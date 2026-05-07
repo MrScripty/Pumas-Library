@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Child;
 use std::sync::{Arc, Mutex, RwLock};
+use std::thread;
 use tracing::{debug, error, info, warn};
 
 /// Process with resource information.
@@ -33,6 +35,7 @@ pub struct ProcessInfo {
 #[derive(Debug, Clone, Default)]
 struct CachedProcessStatus {
     running: bool,
+    generation: u64,
 }
 
 /// Process manager for ComfyUI and other managed applications.
@@ -72,12 +75,15 @@ impl ProcessManager {
 
         let comfyui_status = CachedProcessStatus {
             running: detector.is_any_running(),
+            generation: 0,
         };
         let ollama_status = CachedProcessStatus {
             running: Self::detect_ollama_running(&root_dir),
+            generation: 0,
         };
         let torch_status = CachedProcessStatus {
             running: Self::detect_torch_running(&root_dir),
+            generation: 0,
         };
 
         Ok(Self {
@@ -180,7 +186,7 @@ impl ProcessManager {
         }
 
         // Launch
-        let result = match ProcessLauncher::launch(&config) {
+        let mut result = match ProcessLauncher::launch(&config) {
             Ok(r) => r,
             Err(e) => {
                 let error_msg = format!("Launch error: {}", e);
@@ -203,7 +209,10 @@ impl ProcessManager {
         if result.success {
             let mut log = self.last_launch_log.lock().unwrap();
             *log = result.log_path.clone();
-            self.set_comfyui_status(true);
+            let generation = self.set_comfyui_status(true);
+            if let Some(child) = result.process.take() {
+                Self::observe_child_exit(self.comfyui_status.clone(), "comfyui", generation, child);
+            }
         } else if let Some(ref error) = result.error {
             let mut last_error = self.last_launch_error.lock().unwrap();
             *last_error = Some(error.clone());
@@ -334,7 +343,7 @@ impl ProcessManager {
         }
 
         // Launch
-        let result = match ProcessLauncher::launch_binary(&config) {
+        let mut result = match ProcessLauncher::launch_binary(&config) {
             Ok(r) => r,
             Err(e) => {
                 let error_msg = format!("Launch error: {}", e);
@@ -357,7 +366,10 @@ impl ProcessManager {
         if result.success {
             let mut log = self.last_launch_log.lock().unwrap();
             *log = result.log_path.clone();
-            self.set_ollama_status(true);
+            let generation = self.set_ollama_status(true);
+            if let Some(child) = result.process.take() {
+                Self::observe_child_exit(self.ollama_status.clone(), "ollama", generation, child);
+            }
         } else if let Some(ref error) = result.error {
             let mut last_error = self.last_launch_error.lock().unwrap();
             *last_error = Some(error.clone());
@@ -434,9 +446,8 @@ impl ProcessManager {
         running
     }
 
-    fn set_ollama_status(&self, running: bool) {
-        let mut status = self.ollama_status.lock().unwrap();
-        status.running = running;
+    fn set_ollama_status(&self, running: bool) -> u64 {
+        Self::set_cached_status(&self.ollama_status, running)
     }
 
     fn detect_ollama_running(root_dir: &Path) -> bool {
@@ -471,9 +482,8 @@ impl ProcessManager {
         false
     }
 
-    fn set_comfyui_status(&self, running: bool) {
-        let mut status = self.comfyui_status.lock().unwrap();
-        status.running = running;
+    fn set_comfyui_status(&self, running: bool) -> u64 {
+        Self::set_cached_status(&self.comfyui_status, running)
     }
 
     /// Launch the Torch inference server.
@@ -508,7 +518,7 @@ impl ProcessManager {
         }
 
         // Launch
-        let result = match ProcessLauncher::launch_binary(&config) {
+        let mut result = match ProcessLauncher::launch_binary(&config) {
             Ok(r) => r,
             Err(e) => {
                 let error_msg = format!("Launch error: {}", e);
@@ -531,7 +541,10 @@ impl ProcessManager {
         if result.success {
             let mut log = self.last_launch_log.lock().unwrap();
             *log = result.log_path.clone();
-            self.set_torch_status(true);
+            let generation = self.set_torch_status(true);
+            if let Some(child) = result.process.take() {
+                Self::observe_child_exit(self.torch_status.clone(), "torch", generation, child);
+            }
         } else if let Some(ref error) = result.error {
             let mut last_error = self.last_launch_error.lock().unwrap();
             *last_error = Some(error.clone());
@@ -603,9 +616,8 @@ impl ProcessManager {
         running
     }
 
-    fn set_torch_status(&self, running: bool) {
-        let mut status = self.torch_status.lock().unwrap();
-        status.running = running;
+    fn set_torch_status(&self, running: bool) -> u64 {
+        Self::set_cached_status(&self.torch_status, running)
     }
 
     fn detect_torch_running(root_dir: &Path) -> bool {
@@ -629,6 +641,37 @@ impl ProcessManager {
         }
 
         false
+    }
+
+    fn set_cached_status(status: &Arc<Mutex<CachedProcessStatus>>, running: bool) -> u64 {
+        let mut status = status.lock().unwrap();
+        status.running = running;
+        status.generation = status.generation.saturating_add(1);
+        status.generation
+    }
+
+    fn observe_child_exit(
+        status_cache: Arc<Mutex<CachedProcessStatus>>,
+        label: &'static str,
+        generation: u64,
+        mut child: Child,
+    ) {
+        let pid = child.id();
+        let thread_name = format!("pumas-{label}-wait");
+        if let Err(error) = thread::Builder::new().name(thread_name).spawn(move || {
+            match child.wait() {
+                Ok(status) => info!("{label} process {pid} exited with {status}"),
+                Err(error) => warn!("failed waiting for {label} process {pid}: {error}"),
+            }
+
+            let mut cached = status_cache.lock().unwrap();
+            if cached.generation == generation {
+                cached.running = false;
+                cached.generation = cached.generation.saturating_add(1);
+            }
+        }) {
+            warn!("failed to spawn {label} process wait observer: {error}");
+        }
     }
 
     /// Get the last launch log path.
@@ -743,6 +786,11 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    #[cfg(unix)]
+    use std::process::Command;
+    #[cfg(unix)]
+    use std::time::Duration;
+
     #[test]
     fn test_process_manager_creation() {
         let temp_dir = TempDir::new().unwrap();
@@ -833,5 +881,28 @@ mod tests {
 
         assert!(manager.refresh_torch_running());
         assert!(manager.is_torch_running());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn child_exit_observer_clears_matching_liveness_generation() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ProcessManager::new(temp_dir.path(), None).unwrap();
+        let generation = manager.set_ollama_status(true);
+        let child = Command::new("sh").arg("-c").arg("exit 0").spawn().unwrap();
+
+        ProcessManager::observe_child_exit(
+            manager.ollama_status.clone(),
+            "ollama-test",
+            generation,
+            child,
+        );
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while manager.is_ollama_running() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(!manager.is_ollama_running());
     }
 }

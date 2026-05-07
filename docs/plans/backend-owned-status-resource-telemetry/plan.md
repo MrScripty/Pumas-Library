@@ -908,7 +908,7 @@ Verification completed:
 
 #### R5 - Process Status Ownership
 
-Status: In progress.
+Status: Completed on 2026-05-06.
 
 - Move Ollama/llama.cpp process liveness into an explicit process-status owner
   with cached facts and a clear refresh trigger.
@@ -926,27 +926,30 @@ Verification:
 
 Implementation notes:
 
-- First slice moved ComfyUI, Ollama, and Torch liveness reads in
-  `ProcessManager` to cached facts updated by startup detection, launch/stop
-  operations, and explicit refresh methods.
+- ComfyUI, Ollama, and Torch liveness reads in `ProcessManager` now use cached
+  facts updated by startup detection, launch/stop operations, explicit refresh
+  methods, and managed child-process exit observers.
 - `is_running`, `is_ollama_running`, and `is_torch_running` are now
   non-scanning reads, so status telemetry sampling no longer reaches
   process-table fallback scans for basic app liveness.
 - Process-table fallback remains in explicit refresh/cleanup paths such as
   startup detection, `refresh_*_running`, and stop-by-pattern cleanup.
+- Launch-owned wait observers clear cached liveness when a managed child exits;
+  generation tokens prevent an older child observer from clearing a newer
+  launch's status.
 
-Discovered issue:
+Discovered issue resolved:
 
-- Managed child-process exit is not yet observed through a wait-handle owner.
-  If a managed ComfyUI, Ollama, or Torch process exits outside an explicit stop
-  path, the cached liveness fact can remain stale until an explicit refresh.
-  Resolve this with launch-owned child exit observation or another
-  lifecycle-owned backend mechanism rather than restoring UI/request polling.
+- Managed child-process exit initially was not observed after liveness was
+  cached. That is now handled by launch-owned child wait observers instead of
+  UI/request polling.
 
-Verification completed for first slice:
+Verification completed:
 
 - `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-rpc`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library liveness_read_uses_cache_until_explicit_refresh -- --nocapture`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library child_exit_observer_clears_matching_liveness_generation -- --nocapture`
 
 #### R6 - Runtime And Thread Budget
 

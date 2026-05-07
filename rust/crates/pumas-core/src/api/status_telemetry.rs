@@ -7,15 +7,12 @@ use crate::models;
 use crate::PumasApi;
 use chrono::Utc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::sync::RwLock;
 use tokio::sync::broadcast;
-use tracing::{debug, warn};
+use tracing::debug;
 
 const STATUS_TELEMETRY_CURSOR_PREFIX: &str = "status-telemetry:";
 const STATUS_TELEMETRY_CHANNEL_CAPACITY: usize = 32;
-const STATUS_TELEMETRY_IDLE_SLEEP: Duration = Duration::from_secs(1);
-const STATUS_TELEMETRY_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
 
 pub(crate) struct StatusTelemetryService {
     revision: AtomicU64,
@@ -35,10 +32,6 @@ impl StatusTelemetryService {
 
     fn next_revision(&self) -> u64 {
         self.revision.fetch_add(1, Ordering::SeqCst) + 1
-    }
-
-    pub(crate) fn receiver_count(&self) -> usize {
-        self.updates.receiver_count()
     }
 
     pub(crate) fn current_snapshot(&self) -> Option<models::StatusTelemetrySnapshot> {
@@ -152,25 +145,6 @@ async fn library_status_response(primary: &PrimaryState) -> Result<models::Libra
         pending_lookups: Some(pending_lookups),
         deep_scan_progress: None,
     })
-}
-
-pub(crate) fn start_status_telemetry_sampler(primary: Arc<PrimaryState>) {
-    let tasks = primary.runtime_tasks.clone();
-    tasks.spawn(async move {
-        loop {
-            if primary.status_telemetry.receiver_count() == 0 {
-                tokio::time::sleep(STATUS_TELEMETRY_IDLE_SLEEP).await;
-                continue;
-            }
-
-            match build_status_telemetry_snapshot(&primary).await {
-                Ok(snapshot) => primary.status_telemetry.publish(snapshot),
-                Err(error) => warn!("status telemetry sample failed: {}", error),
-            }
-
-            tokio::time::sleep(STATUS_TELEMETRY_SAMPLE_INTERVAL).await;
-        }
-    });
 }
 
 impl PumasApi {

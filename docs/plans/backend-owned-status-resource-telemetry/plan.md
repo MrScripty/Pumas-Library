@@ -78,11 +78,10 @@ by the primary Pumas instance. The service owns:
 - current status/resource snapshot cache,
 - update cursor or monotonically increasing revision,
 - subscriber broadcast/watch channel,
-- a lifecycle-managed sampler task,
-- configurable sampling cadence and change thresholds,
-- shutdown cancellation.
+- explicit refresh ownership,
+- change thresholds for any future resource refresh loop.
 
-The service should live in core because it owns data and sampling policy. RPC
+The service should live in core because it owns data and refresh policy. RPC
 and Electron are transport adapters.
 
 ### Snapshot Shape
@@ -99,23 +98,22 @@ The first implementation may reuse current DTO fields at the API boundary, but
 the backend-owned snapshot should be typed internally instead of assembled by a
 React hook from unrelated RPC calls.
 
-### Sampling Policy
-The sampler should:
-- publish an initial snapshot shortly after startup,
+### Refresh Policy
+The refresh owner should:
+- publish an initial snapshot on first explicit read or stream handoff,
 - refresh cheap state when lifecycle events occur where hooks already exist,
-- sample system resources at a low cadence only while the GUI or another client
-  has an active telemetry subscription,
-- allow an explicit cached snapshot read without forcing a refresh,
+- avoid periodic resource sampling while the app is idle,
+- allow cached snapshot reads without forcing a refresh,
 - avoid `System::new_all().refresh_all()` in request handlers,
 - avoid full process refresh for the header resource display,
 - use `ResourceTracker` or a narrower replacement with specific refresh calls
   for CPU, memory, disk, and GPU summary data,
 - reserve per-process refresh and descendant aggregation for app/process panels.
 
-Any remaining internal sampling loop must be backend-owned, tracked, cancellable,
-and documented. That is not the same anti-pattern as frontend polling because
-the backend owns the measured state and can centralize cadence, cache, and
-subscriber gating.
+Any future internal sampling loop must be backend-owned, tracked, cancellable,
+subscriber-gated, and documented. The current remediation removes the global
+status telemetry sampler because the header does not need continuous host
+resource refreshes while the app is idle.
 
 ### Push Contract
 Add a backend SSE endpoint, tentatively `/events/status-telemetry-updates`, with
@@ -979,8 +977,9 @@ Implementation notes:
 - The RPC runtime is capped at `4` worker threads and `16` blocking threads,
   with a named `pumas-rpc` thread prefix.
 - Intentionally long-lived work remains owned by existing services: Axum server
-  handle, IPC accept/per-connection tasks, status telemetry sampler, model
-  library watcher, and active workload tasks for downloads/conversion/install.
+  handle, IPC accept/per-connection tasks, model library watcher, and active
+  workload tasks for downloads/conversion/install. Status telemetry is no
+  longer an intentionally long-lived sampler after R10.
 
 Verification completed:
 
@@ -1026,15 +1025,17 @@ Verification completed:
 
 New findings:
 
-- The status telemetry stream still runs while the GUI is open, as intended,
-  but the RPC adapter enriches every pushed telemetry event by calling
+- At R7 failure time, the status telemetry stream still ran while the GUI was
+  open, as intended, but the RPC adapter enriched every pushed telemetry event
+  by calling
   version-path sync, dependency checks, patch checks, and shortcut-state checks.
   That turns a low-frequency telemetry sample into repeated expensive
   filesystem/process work per status stream subscriber.
 - The frontend has two independent status telemetry consumers:
   `useStatus.ts` and `useNetworkStatus.ts`. Each opens its own initial snapshot
   request and Electron status telemetry subscription when mounted.
-- The core status telemetry sampler remains subscriber-gated, but it still
+- At R7 failure time, the core status telemetry sampler was subscriber-gated,
+  but it still
   refreshes resource, network, and library summary facts every two seconds while
   any subscriber is active. If R8 and R9 do not bring idle CPU under target, the
   resource sampler cadence and GPU/disk summary paths must be narrowed next.
@@ -1112,7 +1113,7 @@ Verification completed:
 
 #### R10 - Resource Sampler Narrowing
 
-Status: Planned, conditional on R8/R9 idle CPU results.
+Status: Completed on 2026-05-06.
 
 - If idle CPU remains above target after duplicate subscriptions and per-update
   enrichment are removed, split cheap status/network facts from heavier
@@ -1128,6 +1129,23 @@ Verification:
   every active telemetry tick unless a visible subscriber requires them.
 - Live idle sample averages below `5%` CPU with the GUI open and no active
   downloads, installs, migrations, or runtime launches.
+
+Implementation notes:
+
+- Removed the long-lived status telemetry sampler from API startup.
+- Status telemetry snapshots are now refreshed by explicit snapshot requests
+  and stream handoff/recovery, then published to subscribers.
+- Header CPU/GPU/RAM/disk data will not continuously resample host resources
+  while the GUI is idle. User actions that call status refetch still refresh and
+  publish a new snapshot.
+
+Verification completed:
+
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-rpc`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library status_telemetry -- --nocapture`
+- Restarted-app idle sample remains pending because the app must be restarted
+  onto the rebuilt release binary.
 
 ### Concurrency And Runtime Requirements
 
@@ -1195,10 +1213,9 @@ Standards findings to enforce during implementation:
 - A large default runtime is not itself a correctness bug, but it hides
   ownership boundaries and makes idle behavior harder to reason about. The
   implementation must make thread and blocking budgets explicit.
-- The previous status telemetry sampler remains acceptable only if it is
-  subscriber-gated and not the dominant CPU source after the new remediation
-  slices. If it remains a measured source, this plan must be reopened before
-  declaring completion.
+- The previous status telemetry sampler was removed during R10 because
+  restarted-app tracing showed status telemetry was still the most plausible
+  remaining idle CPU source and the product goal is near-zero idle CPU.
 
 ### Additional Re-Plan Triggers
 

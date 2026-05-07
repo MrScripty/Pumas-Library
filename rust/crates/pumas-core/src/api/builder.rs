@@ -8,7 +8,7 @@ use tokio::fs;
 use tokio::sync::RwLock;
 
 use crate::api::state::{ApiState, PrimaryState};
-use crate::api::status_telemetry::{start_status_telemetry_sampler, StatusTelemetryService};
+use crate::api::status_telemetry::StatusTelemetryService;
 use crate::api::RuntimeTasks;
 use crate::error::{PumasError, Result};
 use crate::{config, conversion, model_library, network, process, registry, system};
@@ -598,7 +598,6 @@ impl PumasApiBuilder {
             model_watcher: None,
             runtime_tasks: runtime_tasks.clone(),
         };
-        start_status_telemetry_sampler(api.primary().clone());
         api.start_ipc_server().await?;
         api.model_watcher = start_primary_background_work(
             api.primary().clone(),

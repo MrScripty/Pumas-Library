@@ -754,7 +754,9 @@ pub struct ModelDownloadSnapshot {
 pub struct ModelDownloadUpdateNotification {
     pub cursor: String,
     pub snapshot: ModelDownloadSnapshot,
+    #[serde(rename = "stale_cursor")]
     pub stale_cursor: bool,
+    #[serde(rename = "snapshot_required")]
     pub snapshot_required: bool,
 }
 
@@ -1060,6 +1062,45 @@ mod tests {
     fn test_asset_validation_state_serialization() {
         let value = serde_json::to_string(&AssetValidationState::Degraded).unwrap();
         assert_eq!(value, "\"degraded\"");
+    }
+
+    #[test]
+    fn test_model_download_update_notification_uses_renderer_flag_names() {
+        let notification = ModelDownloadUpdateNotification {
+            cursor: "download:1".to_string(),
+            snapshot: ModelDownloadSnapshot {
+                cursor: "download:1".to_string(),
+                revision: 1,
+                downloads: vec![ModelDownloadProgress {
+                    download_id: "dl-1".to_string(),
+                    repo_id: Some("owner/model".to_string()),
+                    selected_artifact_id: None,
+                    model_name: None,
+                    model_type: None,
+                    status: DownloadStatus::Downloading,
+                    progress: Some(0.5),
+                    downloaded_bytes: Some(512),
+                    total_bytes: Some(1024),
+                    speed: None,
+                    eta_seconds: None,
+                    retry_attempt: None,
+                    retry_limit: None,
+                    retrying: None,
+                    next_retry_delay_seconds: None,
+                    error: None,
+                }],
+            },
+            stale_cursor: false,
+            snapshot_required: true,
+        };
+
+        let value = serde_json::to_value(notification).unwrap();
+        assert_eq!(value["stale_cursor"], false);
+        assert_eq!(value["snapshot_required"], true);
+        assert!(value.get("staleCursor").is_none());
+        assert!(value.get("snapshotRequired").is_none());
+        assert_eq!(value["snapshot"]["downloads"][0]["downloadId"], "dl-1");
+        assert_eq!(value["snapshot"]["downloads"][0]["downloadedBytes"], 512);
     }
 
     #[test]

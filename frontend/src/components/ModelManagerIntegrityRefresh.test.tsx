@@ -1,6 +1,6 @@
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ModelRecord } from '../types/api';
+import type { ModelLibraryUpdateNotification, ModelRecord } from '../types/api';
 import { useModels } from '../hooks/useModels';
 import { ModelManager } from './ModelManager';
 
@@ -209,8 +209,9 @@ describe('ModelManager integrity refresh acceptance', () => {
     let notifyModelLibraryUpdate: ((notification: unknown) => void) | null = null;
 
     getElectronAPIMock.mockReturnValue({
-      onModelLibraryUpdate: vi.fn((callback) => {
-        notifyModelLibraryUpdate = callback;
+      onModelLibraryUpdate: vi.fn((callback: (notification: ModelLibraryUpdateNotification) => void) => {
+        notifyModelLibraryUpdate = (notification) =>
+          callback(notification as ModelLibraryUpdateNotification);
         return vi.fn();
       }),
     });

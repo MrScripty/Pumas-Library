@@ -77,10 +77,12 @@ describe('useStatus', () => {
     vi.useFakeTimers();
     telemetryCallback = null;
     unsubscribeMock = vi.fn();
-    onStatusTelemetryUpdateMock = vi.fn((callback) => {
-      telemetryCallback = callback;
-      return unsubscribeMock;
-    });
+    onStatusTelemetryUpdateMock = vi.fn(
+      (callback: (notification: StatusTelemetryUpdateNotification) => void) => {
+        telemetryCallback = callback;
+        return unsubscribeMock;
+      }
+    );
     isApiAvailableMock.mockReturnValue(true);
     getStatusTelemetrySnapshotMock.mockResolvedValue(snapshot);
     getElectronAPIMock.mockReturnValue({

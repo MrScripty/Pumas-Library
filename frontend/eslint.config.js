@@ -134,5 +134,11 @@ export default tseslint.config(
       'jsx-a11y/mouse-events-have-key-events': 'error',
       'jsx-a11y/no-static-element-interactions': 'error',
     },
+  },
+  {
+    files: ['src/**/*.test.{ts,tsx}'],
+    rules: {
+      'max-lines': 'off',
+    },
   }
 );

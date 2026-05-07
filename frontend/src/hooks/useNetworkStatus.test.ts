@@ -72,18 +72,22 @@ describe('useNetworkStatus', () => {
 
   let telemetryCallback: ((notification: StatusTelemetryUpdateNotification) => void) | null;
   let unsubscribeMock: ReturnType<typeof vi.fn>;
+  let onStatusTelemetryUpdateMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     telemetryCallback = null;
     unsubscribeMock = vi.fn();
+    onStatusTelemetryUpdateMock = vi.fn(
+      (callback: (notification: StatusTelemetryUpdateNotification) => void) => {
+        telemetryCallback = callback;
+        return unsubscribeMock;
+      }
+    );
     isApiAvailableMock.mockReturnValue(true);
     getStatusTelemetrySnapshotMock.mockResolvedValue(snapshot);
     getElectronAPIMock.mockReturnValue({
-      onStatusTelemetryUpdate: vi.fn((callback) => {
-        telemetryCallback = callback;
-        return unsubscribeMock;
-      }),
+      onStatusTelemetryUpdate: onStatusTelemetryUpdateMock,
     });
   });
 
@@ -186,8 +190,7 @@ describe('useNetworkStatus', () => {
 
     expect(getStatusTelemetrySnapshotMock).toHaveBeenCalledTimes(1);
     expect(getElectronAPIMock).toHaveBeenCalledTimes(1);
-    expect(getElectronAPIMock.mock.results[0]?.value.onStatusTelemetryUpdate)
-      .toHaveBeenCalledTimes(1);
+    expect(onStatusTelemetryUpdateMock).toHaveBeenCalledTimes(1);
 
     statusHook.unmount();
     expect(unsubscribeMock).not.toHaveBeenCalled();

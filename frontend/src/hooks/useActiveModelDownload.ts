@@ -103,7 +103,7 @@ export function useActiveModelDownload() {
 
     void loadSnapshot();
 
-    const unsubscribe = getElectronAPI()?.onModelDownloadUpdate?.((notification) => {
+    const unsubscribe = getElectronAPI()?.onModelDownloadUpdate((notification) => {
       if (!cancelled) {
         applyDownloads(notification.snapshot.downloads);
       }

@@ -1,4 +1,3 @@
-import { ActivitySquare, Database, FileText, PencilLine, Route, Settings } from 'lucide-react';
 import type {
   BundleComponentManifestEntry,
   InferenceParamSchema,
@@ -15,6 +14,7 @@ import {
 import { ModelBundleManifestPanel } from './ModelBundleManifestPanel';
 import { ModelInferenceSettingsEditor } from './ModelInferenceSettingsEditor';
 import { ModelMetadataGrid } from './ModelMetadataGrid';
+import { ModelMetadataModalTabs } from './ModelMetadataModalTabs';
 import { ModelNotesEditor } from './ModelNotesEditor';
 import { ModelRuntimeRouteEditor } from './ModelRuntimeRouteEditor';
 
@@ -131,76 +131,13 @@ export function ModelMetadataModalContent({
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => onActiveSourceChange('embedded')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
-            activeSource === 'embedded'
-              ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
-              : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
-          }`}
-          disabled={!embeddedMetadata}
-        >
-          <FileText className="w-4 h-4" />
-          Embedded ({embeddedFileType || 'N/A'})
-        </button>
-        <button
-          onClick={() => onActiveSourceChange('stored')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
-            activeSource === 'stored'
-              ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
-              : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
-          }`}
-          disabled={!storedMetadata}
-        >
-          <Database className="w-4 h-4" />
-          Stored
-        </button>
-        <button
-          onClick={() => onActiveSourceChange('inference')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
-            activeSource === 'inference'
-              ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
-              : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
-          }`}
-        >
-          <Settings className="w-4 h-4" />
-          Inference
-        </button>
-        <button
-          onClick={() => onActiveSourceChange('execution')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
-            activeSource === 'execution'
-              ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
-              : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
-          }`}
-        >
-          <ActivitySquare className="w-4 h-4" />
-          Execution Facts
-        </button>
-        <button
-          onClick={() => onActiveSourceChange('runtime')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
-            activeSource === 'runtime'
-              ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
-              : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
-          }`}
-        >
-          <Route className="w-4 h-4" />
-          Runtime Route
-        </button>
-        <button
-          onClick={() => onActiveSourceChange('notes')}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
-            activeSource === 'notes'
-              ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
-              : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
-          }`}
-        >
-          <PencilLine className="w-4 h-4" />
-          Notes
-        </button>
-      </div>
+      <ModelMetadataModalTabs
+        activeSource={activeSource}
+        embeddedFileType={embeddedFileType}
+        embeddedMetadata={embeddedMetadata}
+        storedMetadata={storedMetadata}
+        onActiveSourceChange={onActiveSourceChange}
+      />
 
       {activeSource === 'embedded' && embeddedMetadata ? (
         <ModelMetadataGrid

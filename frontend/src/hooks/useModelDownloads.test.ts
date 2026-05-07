@@ -48,7 +48,7 @@ describe('useModelDownloads', () => {
     unsubscribeMock = vi.fn();
     isApiAvailableMock.mockReturnValue(true);
     getElectronAPIMock.mockReturnValue({
-      onModelDownloadUpdate: vi.fn((callback) => {
+      onModelDownloadUpdate: vi.fn((callback: (notification: ModelDownloadUpdateNotification) => void) => {
         downloadUpdateCallback = callback;
         return unsubscribeMock;
       }),

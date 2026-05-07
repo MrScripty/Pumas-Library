@@ -65,7 +65,7 @@ export function useModelDownloads() {
 
     void restoreDownloads();
 
-    const unsubscribe = getElectronAPI()?.onModelDownloadUpdate?.((notification) => {
+    const unsubscribe = getElectronAPI()?.onModelDownloadUpdate((notification) => {
       applyDownloadSnapshot(notification.snapshot.downloads);
     });
 

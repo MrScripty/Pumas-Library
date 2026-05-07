@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelCategory } from '../types/apps';
-import type { ModelRecord } from '../types/api';
+import type { ModelLibraryUpdateNotification, ModelRecord } from '../types/api';
 
 const {
   getModelsMock,
@@ -321,8 +321,9 @@ describe('useModels', () => {
     const unsubscribe = vi.fn();
 
     getElectronAPIMock.mockReturnValue({
-      onModelLibraryUpdate: vi.fn((callback) => {
-        notifyModelLibraryUpdate = callback;
+      onModelLibraryUpdate: vi.fn((callback: (notification: ModelLibraryUpdateNotification) => void) => {
+        notifyModelLibraryUpdate = (notification) =>
+          callback(notification as ModelLibraryUpdateNotification);
         return unsubscribe;
       }),
     });
@@ -371,8 +372,9 @@ describe('useModels', () => {
     let notifyModelLibraryUpdate: ((notification: unknown) => void) | null = null;
 
     getElectronAPIMock.mockReturnValue({
-      onModelLibraryUpdate: vi.fn((callback) => {
-        notifyModelLibraryUpdate = callback;
+      onModelLibraryUpdate: vi.fn((callback: (notification: ModelLibraryUpdateNotification) => void) => {
+        notifyModelLibraryUpdate = (notification) =>
+          callback(notification as ModelLibraryUpdateNotification);
         return vi.fn();
       }),
     });
@@ -397,8 +399,9 @@ describe('useModels', () => {
     const unsubscribe = vi.fn();
 
     getElectronAPIMock.mockReturnValue({
-      onModelLibraryUpdate: vi.fn((callback) => {
-        notifyModelLibraryUpdate = callback;
+      onModelLibraryUpdate: vi.fn((callback: (notification: ModelLibraryUpdateNotification) => void) => {
+        notifyModelLibraryUpdate = (notification) =>
+          callback(notification as ModelLibraryUpdateNotification);
         return unsubscribe;
       }),
     });
@@ -429,8 +432,9 @@ describe('useModels', () => {
     let notifyModelLibraryUpdate: ((notification: unknown) => void) | null = null;
 
     getElectronAPIMock.mockReturnValue({
-      onModelLibraryUpdate: vi.fn((callback) => {
-        notifyModelLibraryUpdate = callback;
+      onModelLibraryUpdate: vi.fn((callback: (notification: ModelLibraryUpdateNotification) => void) => {
+        notifyModelLibraryUpdate = (notification) =>
+          callback(notification as ModelLibraryUpdateNotification);
         return vi.fn();
       }),
     });

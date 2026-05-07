@@ -1428,12 +1428,17 @@ mod tests {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let version_dir = temp_dir.path().join("v0.22.1");
         let nested_bin_dir = version_dir.join("bin");
+        let binary_name = if cfg!(windows) {
+            "ollama.exe"
+        } else {
+            "ollama"
+        };
         std::fs::create_dir_all(&nested_bin_dir).unwrap();
-        std::fs::write(nested_bin_dir.join("ollama"), b"binary").unwrap();
+        std::fs::write(nested_bin_dir.join(binary_name), b"binary").unwrap();
 
         VersionInstaller::finalize_ollama_binary(&version_dir).unwrap();
 
-        let launch_binary = version_dir.join("ollama");
+        let launch_binary = version_dir.join(binary_name);
         assert!(launch_binary.exists());
         assert_eq!(std::fs::read(&launch_binary).unwrap(), b"binary");
     }

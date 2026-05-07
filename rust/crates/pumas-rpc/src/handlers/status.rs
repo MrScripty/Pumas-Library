@@ -5,22 +5,12 @@ use super::{
     sync_version_paths_to_process_manager,
 };
 use crate::server::AppState;
-use pumas_library::models::{
-    StatusResponse, StatusTelemetrySnapshot, StatusTelemetryUpdateNotification,
-};
+use pumas_library::models::{StatusResponse, StatusTelemetrySnapshot};
 use serde_json::{json, Value};
 
 pub async fn get_status(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     let response = enriched_status_response(state).await?;
     Ok(serde_json::to_value(response)?)
-}
-
-pub(crate) async fn enrich_status_telemetry_notification(
-    state: &AppState,
-    mut notification: StatusTelemetryUpdateNotification,
-) -> pumas_library::Result<StatusTelemetryUpdateNotification> {
-    notification.snapshot = enrich_status_telemetry_snapshot(state, notification.snapshot).await?;
-    Ok(notification)
 }
 
 async fn enrich_status_telemetry_snapshot(

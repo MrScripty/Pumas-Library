@@ -994,7 +994,7 @@ Deferred to R7:
 
 #### R7 - Release Verification And Completion
 
-Status: Planned.
+Status: Failed verification on 2026-05-06; remediation continues in R8-R10.
 
 - Build release binaries and frontend after all remediation slices.
 - Run the GUI idle for at least 60 seconds after startup settle with no active
@@ -1010,6 +1010,95 @@ Acceptance:
 - Runtime-profile and download update streams use snapshot plus cursor handoff.
 - Paused and completed downloads do not produce continuous backend RPC traffic.
 - No idle path calls `ps -eo pid=,args=` once per second.
+
+Verification completed:
+
+- `bash launcher.sh --build-release`
+- `bash launcher.sh --release-smoke`
+- Live-app sample after the release build:
+  `pidstat -p 2555914 -t 1 30` averaged `96.10%` CPU for `pumas-rpc`.
+- The backend thread count was reduced to `48`, which satisfies the R6
+  thread-budget target, but four `pumas-rpc` worker threads stayed hot at about
+  `19%` CPU each.
+- `ss -tnp` showed five established Electron-to-backend connections.
+- Host `ptrace` tracing remained blocked:
+  `ptrace(PTRACE_SEIZE, 2555914): Operation not permitted`.
+
+New findings:
+
+- The status telemetry stream still runs while the GUI is open, as intended,
+  but the RPC adapter enriches every pushed telemetry event by calling
+  version-path sync, dependency checks, patch checks, and shortcut-state checks.
+  That turns a low-frequency telemetry sample into repeated expensive
+  filesystem/process work per status stream subscriber.
+- The frontend has two independent status telemetry consumers:
+  `useStatus.ts` and `useNetworkStatus.ts`. Each opens its own initial snapshot
+  request and Electron status telemetry subscription when mounted.
+- The core status telemetry sampler remains subscriber-gated, but it still
+  refreshes resource, network, and library summary facts every two seconds while
+  any subscriber is active. If R8 and R9 do not bring idle CPU under target, the
+  resource sampler cadence and GPU/disk summary paths must be narrowed next.
+
+#### R8 - Lightweight Status Telemetry Stream
+
+Status: In progress.
+
+- Keep expensive status enrichment on explicit `get_status` and
+  `get_status_telemetry_snapshot` calls.
+- Remove status enrichment from pushed telemetry events so stream updates carry
+  the backend-owned cached telemetry snapshot without dependency, patch, or
+  shortcut filesystem checks.
+- On stream lag recovery, return the current cached snapshot instead of forcing
+  a new status telemetry sample unless no cache exists.
+- Ensure frontend consumers preserve enriched status fields from the explicit
+  snapshot when lightweight pushed events omit or reset those enrichment facts.
+
+Verification:
+
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-rpc`
+- Focused frontend hook tests for pushed lightweight telemetry events.
+- Live idle sample after R8/R9 should show a measurable drop in backend worker
+  CPU before declaring completion.
+
+#### R9 - Canonical Frontend Status Telemetry Subscriber
+
+Status: Planned.
+
+- Replace independent `useStatus` and `useNetworkStatus` backend subscriptions
+  with one shared frontend telemetry subscription owner.
+- Preserve the current public hook return shapes while ensuring only one
+  `api.get_status_telemetry_snapshot` and one
+  `electronAPI.onStatusTelemetryUpdate` subscription are active for status
+  telemetry in the renderer.
+- Update `frontend/src/hooks/README.md` so network status is classified as a
+  selector over the canonical status telemetry store, not as a separate
+  backend-owned polling/subscription path.
+
+Verification:
+
+- Frontend tests prove mounting `useStatus` and `useNetworkStatus` together
+  performs one snapshot load and one Electron status telemetry subscription.
+- `npm run -w frontend test:run -- useStatus useNetworkStatus`
+- `npm run -w frontend check:types`
+
+#### R10 - Resource Sampler Narrowing
+
+Status: Planned, conditional on R8/R9 idle CPU results.
+
+- If idle CPU remains above target after duplicate subscriptions and per-update
+  enrichment are removed, split cheap status/network facts from heavier
+  resource facts.
+- Increase resource/GPU/disk sampling cadence or make it view-subscriber based
+  so the header does not repeatedly run expensive host telemetry while idle.
+- Avoid `nvidia-smi`, disk-list refresh, model-count blocking work, or pending
+  lookup scans unless the data is visible, stale, or requested explicitly.
+
+Verification:
+
+- Code search shows the status sampler does not call heavy resource paths on
+  every active telemetry tick unless a visible subscriber requires them.
+- Live idle sample averages below `5%` CPU with the GUI open and no active
+  downloads, installs, migrations, or runtime launches.
 
 ### Concurrency And Runtime Requirements
 

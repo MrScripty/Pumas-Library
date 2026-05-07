@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { useStatus } from './useStatus';
+import { useNetworkStatus } from './useNetworkStatus';
 import type { StatusTelemetrySnapshot, StatusTelemetryUpdateNotification } from '../types/api';
 
 const {
@@ -70,18 +71,20 @@ describe('useStatus', () => {
 
   let telemetryCallback: ((notification: StatusTelemetryUpdateNotification) => void) | null;
   let unsubscribeMock: ReturnType<typeof vi.fn>;
+  let onStatusTelemetryUpdateMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.useFakeTimers();
     telemetryCallback = null;
     unsubscribeMock = vi.fn();
+    onStatusTelemetryUpdateMock = vi.fn((callback) => {
+      telemetryCallback = callback;
+      return unsubscribeMock;
+    });
     isApiAvailableMock.mockReturnValue(true);
     getStatusTelemetrySnapshotMock.mockResolvedValue(snapshot);
     getElectronAPIMock.mockReturnValue({
-      onStatusTelemetryUpdate: vi.fn((callback) => {
-        telemetryCallback = callback;
-        return unsubscribeMock;
-      }),
+      onStatusTelemetryUpdate: onStatusTelemetryUpdateMock,
     });
   });
 
@@ -184,5 +187,65 @@ describe('useStatus', () => {
     expect(clearTimeoutSpy).toHaveBeenCalled();
 
     clearTimeoutSpy.mockRestore();
+  });
+
+  it('shares one telemetry snapshot load and subscription across status hooks', async () => {
+    const statusHook = renderHook(() => useStatus({ initialLoad: true }));
+    const networkHook = renderHook(() => useNetworkStatus());
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(getStatusTelemetrySnapshotMock).toHaveBeenCalledTimes(1);
+    expect(onStatusTelemetryUpdateMock).toHaveBeenCalledTimes(1);
+    expect(statusHook.result.current.status?.message).toBe('ready');
+    expect(networkHook.result.current.successRate).toBe(100);
+
+    statusHook.unmount();
+    expect(unsubscribeMock).not.toHaveBeenCalled();
+
+    networkHook.unmount();
+    expect(unsubscribeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps enriched status fields when pushed telemetry omits them', async () => {
+    const { result } = renderHook(() => useStatus({ initialLoad: true }));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      telemetryCallback?.({
+        cursor: 'status-telemetry:2',
+        snapshot: {
+          ...snapshot,
+          cursor: 'status-telemetry:2',
+          revision: 2,
+          status: {
+            success: true,
+            version: 'test',
+            message: 'lightweight update',
+            comfyui_running: true,
+            ollama_running: false,
+            torch_running: false,
+            last_launch_error: null,
+            last_launch_log: null,
+          } as StatusTelemetrySnapshot['status'],
+        },
+        stale_cursor: false,
+        snapshot_required: false,
+      });
+    });
+
+    expect(result.current.status?.message).toBe('lightweight update');
+    expect(result.current.status?.deps_ready).toBe(true);
+    expect(result.current.status?.patched).toBe(true);
+    expect(result.current.status?.menu_shortcut).toBe(true);
+    expect(result.current.status?.desktop_shortcut).toBe(true);
+    expect(result.current.status?.shortcut_version).toBeNull();
   });
 });

@@ -6,13 +6,10 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { api, getElectronAPI, isAPIAvailable } from '../api/adapter';
 import type { StatusResponse, StatusTelemetrySnapshot } from '../types/api';
 import type { SystemResources } from '../types/apps';
-import { getLogger } from '../utils/logger';
-import { APIError } from '../errors';
+import { useStatusTelemetry } from './statusTelemetryStore';
 
-const logger = getLogger('useStatus');
 
 interface UseStatusOptions {
   initialLoad?: boolean;
@@ -30,6 +27,8 @@ export function useStatus(options: UseStatusOptions = {}) {
   const inFlightRequest = useRef<Promise<void> | null>(null);
   const pendingRefresh = useRef<{ isInitialLoad: boolean; force: boolean } | null>(null);
   const loadingDelayTimeout = useRef<NodeJS.Timeout | null>(null);
+  const initialLoadStartedAt = useRef(Date.now());
+  const telemetry = useStatusTelemetry({ loadInitial: initialLoad });
 
   const clearLoadingDelay = useCallback(() => {
     if (loadingDelayTimeout.current) {
@@ -63,37 +62,14 @@ export function useStatus(options: UseStatusOptions = {}) {
       setIsCheckingDeps(true);
     }
 
-    try {
-      if (!isAPIAvailable()) {
-        clearLoadingDelay();
-        setIsLoading(false);
-        setIsCheckingDeps(false);
-        return;
-      }
+    await telemetry.refetch();
 
-      const snapshot = await api.get_status_telemetry_snapshot();
-      applySnapshot(snapshot);
-
-      if (isInitialLoad) {
-        finishInitialLoad(startedAt);
-      } else {
-        setIsLoading(false);
-      }
-    } catch (error) {
-      if (error instanceof APIError) {
-        logger.error('API error fetching status telemetry', {
-          error: error.message,
-          endpoint: error.endpoint,
-        });
-      } else if (error instanceof Error) {
-        logger.error('Unexpected error fetching status telemetry', { error: error.message });
-      } else {
-        logger.error('Unknown error fetching status telemetry', { error });
-      }
+    if (isInitialLoad) {
+      finishInitialLoad(startedAt);
+    } else {
       setIsLoading(false);
-      setIsCheckingDeps(false);
     }
-  }, [applySnapshot, clearLoadingDelay, finishInitialLoad]);
+  }, [finishInitialLoad, telemetry]);
 
   const fetchStatus = useCallback(async (isInitialLoad = false, force = false) => {
     if (inFlightRequest.current) {
@@ -119,55 +95,32 @@ export function useStatus(options: UseStatusOptions = {}) {
   }, [runStatusFetch]);
 
   useEffect(() => {
-    let waitTimeout: NodeJS.Timeout | null = null;
-    let unsubscribeTelemetry: (() => void) | null = null;
-
-    const startTelemetry = () => {
-      if (initialLoad) {
-        fetchStatus(true).catch((error: unknown) => {
-          if (error instanceof APIError) {
-            logger.error('Initial status telemetry fetch failed', {
-              error: error.message,
-              endpoint: error.endpoint,
-            });
-          } else if (error instanceof Error) {
-            logger.error('Unexpected error during initial telemetry fetch', {
-              error: error.message,
-            });
-          } else {
-            logger.error('Unknown error during initial telemetry fetch', { error: String(error) });
-          }
-          setIsLoading(false);
-          setIsCheckingDeps(false);
-        });
-      }
-
-      const electronAPI = getElectronAPI();
-      if (electronAPI?.onStatusTelemetryUpdate) {
-        unsubscribeTelemetry = electronAPI.onStatusTelemetryUpdate((notification) => {
-          applySnapshot(notification.snapshot);
-          setIsLoading(false);
-          setIsCheckingDeps(false);
-        });
-      }
-    };
-
-    const waitForApi = () => {
-      if (isAPIAvailable()) {
-        startTelemetry();
-        return;
-      }
-      waitTimeout = setTimeout(waitForApi, 100);
-    };
-
-    waitForApi();
-
     return () => {
-      if (waitTimeout) clearTimeout(waitTimeout);
-      if (unsubscribeTelemetry) unsubscribeTelemetry();
       clearLoadingDelay();
     };
-  }, [initialLoad, fetchStatus, applySnapshot, clearLoadingDelay]);
+  }, [clearLoadingDelay]);
+
+  useEffect(() => {
+    if (!telemetry.snapshot) {
+      return;
+    }
+
+    applySnapshot(telemetry.snapshot);
+    if (initialLoad && isLoading) {
+      finishInitialLoad(initialLoadStartedAt.current);
+    } else {
+      setIsLoading(false);
+      setIsCheckingDeps(false);
+    }
+  }, [applySnapshot, finishInitialLoad, initialLoad, isLoading, telemetry.snapshot]);
+
+  useEffect(() => {
+    if (telemetry.error) {
+      clearLoadingDelay();
+      setIsLoading(false);
+      setIsCheckingDeps(false);
+    }
+  }, [clearLoadingDelay, telemetry.error]);
 
   return {
     status: statusData,

@@ -3,9 +3,9 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { api, getElectronAPI, isAPIAvailable } from '../api/adapter';
 import type { NetworkStatusResponse, StatusTelemetrySnapshot } from '../types/api';
 import { getLogger } from '../utils/logger';
+import { useStatusTelemetry } from './statusTelemetryStore';
 
 const logger = getLogger('useNetworkStatus');
 
@@ -59,6 +59,7 @@ export function useNetworkStatus() {
   const [status, setStatus] = useState<NetworkStatus>(DEFAULT_STATUS);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const telemetry = useStatusTelemetry({ loadInitial: true });
 
   const applySnapshot = useCallback((snapshot: StatusTelemetrySnapshot) => {
     setStatus(mapNetworkStatus(snapshot.network));
@@ -67,34 +68,24 @@ export function useNetworkStatus() {
   }, []);
 
   const fetchStatus = useCallback(async () => {
-    if (!isAPIAvailable()) {
-      setIsLoading(false);
+    await telemetry.refetch();
+  }, [telemetry]);
+
+  useEffect(() => {
+    if (!telemetry.snapshot) {
       return;
     }
 
-    try {
-      const snapshot = await api.get_status_telemetry_snapshot();
-      applySnapshot(snapshot);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error';
-      logger.error('Error fetching status telemetry network state', { error: message });
-      setError(message);
-      setIsLoading(false);
-    }
-  }, [applySnapshot]);
+    applySnapshot(telemetry.snapshot);
+  }, [applySnapshot, telemetry.snapshot]);
 
   useEffect(() => {
-    void fetchStatus();
-
-    const electronAPI = getElectronAPI();
-    const unsubscribe = electronAPI?.onStatusTelemetryUpdate?.((notification) => {
-      applySnapshot(notification.snapshot);
-    });
-
-    return () => {
-      unsubscribe?.();
-    };
-  }, [applySnapshot, fetchStatus]);
+    if (telemetry.error) {
+      logger.error('Error fetching status telemetry network state', { error: telemetry.error });
+      setError(telemetry.error);
+      setIsLoading(false);
+    }
+  }, [telemetry.error]);
 
   const refresh = useCallback(() => {
     void fetchStatus();

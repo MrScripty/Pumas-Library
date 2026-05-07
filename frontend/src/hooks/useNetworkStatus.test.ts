@@ -21,6 +21,7 @@ vi.mock('../api/adapter', () => ({
 }));
 
 import { useNetworkStatus } from './useNetworkStatus';
+import { useStatus } from './useStatus';
 
 describe('useNetworkStatus', () => {
   const snapshot: StatusTelemetrySnapshot = {
@@ -172,6 +173,66 @@ describe('useNetworkStatus', () => {
     expect(setIntervalSpy).not.toHaveBeenCalled();
 
     setIntervalSpy.mockRestore();
+  });
+
+  it('shares one status telemetry subscription with useStatus', async () => {
+    const statusHook = renderHook(() => useStatus({ initialLoad: true }));
+    const networkHook = renderHook(() => useNetworkStatus());
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(getStatusTelemetrySnapshotMock).toHaveBeenCalledTimes(1);
+    expect(getElectronAPIMock).toHaveBeenCalledTimes(1);
+    expect(getElectronAPIMock.mock.results[0]?.value.onStatusTelemetryUpdate)
+      .toHaveBeenCalledTimes(1);
+
+    statusHook.unmount();
+    expect(unsubscribeMock).not.toHaveBeenCalled();
+
+    networkHook.unmount();
+    expect(unsubscribeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves enriched status fields when lightweight telemetry is pushed', async () => {
+    const { result } = renderHook(() => useStatus({ initialLoad: true }));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    act(() => {
+      telemetryCallback?.({
+        cursor: 'status-telemetry:2',
+        snapshot: {
+          ...snapshot,
+          cursor: 'status-telemetry:2',
+          revision: 2,
+          status: {
+            success: true,
+            version: 'test',
+            message: 'lightweight',
+            comfyui_running: true,
+            ollama_running: false,
+            torch_running: false,
+            last_launch_error: null,
+            last_launch_log: null,
+          } as StatusTelemetrySnapshot['status'],
+        },
+        stale_cursor: false,
+        snapshot_required: false,
+      });
+    });
+
+    expect(result.current.status?.message).toBe('lightweight');
+    expect(result.current.status?.deps_ready).toBe(true);
+    expect(result.current.status?.patched).toBe(true);
+    expect(result.current.status?.menu_shortcut).toBe(true);
+    expect(result.current.status?.desktop_shortcut).toBe(true);
+    expect(result.current.status?.shortcut_version).toBeNull();
   });
 
   it('supports manual refresh and surfaces thrown errors', async () => {

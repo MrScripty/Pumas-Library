@@ -1041,7 +1041,7 @@ New findings:
 
 #### R8 - Lightweight Status Telemetry Stream
 
-Status: In progress.
+Status: Completed on 2026-05-06.
 
 - Keep expensive status enrichment on explicit `get_status` and
   `get_status_telemetry_snapshot` calls.
@@ -1060,9 +1060,24 @@ Verification:
 - Live idle sample after R8/R9 should show a measurable drop in backend worker
   CPU before declaring completion.
 
+Implementation notes:
+
+- The status telemetry SSE path no longer enriches each pushed event through
+  dependency, patch, shortcut, or version-path checks.
+- Stream lag recovery now reads the current cached status telemetry snapshot
+  instead of forcing a fresh telemetry sample.
+- The frontend status telemetry store preserves enriched status fields from the
+  explicit snapshot when lightweight pushed events arrive.
+
+Verification completed:
+
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-rpc`
+- `npm run -w frontend test:run -- useStatus useNetworkStatus`
+- `npm run -w frontend check:types`
+
 #### R9 - Canonical Frontend Status Telemetry Subscriber
 
-Status: Planned.
+Status: Completed on 2026-05-06.
 
 - Replace independent `useStatus` and `useNetworkStatus` backend subscriptions
   with one shared frontend telemetry subscription owner.
@@ -1078,6 +1093,20 @@ Verification:
 
 - Frontend tests prove mounting `useStatus` and `useNetworkStatus` together
   performs one snapshot load and one Electron status telemetry subscription.
+- `npm run -w frontend test:run -- useStatus useNetworkStatus`
+- `npm run -w frontend check:types`
+
+Implementation notes:
+
+- Added `statusTelemetryStore.ts` as the renderer-owned status telemetry
+  subscription owner.
+- `useStatus` and `useNetworkStatus` now select from the shared store and keep
+  their existing public hook shapes.
+- The hook README classifies network status as a selector over shared status
+  telemetry, not a separate backend subscription.
+
+Verification completed:
+
 - `npm run -w frontend test:run -- useStatus useNetworkStatus`
 - `npm run -w frontend check:types`
 

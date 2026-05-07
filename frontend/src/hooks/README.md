@@ -34,9 +34,10 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useModelPreferences.test.ts` | Hook coverage for backend exclusion loading, local starring, optimistic link persistence, rollback, and API-unavailable no-ops. |
 | `useDiskSpace.ts` | Disk-space lookup state for storage-health indicators in version and app controls. |
 | `useDiskSpace.test.ts` | Hook coverage for successful disk-space updates, unavailable-API no-ops, and failure swallowing. |
-| `useNetworkStatus.ts` | Polling and derivation of offline, rate-limit, and circuit-breaker status for network health indicators. |
-| `useNetworkStatus.test.ts` | Hook coverage for initial status derivation, zero-request defaults, interval polling, overlap protection, and error propagation. |
-| `useStatus.ts` | Launcher/app status polling and refresh behavior. |
+| `statusTelemetryStore.ts` | Process-wide status telemetry snapshot cache, refresh coalescing, and Electron subscription ownership shared by status hooks. |
+| `useNetworkStatus.ts` | Selector over shared status telemetry for offline, rate-limit, and circuit-breaker status indicators. |
+| `useNetworkStatus.test.ts` | Hook coverage for initial status derivation, zero-request defaults, pushed telemetry updates, manual refresh, and error propagation. |
+| `useStatus.ts` | Launcher/app status selector and refresh behavior backed by shared status telemetry. |
 | `useVersions.ts` | Version list and version operations state flow. |
 | `useVersions.test.ts` | Hook coverage for API-gated refresh startup, installing-tag merge behavior, and install-refresh wiring. |
 | `useVersionShortcutState.ts` | Shortcut-toggle state for installed versions, backend refresh, and active-version shortcut sync. |
@@ -88,23 +89,26 @@ Custom React hooks for backend polling, process status, version/model workflows,
 - Backend-pushed runtime profile notifications refresh canonical runtime
   profile snapshots through `useRuntimeProfiles`; profile settings and routes
   remain backend-confirmed rather than optimistic component state.
-- Polling remains hook-owned until the backend exposes a durable event stream.
-  Polling hooks must own overlap prevention, cleanup on unmount, and API-unavailable
-  fallback behavior in the hook instead of pushing timers into components.
+- Status telemetry is backend-owned and shared through `statusTelemetryStore`.
+  Status consumers must select from that store instead of opening duplicate
+  snapshot requests or Electron subscriptions.
+- Polling remains hook-owned for resources that still lack a durable event
+  stream. Polling hooks must own overlap prevention, cleanup on unmount, and
+  API-unavailable fallback behavior in the hook instead of pushing timers into
+  components.
 
 ## Timer Ownership
 | Polling Owner | Current Reason | Required Guardrail |
 | ------------- | -------------- | ------------------ |
-| `useNetworkStatus.ts` | Network counters and circuit-breaker state are sampled backend status today. | Prevent overlapping polls and clear the interval on unmount. |
-| `useStatus.ts` | Launcher/app status has no subscribed event stream yet. | Clear API-wait and polling timers on unmount. |
+| `statusTelemetryStore.ts` | Launcher, resource, network, and model-library status telemetry is backend-owned and pushed through Electron. | Keep one initial snapshot request and one Electron subscription active across mounted status consumers. |
 | `useActiveModelDownload.ts` and `useModelDownloads.ts` | Download progress is backend-owned and exposed through model-download update subscriptions. | Load one startup snapshot, subscribe through Electron, and unsubscribe on unmount. |
 | `useInstallationManager.ts` and `useInstallationProgress.ts` | Installation progress can outlive a single dialog render and still lacks a push channel. | Stop polling on completion/cancel and clear completion-delay timers. |
 | `useAvailableVersionState.ts` | Background fetch status is backend-owned cache state without push notifications. | Clear wait, interval, and follow-up refresh timers together. |
 
-Event-driven replacement trigger: when the RPC backend exposes a durable app
-event stream for status, installs, downloads, and cache updates, these polling
-owners should move behind one subscription adapter and the per-hook intervals
-should be removed.
+Event-driven replacement trigger: when the RPC backend exposes durable app
+event streams for installs, downloads, and cache updates, those polling owners
+should move behind subscription adapters and the per-hook intervals should be
+removed.
 
 Runtime profile status already has a backend event stream. New runtime/profile
 views should use `useRuntimeProfiles` or

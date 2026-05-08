@@ -3,9 +3,11 @@
 use super::parse_params;
 use crate::server::AppState;
 use pumas_library::models::{
-    ModelServeError, ModelServeErrorCode, RuntimeProviderId, ServeModelRequest, ServeModelResponse,
-    ServedModelLoadState, ServedModelStatus, UnserveModelRequest, UnserveModelResponse,
+    ModelServeError, ModelServeErrorCode, RuntimeDeviceSettings, RuntimeProviderId,
+    ServeModelRequest, ServeModelResponse, ServedModelLoadState, ServedModelStatus,
+    UnserveModelRequest, UnserveModelResponse,
 };
+use pumas_library::runtime_profiles::RuntimeProfileLaunchOverrides;
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::warn;
@@ -241,11 +243,12 @@ async fn serve_llama_cpp_model(
     let version_dir = state.api.launcher_data_dir().join("llama-cpp");
     let launch_response = state
         .api
-        .launch_runtime_profile_for_model(
+        .launch_runtime_profile_for_model_with_overrides(
             request.config.profile_id.clone(),
             "local-build",
             &version_dir,
             Some(&request.model_id),
+            Some(llama_cpp_launch_overrides(&request)),
         )
         .await;
     match launch_response {
@@ -369,6 +372,18 @@ async fn serve_llama_cpp_router_model(
         load_error: None,
         snapshot: Some(snapshot),
     })?)
+}
+
+fn llama_cpp_launch_overrides(request: &ServeModelRequest) -> RuntimeProfileLaunchOverrides {
+    RuntimeProfileLaunchOverrides {
+        device: Some(RuntimeDeviceSettings {
+            mode: request.config.device_mode,
+            device_id: request.config.device_id.clone(),
+            gpu_layers: request.config.gpu_layers,
+            tensor_split: request.config.tensor_split.clone(),
+        }),
+        context_size: request.config.context_size,
+    }
 }
 
 async fn unserve_llama_cpp_model(

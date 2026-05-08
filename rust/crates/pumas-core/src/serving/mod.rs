@@ -372,6 +372,10 @@ fn validate_llama_cpp_placement(
     request: &ServeModelRequest,
     profile: &ServingValidationProfile,
 ) -> Vec<ModelServeError> {
+    if profile.provider_mode == RuntimeProviderMode::LlamaCppDedicated {
+        return Vec::new();
+    }
+
     let mut errors = Vec::new();
 
     if request.config.device_mode != RuntimeDeviceMode::Auto
@@ -380,7 +384,7 @@ fn validate_llama_cpp_placement(
         errors.push(unsupported_placement(
             model_id,
             request,
-            "llama.cpp serving uses the selected runtime profile device mode; choose a matching profile or use Auto",
+            "llama.cpp router serving uses the selected runtime profile device mode; choose a matching profile or use Auto",
         ));
     }
 
@@ -389,7 +393,7 @@ fn validate_llama_cpp_placement(
             errors.push(unsupported_placement(
                 model_id,
                 request,
-                "llama.cpp serving uses the selected runtime profile device ID; choose a matching profile",
+                "llama.cpp router serving uses the selected runtime profile device ID; choose a matching profile",
             ));
         }
     }
@@ -399,7 +403,7 @@ fn validate_llama_cpp_placement(
             errors.push(unsupported_placement(
                 model_id,
                 request,
-                "llama.cpp GPU layers must match the selected runtime profile because per-load overrides are not applied yet",
+                "llama.cpp router GPU layers must match the selected runtime profile because router per-load overrides are not applied",
             ));
         }
     }
@@ -409,7 +413,7 @@ fn validate_llama_cpp_placement(
             errors.push(unsupported_placement(
                 model_id,
                 request,
-                "llama.cpp tensor split must match the selected runtime profile because per-load overrides are not applied yet",
+                "llama.cpp router tensor split must match the selected runtime profile because router per-load overrides are not applied",
             ));
         }
     }
@@ -418,7 +422,7 @@ fn validate_llama_cpp_placement(
         errors.push(unsupported_placement(
             model_id,
             request,
-            "llama.cpp context size is not applied by this serving path yet",
+            "llama.cpp router context size is not applied by this serving path",
         ));
     }
 
@@ -733,7 +737,7 @@ mod tests {
     }
 
     #[test]
-    fn validation_rejects_llama_cpp_per_load_placement_overrides() {
+    fn validation_rejects_llama_cpp_router_per_load_placement_overrides() {
         let mut request = request();
         request.config.provider = RuntimeProviderId::LlamaCpp;
         request.config.profile_id = RuntimeProfileId::parse("llama-dedicated").unwrap();
@@ -746,7 +750,7 @@ mod tests {
         let mut context = valid_context();
         context.profile = Some(ServingValidationProfile {
             provider: RuntimeProviderId::LlamaCpp,
-            provider_mode: RuntimeProviderMode::LlamaCppDedicated,
+            provider_mode: RuntimeProviderMode::LlamaCppRouter,
             management_mode: RuntimeManagementMode::Managed,
             state: RuntimeLifecycleState::Running,
             device_mode: RuntimeDeviceMode::Hybrid,

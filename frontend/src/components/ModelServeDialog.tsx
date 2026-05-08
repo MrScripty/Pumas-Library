@@ -30,7 +30,7 @@ function isGgufModel(model: ModelInfo): boolean {
 }
 
 export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
-  const { profiles, defaultProfileId, isLoading, error: profileError } = useRuntimeProfiles();
+  const { profiles, routes, defaultProfileId, isLoading, error: profileError } = useRuntimeProfiles();
   const servingProfiles = useMemo(
     () => profiles.filter((profile) => profile.provider === 'ollama' || profile.provider === 'llama_cpp'),
     [profiles]
@@ -94,11 +94,13 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
       return;
     }
     const fallbackProfile = servingProfiles[0];
+    const routedProfileId = routes.find((route) => route.model_id === model.id)?.profile_id;
+    const routedProfile = servingProfiles.find((profile) => profile.profile_id === routedProfileId);
     const defaultProfile = servingProfiles.find((profile) => profile.profile_id === defaultProfileId);
     if (fallbackProfile) {
-      setProfileId((defaultProfile ?? fallbackProfile).profile_id);
+      setProfileId((routedProfile ?? defaultProfile ?? fallbackProfile).profile_id);
     }
-  }, [defaultProfileId, profileId, servingProfiles]);
+  }, [defaultProfileId, model.id, profileId, routes, servingProfiles]);
 
   useEffect(() => {
     const api = getElectronAPI();
@@ -127,6 +129,16 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
 
   const selectedProfile = servingProfiles.find((profile) => profile.profile_id === profileId);
   const canServe = Boolean(selectedProfile && isGgufModel(model) && !isSubmitting);
+
+  useEffect(() => {
+    if (!selectedProfile) {
+      return;
+    }
+    setDeviceMode(selectedProfile.device.mode);
+    setDeviceId(selectedProfile.device.device_id ?? '');
+    setGpuLayers(selectedProfile.device.gpu_layers?.toString() ?? '');
+    setTensorSplit(selectedProfile.device.tensor_split?.join(',') ?? '');
+  }, [selectedProfile?.profile_id]);
 
   const buildConfig = (): ModelServingConfig | null => {
     if (!selectedProfile) {
@@ -239,7 +251,7 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
 
         <div className="grid gap-3">
           <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
-            Profile
+            Runtime target
             <select
               ref={profileSelectRef}
               value={profileId}
@@ -254,9 +266,24 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
             </select>
           </label>
 
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div>
+              <div className="text-[hsl(var(--text-tertiary))]">Provider</div>
+              <div className="mt-1 text-[hsl(var(--text-primary))]">
+                {selectedProfile?.provider ?? 'none'}
+              </div>
+            </div>
+            <div>
+              <div className="text-[hsl(var(--text-tertiary))]">Serving mode</div>
+              <div className="mt-1 text-[hsl(var(--text-primary))]">
+                {selectedProfile?.provider_mode ?? 'none'}
+              </div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
-              Device
+              Model device
               <select
                 value={deviceMode}
                 onChange={(event) => setDeviceMode(event.target.value as RuntimeDeviceMode)}
@@ -281,7 +308,7 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
 
           <div className="grid grid-cols-3 gap-3">
             <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
-              GPU Layers
+              Model GPU layers
               <input
                 type="number"
                 value={gpuLayers}
@@ -290,7 +317,7 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
               />
             </label>
             <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
-              Tensor Split
+              Model tensor split
               <input
                 value={tensorSplit}
                 onChange={(event) => setTensorSplit(event.target.value)}

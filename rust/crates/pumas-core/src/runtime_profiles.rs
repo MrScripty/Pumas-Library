@@ -11,9 +11,9 @@ use crate::index::ModelRecord;
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::ModelLibrary;
 use crate::models::{
-    ModelRuntimeRoute, RuntimeDeviceMode, RuntimeEndpointUrl, RuntimeLifecycleState,
-    RuntimeManagementMode, RuntimePort, RuntimeProfileConfig, RuntimeProfileEvent,
-    RuntimeProfileEventKind, RuntimeProfileId, RuntimeProfileMutationResponse,
+    ModelRuntimeRoute, RuntimeDeviceMode, RuntimeDeviceSettings, RuntimeEndpointUrl,
+    RuntimeLifecycleState, RuntimeManagementMode, RuntimePort, RuntimeProfileConfig,
+    RuntimeProfileEvent, RuntimeProfileEventKind, RuntimeProfileId, RuntimeProfileMutationResponse,
     RuntimeProfileStatus, RuntimeProfileUpdateFeed, RuntimeProfileUpdateFeedResponse,
     RuntimeProfilesConfigFile, RuntimeProfilesSnapshot, RuntimeProfilesSnapshotResponse,
     RuntimeProviderId, RuntimeProviderMode,
@@ -281,6 +281,12 @@ pub struct RuntimeProfileLaunchSpec {
     pub pid_file: PathBuf,
     pub log_file: PathBuf,
     pub health_check_url: RuntimeEndpointUrl,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RuntimeProfileLaunchOverrides {
+    pub device: Option<RuntimeDeviceSettings>,
+    pub context_size: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

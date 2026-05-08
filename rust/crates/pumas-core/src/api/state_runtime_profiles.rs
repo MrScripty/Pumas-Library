@@ -3,11 +3,13 @@
 use super::state::PrimaryState;
 use crate::error::PumasError;
 use crate::models::{
-    LaunchResponse, RuntimeLifecycleState, RuntimeProfileId, RuntimeProfileStatus,
-    RuntimeProviderId, RuntimeProviderMode,
+    LaunchResponse, RuntimeDeviceMode, RuntimeDeviceSettings, RuntimeLifecycleState,
+    RuntimeProfileId, RuntimeProfileStatus, RuntimeProviderId, RuntimeProviderMode,
 };
 use crate::process::{BinaryLaunchConfig, ProcessLauncher};
-use crate::runtime_profiles::{generate_llama_cpp_router_catalog, RuntimeProfileLaunchSpec};
+use crate::runtime_profiles::{
+    generate_llama_cpp_router_catalog, RuntimeProfileLaunchOverrides, RuntimeProfileLaunchSpec,
+};
 use std::fs;
 use std::path::Path;
 use tokio::fs as async_fs;
@@ -18,6 +20,7 @@ pub(super) async fn launch_runtime_profile(
     tag: &str,
     version_dir: &Path,
     model_id: Option<String>,
+    overrides: Option<RuntimeProfileLaunchOverrides>,
 ) -> std::result::Result<LaunchResponse, PumasError> {
     let _operation_guard = primary
         .runtime_profile_service
@@ -27,7 +30,9 @@ pub(super) async fn launch_runtime_profile(
         .managed_profile_launch_spec(profile_id.clone())
         .await?;
 
-    let spec = prepare_runtime_profile_launch_spec(primary, spec, model_id.as_deref()).await?;
+    let spec =
+        prepare_runtime_profile_launch_spec(primary, spec, model_id.as_deref(), overrides.as_ref())
+            .await?;
 
     primary
         .runtime_profile_service
@@ -124,6 +129,7 @@ async fn prepare_runtime_profile_launch_spec(
     primary: &PrimaryState,
     mut launch_spec: RuntimeProfileLaunchSpec,
     model_id: Option<&str>,
+    overrides: Option<&RuntimeProfileLaunchOverrides>,
 ) -> std::result::Result<RuntimeProfileLaunchSpec, PumasError> {
     if launch_spec.provider != RuntimeProviderId::LlamaCpp {
         return Ok(launch_spec);
@@ -170,11 +176,104 @@ async fn prepare_runtime_profile_launch_spec(
             }
             launch_spec.extra_args =
                 append_llama_cpp_model_arg(&launch_spec.extra_args, &model_path);
+            if let Some(overrides) = overrides {
+                apply_llama_cpp_dedicated_overrides(&mut launch_spec, overrides);
+            }
         }
         RuntimeProviderMode::OllamaServe => {}
     }
 
     Ok(launch_spec)
+}
+
+fn apply_llama_cpp_dedicated_overrides(
+    launch_spec: &mut RuntimeProfileLaunchSpec,
+    overrides: &RuntimeProfileLaunchOverrides,
+) {
+    if let Some(device) = &overrides.device {
+        launch_spec.extra_args = remove_llama_cpp_device_args(&launch_spec.extra_args);
+        apply_llama_cpp_device_override_args(&mut launch_spec.extra_args, device);
+        apply_device_visibility_override_env(&mut launch_spec.env_vars, device);
+    }
+
+    if let Some(context_size) = overrides.context_size {
+        launch_spec.extra_args = remove_arg_with_value(&launch_spec.extra_args, "--ctx-size");
+        launch_spec
+            .extra_args
+            .extend(["--ctx-size".to_string(), context_size.to_string()]);
+    }
+}
+
+fn remove_llama_cpp_device_args(args: &[String]) -> Vec<String> {
+    remove_args_with_values(args, &["--n-gpu-layers", "--tensor-split"])
+}
+
+fn remove_arg_with_value(args: &[String], flag: &str) -> Vec<String> {
+    remove_args_with_values(args, &[flag])
+}
+
+fn remove_args_with_values(args: &[String], flags: &[&str]) -> Vec<String> {
+    let mut output = Vec::with_capacity(args.len());
+    let mut index = 0;
+    while index < args.len() {
+        if flags.contains(&args[index].as_str()) {
+            index += 2;
+            continue;
+        }
+        output.push(args[index].clone());
+        index += 1;
+    }
+    output
+}
+
+fn apply_llama_cpp_device_override_args(args: &mut Vec<String>, device: &RuntimeDeviceSettings) {
+    if device.mode == RuntimeDeviceMode::Cpu {
+        args.extend(["--n-gpu-layers".to_string(), "0".to_string()]);
+    } else if let Some(gpu_layers) = device.gpu_layers {
+        args.extend(["--n-gpu-layers".to_string(), gpu_layers.to_string()]);
+    }
+
+    if let Some(tensor_split) = &device.tensor_split {
+        if !tensor_split.is_empty() {
+            args.extend([
+                "--tensor-split".to_string(),
+                tensor_split
+                    .iter()
+                    .map(|value| value.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ]);
+        }
+    }
+}
+
+fn apply_device_visibility_override_env(
+    env_vars: &mut std::collections::HashMap<String, String>,
+    device: &RuntimeDeviceSettings,
+) {
+    for key in [
+        "CUDA_VISIBLE_DEVICES",
+        "HIP_VISIBLE_DEVICES",
+        "ROCR_VISIBLE_DEVICES",
+    ] {
+        env_vars.remove(key);
+    }
+
+    match device.mode {
+        RuntimeDeviceMode::Cpu => {
+            env_vars.insert("CUDA_VISIBLE_DEVICES".to_string(), String::new());
+            env_vars.insert("HIP_VISIBLE_DEVICES".to_string(), String::new());
+            env_vars.insert("ROCR_VISIBLE_DEVICES".to_string(), String::new());
+        }
+        RuntimeDeviceMode::Gpu | RuntimeDeviceMode::SpecificDevice => {
+            if let Some(device_id) = device.device_id.as_deref() {
+                env_vars.insert("CUDA_VISIBLE_DEVICES".to_string(), device_id.to_string());
+                env_vars.insert("HIP_VISIBLE_DEVICES".to_string(), device_id.to_string());
+                env_vars.insert("ROCR_VISIBLE_DEVICES".to_string(), device_id.to_string());
+            }
+        }
+        RuntimeDeviceMode::Auto | RuntimeDeviceMode::Hybrid => {}
+    }
 }
 
 fn replace_llama_cpp_models_dir_with_preset(args: &[String], preset_path: &Path) -> Vec<String> {
@@ -205,6 +304,76 @@ fn append_llama_cpp_model_arg(args: &[String], model_path: &Path) -> Vec<String>
     output.push("--model".to_string());
     output.push(model_path.to_string_lossy().to_string());
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{RuntimeEndpointUrl, RuntimePort};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    #[test]
+    fn llama_cpp_dedicated_overrides_replace_profile_device_args() {
+        let endpoint_url = RuntimeEndpointUrl::parse("http://127.0.0.1:39191").unwrap();
+        let mut launch_spec = RuntimeProfileLaunchSpec {
+            profile_id: RuntimeProfileId::parse("llama-dedicated").unwrap(),
+            provider: RuntimeProviderId::LlamaCpp,
+            provider_mode: RuntimeProviderMode::LlamaCppDedicated,
+            endpoint_url: endpoint_url.clone(),
+            port: RuntimePort::parse(39191).unwrap(),
+            extra_args: vec![
+                "--host".to_string(),
+                "127.0.0.1".to_string(),
+                "--port".to_string(),
+                "39191".to_string(),
+                "--n-gpu-layers".to_string(),
+                "16".to_string(),
+                "--tensor-split".to_string(),
+                "1,1".to_string(),
+                "--model".to_string(),
+                "/models/base.gguf".to_string(),
+            ],
+            env_vars: HashMap::from([("CUDA_VISIBLE_DEVICES".to_string(), "0".to_string())]),
+            runtime_dir: PathBuf::from("/tmp/runtime"),
+            pid_file: PathBuf::from("/tmp/runtime/runtime.pid"),
+            log_file: PathBuf::from("/tmp/runtime/runtime.log"),
+            health_check_url: endpoint_url,
+        };
+
+        apply_llama_cpp_dedicated_overrides(
+            &mut launch_spec,
+            &RuntimeProfileLaunchOverrides {
+                device: Some(RuntimeDeviceSettings {
+                    mode: RuntimeDeviceMode::SpecificDevice,
+                    device_id: Some("1".to_string()),
+                    gpu_layers: Some(32),
+                    tensor_split: Some(vec![3.0, 1.0]),
+                }),
+                context_size: Some(8192),
+            },
+        );
+
+        assert!(launch_spec
+            .extra_args
+            .windows(2)
+            .any(|window| window == ["--n-gpu-layers", "32"]));
+        assert!(launch_spec
+            .extra_args
+            .windows(2)
+            .any(|window| window == ["--tensor-split", "3,1"]));
+        assert!(launch_spec
+            .extra_args
+            .windows(2)
+            .any(|window| window == ["--ctx-size", "8192"]));
+        assert_eq!(
+            launch_spec
+                .env_vars
+                .get("CUDA_VISIBLE_DEVICES")
+                .map(String::as_str),
+            Some("1")
+        );
+    }
 }
 
 pub(super) async fn stop_runtime_profile(

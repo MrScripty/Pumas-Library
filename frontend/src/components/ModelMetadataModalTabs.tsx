@@ -1,4 +1,4 @@
-import { ActivitySquare, Database, FileText, PencilLine, Route, Settings } from 'lucide-react';
+import { ActivitySquare, Database, FileText, PencilLine, Play, Settings } from 'lucide-react';
 import type { MetadataSource } from './ModelMetadataFieldConfig';
 
 type ModelMetadataModalTabsProps = {
@@ -60,8 +60,8 @@ export function ModelMetadataModalTabs({
         onClick={() => onActiveSourceChange('runtime')}
         className={tabClassName(activeSource === 'runtime')}
       >
-        <Route className="w-4 h-4" />
-        Runtime Route
+        <Play className="w-4 h-4" />
+        Serving
       </button>
       <button
         onClick={() => onActiveSourceChange('notes')}

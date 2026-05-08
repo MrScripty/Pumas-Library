@@ -5,6 +5,7 @@ use crate::models::{
     RuntimeProfileMutationResponse, RuntimeProfileUpdateFeed, RuntimeProfileUpdateFeedResponse,
     RuntimeProfilesSnapshotResponse, RuntimeProviderId,
 };
+use crate::runtime_profiles::RuntimeProfileLaunchOverrides;
 use crate::{PumasApi, Result};
 use std::path::Path;
 
@@ -139,12 +140,31 @@ impl PumasApi {
         version_dir: &Path,
         model_id: Option<&str>,
     ) -> Result<LaunchResponse> {
+        self.launch_runtime_profile_for_model_with_overrides(
+            profile_id,
+            tag,
+            version_dir,
+            model_id,
+            None,
+        )
+        .await
+    }
+
+    pub async fn launch_runtime_profile_for_model_with_overrides(
+        &self,
+        profile_id: RuntimeProfileId,
+        tag: &str,
+        version_dir: &Path,
+        model_id: Option<&str>,
+        overrides: Option<RuntimeProfileLaunchOverrides>,
+    ) -> Result<LaunchResponse> {
         super::state_runtime_profiles::launch_runtime_profile(
             self.primary(),
             profile_id,
             tag,
             version_dir,
             model_id.map(ToOwned::to_owned),
+            overrides,
         )
         .await
     }

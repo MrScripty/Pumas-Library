@@ -393,6 +393,10 @@ const electronAPI = {
   get_serving_status: () => apiCall('get_serving_status'),
   validate_model_serving_config: (request: Record<string, unknown>) =>
     apiCall('validate_model_serving_config', { request }),
+  serve_model: (request: Record<string, unknown>) =>
+    apiCall('serve_model', { request }),
+  unserve_model: (request: Record<string, unknown>) =>
+    apiCall('unserve_model', { request }),
 
   // Torch Inference Server
   launch_torch: () => apiCall('launch_torch'),

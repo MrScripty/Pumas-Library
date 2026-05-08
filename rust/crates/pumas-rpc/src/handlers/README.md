@@ -27,9 +27,9 @@ Domain-specific JSON-RPC handlers that parse request params, call API services, 
   keep raw endpoint URLs confined to legacy Ollama compatibility methods.
 - Launch/stop profile commands delegate to backend runtime-profile ownership;
   RPC handlers do not derive provider-specific process arguments themselves.
-- Serving handlers parse model-row/modal requests and delegate validation to
-  backend-owned serving APIs. They do not register load/unload methods until
-  provider orchestration is implemented.
+- Serving handlers parse model-row/modal requests, delegate validation and
+  status storage to backend-owned serving APIs, and perform the current Ollama
+  provider orchestration through `pumas-app-manager`.
 
 ## Dependencies
 **Internal:** `AppState`, `pumas-library` API, helper utilities in `shared.rs`.

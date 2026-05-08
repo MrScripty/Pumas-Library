@@ -8,7 +8,8 @@ use tokio::sync::RwLock;
 
 use crate::models::{
     ModelServeError, ModelServeErrorCode, ModelServeValidationResponse, RuntimeLifecycleState,
-    RuntimeProviderId, ServeModelRequest, ServingStatusResponse, ServingStatusSnapshot,
+    RuntimeProfileId, RuntimeProviderId, ServeModelRequest, ServedModelStatus, ServingEndpointMode,
+    ServingEndpointStatus, ServingStatusResponse, ServingStatusSnapshot,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,12 +45,99 @@ impl ServingService {
         }
     }
 
+    pub async fn record_loaded_model(&self, status: ServedModelStatus) -> ServingStatusSnapshot {
+        let mut snapshot = self.snapshot.write().await;
+        snapshot
+            .served_models
+            .retain(|model| !same_served_model(model, &status));
+        snapshot.served_models.push(status.clone());
+        snapshot.endpoint = ServingEndpointStatus {
+            endpoint_mode: ServingEndpointMode::ProviderEndpoint,
+            endpoint_url: status.endpoint_url,
+            model_count: snapshot.served_models.len() as u32,
+            message: None,
+        };
+        bump_snapshot_cursor(&mut snapshot);
+        snapshot.clone()
+    }
+
+    pub async fn record_load_error(&self, error: ModelServeError) -> ServingStatusSnapshot {
+        let mut snapshot = self.snapshot.write().await;
+        snapshot.last_errors.push(error);
+        bump_snapshot_cursor(&mut snapshot);
+        snapshot.clone()
+    }
+
+    pub async fn record_unloaded_model(
+        &self,
+        model_id: &str,
+        profile_id: Option<&RuntimeProfileId>,
+        model_alias: Option<&str>,
+    ) -> ServingStatusSnapshot {
+        let mut snapshot = self.snapshot.write().await;
+        snapshot.served_models.retain(|status| {
+            if status.model_id != model_id {
+                return true;
+            }
+            if let Some(profile_id) = profile_id {
+                if &status.profile_id != profile_id {
+                    return true;
+                }
+            }
+            if let Some(model_alias) = model_alias {
+                if status.model_alias.as_deref() != Some(model_alias) {
+                    return true;
+                }
+            }
+            false
+        });
+        snapshot.endpoint.model_count = snapshot.served_models.len() as u32;
+        if snapshot.served_models.is_empty() {
+            snapshot.endpoint = ServingEndpointStatus::not_configured();
+        }
+        bump_snapshot_cursor(&mut snapshot);
+        snapshot.clone()
+    }
+
+    pub async fn find_served_model(
+        &self,
+        model_id: &str,
+        profile_id: Option<&RuntimeProfileId>,
+    ) -> Option<ServedModelStatus> {
+        self.snapshot
+            .read()
+            .await
+            .served_models
+            .iter()
+            .find(|status| {
+                status.model_id == model_id
+                    && profile_id.is_none_or(|profile_id| &status.profile_id == profile_id)
+            })
+            .cloned()
+    }
+
     pub fn validate_request(
         request: &ServeModelRequest,
         context: &ServingValidationContext,
     ) -> ModelServeValidationResponse {
         validate_model_serving_request(request, context)
     }
+}
+
+fn same_served_model(left: &ServedModelStatus, right: &ServedModelStatus) -> bool {
+    left.model_id == right.model_id
+        && left.profile_id == right.profile_id
+        && left.model_alias == right.model_alias
+}
+
+fn bump_snapshot_cursor(snapshot: &mut ServingStatusSnapshot) {
+    let next = snapshot
+        .cursor
+        .strip_prefix("serving:")
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0)
+        + 1;
+    snapshot.cursor = format!("serving:{next}");
 }
 
 pub fn validate_model_serving_request(
@@ -189,6 +277,54 @@ mod tests {
         assert!(status.success);
         assert_eq!(status.snapshot.schema_version, 1);
         assert!(status.snapshot.served_models.is_empty());
+    }
+
+    #[tokio::test]
+    async fn serving_service_records_loaded_and_unloaded_models() {
+        let service = ServingService::new();
+        let status = ServedModelStatus {
+            model_id: "models/example".to_string(),
+            model_alias: Some("example".to_string()),
+            provider: RuntimeProviderId::Ollama,
+            profile_id: RuntimeProfileId::parse("ollama-default").unwrap(),
+            load_state: crate::models::ServedModelLoadState::Loaded,
+            device_mode: RuntimeDeviceMode::Auto,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
+            context_size: None,
+            keep_loaded: true,
+            endpoint_url: None,
+            memory_bytes: None,
+            loaded_at: None,
+            last_error: None,
+        };
+
+        let loaded = service.record_loaded_model(status.clone()).await;
+
+        assert_eq!(loaded.served_models.len(), 1);
+        assert_eq!(
+            loaded.endpoint.endpoint_mode,
+            ServingEndpointMode::ProviderEndpoint
+        );
+        assert_eq!(
+            service
+                .find_served_model("models/example", Some(&status.profile_id))
+                .await
+                .as_ref()
+                .and_then(|status| status.model_alias.as_deref()),
+            Some("example")
+        );
+
+        let unloaded = service
+            .record_unloaded_model("models/example", Some(&status.profile_id), Some("example"))
+            .await;
+
+        assert!(unloaded.served_models.is_empty());
+        assert_eq!(
+            unloaded.endpoint.endpoint_mode,
+            ServingEndpointMode::NotConfigured
+        );
     }
 
     #[test]

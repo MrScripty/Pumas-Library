@@ -341,15 +341,22 @@ impl OllamaClient {
     /// Sends a generate request with an empty prompt to trigger model loading.
     /// Uses `keep_alive: -1` to keep the model loaded until explicitly unloaded.
     pub async fn load_model(&self, name: &str) -> Result<()> {
+        self.load_model_with_keep_alive(name, true).await
+    }
+
+    /// Load a model into Ollama memory, optionally pinning it until explicit unload.
+    pub async fn load_model_with_keep_alive(&self, name: &str, keep_loaded: bool) -> Result<()> {
         let url = format!("{}/api/generate", self.base_url);
         info!("Loading Ollama model '{}' into memory", name);
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": name,
             "prompt": "",
-            "stream": false,
-            "keep_alive": -1
+            "stream": false
         });
+        if keep_loaded {
+            body["keep_alive"] = serde_json::json!(-1);
+        }
 
         let response = self
             .create_client

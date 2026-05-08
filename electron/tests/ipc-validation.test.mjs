@@ -15,6 +15,7 @@ test('RPC method registry has stable unique method names', () => {
   );
   assert.ok(ALLOWED_RPC_METHODS.includes('get_status'));
   assert.ok(ALLOWED_RPC_METHODS.includes('get_serving_status'));
+  assert.ok(ALLOWED_RPC_METHODS.includes('serve_model'));
   assert.ok(ALLOWED_RPC_METHODS.includes('torch_configure'));
 });
 
@@ -89,6 +90,26 @@ test('validateApiCallPayload enforces method request schemas', () => {
     },
   }), {
     method: 'validate_model_serving_config',
+    params: {
+      request: {
+        model_id: 'models/example',
+        config: {
+          provider: 'ollama',
+          profile_id: 'ollama-default',
+        },
+      },
+    },
+  });
+  assert.deepEqual(validateApiCallPayload('serve_model', {
+    request: {
+      model_id: 'models/example',
+      config: {
+        provider: 'ollama',
+        profile_id: 'ollama-default',
+      },
+    },
+  }), {
+    method: 'serve_model',
     params: {
       request: {
         model_id: 'models/example',

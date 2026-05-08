@@ -1,7 +1,8 @@
 //! User-directed model serving API methods.
 
 use crate::models::{
-    ModelServeValidationResponse, RuntimeLifecycleState, ServeModelRequest, ServingStatusResponse,
+    ModelServeError, ModelServeValidationResponse, RuntimeLifecycleState, RuntimeProfileId,
+    ServeModelRequest, ServedModelStatus, ServingStatusResponse, ServingStatusSnapshot,
 };
 use crate::serving::{ServingValidationContext, ServingValidationProfile};
 use crate::{PumasApi, Result};
@@ -62,5 +63,52 @@ impl PumasApi {
         Ok(crate::serving::ServingService::validate_request(
             &request, &context,
         ))
+    }
+
+    pub async fn record_served_model(
+        &self,
+        status: ServedModelStatus,
+    ) -> Result<ServingStatusSnapshot> {
+        Ok(self
+            .primary()
+            .serving_service
+            .record_loaded_model(status)
+            .await)
+    }
+
+    pub async fn record_serving_load_error(
+        &self,
+        error: ModelServeError,
+    ) -> Result<ServingStatusSnapshot> {
+        Ok(self
+            .primary()
+            .serving_service
+            .record_load_error(error)
+            .await)
+    }
+
+    pub async fn record_unserved_model(
+        &self,
+        model_id: &str,
+        profile_id: Option<&RuntimeProfileId>,
+        model_alias: Option<&str>,
+    ) -> Result<ServingStatusSnapshot> {
+        Ok(self
+            .primary()
+            .serving_service
+            .record_unloaded_model(model_id, profile_id, model_alias)
+            .await)
+    }
+
+    pub async fn find_served_model(
+        &self,
+        model_id: &str,
+        profile_id: Option<&RuntimeProfileId>,
+    ) -> Result<Option<ServedModelStatus>> {
+        Ok(self
+            .primary()
+            .serving_service
+            .find_served_model(model_id, profile_id)
+            .await)
     }
 }

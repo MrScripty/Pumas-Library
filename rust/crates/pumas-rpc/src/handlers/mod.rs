@@ -615,6 +615,8 @@ async fn dispatch_method(
         "validate_model_serving_config" => {
             serving::validate_model_serving_config(state, params).await
         }
+        "serve_model" => serving::serve_model(state, params).await,
+        "unserve_model" => serving::unserve_model(state, params).await,
 
         // Version Management
         "get_available_versions" => versions::get_available_versions(state, params).await,

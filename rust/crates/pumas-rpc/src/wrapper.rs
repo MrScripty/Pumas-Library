@@ -91,6 +91,8 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "get_status_telemetry_snapshot"
         | "get_serving_status"
         | "validate_model_serving_config"
+        | "serve_model"
+        | "unserve_model"
         | "get_launcher_version"
         | "check_launcher_updates"
         | "apply_launcher_update"

@@ -617,7 +617,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Electron RPC registry/preload tests for payload validation once methods are wired.
 - Contract documentation update in `docs/contracts/desktop-rpc-methods.md`.
 
-**Status:** Completed for status and validation contracts. `serve_model` and `unserve_model` remain deliberately unregistered until the backend can execute provider orchestration rather than returning placeholder behavior.
+**Status:** Completed for status, validation, and Ollama serve/unserve contracts. llama.cpp support remains a later provider slice.
 
 **Implementation Notes:**
 - 2026-05-08: Added `pumas-core::models::serving` DTOs for user-authored serving config, endpoint mode, served-model state, safe non-critical load errors, validation responses, serving snapshots, and `loaded_models_unchanged` response semantics. The contract reuses existing typed runtime provider/profile/device DTOs instead of adding parallel string fields.
@@ -625,12 +625,15 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - 2026-05-08: Validated with `cargo test -p pumas-library serving --manifest-path rust/Cargo.toml` and `npm run -w frontend check:types`.
 - 2026-05-08: Added implemented `get_serving_status` and `validate_model_serving_config` RPC/preload/bridge methods with Electron request schemas. Native binding exposure is documented as out of scope until a supported binding consumer exists and host-language verification can land in the same slice.
 - 2026-05-08: Validated the callable contract slice with `cargo test -p pumas-library serving --manifest-path rust/Cargo.toml`, `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
+- 2026-05-08: Registered `serve_model` and `unserve_model` after adding real Ollama provider orchestration. llama.cpp requests intentionally return a non-critical `unsupported_provider` load response until the llama.cpp serving slice is implemented.
+- 2026-05-08: Validated the Ollama serving facade wiring with `cargo test -p pumas-library serving --manifest-path rust/Cargo.toml`, `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
 
 **Discovered Issues:**
 - 2026-05-08: The broader models README still contains a historical blanket statement that all DTOs use camelCase, while runtime-profile, package-facts, and serving contracts intentionally use snake_case. This slice documented serving explicitly, but a later docs cleanup should correct the broad statement without changing wire formats.
 - 2026-05-08: Electron RPC request schemas are intentionally shallow and can only treat nested serving config as an `unknown-record`; meaningful serving validation must stay in Rust RPC/service code.
 - 2026-05-08: Torch inference RPCs still bypass runtime profiles and use `connection_url`. That is outside the current Ollama/llama.cpp serving slice but should be considered before claiming a provider-general serving facade.
 - 2026-05-08: `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml` currently compiles the RPC crate but matches no focused serving tests. Add handler-level serving tests when `serve_model` and `unserve_model` are registered.
+- 2026-05-08: Because `pumas-core` cannot depend on `pumas-app-manager` without creating a dependency cycle, the first Ollama provider orchestration lives in the RPC serving handler while validation/status ownership lives in core. This is acceptable for the thin slice but should be revisited with an adapter inversion before adding more provider complexity.
 
 ### Milestone 10: Add Backend Serving Facade And Status Snapshot
 
@@ -641,11 +644,11 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - [ ] Expose `PumasApi` methods:
   - [x] `get_serving_status`
   - [x] `validate_model_serving_config`
-  - `serve_model`
-  - `unserve_model`.
+  - [ ] `serve_model`
+  - [ ] `unserve_model`.
 - [ ] Implement validation for model existence, executable artifact readiness, provider/profile compatibility, profile state, supported file format, numeric ranges, and supported provider placement fields. Initial validation now covers model existence, primary artifact readiness, GGUF format, provider/profile mismatch, profile running/external state, and numeric bounds; provider-specific placement capability checks remain.
 - [x] Resolve model paths only through `ModelLibrary`; do not accept renderer-supplied file paths.
-- [ ] Add serving snapshots/events for loaded models, failed load attempts, endpoint mode, and last non-critical errors. Initial in-memory status snapshot reports `endpoint_mode = not_configured`; load/error events remain.
+- [ ] Add serving snapshots/events for loaded models, failed load attempts, endpoint mode, and last non-critical errors. In-memory snapshots now record loaded/unloaded models, failed load attempts, endpoint mode, and last non-critical errors; pushed events remain.
 - [ ] Keep route defaults separate from immediate serving commands.
 - [x] Preserve existing runtime profile and Ollama APIs unchanged.
 - [ ] If the first implementation uses provider endpoints directly, return `endpoint_mode = provider_endpoint` instead of claiming gateway behavior.
@@ -656,11 +659,12 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Rust tests for non-critical error response shape and `loaded_models_unchanged`.
 - RPC tests for serving handlers once registered.
 
-**Status:** In progress. Status and validation are implemented; load/unload orchestration, provider-specific placement checks, serving events, and endpoint-mode transition behavior remain.
+**Status:** In progress. Status, validation, in-memory snapshot updates, and Ollama load/unload orchestration are implemented; provider-specific placement checks, serving events, llama.cpp orchestration, and gateway endpoint behavior remain.
 
 **Implementation Notes:**
 - 2026-05-08: Added `ServingService` as the backend owner for serving snapshots and request validation. The initial snapshot is in memory and reports `endpoint_mode = not_configured` until provider endpoint or gateway behavior is implemented.
 - 2026-05-08: Added `PumasApi::get_serving_status` and `PumasApi::validate_model_serving_config`, plus RPC handlers. Validation resolves models through `ModelLibrary`, checks runtime profile provider/state through the runtime profile snapshot, and returns non-critical domain errors instead of transport failures for invalid fit/request conditions.
+- 2026-05-08: Added `ServingService` snapshot mutation helpers and wired `serve_model`/`unserve_model` through the RPC serving facade for Ollama. Successful Ollama loads register the GGUF in Ollama if needed, request a load using the user-selected keep-loaded setting, and publish a backend-owned `ServedModelStatus` with `endpoint_mode = provider_endpoint`.
 
 ### Milestone 11: Implement Model Row/Modal Serve Vertical Slice
 
@@ -690,12 +694,12 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 **Goal:** Make Ollama model register/load/unload usable through the provider-neutral serving facade.
 
 **Tasks:**
-- [ ] Adapt existing Ollama create/load/unload/list-running client calls behind the serving provider interface.
-- [ ] Honor explicit user-selected profile and keep-loaded behavior.
+- [x] Adapt existing Ollama create/load/unload/list-running client calls behind the serving provider interface.
+- [x] Honor explicit user-selected profile and keep-loaded behavior.
 - [ ] Return truthful capability validation for device placement fields Ollama cannot control per model.
-- [ ] Preserve legacy `ollama_create_model`, `ollama_load_model`, and profile-aware Ollama commands.
-- [ ] Map Ollama API/load failures into non-critical serving errors where the command was valid but the model did not load.
-- [ ] Populate `ServedModelStatus` from Ollama running-model inventory.
+- [x] Preserve legacy `ollama_create_model`, `ollama_load_model`, and profile-aware Ollama commands.
+- [x] Map Ollama API/load failures into non-critical serving errors where the command was valid but the model did not load.
+- [ ] Populate `ServedModelStatus` from Ollama running-model inventory. Initial status records the successful serve request; inventory memory details remain.
 
 **Verification:**
 - Rust/app-manager or RPC tests for valid Ollama serving request mapping.
@@ -703,7 +707,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Tests showing legacy Ollama APIs remain compatible.
 - One manual smoke path when a local Ollama runtime and small GGUF model are available.
 
-**Status:** Planned.
+**Status:** In progress. Provider-neutral `serve_model`/`unserve_model` now drive Ollama register/load/unload and backend status updates; capability warnings and richer running-inventory projection remain.
 
 ### Milestone 13: Wire llama.cpp Through User-Directed Serving
 

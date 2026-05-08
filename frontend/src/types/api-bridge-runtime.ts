@@ -36,7 +36,10 @@ import type {
 import type {
   ModelServeValidationResponse,
   ServeModelRequest,
+  ServeModelResponse,
   ServingStatusResponse,
+  UnserveModelRequest,
+  UnserveModelResponse,
 } from './api-serving';
 import type {
   CacheStatusResponse,
@@ -143,6 +146,8 @@ export interface DesktopBridgeRuntimeAPI {
   validate_model_serving_config(
     request: ServeModelRequest
   ): Promise<ModelServeValidationResponse>;
+  serve_model(request: ServeModelRequest): Promise<ServeModelResponse>;
+  unserve_model(request: UnserveModelRequest): Promise<UnserveModelResponse>;
 
   // Ollama Model Management
   ollama_list_models(connectionUrl?: string): Promise<OllamaListModelsResponse>;

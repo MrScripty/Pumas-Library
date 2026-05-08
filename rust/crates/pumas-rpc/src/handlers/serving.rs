@@ -198,12 +198,16 @@ async fn serve_llama_cpp_model(
         .await;
     };
 
+    if profile.provider_mode == pumas_library::models::RuntimeProviderMode::LlamaCppRouter {
+        return serve_llama_cpp_router_model(state, request).await;
+    }
+
     if profile.provider_mode != pumas_library::models::RuntimeProviderMode::LlamaCppDedicated {
         return non_critical_failure_response(
             state,
             serving_error(
                 ModelServeErrorCode::UnsupportedProvider,
-                "llama.cpp router serving through the shared serving endpoint is not implemented yet",
+                "selected llama.cpp runtime profile mode is not supported for serving",
                 &request,
             ),
         )
@@ -301,12 +305,107 @@ async fn serve_llama_cpp_model(
     })?)
 }
 
+async fn serve_llama_cpp_router_model(
+    state: &AppState,
+    request: ServeModelRequest,
+) -> pumas_library::Result<Value> {
+    let endpoint = match state
+        .api
+        .resolve_model_runtime_profile_endpoint_for_operation(
+            RuntimeProviderId::LlamaCpp,
+            &request.model_id,
+            Some(request.config.profile_id.clone()),
+        )
+        .await
+    {
+        Ok(endpoint) => endpoint,
+        Err(err) => {
+            warn!(
+                "failed to resolve llama.cpp router serving endpoint: {}",
+                err
+            );
+            return non_critical_failure_response(
+                state,
+                serving_error(
+                    ModelServeErrorCode::EndpointUnavailable,
+                    "selected llama.cpp router profile is not available",
+                    &request,
+                ),
+            )
+            .await;
+        }
+    };
+
+    let model_alias = request
+        .config
+        .model_alias
+        .clone()
+        .unwrap_or_else(|| request.model_id.clone());
+    let status = ServedModelStatus {
+        model_id: request.model_id.clone(),
+        model_alias: Some(model_alias),
+        provider: RuntimeProviderId::LlamaCpp,
+        profile_id: request.config.profile_id.clone(),
+        load_state: ServedModelLoadState::Loaded,
+        device_mode: request.config.device_mode,
+        device_id: request.config.device_id.clone(),
+        gpu_layers: request.config.gpu_layers,
+        tensor_split: request.config.tensor_split.clone(),
+        context_size: request.config.context_size,
+        keep_loaded: request.config.keep_loaded,
+        endpoint_url: Some(endpoint),
+        memory_bytes: None,
+        loaded_at: None,
+        last_error: None,
+    };
+    let snapshot = state.api.record_served_model(status.clone()).await?;
+
+    Ok(serde_json::to_value(ServeModelResponse {
+        success: true,
+        error: None,
+        loaded: true,
+        loaded_models_unchanged: false,
+        status: Some(status),
+        load_error: None,
+        snapshot: Some(snapshot),
+    })?)
+}
+
 async fn unserve_llama_cpp_model(
     state: &AppState,
     request: UnserveModelRequest,
     profile_id: pumas_library::models::RuntimeProfileId,
     model_alias: String,
 ) -> pumas_library::Result<Value> {
+    let is_dedicated = state
+        .api
+        .get_runtime_profiles_snapshot()
+        .await?
+        .snapshot
+        .profiles
+        .iter()
+        .find(|profile| profile.profile_id == profile_id)
+        .is_some_and(|profile| {
+            profile.provider_mode == pumas_library::models::RuntimeProviderMode::LlamaCppDedicated
+        });
+
+    if !is_dedicated {
+        let snapshot = state
+            .api
+            .record_unserved_model(
+                &request.model_id,
+                Some(&profile_id),
+                Some(model_alias.as_str()),
+            )
+            .await?;
+        return Ok(serde_json::to_value(UnserveModelResponse {
+            success: true,
+            error: None,
+            unloaded: true,
+            snapshot: Some(snapshot),
+        })?);
+    }
+
     if let Err(err) = state.api.stop_runtime_profile(profile_id.clone()).await {
         warn!("llama.cpp serving unload failed: {}", err);
         return Ok(serde_json::to_value(UnserveModelResponse {
@@ -432,7 +531,10 @@ async fn serve_ollama_model(
             .find(|model| model.name == model_alias)
             .map(|model| model.size),
         Err(err) => {
-            warn!("Ollama running inventory failed after serving load: {}", err);
+            warn!(
+                "Ollama running inventory failed after serving load: {}",
+                err
+            );
             None
         }
     };

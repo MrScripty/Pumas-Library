@@ -7,6 +7,7 @@ import type { ModelServeError, ModelServingConfig, ServedModelStatus } from '../
 
 interface ModelServeDialogProps {
   model: ModelInfo;
+  initialProfileId?: string | null;
   onClose: () => void;
 }
 
@@ -29,7 +30,7 @@ function isGgufModel(model: ModelInfo): boolean {
   return model.primaryFormat === 'gguf' || model.format?.toLowerCase() === 'gguf';
 }
 
-export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
+export function ModelServeDialog({ model, initialProfileId, onClose }: ModelServeDialogProps) {
   const { profiles, routes, defaultProfileId, isLoading, error: profileError } = useRuntimeProfiles();
   const servingProfiles = useMemo(
     () => profiles.filter((profile) => profile.provider === 'ollama' || profile.provider === 'llama_cpp'),
@@ -94,13 +95,14 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
       return;
     }
     const fallbackProfile = servingProfiles[0];
-    const routedProfileId = routes.find((route) => route.model_id === model.id)?.profile_id;
+    const routedProfileId =
+      initialProfileId || routes.find((route) => route.model_id === model.id)?.profile_id;
     const routedProfile = servingProfiles.find((profile) => profile.profile_id === routedProfileId);
     const defaultProfile = servingProfiles.find((profile) => profile.profile_id === defaultProfileId);
     if (fallbackProfile) {
       setProfileId((routedProfile ?? defaultProfile ?? fallbackProfile).profile_id);
     }
-  }, [defaultProfileId, model.id, profileId, routes, servingProfiles]);
+  }, [defaultProfileId, initialProfileId, model.id, profileId, routes, servingProfiles]);
 
   useEffect(() => {
     const api = getElectronAPI();
@@ -128,7 +130,13 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
   }, [model.id]);
 
   const selectedProfile = servingProfiles.find((profile) => profile.profile_id === profileId);
-  const canServe = Boolean(selectedProfile && isGgufModel(model) && !isSubmitting);
+  const serveBlockReason =
+    profileError ??
+    (isLoading ? 'Loading runtime profiles.' : null) ??
+    (servingProfiles.length === 0 ? 'Create a runtime profile before serving a model.' : null) ??
+    (!selectedProfile ? 'Select a runtime target before serving.' : null) ??
+    (!isGgufModel(model) ? 'Only GGUF models can be served locally in this flow.' : null);
+  const canServe = Boolean(!serveBlockReason && !isSubmitting);
 
   useEffect(() => {
     if (!selectedProfile) {
@@ -175,7 +183,15 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
       const request = { model_id: model.id, config };
       const validation = await api.validate_model_serving_config(request);
       if (!validation.valid) {
-        setServeError(validation.errors[0] ?? null);
+        setServeError(
+          validation.errors[0] ?? {
+            code: 'invalid_request',
+            severity: 'non_critical',
+            message: 'The selected runtime target cannot serve this model configuration.',
+            model_id: model.id,
+            profile_id: config.profile_id,
+          }
+        );
         return;
       }
 
@@ -185,7 +201,15 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
         setMessage('Loaded');
         return;
       }
-      setServeError(response.load_error ?? null);
+      setServeError(
+        response.load_error ?? {
+          code: 'provider_load_failed',
+          severity: 'non_critical',
+          message: 'The runtime did not report the model as loaded.',
+          model_id: model.id,
+          profile_id: config.profile_id,
+        }
+      );
     } catch (caught) {
       setMessage(caught instanceof Error ? caught.message : 'Serving request failed');
     } finally {
@@ -224,14 +248,14 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[hsl(0_0%_0%/0.78)] px-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-labelledby="model-serve-title"
     >
       <div
         ref={dialogRef}
-        className="w-full max-w-lg rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-panel))] p-4 shadow-xl"
+        className="w-full max-w-xl rounded-lg border border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-primary))] p-4 shadow-2xl"
       >
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -265,6 +289,12 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
               ))}
             </select>
           </label>
+
+          <div className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--launcher-bg-secondary))] px-3 py-2 text-xs text-[hsl(var(--text-secondary))]">
+            {serveBlockReason
+              ? `Cannot serve yet: ${serveBlockReason}`
+              : `Ready to serve ${model.name} with ${selectedProfile?.name ?? 'the selected runtime target'}.`}
+          </div>
 
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div>
@@ -345,9 +375,9 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
           </label>
         </div>
 
-        {(profileError || !isGgufModel(model) || serveError || message) && (
+        {(serveError || message) && (
           <div className="mt-3 rounded border border-[hsl(var(--border-default))] px-3 py-2 text-xs text-[hsl(var(--text-secondary))]">
-            {profileError ?? (!isGgufModel(model) ? 'Only GGUF models can be served locally in this flow.' : null) ?? formatServeError(serveError) ?? message}
+            {formatServeError(serveError) ?? message}
           </div>
         )}
 

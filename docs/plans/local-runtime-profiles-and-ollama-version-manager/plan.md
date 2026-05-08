@@ -714,9 +714,11 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - 2026-05-08: Added a Serve action to the model modal Runtime Route tab by reusing `ModelServeDialog` from `ModelRuntimeRouteEditor`. Validated with `npm run -w frontend test:run -- ModelMetadataModal LocalModelInstalledActions` and `npm run -w frontend check:types`.
 - 2026-05-08: Added focus trapping to the serving dialog. Validated with `npm run -w frontend check:types`.
 - 2026-05-08: Renamed the model modal route tab to Serving and made `ModelServeDialog` choose the model's saved route profile before falling back to the default profile. The dialog now labels placement fields as model placement, shows the selected provider/mode, and initializes the model placement draft from the selected runtime target so users can see and override the launch settings before serving.
+- 2026-05-08: Made the model serve dialog use an opaque launcher panel/backdrop, show an always-visible ready/cannot-serve reason, and accept the route editor's currently selected profile even before the route is saved. Validated with `npm run -w frontend test:run -- ModelServeDialog ModelMetadataModal LocalModelInstalledActions` and `npm run -w frontend check:types`.
 
 **Discovered Issues:**
 - 2026-05-08: The first serving dialog uses its own lightweight dialog shell rather than the existing metadata modal frame. Before broadening modal serving UX, reuse or extract the existing modal focus-trap behavior so serving controls meet the same keyboard expectations.
+- 2026-05-08: Opening Serve from the model modal after selecting an unsaved runtime profile could fall back to the saved/default route, and the nested dialog could appear visually transparent over the metadata modal. Resolved by passing the selected profile into the dialog and using an opaque launcher modal surface with explicit blocking reasons.
 
 ### Milestone 12: Wire Ollama Through User-Directed Serving
 

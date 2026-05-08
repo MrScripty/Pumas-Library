@@ -195,6 +195,7 @@ export function ModelRuntimeRouteEditor({
             category: 'local',
             primaryFormat: getPrimaryFormat(primaryFile),
           }}
+          initialProfileId={profileId || null}
           onClose={() => setShowServeDialog(false)}
         />
       )}

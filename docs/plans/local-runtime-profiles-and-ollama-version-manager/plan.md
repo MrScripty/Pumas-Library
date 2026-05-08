@@ -551,6 +551,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - 2026-05-05: Removed the Ollama model section's component-owned 10-second polling loop. The section now refreshes on initial/running-state changes, after local create/load/unload/delete operations, and when the backend runtime-profile update feed publishes a snapshot-required or event-bearing cursor.
 - 2026-05-05: Validated polling cleanup with `npm run -w frontend check:types`.
 - 2026-05-08: Fixed a runtime profile editor state bug where starting a new profile could be immediately overwritten by the default selected profile, carrying `ollama-default`'s `11434` process port into the draft and causing a managed port collision on save. The create-new draft now remains independent until saved or an existing profile is selected, managed endpoint/port copy now explains auto-allocation, and backend collision errors name the conflicting profile. Validated with `npm run -w frontend test:run -- RuntimeProfileSettingsSection`, `npm run -w frontend check:types`, and `cargo test -p pumas-library runtime_profile --manifest-path rust/Cargo.toml`.
+- 2026-05-08: Locked saved profile IDs in the runtime profile editor so renaming a profile cannot accidentally create a second managed profile with the copied process port. Provider changes and switching back to managed mode also clear endpoint/port overrides so managed drafts return to automatic allocation. Validated with `npm run -w frontend test:run -- RuntimeProfileSettingsSection` and `npm run -w frontend check:types`.
 
 **Deferred Follow-up:**
 - 2026-05-05: Ollama inventory changes made outside Pumas are no longer discovered by this component's timer. If automatic external inventory refresh is required, the backend runtime event producer should emit a profile/inventory update instead of reintroducing frontend polling.
@@ -558,6 +559,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 
 **Discovered Issues:**
 - 2026-05-08: The runtime profile editor originally used `selectedProfileId = null` for both "no profile selected yet" and "creating a new profile", so the initial auto-select effect could replace a new-profile draft with the default profile. Resolved by tracking create-new mode separately.
+- 2026-05-08: The runtime profile editor allowed editing a saved profile's durable `profile_id`, which made save behave like clone-with-existing-port instead of rename. Resolved by making saved profile IDs read-only; display names remain editable.
 
 ### Milestone 8: Integration, Documentation, and Release Validation
 

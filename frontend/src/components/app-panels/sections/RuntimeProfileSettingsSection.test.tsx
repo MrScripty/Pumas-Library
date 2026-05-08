@@ -82,4 +82,31 @@ describe('RuntimeProfileSettingsSection', () => {
       })
     );
   });
+
+  it('does not allow saved profile ids to be edited into duplicate profiles', async () => {
+    const user = userEvent.setup();
+
+    render(<RuntimeProfileSettingsSection />);
+
+    expect(await screen.findByDisplayValue('Ollama Default')).toBeInTheDocument();
+
+    const profileIdInput = screen.getByLabelText(/profile id/i);
+    expect(profileIdInput).toBeDisabled();
+    expect(profileIdInput).toHaveValue('ollama-default');
+
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'Emily Llama');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(upsertRuntimeProfileMock).toHaveBeenCalledTimes(1);
+    });
+    expect(upsertRuntimeProfileMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profile_id: 'ollama-default',
+        name: 'Emily Llama',
+        port: 11434,
+      })
+    );
+  });
 });

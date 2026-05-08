@@ -112,6 +112,14 @@ export function RuntimeProfileSettingsSection() {
       const next = { ...current, [key]: value };
       if (key === 'provider') {
         next.provider_mode = providerModes[value as RuntimeProviderId][0] ?? 'ollama_serve';
+        if (next.management_mode === 'managed') {
+          next.endpoint_url = '';
+          next.port = '';
+        }
+      }
+      if (key === 'management_mode' && value === 'managed') {
+        next.endpoint_url = '';
+        next.port = '';
       }
       return next;
     });

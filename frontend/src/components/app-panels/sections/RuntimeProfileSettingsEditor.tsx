@@ -123,6 +123,7 @@ export function RuntimeProfileEditor({
   onUpdateDraft,
 }: RuntimeProfileEditorProps) {
   const isManagedProfile = draft.management_mode === 'managed';
+  const isExistingProfile = selectedProfileId !== null;
 
   return (
     <div className="space-y-3 px-3 py-3 rounded-lg bg-[hsl(var(--launcher-bg-secondary)/0.3)] border border-[hsl(var(--launcher-border)/0.3)]">
@@ -140,8 +141,14 @@ export function RuntimeProfileEditor({
           <input
             value={draft.profile_id}
             onChange={(event) => onUpdateDraft('profile_id', event.target.value)}
-            className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary))] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))]"
+            disabled={isExistingProfile}
+            className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary))] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))] disabled:opacity-70"
           />
+          {isExistingProfile && (
+            <span className="block text-[hsl(var(--launcher-text-muted)/0.75)]">
+              Saved profile IDs cannot be renamed. Change the name field or create a new profile.
+            </span>
+          )}
         </label>
         <label className="space-y-1 text-xs text-[hsl(var(--launcher-text-muted))]">
           <span>Provider</span>

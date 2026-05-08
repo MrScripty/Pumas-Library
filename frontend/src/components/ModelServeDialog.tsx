@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import { getElectronAPI } from '../api/adapter';
 import { useRuntimeProfiles } from '../hooks/useRuntimeProfiles';
 import type { ModelInfo } from '../types/apps';
@@ -8,6 +9,8 @@ import type { ModelServeError, ModelServingConfig, ServedModelStatus } from '../
 interface ModelServeDialogProps {
   model: ModelInfo;
   initialProfileId?: string | null;
+  displayMode?: 'dialog' | 'page';
+  onBack?: () => void;
   onClose: () => void;
 }
 
@@ -30,8 +33,23 @@ function isGgufModel(model: ModelInfo): boolean {
   return model.primaryFormat === 'gguf' || model.format?.toLowerCase() === 'gguf';
 }
 
-export function ModelServeDialog({ model, initialProfileId, onClose }: ModelServeDialogProps) {
-  const { profiles, routes, defaultProfileId, isLoading, error: profileError } = useRuntimeProfiles();
+const DEFAULT_LLAMA_CPP_CONTEXT_SIZE = '4096';
+
+export function ModelServeDialog({
+  model,
+  initialProfileId,
+  displayMode = 'dialog',
+  onBack,
+  onClose,
+}: ModelServeDialogProps) {
+  const {
+    profiles,
+    routes,
+    statuses,
+    defaultProfileId,
+    isLoading,
+    error: profileError,
+  } = useRuntimeProfiles();
   const servingProfiles = useMemo(
     () => profiles.filter((profile) => profile.provider === 'ollama' || profile.provider === 'llama_cpp'),
     [profiles]
@@ -49,9 +67,13 @@ export function ModelServeDialog({ model, initialProfileId, onClose }: ModelServ
   const [servedStatus, setServedStatus] = useState<ServedModelStatus | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const profileSelectRef = useRef<HTMLSelectElement | null>(null);
+  const isDialogMode = displayMode === 'dialog';
 
   useEffect(() => {
     profileSelectRef.current?.focus();
+    if (!isDialogMode) {
+      return undefined;
+    }
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -88,7 +110,7 @@ export function ModelServeDialog({ model, initialProfileId, onClose }: ModelServ
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [isDialogMode, onClose]);
 
   useEffect(() => {
     if (profileId || servingProfiles.length === 0) {
@@ -130,11 +152,35 @@ export function ModelServeDialog({ model, initialProfileId, onClose }: ModelServ
   }, [model.id]);
 
   const selectedProfile = servingProfiles.find((profile) => profile.profile_id === profileId);
+  const selectedStatus = statuses.find((status) => status.profile_id === profileId) ?? null;
+  const supportsDedicatedLlamaCppPlacement =
+    selectedProfile?.provider === 'llama_cpp' &&
+    selectedProfile.provider_mode === 'llama_cpp_dedicated';
+  const isCpuPlacement = deviceMode === 'cpu';
+  const showDeviceControls = supportsDedicatedLlamaCppPlacement;
+  const showDeviceId = supportsDedicatedLlamaCppPlacement && deviceMode === 'specific_device';
+  const showGpuLayers = supportsDedicatedLlamaCppPlacement && !isCpuPlacement;
+  const showTensorSplit =
+    supportsDedicatedLlamaCppPlacement &&
+    !isCpuPlacement &&
+    (deviceMode === 'gpu' || deviceMode === 'hybrid' || deviceMode === 'specific_device');
+  const showContextSize = supportsDedicatedLlamaCppPlacement;
+  const profileCanLaunchOnServe =
+    selectedProfile?.provider === 'llama_cpp' &&
+    selectedProfile.provider_mode === 'llama_cpp_dedicated' &&
+    selectedProfile.management_mode === 'managed';
+  const profileIsAvailable =
+    selectedStatus?.state === 'running' || selectedStatus?.state === 'external';
+  const profileStateBlockReason =
+    selectedProfile && !profileCanLaunchOnServe && !profileIsAvailable
+      ? 'Start the selected runtime target before serving models with this mode.'
+      : null;
   const serveBlockReason =
     profileError ??
     (isLoading ? 'Loading runtime profiles.' : null) ??
     (servingProfiles.length === 0 ? 'Create a runtime profile before serving a model.' : null) ??
     (!selectedProfile ? 'Select a runtime target before serving.' : null) ??
+    profileStateBlockReason ??
     (!isGgufModel(model) ? 'Only GGUF models can be served locally in this flow.' : null);
   const canServe = Boolean(!serveBlockReason && !isSubmitting);
 
@@ -146,6 +192,12 @@ export function ModelServeDialog({ model, initialProfileId, onClose }: ModelServ
     setDeviceId(selectedProfile.device.device_id ?? '');
     setGpuLayers(selectedProfile.device.gpu_layers?.toString() ?? '');
     setTensorSplit(selectedProfile.device.tensor_split?.join(',') ?? '');
+    setContextSize(
+      selectedProfile.provider === 'llama_cpp' &&
+        selectedProfile.provider_mode === 'llama_cpp_dedicated'
+        ? DEFAULT_LLAMA_CPP_CONTEXT_SIZE
+        : ''
+    );
   }, [selectedProfile?.profile_id]);
 
   const buildConfig = (): ModelServingConfig | null => {
@@ -157,12 +209,12 @@ export function ModelServeDialog({ model, initialProfileId, onClose }: ModelServ
       provider: selectedProfile.provider,
       profile_id: selectedProfile.profile_id,
       device_mode: deviceMode,
-      device_id: deviceId.trim() ? deviceId.trim() : null,
-      gpu_layers: gpuLayers.trim() ? Number(gpuLayers) : null,
-      tensor_split: tensorSplit.trim()
+      device_id: showDeviceId && deviceId.trim() ? deviceId.trim() : null,
+      gpu_layers: showGpuLayers && gpuLayers.trim() ? Number(gpuLayers) : null,
+      tensor_split: showTensorSplit && tensorSplit.trim()
         ? tensorSplit.split(',').map((value) => Number(value.trim()))
         : null,
-      context_size: contextSize.trim() ? Number(contextSize) : null,
+      context_size: showContextSize && contextSize.trim() ? Number(contextSize) : null,
       keep_loaded: keepLoaded,
       model_alias: null,
     };
@@ -246,72 +298,89 @@ export function ModelServeDialog({ model, initialProfileId, onClose }: ModelServ
     }
   };
 
-  return (
+  const content = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[hsl(0_0%_0%/0.78)] px-4 backdrop-blur-sm"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="model-serve-title"
+      ref={dialogRef}
+      className={
+        isDialogMode
+          ? 'w-full max-w-xl rounded-lg border border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-primary))] p-4 shadow-2xl'
+          : 'space-y-4'
+      }
     >
-      <div
-        ref={dialogRef}
-        className="w-full max-w-xl rounded-lg border border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-primary))] p-4 shadow-2xl"
-      >
-        <div className="mb-4 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h2 id="model-serve-title" className="text-sm font-semibold text-[hsl(var(--text-primary))]">
-              Serve {model.name}
-            </h2>
-            <p className="mt-1 truncate text-xs text-[hsl(var(--text-tertiary))]">{model.id}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded px-2 py-1 text-xs text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--surface-interactive-hover))]"
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          {onBack && !isDialogMode && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="mb-3 inline-flex items-center gap-1.5 rounded-md border border-[hsl(var(--border-default))] px-2.5 py-1.5 text-xs text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--surface-interactive-hover))]"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Back
+            </button>
+          )}
+          <h2 id="model-serve-title" className="text-sm font-semibold text-[hsl(var(--text-primary))]">
+            Serve {model.name}
+          </h2>
+          <p className="mt-1 truncate text-xs text-[hsl(var(--text-tertiary))]">{model.id}</p>
+        </div>
+        {isDialogMode && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded px-2 py-1 text-xs text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--surface-interactive-hover))]"
+            >
+              Close
+            </button>
+        )}
+      </div>
+
+      <div className="grid gap-3">
+        <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
+          Runtime target
+          <select
+            ref={profileSelectRef}
+            value={profileId}
+            onChange={(event) => setProfileId(event.target.value)}
+            className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-base))] px-2 py-1.5 text-sm text-[hsl(var(--text-primary))]"
           >
-            Close
-          </button>
+            {servingProfiles.map((profile) => (
+              <option key={profile.profile_id} value={profile.profile_id}>
+                {profile.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--launcher-bg-secondary))] px-3 py-2 text-xs text-[hsl(var(--text-secondary))]">
+          {serveBlockReason
+            ? `Cannot serve yet: ${serveBlockReason}`
+            : `Ready to serve ${model.name} with ${selectedProfile?.name ?? 'the selected runtime target'}.`}
         </div>
 
-        <div className="grid gap-3">
-          <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
-            Runtime target
-            <select
-              ref={profileSelectRef}
-              value={profileId}
-              onChange={(event) => setProfileId(event.target.value)}
-              className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-base))] px-2 py-1.5 text-sm text-[hsl(var(--text-primary))]"
-            >
-              {servingProfiles.map((profile) => (
-                <option key={profile.profile_id} value={profile.profile_id}>
-                  {profile.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--launcher-bg-secondary))] px-3 py-2 text-xs text-[hsl(var(--text-secondary))]">
-            {serveBlockReason
-              ? `Cannot serve yet: ${serveBlockReason}`
-              : `Ready to serve ${model.name} with ${selectedProfile?.name ?? 'the selected runtime target'}.`}
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <div>
-              <div className="text-[hsl(var(--text-tertiary))]">Provider</div>
-              <div className="mt-1 text-[hsl(var(--text-primary))]">
-                {selectedProfile?.provider ?? 'none'}
-              </div>
-            </div>
-            <div>
-              <div className="text-[hsl(var(--text-tertiary))]">Serving mode</div>
-              <div className="mt-1 text-[hsl(var(--text-primary))]">
-                {selectedProfile?.provider_mode ?? 'none'}
-              </div>
+        <div className="grid grid-cols-3 gap-3 text-xs">
+          <div>
+            <div className="text-[hsl(var(--text-tertiary))]">Provider</div>
+            <div className="mt-1 text-[hsl(var(--text-primary))]">
+              {selectedProfile?.provider ?? 'none'}
             </div>
           </div>
+          <div>
+            <div className="text-[hsl(var(--text-tertiary))]">Serving mode</div>
+            <div className="mt-1 text-[hsl(var(--text-primary))]">
+              {selectedProfile?.provider_mode ?? 'none'}
+            </div>
+          </div>
+          <div>
+            <div className="text-[hsl(var(--text-tertiary))]">State</div>
+            <div className="mt-1 text-[hsl(var(--text-primary))]">
+              {selectedStatus?.state ?? 'unknown'}
+            </div>
+          </div>
+        </div>
 
-          <div className="grid grid-cols-2 gap-3">
+        {showDeviceControls ? (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
               Model device
               <select
@@ -326,62 +395,78 @@ export function ModelServeDialog({ model, initialProfileId, onClose }: ModelServ
                 ))}
               </select>
             </label>
-            <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
-              Device ID
-              <input
-                value={deviceId}
-                onChange={(event) => setDeviceId(event.target.value)}
-                className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-base))] px-2 py-1.5 text-sm text-[hsl(var(--text-primary))]"
-              />
-            </label>
+            {showDeviceId && (
+              <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
+                Device ID
+                <input
+                  value={deviceId}
+                  onChange={(event) => setDeviceId(event.target.value)}
+                  className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-base))] px-2 py-1.5 text-sm text-[hsl(var(--text-primary))]"
+                />
+              </label>
+            )}
           </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
-              Model GPU layers
-              <input
-                type="number"
-                value={gpuLayers}
-                onChange={(event) => setGpuLayers(event.target.value)}
-                className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-base))] px-2 py-1.5 text-sm text-[hsl(var(--text-primary))]"
-              />
-            </label>
-            <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
-              Model tensor split
-              <input
-                value={tensorSplit}
-                onChange={(event) => setTensorSplit(event.target.value)}
-                className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-base))] px-2 py-1.5 text-sm text-[hsl(var(--text-primary))]"
-              />
-            </label>
-            <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
-              Context
-              <input
-                type="number"
-                value={contextSize}
-                onChange={(event) => setContextSize(event.target.value)}
-                className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-base))] px-2 py-1.5 text-sm text-[hsl(var(--text-primary))]"
-              />
-            </label>
-          </div>
-
-          <label className="flex items-center gap-2 text-xs text-[hsl(var(--text-secondary))]">
-            <input
-              type="checkbox"
-              checked={keepLoaded}
-              onChange={(event) => setKeepLoaded(event.target.checked)}
-            />
-            Keep loaded
-          </label>
-        </div>
-
-        {(serveError || message) && (
-          <div className="mt-3 rounded border border-[hsl(var(--border-default))] px-3 py-2 text-xs text-[hsl(var(--text-secondary))]">
-            {formatServeError(serveError) ?? message}
+        ) : (
+          <div className="rounded border border-[hsl(var(--border-default))] px-3 py-2 text-xs text-[hsl(var(--text-secondary))]">
+            Model placement comes from the selected runtime target.
           </div>
         )}
 
-        <div className="mt-4 flex justify-end gap-2">
+        {(showGpuLayers || showTensorSplit || showContextSize) && (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            {showGpuLayers && (
+              <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
+                Model GPU layers
+                <input
+                  type="number"
+                  value={gpuLayers}
+                  onChange={(event) => setGpuLayers(event.target.value)}
+                  className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-base))] px-2 py-1.5 text-sm text-[hsl(var(--text-primary))]"
+                />
+              </label>
+            )}
+            {showTensorSplit && (
+              <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
+                Model tensor split
+                <input
+                  value={tensorSplit}
+                  onChange={(event) => setTensorSplit(event.target.value)}
+                  className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-base))] px-2 py-1.5 text-sm text-[hsl(var(--text-primary))]"
+                />
+              </label>
+            )}
+            {showContextSize && (
+              <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
+                Context
+                <input
+                  type="number"
+                  value={contextSize}
+                  onChange={(event) => setContextSize(event.target.value)}
+                  className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-base))] px-2 py-1.5 text-sm text-[hsl(var(--text-primary))]"
+                />
+              </label>
+            )}
+          </div>
+        )}
+
+        <label className="flex items-center gap-2 text-xs text-[hsl(var(--text-secondary))]">
+          <input
+            type="checkbox"
+            checked={keepLoaded}
+            onChange={(event) => setKeepLoaded(event.target.checked)}
+          />
+          Keep loaded
+        </label>
+      </div>
+
+      {(serveError || message) && (
+        <div className="mt-3 rounded border border-[hsl(var(--border-default))] px-3 py-2 text-xs text-[hsl(var(--text-secondary))]">
+          {formatServeError(serveError) ?? message}
+        </div>
+      )}
+
+      <div className="mt-4 flex justify-end gap-2">
+        {isDialogMode && (
           <button
             type="button"
             onClick={onClose}
@@ -389,24 +474,39 @@ export function ModelServeDialog({ model, initialProfileId, onClose }: ModelServ
           >
             Cancel
           </button>
-          <button
-            type="button"
-            onClick={() => void handleServe()}
-            disabled={!canServe || isLoading}
-            className="rounded bg-[hsl(var(--accent-primary))] px-3 py-1.5 text-sm text-[hsl(0_0%_10%)] disabled:opacity-50"
-          >
-            {isSubmitting ? 'Serving...' : 'Serve'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleUnload()}
-            disabled={!servedStatus || isSubmitting}
-            className="rounded border border-[hsl(var(--border-default))] px-3 py-1.5 text-sm text-[hsl(var(--text-primary))] disabled:opacity-50"
-          >
-            Unload
-          </button>
-        </div>
+        )}
+        <button
+          type="button"
+          onClick={() => void handleServe()}
+          disabled={!canServe || isLoading}
+          className="rounded bg-[hsl(var(--accent-primary))] px-3 py-1.5 text-sm text-[hsl(0_0%_10%)] disabled:opacity-50"
+        >
+          {isSubmitting ? 'Starting...' : 'Start serving'}
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleUnload()}
+          disabled={!servedStatus || isSubmitting}
+          className="rounded border border-[hsl(var(--border-default))] px-3 py-1.5 text-sm text-[hsl(var(--text-primary))] disabled:opacity-50"
+        >
+          Unload
+        </button>
       </div>
+    </div>
+  );
+
+  if (!isDialogMode) {
+    return content;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[hsl(0_0%_0%/0.78)] px-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="model-serve-title"
+    >
+      {content}
     </div>
   );
 }

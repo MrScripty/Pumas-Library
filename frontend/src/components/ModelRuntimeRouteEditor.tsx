@@ -42,7 +42,7 @@ export function ModelRuntimeRouteEditor({
   const [autoLoad, setAutoLoad] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [showServeDialog, setShowServeDialog] = useState(false);
+  const [viewMode, setViewMode] = useState<'route' | 'serve'>('route');
 
   useEffect(() => {
     setProfileId(currentRoute?.profile_id ?? '');
@@ -51,6 +51,23 @@ export function ModelRuntimeRouteEditor({
 
   const selectedProfile = profiles.find((profile) => profile.profile_id === profileId) ?? null;
   const selectedStatus = statuses.find((status) => status.profile_id === profileId) ?? null;
+
+  if (viewMode === 'serve') {
+    return (
+      <ModelServeDialog
+        model={{
+          id: modelId,
+          name: modelName,
+          category: 'local',
+          primaryFormat: getPrimaryFormat(primaryFile),
+        }}
+        displayMode="page"
+        initialProfileId={profileId || null}
+        onBack={() => setViewMode('route')}
+        onClose={() => setViewMode('route')}
+      />
+    );
+  }
 
   const handleSave = async () => {
     const electronAPI = getElectronAPI();
@@ -162,7 +179,7 @@ export function ModelRuntimeRouteEditor({
       <div className="flex justify-end gap-2">
         <button
           type="button"
-          onClick={() => setShowServeDialog(true)}
+          onClick={() => setViewMode('serve')}
           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[hsl(var(--border-default))] text-xs text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]"
         >
           <Play className="w-3.5 h-3.5" />
@@ -187,18 +204,6 @@ export function ModelRuntimeRouteEditor({
           {isSaving ? 'Saving' : 'Save'}
         </button>
       </div>
-      {showServeDialog && (
-        <ModelServeDialog
-          model={{
-            id: modelId,
-            name: modelName,
-            category: 'local',
-            primaryFormat: getPrimaryFormat(primaryFile),
-          }}
-          initialProfileId={profileId || null}
-          onClose={() => setShowServeDialog(false)}
-        />
-      )}
     </div>
   );
 }

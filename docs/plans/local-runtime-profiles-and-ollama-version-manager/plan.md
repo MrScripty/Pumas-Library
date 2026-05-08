@@ -715,10 +715,12 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - 2026-05-08: Added focus trapping to the serving dialog. Validated with `npm run -w frontend check:types`.
 - 2026-05-08: Renamed the model modal route tab to Serving and made `ModelServeDialog` choose the model's saved route profile before falling back to the default profile. The dialog now labels placement fields as model placement, shows the selected provider/mode, and initializes the model placement draft from the selected runtime target so users can see and override the launch settings before serving.
 - 2026-05-08: Made the model serve dialog use an opaque launcher panel/backdrop, show an always-visible ready/cannot-serve reason, and accept the route editor's currently selected profile even before the route is saved. Validated with `npm run -w frontend test:run -- ModelServeDialog ModelMetadataModal LocalModelInstalledActions` and `npm run -w frontend check:types`.
+- 2026-05-08: Reworked the model-modal serve flow from a nested floating dialog into an inline Serving tab page with a Back button. The serving page now hides placement fields that do not apply to the selected profile, defaults llama.cpp dedicated context to 4096, blocks non-launchable stopped profiles with an explicit reason, and keeps CPU-only profiles free of GPU layer, tensor split, and device-id controls. Validated with `npm run -w frontend test:run -- ModelServeDialog ModelMetadataModal LocalModelInstalledActions` and `npm run -w frontend check:types`.
 
 **Discovered Issues:**
 - 2026-05-08: The first serving dialog uses its own lightweight dialog shell rather than the existing metadata modal frame. Before broadening modal serving UX, reuse or extract the existing modal focus-trap behavior so serving controls meet the same keyboard expectations.
 - 2026-05-08: Opening Serve from the model modal after selecting an unsaved runtime profile could fall back to the saved/default route, and the nested dialog could appear visually transparent over the metadata modal. Resolved by passing the selected profile into the dialog and using an opaque launcher modal surface with explicit blocking reasons.
+- 2026-05-08: The model-modal serve UX still behaved like a second modal and exposed dedicated llama.cpp GPU controls even for CPU-only profiles. Resolved by rendering serving as an inline page inside the modal and deriving visible controls from the selected provider, mode, and device.
 
 ### Milestone 12: Wire Ollama Through User-Directed Serving
 

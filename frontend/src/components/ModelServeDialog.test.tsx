@@ -45,6 +45,18 @@ describe('ModelServeDialog', () => {
         device: { mode: 'gpu', gpu_layers: 32 },
         scheduler: { auto_load: true },
       },
+      {
+        profile_id: 'cpu-llama',
+        provider: 'llama_cpp',
+        provider_mode: 'llama_cpp_dedicated',
+        management_mode: 'managed',
+        name: 'CPU Llama',
+        enabled: true,
+        endpoint_url: null,
+        port: null,
+        device: { mode: 'cpu' },
+        scheduler: { auto_load: true },
+      },
     ],
     routes: [],
     statuses: [],
@@ -112,6 +124,31 @@ describe('ModelServeDialog', () => {
     expect(
       screen.getByText('Cannot serve yet: Only GGUF models can be served locally in this flow.')
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Serve' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start serving' })).toBeDisabled();
+  });
+
+  it('hides GPU-only controls for CPU dedicated profiles and defaults context', () => {
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'model-3',
+          name: 'Model Three',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        displayMode="page"
+        initialProfileId="cpu-llama"
+        onBack={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('combobox', { name: /runtime target/i })).toHaveValue('cpu-llama');
+    expect(screen.getByRole('combobox', { name: /model device/i })).toHaveValue('cpu');
+    expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(4096);
+    expect(screen.queryByRole('spinbutton', { name: /model gpu layers/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /model tensor split/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /device id/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start serving' })).toBeEnabled();
   });
 });

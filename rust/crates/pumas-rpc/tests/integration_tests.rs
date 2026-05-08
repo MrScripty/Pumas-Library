@@ -595,6 +595,29 @@ mod tests {
             Some(true)
         );
 
+        let client = reqwest::Client::new();
+        let models = client
+            .get(format!("http://127.0.0.1:{}/v1/models", port))
+            .send()
+            .await
+            .unwrap()
+            .json::<Value>()
+            .await
+            .unwrap();
+        assert_eq!(models.get("object").and_then(|v| v.as_str()), Some("list"));
+        assert!(models
+            .get("data")
+            .and_then(|v| v.as_array())
+            .is_some_and(Vec::is_empty));
+
+        let proxy_error = client
+            .post(format!("http://127.0.0.1:{}/v1/chat/completions", port))
+            .json(&json!({"model": "not-served", "messages": []}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(proxy_error.status(), reqwest::StatusCode::NOT_FOUND);
+
         server.stop().await;
     }
 

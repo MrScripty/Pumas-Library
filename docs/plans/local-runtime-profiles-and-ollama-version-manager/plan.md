@@ -653,7 +653,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - [x] Add serving snapshots/events for loaded models, failed load attempts, endpoint mode, and last non-critical errors.
 - [x] Keep route defaults separate from immediate serving commands.
 - [x] Preserve existing runtime profile and Ollama APIs unchanged.
-- [x] If the first implementation uses provider endpoints directly, return `endpoint_mode = provider_endpoint` instead of claiming gateway behavior.
+- [x] Report `endpoint_mode = pumas_gateway` once the Pumas `/v1` gateway is available, while keeping per-model provider endpoints in `ServedModelStatus` for routing.
 
 **Verification:**
 - Rust unit tests for validation success/failure cases.
@@ -661,7 +661,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Rust tests for non-critical error response shape and `loaded_models_unchanged`.
 - RPC tests for serving handlers once registered.
 
-**Status:** In progress. Status, validation, in-memory snapshot updates/events, bridge-level serve/unserve methods, route-default separation, provider-endpoint status reporting, Ollama load/unload orchestration, and first llama.cpp dedicated launch/unload orchestration are implemented. Moving provider load/unload orchestration behind a core-owned adapter trait remains dependent on resolving the `pumas-core`/`pumas-app-manager` dependency boundary; llama.cpp router serving and gateway endpoint behavior remain.
+**Status:** In progress. Status, validation, in-memory snapshot updates/events, bridge-level serve/unserve methods, route-default separation, gateway status reporting, Ollama load/unload orchestration, and first llama.cpp dedicated launch/unload orchestration are implemented. Moving provider load/unload orchestration behind a core-owned adapter trait remains dependent on resolving the `pumas-core`/`pumas-app-manager` dependency boundary; llama.cpp router serving remains.
 
 **Implementation Notes:**
 - 2026-05-08: Added `ServingService` as the backend owner for serving snapshots and request validation. The initial snapshot is in memory and reports `endpoint_mode = not_configured` until provider endpoint or gateway behavior is implemented.
@@ -761,16 +761,21 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 **Goal:** Resolve the "same server endpoint" requirement truthfully and safely.
 
 **Tasks:**
-- [ ] Decide whether the first shipped endpoint is a Pumas gateway or provider endpoint mode.
-- [ ] If gateway mode is implemented, expose one loopback endpoint with OpenAI-compatible model listing and routing for served models.
-- [ ] Bind local-only by default and reject unsafe bind addresses unless a documented LAN mode exists.
-- [ ] Add bounded request/body/connection limits and safe error mapping at the transport boundary.
-- [ ] Ensure `/v1/models` or the equivalent endpoint reflects backend `ServedModelStatus`.
-- [ ] If gateway mode is deferred, show `provider_endpoint` status and document that one Pumas endpoint is not complete yet.
+- [x] Decide whether the first shipped endpoint is a Pumas gateway or provider endpoint mode.
+- [x] If gateway mode is implemented, expose one loopback endpoint with OpenAI-compatible model listing and routing for served models.
+- [x] Bind local-only by default and reject unsafe bind addresses unless a documented LAN mode exists.
+- [ ] Add bounded request/body/connection limits and safe error mapping at the transport boundary. Concurrency is bounded by the existing RPC server layer and gateway errors are mapped; explicit body-size limits remain.
+- [x] Ensure `/v1/models` or the equivalent endpoint reflects backend `ServedModelStatus`.
+- [x] If gateway mode is deferred, show `provider_endpoint` status and document that one Pumas endpoint is not complete yet.
 
 **Verification:**
 - Backend or RPC tests for endpoint mode status.
 - Gateway route tests if implemented.
+
+**Status:** In progress. A first Pumas gateway is implemented on the RPC server for `/v1/models`, `/v1/chat/completions`, `/v1/completions`, and `/v1/embeddings`. It routes by served model id/alias from backend serving status, reports aggregate serving status as `pumas_gateway` when models are loaded, and inherits the existing loopback-by-default RPC bind guard. Explicit request body-size limits remain.
+
+**Implementation Notes:**
+- 2026-05-08: Added OpenAI-compatible gateway routes to `pumas-rpc`. `/v1/models` lists loaded `ServedModelStatus` entries, and proxy routes forward JSON requests to the selected model's provider endpoint. If a served model has a provider alias, the gateway rewrites the outgoing `model` field to that alias. Validated with `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml`.
 - Security tests for bind address and invalid payload rejection if a listener is added.
 - Frontend test that endpoint status wording follows backend endpoint mode.
 

@@ -18,11 +18,12 @@ mod versions;
 use crate::server::AppState;
 use crate::wrapper::wrap_response;
 use axum::{
+    body::Bytes,
     extract::{Query, State},
-    http::StatusCode,
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
-        IntoResponse,
+        IntoResponse, Response,
     },
     Json,
 };
@@ -32,10 +33,10 @@ use futures::{
 };
 use pumas_library::models::{
     ModelDownloadUpdateNotification, ModelLibraryUpdateNotification, RuntimeProfileUpdateFeed,
-    StatusTelemetryUpdateNotification,
+    ServedModelLoadState, ServedModelStatus, StatusTelemetryUpdateNotification,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::convert::Infallible;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -118,6 +119,143 @@ impl JsonRpcResponse {
 /// Health check endpoint.
 pub async fn handle_health() -> impl IntoResponse {
     Json(json!({"status": "ok"}))
+}
+
+/// OpenAI-compatible served-model listing backed by Pumas serving status.
+pub async fn handle_openai_models(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.api.get_serving_status().await {
+        Ok(response) => Json(json!({
+            "object": "list",
+            "data": response
+                .snapshot
+                .served_models
+                .into_iter()
+                .filter(|model| model.load_state == ServedModelLoadState::Loaded)
+                .map(openai_model_entry)
+                .collect::<Vec<_>>()
+        }))
+        .into_response(),
+        Err(error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": {
+                    "message": error.to_string(),
+                    "type": "pumas_error"
+                }
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// OpenAI-compatible proxy for served models.
+pub async fn handle_openai_proxy(
+    State(state): State<Arc<AppState>>,
+    path: axum::extract::OriginalUri,
+    Json(mut body): Json<Value>,
+) -> Response {
+    let Some(requested_model) = body.get("model").and_then(Value::as_str) else {
+        return openai_error_response(
+            StatusCode::BAD_REQUEST,
+            "request body must include a string model field",
+        );
+    };
+
+    let served = match find_openai_served_model(&state, requested_model).await {
+        Ok(Some(model)) => model,
+        Ok(None) => {
+            return openai_error_response(
+                StatusCode::NOT_FOUND,
+                format!("model is not served: {requested_model}"),
+            );
+        }
+        Err(error) => {
+            return openai_error_response(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
+        }
+    };
+
+    let Some(endpoint) = served.endpoint_url.as_ref() else {
+        return openai_error_response(
+            StatusCode::BAD_GATEWAY,
+            "served model does not have a provider endpoint",
+        );
+    };
+
+    if let Some(alias) = served.model_alias.as_deref() {
+        if let Some(object) = body.as_object_mut() {
+            object.insert("model".to_string(), Value::String(alias.to_string()));
+        }
+    }
+
+    let target_url = format!("{}{}", endpoint.as_str().trim_end_matches('/'), path.path());
+    match reqwest::Client::new()
+        .post(target_url)
+        .json(&body)
+        .send()
+        .await
+    {
+        Ok(response) => proxy_response(response).await,
+        Err(error) => openai_error_response(StatusCode::BAD_GATEWAY, error.to_string()),
+    }
+}
+
+fn openai_model_entry(model: ServedModelStatus) -> Value {
+    json!({
+        "id": model.model_alias.unwrap_or(model.model_id),
+        "object": "model",
+        "created": 0,
+        "owned_by": "pumas"
+    })
+}
+
+async fn find_openai_served_model(
+    state: &AppState,
+    requested_model: &str,
+) -> pumas_library::Result<Option<ServedModelStatus>> {
+    let snapshot = state.api.get_serving_status().await?.snapshot;
+    Ok(snapshot.served_models.into_iter().find(|model| {
+        model.load_state == ServedModelLoadState::Loaded
+            && (model.model_id == requested_model
+                || model.model_alias.as_deref() == Some(requested_model))
+    }))
+}
+
+async fn proxy_response(response: reqwest::Response) -> Response {
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| HeaderValue::from_str(value).ok());
+    match response.bytes().await {
+        Ok(bytes) => response_with_bytes(status, content_type, bytes),
+        Err(error) => openai_error_response(StatusCode::BAD_GATEWAY, error.to_string()),
+    }
+}
+
+fn response_with_bytes(
+    status: StatusCode,
+    content_type: Option<HeaderValue>,
+    bytes: Bytes,
+) -> Response {
+    let mut headers = HeaderMap::new();
+    if let Some(content_type) = content_type {
+        headers.insert(header::CONTENT_TYPE, content_type);
+    }
+    (status, headers, bytes).into_response()
+}
+
+fn openai_error_response(status: StatusCode, message: impl Into<String>) -> Response {
+    let mut error = Map::new();
+    error.insert("message".to_string(), Value::String(message.into()));
+    error.insert("type".to_string(), Value::String("pumas_error".to_string()));
+    (
+        status,
+        Json(json!({
+            "error": Value::Object(error)
+        })),
+    )
+        .into_response()
 }
 
 /// Server-sent model-library update notification stream.

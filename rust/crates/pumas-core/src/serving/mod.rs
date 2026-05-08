@@ -80,10 +80,10 @@ impl ServingService {
             .retain(|model| !same_served_model(model, &status));
         snapshot.served_models.push(status.clone());
         snapshot.endpoint = ServingEndpointStatus {
-            endpoint_mode: ServingEndpointMode::ProviderEndpoint,
-            endpoint_url: status.endpoint_url,
+            endpoint_mode: ServingEndpointMode::PumasGateway,
+            endpoint_url: None,
             model_count: snapshot.served_models.len() as u32,
-            message: None,
+            message: Some("Use the Pumas /v1 serving gateway for loaded models".to_string()),
         };
         bump_snapshot_cursor(&mut snapshot);
         let event = serving_status_event(
@@ -575,7 +575,7 @@ mod tests {
         );
         assert_eq!(
             loaded.endpoint.endpoint_mode,
-            ServingEndpointMode::ProviderEndpoint
+            ServingEndpointMode::PumasGateway
         );
         assert!(service
             .list_updates_since(Some(loaded.cursor.as_str()))

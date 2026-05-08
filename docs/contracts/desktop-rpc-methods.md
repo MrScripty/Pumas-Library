@@ -35,6 +35,20 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
 | Model library updates | `/events/model-library-updates` | `model-library:update` | `onModelLibraryUpdate` |
 | Runtime profile updates | `/events/runtime-profile-updates` | `runtime-profile:update` | `onRuntimeProfileUpdate` |
 
+## Serving Gateway
+- The RPC server exposes a local OpenAI-compatible serving gateway at
+  `/v1/models`, `/v1/chat/completions`, `/v1/completions`, and `/v1/embeddings`.
+- `/v1/models` is backed by `ServingStatusSnapshot.served_models`.
+- When one or more models are loaded, aggregate serving status reports
+  `endpoint_mode = pumas_gateway`; each `ServedModelStatus.endpoint_url`
+  remains the provider endpoint used internally by the gateway.
+- Proxy routes select a served model by request `model`, matching either
+  `model_id` or `model_alias`, then forward the JSON body to that model's
+  provider endpoint. If a provider alias exists, the forwarded `model` field is
+  rewritten to that alias.
+- The gateway is available only on the RPC server bind address. The binary
+  already rejects non-loopback binds unless `--allow-lan` is supplied.
+
 ## Local Runtime Profile Rules
 - `profile_id` is the canonical internal address for local runtime operations.
 - `connection_url` inputs remain available only on legacy Ollama methods and

@@ -1,4 +1,4 @@
-import { Save, Trash2 } from 'lucide-react';
+import { Play, Save, Square, Trash2 } from 'lucide-react';
 import type {
   RuntimeDeviceMode,
   RuntimeManagementMode,
@@ -104,7 +104,9 @@ type RuntimeProfileEditorProps = {
   error: string | null;
   saveError: string | null;
   onDelete: () => void;
+  onLaunch: () => void;
   onSave: () => void;
+  onStop: () => void;
   onUpdateDraft: <Key extends keyof RuntimeProfileDraft>(
     key: Key,
     value: RuntimeProfileDraft[Key]
@@ -119,11 +121,23 @@ export function RuntimeProfileEditor({
   error,
   saveError,
   onDelete,
+  onLaunch,
   onSave,
+  onStop,
   onUpdateDraft,
 }: RuntimeProfileEditorProps) {
   const isManagedProfile = draft.management_mode === 'managed';
   const isExistingProfile = selectedProfileId !== null;
+  const canStartFromProfile =
+    isExistingProfile &&
+    isManagedProfile &&
+    draft.provider_mode !== 'llama_cpp_dedicated' &&
+    selectedStatus?.state !== 'running' &&
+    selectedStatus?.state !== 'starting';
+  const canStopProfile =
+    isExistingProfile &&
+    isManagedProfile &&
+    (selectedStatus?.state === 'running' || selectedStatus?.state === 'starting');
 
   return (
     <div className="space-y-3 px-3 py-3 rounded-lg bg-[hsl(var(--launcher-bg-secondary)/0.3)] border border-[hsl(var(--launcher-border)/0.3)]">
@@ -274,8 +288,34 @@ export function RuntimeProfileEditor({
       <div className="flex items-center justify-between gap-3">
         <div className="text-xs text-[hsl(var(--launcher-text-muted))]">
           {selectedStatus ? `State: ${selectedStatus.state}` : 'State: unknown'}
+          {draft.provider_mode === 'llama_cpp_dedicated' && isManagedProfile && (
+            <span className="ml-2">Dedicated profiles start from a model's Serving page.</span>
+          )}
         </div>
         <div className="flex items-center gap-2">
+          {selectedProfileId && isManagedProfile && draft.provider_mode !== 'llama_cpp_dedicated' && (
+            selectedStatus?.state === 'running' || selectedStatus?.state === 'starting' ? (
+              <button
+                type="button"
+                onClick={onStop}
+                disabled={!canStopProfile || isSaving}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[hsl(var(--launcher-border)/0.35)] text-xs text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-primary))] disabled:opacity-50"
+              >
+                <Square className="w-3.5 h-3.5" />
+                Stop
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onLaunch}
+                disabled={!canStartFromProfile || isSaving}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[hsl(var(--launcher-border)/0.35)] text-xs text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-primary))] disabled:opacity-50"
+              >
+                <Play className="w-3.5 h-3.5" />
+                Start runtime
+              </button>
+            )
+          )}
           {selectedProfileId && (
             <button
               type="button"

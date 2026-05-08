@@ -4,10 +4,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RuntimeProfilesSnapshot } from '../../../types/api-runtime-profiles';
 import { RuntimeProfileSettingsSection } from './RuntimeProfileSettingsSection';
 
-const { getElectronAPIMock, getRuntimeProfilesSnapshotMock, upsertRuntimeProfileMock } =
+const {
+  getElectronAPIMock,
+  getRuntimeProfilesSnapshotMock,
+  launchRuntimeProfileMock,
+  stopRuntimeProfileMock,
+  upsertRuntimeProfileMock,
+} =
   vi.hoisted(() => ({
     getElectronAPIMock: vi.fn(),
     getRuntimeProfilesSnapshotMock: vi.fn(),
+    launchRuntimeProfileMock: vi.fn(),
+    stopRuntimeProfileMock: vi.fn(),
     upsertRuntimeProfileMock: vi.fn(),
   }));
 
@@ -49,8 +57,18 @@ describe('RuntimeProfileSettingsSection', () => {
       profile_id: 'runtime-new',
       snapshot_required: false,
     });
+    launchRuntimeProfileMock.mockResolvedValue({
+      success: true,
+      ready: true,
+      log_path: '/tmp/runtime.log',
+    });
+    stopRuntimeProfileMock.mockResolvedValue({
+      success: true,
+    });
     getElectronAPIMock.mockReturnValue({
       get_runtime_profiles_snapshot: getRuntimeProfilesSnapshotMock,
+      launch_runtime_profile: launchRuntimeProfileMock,
+      stop_runtime_profile: stopRuntimeProfileMock,
       upsert_runtime_profile: upsertRuntimeProfileMock,
       onRuntimeProfileUpdate: vi.fn(() => vi.fn()),
     });
@@ -108,5 +126,20 @@ describe('RuntimeProfileSettingsSection', () => {
         port: 11434,
       })
     );
+  });
+
+  it('starts a selected managed runtime profile from settings', async () => {
+    const user = userEvent.setup();
+
+    render(<RuntimeProfileSettingsSection />);
+
+    expect(await screen.findByDisplayValue('Ollama Default')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Start runtime' }));
+
+    await waitFor(() => {
+      expect(launchRuntimeProfileMock).toHaveBeenCalledTimes(1);
+    });
+    expect(launchRuntimeProfileMock).toHaveBeenCalledWith('ollama-default');
   });
 });

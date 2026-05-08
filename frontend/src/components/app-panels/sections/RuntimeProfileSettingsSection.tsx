@@ -81,6 +81,7 @@ export function RuntimeProfileSettingsSection() {
   const [draft, setDraft] = useState<RuntimeProfileDraft>(() => newProfileDraft());
   const [isCreatingProfile, setIsCreatingProfile] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isRuntimeActionRunning, setIsRuntimeActionRunning] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const selectedProfile = useMemo(
@@ -189,6 +190,50 @@ export function RuntimeProfileSettingsSection() {
     }
   };
 
+  const handleLaunchRuntime = async () => {
+    const electronAPI = getElectronAPI();
+    if (!electronAPI?.launch_runtime_profile || !selectedProfileId) {
+      return;
+    }
+
+    setIsRuntimeActionRunning(true);
+    setSaveError(null);
+    try {
+      const response = await electronAPI.launch_runtime_profile(selectedProfileId);
+      if (!response.success) {
+        setSaveError(response.error ?? 'Failed to start runtime profile');
+        return;
+      }
+      await refreshRuntimeProfiles();
+    } catch (caught) {
+      setSaveError(caught instanceof Error ? caught.message : 'Failed to start runtime profile');
+    } finally {
+      setIsRuntimeActionRunning(false);
+    }
+  };
+
+  const handleStopRuntime = async () => {
+    const electronAPI = getElectronAPI();
+    if (!electronAPI?.stop_runtime_profile || !selectedProfileId) {
+      return;
+    }
+
+    setIsRuntimeActionRunning(true);
+    setSaveError(null);
+    try {
+      const response = await electronAPI.stop_runtime_profile(selectedProfileId);
+      if (!response.success) {
+        setSaveError(response.error ?? 'Failed to stop runtime profile');
+        return;
+      }
+      await refreshRuntimeProfiles();
+    } catch (caught) {
+      setSaveError(caught instanceof Error ? caught.message : 'Failed to stop runtime profile');
+    } finally {
+      setIsRuntimeActionRunning(false);
+    }
+  };
+
   return (
     <section className="w-full space-y-3">
       <div className="flex items-center justify-between gap-3">
@@ -228,11 +273,13 @@ export function RuntimeProfileSettingsSection() {
           draft={draft}
           selectedProfileId={selectedProfileId}
           selectedStatus={selectedStatus}
-          isSaving={isSaving}
+          isSaving={isSaving || isRuntimeActionRunning}
           error={error}
           saveError={saveError}
           onDelete={() => void handleDelete()}
+          onLaunch={() => void handleLaunchRuntime()}
           onSave={() => void handleSave()}
+          onStop={() => void handleStopRuntime()}
           onUpdateDraft={updateDraft}
         />
       </div>

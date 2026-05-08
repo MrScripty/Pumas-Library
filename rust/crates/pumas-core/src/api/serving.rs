@@ -51,6 +51,8 @@ impl PumasApi {
                 ServingValidationProfile {
                     provider: profile.provider,
                     state,
+                    device_mode: profile.device.mode,
+                    device_id: profile.device.device_id.clone(),
                 }
             });
 

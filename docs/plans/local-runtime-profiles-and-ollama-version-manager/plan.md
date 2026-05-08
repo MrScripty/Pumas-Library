@@ -646,7 +646,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
   - [x] `validate_model_serving_config`
   - [ ] `serve_model`
   - [ ] `unserve_model`.
-- [ ] Implement validation for model existence, executable artifact readiness, provider/profile compatibility, profile state, supported file format, numeric ranges, and supported provider placement fields. Initial validation now covers model existence, primary artifact readiness, GGUF format, provider/profile mismatch, profile running/external state, and numeric bounds; provider-specific placement capability checks remain.
+- [ ] Implement validation for model existence, executable artifact readiness, provider/profile compatibility, profile state, supported file format, numeric ranges, and supported provider placement fields. Validation now covers model existence, primary artifact readiness, GGUF format, provider/profile mismatch, profile running/external state, numeric bounds, and Ollama placement limitations; llama.cpp placement checks remain.
 - [x] Resolve model paths only through `ModelLibrary`; do not accept renderer-supplied file paths.
 - [ ] Add serving snapshots/events for loaded models, failed load attempts, endpoint mode, and last non-critical errors. In-memory snapshots now record loaded/unloaded models, failed load attempts, endpoint mode, and last non-critical errors; pushed events remain.
 - [ ] Keep route defaults separate from immediate serving commands.
@@ -659,12 +659,13 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Rust tests for non-critical error response shape and `loaded_models_unchanged`.
 - RPC tests for serving handlers once registered.
 
-**Status:** In progress. Status, validation, in-memory snapshot updates, and Ollama load/unload orchestration are implemented; provider-specific placement checks, serving events, llama.cpp orchestration, and gateway endpoint behavior remain.
+**Status:** In progress. Status, validation, in-memory snapshot updates, and Ollama load/unload orchestration are implemented; llama.cpp placement/orchestration, serving events, and gateway endpoint behavior remain.
 
 **Implementation Notes:**
 - 2026-05-08: Added `ServingService` as the backend owner for serving snapshots and request validation. The initial snapshot is in memory and reports `endpoint_mode = not_configured` until provider endpoint or gateway behavior is implemented.
 - 2026-05-08: Added `PumasApi::get_serving_status` and `PumasApi::validate_model_serving_config`, plus RPC handlers. Validation resolves models through `ModelLibrary`, checks runtime profile provider/state through the runtime profile snapshot, and returns non-critical domain errors instead of transport failures for invalid fit/request conditions.
 - 2026-05-08: Added `ServingService` snapshot mutation helpers and wired `serve_model`/`unserve_model` through the RPC serving facade for Ollama. Successful Ollama loads register the GGUF in Ollama if needed, request a load using the user-selected keep-loaded setting, and publish a backend-owned `ServedModelStatus` with `endpoint_mode = provider_endpoint`.
+- 2026-05-08: Added provider-specific validation for Ollama placement limitations. Ollama serving accepts `auto` or a request that matches the selected runtime profile device mode, and returns non-critical `unsupported_placement` errors for per-model device IDs, GPU layers, tensor split, and context-size settings that the current Ollama load path does not apply.
 
 ### Milestone 11: Implement Model Row/Modal Serve Vertical Slice
 
@@ -704,7 +705,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 **Tasks:**
 - [x] Adapt existing Ollama create/load/unload/list-running client calls behind the serving provider interface.
 - [x] Honor explicit user-selected profile and keep-loaded behavior.
-- [ ] Return truthful capability validation for device placement fields Ollama cannot control per model.
+- [x] Return truthful capability validation for device placement fields Ollama cannot control per model.
 - [x] Preserve legacy `ollama_create_model`, `ollama_load_model`, and profile-aware Ollama commands.
 - [x] Map Ollama API/load failures into non-critical serving errors where the command was valid but the model did not load.
 - [ ] Populate `ServedModelStatus` from Ollama running-model inventory. Initial status records the successful serve request; inventory memory details remain.
@@ -715,7 +716,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Tests showing legacy Ollama APIs remain compatible.
 - One manual smoke path when a local Ollama runtime and small GGUF model are available.
 
-**Status:** In progress. Provider-neutral `serve_model`/`unserve_model` now drive Ollama register/load/unload and backend status updates; capability warnings and richer running-inventory projection remain.
+**Status:** In progress. Provider-neutral `serve_model`/`unserve_model` now drive Ollama register/load/unload and backend status updates; unsupported per-model placement fields return non-critical validation errors. Richer running-inventory projection remains.
 
 ### Milestone 13: Wire llama.cpp Through User-Directed Serving
 

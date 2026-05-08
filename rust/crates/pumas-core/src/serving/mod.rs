@@ -7,15 +7,18 @@
 use tokio::sync::RwLock;
 
 use crate::models::{
-    ModelServeError, ModelServeErrorCode, ModelServeValidationResponse, RuntimeLifecycleState,
-    RuntimeProfileId, RuntimeProviderId, ServeModelRequest, ServedModelStatus, ServingEndpointMode,
-    ServingEndpointStatus, ServingStatusResponse, ServingStatusSnapshot,
+    ModelServeError, ModelServeErrorCode, ModelServeValidationResponse, RuntimeDeviceMode,
+    RuntimeLifecycleState, RuntimeProfileId, RuntimeProviderId, ServeModelRequest,
+    ServedModelStatus, ServingEndpointMode, ServingEndpointStatus, ServingStatusResponse,
+    ServingStatusSnapshot,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServingValidationProfile {
     pub provider: RuntimeProviderId,
     pub state: RuntimeLifecycleState,
+    pub device_mode: RuntimeDeviceMode,
+    pub device_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -164,7 +167,7 @@ pub fn validate_model_serving_request(
 
     errors.extend(request.config.validate_numeric_bounds(model_id));
 
-    match context.profile {
+    match &context.profile {
         Some(profile) => {
             if profile.provider != request.config.provider {
                 errors.push(
@@ -192,6 +195,8 @@ pub fn validate_model_serving_request(
                     .for_provider(request.config.provider),
                 );
             }
+
+            errors.extend(validate_provider_placement(model_id, request, profile));
         }
         None => {
             errors.push(
@@ -233,6 +238,82 @@ pub fn validate_model_serving_request(
     ModelServeValidationResponse::from_errors(errors)
 }
 
+fn validate_provider_placement(
+    model_id: &str,
+    request: &ServeModelRequest,
+    profile: &ServingValidationProfile,
+) -> Vec<ModelServeError> {
+    match profile.provider {
+        RuntimeProviderId::Ollama => validate_ollama_placement(model_id, request, profile),
+        RuntimeProviderId::LlamaCpp => Vec::new(),
+    }
+}
+
+fn validate_ollama_placement(
+    model_id: &str,
+    request: &ServeModelRequest,
+    profile: &ServingValidationProfile,
+) -> Vec<ModelServeError> {
+    let mut errors = Vec::new();
+
+    if request.config.device_mode != RuntimeDeviceMode::Auto
+        && request.config.device_mode != profile.device_mode
+    {
+        errors.push(unsupported_placement(
+            model_id,
+            request,
+            "Ollama per-model device mode is not supported; choose a runtime profile with matching device placement or use Auto",
+        ));
+    }
+
+    if let Some(requested_device_id) = request.config.device_id.as_deref() {
+        if profile.device_id.as_deref() != Some(requested_device_id) {
+            errors.push(unsupported_placement(
+                model_id,
+                request,
+                "Ollama per-model device IDs are not supported; choose a runtime profile for that device",
+            ));
+        }
+    }
+
+    if request.config.gpu_layers.is_some() {
+        errors.push(unsupported_placement(
+            model_id,
+            request,
+            "Ollama does not support per-model GPU layer settings through this serving path",
+        ));
+    }
+
+    if request.config.tensor_split.is_some() {
+        errors.push(unsupported_placement(
+            model_id,
+            request,
+            "Ollama does not support per-model tensor split settings through this serving path",
+        ));
+    }
+
+    if request.config.context_size.is_some() {
+        errors.push(unsupported_placement(
+            model_id,
+            request,
+            "Ollama context size is not applied by this serving path yet",
+        ));
+    }
+
+    errors
+}
+
+fn unsupported_placement(
+    model_id: &str,
+    request: &ServeModelRequest,
+    message: &'static str,
+) -> ModelServeError {
+    ModelServeError::non_critical(ModelServeErrorCode::UnsupportedPlacement, message)
+        .for_model(model_id)
+        .for_profile(request.config.profile_id.clone())
+        .for_provider(request.config.provider)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,7 +331,7 @@ mod tests {
                 device_id: None,
                 gpu_layers: None,
                 tensor_split: None,
-                context_size: Some(4096),
+                context_size: None,
                 keep_loaded: false,
                 model_alias: None,
             },
@@ -264,6 +345,8 @@ mod tests {
             profile: Some(ServingValidationProfile {
                 provider: RuntimeProviderId::Ollama,
                 state: RuntimeLifecycleState::Running,
+                device_mode: RuntimeDeviceMode::Auto,
+                device_id: None,
             }),
         }
     }
@@ -344,6 +427,8 @@ mod tests {
         context.profile = Some(ServingValidationProfile {
             provider: RuntimeProviderId::LlamaCpp,
             state: RuntimeLifecycleState::Stopped,
+            device_mode: RuntimeDeviceMode::Auto,
+            device_id: None,
         });
 
         let response = validate_model_serving_request(&request(), &context);
@@ -366,5 +451,44 @@ mod tests {
             .errors
             .iter()
             .any(|error| error.code == ModelServeErrorCode::ProfileStopped));
+    }
+
+    #[test]
+    fn validation_rejects_ollama_per_model_placement_fields() {
+        let mut request = request();
+        request.config.device_mode = RuntimeDeviceMode::Gpu;
+        request.config.device_id = Some("cuda:0".to_string());
+        request.config.gpu_layers = Some(32);
+        request.config.tensor_split = Some(vec![1.0, 2.0]);
+        request.config.context_size = Some(4096);
+
+        let response = validate_model_serving_request(&request, &valid_context());
+
+        assert!(!response.valid);
+        assert!(response
+            .errors
+            .iter()
+            .all(|error| error.severity == ModelServeErrorSeverity::NonCritical));
+        assert!(response
+            .errors
+            .iter()
+            .any(|error| error.code == ModelServeErrorCode::UnsupportedPlacement));
+    }
+
+    #[test]
+    fn validation_accepts_ollama_profile_matching_device_request() {
+        let mut request = request();
+        request.config.device_mode = RuntimeDeviceMode::Cpu;
+        let mut context = valid_context();
+        context.profile = Some(ServingValidationProfile {
+            provider: RuntimeProviderId::Ollama,
+            state: RuntimeLifecycleState::Running,
+            device_mode: RuntimeDeviceMode::Cpu,
+            device_id: None,
+        });
+
+        let response = validate_model_serving_request(&request, &context);
+
+        assert!(response.valid);
     }
 }

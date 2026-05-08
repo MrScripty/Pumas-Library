@@ -40,7 +40,7 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
   const [deviceId, setDeviceId] = useState('');
   const [gpuLayers, setGpuLayers] = useState('');
   const [tensorSplit, setTensorSplit] = useState('');
-  const [contextSize, setContextSize] = useState('4096');
+  const [contextSize, setContextSize] = useState('');
   const [keepLoaded, setKeepLoaded] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);

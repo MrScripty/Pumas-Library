@@ -7,6 +7,7 @@ use crate::handlers::{
 };
 use crate::shortcut::ShortcutManager;
 use axum::{
+    extract::DefaultBodyLimit,
     http::{header, HeaderValue, Method},
     routing::{get, post},
     Router,
@@ -26,6 +27,7 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::{error, info, warn};
 
 const MAX_IN_FLIGHT_RPC_REQUESTS: usize = 64;
+const MAX_REQUEST_BODY_BYTES: usize = 32 * 1024 * 1024;
 
 /// Application state shared across handlers.
 pub struct AppState {
@@ -143,6 +145,7 @@ pub async fn start_server(
         .route("/v1/completions", post(handle_openai_proxy))
         .route("/v1/embeddings", post(handle_openai_proxy))
         .route("/rpc", post(handle_rpc))
+        .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))
         .layer(ConcurrencyLimitLayer::new(MAX_IN_FLIGHT_RPC_REQUESTS))
         .layer(cors)
         .with_state(state);
@@ -155,8 +158,8 @@ pub async fn start_server(
     let actual_addr = listener.local_addr()?;
 
     info!(
-        "Server listening on {} with max {} in-flight requests",
-        actual_addr, MAX_IN_FLIGHT_RPC_REQUESTS
+        "Server listening on {} with max {} in-flight requests and {} byte request bodies",
+        actual_addr, MAX_IN_FLIGHT_RPC_REQUESTS, MAX_REQUEST_BODY_BYTES
     );
 
     // Spawn the server in the background and retain ownership of the task.

@@ -764,7 +764,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - [x] Decide whether the first shipped endpoint is a Pumas gateway or provider endpoint mode.
 - [x] If gateway mode is implemented, expose one loopback endpoint with OpenAI-compatible model listing and routing for served models.
 - [x] Bind local-only by default and reject unsafe bind addresses unless a documented LAN mode exists.
-- [ ] Add bounded request/body/connection limits and safe error mapping at the transport boundary. Concurrency is bounded by the existing RPC server layer and gateway errors are mapped; explicit body-size limits remain.
+- [x] Add bounded request/body/connection limits and safe error mapping at the transport boundary.
 - [x] Ensure `/v1/models` or the equivalent endpoint reflects backend `ServedModelStatus`.
 - [x] If gateway mode is deferred, show `provider_endpoint` status and document that one Pumas endpoint is not complete yet.
 
@@ -772,10 +772,11 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Backend or RPC tests for endpoint mode status.
 - Gateway route tests if implemented.
 
-**Status:** In progress. A first Pumas gateway is implemented on the RPC server for `/v1/models`, `/v1/chat/completions`, `/v1/completions`, and `/v1/embeddings`. It routes by served model id/alias from backend serving status, reports aggregate serving status as `pumas_gateway` when models are loaded, and inherits the existing loopback-by-default RPC bind guard. Explicit request body-size limits remain.
+**Status:** Complete for the first gateway slice. A first Pumas gateway is implemented on the RPC server for `/v1/models`, `/v1/chat/completions`, `/v1/completions`, and `/v1/embeddings`. It routes by served model id/alias from backend serving status, reports aggregate serving status as `pumas_gateway` when models are loaded, inherits the existing loopback-by-default RPC bind guard, uses the existing concurrency limit, and applies a 32 MiB request body limit.
 
 **Implementation Notes:**
 - 2026-05-08: Added OpenAI-compatible gateway routes to `pumas-rpc`. `/v1/models` lists loaded `ServedModelStatus` entries, and proxy routes forward JSON requests to the selected model's provider endpoint. If a served model has a provider alias, the gateway rewrites the outgoing `model` field to that alias. Validated with `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml`.
+- 2026-05-08: Added an explicit 32 MiB request body limit to the RPC/gateway server. This complements the existing in-flight request limit and loopback-by-default bind guard.
 - Security tests for bind address and invalid payload rejection if a listener is added.
 - Frontend test that endpoint status wording follows backend endpoint mode.
 

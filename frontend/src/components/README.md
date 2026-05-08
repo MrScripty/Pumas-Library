@@ -125,6 +125,9 @@ second source of truth for business state.
   optimistic updates for persisted library data.
 - Integrity warning labels in the model manager must clear only when refreshed
   backend model data no longer reports the issue metadata.
+- Model serving dialogs may keep profile/device placement drafts locally, but
+  served state, endpoint mode, and load errors come from backend serving
+  responses or snapshots.
 
 ## Decision
 - Keep feature-level composition in high-level components; primitives stay in
@@ -144,6 +147,8 @@ second source of truth for business state.
 ## Invariants
 - Components display backend-owned library and migration state rather than
   inventing alternate business state locally.
+- Model serving components display backend-owned served-model state rather than
+  assuming a serve/unserve action succeeded locally.
 - Operator actions go through explicit backend/API calls.
 - Cross-platform file import components must keep the Electron bridge as the
   primary path source and treat URI-list parsing as a compatibility fallback.

@@ -778,14 +778,14 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 **Goal:** Close the user-directed serving phase with updated docs and full-path validation.
 
 **Tasks:**
-- [ ] Update `rust/crates/pumas-core/src/api/README.md`.
-- [ ] Update `rust/crates/pumas-core/src/models/README.md`.
-- [ ] Add README for any new `pumas-core/src/serving/` directory.
-- [ ] Update `rust/crates/pumas-rpc/src/handlers/README.md`.
-- [ ] Update `frontend/src/types/README.md`.
-- [ ] Update relevant frontend component/app-panel README files.
-- [ ] Update `electron/src/README.md` if preload/bridge serving behavior changes.
-- [ ] Update `docs/contracts/desktop-rpc-methods.md`.
+- [x] Update `rust/crates/pumas-core/src/api/README.md`.
+- [x] Update `rust/crates/pumas-core/src/models/README.md`.
+- [x] Add README for any new `pumas-core/src/serving/` directory.
+- [x] Update `rust/crates/pumas-rpc/src/handlers/README.md`.
+- [x] Update `frontend/src/types/README.md`.
+- [x] Update relevant frontend component/app-panel README files.
+- [x] Update `electron/src/README.md` if preload/bridge serving behavior changes.
+- [x] Update `docs/contracts/desktop-rpc-methods.md`.
 - [ ] Run the vertical acceptance path from UI action to backend result/status.
 - [ ] Run frontend typecheck/build, Electron tests, Rust tests for changed crates, and release smoke where feasible.
 
@@ -798,7 +798,10 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - `npm run -w frontend build`.
 - `bash launcher.sh --release-smoke` when release validation is in scope.
 
-**Status:** Planned.
+**Status:** In progress. Core API/model/serving, RPC handler, frontend type/component, Electron, and desktop RPC contract docs now reflect the serving status/update-feed contract. Vertical UI smoke, frontend build, and release smoke remain.
+
+**Implementation Notes:**
+- 2026-05-08: Updated serving contract documentation and added `pumas-core/src/serving/README.md`. Corrected the stale models README claim that all DTOs use camelCase; newer runtime-profile, package-facts, and serving DTOs intentionally use snake_case.
 
 ## Lifecycle and Runtime Ownership Notes
 

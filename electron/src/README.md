@@ -79,7 +79,9 @@ contextBridge.exposeInMainWorld('electronAPI', apiMethods);
 
 ## Structured Producer Contract
 - `preload.ts` produces the renderer-visible global bridge shape consumed by the
-  frontend.
+  frontend. Runtime-profile and serving methods are additive bridge contracts;
+  serving update feeds are exposed as RPC calls rather than Electron-owned
+  persistent state.
 - `python-bridge.ts` produces the backend lifecycle scheduling contract consumed
   by `main.ts`, including restartable model-library update stream ownership,
   and is verified by package-local tests.

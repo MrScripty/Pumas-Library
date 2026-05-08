@@ -15,7 +15,7 @@ Defines the primary API facade (`PumasApi`) methods that orchestrate core subsys
 | `process.rs` | Process lifecycle/status API methods. |
 | `reconciliation.rs` | Reconcile scheduling, watcher routing, and startup freshness rules. |
 | `runtime_profiles.rs` | Runtime profile snapshot, mutation, route, update-feed, and lifecycle API methods. |
-| `serving.rs` | User-directed model serving status and validation API methods. |
+| `serving.rs` | User-directed model serving status, update-feed, validation, and snapshot API methods. |
 | `state.rs` | Primary-state dispatch and IPC method execution. |
 | `state_hf.rs` | HuggingFace search, download, metadata-refetch, and auth helpers used by primary-state IPC dispatch. |
 | `state_process.rs` | Process lifecycle, launch, and status helpers used by primary-state IPC dispatch. |
@@ -47,7 +47,9 @@ Expose a stable host-facing API while keeping runtime ownership, reconciliation,
   backend-owned while the `PumasApi` facade remains additive.
 - Keep user-directed serving API methods in a dedicated sibling module so
   model row/modal commands validate through a backend-owned service instead of
-  making React orchestrate provider-specific runtime calls.
+  making React orchestrate provider-specific runtime calls. Provider-specific
+  load/unload orchestration may still live at a higher adapter boundary when it
+  depends on crates outside `pumas-core`.
 - Keep link-registry health/cleanup flows and app mapping flows in separate
   modules so `models.rs` stays centered on model-library metadata and import
   behavior.
@@ -111,6 +113,9 @@ println!("offline={}", net.is_offline);
 - Serving status and validation methods return backend-confirmed endpoint mode,
   served-model state, and non-critical load/validation errors. Consumers should
   not infer loaded state from a button click or local form draft.
+- Serving update feeds are in-memory invalidation signals. Consumers that miss
+  a cursor must refresh `get_serving_status` rather than expecting durable
+  event replay.
 - Errors are surfaced as backend errors rather than partial transport-specific states.
 - Compatibility policy is facade-first: internal reconcile and startup sequencing may evolve without changing host-facing method shapes unless a documented breaking change is introduced.
 

@@ -17,7 +17,7 @@ frontend, ensuring type-compatible serialization across all layers.
 | `model_library_selector.rs` | Fast model-library selector snapshot DTOs with canonical model refs, selected artifact identity, entry-path state, artifact state, and detail freshness |
 | `package_facts.rs` | Versioned model package-fact DTOs for artifact, component, task, backend-hint, generation-default, and custom-code evidence |
 | `runtime_profile.rs` | Local runtime profile, provider settings, model-route, status, snapshot, and update-feed DTOs shared with RPC/Electron/frontend consumers. |
-| `serving.rs` | User-directed model serving DTOs for explicit placement, served-model status, endpoint mode, and non-critical load-error envelopes. |
+| `serving.rs` | User-directed model serving DTOs for explicit placement, served-model status, endpoint mode, update feeds, and non-critical load-error envelopes. |
 | `version.rs` | `VersionInfo`, `VersionsMetadata` - Version tracking and metadata persistence types |
 | `github.rs` | GitHub-specific types for release and asset data |
 | `custom_node.rs` | Custom node metadata: `CompatibilityStatus`, `CustomNodeVersionStatus` |
@@ -26,8 +26,10 @@ frontend, ensuring type-compatible serialization across all layers.
 
 - **`#[serde(flatten)]` on `ApiResponse<T>`**: Eliminates the need for a nested `data` field,
   keeping JSON output flat and compatible with the existing frontend contract.
-- **`#[serde(rename_all = "camelCase")]`**: All types use camelCase serialization to match the
-  TypeScript/JavaScript frontend conventions.
+- **Serde field naming is contract-specific**: legacy response DTOs may use
+  camelCase, while newer backend-owned contracts such as runtime profiles,
+  package facts, and user-directed serving use snake_case exactly as defined in
+  their Rust DTO modules and matching TypeScript types.
 - **Re-exports via glob (`pub use *`)**: All types are available from `pumas_library::models::`
   without needing to know which submodule defines them.
 - **Append-only contract growth**: New external-asset fields are added as optional metadata
@@ -79,6 +81,9 @@ frontend, ensuring type-compatible serialization across all layers.
   selected provider/profile/device placement is user-authored; Pumas validates
   and attempts it without silently moving, evicting, or unloading unrelated
   models to make the request fit.
+- `ServingStatusUpdateFeed` is an in-memory invalidation contract. Consumers
+  can use it to decide when to refresh serving snapshots, but must tolerate
+  `snapshot_required` instead of durable event replay.
 - `ModelServeError` is the safe load-failure envelope. Failed fit or runtime
   load attempts that do not corrupt existing served state use
   `severity = non_critical` and preserve `loaded_models_unchanged = true`.

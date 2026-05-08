@@ -14,7 +14,7 @@ Domain-specific JSON-RPC handlers that parse request params, call API services, 
 | `links.rs` | Link health/mapping/sync handler methods. |
 | `ollama.rs` | Legacy endpoint and profile-aware Ollama model operation handlers. |
 | `runtime_profiles.rs` | Runtime profile snapshot, update-feed, mutation, model-route, launch, and stop handlers. |
-| `serving.rs` | User-directed model serving status and validation handlers. |
+| `serving.rs` | User-directed model serving status, update-feed, validation, serve, and unload handlers. |
 | `process.rs` | Legacy singleton process launch/stop and filesystem/window process handlers. |
 | `torch.rs` | Torch server status, slot, and configuration handlers. |
 | `versions.rs` | Re-export surface for version handlers. |
@@ -28,8 +28,13 @@ Domain-specific JSON-RPC handlers that parse request params, call API services, 
 - Launch/stop profile commands delegate to backend runtime-profile ownership;
   RPC handlers do not derive provider-specific process arguments themselves.
 - Serving handlers parse model-row/modal requests, delegate validation and
-  status storage to backend-owned serving APIs, and perform the current Ollama
-  provider orchestration through `pumas-app-manager`.
+  status/update-feed storage to backend-owned serving APIs. They perform the
+  current Ollama provider orchestration through `pumas-app-manager` and call
+  the runtime-profile launcher for managed dedicated llama.cpp profiles because
+  those provider adapters are outside the core serving service boundary.
+- Serving handlers return non-critical domain errors for valid requests that
+  cannot load, preserving existing served models and avoiding renderer crash
+  behavior.
 
 ## Dependencies
 **Internal:** `AppState`, `pumas-library` API, helper utilities in `shared.rs`.

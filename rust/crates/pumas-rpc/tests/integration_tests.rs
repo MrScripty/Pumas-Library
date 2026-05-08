@@ -488,6 +488,85 @@ mod tests {
         }
     }
 
+    fn missing_serving_request() -> Value {
+        json!({
+            "request": {
+                "model_id": "llm/missing/serving-fixture",
+                "config": {
+                    "provider": "ollama",
+                    "profile_id": "ollama-default",
+                    "device_mode": "auto",
+                    "keep_loaded": false
+                }
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn test_serving_rpc_methods_return_non_critical_domain_errors() {
+        if !can_bind_local_tcp_for_tests() {
+            return;
+        }
+        let env = create_test_env();
+        let server = start_rpc_server(env.path()).await.unwrap();
+        let port = server.port;
+
+        let status = rpc_call(port, "get_serving_status", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(status.get("success").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            status
+                .pointer("/snapshot/endpoint/endpoint_mode")
+                .and_then(|v| v.as_str()),
+            Some("not_configured")
+        );
+
+        let validation = rpc_call(
+            port,
+            "validate_model_serving_config",
+            missing_serving_request(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            validation.get("success").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            validation.get("valid").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert!(validation
+            .get("errors")
+            .and_then(|v| v.as_array())
+            .is_some_and(|errors| errors
+                .iter()
+                .any(
+                    |error| error.get("code").and_then(|v| v.as_str()) == Some("model_not_found")
+                )));
+
+        let serve = rpc_call(port, "serve_model", missing_serving_request())
+            .await
+            .unwrap();
+        assert_eq!(serve.get("success").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(serve.get("loaded").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            serve
+                .get("loaded_models_unchanged")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            serve
+                .pointer("/load_error/severity")
+                .and_then(|v| v.as_str()),
+            Some("non_critical")
+        );
+
+        server.stop().await;
+    }
+
     #[tokio::test]
     async fn test_migration_report_rpc_lifecycle() {
         if !can_bind_local_tcp_for_tests() {

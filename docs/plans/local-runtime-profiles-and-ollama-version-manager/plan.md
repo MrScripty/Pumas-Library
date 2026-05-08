@@ -632,7 +632,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - 2026-05-08: The broader models README still contains a historical blanket statement that all DTOs use camelCase, while runtime-profile, package-facts, and serving contracts intentionally use snake_case. This slice documented serving explicitly, but a later docs cleanup should correct the broad statement without changing wire formats.
 - 2026-05-08: Electron RPC request schemas are intentionally shallow and can only treat nested serving config as an `unknown-record`; meaningful serving validation must stay in Rust RPC/service code.
 - 2026-05-08: Torch inference RPCs still bypass runtime profiles and use `connection_url`. That is outside the current Ollama/llama.cpp serving slice but should be considered before claiming a provider-general serving facade.
-- 2026-05-08: `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml` currently compiles the RPC crate but matches no focused serving tests. Add handler-level serving tests when `serve_model` and `unserve_model` are registered.
+- 2026-05-08: `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml` initially compiled the RPC crate but matched no focused serving tests. Resolved the same day by adding an integration test for serving status, validation, and non-critical serve failures.
 - 2026-05-08: Because `pumas-core` cannot depend on `pumas-app-manager` without creating a dependency cycle, the first Ollama provider orchestration lives in the RPC serving handler while validation/status ownership lives in core. This is acceptable for the thin slice but should be revisited with an adapter inversion before adding more provider complexity.
 
 ### Milestone 10: Add Backend Serving Facade And Status Snapshot
@@ -667,6 +667,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - 2026-05-08: Added `ServingService` snapshot mutation helpers and wired `serve_model`/`unserve_model` through the RPC serving facade for Ollama. Successful Ollama loads register the GGUF in Ollama if needed, request a load using the user-selected keep-loaded setting, and publish a backend-owned `ServedModelStatus` with `endpoint_mode = provider_endpoint`.
 - 2026-05-08: Added provider-specific validation for Ollama placement limitations. Ollama serving accepts `auto` or a request that matches the selected runtime profile device mode, and returns non-critical `unsupported_placement` errors for per-model device IDs, GPU layers, tensor split, and context-size settings that the current Ollama load path does not apply.
 - 2026-05-08: Added validation and RPC orchestration for managed llama.cpp dedicated profiles. Stopped managed dedicated profiles are treated as launchable serving targets, `serve_model` calls the existing model-bound runtime-profile launcher, `unserve_model` stops the selected dedicated profile, and router-mode requests still return a non-critical unsupported-provider response until gateway/router semantics are implemented.
+- 2026-05-08: Added focused RPC integration coverage for `get_serving_status`, `validate_model_serving_config`, and `serve_model` non-critical domain-error responses. Validated with `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml`.
 
 ### Milestone 11: Implement Model Row/Modal Serve Vertical Slice
 

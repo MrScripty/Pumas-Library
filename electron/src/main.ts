@@ -292,28 +292,28 @@ function registerIPCHandlers(): void {
     return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
   });
 
-  ipcMain.handle(STATUS_TELEMETRY_SUBSCRIBE_CHANNEL, async () => {
+  ipcMain.handle(STATUS_TELEMETRY_SUBSCRIBE_CHANNEL, () => {
     statusTelemetryRendererSubscriptions += 1;
     if (statusTelemetryRendererSubscriptions === 1) {
       startStatusTelemetryUpdateForwarder();
     }
   });
 
-  ipcMain.handle(STATUS_TELEMETRY_UNSUBSCRIBE_CHANNEL, async () => {
+  ipcMain.handle(STATUS_TELEMETRY_UNSUBSCRIBE_CHANNEL, () => {
     statusTelemetryRendererSubscriptions = Math.max(0, statusTelemetryRendererSubscriptions - 1);
     if (statusTelemetryRendererSubscriptions === 0) {
       pythonBridge?.stopStatusTelemetryUpdateStream();
     }
   });
 
-  ipcMain.handle(MODEL_DOWNLOAD_SUBSCRIBE_CHANNEL, async () => {
+  ipcMain.handle(MODEL_DOWNLOAD_SUBSCRIBE_CHANNEL, () => {
     modelDownloadRendererSubscriptions += 1;
     if (modelDownloadRendererSubscriptions === 1) {
       startModelDownloadUpdateForwarder();
     }
   });
 
-  ipcMain.handle(MODEL_DOWNLOAD_UNSUBSCRIBE_CHANNEL, async () => {
+  ipcMain.handle(MODEL_DOWNLOAD_UNSUBSCRIBE_CHANNEL, () => {
     modelDownloadRendererSubscriptions = Math.max(0, modelDownloadRendererSubscriptions - 1);
     if (modelDownloadRendererSubscriptions === 0) {
       pythonBridge?.stopModelDownloadUpdateStream();

@@ -646,7 +646,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
   - [x] `validate_model_serving_config`
   - [ ] `serve_model`
   - [ ] `unserve_model`.
-- [ ] Implement validation for model existence, executable artifact readiness, provider/profile compatibility, profile state, supported file format, numeric ranges, and supported provider placement fields. Validation now covers model existence, primary artifact readiness, GGUF format, provider/profile mismatch, profile running/external state, numeric bounds, Ollama placement limitations, and the stopped managed llama.cpp dedicated launch case; richer llama.cpp placement checks remain.
+- [x] Implement validation for model existence, executable artifact readiness, provider/profile compatibility, profile state, supported file format, numeric ranges, and supported provider placement fields.
 - [x] Resolve model paths only through `ModelLibrary`; do not accept renderer-supplied file paths.
 - [ ] Add serving snapshots/events for loaded models, failed load attempts, endpoint mode, and last non-critical errors. In-memory snapshots now record loaded/unloaded models, failed load attempts, endpoint mode, and last non-critical errors; pushed events remain.
 - [ ] Keep route defaults separate from immediate serving commands.
@@ -659,7 +659,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Rust tests for non-critical error response shape and `loaded_models_unchanged`.
 - RPC tests for serving handlers once registered.
 
-**Status:** In progress. Status, validation, in-memory snapshot updates, Ollama load/unload orchestration, and first llama.cpp dedicated launch/unload orchestration are implemented; llama.cpp router serving, richer llama.cpp placement checks, serving events, and gateway endpoint behavior remain.
+**Status:** In progress. Status, validation, in-memory snapshot updates, Ollama load/unload orchestration, and first llama.cpp dedicated launch/unload orchestration are implemented; llama.cpp router serving, serving events, and gateway endpoint behavior remain.
 
 **Implementation Notes:**
 - 2026-05-08: Added `ServingService` as the backend owner for serving snapshots and request validation. The initial snapshot is in memory and reports `endpoint_mode = not_configured` until provider endpoint or gateway behavior is implemented.
@@ -668,6 +668,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - 2026-05-08: Added provider-specific validation for Ollama placement limitations. Ollama serving accepts `auto` or a request that matches the selected runtime profile device mode, and returns non-critical `unsupported_placement` errors for per-model device IDs, GPU layers, tensor split, and context-size settings that the current Ollama load path does not apply.
 - 2026-05-08: Added validation and RPC orchestration for managed llama.cpp dedicated profiles. Stopped managed dedicated profiles are treated as launchable serving targets, `serve_model` calls the existing model-bound runtime-profile launcher, `unserve_model` stops the selected dedicated profile, and router-mode requests still return a non-critical unsupported-provider response until gateway/router semantics are implemented.
 - 2026-05-08: Added focused RPC integration coverage for `get_serving_status`, `validate_model_serving_config`, and `serve_model` non-critical domain-error responses. Validated with `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml`.
+- 2026-05-08: Added llama.cpp placement validation that accepts explicit device, GPU layer, and tensor-split requests only when they match the selected runtime profile because the current launch path applies profile launch args rather than per-load overrides. Context-size requests return non-critical `unsupported_placement` until that launch argument is wired. Validated with `cargo test -p pumas-library serving --manifest-path rust/Cargo.toml`.
 
 ### Milestone 11: Implement Model Row/Modal Serve Vertical Slice
 
@@ -730,7 +731,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 **Tasks:**
 - [ ] Support router-mode serving when the selected profile can load/register multiple GGUF models from one `llama-server` router endpoint.
 - [x] Support dedicated-mode serving through model-bound `launch_runtime_profile(profile_id, tag?, model_id?)` while reporting `provider_endpoint` status rather than claiming a Pumas gateway.
-- [ ] Validate GGUF requirement, selected GPU layers, tensor split, context size, and device id before launch/load. GGUF and stopped managed dedicated launchability are covered; placement-specific llama.cpp checks remain.
+- [x] Validate GGUF requirement, selected GPU layers, tensor split, context size, and device id before launch/load.
 - [ ] Return non-critical errors for missing binary, stopped profile, invalid GGUF, unsupported mode, and provider load failures. Missing runtime/provider load failure/unsupported router mapping is implemented; stopped-profile and invalid-GGUF mapping should be covered by focused handler tests.
 - [ ] Update generated router preset/catalog behavior only through backend-owned deterministic producers.
 - [ ] Keep conversion llama.cpp code out of serving lifecycle ownership.
@@ -742,10 +743,11 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Existing llama.cpp runtime profile tests still pass.
 - Manual `llama-server` smoke path when a local build is available.
 
-**Status:** In progress. Managed dedicated llama.cpp serve/unserve now routes through the provider-neutral serving RPC facade and existing runtime-profile launcher. Router-mode multi-model serving, gateway endpoint behavior, richer placement validation, and focused handler tests remain.
+**Status:** In progress. Managed dedicated llama.cpp serve/unserve now routes through the provider-neutral serving RPC facade and existing runtime-profile launcher, with validation that rejects unapplied per-load placement overrides. Router-mode multi-model serving, gateway endpoint behavior, and focused llama.cpp handler tests remain.
 
 **Implementation Notes:**
 - 2026-05-08: Implemented the first llama.cpp serving slice for managed dedicated profiles. Core serving validation now distinguishes launchable managed dedicated profiles from profiles that must already be running, and RPC serving records backend `ServedModelStatus` after a successful profile launch.
+- 2026-05-08: Added provider-specific llama.cpp placement validation. The validator accepts explicit request placement only when it matches the selected profile and rejects context-size requests until the dedicated launch path has a typed context-size override.
 
 **Discovered Issues:**
 - 2026-05-08: The dedicated llama.cpp serving path currently uses the runtime profile's provider endpoint directly. This is truthful through `endpoint_mode = provider_endpoint`, but it does not satisfy the final "same Pumas endpoint for simultaneous models" requirement until the gateway/router milestone lands.

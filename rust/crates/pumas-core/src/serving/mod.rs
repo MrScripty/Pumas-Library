@@ -13,7 +13,7 @@ use crate::models::{
     ServingEndpointStatus, ServingStatusResponse, ServingStatusSnapshot,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ServingValidationProfile {
     pub provider: RuntimeProviderId,
     pub provider_mode: RuntimeProviderMode,
@@ -21,9 +21,11 @@ pub struct ServingValidationProfile {
     pub state: RuntimeLifecycleState,
     pub device_mode: RuntimeDeviceMode,
     pub device_id: Option<String>,
+    pub gpu_layers: Option<i32>,
+    pub tensor_split: Option<Vec<f32>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ServingValidationContext {
     pub model_exists: bool,
     pub primary_artifact_extension: Option<String>,
@@ -263,8 +265,66 @@ fn validate_provider_placement(
 ) -> Vec<ModelServeError> {
     match profile.provider {
         RuntimeProviderId::Ollama => validate_ollama_placement(model_id, request, profile),
-        RuntimeProviderId::LlamaCpp => Vec::new(),
+        RuntimeProviderId::LlamaCpp => validate_llama_cpp_placement(model_id, request, profile),
     }
+}
+
+fn validate_llama_cpp_placement(
+    model_id: &str,
+    request: &ServeModelRequest,
+    profile: &ServingValidationProfile,
+) -> Vec<ModelServeError> {
+    let mut errors = Vec::new();
+
+    if request.config.device_mode != RuntimeDeviceMode::Auto
+        && request.config.device_mode != profile.device_mode
+    {
+        errors.push(unsupported_placement(
+            model_id,
+            request,
+            "llama.cpp serving uses the selected runtime profile device mode; choose a matching profile or use Auto",
+        ));
+    }
+
+    if let Some(requested_device_id) = request.config.device_id.as_deref() {
+        if profile.device_id.as_deref() != Some(requested_device_id) {
+            errors.push(unsupported_placement(
+                model_id,
+                request,
+                "llama.cpp serving uses the selected runtime profile device ID; choose a matching profile",
+            ));
+        }
+    }
+
+    if let Some(requested_gpu_layers) = request.config.gpu_layers {
+        if profile.gpu_layers != Some(requested_gpu_layers) {
+            errors.push(unsupported_placement(
+                model_id,
+                request,
+                "llama.cpp GPU layers must match the selected runtime profile because per-load overrides are not applied yet",
+            ));
+        }
+    }
+
+    if let Some(requested_tensor_split) = &request.config.tensor_split {
+        if profile.tensor_split.as_ref() != Some(requested_tensor_split) {
+            errors.push(unsupported_placement(
+                model_id,
+                request,
+                "llama.cpp tensor split must match the selected runtime profile because per-load overrides are not applied yet",
+            ));
+        }
+    }
+
+    if request.config.context_size.is_some() {
+        errors.push(unsupported_placement(
+            model_id,
+            request,
+            "llama.cpp context size is not applied by this serving path yet",
+        ));
+    }
+
+    errors
 }
 
 fn validate_ollama_placement(
@@ -367,6 +427,8 @@ mod tests {
                 state: RuntimeLifecycleState::Running,
                 device_mode: RuntimeDeviceMode::Auto,
                 device_id: None,
+                gpu_layers: None,
+                tensor_split: None,
             }),
         }
     }
@@ -451,6 +513,8 @@ mod tests {
             state: RuntimeLifecycleState::Stopped,
             device_mode: RuntimeDeviceMode::Auto,
             device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
         });
 
         let response = validate_model_serving_request(&request(), &context);
@@ -509,6 +573,8 @@ mod tests {
             state: RuntimeLifecycleState::Running,
             device_mode: RuntimeDeviceMode::Cpu,
             device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
         });
 
         let response = validate_model_serving_request(&request, &context);
@@ -523,6 +589,7 @@ mod tests {
         request.config.profile_id = RuntimeProfileId::parse("llama-dedicated").unwrap();
         request.config.device_mode = RuntimeDeviceMode::Hybrid;
         request.config.gpu_layers = Some(24);
+        request.config.tensor_split = Some(vec![1.0, 1.0]);
 
         let mut context = valid_context();
         context.profile = Some(ServingValidationProfile {
@@ -532,10 +599,52 @@ mod tests {
             state: RuntimeLifecycleState::Stopped,
             device_mode: RuntimeDeviceMode::Hybrid,
             device_id: None,
+            gpu_layers: Some(24),
+            tensor_split: Some(vec![1.0, 1.0]),
         });
 
         let response = validate_model_serving_request(&request, &context);
 
         assert!(response.valid);
+    }
+
+    #[test]
+    fn validation_rejects_llama_cpp_per_load_placement_overrides() {
+        let mut request = request();
+        request.config.provider = RuntimeProviderId::LlamaCpp;
+        request.config.profile_id = RuntimeProfileId::parse("llama-dedicated").unwrap();
+        request.config.device_mode = RuntimeDeviceMode::Gpu;
+        request.config.device_id = Some("cuda:1".to_string());
+        request.config.gpu_layers = Some(36);
+        request.config.tensor_split = Some(vec![3.0, 1.0]);
+        request.config.context_size = Some(8192);
+
+        let mut context = valid_context();
+        context.profile = Some(ServingValidationProfile {
+            provider: RuntimeProviderId::LlamaCpp,
+            provider_mode: RuntimeProviderMode::LlamaCppDedicated,
+            management_mode: RuntimeManagementMode::Managed,
+            state: RuntimeLifecycleState::Running,
+            device_mode: RuntimeDeviceMode::Hybrid,
+            device_id: Some("cuda:0".to_string()),
+            gpu_layers: Some(24),
+            tensor_split: Some(vec![1.0, 1.0]),
+        });
+
+        let response = validate_model_serving_request(&request, &context);
+
+        assert!(!response.valid);
+        assert!(response
+            .errors
+            .iter()
+            .all(|error| error.severity == ModelServeErrorSeverity::NonCritical));
+        assert_eq!(
+            response
+                .errors
+                .iter()
+                .filter(|error| error.code == ModelServeErrorCode::UnsupportedPlacement)
+                .count(),
+            5
+        );
     }
 }

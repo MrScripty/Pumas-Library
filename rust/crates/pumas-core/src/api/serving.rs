@@ -55,6 +55,8 @@ impl PumasApi {
                     state,
                     device_mode: profile.device.mode,
                     device_id: profile.device.device_id.clone(),
+                    gpu_layers: profile.device.gpu_layers,
+                    tensor_split: profile.device.tensor_split.clone(),
                 }
             });
 

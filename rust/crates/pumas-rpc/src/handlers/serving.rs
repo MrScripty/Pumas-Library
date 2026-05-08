@@ -426,6 +426,17 @@ async fn serve_ollama_model(
         .await;
     }
 
+    let memory_bytes = match client.list_running_models().await {
+        Ok(running) => running
+            .iter()
+            .find(|model| model.name == model_alias)
+            .map(|model| model.size),
+        Err(err) => {
+            warn!("Ollama running inventory failed after serving load: {}", err);
+            None
+        }
+    };
+
     let status = ServedModelStatus {
         model_id: request.model_id.clone(),
         model_alias: Some(model_alias),
@@ -439,7 +450,7 @@ async fn serve_ollama_model(
         context_size: request.config.context_size,
         keep_loaded: request.config.keep_loaded,
         endpoint_url: Some(endpoint),
-        memory_bytes: None,
+        memory_bytes,
         loaded_at: None,
         last_error: None,
     };

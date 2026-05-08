@@ -718,7 +718,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - [x] Return truthful capability validation for device placement fields Ollama cannot control per model.
 - [x] Preserve legacy `ollama_create_model`, `ollama_load_model`, and profile-aware Ollama commands.
 - [x] Map Ollama API/load failures into non-critical serving errors where the command was valid but the model did not load.
-- [ ] Populate `ServedModelStatus` from Ollama running-model inventory. Initial status records the successful serve request; inventory memory details remain.
+- [x] Populate `ServedModelStatus` from Ollama running-model inventory.
 
 **Verification:**
 - Rust/app-manager or RPC tests for valid Ollama serving request mapping.
@@ -726,7 +726,10 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Tests showing legacy Ollama APIs remain compatible.
 - One manual smoke path when a local Ollama runtime and small GGUF model are available.
 
-**Status:** In progress. Provider-neutral `serve_model`/`unserve_model` now drive Ollama register/load/unload and backend status updates; unsupported per-model placement fields return non-critical validation errors. Richer running-inventory projection remains.
+**Status:** Complete for the current Ollama serving facade. Provider-neutral `serve_model`/`unserve_model` now drive Ollama register/load/unload and backend status updates; unsupported per-model placement fields return non-critical validation errors; successful loads do a best-effort running-inventory read for memory size.
+
+**Implementation Notes:**
+- 2026-05-08: After successful Ollama load, `serve_model` now queries Ollama running inventory and records the reported model size as `ServedModelStatus.memory_bytes` when available. Inventory read failures are logged and do not turn a successful load into a failed serving command.
 
 ### Milestone 13: Wire llama.cpp Through User-Directed Serving
 

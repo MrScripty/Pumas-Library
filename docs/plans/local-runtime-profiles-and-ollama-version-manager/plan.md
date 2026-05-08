@@ -1,8 +1,10 @@
-# Plan: Local Runtime Profiles and Ollama Version Manager Stability
+# Plan: Local Runtime Profiles, User-Directed Model Serving, and Ollama Version Manager Stability
 
 ## Objective
 
 Fix the Ollama page crash triggered by the version-manager globe button and add a backend-owned local runtime profile architecture for model-serving providers. Ollama and llama.cpp should share the same runtime-profile, model-routing, status-event, and frontend settings architecture while keeping provider-specific process and API behavior behind adapters.
+
+The next active phase extends the completed runtime-profile foundation into user-directed model serving. Users start from a model row or model modal, choose the serving profile and explicit device placement for that model, and ask Pumas to load it into a shared serving endpoint. Pumas validates obvious configuration errors, attempts the requested load, reports non-critical load failures when the selected configuration does not fit or cannot be served, and preserves already-loaded models unless the user explicitly unloads them.
 
 ## Scope
 
@@ -14,6 +16,10 @@ Fix the Ollama page crash triggered by the version-manager globe button and add 
 - Add provider adapters for Ollama and llama.cpp behind the same runtime profile contract.
 - Add per-model routing from Pumas library models to local runtime profiles.
 - Support CPU, GPU, auto, external endpoint, and future specific-device profile modes without hard-coding behavior for a specific model.
+- Add a user-directed model serving workflow from model rows and the model modal.
+- Add backend-owned serving status for models loaded into the shared endpoint.
+- Add explicit per-load serving configuration for provider/profile, device mode, device id, GPU layers, tensor split, context size, and keep-loaded behavior where supported.
+- Return recoverable, non-critical load errors for configurations that fail validation or fail to load because of memory/device/runtime constraints.
 - Add frontend controls that edit backend-owned runtime/profile state through RPC.
 - Extend the existing backend-to-frontend event pattern so local runtime status updates are pushed to the frontend instead of polled per profile.
 - Add tests for UI crash prevention, API contracts, persisted config, process lifecycle, and routing behavior.
@@ -21,7 +27,9 @@ Fix the Ollama page crash triggered by the version-manager globe button and add 
 ### Out of Scope
 
 - Replacing existing Ollama support with another runtime.
-- Building a new inference server for Ollama-compatible APIs.
+- Automatically deciding which models to evict, downgrade, or move between devices to make a new model fit.
+- Automatically selecting CPU/GPU/hybrid placement for the user beyond safe defaults shown in the form.
+- Silently unloading, evicting, or reconfiguring existing served models when a new user-selected configuration fails.
 - Claiming that a single Ollama daemon can enforce native per-model CPU/GPU placement unless upstream Ollama exposes a stable, documented setting for that behavior.
 - Claiming llama.cpp router mode supports every feature or hardware-isolation pattern that dedicated `llama-server` processes support.
 - Removing existing singleton Ollama commands in the first pass.
@@ -33,6 +41,8 @@ Fix the Ollama page crash triggered by the version-manager globe button and add 
 
 The Ollama page crashes when the globe/version-manager button opens installable Ollama versions. The same area also lacks sufficient settings for managing multiple local runtime models and selecting CPU/GPU behavior per model. The current implementation treats Ollama process management as singleton-oriented while model operations accept an optional `connectionUrl`. llama.cpp-capable GGUF models already exist in the library metadata surface, but Pumas does not yet expose llama.cpp runtime profiles or provider-neutral model routing.
 
+The runtime-profile foundation now exists, but the user workflow is still incomplete. Users can configure profiles and routes, but they cannot start from a model row or modal, choose explicit model placement, and load that model into a common serving endpoint with clear success/failure status. The next feature slice must turn profiles and routes into a backend-owned serving workflow without making Pumas an automatic memory scheduler.
+
 ### Constraints
 
 - User requested planning only before implementation.
@@ -40,6 +50,9 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Frontend may own only transient UI state such as panel open/closed state and form edits before submit.
 - Existing RPC methods and frontend bridge calls must remain compatible unless an explicit breaking change is approved.
 - The feature must be model-general and cannot special-case individual model names, repositories, or quant formats.
+- User placement decisions are authoritative. Pumas validates and attempts the requested configuration, but it must not override the selected CPU/GPU/hybrid settings to make a model fit.
+- Load failures caused by memory, unsupported device placement, missing binaries, stopped profiles, or invalid runtime settings are normal domain outcomes and must not crash the app or corrupt existing served-model state.
+- The frontend may draft serving settings locally, but loaded/served model state, last load errors, endpoint status, and active model aliases are backend-owned.
 - Ollama capability labels must be truthful: Pumas can route a model to a CPU/GPU-profiled runtime, but should not present unsupported upstream Ollama behavior as a native per-model guarantee.
 - llama.cpp capability labels must distinguish router profiles from dedicated process profiles because their lifecycle, isolation, and model-loading behavior differ.
 
@@ -47,15 +60,22 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 
 - The magenta page indicates an uncaught React render/runtime error in the version manager path.
 - The first acceptable fix is a small vertical slice: reproduce the crash, stabilize the version-manager rendering path, and add a regression test.
-- Per-model CPU/GPU selection should be implemented as Pumas model-to-runtime-profile routing.
+- Per-model CPU/GPU selection should be implemented as explicit user-selected serving config attached to a model/profile operation, with saved route defaults used only to prefill the form.
 - Managed runtime profiles may need separate Ollama processes on separate ports because process environment variables are process-wide.
 - Managed llama.cpp profiles may use either router mode or dedicated `llama-server -m <model>` processes depending on the isolation and scheduling needed.
+- A Pumas-owned serving facade may be required to present one stable endpoint even when provider-specific workers differ. If the first implementation keeps provider endpoints exposed, the plan must explicitly mark the unified endpoint as incomplete rather than claiming the same endpoint behavior.
 - `profile_id` is the canonical internal address for local runtime operations.
 - Existing optional `connectionUrl` arguments in Ollama model RPC methods remain a legacy boundary compatibility path, but internal routing resolves through validated runtime profiles.
 
 ### Dependencies
 
 - `frontend/src/components/app-panels/OllamaPanel.tsx`
+- `frontend/src/components/LocalModelRowActions.tsx`
+- `frontend/src/components/LocalModelInstalledActions.tsx`
+- `frontend/src/components/ModelRuntimeRouteEditor.tsx`
+- `frontend/src/components/ModelMetadataModalContent.tsx`
+- `frontend/src/components/ModelMetadataModalTabs.tsx`
+- `frontend/src/components/app-panels/sections/OllamaModelSection.tsx`
 - `frontend/src/components/app-panels/VersionManagementPanel.tsx`
 - `frontend/src/components/InstallDialog.tsx`
 - `frontend/src/components/InstallDialogContent.tsx`
@@ -68,6 +88,8 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - `electron/src/rpc-method-registry.ts`
 - `rust/crates/pumas-rpc/src/handlers/process.rs`
 - `rust/crates/pumas-rpc/src/handlers/ollama.rs`
+- `rust/crates/pumas-rpc/src/handlers/runtime_profiles.rs`
+- New or expanded `rust/crates/pumas-rpc/src/handlers/serving.rs`
 - `rust/crates/pumas-rpc/src/handlers/mod.rs`
 - `rust/crates/pumas-rpc/src/wrapper.rs`
 - `rust/crates/pumas-app-manager/src/ollama_client.rs`
@@ -76,8 +98,12 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - `rust/crates/pumas-core/src/api/process.rs`
 - `rust/crates/pumas-core/src/api/state_process.rs`
 - `rust/crates/pumas-core/src/api/state_runtime.rs`
+- New or expanded `rust/crates/pumas-core/src/api/serving.rs`
+- New or expanded `rust/crates/pumas-core/src/serving/`
 - `rust/crates/pumas-core/src/models/`
 - `rust/crates/pumas-core/src/conversion/llama_cpp.rs`
+- `rust/crates/pumas-uniffi/src/bindings/` if serving APIs become supported native binding surface.
+- `rust/crates/pumas-rustler/src/lib.rs` if serving APIs become supported BEAM/NIF surface.
 - `docs/architecture/MODEL_LIBRARY_ARCHITECTURE.md`
 - `docs/contracts/desktop-rpc-methods.md`
 - Coding standards under `/media/jeremy/OrangeCream/Linux Software/repos/owned/developer-tooling/Coding-Standards/`
@@ -89,8 +115,19 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - RPC method registry and request-schema validation in `electron/src/rpc-method-registry.ts`.
 - Rust RPC dispatch methods in `rust/crates/pumas-rpc/src/handlers/mod.rs`.
 - Provider-specific runtime RPC response shapes, including existing Ollama responses and new llama.cpp runtime responses.
+- New model-serving request/response DTOs:
+  - `ModelServingConfig`
+  - `ServeModelRequest`
+  - `ServedModelStatus`
+  - `ServingEndpointStatus`
+  - `ModelServeValidationResponse`
+  - `ModelServeError`
+  - `ModelServeErrorSeverity`
+  - explicit provider, device, placement, and error-code enums.
+- New RPC/bridge methods for serving status, validation, load, and unload operations.
 - Process status response shape if profile-level status is exposed in global status.
 - Backend event stream payloads for runtime/profile status notifications.
+- Backend event stream payloads for served-model status and non-critical load-result notifications.
 - Electron bridge subscription APIs for runtime/profile events.
 - Persisted runtime profile and model route config schema.
 
@@ -98,6 +135,8 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 
 - New backend-owned local runtime profile config.
 - New backend-owned model-to-runtime-profile route config.
+- Optional backend-owned model-serving defaults, if users can save a preferred device placement per model. Defaults must be append-only and must not rewrite existing route semantics.
+- Runtime serving status cache or journal if status is made durable across backend restarts. If status is in-memory only, this must be documented explicitly and rebuilt from provider inventories on startup.
 - Potential profile-specific PID files and log files.
 - Potential profile-specific endpoint/port allocation metadata.
 - Potential llama.cpp generated model catalog or preset files for managed router profiles.
@@ -119,6 +158,11 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 | Ollama and llama.cpp duplicate the same architecture in separate feature silos. | High | Introduce a provider-neutral runtime profile service with provider adapters for Ollama and llama.cpp. |
 | llama.cpp router mode and dedicated process mode are conflated. | Medium | Model them as separate profile modes under the llama.cpp provider with distinct lifecycle and capability flags. |
 | Generated llama.cpp model catalogs or presets drift from the Pumas library. | Medium | Make catalog/preset generation backend-owned, deterministic, and evented when model routes or library artifacts change. |
+| Pumas accidentally becomes an automatic memory scheduler despite the product requirement for user-selected placement. | High | Keep serve requests user-authored, treat fit checks as validation/advisory responses, and never evict or move existing models unless requested by a user command. |
+| A failed load disrupts existing served models. | High | Define `loaded_models_unchanged` in the response contract, make provider adapters preserve existing model state on failure where upstream allows it, and surface any unknown provider-side side effects explicitly. |
+| Frontend duplicates serving state in row/modals. | Medium | Store only form drafts locally; subscribe to backend serving snapshots/events for loaded state and last errors. |
+| Shared endpoint behavior is claimed before the implementation actually provides it. | High | Add a serving endpoint status contract with an explicit mode: `pumas_gateway`, `provider_endpoint`, or `not_configured`; UI copy must reflect the current mode. |
+| New serving APIs are exposed through UniFFI/Rustler without binding tests. | Medium | Keep binding exposure out of scope until there is a supported consumer, or add native and host-language binding coverage in the same slice. |
 
 ## Codebase Impact and Blast Radius
 
@@ -138,12 +182,20 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Existing broad process-pattern cleanup such as stopping every `ollama serve` process is unsafe for managed multi-profile operation and must remain a legacy singleton behavior or become profile-scoped.
 - llama.cpp support should not be implemented as a second independent copy of the Ollama runtime service. Provider-specific launch flags, router APIs, and model catalog/preset handling belong in a llama.cpp adapter behind the shared runtime profile service.
 - Existing `rust/crates/pumas-core/src/conversion/llama_cpp.rs` is conversion/build tooling context, not a runtime serving boundary. Runtime profile work should not overload conversion code with server lifecycle responsibilities.
+- New user-directed serving behavior needs a separate service boundary, tentatively `pumas-core/src/serving/`, so `RuntimeProfileService` remains profile/process ownership and does not become a mixed UI-workflow, validation, and provider-inventory service.
+- The serving service should depend on runtime profile contracts and provider adapters through narrow interfaces. It should own serve/unserve orchestration, serving snapshots, validation responses, and non-critical error shaping.
+- If a Pumas gateway is introduced to provide one public endpoint, it is an app/runtime boundary and must not live in reusable model-library or conversion modules. It must bind to loopback by default and report whether the endpoint is a gateway or a direct provider endpoint.
+- Provider adapter changes must be additive: Ollama register/load/unload/list-running stays in `pumas-app-manager`, while the serving service decides when those calls are made and how their errors are projected.
 
 ### Frontend Blast Radius
 
 - Existing `OllamaModelSection.tsx` polls one `connectionUrl` every 10 seconds while running. Multiple local runtime profiles should not multiply frontend polling. The frontend should subscribe once to backend-pushed runtime/profile events and refresh a backend-owned snapshot when notified.
 - Existing library GGUF rows assume one running Ollama endpoint. Per-model routing means row actions must resolve the assigned provider/profile before create/register/load/unload.
 - Settings UI should avoid generic text-only controls and use existing UI primitives, semantic buttons, labels, selects, toggles, segmented controls, and accessible names.
+- Model row actions should add a `Serve` action without embedding provider-specific branching in row components. The row should open a serving modal or command surface that works from backend-provided profiles and defaults.
+- The existing model metadata Runtime Route tab should either be renamed/split or delegate to a serving-config editor so users can both save route defaults and issue an immediate load request from one model-centered workflow.
+- The loaded-models panel should render backend `ServedModelStatus` rows, including model alias, provider/profile, device placement, endpoint mode, memory usage when known, keep-loaded state, and last non-critical error.
+- Frontend code may keep draft values for device mode, GPU layers, tensor split, context size, and keep-loaded toggles. It must not mark a model as served until the backend serving snapshot or command response confirms it.
 
 ### API Compatibility Blast Radius
 
@@ -162,6 +214,26 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - New frontend types should extend the bridge contract without changing existing response fields.
 - New profile-aware model commands should accept `profile_id`, not raw endpoint URLs. Raw endpoint URLs may be accepted only by legacy commands or external-profile creation/update commands.
 - Provider-specific commands should stay behind a provider-neutral runtime profile facade unless an upstream API exposes provider-only capabilities that cannot be represented generically.
+- New user-directed serving commands should be provider-neutral:
+  - `get_serving_status`
+  - `validate_model_serving_config`
+  - `serve_model`
+  - `unserve_model`
+  - optional `list_served_models` if it is not redundant with status.
+- `serve_model` responses must distinguish command transport failure from non-critical model load failure. Transport failure means the request could not be processed; non-critical load failure means the request was processed and the selected model configuration did not load.
+- Existing `launch_runtime_profile(profile_id, tag?, model_id?)` remains a low-level profile lifecycle API. Row/modal serving should call `serve_model` rather than requiring React to know whether a provider needs register, load, router refresh, or dedicated process launch.
+- Native binding exposure is out of scope for the first serving UI slice unless a supported host-language caller is identified. If included, the UniFFI/Rustler surfaces must be updated in the same commit as native and host-language tests.
+
+### Standards Compliance Requirements For Next Phase
+
+- Contract-first: add Rust DTOs and matching TypeScript bridge types before UI implementation. Use explicit enums/newtypes instead of stringly typed device, provider, endpoint-mode, and error-code fields.
+- Backend-owned data: serving snapshots, loaded state, endpoint status, and last errors are backend-owned. Frontend may only hold local form drafts and presentational state.
+- Boundary validation: RPC handlers validate payload shape, URL/endpoint inputs, model IDs, numeric ranges, and provider/profile compatibility before calling the serving service.
+- Non-critical errors: failed model loads must be domain responses with `severity = non_critical`, stable error codes, safe messages, and enough diagnostic context to identify model/profile/provider without exposing paths or unbounded process output.
+- Path and process safety: model files are resolved through the existing model library, not renderer-supplied paths. Generated llama.cpp presets and profile logs stay under backend-owned launcher-data roots.
+- Accessibility: model row/modal serving controls use semantic buttons, associated labels for form controls, named icon buttons, and keyboard-accessible modal behavior.
+- Testing: add one vertical acceptance path from model row/modal command to backend response/status projection before expanding provider-specific breadth.
+- Documentation: update touched `src` directory READMEs and `docs/contracts/desktop-rpc-methods.md` when serving contracts are introduced.
 
 ## Standards Review Iterations
 
@@ -195,11 +267,24 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Adjustment: Add typed profile IDs, provider IDs, endpoint URLs, ports, device modes, llama.cpp profile modes, and lifecycle states instead of passing stringly typed modes deep into process code.
 - Adjustment: Public APIs return structured errors and avoid `Result<T, String>` in Rust boundaries.
 
-### Iteration 6: Concurrency Standards
+### Historical Iteration 6: Runtime Lifecycle Ownership
 
-- Result: Compliant if profile lifecycle state is protected under one owner and process start/stop tasks are serialized per profile.
+- Previous-wave note: this section predates the 2026-05-08 serving update. It is retained for traceability, but the 2026-05-08 update did not re-review the external multithreading/concurrency standard by request.
+- Result: Profile lifecycle state remains planned under one backend owner, with guarded profile operations and profile-scoped PID/log/status ownership.
 - Adjustment: Profile start/stop must prevent overlapping operations, observe task errors, avoid holding locks across blocking process work, and cleanly remove profile PID files on shutdown.
 - Adjustment: Backend runtime/profile event production may internally sample external endpoint health, but sampling must be owned by the backend service and surfaced through one subscription/snapshot contract.
+
+### Iteration 7: User-Directed Shared Endpoint Update
+
+- Date: 2026-05-08.
+- Standards reviewed for this update: plan, architecture, coding, frontend, accessibility, testing, security, interop, launcher, dependency, documentation, cross-platform, language-binding, and Rust API/security/interop/dependency/tooling/cross-platform standards.
+- Excluded from this update by request: the multithreading/concurrency standards.
+- Result: The next phase is compliant only if it is implemented as user-directed serving, not automatic memory scheduling.
+- Adjustment: Add a backend-owned serving facade and typed serving DTOs before frontend work.
+- Adjustment: Save route/profile defaults separately from immediate `serve_model` commands.
+- Adjustment: Make a failed fit or runtime load failure a non-critical domain response that preserves existing served models.
+- Adjustment: Expose shared endpoint status truthfully. Do not claim one stable Pumas endpoint until a gateway or equivalent endpoint facade exists.
+- Adjustment: Keep binding exposure out of scope unless native and host-language verification are added in the same slice.
 
 ## Definition of Done
 
@@ -211,8 +296,14 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Ollama profiles and llama.cpp profiles use the same route/status/settings facade.
 - Model create/load/unload/list operations use the assigned profile endpoint.
 - Frontend runtime status updates arrive through a backend-owned event/snapshot path, not per-profile component polling.
+- Users can start model serving from a model row or model modal.
+- Users can explicitly choose the profile/provider and CPU/GPU/hybrid placement for the selected model.
+- Pumas validates the selected configuration and returns non-critical errors for failed loads without crashing the app or silently modifying unrelated loaded models.
+- A backend-owned served-model status snapshot shows loaded models, placement, endpoint/profile, and last error state.
+- Shared endpoint behavior is either implemented through a Pumas gateway/facade or explicitly labeled as provider endpoint mode in the serving status contract.
 - Existing singleton Ollama commands and current frontend flows continue to work.
 - Tests cover the version crash, runtime profile config, process lifecycle, profile routing, frontend settings controls, and cleanup of any timers/polling.
+- Tests cover one vertical model-row/modal serving path and one non-critical load error path.
 - Release binaries and frontend build complete after implementation.
 
 ## Milestones
@@ -498,26 +589,201 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml` and the plural `runtime_profiles` filter currently match no RPC tests. The full `pumas-rpc` suite covers the registered RPC unit tests, but dedicated runtime-profile handler tests should be added if handler-level behavior expands.
 - 2026-05-05: Release smoke can connect to an already-running primary backend from a previous build. Runtime-profile event compatibility is now throttled for older primaries, but manual verification should restart the app fully before judging new runtime-profile UI behavior.
 
-## Lifecycle and Concurrency Notes
+### Milestone 9: Define User-Directed Serving Contracts
+
+**Goal:** Freeze the cross-layer serving contract before implementing model-row/modal workflows.
+
+**Tasks:**
+- [ ] Define Rust serving DTOs under `pumas-core::models` or a focused `serving` model module.
+- [ ] Add typed enums/newtypes for serving provider, endpoint mode, device mode, placement details, load state, error severity, and error code.
+- [ ] Define `ModelServingConfig` with explicit user-selected placement fields:
+  - provider/profile id
+  - device mode
+  - device id
+  - GPU layers
+  - tensor split
+  - context size
+  - keep-loaded flag
+  - model alias when supported.
+- [ ] Define `ServeModelRequest`, `ModelServeValidationResponse`, `ServedModelStatus`, `ServingEndpointStatus`, and `ModelServeError`.
+- [ ] Define response semantics for non-critical load failures, including `loaded_models_unchanged`.
+- [ ] Add matching TypeScript payload and bridge types in `frontend/src/types/`.
+- [ ] Add RPC/preload method declarations and validation schemas without registering unimplemented behavior that returns dummy data.
+- [ ] Decide whether native bindings are in or out of scope for the first serving phase and document the decision in this plan and binding README if needed.
+
+**Verification:**
+- Rust unit tests for serving DTO serialization, deserialization, enum labels, defaults, numeric bounds, and non-critical error shaping.
+- TypeScript typecheck for new bridge and payload types.
+- Electron RPC registry/preload tests for payload validation once methods are wired.
+- Contract documentation update in `docs/contracts/desktop-rpc-methods.md`.
+
+**Status:** Planned.
+
+### Milestone 10: Add Backend Serving Facade And Status Snapshot
+
+**Goal:** Create the backend owner for user-directed serving without spreading provider-specific decisions into React or runtime-profile settings.
+
+**Tasks:**
+- [ ] Add a `ServingService` or equivalent backend service boundary.
+- [ ] Expose `PumasApi` methods:
+  - `get_serving_status`
+  - `validate_model_serving_config`
+  - `serve_model`
+  - `unserve_model`.
+- [ ] Implement validation for model existence, executable artifact readiness, provider/profile compatibility, profile state, supported file format, numeric ranges, and supported provider placement fields.
+- [ ] Resolve model paths only through `ModelLibrary`; do not accept renderer-supplied file paths.
+- [ ] Add serving snapshots/events for loaded models, failed load attempts, endpoint mode, and last non-critical errors.
+- [ ] Keep route defaults separate from immediate serving commands.
+- [ ] Preserve existing runtime profile and Ollama APIs unchanged.
+- [ ] If the first implementation uses provider endpoints directly, return `endpoint_mode = provider_endpoint` instead of claiming gateway behavior.
+
+**Verification:**
+- Rust unit tests for validation success/failure cases.
+- Rust tests proving route defaults prefill or resolve config but do not auto-load without a serve command.
+- Rust tests for non-critical error response shape and `loaded_models_unchanged`.
+- RPC tests for serving handlers once registered.
+
+**Status:** Planned.
+
+### Milestone 11: Implement Model Row/Modal Serve Vertical Slice
+
+**Goal:** Prove the user workflow from a model row or modal through backend serving validation and status display.
+
+**Tasks:**
+- [ ] Add a `Serve` action to installed model rows for eligible models.
+- [ ] Add or update a model modal serving tab/panel with profile/provider selection and device placement controls.
+- [ ] Prefill draft values from backend route/defaults while keeping draft state local until submit.
+- [ ] Call `validate_model_serving_config` before `serve_model` when the user asks for validation or when the load form is submitted.
+- [ ] Show non-critical load errors inline without closing the modal or marking the model as served.
+- [ ] Render loaded/served status only from backend status response or update events.
+- [ ] Add an unload action that calls `unserve_model`.
+- [ ] Keep controls semantic and accessible: named buttons, associated labels, keyboard-usable modal behavior, and no raw interactive divs.
+
+**Verification:**
+- Frontend test for opening the serve flow from a model row by accessible name.
+- Frontend test for serving from the modal and rendering backend-confirmed loaded status.
+- Frontend test for non-critical load error display with existing loaded-model state unchanged.
+- Frontend test for provider/device controls and unsupported-option visibility.
+- Typecheck and targeted lint for changed frontend files.
+
+**Status:** Planned.
+
+### Milestone 12: Wire Ollama Through User-Directed Serving
+
+**Goal:** Make Ollama model register/load/unload usable through the provider-neutral serving facade.
+
+**Tasks:**
+- [ ] Adapt existing Ollama create/load/unload/list-running client calls behind the serving provider interface.
+- [ ] Honor explicit user-selected profile and keep-loaded behavior.
+- [ ] Return truthful capability validation for device placement fields Ollama cannot control per model.
+- [ ] Preserve legacy `ollama_create_model`, `ollama_load_model`, and profile-aware Ollama commands.
+- [ ] Map Ollama API/load failures into non-critical serving errors where the command was valid but the model did not load.
+- [ ] Populate `ServedModelStatus` from Ollama running-model inventory.
+
+**Verification:**
+- Rust/app-manager or RPC tests for valid Ollama serving request mapping.
+- Tests showing unsupported Ollama per-model placement controls return validation errors or warnings without pretending to apply them.
+- Tests showing legacy Ollama APIs remain compatible.
+- One manual smoke path when a local Ollama runtime and small GGUF model are available.
+
+**Status:** Planned.
+
+### Milestone 13: Wire llama.cpp Through User-Directed Serving
+
+**Goal:** Make llama.cpp serving requests work through the same model-centered facade while preserving router/dedicated distinctions.
+
+**Tasks:**
+- [ ] Support router-mode serving when the selected profile can load/register multiple GGUF models from one `llama-server` router endpoint.
+- [ ] Support dedicated-mode serving through model-bound `launch_runtime_profile(profile_id, tag?, model_id?)` only when the shared endpoint facade can expose it truthfully.
+- [ ] Validate GGUF requirement, selected GPU layers, tensor split, context size, and device id before launch/load.
+- [ ] Return non-critical errors for missing binary, stopped profile, invalid GGUF, unsupported mode, and provider load failures.
+- [ ] Update generated router preset/catalog behavior only through backend-owned deterministic producers.
+- [ ] Keep conversion llama.cpp code out of serving lifecycle ownership.
+
+**Verification:**
+- Rust tests for llama.cpp serving validation and command/preset construction.
+- Rust tests for router versus dedicated endpoint mode reporting.
+- Rust tests for missing binary and invalid model non-critical error mapping.
+- Existing llama.cpp runtime profile tests still pass.
+- Manual `llama-server` smoke path when a local build is available.
+
+**Status:** Planned.
+
+### Milestone 14: Shared Endpoint/Gateway Decision And Validation
+
+**Goal:** Resolve the "same server endpoint" requirement truthfully and safely.
+
+**Tasks:**
+- [ ] Decide whether the first shipped endpoint is a Pumas gateway or provider endpoint mode.
+- [ ] If gateway mode is implemented, expose one loopback endpoint with OpenAI-compatible model listing and routing for served models.
+- [ ] Bind local-only by default and reject unsafe bind addresses unless a documented LAN mode exists.
+- [ ] Add bounded request/body/connection limits and safe error mapping at the transport boundary.
+- [ ] Ensure `/v1/models` or the equivalent endpoint reflects backend `ServedModelStatus`.
+- [ ] If gateway mode is deferred, show `provider_endpoint` status and document that one Pumas endpoint is not complete yet.
+
+**Verification:**
+- Backend or RPC tests for endpoint mode status.
+- Gateway route tests if implemented.
+- Security tests for bind address and invalid payload rejection if a listener is added.
+- Frontend test that endpoint status wording follows backend endpoint mode.
+
+**Status:** Planned.
+
+### Milestone 15: Documentation, Integration, And Release Validation For Serving
+
+**Goal:** Close the user-directed serving phase with updated docs and full-path validation.
+
+**Tasks:**
+- [ ] Update `rust/crates/pumas-core/src/api/README.md`.
+- [ ] Update `rust/crates/pumas-core/src/models/README.md`.
+- [ ] Add README for any new `pumas-core/src/serving/` directory.
+- [ ] Update `rust/crates/pumas-rpc/src/handlers/README.md`.
+- [ ] Update `frontend/src/types/README.md`.
+- [ ] Update relevant frontend component/app-panel README files.
+- [ ] Update `electron/src/README.md` if preload/bridge serving behavior changes.
+- [ ] Update `docs/contracts/desktop-rpc-methods.md`.
+- [ ] Run the vertical acceptance path from UI action to backend result/status.
+- [ ] Run frontend typecheck/build, Electron tests, Rust tests for changed crates, and release smoke where feasible.
+
+**Verification:**
+- `cargo test -p pumas-library <serving filter> --manifest-path rust/Cargo.toml`.
+- `cargo test -p pumas-rpc <serving filter> --manifest-path rust/Cargo.toml`.
+- `npm run -w frontend check:types`.
+- `npm run -w frontend test:run -- <targeted serving tests>`.
+- `npm run -w electron test`.
+- `npm run -w frontend build`.
+- `bash launcher.sh --release-smoke` when release validation is in scope.
+
+**Status:** Planned.
+
+## Lifecycle and Runtime Ownership Notes
+
+The 2026-05-08 serving update was not reviewed against the external multithreading/concurrency standard by request. The notes below capture existing runtime ownership requirements and high-level lifecycle boundaries only.
 
 - Backend starts, stops, and owns managed local runtime profile processes.
 - Each profile must have one lifecycle owner and one serialized operation queue or lock.
 - `RuntimeProfileService` or the equivalent backend owner owns profile config, provider adapter dispatch, route resolution, lifecycle state, endpoint health, event production, and snapshot generation.
+- `ServingService` or the equivalent backend owner owns user-directed serve/unserve commands, serving validation, served-model snapshots, endpoint-mode status, and non-critical load error projection.
 - Provider adapters own provider-specific process arguments, API calls, capability translation, and status parsing.
 - `ProcessManager` and `ProcessLauncher` remain lower-level process helpers. They must not own profile routing policy.
 - Start operations must validate profile config before spawning a process.
 - Stop operations must be idempotent and remove stale PID files only for the target profile.
 - Blocking process work must run outside async locks or inside explicit blocking tasks.
 - Runtime status should be reported through backend snapshots/events, not inferred by frontend mutation.
+- Serving status should be reported through backend snapshots/events, not inferred by successful button clicks or local row state.
 - Frontend runtime/profile views should not add per-profile polling. Any required health sampling for external endpoints belongs inside the backend event producer.
+- Frontend served-model views should not add per-model polling. External provider inventory refresh belongs in the backend serving/status producer.
 
 ## Public Facade Preservation
 
 - Preserve existing singleton commands and bridge methods for compatibility.
 - Add profile-aware commands append-only.
+- Add serving commands append-only.
 - Internally, singleton commands may map to the default profile after profile support exists.
 - Do not require existing callers to pass a profile ID during the first implementation wave.
 - Do not let `connection_url` become a second internal routing model. Convert it to a validated legacy/external profile boundary object before calling internal runtime/profile code.
+- Do not require React callers to orchestrate provider-specific load sequences. The model row/modal should call the provider-neutral serving facade.
+- If a Pumas gateway is not implemented in the first serving slice, the public facade must report provider endpoint mode instead of implying one shared Pumas endpoint exists.
 
 ## Optional Subagent Assignment
 
@@ -528,6 +794,9 @@ Use subagents only after contracts are frozen and work can be split without over
 | Frontend worker | Local runtime profile settings UI, runtime event subscription hook, and regression tests | Patch limited to frontend components/hooks/tests after API and event types are frozen | Backend contracts merged or branch exported |
 | Backend worker | Rust profile config, runtime-profile service, Ollama adapter, event producer, and process lifecycle | Patch limited to Rust core/app-manager/rpc lifecycle files | Contract DTOs frozen |
 | llama.cpp worker | llama.cpp provider adapter, catalog/preset generation, and provider tests | Patch limited to llama.cpp adapter files and provider-specific tests after shared contracts are frozen | Runtime profile service merged or branch exported |
+| Serving contracts owner | User-directed serving DTOs, non-critical error envelope, endpoint-mode contract, and contract tests | Patch limited to Rust model DTOs, TypeScript bridge types, RPC validation schemas, and docs | Requirements frozen |
+| Serving frontend worker | Model row/modal serve flow, loaded-model status panel, accessibility tests | Patch limited to frontend components/hooks/tests after serving contracts are frozen | Serving facade methods merged or mocked through typed bridge |
+| Serving provider worker | Ollama and llama.cpp serving adapter integration under `ServingService` | Patch limited to backend serving/provider files and focused provider tests | Serving contracts and service boundary merged |
 | Integration owner | Bridge types, preload, RPC registry, docs, final verification | Serial integration patch and build/test results | Worker patches complete |
 
 Forbidden shared files for parallel workers unless explicitly assigned to the integration owner:
@@ -535,7 +804,9 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 - `electron/src/preload.ts`
 - `frontend/src/types/api-processes.ts`
 - frontend runtime/profile event types
+- frontend serving bridge and payload types
 - `rust/crates/pumas-rpc/src/handlers/mod.rs`
+- provider-neutral serving DTO/schema files
 - persisted config schema files
 - lockfiles and generated files
 
@@ -549,10 +820,19 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 - Profile settings require a migration of existing user config rather than append-only defaults.
 - Tests reveal shared version manager changes regress ComfyUI or Torch.
 - The current model-library-only event bridge cannot be generalized without a separate event transport plan.
+- User-directed serving requires automatic eviction or placement decisions after all.
+- Provider load APIs cannot preserve existing loaded-model state on failure, making the `loaded_models_unchanged` contract impossible for a backend.
+- The first shared endpoint implementation would require a new long-lived listener with security or lifecycle behavior that exceeds the current feature slice.
+- Frontend row/modal serving cannot be implemented without exceeding component size or complexity thresholds; split the UI into dedicated subcomponents before continuing.
+- A supported native binding consumer requires serving APIs before desktop serving is complete.
 
 ## Recommendations
 
 - Treat CPU/GPU selection as Pumas runtime-profile routing. This is more truthful and more maintainable than exposing unsupported per-model Ollama flags.
+- For the next serving phase, treat CPU/GPU/hybrid selection as an explicit user-selected serving configuration. Runtime routes may prefill defaults, but Pumas should not choose placement automatically.
+- Implement `serve_model` as the row/modal entrypoint. Do not make frontend code call a provider-specific sequence such as create, load, launch, and refresh.
+- Treat load failures as non-critical domain responses when the request is valid but the selected configuration cannot be loaded.
+- Make endpoint mode explicit in backend status so the UI never overstates shared-endpoint support.
 - Make `profile_id` the canonical internal route key and keep raw endpoint URLs at compatibility/config boundaries only.
 - Put local runtime policy in a provider-neutral backend service instead of expanding singleton process-manager methods or creating provider-specific silos.
 - Implement Ollama and llama.cpp as provider adapters under that service.
@@ -568,25 +848,28 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 
 - Plan written and validated against local Coding Standards.
 - Milestone 1 automated crash-containment slice implemented and validated.
-- Milestone 2 contract DTO/bridge slice implemented and validated.
-- Milestone 2 backend persistence slice implemented and validated.
+- Milestones 2 through 8 runtime-profile, Ollama routing, llama.cpp launch support, frontend settings, documentation, and release-validation slices implemented and validated for the previous runtime-profile wave.
+- 2026-05-08 user-directed serving requirements added to the plan, with new milestones 9 through 15.
 
 ### Deviations
 
-- None.
+- 2026-05-08: The original plan treated CPU/GPU selection primarily as model-to-runtime-profile routing. The updated product requirement is stricter: users choose the device placement for each serve request, and Pumas validates/attempts that selection instead of scheduling or fitting models automatically.
+- 2026-05-08: The original plan explicitly excluded building a new inference server. The updated requirement for one shared endpoint may require a Pumas gateway/facade. The revised plan allows that work but requires endpoint status to state whether gateway mode is implemented.
 
 ### Follow-Ups
 
 - Keep the Milestone 1 manual Ollama globe smoke check in release validation even though automated crash-containment coverage is complete.
-- Implement Milestone 3 as the next thin slice: default profile resolution for one profile-aware Ollama model operation while preserving legacy `connection_url` behavior.
-- Implement runtime-profile pushed updates as a separate event-transport slice because the existing SSE/preload path is currently hardcoded to model-library notifications.
-- Re-check Ollama and llama.cpp upstream documentation before implementing hardware mode labels, because device-control and router behavior may change across versions.
+- Implement Milestone 9 next: user-directed serving contracts and non-critical error envelope.
+- Decide during Milestone 14 whether the first shared endpoint is a Pumas gateway or an explicit provider-endpoint status mode.
+- Re-check Ollama and llama.cpp upstream documentation before implementing provider-specific serving capability labels, because device-control and router behavior may change across versions.
+- Keep native binding exposure out of scope until a supported consumer requires it or add binding verification in the same implementation slice.
 
 ### Verification Summary
 
 - Read standards from `/media/jeremy/OrangeCream/Linux Software/repos/owned/developer-tooling/Coding-Standards/`.
+- For the 2026-05-08 update, intentionally excluded the multithreading/concurrency standard by request.
 - Inspected current Ollama version-manager, model UI, bridge, RPC, client, process-management surfaces, and existing llama.cpp references.
-- No implementation tests were run because this is a planning-only change.
+- No implementation tests were run for the 2026-05-08 update because this is a planning-only change.
 
 ### Traceability Links
 

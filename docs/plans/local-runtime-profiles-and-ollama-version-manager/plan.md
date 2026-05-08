@@ -608,8 +608,8 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - [x] Define `ServeModelRequest`, `ModelServeValidationResponse`, `ServedModelStatus`, `ServingEndpointStatus`, and `ModelServeError`.
 - [x] Define response semantics for non-critical load failures, including `loaded_models_unchanged`.
 - [x] Add matching TypeScript payload and bridge types in `frontend/src/types/`.
-- [ ] Add RPC/preload method declarations and validation schemas without registering unimplemented behavior that returns dummy data.
-- [ ] Decide whether native bindings are in or out of scope for the first serving phase and document the decision in this plan and binding README if needed.
+- [x] Add RPC/preload method declarations and validation schemas without registering unimplemented behavior that returns dummy data.
+- [x] Decide whether native bindings are in or out of scope for the first serving phase and document the decision in this plan and binding README if needed.
 
 **Verification:**
 - Rust unit tests for serving DTO serialization, deserialization, enum labels, defaults, numeric bounds, and non-critical error shaping.
@@ -617,34 +617,37 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Electron RPC registry/preload tests for payload validation once methods are wired.
 - Contract documentation update in `docs/contracts/desktop-rpc-methods.md`.
 
-**Status:** In progress. The first contract DTO slice is complete; RPC/preload declarations, native binding scope documentation, and handler validation remain.
+**Status:** Completed for status and validation contracts. `serve_model` and `unserve_model` remain deliberately unregistered until the backend can execute provider orchestration rather than returning placeholder behavior.
 
 **Implementation Notes:**
 - 2026-05-08: Added `pumas-core::models::serving` DTOs for user-authored serving config, endpoint mode, served-model state, safe non-critical load errors, validation responses, serving snapshots, and `loaded_models_unchanged` response semantics. The contract reuses existing typed runtime provider/profile/device DTOs instead of adding parallel string fields.
 - 2026-05-08: Added matching renderer payload types in `frontend/src/types/api-serving.ts`, exported them through the public type barrel, and documented the backend-owned serving-state contract in frontend, model, and desktop RPC docs.
 - 2026-05-08: Validated with `cargo test -p pumas-library serving --manifest-path rust/Cargo.toml` and `npm run -w frontend check:types`.
+- 2026-05-08: Added implemented `get_serving_status` and `validate_model_serving_config` RPC/preload/bridge methods with Electron request schemas. Native binding exposure is documented as out of scope until a supported binding consumer exists and host-language verification can land in the same slice.
+- 2026-05-08: Validated the callable contract slice with `cargo test -p pumas-library serving --manifest-path rust/Cargo.toml`, `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
 
 **Discovered Issues:**
 - 2026-05-08: The broader models README still contains a historical blanket statement that all DTOs use camelCase, while runtime-profile, package-facts, and serving contracts intentionally use snake_case. This slice documented serving explicitly, but a later docs cleanup should correct the broad statement without changing wire formats.
 - 2026-05-08: Electron RPC request schemas are intentionally shallow and can only treat nested serving config as an `unknown-record`; meaningful serving validation must stay in Rust RPC/service code.
 - 2026-05-08: Torch inference RPCs still bypass runtime profiles and use `connection_url`. That is outside the current Ollama/llama.cpp serving slice but should be considered before claiming a provider-general serving facade.
+- 2026-05-08: `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml` currently compiles the RPC crate but matches no focused serving tests. Add handler-level serving tests when `serve_model` and `unserve_model` are registered.
 
 ### Milestone 10: Add Backend Serving Facade And Status Snapshot
 
 **Goal:** Create the backend owner for user-directed serving without spreading provider-specific decisions into React or runtime-profile settings.
 
 **Tasks:**
-- [ ] Add a `ServingService` or equivalent backend service boundary.
+- [x] Add a `ServingService` or equivalent backend service boundary.
 - [ ] Expose `PumasApi` methods:
-  - `get_serving_status`
-  - `validate_model_serving_config`
+  - [x] `get_serving_status`
+  - [x] `validate_model_serving_config`
   - `serve_model`
   - `unserve_model`.
-- [ ] Implement validation for model existence, executable artifact readiness, provider/profile compatibility, profile state, supported file format, numeric ranges, and supported provider placement fields.
-- [ ] Resolve model paths only through `ModelLibrary`; do not accept renderer-supplied file paths.
-- [ ] Add serving snapshots/events for loaded models, failed load attempts, endpoint mode, and last non-critical errors.
+- [ ] Implement validation for model existence, executable artifact readiness, provider/profile compatibility, profile state, supported file format, numeric ranges, and supported provider placement fields. Initial validation now covers model existence, primary artifact readiness, GGUF format, provider/profile mismatch, profile running/external state, and numeric bounds; provider-specific placement capability checks remain.
+- [x] Resolve model paths only through `ModelLibrary`; do not accept renderer-supplied file paths.
+- [ ] Add serving snapshots/events for loaded models, failed load attempts, endpoint mode, and last non-critical errors. Initial in-memory status snapshot reports `endpoint_mode = not_configured`; load/error events remain.
 - [ ] Keep route defaults separate from immediate serving commands.
-- [ ] Preserve existing runtime profile and Ollama APIs unchanged.
+- [x] Preserve existing runtime profile and Ollama APIs unchanged.
 - [ ] If the first implementation uses provider endpoints directly, return `endpoint_mode = provider_endpoint` instead of claiming gateway behavior.
 
 **Verification:**
@@ -653,7 +656,11 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Rust tests for non-critical error response shape and `loaded_models_unchanged`.
 - RPC tests for serving handlers once registered.
 
-**Status:** Planned.
+**Status:** In progress. Status and validation are implemented; load/unload orchestration, provider-specific placement checks, serving events, and endpoint-mode transition behavior remain.
+
+**Implementation Notes:**
+- 2026-05-08: Added `ServingService` as the backend owner for serving snapshots and request validation. The initial snapshot is in memory and reports `endpoint_mode = not_configured` until provider endpoint or gateway behavior is implemented.
+- 2026-05-08: Added `PumasApi::get_serving_status` and `PumasApi::validate_model_serving_config`, plus RPC handlers. Validation resolves models through `ModelLibrary`, checks runtime profile provider/state through the runtime profile snapshot, and returns non-critical domain errors instead of transport failures for invalid fit/request conditions.
 
 ### Milestone 11: Implement Model Row/Modal Serve Vertical Slice
 

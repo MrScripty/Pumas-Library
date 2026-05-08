@@ -14,3 +14,8 @@ Host-language consumers should use language-specific packages or smoke harnesses
 
 ## Non-Goals
 Core domain behavior is out of scope. Reason: bindings are projection surfaces over `pumas-library`. Revisit trigger: add a host-language implementation that owns durable state.
+
+User-directed model serving is currently a desktop/RPC implementation surface.
+Serving APIs should not be added to generated host-language bindings until a
+supported binding consumer exists and native plus host-language verification can
+land in the same slice.

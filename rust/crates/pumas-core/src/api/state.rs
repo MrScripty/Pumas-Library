@@ -30,6 +30,7 @@ use crate::network;
 use crate::process;
 use crate::registry;
 use crate::runtime_profiles;
+use crate::serving;
 use crate::system;
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
@@ -244,6 +245,7 @@ pub(crate) struct PrimaryState {
     pub(crate) model_importer: model_library::ModelImporter,
     pub(crate) conversion_manager: Arc<conversion::ConversionManager>,
     pub(crate) runtime_profile_service: Arc<runtime_profiles::RuntimeProfileService>,
+    pub(crate) serving_service: Arc<serving::ServingService>,
     /// Shared owner for primary runtime task handles.
     pub(crate) runtime_tasks: RuntimeTasks,
     /// Internal scheduler for event-driven reconciliation.

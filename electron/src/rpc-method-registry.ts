@@ -33,6 +33,8 @@ export const RPC_METHOD_REGISTRY = {
     'clear_model_runtime_route',
     'launch_runtime_profile',
     'stop_runtime_profile',
+    'get_serving_status',
+    'validate_model_serving_config',
     'get_available_versions',
     'get_installed_versions',
     'get_active_version',
@@ -227,6 +229,7 @@ export const RPC_METHOD_PARAM_VALIDATION = {
   stop_torch: 'empty-record',
   get_plugins: 'empty-record',
   get_runtime_profiles_snapshot: 'empty-record',
+  get_serving_status: 'empty-record',
 } as const satisfies Partial<Record<RpcMethodName, RpcParamsValidationPolicy>>;
 
 const RPC_METHOD_PARAM_VALIDATION_BY_METHOD: Partial<
@@ -365,6 +368,11 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
   stop_runtime_profile: {
     required: {
       profile_id: 'string',
+    },
+  },
+  validate_model_serving_config: {
+    required: {
+      request: 'unknown-record',
     },
   },
   ollama_list_models_for_profile: {

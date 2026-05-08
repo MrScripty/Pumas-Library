@@ -16,6 +16,7 @@ mod reconciliation;
 mod resource_responses;
 mod runtime_profiles;
 mod runtime_tasks;
+mod serving;
 mod state;
 mod state_hf;
 mod state_process;

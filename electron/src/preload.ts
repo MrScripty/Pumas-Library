@@ -390,6 +390,9 @@ const electronAPI = {
     apiCall('launch_runtime_profile', { profile_id: profileId, tag, model_id: modelId }),
   stop_runtime_profile: (profileId: string) =>
     apiCall('stop_runtime_profile', { profile_id: profileId }),
+  get_serving_status: () => apiCall('get_serving_status'),
+  validate_model_serving_config: (request: Record<string, unknown>) =>
+    apiCall('validate_model_serving_config', { request }),
 
   // Torch Inference Server
   launch_torch: () => apiCall('launch_torch'),

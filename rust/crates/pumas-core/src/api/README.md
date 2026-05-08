@@ -15,6 +15,7 @@ Defines the primary API facade (`PumasApi`) methods that orchestrate core subsys
 | `process.rs` | Process lifecycle/status API methods. |
 | `reconciliation.rs` | Reconcile scheduling, watcher routing, and startup freshness rules. |
 | `runtime_profiles.rs` | Runtime profile snapshot, mutation, route, update-feed, and lifecycle API methods. |
+| `serving.rs` | User-directed model serving status and validation API methods. |
 | `state.rs` | Primary-state dispatch and IPC method execution. |
 | `state_hf.rs` | HuggingFace search, download, metadata-refetch, and auth helpers used by primary-state IPC dispatch. |
 | `state_process.rs` | Process lifecycle, launch, and status helpers used by primary-state IPC dispatch. |
@@ -44,6 +45,9 @@ Expose a stable host-facing API while keeping runtime ownership, reconciliation,
 - Keep runtime profile API methods in a dedicated sibling module so provider
   routing, profile mutation, status feeds, and model-route persistence stay
   backend-owned while the `PumasApi` facade remains additive.
+- Keep user-directed serving API methods in a dedicated sibling module so
+  model row/modal commands validate through a backend-owned service instead of
+  making React orchestrate provider-specific runtime calls.
 - Keep link-registry health/cleanup flows and app mapping flows in separate
   modules so `models.rs` stays centered on model-library metadata and import
   behavior.
@@ -104,6 +108,9 @@ println!("offline={}", net.is_offline);
 - Runtime profile snapshot, route, launch, stop, and update-feed methods return
   backend-confirmed state. Consumers should refresh or subscribe to profile
   events rather than inferring successful persistence from local UI state.
+- Serving status and validation methods return backend-confirmed endpoint mode,
+  served-model state, and non-critical load/validation errors. Consumers should
+  not infer loaded state from a button click or local form draft.
 - Errors are surfaced as backend errors rather than partial transport-specific states.
 - Compatibility policy is facade-first: internal reconcile and startup sequencing may evolve without changing host-facing method shapes unless a documented breaking change is introduced.
 
@@ -115,5 +122,8 @@ println!("offline={}", net.is_offline);
 - Managed llama.cpp router launch writes profile-scoped preset files derived
   from backend-indexed GGUF artifacts. Those generated files are runtime
   artifacts, not user-authored configuration.
+- Serving validation resolves models through `ModelLibrary` and profile state
+  through the runtime profile service. Renderer-supplied file paths are not
+  accepted by serving APIs.
 - Revisit trigger: generated schemas replace the hand-maintained runtime
   profile DTOs or another host needs a versioned compatibility guarantee.

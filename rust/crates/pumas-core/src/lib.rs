@@ -48,6 +48,7 @@ pub mod plugins;
 pub mod process;
 pub mod registry;
 pub mod runtime_profiles;
+pub mod serving;
 pub mod system;
 
 mod api;

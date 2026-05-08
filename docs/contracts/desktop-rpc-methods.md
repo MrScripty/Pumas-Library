@@ -19,7 +19,7 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
 | --- | --- | --- |
 | Status and system | `get_status`, `get_disk_space`, `get_system_resources`, `get_network_status` | `rust/crates/pumas-rpc/src/handlers/status.rs` |
 | Local runtime profiles | `get_runtime_profiles_snapshot`, `list_runtime_profile_updates_since`, `upsert_runtime_profile`, `set_model_runtime_route` | `rust/crates/pumas-rpc/src/handlers/runtime_profiles.rs` |
-| User-directed serving | Planned `get_serving_status`, `validate_model_serving_config`, `serve_model`, `unserve_model` methods use the `pumas-core::models::serving` DTO contract before handler registration. | Planned `rust/crates/pumas-rpc/src/handlers/serving.rs` |
+| User-directed serving | `get_serving_status`, `validate_model_serving_config`; planned `serve_model`, `unserve_model` after provider orchestration lands | `rust/crates/pumas-rpc/src/handlers/serving.rs` |
 | Version management | `get_available_versions`, `install_version`, `switch_version`, `get_installation_progress` | `rust/crates/pumas-rpc/src/handlers/versions/` |
 | Model library | `get_models`, `import_model`, `search_hf_models`, `get_library_model_metadata` | `rust/crates/pumas-rpc/src/handlers/models/` |
 | Process control | `launch_comfyui`, `stop_comfyui`, `open_path`, `open_url` | `rust/crates/pumas-rpc/src/handlers/process.rs` |

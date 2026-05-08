@@ -8,6 +8,7 @@ mod ollama;
 mod plugins;
 mod process;
 mod runtime_profiles;
+mod serving;
 mod shared;
 mod shortcuts;
 mod status;
@@ -608,6 +609,12 @@ async fn dispatch_method(
         }
         "launch_runtime_profile" => runtime_profiles::launch_runtime_profile(state, params).await,
         "stop_runtime_profile" => runtime_profiles::stop_runtime_profile(state, params).await,
+
+        // User-Directed Serving
+        "get_serving_status" => serving::get_serving_status(state, params).await,
+        "validate_model_serving_config" => {
+            serving::validate_model_serving_config(state, params).await
+        }
 
         // Version Management
         "get_available_versions" => versions::get_available_versions(state, params).await,

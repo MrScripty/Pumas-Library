@@ -578,6 +578,7 @@ impl PumasApiBuilder {
             runtime_profile_service: Arc::new(crate::runtime_profiles::RuntimeProfileService::new(
                 &self.launcher_root,
             )),
+            serving_service: Arc::new(crate::serving::ServingService::new()),
             runtime_tasks: runtime_tasks.clone(),
             reconciliation: Arc::new(ReconciliationCoordinator::new(
                 Duration::from_secs(5),

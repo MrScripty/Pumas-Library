@@ -34,6 +34,11 @@ import type {
   RuntimeProfilesSnapshotResponse,
 } from './api-runtime-profiles';
 import type {
+  ModelServeValidationResponse,
+  ServeModelRequest,
+  ServingStatusResponse,
+} from './api-serving';
+import type {
   CacheStatusResponse,
   CancelInstallationResponse,
   GetActiveVersionResponse,
@@ -134,6 +139,10 @@ export interface DesktopBridgeRuntimeAPI {
     modelId?: string | null
   ): Promise<LaunchResponse>;
   stop_runtime_profile(profileId: string): Promise<StopOllamaResponse>;
+  get_serving_status(): Promise<ServingStatusResponse>;
+  validate_model_serving_config(
+    request: ServeModelRequest
+  ): Promise<ModelServeValidationResponse>;
 
   // Ollama Model Management
   ollama_list_models(connectionUrl?: string): Promise<OllamaListModelsResponse>;

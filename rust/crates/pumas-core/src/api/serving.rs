@@ -50,6 +50,8 @@ impl PumasApi {
                     .unwrap_or(RuntimeLifecycleState::Unknown);
                 ServingValidationProfile {
                     provider: profile.provider,
+                    provider_mode: profile.provider_mode,
+                    management_mode: profile.management_mode,
                     state,
                     device_mode: profile.device.mode,
                     device_id: profile.device.device_id.clone(),

@@ -8,14 +8,16 @@ use tokio::sync::RwLock;
 
 use crate::models::{
     ModelServeError, ModelServeErrorCode, ModelServeValidationResponse, RuntimeDeviceMode,
-    RuntimeLifecycleState, RuntimeProfileId, RuntimeProviderId, ServeModelRequest,
-    ServedModelStatus, ServingEndpointMode, ServingEndpointStatus, ServingStatusResponse,
-    ServingStatusSnapshot,
+    RuntimeLifecycleState, RuntimeManagementMode, RuntimeProfileId, RuntimeProviderId,
+    RuntimeProviderMode, ServeModelRequest, ServedModelStatus, ServingEndpointMode,
+    ServingEndpointStatus, ServingStatusResponse, ServingStatusSnapshot,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServingValidationProfile {
     pub provider: RuntimeProviderId,
+    pub provider_mode: RuntimeProviderMode,
+    pub management_mode: RuntimeManagementMode,
     pub state: RuntimeLifecycleState,
     pub device_mode: RuntimeDeviceMode,
     pub device_id: Option<String>,
@@ -181,10 +183,7 @@ pub fn validate_model_serving_request(
                 );
             }
 
-            if !matches!(
-                profile.state,
-                RuntimeLifecycleState::Running | RuntimeLifecycleState::External
-            ) {
+            if !profile_accepts_serving_operation(profile) {
                 errors.push(
                     ModelServeError::non_critical(
                         ModelServeErrorCode::ProfileStopped,
@@ -236,6 +235,25 @@ pub fn validate_model_serving_request(
     }
 
     ModelServeValidationResponse::from_errors(errors)
+}
+
+fn profile_accepts_serving_operation(profile: &ServingValidationProfile) -> bool {
+    if matches!(
+        profile.state,
+        RuntimeLifecycleState::Running | RuntimeLifecycleState::External
+    ) {
+        return true;
+    }
+
+    profile.provider == RuntimeProviderId::LlamaCpp
+        && profile.provider_mode == RuntimeProviderMode::LlamaCppDedicated
+        && profile.management_mode == RuntimeManagementMode::Managed
+        && matches!(
+            profile.state,
+            RuntimeLifecycleState::Stopped
+                | RuntimeLifecycleState::Failed
+                | RuntimeLifecycleState::Unknown
+        )
 }
 
 fn validate_provider_placement(
@@ -344,6 +362,8 @@ mod tests {
             primary_artifact_extension: Some("gguf".to_string()),
             profile: Some(ServingValidationProfile {
                 provider: RuntimeProviderId::Ollama,
+                provider_mode: RuntimeProviderMode::OllamaServe,
+                management_mode: RuntimeManagementMode::Managed,
                 state: RuntimeLifecycleState::Running,
                 device_mode: RuntimeDeviceMode::Auto,
                 device_id: None,
@@ -426,6 +446,8 @@ mod tests {
         context.primary_artifact_extension = None;
         context.profile = Some(ServingValidationProfile {
             provider: RuntimeProviderId::LlamaCpp,
+            provider_mode: RuntimeProviderMode::LlamaCppRouter,
+            management_mode: RuntimeManagementMode::Managed,
             state: RuntimeLifecycleState::Stopped,
             device_mode: RuntimeDeviceMode::Auto,
             device_id: None,
@@ -482,8 +504,33 @@ mod tests {
         let mut context = valid_context();
         context.profile = Some(ServingValidationProfile {
             provider: RuntimeProviderId::Ollama,
+            provider_mode: RuntimeProviderMode::OllamaServe,
+            management_mode: RuntimeManagementMode::Managed,
             state: RuntimeLifecycleState::Running,
             device_mode: RuntimeDeviceMode::Cpu,
+            device_id: None,
+        });
+
+        let response = validate_model_serving_request(&request, &context);
+
+        assert!(response.valid);
+    }
+
+    #[test]
+    fn validation_accepts_stopped_managed_llama_cpp_dedicated_profile() {
+        let mut request = request();
+        request.config.provider = RuntimeProviderId::LlamaCpp;
+        request.config.profile_id = RuntimeProfileId::parse("llama-dedicated").unwrap();
+        request.config.device_mode = RuntimeDeviceMode::Hybrid;
+        request.config.gpu_layers = Some(24);
+
+        let mut context = valid_context();
+        context.profile = Some(ServingValidationProfile {
+            provider: RuntimeProviderId::LlamaCpp,
+            provider_mode: RuntimeProviderMode::LlamaCppDedicated,
+            management_mode: RuntimeManagementMode::Managed,
+            state: RuntimeLifecycleState::Stopped,
+            device_mode: RuntimeDeviceMode::Hybrid,
             device_id: None,
         });
 

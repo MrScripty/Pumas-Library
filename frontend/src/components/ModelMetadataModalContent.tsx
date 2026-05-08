@@ -31,6 +31,7 @@ interface ModelMetadataModalContentProps {
   expandedFieldKeys: Set<string>;
   inferenceSettings: InferenceParamSchema[];
   modelId: string;
+  modelName: string;
   newParam: {
     key: string;
     label: string;
@@ -92,6 +93,7 @@ export function ModelMetadataModalContent({
   expandedFieldKeys,
   inferenceSettings,
   modelId,
+  modelName,
   newParam,
   notesDirty,
   notesDraft,
@@ -220,7 +222,11 @@ export function ModelMetadataModalContent({
           </div>
         )
       ) : activeSource === 'runtime' ? (
-        <ModelRuntimeRouteEditor modelId={modelId} />
+        <ModelRuntimeRouteEditor
+          modelId={modelId}
+          modelName={modelName}
+          primaryFile={primaryFile}
+        />
       ) : activeSource === 'notes' ? (
         <ModelNotesEditor
           notesDraft={notesDraft}

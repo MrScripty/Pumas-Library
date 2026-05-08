@@ -1,13 +1,31 @@
 import { useEffect, useMemo, useState } from 'react';
-import { RotateCcw, Save } from 'lucide-react';
+import { Play, RotateCcw, Save } from 'lucide-react';
 import { getElectronAPI } from '../api/adapter';
 import { useRuntimeProfiles } from '../hooks/useRuntimeProfiles';
+import type { ModelInfo } from '../types/apps';
+import { ModelServeDialog } from './ModelServeDialog';
 
 interface ModelRuntimeRouteEditorProps {
   modelId: string;
+  modelName: string;
+  primaryFile: string | null;
 }
 
-export function ModelRuntimeRouteEditor({ modelId }: ModelRuntimeRouteEditorProps) {
+function getPrimaryFormat(primaryFile: string | null): ModelInfo['primaryFormat'] {
+  if (primaryFile?.toLowerCase().endsWith('.gguf')) {
+    return 'gguf';
+  }
+  if (primaryFile?.toLowerCase().endsWith('.safetensors')) {
+    return 'safetensors';
+  }
+  return undefined;
+}
+
+export function ModelRuntimeRouteEditor({
+  modelId,
+  modelName,
+  primaryFile,
+}: ModelRuntimeRouteEditorProps) {
   const {
     profiles,
     routes,
@@ -24,6 +42,7 @@ export function ModelRuntimeRouteEditor({ modelId }: ModelRuntimeRouteEditorProp
   const [autoLoad, setAutoLoad] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showServeDialog, setShowServeDialog] = useState(false);
 
   useEffect(() => {
     setProfileId(currentRoute?.profile_id ?? '');
@@ -143,6 +162,14 @@ export function ModelRuntimeRouteEditor({ modelId }: ModelRuntimeRouteEditorProp
       <div className="flex justify-end gap-2">
         <button
           type="button"
+          onClick={() => setShowServeDialog(true)}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[hsl(var(--border-default))] text-xs text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))]"
+        >
+          <Play className="w-3.5 h-3.5" />
+          Serve
+        </button>
+        <button
+          type="button"
           onClick={() => void handleClear()}
           disabled={isSaving || !currentRoute}
           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[hsl(var(--border-default))] text-xs text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] disabled:opacity-50"
@@ -160,6 +187,17 @@ export function ModelRuntimeRouteEditor({ modelId }: ModelRuntimeRouteEditorProp
           {isSaving ? 'Saving' : 'Save'}
         </button>
       </div>
+      {showServeDialog && (
+        <ModelServeDialog
+          model={{
+            id: modelId,
+            name: modelName,
+            category: 'local',
+            primaryFormat: getPrimaryFormat(primaryFile),
+          }}
+          onClose={() => setShowServeDialog(false)}
+        />
+      )}
     </div>
   );
 }

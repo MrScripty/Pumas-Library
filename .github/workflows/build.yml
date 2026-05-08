@@ -43,10 +43,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Setup Windows RAM disk
-        if: runner.os == 'Windows'
-        uses: ./.github/actions/setup-windows-ramdisk
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:

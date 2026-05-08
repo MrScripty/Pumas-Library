@@ -758,7 +758,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - 2026-05-08: Added router-profile serving. Running llama.cpp router profiles now record selected models as served through the router endpoint, using the existing deterministic backend-generated router catalog/preset behavior from runtime profile launch. Router unload removes the served-model record without stopping the shared router process.
 
 **Discovered Issues:**
-- 2026-05-08: The dedicated llama.cpp serving path currently uses the runtime profile's provider endpoint directly. This is truthful through `endpoint_mode = provider_endpoint`, but it does not satisfy the final "same Pumas endpoint for simultaneous models" requirement until the gateway/router milestone lands.
+- 2026-05-08: The dedicated llama.cpp serving path initially used only the runtime profile's provider endpoint. Resolved the same day by adding the Pumas `/v1` gateway and reporting aggregate serving status as `pumas_gateway` when models are loaded.
 
 ### Milestone 14: Shared Endpoint/Gateway Decision And Validation
 
@@ -770,7 +770,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - [x] Bind local-only by default and reject unsafe bind addresses unless a documented LAN mode exists.
 - [x] Add bounded request/body/connection limits and safe error mapping at the transport boundary.
 - [x] Ensure `/v1/models` or the equivalent endpoint reflects backend `ServedModelStatus`.
-- [x] If gateway mode is deferred, show `provider_endpoint` status and document that one Pumas endpoint is not complete yet.
+- [x] If gateway mode is deferred, show `provider_endpoint` status and document that one Pumas endpoint is not complete yet. Gateway mode was not deferred.
 
 **Verification:**
 - Backend or RPC tests for endpoint mode status.
@@ -781,10 +781,6 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 **Implementation Notes:**
 - 2026-05-08: Added OpenAI-compatible gateway routes to `pumas-rpc`. `/v1/models` lists loaded `ServedModelStatus` entries, and proxy routes forward JSON requests to the selected model's provider endpoint. If a served model has a provider alias, the gateway rewrites the outgoing `model` field to that alias. Validated with `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml`.
 - 2026-05-08: Added an explicit 32 MiB request body limit to the RPC/gateway server. This complements the existing in-flight request limit and loopback-by-default bind guard.
-- Security tests for bind address and invalid payload rejection if a listener is added.
-- Frontend test that endpoint status wording follows backend endpoint mode.
-
-**Status:** Planned.
 
 ### Milestone 15: Documentation, Integration, And Release Validation For Serving
 
@@ -800,7 +796,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - [x] Update `electron/src/README.md` if preload/bridge serving behavior changes.
 - [x] Update `docs/contracts/desktop-rpc-methods.md`.
 - [ ] Run the vertical acceptance path from UI action to backend result/status.
-- [ ] Run frontend typecheck/build, Electron tests, Rust tests for changed crates, and release smoke where feasible.
+- [ ] Run frontend typecheck/build, Electron tests, Rust tests for changed crates, and release smoke where feasible. Automated Rust/frontend/Electron validation passed; release smoke is blocked by an already-running Pumas owner process for this launcher root.
 
 **Verification:**
 - `cargo test -p pumas-library <serving filter> --manifest-path rust/Cargo.toml`.
@@ -811,10 +807,12 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - `npm run -w frontend build`.
 - `bash launcher.sh --release-smoke` when release validation is in scope.
 
-**Status:** In progress. Core API/model/serving, RPC handler, frontend type/component, Electron, and desktop RPC contract docs now reflect the serving status/update-feed contract. Vertical UI smoke, frontend build, and release smoke remain.
+**Status:** In progress. Core API/model/serving, RPC handler, frontend type/component, Electron, and desktop RPC contract docs now reflect the serving status/update-feed contract. Automated frontend build, targeted frontend serving tests, Electron tests, and focused Rust serving tests pass. Manual vertical UI smoke and release smoke remain; release smoke was blocked locally by an existing owner process for this launcher root.
 
 **Implementation Notes:**
 - 2026-05-08: Updated serving contract documentation and added `pumas-core/src/serving/README.md`. Corrected the stale models README claim that all DTOs use camelCase; newer runtime-profile, package-facts, and serving DTOs intentionally use snake_case.
+- 2026-05-08: Validated with `cargo test -p pumas-library serving --manifest-path rust/Cargo.toml`, `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml`, `npm run -w frontend build`, `npm run -w frontend test:run -- ModelMetadataModal LocalModelInstalledActions`, and `npm run -w electron test`.
+- 2026-05-08: `bash launcher.sh --release-smoke` was attempted but did not complete because the release backend refused to start while another Pumas instance already owned `/media/jeremy/OrangeCream/Linux Software/repos/owned/ai-systems/Pumas-Library` (`pid 2940353`), then the bounded smoke window timed out.
 
 ## Lifecycle and Runtime Ownership Notes
 

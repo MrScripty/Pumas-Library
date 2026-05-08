@@ -46,6 +46,7 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
   const [message, setMessage] = useState<string | null>(null);
   const [serveError, setServeError] = useState<ModelServeError | null>(null);
   const [servedStatus, setServedStatus] = useState<ServedModelStatus | null>(null);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const profileSelectRef = useRef<HTMLSelectElement | null>(null);
 
   useEffect(() => {
@@ -54,6 +55,33 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         onClose();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) {
+        return;
+      }
+
+      const focusableElements = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      if (focusableElements.length === 0) {
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      if (!firstElement || !lastElement) {
+        return;
+      }
+
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
       }
     };
 
@@ -189,7 +217,10 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
       aria-modal="true"
       aria-labelledby="model-serve-title"
     >
-      <div className="w-full max-w-lg rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-panel))] p-4 shadow-xl">
+      <div
+        ref={dialogRef}
+        className="w-full max-w-lg rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-panel))] p-4 shadow-xl"
+      >
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 id="model-serve-title" className="text-sm font-semibold text-[hsl(var(--text-primary))]">

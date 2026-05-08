@@ -679,7 +679,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - [x] Show non-critical load errors inline without closing the modal or marking the model as served.
 - [x] Render loaded/served status only from backend status response or update events.
 - [x] Add an unload action that calls `unserve_model`.
-- [ ] Keep controls semantic and accessible: named buttons, associated labels, keyboard-usable modal behavior, and no raw interactive divs. Initial dialog uses semantic controls, dialog roles, initial focus, and Escape dismissal; full focus trap should be added or delegated to the existing modal shell.
+- [x] Keep controls semantic and accessible: named buttons, associated labels, keyboard-usable modal behavior, and no raw interactive divs.
 
 **Verification:**
 - Frontend test for opening the serve flow from a model row by accessible name.
@@ -688,7 +688,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Frontend test for provider/device controls and unsupported-option visibility.
 - Typecheck and targeted lint for changed frontend files.
 
-**Status:** In progress. Installed model rows and the model modal Runtime Route tab now expose the user-directed Serve dialog, which initializes loaded status from backend `get_serving_status` and can unload through `unserve_model`. A full focus trap remains.
+**Status:** Complete for the first row/modal serving workflow. Installed model rows and the model modal Runtime Route tab expose the user-directed Serve dialog, which initializes loaded status from backend `get_serving_status`, validates before load, can unload through `unserve_model`, and keeps keyboard focus inside the dialog.
 
 **Implementation Notes:**
 - 2026-05-08: Added `ModelServeDialog` and row action wiring through `LocalModelsList`, `LocalModelRow`, `LocalModelRowActions`, and `LocalModelInstalledActions`. The dialog loads backend runtime profiles, keeps serving placement values as local form drafts, validates through `validate_model_serving_config`, then submits through `serve_model`.
@@ -696,6 +696,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - 2026-05-08: Added dialog unload support through `unserve_model`, initial focus on the profile selector, and Escape dismissal. Validated with `npm run -w frontend check:types`.
 - 2026-05-08: The serving dialog now initializes its loaded/unload state from backend `get_serving_status` and still treats command responses as backend-confirmed state. Validated with `npm run -w frontend check:types`.
 - 2026-05-08: Added a Serve action to the model modal Runtime Route tab by reusing `ModelServeDialog` from `ModelRuntimeRouteEditor`. Validated with `npm run -w frontend test:run -- ModelMetadataModal LocalModelInstalledActions` and `npm run -w frontend check:types`.
+- 2026-05-08: Added focus trapping to the serving dialog. Validated with `npm run -w frontend check:types`.
 
 **Discovered Issues:**
 - 2026-05-08: The first serving dialog uses its own lightweight dialog shell rather than the existing metadata modal frame. Before broadening modal serving UX, reuse or extract the existing modal focus-trap behavior so serving controls meet the same keyboard expectations.

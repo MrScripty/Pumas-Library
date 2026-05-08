@@ -677,7 +677,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - [x] Prefill draft values from backend route/defaults while keeping draft state local until submit.
 - [x] Call `validate_model_serving_config` before `serve_model` when the user asks for validation or when the load form is submitted.
 - [x] Show non-critical load errors inline without closing the modal or marking the model as served.
-- [ ] Render loaded/served status only from backend status response or update events.
+- [x] Render loaded/served status only from backend status response or update events.
 - [x] Add an unload action that calls `unserve_model`.
 - [ ] Keep controls semantic and accessible: named buttons, associated labels, keyboard-usable modal behavior, and no raw interactive divs. Initial dialog uses semantic controls, dialog roles, initial focus, and Escape dismissal; full focus trap should be added or delegated to the existing modal shell.
 
@@ -688,12 +688,13 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Frontend test for provider/device controls and unsupported-option visibility.
 - Typecheck and targeted lint for changed frontend files.
 
-**Status:** In progress. Installed model rows now expose a Serve action that opens a user-directed serving dialog and submits through backend validation plus `serve_model`; the dialog can unload the model through `unserve_model`. Modal-tab integration, backend status rendering, and a full focus trap remain.
+**Status:** In progress. Installed model rows now expose a Serve action that opens a user-directed serving dialog and submits through backend validation plus `serve_model`; the dialog initializes loaded status from backend `get_serving_status` and can unload through `unserve_model`. Modal-tab integration and a full focus trap remain.
 
 **Implementation Notes:**
 - 2026-05-08: Added `ModelServeDialog` and row action wiring through `LocalModelsList`, `LocalModelRow`, `LocalModelRowActions`, and `LocalModelInstalledActions`. The dialog loads backend runtime profiles, keeps serving placement values as local form drafts, validates through `validate_model_serving_config`, then submits through `serve_model`.
 - 2026-05-08: Validated the row action slice with `npm run -w frontend test:run -- LocalModelInstalledActions` and `npm run -w frontend check:types`.
 - 2026-05-08: Added dialog unload support through `unserve_model`, initial focus on the profile selector, and Escape dismissal. Validated with `npm run -w frontend check:types`.
+- 2026-05-08: The serving dialog now initializes its loaded/unload state from backend `get_serving_status` and still treats command responses as backend-confirmed state. Validated with `npm run -w frontend check:types`.
 
 **Discovered Issues:**
 - 2026-05-08: The first serving dialog uses its own lightweight dialog shell rather than the existing metadata modal frame. Before broadening modal serving UX, reuse or extract the existing modal focus-trap behavior so serving controls meet the same keyboard expectations.

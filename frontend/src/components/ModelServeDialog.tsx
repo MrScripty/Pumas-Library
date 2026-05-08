@@ -72,6 +72,31 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
     }
   }, [defaultProfileId, profileId, servingProfiles]);
 
+  useEffect(() => {
+    const api = getElectronAPI();
+    if (!api?.get_serving_status) {
+      return;
+    }
+
+    let isActive = true;
+    void api.get_serving_status().then((response) => {
+      if (!isActive || !response.success) {
+        return;
+      }
+      const status = response.snapshot.served_models.find(
+        (servedModel) => servedModel.model_id === model.id
+      );
+      setServedStatus(status ?? null);
+      if (status) {
+        setMessage(`Loaded on ${status.profile_id}`);
+      }
+    });
+
+    return () => {
+      isActive = false;
+    };
+  }, [model.id]);
+
   const selectedProfile = servingProfiles.find((profile) => profile.profile_id === profileId);
   const canServe = Boolean(selectedProfile && isGgufModel(model) && !isSubmitting);
 

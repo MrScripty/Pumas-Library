@@ -79,6 +79,7 @@ export function RuntimeProfileSettingsSection() {
   } = useRuntimeProfiles();
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [draft, setDraft] = useState<RuntimeProfileDraft>(() => newProfileDraft());
+  const [isCreatingProfile, setIsCreatingProfile] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -92,16 +93,16 @@ export function RuntimeProfileSettingsSection() {
   );
 
   useEffect(() => {
-    if (!selectedProfileId && profiles.length > 0) {
+    if (!isCreatingProfile && !selectedProfileId && profiles.length > 0) {
       setSelectedProfileId(profiles[0]?.profile_id ?? null);
     }
-  }, [profiles, selectedProfileId]);
+  }, [isCreatingProfile, profiles, selectedProfileId]);
 
   useEffect(() => {
-    if (selectedProfile) {
+    if (!isCreatingProfile && selectedProfile) {
       setDraft(profileToDraft(selectedProfile));
     }
-  }, [selectedProfile]);
+  }, [isCreatingProfile, selectedProfile]);
 
   const updateDraft = <Key extends keyof RuntimeProfileDraft>(
     key: Key,
@@ -118,8 +119,15 @@ export function RuntimeProfileSettingsSection() {
 
   const handleNewProfile = () => {
     const nextDraft = newProfileDraft();
+    setIsCreatingProfile(true);
     setSelectedProfileId(null);
     setDraft(nextDraft);
+    setSaveError(null);
+  };
+
+  const handleSelectProfile = (profileId: string) => {
+    setIsCreatingProfile(false);
+    setSelectedProfileId(profileId);
     setSaveError(null);
   };
 
@@ -138,6 +146,7 @@ export function RuntimeProfileSettingsSection() {
         setSaveError(response.error ?? 'Failed to save runtime profile');
         return;
       }
+      setIsCreatingProfile(false);
       setSelectedProfileId(profile.profile_id);
       await refreshRuntimeProfiles();
     } catch (caught) {
@@ -161,6 +170,7 @@ export function RuntimeProfileSettingsSection() {
         setSaveError(response.error ?? 'Failed to delete runtime profile');
         return;
       }
+      setIsCreatingProfile(false);
       setSelectedProfileId(null);
       setDraft(newProfileDraft());
       await refreshRuntimeProfiles();
@@ -204,7 +214,7 @@ export function RuntimeProfileSettingsSection() {
           statuses={statuses}
           selectedProfileId={selectedProfileId}
           isLoading={isLoading}
-          onSelectProfile={setSelectedProfileId}
+          onSelectProfile={handleSelectProfile}
         />
         <RuntimeProfileEditor
           draft={draft}

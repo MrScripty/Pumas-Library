@@ -959,7 +959,7 @@ fn derive_managed_profile_launch_specs(
     launcher_root: &Path,
     config: &RuntimeProfilesConfigFile,
 ) -> Result<Vec<RuntimeProfileLaunchSpec>> {
-    let mut used_ports = HashSet::new();
+    let mut used_ports: HashMap<u16, RuntimeProfileId> = HashMap::new();
     let mut profiles = config
         .profiles
         .iter()
@@ -971,23 +971,30 @@ fn derive_managed_profile_launch_specs(
     for profile in profiles {
         let port = match profile.port {
             Some(port) => {
-                if !used_ports.insert(port.value()) {
+                if let Some(existing_profile_id) = used_ports.get(&port.value()) {
                     return Err(PumasError::InvalidParams {
-                        message: format!("runtime profile port collision: {}", port.value()),
+                        message: format!(
+                            "runtime profile port collision: {} is already used by {}; choose a unique managed profile process port or leave the port blank for automatic allocation",
+                            port.value(),
+                            existing_profile_id.as_str()
+                        ),
                     });
                 }
+                used_ports.insert(port.value(), profile.profile_id.clone());
                 port
             }
             None => match profile.endpoint_url.as_ref().and_then(endpoint_port) {
                 Some(port) => {
-                    if !used_ports.insert(port.value()) {
+                    if let Some(existing_profile_id) = used_ports.get(&port.value()) {
                         return Err(PumasError::InvalidParams {
                             message: format!(
-                                "runtime profile endpoint port collision: {}",
-                                port.value()
+                                "runtime profile endpoint port collision: {} is already used by {}; choose a unique managed profile endpoint or leave the endpoint blank for automatic allocation",
+                                port.value(),
+                                existing_profile_id.as_str()
                             ),
                         });
                     }
+                    used_ports.insert(port.value(), profile.profile_id.clone());
                     port
                 }
                 None => allocate_implicit_runtime_port(profile, &mut used_ports)?,
@@ -1060,7 +1067,7 @@ fn resolve_config_profile_endpoint(
 
 fn allocate_implicit_runtime_port(
     profile: &RuntimeProfileConfig,
-    used_ports: &mut HashSet<u16>,
+    used_ports: &mut HashMap<u16, RuntimeProfileId>,
 ) -> Result<RuntimePort> {
     let base_port = provider_base_port(profile.provider);
     let start_offset = implicit_port_offset(profile.profile_id.as_str());
@@ -1072,7 +1079,8 @@ fn allocate_implicit_runtime_port(
             continue;
         }
         let candidate = candidate as u16;
-        if used_ports.insert(candidate) {
+        if let std::collections::hash_map::Entry::Vacant(entry) = used_ports.entry(candidate) {
+            entry.insert(profile.profile_id.clone());
             return RuntimePort::parse(candidate).map_err(|message| PumasError::InvalidParams {
                 message: format!("invalid implicit runtime port: {message}"),
             });
@@ -1677,7 +1685,10 @@ mod tests {
         duplicate_port_profile.name = "Ollama Duplicate".to_string();
 
         let result = service.upsert_profile(duplicate_port_profile).await;
-        assert!(result.is_err());
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("runtime profile port collision: 11434"));
+        assert!(error.contains("ollama-default"));
+        assert!(error.contains("leave the port blank"));
     }
 
     #[tokio::test]

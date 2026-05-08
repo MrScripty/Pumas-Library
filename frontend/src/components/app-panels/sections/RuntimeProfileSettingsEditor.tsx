@@ -122,6 +122,8 @@ export function RuntimeProfileEditor({
   onSave,
   onUpdateDraft,
 }: RuntimeProfileEditorProps) {
+  const isManagedProfile = draft.management_mode === 'managed';
+
   return (
     <div className="space-y-3 px-3 py-3 rounded-lg bg-[hsl(var(--launcher-bg-secondary)/0.3)] border border-[hsl(var(--launcher-border)/0.3)]">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -198,24 +200,36 @@ export function RuntimeProfileEditor({
           </select>
         </label>
         <label className="space-y-1 text-xs text-[hsl(var(--launcher-text-muted))] md:col-span-2">
-          <span>Endpoint URL</span>
+          <span>{isManagedProfile ? 'Managed endpoint override' : 'External endpoint URL'}</span>
           <input
             value={draft.endpoint_url}
             onChange={(event) => onUpdateDraft('endpoint_url', event.target.value)}
-            placeholder="http://127.0.0.1:11434"
+            placeholder={isManagedProfile ? 'Auto from process port' : 'http://127.0.0.1:11434'}
             className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary))] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))]"
           />
+          <span className="block text-[hsl(var(--launcher-text-muted)/0.75)]">
+            {isManagedProfile
+              ? 'Leave blank unless this managed process must bind a specific host URL.'
+              : 'Required for external profiles that Pumas does not launch.'}
+          </span>
         </label>
         <label className="space-y-1 text-xs text-[hsl(var(--launcher-text-muted))]">
-          <span>Port</span>
+          <span>{isManagedProfile ? 'Managed process port' : 'Endpoint port'}</span>
           <input
             type="number"
             min={1}
             max={65535}
             value={draft.port}
             onChange={(event) => onUpdateDraft('port', event.target.value)}
+            placeholder={isManagedProfile ? 'Auto' : undefined}
             className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary))] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))]"
           />
+          {isManagedProfile && (
+            <span className="block text-[hsl(var(--launcher-text-muted)/0.75)]">
+              Leave blank for a unique auto-assigned port. Do not reuse 11434 unless replacing the
+              default Ollama profile.
+            </span>
+          )}
         </label>
         <label className="space-y-1 text-xs text-[hsl(var(--launcher-text-muted))]">
           <span>Device ID</span>

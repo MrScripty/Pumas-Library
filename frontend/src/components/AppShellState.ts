@@ -38,6 +38,7 @@ export interface SetupDisplayState {
 
 interface BuildManagedAppsStateOptions {
   comfyui: AppProcessVisualState;
+  llamaCpp: AppProcessVisualState;
   ollama: AppProcessVisualState;
   running: AppRunningState;
   status: StatusResponse | null | undefined;
@@ -137,6 +138,7 @@ export function getLauncherLatestVersion(
 
 export function buildManagedAppsState({
   comfyui,
+  llamaCpp,
   ollama,
   running,
   status,
@@ -158,6 +160,10 @@ export function buildManagedAppsState({
       isRunning: running.ollamaRunning,
       ramMemory: appResources?.ollama?.ram_memory,
       gpuMemory: appResources?.ollama?.gpu_memory,
+    },
+    llamaCpp: {
+      ...llamaCpp,
+      isRunning: false,
     },
     torch: {
       ...torch,

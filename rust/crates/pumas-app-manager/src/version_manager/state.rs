@@ -472,6 +472,31 @@ impl VersionState {
                     vec![root_path]
                 }
             }
+            AppId::LlamaCpp => {
+                let binary_name = if cfg!(windows) {
+                    "llama-server.exe"
+                } else {
+                    "llama-server"
+                };
+                let candidates = [
+                    version_path.join("bin").join(binary_name),
+                    version_path.join(binary_name),
+                    version_path.join("build").join("bin").join(binary_name),
+                ];
+                for candidate in &candidates {
+                    if fs::try_exists(candidate)
+                        .await
+                        .map_err(|e| PumasError::Io {
+                            message: format!("Failed to check binary path: {}", e),
+                            path: Some(candidate.clone()),
+                            source: Some(e),
+                        })?
+                    {
+                        return Ok(true);
+                    }
+                }
+                vec![candidates[0].clone()]
+            }
             _ => {
                 // Generic check - just need the directory to exist
                 vec![version_path.to_path_buf()]

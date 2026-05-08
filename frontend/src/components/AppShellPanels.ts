@@ -77,6 +77,11 @@ export function buildAppShellPanels({
       isOllamaRunning,
       modelGroups,
     },
+    llamaCpp: {
+      ...sharedVersionProps,
+      connectionUrl,
+      modelManagerProps,
+    },
     torch: {
       ...sharedVersionProps,
       connectionUrl,

@@ -42,6 +42,26 @@ export function modeLabel(mode: RuntimeProviderMode): string {
   }
 }
 
+const providerDeviceModes: Record<RuntimeProviderId, RuntimeDeviceMode[]> = {
+  ollama: ['auto', 'cpu', 'gpu', 'hybrid'],
+  llama_cpp: ['auto', 'cpu', 'gpu', 'specific_device'],
+};
+
+function deviceModeLabel(mode: RuntimeDeviceMode): string {
+  switch (mode) {
+    case 'auto':
+      return 'Auto';
+    case 'cpu':
+      return 'CPU';
+    case 'gpu':
+      return 'GPU';
+    case 'hybrid':
+      return 'Hybrid';
+    case 'specific_device':
+      return 'Specific device';
+  }
+}
+
 type RuntimeProfileListProps = {
   profiles: RuntimeProfileConfig[];
   statuses: RuntimeProfileStatus[];
@@ -138,6 +158,14 @@ export function RuntimeProfileEditor({
     isExistingProfile &&
     isManagedProfile &&
     (selectedStatus?.state === 'running' || selectedStatus?.state === 'starting');
+  const deviceModes = providerDeviceModes[draft.provider].includes(draft.device_mode)
+    ? providerDeviceModes[draft.provider]
+    : [...providerDeviceModes[draft.provider], draft.device_mode];
+  const showsDeviceId =
+    draft.device_mode === 'gpu' || draft.device_mode === 'specific_device';
+  const showsGpuLayers =
+    draft.provider === 'llama_cpp' &&
+    (draft.device_mode === 'gpu' || draft.device_mode === 'hybrid' || draft.device_mode === 'specific_device');
 
   return (
     <div className="space-y-3 px-3 py-3 rounded-lg bg-[hsl(var(--launcher-bg-secondary)/0.3)] border border-[hsl(var(--launcher-border)/0.3)]">
@@ -164,17 +192,12 @@ export function RuntimeProfileEditor({
             </span>
           )}
         </label>
-        <label className="space-y-1 text-xs text-[hsl(var(--launcher-text-muted))]">
-          <span>Provider</span>
-          <select
-            value={draft.provider}
-            onChange={(event) => onUpdateDraft('provider', event.target.value as RuntimeProviderId)}
-            className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary))] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))]"
-          >
-            <option value="ollama">Ollama</option>
-            <option value="llama_cpp">llama.cpp</option>
-          </select>
-        </label>
+        <div className="space-y-1 text-xs text-[hsl(var(--launcher-text-muted))]">
+          <span>Runtime</span>
+          <div className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary)/0.55)] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))]">
+            {providerLabel(draft.provider)}
+          </div>
+        </div>
         <label className="space-y-1 text-xs text-[hsl(var(--launcher-text-muted))]">
           <span>Mode</span>
           <select
@@ -213,11 +236,11 @@ export function RuntimeProfileEditor({
             }
             className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary))] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))]"
           >
-            <option value="auto">Auto</option>
-            <option value="cpu">CPU</option>
-            <option value="gpu">GPU</option>
-            <option value="hybrid">Hybrid</option>
-            <option value="specific_device">Specific Device</option>
+            {deviceModes.map((mode) => (
+              <option key={mode} value={mode}>
+                {deviceModeLabel(mode)}
+              </option>
+            ))}
           </select>
         </label>
         <label className="space-y-1 text-xs text-[hsl(var(--launcher-text-muted))] md:col-span-2">
@@ -252,15 +275,17 @@ export function RuntimeProfileEditor({
             </span>
           )}
         </label>
-        <label className="space-y-1 text-xs text-[hsl(var(--launcher-text-muted))]">
-          <span>Device ID</span>
-          <input
-            value={draft.device_id}
-            onChange={(event) => onUpdateDraft('device_id', event.target.value)}
-            className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary))] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))]"
-          />
-        </label>
-        {draft.provider === 'llama_cpp' && (
+        {showsDeviceId && (
+          <label className="space-y-1 text-xs text-[hsl(var(--launcher-text-muted))]">
+            <span>Device ID</span>
+            <input
+              value={draft.device_id}
+              onChange={(event) => onUpdateDraft('device_id', event.target.value)}
+              className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary))] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))]"
+            />
+          </label>
+        )}
+        {showsGpuLayers && (
           <label className="space-y-1 text-xs text-[hsl(var(--launcher-text-muted))]">
             <span>GPU Layers</span>
             <input
@@ -289,7 +314,7 @@ export function RuntimeProfileEditor({
         <div className="text-xs text-[hsl(var(--launcher-text-muted))]">
           {selectedStatus ? `State: ${selectedStatus.state}` : 'State: unknown'}
           {draft.provider_mode === 'llama_cpp_dedicated' && isManagedProfile && (
-            <span className="ml-2">Dedicated profiles start from a model's Serving page.</span>
+            <span className="ml-2">Dedicated profiles start from a model&apos;s Serving page.</span>
           )}
         </div>
         <div className="flex items-center gap-2">

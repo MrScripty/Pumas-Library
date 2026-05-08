@@ -156,8 +156,27 @@ pub async fn launch_runtime_profile(
             (tag, version_dir)
         }
         RuntimeProviderId::LlamaCpp => {
-            let tag = command.tag.unwrap_or_else(|| "local-build".to_string());
-            let version_dir = state.api.launcher_data_dir().join("llama-cpp");
+            let Some(version_manager) = super::get_version_manager(state, "llama-cpp").await else {
+                return Ok(serde_json::json!({
+                    "success": false,
+                    "error": "Version manager not initialized for llama.cpp",
+                    "ready": false
+                }));
+            };
+            let tag = match command.tag {
+                Some(tag) => tag,
+                None => match version_manager.get_active_version().await? {
+                    Some(tag) => tag,
+                    None => {
+                        return Ok(serde_json::json!({
+                            "success": false,
+                            "error": "No active llama.cpp version set. Open the llama.cpp app page, install a runtime version, and set it active.",
+                            "ready": false
+                        }));
+                    }
+                },
+            };
+            let version_dir = version_manager.version_path(&tag);
             (tag, version_dir)
         }
     };

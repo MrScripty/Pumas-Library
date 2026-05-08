@@ -528,10 +528,9 @@ impl MetadataManager {
         let mut versions = self.load_versions(app_id)?;
         let mut removed = Vec::new();
 
-        let versions_dir = match app_id {
-            Some(AppId::Ollama) => self.launcher_root.join("ollama-versions"),
-            _ => self.launcher_root.join("comfyui-versions"),
-        };
+        let versions_dir = self
+            .launcher_root
+            .join(app_id.unwrap_or_default().versions_dir_name());
 
         // Check each installed version
         let tags_to_check: Vec<_> = versions.installed.keys().cloned().collect();

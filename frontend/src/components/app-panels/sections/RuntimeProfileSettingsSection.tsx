@@ -8,6 +8,7 @@ import type {
 } from '../../../types/api-runtime-profiles';
 import {
   providerModes,
+  providerLabel,
   RuntimeProfileEditor,
   RuntimeProfileList,
   type RuntimeProfileDraft,
@@ -29,13 +30,13 @@ function profileToDraft(profile: RuntimeProfileConfig): RuntimeProfileDraft {
   };
 }
 
-function newProfileDraft(): RuntimeProfileDraft {
+function newProfileDraft(provider: RuntimeProviderId): RuntimeProfileDraft {
   return {
     profile_id: `runtime-${Date.now()}`,
-    provider: 'ollama',
-    provider_mode: 'ollama_serve',
+    provider,
+    provider_mode: providerModes[provider][0] ?? 'ollama_serve',
     management_mode: 'managed',
-    name: 'New Runtime Profile',
+    name: `New ${providerLabel(provider)} Profile`,
     enabled: true,
     endpoint_url: '',
     port: '',
@@ -46,6 +47,13 @@ function newProfileDraft(): RuntimeProfileDraft {
 }
 
 function draftToProfile(draft: RuntimeProfileDraft): RuntimeProfileConfig {
+  const keepsDeviceId = draft.device_mode === 'gpu' || draft.device_mode === 'specific_device';
+  const keepsGpuLayers =
+    draft.provider === 'llama_cpp' &&
+    (draft.device_mode === 'gpu' ||
+      draft.device_mode === 'hybrid' ||
+      draft.device_mode === 'specific_device');
+
   return {
     profile_id: draft.profile_id.trim(),
     provider: draft.provider,
@@ -57,8 +65,10 @@ function draftToProfile(draft: RuntimeProfileDraft): RuntimeProfileConfig {
     port: draft.port.trim() ? Number.parseInt(draft.port, 10) : null,
     device: {
       mode: draft.device_mode,
-      device_id: draft.device_id.trim() || null,
-      gpu_layers: draft.gpu_layers.trim() ? Number.parseInt(draft.gpu_layers, 10) : null,
+      device_id: keepsDeviceId ? draft.device_id.trim() || null : null,
+      gpu_layers: keepsGpuLayers && draft.gpu_layers.trim()
+        ? Number.parseInt(draft.gpu_layers, 10)
+        : null,
       tensor_split: null,
     },
     scheduler: {
@@ -69,7 +79,11 @@ function draftToProfile(draft: RuntimeProfileDraft): RuntimeProfileConfig {
   };
 }
 
-export function RuntimeProfileSettingsSection() {
+type RuntimeProfileSettingsSectionProps = {
+  provider: RuntimeProviderId;
+};
+
+export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettingsSectionProps) {
   const {
     profiles,
     statuses,
@@ -78,26 +92,59 @@ export function RuntimeProfileSettingsSection() {
     refreshRuntimeProfiles,
   } = useRuntimeProfiles();
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<RuntimeProfileDraft>(() => newProfileDraft());
+  const [draft, setDraft] = useState<RuntimeProfileDraft>(() => newProfileDraft(provider));
   const [isCreatingProfile, setIsCreatingProfile] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isRuntimeActionRunning, setIsRuntimeActionRunning] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  const providerProfiles = useMemo(
+    () => profiles.filter((profile) => profile.provider === provider),
+    [profiles, provider]
+  );
+  const providerStatuses = useMemo(
+    () =>
+      statuses.filter((status) =>
+        providerProfiles.some((profile) => profile.profile_id === status.profile_id)
+      ),
+    [providerProfiles, statuses]
+  );
   const selectedProfile = useMemo(
-    () => profiles.find((profile) => profile.profile_id === selectedProfileId) ?? null,
-    [profiles, selectedProfileId]
+    () => providerProfiles.find((profile) => profile.profile_id === selectedProfileId) ?? null,
+    [providerProfiles, selectedProfileId]
   );
   const selectedStatus = useMemo(
-    () => statuses.find((status) => status.profile_id === selectedProfileId) ?? null,
-    [statuses, selectedProfileId]
+    () => providerStatuses.find((status) => status.profile_id === selectedProfileId) ?? null,
+    [providerStatuses, selectedProfileId]
   );
 
   useEffect(() => {
-    if (!isCreatingProfile && !selectedProfileId && profiles.length > 0) {
-      setSelectedProfileId(profiles[0]?.profile_id ?? null);
+    if (isCreatingProfile) {
+      return;
     }
-  }, [isCreatingProfile, profiles, selectedProfileId]);
+    if (!selectedProfileId && providerProfiles.length > 0) {
+      setSelectedProfileId(providerProfiles[0]?.profile_id ?? null);
+      return;
+    }
+    if (selectedProfileId && !providerProfiles.some((profile) => profile.profile_id === selectedProfileId)) {
+      setSelectedProfileId(providerProfiles[0]?.profile_id ?? null);
+      setDraft(newProfileDraft(provider));
+    }
+  }, [isCreatingProfile, provider, providerProfiles, selectedProfileId]);
+
+  useEffect(() => {
+    if (isCreatingProfile) {
+      setDraft((current) =>
+        current.provider === provider
+          ? current
+          : {
+              ...newProfileDraft(provider),
+              name: current.name,
+              profile_id: current.profile_id,
+            }
+      );
+    }
+  }, [isCreatingProfile, provider]);
 
   useEffect(() => {
     if (!isCreatingProfile && selectedProfile) {
@@ -111,11 +158,16 @@ export function RuntimeProfileSettingsSection() {
   ) => {
     setDraft((current) => {
       const next = { ...current, [key]: value };
-      if (key === 'provider') {
-        next.provider_mode = providerModes[value as RuntimeProviderId][0] ?? 'ollama_serve';
-        if (next.management_mode === 'managed') {
-          next.endpoint_url = '';
-          next.port = '';
+      next.provider = provider;
+      if (!providerModes[provider].includes(next.provider_mode)) {
+        next.provider_mode = providerModes[provider][0] ?? 'ollama_serve';
+      }
+      if (key === 'device_mode') {
+        if (value !== 'gpu' && value !== 'specific_device') {
+          next.device_id = '';
+        }
+        if (provider !== 'llama_cpp' || value === 'auto' || value === 'cpu') {
+          next.gpu_layers = '';
         }
       }
       if (key === 'management_mode' && value === 'managed') {
@@ -127,7 +179,7 @@ export function RuntimeProfileSettingsSection() {
   };
 
   const handleNewProfile = () => {
-    const nextDraft = newProfileDraft();
+    const nextDraft = newProfileDraft(provider);
     setIsCreatingProfile(true);
     setSelectedProfileId(null);
     setDraft(nextDraft);
@@ -181,7 +233,7 @@ export function RuntimeProfileSettingsSection() {
       }
       setIsCreatingProfile(false);
       setSelectedProfileId(null);
-      setDraft(newProfileDraft());
+      setDraft(newProfileDraft(provider));
       await refreshRuntimeProfiles();
     } catch (caught) {
       setSaveError(caught instanceof Error ? caught.message : 'Failed to delete runtime profile');
@@ -263,8 +315,8 @@ export function RuntimeProfileSettingsSection() {
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(180px,240px)_1fr] gap-3">
         <RuntimeProfileList
-          profiles={profiles}
-          statuses={statuses}
+          profiles={providerProfiles}
+          statuses={providerStatuses}
           selectedProfileId={selectedProfileId}
           isLoading={isLoading}
           onSelectProfile={handleSelectProfile}

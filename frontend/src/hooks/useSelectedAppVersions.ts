@@ -7,6 +7,7 @@ interface UseSelectedAppVersionsResult {
   comfyActiveVersion: string | null;
   comfyInstalledVersions: string[];
   installationProgress: UseVersionsResult['installationProgress'];
+  llamaCppInstalledVersions: string[];
   ollamaInstalledVersions: string[];
   torchInstalledVersions: string[];
 }
@@ -20,6 +21,10 @@ export function useSelectedAppVersions(selectedAppId: string | null): UseSelecte
     appId: 'ollama',
     trackAvailableVersions: selectedAppId === 'ollama',
   });
+  const llamaCppVersions = useVersions({
+    appId: 'llama-cpp',
+    trackAvailableVersions: selectedAppId === 'llama-cpp',
+  });
   const torchVersions = useVersions({
     appId: 'torch',
     trackAvailableVersions: selectedAppId === 'torch',
@@ -28,9 +33,10 @@ export function useSelectedAppVersions(selectedAppId: string | null): UseSelecte
   const activeVersions = useMemo(() => {
     if (selectedAppId === 'comfyui') return comfyVersions;
     if (selectedAppId === 'ollama') return ollamaVersions;
+    if (selectedAppId === 'llama-cpp') return llamaCppVersions;
     if (selectedAppId === 'torch') return torchVersions;
     return comfyVersions;
-  }, [selectedAppId, comfyVersions, ollamaVersions, torchVersions]);
+  }, [selectedAppId, comfyVersions, llamaCppVersions, ollamaVersions, torchVersions]);
 
   const appVersions = getAppVersionState(selectedAppId, activeVersions);
 
@@ -39,6 +45,7 @@ export function useSelectedAppVersions(selectedAppId: string | null): UseSelecte
     comfyActiveVersion: comfyVersions.activeVersion,
     comfyInstalledVersions: comfyVersions.installedVersions,
     installationProgress: appVersions.installationProgress,
+    llamaCppInstalledVersions: llamaCppVersions.installedVersions,
     ollamaInstalledVersions: ollamaVersions.installedVersions,
     torchInstalledVersions: torchVersions.installedVersions,
   };

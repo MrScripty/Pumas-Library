@@ -56,7 +56,7 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useAppWindowActions.test.ts` | Hook coverage for backend/window routing of models-root and window control actions. |
 | `useLauncherUpdates.ts` | Launcher update availability, update-check action state, and update URL opening. |
 | `useLauncherUpdates.test.ts` | Hook coverage for update metadata storage, URL preference, stale-state clearing, and API-unavailable no-ops. |
-| `useSelectedAppVersions.ts` | Selected-app version hook routing for ComfyUI, Ollama, Torch, and unsupported app fallback state. |
+| `useSelectedAppVersions.ts` | Selected-app version hook routing for ComfyUI, Ollama, llama.cpp, Torch, and unsupported app fallback state. |
 | `useSelectedAppVersions.test.ts` | Hook coverage for selected-app version tracking and unsupported version state. |
 | `usePhysicsDrag.ts` | Physics-based drag state, frame updates, delete/reorder commits, and public hook output. |
 | `usePhysicsDragDelete.ts` | Drag delete completion, fallback reset, and post-delete cleanup lifecycle. |

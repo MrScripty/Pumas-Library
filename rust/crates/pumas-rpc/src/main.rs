@@ -147,6 +147,17 @@ async fn run(args: Args) -> Result<()> {
         }
     }
 
+    // llama.cpp version manager
+    match VersionManager::new(&launcher_root, AppId::LlamaCpp).await {
+        Ok(mgr) => {
+            info!("llama.cpp version manager initialized successfully");
+            version_managers.insert("llama-cpp".to_string(), mgr);
+        }
+        Err(e) => {
+            warn!("Failed to initialize llama.cpp version manager: {}", e);
+        }
+    }
+
     info!("Initialized {} version manager(s)", version_managers.len());
 
     // Initialize custom nodes manager

@@ -137,6 +137,12 @@ describe('AppShellState', () => {
         launchError: 'failed',
         installedVersions: [],
       },
+      llamaCpp: {
+        isStarting: false,
+        isStopping: false,
+        launchError: null,
+        installedVersions: ['llama.cpp'],
+      },
       torch: {
         isStarting: false,
         isStopping: true,
@@ -163,6 +169,10 @@ describe('AppShellState', () => {
       isRunning: false,
       isStopping: true,
       installedVersions: ['torch'],
+    });
+    expect(managedState.llamaCpp).toMatchObject({
+      isRunning: false,
+      installedVersions: ['llama.cpp'],
     });
   });
 

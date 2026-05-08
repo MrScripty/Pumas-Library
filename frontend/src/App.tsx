@@ -90,6 +90,7 @@ export default function App() {
     comfyActiveVersion,
     comfyInstalledVersions,
     installationProgress,
+    llamaCppInstalledVersions,
     ollamaInstalledVersions,
     torchInstalledVersions,
   } = useSelectedAppVersions(selectedAppId);
@@ -110,6 +111,12 @@ export default function App() {
       launchError: ollamaLaunchError,
       installedVersions: ollamaInstalledVersions,
     },
+    llamaCpp: {
+      isStarting: false,
+      isStopping: false,
+      launchError: null,
+      installedVersions: llamaCppInstalledVersions,
+    },
     torch: {
       isStarting: torchIsStarting,
       isStopping: torchIsStopping,
@@ -120,6 +127,7 @@ export default function App() {
     comfyInstalledVersions,
     isStarting,
     isStopping,
+    llamaCppInstalledVersions,
     launchError,
     ollamaInstalledVersions,
     ollamaIsStarting,

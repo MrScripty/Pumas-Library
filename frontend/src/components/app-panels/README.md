@@ -1,13 +1,14 @@
 # frontend components app-panels
 
 ## Purpose
-App-specific panel containers and renderers for ComfyUI, Ollama, and Torch sections in the main UI.
+App-specific panel containers and renderers for ComfyUI, Ollama, llama.cpp, and Torch sections in the main UI.
 
 ## Contents
 | File/Folder | Description |
 | ----------- | ----------- |
 | `AppPanelRenderer.tsx` | Chooses panel implementation by app/runtime key. |
 | `ComfyUIPanel.tsx` | ComfyUI panel composition. |
+| `LlamaCppPanel.tsx` | llama.cpp panel composition. |
 | `OllamaPanel.tsx` | Ollama panel composition. |
 | `TorchPanel.tsx` | Torch panel composition. |
 | `VersionManagementPanel.tsx` | Version management panel composition. |

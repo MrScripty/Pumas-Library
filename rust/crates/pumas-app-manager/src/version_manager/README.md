@@ -4,8 +4,8 @@
 
 Manages the full lifecycle of application versions: discovery via GitHub releases, installation
 with progress tracking, Python virtual environment and dependency management, launching with
-health checks, and removal. Supports ComfyUI (Python/git), Ollama (pre-built binary), and
-plugin-defined applications.
+health checks, and removal. Supports ComfyUI (Python/git), Ollama and llama.cpp (pre-built
+binaries), and plugin-defined applications.
 
 ## Contents
 

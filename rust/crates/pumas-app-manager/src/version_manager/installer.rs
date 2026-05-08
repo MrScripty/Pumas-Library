@@ -69,6 +69,10 @@ impl VersionInstaller {
     ) -> Result<()> {
         match self.app_id {
             AppId::Ollama => self.install_ollama_binary(tag, release, progress_tx).await,
+            AppId::LlamaCpp => {
+                self.install_llama_cpp_binary(tag, release, progress_tx)
+                    .await
+            }
             AppId::ComfyUI => self.install_python_app(tag, release, progress_tx).await,
             _ => self.install_python_app(tag, release, progress_tx).await,
         }
@@ -287,6 +291,89 @@ impl VersionInstaller {
         result
     }
 
+    /// Install llama.cpp from upstream pre-built release archives.
+    async fn install_llama_cpp_binary(
+        &self,
+        tag: &str,
+        release: &GitHubRelease,
+        progress_tx: mpsc::Sender<ProgressUpdate>,
+    ) -> Result<()> {
+        info!("Starting llama.cpp binary installation for {}", tag);
+
+        let asset = self.select_llama_cpp_asset(&release.assets)?;
+        let download_url = &asset.download_url;
+        let total_size = asset.size;
+        let asset_name = asset.name.clone();
+
+        info!(
+            "Selected llama.cpp asset: {} ({} bytes)",
+            asset_name, total_size
+        );
+
+        let log_dir = self.logs_dir();
+        fs::create_dir_all(&log_dir).await.ok();
+        let log_path = log_dir.join(format!(
+            "install-llama-cpp-{}-{}.log",
+            self.slugify_tag(tag),
+            Utc::now().format("%Y%m%d-%H%M%S")
+        ));
+
+        {
+            let mut tracker = self.progress_tracker.write().await;
+            tracker.start_installation(
+                tag,
+                Some(total_size),
+                None,
+                Some(log_path.to_string_lossy().as_ref()),
+            );
+        }
+
+        let cache_downloads = self
+            .launcher_root
+            .join("launcher-data")
+            .join("cache")
+            .join("downloads");
+        fs::create_dir_all(&cache_downloads)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to create download cache directory: {}", e),
+                path: Some(cache_downloads.clone()),
+                source: Some(e),
+            })?;
+
+        let archive_path = cache_downloads.join(&asset_name);
+        let cache_valid = self
+            .is_cached_download_valid(&archive_path, &asset_name, total_size)
+            .await?;
+
+        let result = self
+            .do_llama_cpp_install(
+                tag,
+                release,
+                download_url,
+                total_size,
+                &asset_name,
+                &archive_path,
+                cache_valid,
+                &progress_tx,
+            )
+            .await;
+
+        if result.is_err() {
+            let _ = fs::remove_file(&archive_path).await;
+        }
+
+        {
+            let mut tracker = self.progress_tracker.write().await;
+            if let Err(error) = result.as_ref() {
+                tracker.set_error(&error.to_string());
+            }
+            tracker.complete_installation(result.is_ok());
+        }
+
+        result
+    }
+
     /// Execute Ollama installation steps.
     #[allow(clippy::too_many_arguments)]
     async fn do_ollama_install(
@@ -386,6 +473,140 @@ impl VersionInstaller {
         Ok(())
     }
 
+    async fn is_cached_download_valid(
+        &self,
+        archive_path: &Path,
+        asset_name: &str,
+        total_size: u64,
+    ) -> Result<bool> {
+        if !path_exists(archive_path).await? {
+            return Ok(false);
+        }
+
+        match fs::metadata(archive_path).await {
+            Ok(meta) if meta.len() == total_size => {
+                info!(
+                    "Using cached download: {} ({} bytes)",
+                    asset_name, total_size
+                );
+                Ok(true)
+            }
+            Ok(meta) => {
+                info!(
+                    "Cached download size mismatch ({} != {}), re-downloading",
+                    meta.len(),
+                    total_size
+                );
+                let _ = fs::remove_file(archive_path).await;
+                Ok(false)
+            }
+            Err(_) => {
+                let _ = fs::remove_file(archive_path).await;
+                Ok(false)
+            }
+        }
+    }
+
+    /// Execute llama.cpp installation steps.
+    #[allow(clippy::too_many_arguments)]
+    async fn do_llama_cpp_install(
+        &self,
+        tag: &str,
+        release: &GitHubRelease,
+        download_url: &str,
+        total_size: u64,
+        asset_name: &str,
+        archive_path: &Path,
+        cache_valid: bool,
+        progress_tx: &mpsc::Sender<ProgressUpdate>,
+    ) -> Result<()> {
+        self.check_cancelled()?;
+
+        if cache_valid {
+            {
+                let mut tracker = self.progress_tracker.write().await;
+                tracker.update_stage(
+                    InstallationStage::Download,
+                    100.0,
+                    Some("Using cached download"),
+                );
+            }
+            let _ = progress_tx
+                .send(ProgressUpdate::Download {
+                    downloaded_bytes: total_size,
+                    total_bytes: Some(total_size),
+                    speed_bytes_per_sec: None,
+                })
+                .await;
+        } else {
+            self.download_archive(download_url, archive_path, progress_tx)
+                .await?;
+        }
+
+        self.check_cancelled()?;
+
+        let version_dir = self.versions_dir().join(tag);
+        if path_exists(&version_dir).await? {
+            fs::remove_dir_all(&version_dir)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to remove existing version directory: {}", e),
+                    path: Some(version_dir.clone()),
+                    source: Some(e),
+                })?;
+        }
+        fs::create_dir_all(&version_dir)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to create version directory: {}", e),
+                path: Some(version_dir.clone()),
+                source: Some(e),
+            })?;
+
+        {
+            let mut tracker = self.progress_tracker.write().await;
+            tracker.update_stage(
+                InstallationStage::Extract,
+                0.0,
+                Some("Extracting binary archive..."),
+            );
+        }
+        let _ = progress_tx
+            .send(ProgressUpdate::StageChanged {
+                stage: InstallationStage::Extract,
+                message: "Extracting binary archive...".to_string(),
+            })
+            .await;
+
+        let archive_path = archive_path.to_path_buf();
+        let version_dir_for_extract = version_dir.clone();
+        let asset_name = asset_name.to_string();
+        tokio::task::spawn_blocking(move || {
+            Self::extract_llama_cpp_binary(&archive_path, &version_dir_for_extract, &asset_name)
+        })
+        .await
+        .map_err(|e| {
+            PumasError::Other(format!("Failed to join llama.cpp extraction task: {}", e))
+        })??;
+
+        {
+            let mut tracker = self.progress_tracker.write().await;
+            tracker.update_stage(
+                InstallationStage::Extract,
+                100.0,
+                Some("Extraction complete"),
+            );
+        }
+
+        self.check_cancelled()?;
+
+        self.finalize_llama_cpp_installation(tag, release, &version_dir, progress_tx)
+            .await?;
+
+        info!("llama.cpp installation of {} completed successfully", tag);
+        Ok(())
+    }
+
     /// Select the appropriate Ollama binary asset for the current platform.
     /// Uses exact matching to avoid selecting variant builds (ROCm, Jetpack, etc.).
     fn select_ollama_asset<'a>(&self, assets: &'a [GitHubAsset]) -> Result<&'a GitHubAsset> {
@@ -413,6 +634,59 @@ impl VersionInstaller {
                     os,
                     arch,
                     exact_patterns,
+                    assets.iter().map(|a| &a.name).collect::<Vec<_>>()
+                ),
+            })
+    }
+
+    /// Select the default CPU llama.cpp binary asset for the current platform.
+    fn select_llama_cpp_asset<'a>(&self, assets: &'a [GitHubAsset]) -> Result<&'a GitHubAsset> {
+        let os = std::env::consts::OS;
+        let arch = match std::env::consts::ARCH {
+            "x86_64" => "x64",
+            "aarch64" => "arm64",
+            _ => std::env::consts::ARCH,
+        };
+        let platform = match os {
+            "linux" => "ubuntu",
+            "macos" => "macos",
+            "windows" => "win",
+            _ => os,
+        };
+        let excluded = [
+            "source",
+            "cudart",
+            "cuda",
+            "vulkan",
+            "rocm",
+            "hip",
+            "sycl",
+            "openvino",
+            "android",
+            "ios",
+            "xcframework",
+            "openeuler",
+            "kleidiai",
+        ];
+
+        assets
+            .iter()
+            .find(|asset| {
+                let name = asset.name.to_ascii_lowercase();
+                name.starts_with("llama-")
+                    && name.contains("-bin-")
+                    && name.contains(platform)
+                    && name.contains(arch)
+                    && !excluded.iter().any(|pattern| name.contains(pattern))
+                    && (name.ends_with(".zip")
+                        || name.ends_with(".tar.gz")
+                        || name.ends_with(".tgz"))
+            })
+            .ok_or_else(|| PumasError::InstallationFailed {
+                message: format!(
+                    "No llama.cpp CPU binary found for {}-{}. Available assets: {:?}",
+                    platform,
+                    arch,
                     assets.iter().map(|a| &a.name).collect::<Vec<_>>()
                 ),
             })
@@ -459,6 +733,39 @@ impl VersionInstaller {
         Self::finalize_ollama_binary(version_dir)?;
 
         info!("Ollama binary extraction complete");
+        Ok(())
+    }
+
+    /// Extract a llama.cpp binary archive and ensure llama-server is executable.
+    fn extract_llama_cpp_binary(
+        archive_path: &Path,
+        version_dir: &Path,
+        asset_name: &str,
+    ) -> Result<()> {
+        info!("Extracting llama.cpp binary from {}", asset_name);
+
+        if asset_name.ends_with(".tar.zst") {
+            Self::extract_tar_zst(archive_path, version_dir)?;
+        } else if asset_name.ends_with(".tgz") || asset_name.ends_with(".tar.gz") {
+            Self::extract_tarball(archive_path, version_dir)?;
+        } else if asset_name.ends_with(".zip") {
+            Self::extract_zip(archive_path, version_dir)?;
+        } else {
+            return Err(PumasError::InstallationFailed {
+                message: format!("Unsupported llama.cpp archive format: {}", asset_name),
+            });
+        }
+
+        let server_binary = Self::find_named_binary(version_dir, &["llama-server", "server"])?
+            .ok_or_else(|| PumasError::InstallationFailed {
+                message: "Could not find llama-server in extracted archive".to_string(),
+            })?;
+        Self::make_binary_executable(&server_binary)?;
+
+        info!(
+            "llama.cpp server binary available at {}",
+            server_binary.display()
+        );
         Ok(())
     }
 
@@ -581,6 +888,68 @@ impl VersionInstaller {
         Ok(None)
     }
 
+    fn find_named_binary(dir: &Path, binary_names: &[&str]) -> Result<Option<PathBuf>> {
+        let names: Vec<String> = if cfg!(windows) {
+            binary_names
+                .iter()
+                .flat_map(|name| [format!("{name}.exe"), (*name).to_string()])
+                .collect()
+        } else {
+            binary_names
+                .iter()
+                .flat_map(|name| [(*name).to_string(), format!("{name}.exe")])
+                .collect()
+        };
+
+        for entry in std::fs::read_dir(dir).map_err(|e| PumasError::Io {
+            message: format!("Failed to read extracted directory: {}", e),
+            path: Some(dir.to_path_buf()),
+            source: Some(e),
+        })? {
+            let entry = entry.map_err(|e| PumasError::Io {
+                message: format!("Failed to read extracted entry: {}", e),
+                path: Some(dir.to_path_buf()),
+                source: Some(e),
+            })?;
+            let path = entry.path();
+
+            if path.is_file() {
+                if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                    if names.iter().any(|candidate| candidate == name) {
+                        return Ok(Some(path));
+                    }
+                }
+            } else if path.is_dir() {
+                if let Some(found) = Self::find_named_binary(&path, binary_names)? {
+                    return Ok(Some(found));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn make_binary_executable(path: &Path) -> Result<()> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(path)
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to get binary metadata: {}", e),
+                    path: Some(path.to_path_buf()),
+                    source: Some(e),
+                })?
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(path, perms).map_err(|e| PumasError::Io {
+                message: format!("Failed to set binary permissions: {}", e),
+                path: Some(path.to_path_buf()),
+                source: Some(e),
+            })?;
+        }
+        Ok(())
+    }
+
     /// Finalize Ollama installation (create metadata, no Python/venv).
     async fn finalize_ollama_installation(
         &self,
@@ -651,6 +1020,72 @@ impl VersionInstaller {
             .await;
 
         info!("Ollama installation of {} finalized", tag);
+        Ok(())
+    }
+
+    /// Finalize llama.cpp installation metadata.
+    async fn finalize_llama_cpp_installation(
+        &self,
+        tag: &str,
+        release: &GitHubRelease,
+        _version_dir: &Path,
+        progress_tx: &mpsc::Sender<ProgressUpdate>,
+    ) -> Result<()> {
+        info!("Finalizing llama.cpp installation for {}", tag);
+
+        {
+            let mut tracker = self.progress_tracker.write().await;
+            tracker.update_stage(
+                InstallationStage::Setup,
+                0.0,
+                Some("Finalizing installation..."),
+            );
+        }
+        let _ = progress_tx
+            .send(ProgressUpdate::StageChanged {
+                stage: InstallationStage::Setup,
+                message: "Finalizing installation...".to_string(),
+            })
+            .await;
+
+        let download_url = release
+            .assets
+            .iter()
+            .find(|asset| asset.name.starts_with("llama-") && asset.name.contains("-bin-"))
+            .map(|asset| asset.download_url.clone());
+
+        let metadata = InstalledVersionMetadata {
+            path: tag.to_string(),
+            installed_date: Utc::now().to_rfc3339(),
+            release_tag: tag.to_string(),
+            python_version: None,
+            git_commit: None,
+            release_date: Some(release.published_at.clone()),
+            release_notes: release.body.clone(),
+            download_url,
+            size: release.archive_size,
+            requirements_hash: None,
+            dependencies_installed: Some(true),
+        };
+
+        self.metadata_manager
+            .update_installed_version(tag, metadata, Some(self.app_id))?;
+
+        {
+            let mut tracker = self.progress_tracker.write().await;
+            tracker.update_stage(
+                InstallationStage::Setup,
+                100.0,
+                Some("Installation complete"),
+            );
+        }
+        let _ = progress_tx
+            .send(ProgressUpdate::Setup {
+                message: "Installation complete".to_string(),
+            })
+            .await;
+
+        info!("llama.cpp installation of {} finalized", tag);
         Ok(())
     }
 

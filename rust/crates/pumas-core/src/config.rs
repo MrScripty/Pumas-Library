@@ -159,6 +159,7 @@ pub enum AppId {
     OpenWebUI,
     InvokeAI,
     KritaDiffusion,
+    LlamaCpp,
     Torch,
 }
 
@@ -171,6 +172,7 @@ impl AppId {
             AppId::OpenWebUI => "openwebui",
             AppId::InvokeAI => "invokeai",
             AppId::KritaDiffusion => "kritadiffusion",
+            AppId::LlamaCpp => "llama-cpp",
             AppId::Torch => "torch",
         }
     }
@@ -183,6 +185,7 @@ impl AppId {
             AppId::OpenWebUI => "open-webui/open-webui",
             AppId::InvokeAI => "invoke-ai/InvokeAI",
             AppId::KritaDiffusion => "Acly/krita-ai-diffusion",
+            AppId::LlamaCpp => "ggml-org/llama.cpp",
             AppId::Torch => "pytorch/pytorch",
         }
     }
@@ -195,6 +198,7 @@ impl AppId {
             AppId::OpenWebUI => "openwebui-versions",
             AppId::InvokeAI => "invokeai-versions",
             AppId::KritaDiffusion => "kritadiffusion-versions",
+            AppId::LlamaCpp => "llama-cpp-versions",
             AppId::Torch => "torch-versions",
         }
     }
@@ -204,6 +208,7 @@ impl AppId {
         match self {
             AppId::ComfyUI => 8188,
             AppId::Ollama => 11434,
+            AppId::LlamaCpp => 18080,
             AppId::Torch => 8400,
             _ => 0, // No default port
         }
@@ -214,6 +219,7 @@ impl AppId {
         match self {
             AppId::ComfyUI => "http://127.0.0.1:8188",
             AppId::Ollama => "http://127.0.0.1:11434",
+            AppId::LlamaCpp => "http://127.0.0.1:18080",
             AppId::Torch => "http://127.0.0.1:8400",
             _ => "",
         }
@@ -228,6 +234,7 @@ impl AppId {
             "openwebui" => Some(AppId::OpenWebUI),
             "invokeai" => Some(AppId::InvokeAI),
             "kritadiffusion" => Some(AppId::KritaDiffusion),
+            "llama-cpp" | "llamacpp" | "llama.cpp" => Some(AppId::LlamaCpp),
             "torch" => Some(AppId::Torch),
             _ => None,
         }
@@ -252,6 +259,7 @@ mod tests {
             AppId::OpenWebUI,
             AppId::InvokeAI,
             AppId::KritaDiffusion,
+            AppId::LlamaCpp,
             AppId::Torch,
         ] {
             let s = app_id.as_str();

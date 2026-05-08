@@ -1,12 +1,10 @@
 import { AppConnectionInfo } from '../AppConnectionInfo';
 import { ModelManager, type ModelManagerProps } from '../ModelManager';
 import { VersionManagementPanel } from './VersionManagementPanel';
-import { OllamaModelSection } from './sections/OllamaModelSection';
 import { RuntimeProfileSettingsSection } from './sections/RuntimeProfileSettingsSection';
 import type { AppVersionState } from '../../utils/appVersionState';
-import type { ModelCategory } from '../../types/apps';
 
-export interface OllamaPanelProps {
+export interface LlamaCppPanelProps {
   appDisplayName: string;
   connectionUrl?: string;
   versions: AppVersionState;
@@ -15,11 +13,9 @@ export interface OllamaPanelProps {
   activeShortcutState?: { menu: boolean; desktop: boolean };
   diskSpacePercent: number;
   modelManagerProps: ModelManagerProps;
-  isOllamaRunning: boolean;
-  modelGroups: ModelCategory[];
 }
 
-export function OllamaPanel({
+export function LlamaCppPanel({
   appDisplayName,
   connectionUrl,
   versions,
@@ -28,9 +24,7 @@ export function OllamaPanel({
   activeShortcutState,
   diskSpacePercent,
   modelManagerProps,
-  isOllamaRunning,
-  modelGroups,
-}: OllamaPanelProps) {
+}: LlamaCppPanelProps) {
   const isManagerOpen = versions.isSupported && showVersionManager;
 
   return (
@@ -49,15 +43,7 @@ export function OllamaPanel({
         )}
       </div>
 
-      {!isManagerOpen && connectionUrl && (
-        <OllamaModelSection
-          connectionUrl={connectionUrl}
-          isRunning={isOllamaRunning}
-          modelGroups={modelGroups}
-        />
-      )}
-
-      {!isManagerOpen && <RuntimeProfileSettingsSection provider="ollama" />}
+      {!isManagerOpen && <RuntimeProfileSettingsSection provider="llama_cpp" />}
 
       {!isManagerOpen && <ModelManager {...modelManagerProps} />}
     </div>

@@ -1,4 +1,4 @@
-import { Zap, MessageSquare, Palette, Image, Cpu, Flame } from 'lucide-react';
+import { Zap, MessageSquare, Palette, Image, Cpu, Flame, CircuitBoard } from 'lucide-react';
 import type { AppConfig } from '../types/apps';
 
 /**
@@ -37,6 +37,18 @@ export const DEFAULT_APPS: AppConfig[] = [
     iconState: 'uninstalled',
     description: 'Local LLM runtime and model server',
     connectionUrl: 'http://localhost:11434',
+    starred: false,
+    linked: false,
+  },
+  {
+    id: 'llama-cpp',
+    name: 'llama-cpp',
+    displayName: 'llama.cpp',
+    icon: CircuitBoard,
+    status: 'idle',
+    iconState: 'uninstalled',
+    description: 'Native GGUF runtime and OpenAI-compatible model server',
+    connectionUrl: 'http://127.0.0.1:18080',
     starred: false,
     linked: false,
   },

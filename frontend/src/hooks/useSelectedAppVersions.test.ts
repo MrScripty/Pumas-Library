@@ -64,12 +64,24 @@ describe('useSelectedAppVersions', () => {
       trackAvailableVersions: true,
     });
     expect(useVersionsMock).toHaveBeenNthCalledWith(3, {
+      appId: 'llama-cpp',
+      trackAvailableVersions: false,
+    });
+    expect(useVersionsMock).toHaveBeenNthCalledWith(4, {
       appId: 'torch',
       trackAvailableVersions: false,
     });
     expect(result.current.appVersions.appId).toBe('ollama');
     expect(result.current.appVersions.activeVersion).toBe('ollama-active');
     expect(result.current.ollamaInstalledVersions).toEqual(['ollama-installed']);
+    expect(result.current.llamaCppInstalledVersions).toEqual(['llama-cpp-installed']);
+  });
+
+  it('routes selected llama.cpp version state to the panel', () => {
+    const { result } = renderHook(() => useSelectedAppVersions('llama-cpp'));
+
+    expect(result.current.appVersions.appId).toBe('llama-cpp');
+    expect(result.current.appVersions.activeVersion).toBe('llama-cpp-active');
   });
 
   it('returns unsupported version state for an unsupported selection', () => {

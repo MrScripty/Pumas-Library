@@ -40,9 +40,24 @@ describe('RuntimeProfileSettingsSection', () => {
         device: { mode: 'auto' },
         scheduler: { auto_load: true },
       },
+      {
+        profile_id: 'llama-router',
+        provider: 'llama_cpp',
+        provider_mode: 'llama_cpp_router',
+        management_mode: 'managed',
+        name: 'llama.cpp Router',
+        enabled: true,
+        endpoint_url: 'http://127.0.0.1:18080/',
+        port: 18080,
+        device: { mode: 'cpu' },
+        scheduler: { auto_load: true },
+      },
     ],
     routes: [],
-    statuses: [{ profile_id: 'ollama-default', state: 'stopped' }],
+    statuses: [
+      { profile_id: 'ollama-default', state: 'stopped' },
+      { profile_id: 'llama-router', state: 'stopped' },
+    ],
     default_profile_id: 'ollama-default',
   };
 
@@ -77,13 +92,13 @@ describe('RuntimeProfileSettingsSection', () => {
   it('keeps a new managed profile draft from inheriting the default Ollama port', async () => {
     const user = userEvent.setup();
 
-    render(<RuntimeProfileSettingsSection />);
+    render(<RuntimeProfileSettingsSection provider="ollama" />);
 
     expect(await screen.findByDisplayValue('Ollama Default')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'New runtime profile' }));
 
-    expect(screen.getByDisplayValue('New Runtime Profile')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('New Ollama Profile')).toBeInTheDocument();
     expect(screen.getByRole('spinbutton', { name: /managed process port/i })).toHaveValue(null);
 
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -104,7 +119,7 @@ describe('RuntimeProfileSettingsSection', () => {
   it('does not allow saved profile ids to be edited into duplicate profiles', async () => {
     const user = userEvent.setup();
 
-    render(<RuntimeProfileSettingsSection />);
+    render(<RuntimeProfileSettingsSection provider="ollama" />);
 
     expect(await screen.findByDisplayValue('Ollama Default')).toBeInTheDocument();
 
@@ -131,7 +146,7 @@ describe('RuntimeProfileSettingsSection', () => {
   it('starts a selected managed runtime profile from settings', async () => {
     const user = userEvent.setup();
 
-    render(<RuntimeProfileSettingsSection />);
+    render(<RuntimeProfileSettingsSection provider="ollama" />);
 
     expect(await screen.findByDisplayValue('Ollama Default')).toBeInTheDocument();
 
@@ -141,5 +156,33 @@ describe('RuntimeProfileSettingsSection', () => {
       expect(launchRuntimeProfileMock).toHaveBeenCalledTimes(1);
     });
     expect(launchRuntimeProfileMock).toHaveBeenCalledWith('ollama-default');
+  });
+
+  it('scopes profiles and new drafts to the selected runtime provider', async () => {
+    const user = userEvent.setup();
+
+    render(<RuntimeProfileSettingsSection provider="llama_cpp" />);
+
+    expect(await screen.findByDisplayValue('llama.cpp Router')).toBeInTheDocument();
+    expect(screen.queryByText('Ollama Default')).not.toBeInTheDocument();
+    expect(screen.getByText('Runtime')).toBeInTheDocument();
+    expect(screen.getAllByText('llama.cpp').length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText(/device id/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/gpu layers/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'New runtime profile' }));
+    expect(screen.getByDisplayValue('New llama.cpp Profile')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(upsertRuntimeProfileMock).toHaveBeenCalledTimes(1);
+    });
+    expect(upsertRuntimeProfileMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'llama_cpp',
+        provider_mode: 'llama_cpp_router',
+      })
+    );
   });
 });

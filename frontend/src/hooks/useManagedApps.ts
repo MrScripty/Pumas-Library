@@ -16,6 +16,7 @@ interface ManagedAppVisualState {
 interface UseManagedAppsOptions {
   systemResources?: SystemResources;
   comfyui: ManagedAppVisualState;
+  llamaCpp: ManagedAppVisualState;
   ollama: ManagedAppVisualState;
   torch: ManagedAppVisualState;
 }
@@ -44,7 +45,7 @@ function deriveIconState({
 
 export function decorateManagedApps(
   apps: AppConfig[],
-  { systemResources, comfyui, ollama, torch }: UseManagedAppsOptions
+  { systemResources, comfyui, llamaCpp, ollama, torch }: UseManagedAppsOptions
 ): AppConfig[] {
   return apps.map((app) => {
     if (app.id === 'comfyui') {
@@ -64,6 +65,16 @@ export function decorateManagedApps(
         ramUsage: calculateUsagePercent(ollama.ramMemory, systemResources?.ram.total),
         gpuUsage: calculateUsagePercent(ollama.gpuMemory, systemResources?.gpu.memory_total),
         iconState: deriveIconState(ollama),
+      };
+    }
+
+    if (app.id === 'llama-cpp') {
+      return {
+        ...app,
+        status: llamaCpp.isRunning ? 'running' : 'idle',
+        ramUsage: calculateUsagePercent(llamaCpp.ramMemory, systemResources?.ram.total),
+        gpuUsage: calculateUsagePercent(llamaCpp.gpuMemory, systemResources?.gpu.memory_total),
+        iconState: deriveIconState(llamaCpp),
       };
     }
 

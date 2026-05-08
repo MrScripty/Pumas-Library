@@ -19,6 +19,13 @@ describe('decorateManagedApps', () => {
         launchError: null,
         installedVersions: [],
       },
+      llamaCpp: {
+        isRunning: false,
+        isStarting: false,
+        isStopping: false,
+        launchError: null,
+        installedVersions: [],
+      },
       torch: {
         isRunning: false,
         isStarting: false,
@@ -55,6 +62,13 @@ describe('decorateManagedApps', () => {
         launchError: null,
         installedVersions: [],
       },
+      llamaCpp: {
+        isRunning: false,
+        isStarting: false,
+        isStopping: false,
+        launchError: null,
+        installedVersions: ['b1'],
+      },
       torch: {
         isRunning: false,
         isStarting: false,
@@ -68,5 +82,6 @@ describe('decorateManagedApps', () => {
     expect(comfyui?.ramUsage).toBe(25);
     expect(comfyui?.gpuUsage).toBe(25);
     expect(comfyui?.status).toBe('running');
+    expect(decorated.find((app) => app.id === 'llama-cpp')?.iconState).toBe('offline');
   });
 });

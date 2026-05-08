@@ -1,0 +1,61 @@
+{
+  "id": "llama-cpp",
+  "displayName": "llama.cpp",
+  "description": "Native GGUF runtime and OpenAI-compatible model server",
+  "icon": "circuit-board",
+  "githubRepo": "ggml-org/llama.cpp",
+  "installationType": "binary",
+
+  "capabilities": {
+    "hasVersionManagement": true,
+    "supportsShortcuts": false,
+    "hasDependencies": false,
+    "hasConnectionUrl": true,
+    "hasModelLibrary": true,
+    "hasStats": true
+  },
+
+  "connection": {
+    "defaultPort": 18080,
+    "protocol": "http",
+    "healthEndpoint": "/health"
+  },
+
+  "versionFilter": {
+    "includePrereleases": false,
+    "excludePatterns": ["source", "cudart", "cuda", "vulkan", "rocm", "hip", "sycl", "openvino"],
+    "platformAssets": {
+      "linux-amd64": "llama-*-bin-ubuntu-x64",
+      "linux-arm64": "llama-*-bin-ubuntu-arm64",
+      "darwin-amd64": "llama-*-bin-macos-x64",
+      "darwin-arm64": "llama-*-bin-macos-arm64",
+      "windows-amd64": "llama-*-bin-win-x64"
+    }
+  },
+
+  "modelCompatibility": {
+    "supportedFormats": ["gguf"]
+  },
+
+  "api": {
+    "stats": {
+      "method": "GET",
+      "endpoint": "/props",
+      "pollingIntervalMs": 2000
+    },
+    "listModels": {
+      "method": "GET",
+      "endpoint": "/v1/models"
+    }
+  },
+
+  "panelLayout": [
+    {"type": "version_manager"},
+    {"type": "connection_info"},
+    {"type": "runtime_profiles", "config": {"provider": "llama_cpp"}},
+    {"type": "model_library"}
+  ],
+
+  "sidebarPriority": 21,
+  "enabledByDefault": true
+}

@@ -120,10 +120,7 @@ impl BinaryLaunchConfig {
     ) -> Self {
         let version_dir = version_dir.as_ref().to_path_buf();
         let host = host.into();
-        let binary_path = version_dir
-            .join("build")
-            .join("bin")
-            .join(executable_name("llama-server"));
+        let binary_path = llama_cpp_server_binary_path(&version_dir);
         let pid_file = version_dir.join("llama-server.pid");
 
         Self {
@@ -157,10 +154,7 @@ impl BinaryLaunchConfig {
     ) -> Self {
         let version_dir = version_dir.as_ref().to_path_buf();
         let host = host.into();
-        let binary_path = version_dir
-            .join("build")
-            .join("bin")
-            .join(executable_name("llama-server"));
+        let binary_path = llama_cpp_server_binary_path(&version_dir);
         let pid_file = version_dir.join("llama-server.pid");
 
         Self {
@@ -237,6 +231,49 @@ fn executable_name(name: &str) -> String {
     {
         name.to_string()
     }
+}
+
+fn llama_cpp_server_binary_path(version_dir: &Path) -> PathBuf {
+    let binary_name = executable_name("llama-server");
+    let legacy_path = version_dir.join("build").join("bin").join(&binary_name);
+    let candidates = [
+        version_dir.join("bin").join(&binary_name),
+        version_dir.join(&binary_name),
+        legacy_path.clone(),
+        version_dir
+            .join("build")
+            .join("bin")
+            .join("Release")
+            .join(&binary_name),
+    ];
+
+    candidates
+        .into_iter()
+        .find(|path| path.exists())
+        .or_else(|| find_named_binary(version_dir, &binary_name))
+        .unwrap_or(legacy_path)
+}
+
+fn find_named_binary(root: &Path, binary_name: &str) -> Option<PathBuf> {
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let entries = std::fs::read_dir(&dir).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name == binary_name)
+            {
+                return Some(path);
+            }
+            if path.is_dir() {
+                pending.push(path);
+            }
+        }
+    }
+    None
 }
 
 impl LaunchConfig {

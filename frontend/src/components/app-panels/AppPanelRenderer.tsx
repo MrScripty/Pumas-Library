@@ -1,5 +1,6 @@
 import { ComfyUIPanel, type ComfyUIPanelProps } from './ComfyUIPanel';
 import { DefaultAppPanel, type DefaultAppPanelProps } from './DefaultAppPanel';
+import { LlamaCppPanel, type LlamaCppPanelProps } from './LlamaCppPanel';
 import { OllamaPanel, type OllamaPanelProps } from './OllamaPanel';
 import { TorchPanel, type TorchPanelProps } from './TorchPanel';
 import { ModelManager } from '../ModelManager';
@@ -7,6 +8,7 @@ import { ModelManager } from '../ModelManager';
 interface AppPanelRendererProps {
   selectedAppId: string | null;
   comfyUI: ComfyUIPanelProps;
+  llamaCpp: LlamaCppPanelProps;
   ollama: OllamaPanelProps;
   torch: TorchPanelProps;
   fallback: DefaultAppPanelProps;
@@ -15,6 +17,7 @@ interface AppPanelRendererProps {
 export function AppPanelRenderer({
   selectedAppId,
   comfyUI,
+  llamaCpp,
   ollama,
   torch,
   fallback,
@@ -33,6 +36,8 @@ export function AppPanelRenderer({
       return <ComfyUIPanel {...comfyUI} />;
     case 'ollama':
       return <OllamaPanel {...ollama} />;
+    case 'llama-cpp':
+      return <LlamaCppPanel {...llamaCpp} />;
     case 'torch':
       return <TorchPanel {...torch} />;
     default:

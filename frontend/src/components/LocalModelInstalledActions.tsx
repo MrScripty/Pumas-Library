@@ -1,4 +1,4 @@
-import { ArrowRightLeft, Download, Link2 } from 'lucide-react';
+import { ArrowRightLeft, Download, Link2, Play } from 'lucide-react';
 import type { ModelInfo } from '../types/apps';
 import { LocalModelDownloadProgressRing } from './LocalModelDownloadProgressRing';
 import { HoldToDeleteButton, IconButton } from './ui';
@@ -11,6 +11,7 @@ interface LocalModelInstalledActionsProps {
   onConvertModel?: (modelId: string) => void;
   onDeleteModel?: (modelId: string) => void;
   onRecoverPartialDownload?: (model: ModelInfo) => void;
+  onServeModel?: (model: ModelInfo) => void;
   onToggleLink: (modelId: string) => void;
 }
 
@@ -39,6 +40,7 @@ export function LocalModelInstalledActions({
   onConvertModel,
   onDeleteModel,
   onRecoverPartialDownload,
+  onServeModel,
   onToggleLink,
 }: LocalModelInstalledActionsProps) {
   const showRetainedDownloadIndicator = rowState.hasRetainedProgressRing;
@@ -82,6 +84,15 @@ export function LocalModelInstalledActions({
           icon={<ArrowRightLeft />}
           tooltip={getConvertTooltip(model)}
           onClick={() => onConvertModel(model.id)}
+          size="sm"
+        />
+      )}
+      {onServeModel && (
+        <IconButton
+          icon={<Play />}
+          tooltip="Serve model"
+          onClick={() => onServeModel(model)}
+          disabled={rowState.isPartialDownload}
           size="sm"
         />
       )}

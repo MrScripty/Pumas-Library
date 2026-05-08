@@ -15,6 +15,7 @@ interface LocalModelRowActionsProps {
   onPauseDownload?: (downloadKey: string) => void;
   onRecoverPartialDownload?: (model: ModelInfo) => void;
   onResumeDownload?: (downloadKey: string) => void;
+  onServeModel?: (model: ModelInfo) => void;
   onToggleLink: (modelId: string) => void;
   onToggleRelated: (modelId: string) => void;
 }
@@ -29,6 +30,7 @@ export function LocalModelRowActions({
   onPauseDownload,
   onRecoverPartialDownload,
   onResumeDownload,
+  onServeModel,
   onToggleLink,
   onToggleRelated,
 }: LocalModelRowActionsProps) {
@@ -59,6 +61,7 @@ export function LocalModelRowActions({
           onConvertModel={onConvertModel}
           onDeleteModel={onDeleteModel}
           onRecoverPartialDownload={onRecoverPartialDownload}
+          onServeModel={onServeModel}
           onToggleLink={onToggleLink}
         />
       )}

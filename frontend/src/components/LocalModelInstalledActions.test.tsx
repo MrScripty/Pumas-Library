@@ -78,4 +78,18 @@ describe('LocalModelInstalledActions', () => {
     expect(button).toBeDisabled();
     expect(button.querySelector('.download-progress-ring.is-retained')).not.toBeNull();
   });
+
+  it('renders a serve action for installed models', () => {
+    render(
+      <LocalModelInstalledActions
+        model={createModel({ primaryFormat: 'gguf' })}
+        rowState={createRowState()}
+        selectedAppId="ollama"
+        onServeModel={vi.fn()}
+        onToggleLink={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /serve model/i })).toBeEnabled();
+  });
 });

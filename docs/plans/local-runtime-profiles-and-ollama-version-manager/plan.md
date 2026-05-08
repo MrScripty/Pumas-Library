@@ -671,14 +671,14 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 **Goal:** Prove the user workflow from a model row or modal through backend serving validation and status display.
 
 **Tasks:**
-- [ ] Add a `Serve` action to installed model rows for eligible models.
-- [ ] Add or update a model modal serving tab/panel with profile/provider selection and device placement controls.
-- [ ] Prefill draft values from backend route/defaults while keeping draft state local until submit.
-- [ ] Call `validate_model_serving_config` before `serve_model` when the user asks for validation or when the load form is submitted.
-- [ ] Show non-critical load errors inline without closing the modal or marking the model as served.
+- [x] Add a `Serve` action to installed model rows for eligible models.
+- [ ] Add or update a model modal serving tab/panel with profile/provider selection and device placement controls. Initial row-launched serving dialog exists; modal tab integration remains.
+- [x] Prefill draft values from backend route/defaults while keeping draft state local until submit.
+- [x] Call `validate_model_serving_config` before `serve_model` when the user asks for validation or when the load form is submitted.
+- [x] Show non-critical load errors inline without closing the modal or marking the model as served.
 - [ ] Render loaded/served status only from backend status response or update events.
 - [ ] Add an unload action that calls `unserve_model`.
-- [ ] Keep controls semantic and accessible: named buttons, associated labels, keyboard-usable modal behavior, and no raw interactive divs.
+- [ ] Keep controls semantic and accessible: named buttons, associated labels, keyboard-usable modal behavior, and no raw interactive divs. Initial dialog uses semantic controls and dialog roles; focus-trap and Escape handling should be added or delegated to the existing modal shell.
 
 **Verification:**
 - Frontend test for opening the serve flow from a model row by accessible name.
@@ -687,7 +687,14 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Frontend test for provider/device controls and unsupported-option visibility.
 - Typecheck and targeted lint for changed frontend files.
 
-**Status:** Planned.
+**Status:** In progress. Installed model rows now expose a Serve action that opens a user-directed serving dialog and submits through backend validation plus `serve_model`; modal-tab integration, unload, backend status rendering, and stronger modal keyboard behavior remain.
+
+**Implementation Notes:**
+- 2026-05-08: Added `ModelServeDialog` and row action wiring through `LocalModelsList`, `LocalModelRow`, `LocalModelRowActions`, and `LocalModelInstalledActions`. The dialog loads backend runtime profiles, keeps serving placement values as local form drafts, validates through `validate_model_serving_config`, then submits through `serve_model`.
+- 2026-05-08: Validated the row action slice with `npm run -w frontend test:run -- LocalModelInstalledActions` and `npm run -w frontend check:types`.
+
+**Discovered Issues:**
+- 2026-05-08: The first serving dialog uses its own lightweight dialog shell rather than the existing metadata modal frame. Before broadening modal serving UX, reuse or extract the existing modal focus/Escape behavior so serving controls meet the same keyboard expectations.
 
 ### Milestone 12: Wire Ollama Through User-Directed Serving
 

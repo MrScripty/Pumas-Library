@@ -13,6 +13,7 @@ import { LocalModelGroupHeader } from './LocalModelGroupHeader';
 import { LocalModelRow } from './LocalModelRow';
 import { LocalModelsEmptyState } from './LocalModelsEmptyState';
 import { ModelMetadataModal } from './ModelMetadataModal';
+import { ModelServeDialog } from './ModelServeDialog';
 
 interface LocalModelsListProps {
   modelGroups: ModelCategory[];
@@ -70,6 +71,7 @@ export function LocalModelsList({
     modelId: string;
     modelName: string;
   } | null>(null);
+  const [servingModel, setServingModel] = useState<ModelInfo | null>(null);
 
   if (modelGroups.length === 0) {
     return (
@@ -113,6 +115,7 @@ export function LocalModelsList({
                 onPauseDownload={onPauseDownload}
                 onRecoverPartialDownload={onRecoverPartialDownload}
                 onResumeDownload={onResumeDownload}
+                onServeModel={setServingModel}
                 onToggleLink={onToggleLink}
                 onToggleRelated={onToggleRelated}
                 onToggleStar={onToggleStar}
@@ -128,6 +131,12 @@ export function LocalModelsList({
           modelId={metadataModal.modelId}
           modelName={metadataModal.modelName}
           onClose={() => setMetadataModal(null)}
+        />
+      )}
+      {servingModel && (
+        <ModelServeDialog
+          model={servingModel}
+          onClose={() => setServingModel(null)}
         />
       )}
     </>

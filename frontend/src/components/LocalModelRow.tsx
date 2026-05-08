@@ -24,6 +24,7 @@ interface LocalModelRowProps {
   onPauseDownload?: (repoId: string) => void;
   onRecoverPartialDownload?: (model: ModelInfo) => void;
   onResumeDownload?: (repoId: string) => void;
+  onServeModel?: (model: ModelInfo) => void;
   onToggleLink: (modelId: string) => void;
   onToggleRelated: (modelId: string) => void;
   onToggleStar: (modelId: string) => void;
@@ -46,6 +47,7 @@ export function LocalModelRow({
   onPauseDownload,
   onRecoverPartialDownload,
   onResumeDownload,
+  onServeModel,
   onToggleLink,
   onToggleRelated,
   onToggleStar,
@@ -107,6 +109,7 @@ export function LocalModelRow({
           onPauseDownload={onPauseDownload}
           onRecoverPartialDownload={onRecoverPartialDownload}
           onResumeDownload={onResumeDownload}
+          onServeModel={onServeModel}
           onToggleLink={onToggleLink}
           onToggleRelated={onToggleRelated}
         />

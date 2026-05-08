@@ -45,14 +45,15 @@ bridge.
 | `ConflictResolutionDialog.test.tsx` | Interaction coverage for default and bulk conflict-resolution choices in the mapping workflow. |
 | `ConflictResolutionItem.tsx` | Presentational conflict row with resolution selector, path details, and per-action descriptions. |
 | `ConflictResolutionItem.test.tsx` | Rendering and interaction coverage for conflict rows and expanded details. |
-| `LocalModelsList.tsx` | Grouped local-library list with model actions, related-model disclosure wiring, and metadata-modal access. |
+| `LocalModelsList.tsx` | Grouped local-library list with model actions, related-model disclosure wiring, metadata-modal access, and model serving dialog ownership. |
 | `LocalModelsList.test.tsx` | Interaction coverage for local-library formatting, ctrl-click metadata access, and related-model actions. |
 | `LocalModelGroupHeader.tsx` | Presentational category header and count for local model groups. |
 | `LocalModelGroupHeader.test.tsx` | Rendering coverage for local model group labels and counts. |
 | `LocalModelRow.tsx` | Local model row coordinator for metadata, relationship disclosure, and action controls. |
 | `LocalModelRowActions.tsx` | Local model related/download/installed action switcher. |
 | `LocalModelDownloadActions.tsx` | Active local download pause/resume/cancel progress controls. |
-| `LocalModelInstalledActions.tsx` | Local model link, recover, convert, and delete controls. |
+| `LocalModelInstalledActions.tsx` | Local model link, recover, serve, convert, and delete controls. |
+| `ModelServeDialog.tsx` | User-directed local serving dialog for profile/device placement drafts and backend-confirmed serve responses. |
 | `LocalModelRowState.ts` | Derived local model row state for link, download, related, partial, and conversion capabilities. |
 | `LocalModelsEmptyState.tsx` | Empty local-library and no-match filter states for the local model list. |
 | `LocalModelsEmptyState.test.tsx` | Rendering and action coverage for local model empty states. |

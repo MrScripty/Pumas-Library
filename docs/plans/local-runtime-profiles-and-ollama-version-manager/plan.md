@@ -739,7 +739,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - [x] Support router-mode serving when the selected profile can load/register multiple GGUF models from one `llama-server` router endpoint.
 - [x] Support dedicated-mode serving through model-bound `launch_runtime_profile(profile_id, tag?, model_id?)` while reporting `provider_endpoint` status rather than claiming a Pumas gateway.
 - [x] Validate GGUF requirement, selected GPU layers, tensor split, context size, and device id before launch/load.
-- [ ] Return non-critical errors for missing binary, stopped profile, invalid GGUF, unsupported mode, and provider load failures. Missing runtime/provider load failure/unsupported router mapping is implemented; stopped-profile and invalid-GGUF mapping should be covered by focused handler tests.
+- [x] Return non-critical errors for missing binary, stopped profile, invalid GGUF, unsupported mode, and provider load failures.
 - [x] Update generated router preset/catalog behavior only through backend-owned deterministic producers.
 - [x] Keep conversion llama.cpp code out of serving lifecycle ownership.
 
@@ -750,12 +750,13 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Existing llama.cpp runtime profile tests still pass.
 - Manual `llama-server` smoke path when a local build is available.
 
-**Status:** In progress. Managed dedicated llama.cpp serve/unserve now routes through the provider-neutral serving RPC facade and existing runtime-profile launcher, and router profiles can mark selected GGUF models as served through a running router endpoint without stopping the shared router on unload. Focused llama.cpp handler tests remain.
+**Status:** Complete for the current llama.cpp serving facade. Managed dedicated llama.cpp serve/unserve routes through the provider-neutral serving RPC facade and existing runtime-profile launcher, router profiles can mark selected GGUF models as served through a running router endpoint without stopping the shared router on unload, and missing-runtime/provider-load failures return non-critical serving errors.
 
 **Implementation Notes:**
 - 2026-05-08: Implemented the first llama.cpp serving slice for managed dedicated profiles. Core serving validation now distinguishes launchable managed dedicated profiles from profiles that must already be running, and RPC serving records backend `ServedModelStatus` after a successful profile launch.
 - 2026-05-08: Added provider-specific llama.cpp placement validation. The validator accepts explicit request placement only when it matches the selected profile and rejects context-size requests until the dedicated launch path has a typed context-size override.
 - 2026-05-08: Added router-profile serving. Running llama.cpp router profiles now record selected models as served through the router endpoint, using the existing deterministic backend-generated router catalog/preset behavior from runtime profile launch. Router unload removes the served-model record without stopping the shared router process.
+- 2026-05-08: Added focused RPC integration coverage proving a managed dedicated llama.cpp serve request returns a successful transport response with a non-critical load error when no local `llama-server` runtime can be launched. Validated with `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml`.
 
 **Discovered Issues:**
 - 2026-05-08: The dedicated llama.cpp serving path initially used only the runtime profile's provider endpoint. Resolved the same day by adding the Pumas `/v1` gateway and reporting aggregate serving status as `pumas_gateway` when models are loaded.

@@ -51,6 +51,26 @@ fn create_indexable_test_model(root: &std::path::Path, model_id: &str, official_
     .unwrap();
 }
 
+fn create_indexable_gguf_test_model(root: &std::path::Path, model_id: &str, official_name: &str) {
+    let model_dir = root.join("shared-resources/models").join(model_id);
+    std::fs::create_dir_all(&model_dir).unwrap();
+    std::fs::write(model_dir.join("model.gguf"), b"test").unwrap();
+    std::fs::write(
+        model_dir.join("metadata.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "model_id": model_id,
+            "family": "llama",
+            "model_type": "llm",
+            "official_name": official_name,
+            "cleaned_name": official_name.to_ascii_lowercase().replace(' ', "-"),
+            "files": [{"name": "model.gguf"}],
+            "runtime_engine_hints": ["llama.cpp"]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
 /// Make an RPC call to the server.
 async fn rpc_call(port: u16, method: &str, params: Value) -> Result<Value, String> {
     let json = rpc_call_raw(port, method, params).await?;
@@ -617,6 +637,91 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(proxy_error.status(), reqwest::StatusCode::NOT_FOUND);
+
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_serving_llama_cpp_missing_runtime_is_non_critical() {
+        if !can_bind_local_tcp_for_tests() {
+            return;
+        }
+        let env = create_test_env();
+        let model_id = "llm/llama/serving-gguf-fixture";
+        create_indexable_gguf_test_model(env.path(), model_id, "Serving GGUF Fixture");
+        let server = start_rpc_server(env.path()).await.unwrap();
+        let port = server.port;
+
+        let listed = rpc_call(port, "get_models", json!({})).await.unwrap();
+        assert!(listed
+            .get("models")
+            .and_then(|value| value.as_object())
+            .is_some_and(|models| models.contains_key(model_id)));
+
+        let profile_id = "llama-dedicated-serving-test";
+        let upserted = rpc_call(
+            port,
+            "upsert_runtime_profile",
+            json!({
+                "profile": {
+                    "profile_id": profile_id,
+                    "provider": "llama_cpp",
+                    "provider_mode": "llama_cpp_dedicated",
+                    "management_mode": "managed",
+                    "name": "llama.cpp Dedicated Serving Test",
+                    "enabled": true,
+                    "endpoint_url": "http://127.0.0.1:39191",
+                    "port": 39191,
+                    "device": {"mode": "auto"},
+                    "scheduler": {"auto_load": true}
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            upserted.get("success").and_then(|value| value.as_bool()),
+            Some(true)
+        );
+
+        let served = rpc_call(
+            port,
+            "serve_model",
+            json!({
+                "request": {
+                    "model_id": model_id,
+                    "config": {
+                        "provider": "llama_cpp",
+                        "profile_id": profile_id,
+                        "device_mode": "auto",
+                        "keep_loaded": false
+                    }
+                }
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(served.get("success").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(served.get("loaded").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            served
+                .get("loaded_models_unchanged")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            served
+                .pointer("/load_error/severity")
+                .and_then(|v| v.as_str()),
+            Some("non_critical")
+        );
+        assert!(matches!(
+            served
+                .pointer("/load_error/code")
+                .and_then(|value| value.as_str()),
+            Some("missing_runtime" | "provider_load_failed")
+        ));
 
         server.stop().await;
     }

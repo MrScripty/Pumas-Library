@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getElectronAPI } from '../api/adapter';
 import { useRuntimeProfiles } from '../hooks/useRuntimeProfiles';
 import type { ModelInfo } from '../types/apps';
 import type { RuntimeDeviceMode } from '../types/api-runtime-profiles';
-import type { ModelServeError, ModelServingConfig } from '../types/api-serving';
+import type { ModelServeError, ModelServingConfig, ServedModelStatus } from '../types/api-serving';
 
 interface ModelServeDialogProps {
   model: ModelInfo;
@@ -45,6 +45,21 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [serveError, setServeError] = useState<ModelServeError | null>(null);
+  const [servedStatus, setServedStatus] = useState<ServedModelStatus | null>(null);
+  const profileSelectRef = useRef<HTMLSelectElement | null>(null);
+
+  useEffect(() => {
+    profileSelectRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
 
   useEffect(() => {
     if (profileId || servingProfiles.length === 0) {
@@ -101,12 +116,42 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
 
       const response = await api.serve_model(request);
       if (response.loaded) {
+        setServedStatus(response.status ?? null);
         setMessage('Loaded');
         return;
       }
       setServeError(response.load_error ?? null);
     } catch (caught) {
       setMessage(caught instanceof Error ? caught.message : 'Serving request failed');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleUnload = async () => {
+    const api = getElectronAPI();
+    if (!api?.unserve_model || !servedStatus) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setMessage(null);
+    setServeError(null);
+
+    try {
+      const response = await api.unserve_model({
+        model_id: servedStatus.model_id,
+        profile_id: servedStatus.profile_id,
+        model_alias: servedStatus.model_alias ?? null,
+      });
+      if (response.unloaded) {
+        setServedStatus(null);
+        setMessage('Unloaded');
+      } else {
+        setMessage(response.error ?? 'Model was not loaded');
+      }
+    } catch (caught) {
+      setMessage(caught instanceof Error ? caught.message : 'Unload request failed');
     } finally {
       setIsSubmitting(false);
     }
@@ -140,6 +185,7 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
           <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
             Profile
             <select
+              ref={profileSelectRef}
               value={profileId}
               onChange={(event) => setProfileId(event.target.value)}
               className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-base))] px-2 py-1.5 text-sm text-[hsl(var(--text-primary))]"
@@ -237,6 +283,14 @@ export function ModelServeDialog({ model, onClose }: ModelServeDialogProps) {
             className="rounded bg-[hsl(var(--accent-primary))] px-3 py-1.5 text-sm text-[hsl(0_0%_10%)] disabled:opacity-50"
           >
             {isSubmitting ? 'Serving...' : 'Serve'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleUnload()}
+            disabled={!servedStatus || isSubmitting}
+            className="rounded border border-[hsl(var(--border-default))] px-3 py-1.5 text-sm text-[hsl(var(--text-primary))] disabled:opacity-50"
+          >
+            Unload
           </button>
         </div>
       </div>

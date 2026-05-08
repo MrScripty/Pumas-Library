@@ -4,14 +4,17 @@
 //! model-row/modal serving requests. Provider-specific load/unload behavior is
 //! added in later slices behind this service boundary.
 
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 
 use crate::models::{
     ModelServeError, ModelServeErrorCode, ModelServeValidationResponse, RuntimeDeviceMode,
     RuntimeLifecycleState, RuntimeManagementMode, RuntimeProfileId, RuntimeProviderId,
     RuntimeProviderMode, ServeModelRequest, ServedModelStatus, ServingEndpointMode,
-    ServingEndpointStatus, ServingStatusResponse, ServingStatusSnapshot,
+    ServingEndpointStatus, ServingStatusEvent, ServingStatusEventKind, ServingStatusResponse,
+    ServingStatusSnapshot, ServingStatusUpdateFeed, ServingStatusUpdateFeedResponse,
 };
+
+const SERVING_STATUS_UPDATE_CHANNEL_CAPACITY: usize = 64;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServingValidationProfile {
@@ -35,12 +38,14 @@ pub struct ServingValidationContext {
 #[derive(Debug)]
 pub struct ServingService {
     snapshot: RwLock<ServingStatusSnapshot>,
+    updates: broadcast::Sender<ServingStatusUpdateFeed>,
 }
 
 impl ServingService {
     pub fn new() -> Self {
         Self {
             snapshot: RwLock::new(ServingStatusSnapshot::empty()),
+            updates: broadcast::channel(SERVING_STATUS_UPDATE_CHANNEL_CAPACITY).0,
         }
     }
 
@@ -50,6 +55,22 @@ impl ServingService {
             error: None,
             snapshot: self.snapshot.read().await.clone(),
         }
+    }
+
+    pub async fn list_updates_since(
+        &self,
+        cursor: Option<&str>,
+    ) -> ServingStatusUpdateFeedResponse {
+        let current_cursor = self.snapshot.read().await.cursor.clone();
+        ServingStatusUpdateFeedResponse {
+            success: true,
+            error: None,
+            feed: build_update_feed(cursor, &current_cursor),
+        }
+    }
+
+    pub fn subscribe_updates(&self) -> broadcast::Receiver<ServingStatusUpdateFeed> {
+        self.updates.subscribe()
     }
 
     pub async fn record_loaded_model(&self, status: ServedModelStatus) -> ServingStatusSnapshot {
@@ -65,6 +86,14 @@ impl ServingService {
             message: None,
         };
         bump_snapshot_cursor(&mut snapshot);
+        let event = serving_status_event(
+            snapshot.cursor.clone(),
+            ServingStatusEventKind::ModelLoaded,
+            Some(status.model_id.clone()),
+            Some(status.profile_id.clone()),
+            Some(status.provider),
+        );
+        self.publish_event(event);
         snapshot.clone()
     }
 
@@ -72,6 +101,20 @@ impl ServingService {
         let mut snapshot = self.snapshot.write().await;
         snapshot.last_errors.push(error);
         bump_snapshot_cursor(&mut snapshot);
+        let event = serving_status_event(
+            snapshot.cursor.clone(),
+            ServingStatusEventKind::LoadFailed,
+            snapshot
+                .last_errors
+                .last()
+                .and_then(|error| error.model_id.clone()),
+            snapshot
+                .last_errors
+                .last()
+                .and_then(|error| error.profile_id.clone()),
+            snapshot.last_errors.last().and_then(|error| error.provider),
+        );
+        self.publish_event(event);
         snapshot.clone()
     }
 
@@ -103,6 +146,14 @@ impl ServingService {
             snapshot.endpoint = ServingEndpointStatus::not_configured();
         }
         bump_snapshot_cursor(&mut snapshot);
+        let event = serving_status_event(
+            snapshot.cursor.clone(),
+            ServingStatusEventKind::ModelUnloaded,
+            Some(model_id.to_string()),
+            profile_id.cloned(),
+            None,
+        );
+        self.publish_event(event);
         snapshot.clone()
     }
 
@@ -129,6 +180,15 @@ impl ServingService {
     ) -> ModelServeValidationResponse {
         validate_model_serving_request(request, context)
     }
+
+    fn publish_event(&self, event: ServingStatusEvent) {
+        let _ = self.updates.send(ServingStatusUpdateFeed {
+            cursor: event.cursor.clone(),
+            events: vec![event],
+            stale_cursor: false,
+            snapshot_required: false,
+        });
+    }
 }
 
 fn same_served_model(left: &ServedModelStatus, right: &ServedModelStatus) -> bool {
@@ -145,6 +205,44 @@ fn bump_snapshot_cursor(snapshot: &mut ServingStatusSnapshot) {
         .unwrap_or(0)
         + 1;
     snapshot.cursor = format!("serving:{next}");
+}
+
+fn build_update_feed(cursor: Option<&str>, current_cursor: &str) -> ServingStatusUpdateFeed {
+    let Some(requested_cursor) = cursor else {
+        return ServingStatusUpdateFeed::snapshot_required(current_cursor.to_string());
+    };
+    let Some(requested) = parse_serving_cursor(requested_cursor) else {
+        return ServingStatusUpdateFeed::snapshot_required(current_cursor.to_string());
+    };
+    let Some(current) = parse_serving_cursor(current_cursor) else {
+        return ServingStatusUpdateFeed::snapshot_required(current_cursor.to_string());
+    };
+    if requested == current {
+        return ServingStatusUpdateFeed::empty(Some(current_cursor));
+    }
+    ServingStatusUpdateFeed::snapshot_required(current_cursor.to_string())
+}
+
+fn parse_serving_cursor(cursor: &str) -> Option<u64> {
+    cursor
+        .strip_prefix("serving:")
+        .and_then(|value| value.parse::<u64>().ok())
+}
+
+fn serving_status_event(
+    cursor: String,
+    event_kind: ServingStatusEventKind,
+    model_id: Option<String>,
+    profile_id: Option<RuntimeProfileId>,
+    provider: Option<RuntimeProviderId>,
+) -> ServingStatusEvent {
+    ServingStatusEvent {
+        cursor,
+        event_kind,
+        model_id,
+        profile_id,
+        provider,
+    }
 }
 
 pub fn validate_model_serving_request(
@@ -447,6 +545,7 @@ mod tests {
     #[tokio::test]
     async fn serving_service_records_loaded_and_unloaded_models() {
         let service = ServingService::new();
+        let mut updates = service.subscribe_updates();
         let status = ServedModelStatus {
             model_id: "models/example".to_string(),
             model_alias: Some("example".to_string()),
@@ -468,10 +567,22 @@ mod tests {
         let loaded = service.record_loaded_model(status.clone()).await;
 
         assert_eq!(loaded.served_models.len(), 1);
+        let loaded_feed = updates.recv().await.unwrap();
+        assert_eq!(loaded_feed.cursor, loaded.cursor);
+        assert_eq!(
+            loaded_feed.events[0].event_kind,
+            ServingStatusEventKind::ModelLoaded
+        );
         assert_eq!(
             loaded.endpoint.endpoint_mode,
             ServingEndpointMode::ProviderEndpoint
         );
+        assert!(service
+            .list_updates_since(Some(loaded.cursor.as_str()))
+            .await
+            .feed
+            .events
+            .is_empty());
         assert_eq!(
             service
                 .find_served_model("models/example", Some(&status.profile_id))
@@ -486,9 +597,22 @@ mod tests {
             .await;
 
         assert!(unloaded.served_models.is_empty());
+        let unloaded_feed = updates.recv().await.unwrap();
+        assert_eq!(unloaded_feed.cursor, unloaded.cursor);
+        assert_eq!(
+            unloaded_feed.events[0].event_kind,
+            ServingStatusEventKind::ModelUnloaded
+        );
         assert_eq!(
             unloaded.endpoint.endpoint_mode,
             ServingEndpointMode::NotConfigured
+        );
+        assert!(
+            service
+                .list_updates_since(Some(loaded.cursor.as_str()))
+                .await
+                .feed
+                .snapshot_required
         );
     }
 

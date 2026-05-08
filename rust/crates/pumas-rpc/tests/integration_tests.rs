@@ -521,6 +521,24 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some("not_configured")
         );
+        let initial_cursor = status
+            .pointer("/snapshot/cursor")
+            .and_then(|v| v.as_str())
+            .expect("serving snapshot cursor missing");
+
+        let initial_feed = rpc_call(
+            port,
+            "list_serving_status_updates_since",
+            json!({"cursor": initial_cursor}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            initial_feed
+                .pointer("/feed/snapshot_required")
+                .and_then(|v| v.as_bool()),
+            Some(false)
+        );
 
         let validation = rpc_call(
             port,
@@ -562,6 +580,19 @@ mod tests {
                 .pointer("/load_error/severity")
                 .and_then(|v| v.as_str()),
             Some("non_critical")
+        );
+        let updated_feed = rpc_call(
+            port,
+            "list_serving_status_updates_since",
+            json!({"cursor": initial_cursor}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            updated_feed
+                .pointer("/feed/snapshot_required")
+                .and_then(|v| v.as_bool()),
+            Some(true)
         );
 
         server.stop().await;

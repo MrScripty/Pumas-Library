@@ -391,6 +391,8 @@ const electronAPI = {
   stop_runtime_profile: (profileId: string) =>
     apiCall('stop_runtime_profile', { profile_id: profileId }),
   get_serving_status: () => apiCall('get_serving_status'),
+  list_serving_status_updates_since: (cursor?: string | null) =>
+    apiCall('list_serving_status_updates_since', { cursor }),
   validate_model_serving_config: (request: Record<string, unknown>) =>
     apiCall('validate_model_serving_config', { request }),
   serve_model: (request: Record<string, unknown>) =>

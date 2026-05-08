@@ -334,6 +334,66 @@ impl ServingStatusResponse {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServingStatusEventKind {
+    ModelLoaded,
+    ModelUnloaded,
+    LoadFailed,
+    SnapshotRequired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ServingStatusEvent {
+    pub cursor: String,
+    pub event_kind: ServingStatusEventKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<RuntimeProfileId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<RuntimeProviderId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ServingStatusUpdateFeed {
+    pub cursor: String,
+    pub events: Vec<ServingStatusEvent>,
+    pub stale_cursor: bool,
+    pub snapshot_required: bool,
+}
+
+impl ServingStatusUpdateFeed {
+    pub fn empty(cursor: Option<&str>) -> Self {
+        Self {
+            cursor: cursor.unwrap_or(SERVING_CURSOR_ZERO).to_string(),
+            events: Vec::new(),
+            stale_cursor: false,
+            snapshot_required: false,
+        }
+    }
+
+    pub fn snapshot_required(cursor: String) -> Self {
+        Self {
+            cursor,
+            events: Vec::new(),
+            stale_cursor: true,
+            snapshot_required: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ServingStatusUpdateFeedResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub feed: ServingStatusUpdateFeed,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ServeModelResponse {

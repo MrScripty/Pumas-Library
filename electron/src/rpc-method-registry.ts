@@ -34,6 +34,7 @@ export const RPC_METHOD_REGISTRY = {
     'launch_runtime_profile',
     'stop_runtime_profile',
     'get_serving_status',
+    'list_serving_status_updates_since',
     'validate_model_serving_config',
     'serve_model',
     'unserve_model',
@@ -375,6 +376,11 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
   validate_model_serving_config: {
     required: {
       request: 'unknown-record',
+    },
+  },
+  list_serving_status_updates_since: {
+    nullable: {
+      cursor: 'string',
     },
   },
   serve_model: {

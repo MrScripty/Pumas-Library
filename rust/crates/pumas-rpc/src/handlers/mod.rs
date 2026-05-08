@@ -612,6 +612,9 @@ async fn dispatch_method(
 
         // User-Directed Serving
         "get_serving_status" => serving::get_serving_status(state, params).await,
+        "list_serving_status_updates_since" => {
+            serving::list_serving_status_updates_since(state, params).await
+        }
         "validate_model_serving_config" => {
             serving::validate_model_serving_config(state, params).await
         }

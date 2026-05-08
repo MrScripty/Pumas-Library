@@ -3,6 +3,7 @@
 use crate::models::{
     ModelServeError, ModelServeValidationResponse, RuntimeLifecycleState, RuntimeProfileId,
     ServeModelRequest, ServedModelStatus, ServingStatusResponse, ServingStatusSnapshot,
+    ServingStatusUpdateFeed, ServingStatusUpdateFeedResponse,
 };
 use crate::serving::{ServingValidationContext, ServingValidationProfile};
 use crate::{PumasApi, Result};
@@ -10,6 +11,23 @@ use crate::{PumasApi, Result};
 impl PumasApi {
     pub async fn get_serving_status(&self) -> Result<ServingStatusResponse> {
         Ok(self.primary().serving_service.status().await)
+    }
+
+    pub async fn list_serving_status_updates_since(
+        &self,
+        cursor: Option<&str>,
+    ) -> Result<ServingStatusUpdateFeedResponse> {
+        Ok(self
+            .primary()
+            .serving_service
+            .list_updates_since(cursor)
+            .await)
+    }
+
+    pub fn subscribe_serving_status_updates(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<ServingStatusUpdateFeed> {
+        self.primary().serving_service.subscribe_updates()
     }
 
     pub async fn validate_model_serving_config(

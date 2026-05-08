@@ -25,8 +25,27 @@ struct UnserveModelParams {
     request: UnserveModelRequest,
 }
 
+#[derive(Debug, Deserialize)]
+struct ListServingStatusUpdatesSinceParams {
+    cursor: Option<String>,
+}
+
 pub async fn get_serving_status(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     Ok(serde_json::to_value(state.api.get_serving_status().await?)?)
+}
+
+pub async fn list_serving_status_updates_since(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let command: ListServingStatusUpdatesSinceParams =
+        parse_params("list_serving_status_updates_since", params)?;
+    Ok(serde_json::to_value(
+        state
+            .api
+            .list_serving_status_updates_since(command.cursor.as_deref())
+            .await?,
+    )?)
 }
 
 pub async fn validate_model_serving_config(

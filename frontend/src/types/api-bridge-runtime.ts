@@ -38,6 +38,7 @@ import type {
   ServeModelRequest,
   ServeModelResponse,
   ServingStatusResponse,
+  ServingStatusUpdateFeedResponse,
   UnserveModelRequest,
   UnserveModelResponse,
 } from './api-serving';
@@ -143,6 +144,9 @@ export interface DesktopBridgeRuntimeAPI {
   ): Promise<LaunchResponse>;
   stop_runtime_profile(profileId: string): Promise<StopOllamaResponse>;
   get_serving_status(): Promise<ServingStatusResponse>;
+  list_serving_status_updates_since(
+    cursor?: string | null
+  ): Promise<ServingStatusUpdateFeedResponse>;
   validate_model_serving_config(
     request: ServeModelRequest
   ): Promise<ModelServeValidationResponse>;

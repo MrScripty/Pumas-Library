@@ -19,7 +19,7 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
 | --- | --- | --- |
 | Status and system | `get_status`, `get_disk_space`, `get_system_resources`, `get_network_status` | `rust/crates/pumas-rpc/src/handlers/status.rs` |
 | Local runtime profiles | `get_runtime_profiles_snapshot`, `list_runtime_profile_updates_since`, `upsert_runtime_profile`, `set_model_runtime_route` | `rust/crates/pumas-rpc/src/handlers/runtime_profiles.rs` |
-| User-directed serving | `get_serving_status`, `validate_model_serving_config`, `serve_model`, `unserve_model` | `rust/crates/pumas-rpc/src/handlers/serving.rs` |
+| User-directed serving | `get_serving_status`, `list_serving_status_updates_since`, `validate_model_serving_config`, `serve_model`, `unserve_model` | `rust/crates/pumas-rpc/src/handlers/serving.rs` |
 | Version management | `get_available_versions`, `install_version`, `switch_version`, `get_installation_progress` | `rust/crates/pumas-rpc/src/handlers/versions/` |
 | Model library | `get_models`, `import_model`, `search_hf_models`, `get_library_model_metadata` | `rust/crates/pumas-rpc/src/handlers/models/` |
 | Process control | `launch_comfyui`, `stop_comfyui`, `open_path`, `open_url` | `rust/crates/pumas-rpc/src/handlers/process.rs` |
@@ -55,13 +55,17 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
 - Loaded-model state, endpoint mode, and last load errors are backend-owned.
   Renderer code should not mark a model as served until a backend response or
   serving snapshot confirms it.
+- `list_serving_status_updates_since(cursor?)` is a lightweight serving update
+  feed. It returns an empty feed at the current cursor, or `snapshot_required`
+  when the caller has no cursor or missed an in-memory serving update.
 - A failed fit or provider load is a domain response, not a renderer crash.
   Valid requests that cannot be loaded should return a `ModelServeError` with
   `severity = non_critical` and should preserve already-served models unless a
   user explicitly unloads them.
-- `serve_model` currently wires Ollama provider orchestration. llama.cpp
-  requests return a non-critical `unsupported_provider` response until the
-  llama.cpp provider adapter slice lands.
+- `serve_model` currently wires Ollama orchestration and managed dedicated
+  llama.cpp launch orchestration. llama.cpp router requests return a
+  non-critical `unsupported_provider` response until gateway/router semantics
+  land.
 - Endpoint status must report `not_configured`, `provider_endpoint`, or
   `pumas_gateway` truthfully. The UI must not imply a shared Pumas endpoint
   exists until gateway/facade behavior is implemented.

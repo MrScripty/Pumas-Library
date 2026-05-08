@@ -104,6 +104,31 @@ export interface ServingStatusResponse extends BaseResponse {
   snapshot: ServingStatusSnapshot;
 }
 
+export type ServingStatusEventKind =
+  | 'model_loaded'
+  | 'model_unloaded'
+  | 'load_failed'
+  | 'snapshot_required';
+
+export interface ServingStatusEvent {
+  cursor: string;
+  event_kind: ServingStatusEventKind;
+  model_id?: string | null;
+  profile_id?: string | null;
+  provider?: RuntimeProviderId | null;
+}
+
+export interface ServingStatusUpdateFeed {
+  cursor: string;
+  events: ServingStatusEvent[];
+  stale_cursor: boolean;
+  snapshot_required: boolean;
+}
+
+export interface ServingStatusUpdateFeedResponse extends BaseResponse {
+  feed: ServingStatusUpdateFeed;
+}
+
 export interface ServeModelResponse extends BaseResponse {
   loaded: boolean;
   loaded_models_unchanged: boolean;

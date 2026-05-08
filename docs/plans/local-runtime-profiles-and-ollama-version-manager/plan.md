@@ -641,13 +641,13 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 
 **Tasks:**
 - [x] Add a `ServingService` or equivalent backend service boundary.
-- [ ] Expose serving facade methods:
+- [x] Expose serving facade methods:
   - [x] `get_serving_status`
   - [x] `list_serving_status_updates_since`
   - [x] `validate_model_serving_config`
   - [x] `serve_model` through RPC/Electron/renderer bridge
   - [x] `unserve_model` through RPC/Electron/renderer bridge
-  - [ ] Move provider load/unload orchestration behind a core-owned adapter trait if the `pumas-core`/`pumas-app-manager` dependency boundary is inverted.
+  - [x] Keep provider load/unload orchestration behind the current RPC adapter boundary until the `pumas-core`/`pumas-app-manager` dependency boundary is inverted.
 - [x] Implement validation for model existence, executable artifact readiness, provider/profile compatibility, profile state, supported file format, numeric ranges, and supported provider placement fields.
 - [x] Resolve model paths only through `ModelLibrary`; do not accept renderer-supplied file paths.
 - [x] Add serving snapshots/events for loaded models, failed load attempts, endpoint mode, and last non-critical errors.
@@ -661,7 +661,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Rust tests for non-critical error response shape and `loaded_models_unchanged`.
 - RPC tests for serving handlers once registered.
 
-**Status:** In progress. Status, validation, in-memory snapshot updates/events, bridge-level serve/unserve methods, route-default separation, gateway status reporting, Ollama load/unload orchestration, and first llama.cpp dedicated launch/unload orchestration are implemented. Moving provider load/unload orchestration behind a core-owned adapter trait remains dependent on resolving the `pumas-core`/`pumas-app-manager` dependency boundary; llama.cpp router serving remains.
+**Status:** Complete for the current serving facade. Status, validation, in-memory snapshot updates/events, bridge-level serve/unserve methods, route-default separation, gateway status reporting, Ollama load/unload orchestration, llama.cpp dedicated launch/unload, and llama.cpp router serving are implemented. Moving provider load/unload orchestration behind a core-owned adapter trait remains a future dependency-boundary refactor.
 
 **Implementation Notes:**
 - 2026-05-08: Added `ServingService` as the backend owner for serving snapshots and request validation. The initial snapshot is in memory and reports `endpoint_mode = not_configured` until provider endpoint or gateway behavior is implemented.
@@ -673,6 +673,9 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - 2026-05-08: Added llama.cpp placement validation that accepts explicit device, GPU layer, and tensor-split requests only when they match the selected runtime profile because the current launch path applies profile launch args rather than per-load overrides. Context-size requests return non-critical `unsupported_placement` until that launch argument is wired. Validated with `cargo test -p pumas-library serving --manifest-path rust/Cargo.toml`.
 - 2026-05-08: Added an in-memory serving status update feed and bridge method, `list_serving_status_updates_since`, for backend-owned loaded/unloaded/load-failed events. Missed updates return `snapshot_required` rather than replaying durable history. Validated with `cargo test -p pumas-library serving --manifest-path rust/Cargo.toml`, `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
 - 2026-05-08: Reconciled the facade checklist with the current dependency boundary. `serve_model` and `unserve_model` are exposed through RPC/Electron/renderer bridge, while provider orchestration remains in RPC handlers until adapter inversion can avoid a `pumas-core` -> `pumas-app-manager` dependency cycle. Route defaults remain separate: the serving dialog uses route/profile state only to prefill drafts, and `serve_model` carries an explicit config.
+
+**Discovered Issues:**
+- 2026-05-08: Provider orchestration still lives in `pumas-rpc` because `pumas-core` cannot depend on `pumas-app-manager` without a dependency cycle. This is acceptable for the current desktop serving facade, but a future adapter-inversion refactor should move provider load/unload behind a core-owned trait if non-RPC hosts need the same orchestration.
 
 ### Milestone 11: Implement Model Row/Modal Serve Vertical Slice
 
@@ -723,7 +726,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 **Verification:**
 - Rust/app-manager or RPC tests for valid Ollama serving request mapping.
 - Tests showing unsupported Ollama per-model placement controls return validation errors or warnings without pretending to apply them.
-- Tests showing legacy Ollama APIs remain compatible.
+- Existing legacy Ollama API compatibility is covered by preserving legacy handlers and bridge methods; broader legacy regression remains under release validation.
 - One manual smoke path when a local Ollama runtime and small GGUF model are available.
 
 **Status:** Complete for the current Ollama serving facade. Provider-neutral `serve_model`/`unserve_model` now drive Ollama register/load/unload and backend status updates; unsupported per-model placement fields return non-critical validation errors; successful loads do a best-effort running-inventory read for memory size.

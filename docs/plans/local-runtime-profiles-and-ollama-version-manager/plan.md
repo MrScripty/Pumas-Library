@@ -594,9 +594,9 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 **Goal:** Freeze the cross-layer serving contract before implementing model-row/modal workflows.
 
 **Tasks:**
-- [ ] Define Rust serving DTOs under `pumas-core::models` or a focused `serving` model module.
-- [ ] Add typed enums/newtypes for serving provider, endpoint mode, device mode, placement details, load state, error severity, and error code.
-- [ ] Define `ModelServingConfig` with explicit user-selected placement fields:
+- [x] Define Rust serving DTOs under `pumas-core::models` or a focused `serving` model module.
+- [x] Add typed enums/newtypes for serving provider, endpoint mode, device mode, placement details, load state, error severity, and error code.
+- [x] Define `ModelServingConfig` with explicit user-selected placement fields:
   - provider/profile id
   - device mode
   - device id
@@ -605,9 +605,9 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
   - context size
   - keep-loaded flag
   - model alias when supported.
-- [ ] Define `ServeModelRequest`, `ModelServeValidationResponse`, `ServedModelStatus`, `ServingEndpointStatus`, and `ModelServeError`.
-- [ ] Define response semantics for non-critical load failures, including `loaded_models_unchanged`.
-- [ ] Add matching TypeScript payload and bridge types in `frontend/src/types/`.
+- [x] Define `ServeModelRequest`, `ModelServeValidationResponse`, `ServedModelStatus`, `ServingEndpointStatus`, and `ModelServeError`.
+- [x] Define response semantics for non-critical load failures, including `loaded_models_unchanged`.
+- [x] Add matching TypeScript payload and bridge types in `frontend/src/types/`.
 - [ ] Add RPC/preload method declarations and validation schemas without registering unimplemented behavior that returns dummy data.
 - [ ] Decide whether native bindings are in or out of scope for the first serving phase and document the decision in this plan and binding README if needed.
 
@@ -617,7 +617,17 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - Electron RPC registry/preload tests for payload validation once methods are wired.
 - Contract documentation update in `docs/contracts/desktop-rpc-methods.md`.
 
-**Status:** Planned.
+**Status:** In progress. The first contract DTO slice is complete; RPC/preload declarations, native binding scope documentation, and handler validation remain.
+
+**Implementation Notes:**
+- 2026-05-08: Added `pumas-core::models::serving` DTOs for user-authored serving config, endpoint mode, served-model state, safe non-critical load errors, validation responses, serving snapshots, and `loaded_models_unchanged` response semantics. The contract reuses existing typed runtime provider/profile/device DTOs instead of adding parallel string fields.
+- 2026-05-08: Added matching renderer payload types in `frontend/src/types/api-serving.ts`, exported them through the public type barrel, and documented the backend-owned serving-state contract in frontend, model, and desktop RPC docs.
+- 2026-05-08: Validated with `cargo test -p pumas-library serving --manifest-path rust/Cargo.toml` and `npm run -w frontend check:types`.
+
+**Discovered Issues:**
+- 2026-05-08: The broader models README still contains a historical blanket statement that all DTOs use camelCase, while runtime-profile, package-facts, and serving contracts intentionally use snake_case. This slice documented serving explicitly, but a later docs cleanup should correct the broad statement without changing wire formats.
+- 2026-05-08: Electron RPC request schemas are intentionally shallow and can only treat nested serving config as an `unknown-record`; meaningful serving validation must stay in Rust RPC/service code.
+- 2026-05-08: Torch inference RPCs still bypass runtime profiles and use `connection_url`. That is outside the current Ollama/llama.cpp serving slice but should be considered before claiming a provider-general serving facade.
 
 ### Milestone 10: Add Backend Serving Facade And Status Snapshot
 

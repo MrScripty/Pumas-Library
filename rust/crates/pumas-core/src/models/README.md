@@ -17,6 +17,7 @@ frontend, ensuring type-compatible serialization across all layers.
 | `model_library_selector.rs` | Fast model-library selector snapshot DTOs with canonical model refs, selected artifact identity, entry-path state, artifact state, and detail freshness |
 | `package_facts.rs` | Versioned model package-fact DTOs for artifact, component, task, backend-hint, generation-default, and custom-code evidence |
 | `runtime_profile.rs` | Local runtime profile, provider settings, model-route, status, snapshot, and update-feed DTOs shared with RPC/Electron/frontend consumers. |
+| `serving.rs` | User-directed model serving DTOs for explicit placement, served-model status, endpoint mode, and non-critical load-error envelopes. |
 | `version.rs` | `VersionInfo`, `VersionsMetadata` - Version tracking and metadata persistence types |
 | `github.rs` | GitHub-specific types for release and asset data |
 | `custom_node.rs` | Custom node metadata: `CompatibilityStatus`, `CustomNodeVersionStatus` |
@@ -73,6 +74,14 @@ frontend, ensuring type-compatible serialization across all layers.
   `RuntimeProfileUpdateFeed` are the host-facing local runtime contract.
   Consumers should treat `profile_id` as the stable route key; raw endpoint
   URLs are compatibility inputs, not durable internal identity.
+- `ModelServingConfig`, `ServeModelRequest`, `ServedModelStatus`, and
+  `ServingStatusSnapshot` are the host-facing model serving contract. The
+  selected provider/profile/device placement is user-authored; Pumas validates
+  and attempts it without silently moving, evicting, or unloading unrelated
+  models to make the request fit.
+- `ModelServeError` is the safe load-failure envelope. Failed fit or runtime
+  load attempts that do not corrupt existing served state use
+  `severity = non_critical` and preserve `loaded_models_unchanged = true`.
 - Compatibility policy is append-only for milestone one: new optional fields may appear, but
   existing file-based fields and semantics must remain valid.
 

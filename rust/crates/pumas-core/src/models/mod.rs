@@ -13,6 +13,7 @@ mod model_library_selector;
 mod package_facts;
 mod responses;
 mod runtime_profile;
+mod serving;
 mod version;
 
 pub use api_response::*;
@@ -24,4 +25,5 @@ pub use model_library_selector::*;
 pub use package_facts::*;
 pub use responses::*;
 pub use runtime_profile::*;
+pub use serving::*;
 pub use version::*;

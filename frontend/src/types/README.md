@@ -20,6 +20,7 @@ one authoritative view of the desktop bridge boundary.
 | `api-versions.ts` | Version, installation-progress, cache, and background-fetch contracts. |
 | `api-processes.ts` | Process, Ollama, Torch, shortcut, and launcher-update contracts. |
 | `api-runtime-profiles.ts` | Provider-neutral local runtime profile, route, status, and update-feed contracts. |
+| `api-serving.ts` | User-directed model serving request, status, endpoint-mode, and non-critical load-error contracts. |
 | `api-window.ts` | Renderer utility response contracts for paths, URLs, and window actions. |
 | `api-bridge*.ts` | Domain bridge method interfaces composed into `DesktopBridgeAPI`. |
 | `api-plugins.ts` | Plugin response contracts. |
@@ -94,5 +95,8 @@ import type { DesktopBridgeAPI, LibraryStatusResponse } from './api';
 - `api-runtime-profiles.ts` is the renderer contract for runtime profiles,
   model routes, statuses, snapshots, and update-feed events. Add provider
   fields there before exposing them through profile editors or model-route UI.
+- `api-serving.ts` is the renderer contract for model row/modal serve flows.
+  Loaded state, endpoint mode, and last load errors are backend-owned; renderer
+  components may keep only unsaved serving form drafts locally.
 - Revisit trigger: a generated schema or codegen pipeline becomes the producer
   of these contracts.

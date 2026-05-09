@@ -350,7 +350,7 @@ public usage elsewhere.
 **Tasks:**
 - [x] Add a `LlamaCppModelLibrarySection` or equivalent component under the
       app-panel section area.
-- [ ] Feed it the existing model groups, runtime profile snapshot, route
+- [x] Feed it the existing model groups, runtime profile snapshot, route
       snapshot, and serving snapshot.
 - [x] Render only compatible models using existing row visual patterns without
       importing the generic model manager's remote-search/download state
@@ -371,7 +371,7 @@ public usage elsewhere.
   `ModelManager` path.
 - Accessibility tests use named buttons/selectors, not generic role counts.
 
-**Status:** In progress.
+**Status:** Completed.
 
 **Progress:**
 - 2026-05-09: Added a display-only llama.cpp model library section and swapped
@@ -393,16 +393,16 @@ public usage elsewhere.
 the row.
 
 **Tasks:**
-- [ ] Add a compact profile selector listing only llama.cpp profiles.
-- [ ] Label profile options with name plus placement: `Emily GPU`, `Emily CPU`,
+- [x] Add a compact profile selector listing only llama.cpp profiles.
+- [x] Label profile options with name plus placement: `Emily GPU`, `Emily CPU`,
       `Emily iGPU`, `Emily Hybrid`.
-- [ ] On selection, persist `ModelRuntimeRoute` through existing backend RPC, or
+- [x] On selection, persist `ModelRuntimeRoute` through existing backend RPC, or
       use an explicit save affordance if immediate persistence creates stale
       response or accidental-write issues during implementation.
 - [ ] Extract or reuse a focused route save/clear helper so row selection and
       `ModelRuntimeRouteEditor` do not duplicate backend mutation logic.
-- [ ] Refresh route state from the backend snapshot/update feed after save.
-- [ ] Surface route-save errors inline without mutating served state.
+- [x] Refresh route state from the backend snapshot/update feed after save.
+- [x] Surface route-save errors inline without mutating served state.
 - [ ] Disable or explain selector state when no llama.cpp profiles exist.
 
 **Verification:**
@@ -413,7 +413,21 @@ the row.
   visible.
 - Rust route mutation tests if backend route behavior needs contract changes.
 
-**Status:** Not started.
+**Status:** In progress.
+
+**Progress:**
+- 2026-05-09: Wired the llama.cpp library rows to backend runtime profile
+  snapshots and route snapshots, added a row-level llama.cpp-only profile
+  selector with explicit save/clear behavior, and refreshed backend-confirmed
+  route state after successful mutation. Verified with
+  `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx` and
+  `npm run -w frontend check:types`.
+
+**Discovered issues:**
+- Route mutation logic now exists in both `ModelRuntimeRouteEditor` and
+  `LlamaCppModelLibrarySection`; extract a shared route mutation helper before
+  marking the duplication task complete.
+- Empty-profile selector UX still needs a clear disabled/explanation state.
 
 ### Milestone 6: Hardware Placement Tags
 

@@ -1,13 +1,17 @@
-import { useState } from 'react';
-import { Link2, Star } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link2, Save, Star } from 'lucide-react';
+import { getElectronAPI } from '../../../api/adapter';
+import { useRuntimeProfiles } from '../../../hooks/useRuntimeProfiles';
 import type { ModelCategory, ModelInfo } from '../../../types/apps';
 import type { ServedModelStatus } from '../../../types/api-serving';
+import type { RuntimeProfileConfig } from '../../../types/api-runtime-profiles';
 import { IconButton, ListItem, ListItemContent } from '../../ui';
 import { LocalModelMetadataSummary } from '../../LocalModelMetadataSummary';
 import { LocalModelNameButton } from '../../LocalModelNameButton';
 import { ModelMetadataModal } from '../../ModelMetadataModal';
 import {
   buildLlamaCppModelRows,
+  getLlamaCppPlacementLabel,
   type LlamaCppModelRowViewModel,
 } from './llamaCppLibraryViewModels';
 
@@ -38,18 +42,30 @@ function getPlacementLabel(row: LlamaCppModelRowViewModel): string {
   return row.servedPlacement?.label ?? row.selectedProfilePlacement?.label ?? 'Auto';
 }
 
+function getProfileOptionLabel(profile: RuntimeProfileConfig): string {
+  return `${profile.name} - ${
+    getLlamaCppPlacementLabel({ profile })?.label ?? 'Auto'
+  }`;
+}
+
 function LlamaCppModelRow({
   excludedModels,
+  isSavingRoute,
+  providerProfiles,
   row,
   starredModels,
   onOpenMetadata,
+  onSaveRoute,
   onToggleLink,
   onToggleStar,
 }: {
   excludedModels: Set<string>;
+  isSavingRoute: boolean;
+  providerProfiles: RuntimeProfileConfig[];
   row: LlamaCppModelRowViewModel;
   starredModels: Set<string>;
   onOpenMetadata: (modelId: string, modelName: string) => void;
+  onSaveRoute: (modelId: string, profileId: string) => void;
   onToggleLink: (modelId: string) => void;
   onToggleStar: (modelId: string) => void;
 }) {
@@ -57,6 +73,12 @@ function LlamaCppModelRow({
   const isLinked = row.model.linkedApps?.includes('llama-cpp') ?? false;
   const isExcluded = excludedModels.has(row.model.id);
   const servedCount = row.servedStatuses.filter((status) => status.load_state === 'loaded').length;
+  const [draftProfileId, setDraftProfileId] = useState(row.route?.profile_id ?? '');
+  const hasDraftChange = draftProfileId !== (row.route?.profile_id ?? '');
+
+  useEffect(() => {
+    setDraftProfileId(row.route?.profile_id ?? '');
+  }, [row.route?.profile_id]);
 
   return (
     <ListItem highlighted={isLinked} className={isExcluded ? 'opacity-60' : ''}>
@@ -102,10 +124,31 @@ function LlamaCppModelRow({
             />
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2 pt-0.5">
-          <span className="max-w-32 truncate text-xs text-[hsl(var(--text-muted))]">
-            {getRouteLabel(row)}
-          </span>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pt-0.5">
+          <label className="sr-only" htmlFor={`llamacpp-profile-${row.model.id}`}>
+            llama.cpp profile for {row.model.name}
+          </label>
+          <select
+            id={`llamacpp-profile-${row.model.id}`}
+            value={draftProfileId}
+            onChange={(event) => setDraftProfileId(event.target.value)}
+            className="h-8 max-w-44 rounded border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface-high))] px-2 text-xs text-[hsl(var(--text-primary))]"
+            aria-label={`llama.cpp profile for ${row.model.name}`}
+          >
+            <option value="">{getRouteLabel(row)}</option>
+            {providerProfiles.map((profile) => (
+              <option key={profile.profile_id} value={profile.profile_id}>
+                {getProfileOptionLabel(profile)}
+              </option>
+            ))}
+          </select>
+          <IconButton
+            icon={<Save />}
+            tooltip="Save llama.cpp route"
+            onClick={() => onSaveRoute(row.model.id, draftProfileId)}
+            disabled={!hasDraftChange || isSavingRoute}
+            size="sm"
+          />
           <IconButton
             icon={<Link2 />}
             tooltip={isLinked ? 'Unlink from llama.cpp' : 'Link to llama.cpp'}
@@ -126,16 +169,57 @@ export function LlamaCppModelLibrarySection({
   onToggleLink,
   onToggleStar,
 }: LlamaCppModelLibrarySectionProps) {
+  const {
+    profiles,
+    routes,
+    refreshRuntimeProfiles,
+  } = useRuntimeProfiles();
   const [metadataModal, setMetadataModal] = useState<{
     modelId: string;
     modelName: string;
   } | null>(null);
+  const [savingRouteModelId, setSavingRouteModelId] = useState<string | null>(null);
+  const [routeError, setRouteError] = useState<string | null>(null);
+  const providerProfiles = profiles.filter((profile) => profile.provider === 'llama_cpp');
   const rows = buildLlamaCppModelRows({
     modelGroups,
-    profiles: [],
-    routes: [],
+    profiles,
+    routes,
     servedStatuses: servedModels,
   });
+
+  const handleSaveRoute = async (modelId: string, profileId: string) => {
+    const electronAPI = getElectronAPI();
+    if (profileId && !electronAPI?.set_model_runtime_route) {
+      setRouteError('Runtime route API is unavailable');
+      return;
+    }
+    if (!profileId && !electronAPI?.clear_model_runtime_route) {
+      setRouteError('Runtime route API is unavailable');
+      return;
+    }
+
+    setSavingRouteModelId(modelId);
+    setRouteError(null);
+    try {
+      const response = profileId
+        ? await electronAPI!.set_model_runtime_route({
+            model_id: modelId,
+            profile_id: profileId,
+            auto_load: true,
+          })
+        : await electronAPI!.clear_model_runtime_route(modelId);
+      if (!response.success) {
+        setRouteError(response.error ?? 'Failed to save runtime route');
+        return;
+      }
+      await refreshRuntimeProfiles();
+    } catch (caught) {
+      setRouteError(caught instanceof Error ? caught.message : 'Failed to save runtime route');
+    } finally {
+      setSavingRouteModelId(null);
+    }
+  };
 
   return (
     <section className="min-h-0 flex-1 overflow-hidden bg-[hsl(var(--launcher-bg-tertiary)/0.2)]">
@@ -149,6 +233,11 @@ export function LlamaCppModelLibrarySection({
               {rows.length} compatible local model{rows.length === 1 ? '' : 's'}
             </div>
           </div>
+          {routeError && (
+            <div className="mt-2 rounded border border-[hsl(var(--accent-error)/0.35)] bg-[hsl(var(--accent-error)/0.12)] px-3 py-2 text-xs text-[hsl(var(--accent-error))]">
+              {routeError}
+            </div>
+          )}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {rows.length === 0 ? (
@@ -161,10 +250,15 @@ export function LlamaCppModelLibrarySection({
                 <LlamaCppModelRow
                   key={row.model.id}
                   excludedModels={excludedModels}
+                  isSavingRoute={savingRouteModelId === row.model.id}
+                  providerProfiles={providerProfiles}
                   row={row}
                   starredModels={starredModels}
                   onOpenMetadata={(modelId, modelName) => {
                     setMetadataModal({ modelId, modelName });
+                  }}
+                  onSaveRoute={(modelId, profileId) => {
+                    void handleSaveRoute(modelId, profileId);
                   }}
                   onToggleLink={onToggleLink}
                   onToggleStar={onToggleStar}

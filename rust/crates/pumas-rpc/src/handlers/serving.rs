@@ -4,12 +4,13 @@ use super::parse_params;
 use crate::server::AppState;
 use pumas_library::models::{
     ModelServeError, ModelServeErrorCode, RuntimeDeviceSettings, RuntimeProviderId,
-    ServeModelRequest, ServeModelResponse, ServedModelLoadState, ServedModelStatus,
-    UnserveModelRequest, UnserveModelResponse,
+    RuntimeProviderMode, ServeModelRequest, ServeModelResponse, ServedModelLoadState,
+    ServedModelStatus, UnserveModelRequest, UnserveModelResponse,
 };
 use pumas_library::runtime_profiles::RuntimeProfileLaunchOverrides;
 use serde::Deserialize;
 use serde_json::Value;
+use std::path::PathBuf;
 use tracing::warn;
 
 #[derive(Debug, Deserialize)]
@@ -200,11 +201,11 @@ async fn serve_llama_cpp_model(
         .await;
     };
 
-    if profile.provider_mode == pumas_library::models::RuntimeProviderMode::LlamaCppRouter {
+    if profile.provider_mode == RuntimeProviderMode::LlamaCppRouter {
         return serve_llama_cpp_router_model(state, request).await;
     }
 
-    if profile.provider_mode != pumas_library::models::RuntimeProviderMode::LlamaCppDedicated {
+    if profile.provider_mode != RuntimeProviderMode::LlamaCppDedicated {
         return non_critical_failure_response(
             state,
             serving_error(
@@ -240,7 +241,7 @@ async fn serve_llama_cpp_model(
         }
     };
 
-    let Some(version_manager) = super::get_version_manager(state, "llama-cpp").await else {
+    let Some((tag, version_dir)) = active_llama_cpp_runtime(state, &request).await? else {
         return non_critical_failure_response(
             state,
             serving_error(
@@ -251,18 +252,6 @@ async fn serve_llama_cpp_model(
         )
         .await;
     };
-    let Some(tag) = version_manager.get_active_version().await? else {
-        return non_critical_failure_response(
-            state,
-            serving_error(
-                ModelServeErrorCode::MissingRuntime,
-                "No active llama.cpp runtime version is set. Open the llama.cpp app page and set an installed runtime active.",
-                &request,
-            ),
-        )
-        .await;
-    };
-    let version_dir = version_manager.version_path(&tag);
     let launch_response = state
         .api
         .launch_runtime_profile_for_model_with_overrides(
@@ -336,7 +325,7 @@ async fn serve_llama_cpp_router_model(
 ) -> pumas_library::Result<Value> {
     let endpoint = match state
         .api
-        .resolve_model_runtime_profile_endpoint_for_operation(
+        .resolve_model_runtime_profile_endpoint(
             RuntimeProviderId::LlamaCpp,
             &request.model_id,
             Some(request.config.profile_id.clone()),
@@ -360,6 +349,59 @@ async fn serve_llama_cpp_router_model(
             .await;
         }
     };
+
+    if state
+        .api
+        .resolve_model_runtime_profile_endpoint_for_operation(
+            RuntimeProviderId::LlamaCpp,
+            &request.model_id,
+            Some(request.config.profile_id.clone()),
+        )
+        .await
+        .is_err()
+    {
+        let Some((tag, version_dir)) = active_llama_cpp_runtime(state, &request).await? else {
+            return non_critical_failure_response(
+                state,
+                serving_error(
+                    ModelServeErrorCode::MissingRuntime,
+                    "llama.cpp runtime versions are not available",
+                    &request,
+                ),
+            )
+            .await;
+        };
+        let launch_response = state
+            .api
+            .launch_runtime_profile(request.config.profile_id.clone(), &tag, &version_dir)
+            .await;
+        match launch_response {
+            Ok(response) if response.success => {}
+            Ok(response) => {
+                let message = response.error.unwrap_or_else(|| {
+                    "llama.cpp router profile did not start for the selected model".to_string()
+                });
+                warn!("llama.cpp router serve launch failed: {}", message);
+                return non_critical_failure_response(
+                    state,
+                    serving_error(ModelServeErrorCode::ProviderLoadFailed, message, &request),
+                )
+                .await;
+            }
+            Err(err) => {
+                warn!("llama.cpp router serve launch failed: {}", err);
+                return non_critical_failure_response(
+                    state,
+                    serving_error(
+                        ModelServeErrorCode::MissingRuntime,
+                        "llama.cpp router runtime could not be launched",
+                        &request,
+                    ),
+                )
+                .await;
+            }
+        }
+    }
 
     let model_alias = request
         .config
@@ -394,6 +436,25 @@ async fn serve_llama_cpp_router_model(
         load_error: None,
         snapshot: Some(snapshot),
     })?)
+}
+
+async fn active_llama_cpp_runtime(
+    state: &AppState,
+    request: &ServeModelRequest,
+) -> pumas_library::Result<Option<(String, PathBuf)>> {
+    let Some(version_manager) = super::get_version_manager(state, "llama-cpp").await else {
+        return Ok(None);
+    };
+    let Some(tag) = version_manager.get_active_version().await? else {
+        warn!(
+            model_id = %request.model_id,
+            profile_id = %request.config.profile_id.as_str(),
+            "No active llama.cpp runtime version is set"
+        );
+        return Ok(None);
+    };
+    let version_dir = version_manager.version_path(&tag);
+    Ok(Some((tag, version_dir)))
 }
 
 fn llama_cpp_launch_overrides(request: &ServeModelRequest) -> RuntimeProfileLaunchOverrides {

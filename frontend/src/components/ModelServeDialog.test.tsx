@@ -169,7 +169,7 @@ describe('ModelServeDialog', () => {
     expect(screen.getByRole('button', { name: 'Start serving' })).toBeEnabled();
   });
 
-  it('shows llama.cpp placement controls for router profiles', () => {
+  it('uses router profile placement without per-model overrides', () => {
     render(
       <ModelServeDialog
         model={{
@@ -186,10 +186,13 @@ describe('ModelServeDialog', () => {
     );
 
     expect(screen.getByRole('combobox', { name: /runtime target/i })).toHaveValue('router-llama');
-    expect(screen.getByRole('combobox', { name: /model device/i })).toHaveValue('gpu');
-    expect(screen.getByRole('spinbutton', { name: /model gpu layers/i })).toHaveValue(20);
-    expect(screen.getByRole('textbox', { name: /model tensor split/i })).toHaveValue('1,1');
-    expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(4096);
+    expect(
+      screen.getByText('Model placement comes from the selected runtime target.')
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /model device/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: /model gpu layers/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: /model tensor split/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: /context/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start serving' })).toBeEnabled();
   });
 

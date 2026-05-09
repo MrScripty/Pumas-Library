@@ -623,6 +623,7 @@ impl RuntimeProfileService {
     ) -> Result<ResolvedRuntimeProfileEndpoint> {
         let config_path = self.config_path.clone();
         let write_lock = self.write_lock.clone();
+        let launcher_root = self.launcher_root.clone();
         tokio::task::spawn_blocking(move || {
             let _guard = write_lock.write().map_err(|_| {
                 PumasError::Other("Failed to acquire runtime profile config lock".to_string())
@@ -633,7 +634,7 @@ impl RuntimeProfileService {
                 .ok_or_else(|| PumasError::InvalidParams {
                     message: "runtime profile id is required".to_string(),
                 })?;
-            resolve_config_profile_endpoint(&config, provider, selected_profile_id)
+            resolve_config_profile_endpoint(&launcher_root, &config, provider, selected_profile_id)
         })
         .await
         .map_err(|err| {
@@ -683,6 +684,7 @@ impl RuntimeProfileService {
 
         let config_path = self.config_path.clone();
         let write_lock = self.write_lock.clone();
+        let launcher_root = self.launcher_root.clone();
         tokio::task::spawn_blocking(move || {
             let _guard = write_lock.write().map_err(|_| {
                 PumasError::Other("Failed to acquire runtime profile config lock".to_string())
@@ -700,7 +702,7 @@ impl RuntimeProfileService {
                 .ok_or_else(|| PumasError::InvalidParams {
                     message: "runtime profile id is required".to_string(),
                 })?;
-            resolve_config_profile_endpoint(&config, provider, routed_profile_id)
+            resolve_config_profile_endpoint(&launcher_root, &config, provider, routed_profile_id)
         })
         .await
         .map_err(|err| {
@@ -1029,6 +1031,7 @@ fn derive_managed_profile_launch_specs(
 }
 
 fn resolve_config_profile_endpoint(
+    launcher_root: &Path,
     config: &RuntimeProfilesConfigFile,
     provider: RuntimeProviderId,
     profile_id: RuntimeProfileId,
@@ -1049,15 +1052,29 @@ fn resolve_config_profile_endpoint(
             ),
         });
     }
-    let endpoint_url = profile
-        .endpoint_url
-        .clone()
-        .ok_or_else(|| PumasError::InvalidParams {
-            message: format!(
-                "runtime profile {} does not define endpoint_url",
-                profile_id.as_str()
-            ),
-        })?;
+    let endpoint_url = match &profile.endpoint_url {
+        Some(endpoint_url) => endpoint_url.clone(),
+        None if profile.management_mode == RuntimeManagementMode::Managed => {
+            derive_managed_profile_launch_specs(launcher_root, config)?
+                .into_iter()
+                .find(|spec| spec.profile_id == profile_id)
+                .map(|spec| spec.endpoint_url)
+                .ok_or_else(|| PumasError::InvalidParams {
+                    message: format!(
+                        "managed runtime profile endpoint could not be derived: {}",
+                        profile_id.as_str()
+                    ),
+                })?
+        }
+        None => {
+            return Err(PumasError::InvalidParams {
+                message: format!(
+                    "runtime profile {} does not define endpoint_url",
+                    profile_id.as_str()
+                ),
+            });
+        }
+    };
     Ok(ResolvedRuntimeProfileEndpoint {
         profile_id,
         endpoint_url,
@@ -1785,6 +1802,35 @@ mod tests {
                 .map(String::as_str),
             Some("1")
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_resolves_implicit_managed_llama_cpp_endpoint() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+
+        let mut profile = managed_llama_cpp_profile("llama-router-auto-port");
+        profile.endpoint_url = None;
+        profile.port = None;
+        service.upsert_profile(profile).await.unwrap();
+
+        let spec = service
+            .list_managed_profile_launch_specs()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|spec| spec.profile_id.as_str() == "llama-router-auto-port")
+            .unwrap();
+        let endpoint = service
+            .resolve_model_endpoint(
+                RuntimeProviderId::LlamaCpp,
+                "embedding/qwen/model",
+                Some(RuntimeProfileId::parse("llama-router-auto-port").unwrap()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(endpoint, spec.endpoint_url);
     }
 
     #[test]

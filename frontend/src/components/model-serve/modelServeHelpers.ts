@@ -52,21 +52,25 @@ export function isLlamaCppProfile(profile: RuntimeProfileConfig | undefined): bo
   return profile?.provider === 'llama_cpp';
 }
 
+export function isManagedLlamaCppProfile(profile: RuntimeProfileConfig | undefined): boolean {
+  return isLlamaCppProfile(profile) && profile?.management_mode === 'managed';
+}
+
 export function getPlacementControls(
   profile: RuntimeProfileConfig | undefined,
   deviceMode: RuntimeDeviceMode
 ): ModelServeControls {
-  const supportsLlamaCppPlacement = isLlamaCppProfile(profile);
-  const canUseGpuPlacement = supportsLlamaCppPlacement && deviceMode !== 'cpu';
+  const supportsModelPlacement = isDedicatedLlamaCppProfile(profile);
+  const canUseGpuPlacement = supportsModelPlacement && deviceMode !== 'cpu';
 
   return {
-    showDeviceControls: supportsLlamaCppPlacement,
-    showDeviceId: supportsLlamaCppPlacement && deviceMode === 'specific_device',
+    showDeviceControls: supportsModelPlacement,
+    showDeviceId: supportsModelPlacement && deviceMode === 'specific_device',
     showGpuLayers: canUseGpuPlacement,
     showTensorSplit:
       canUseGpuPlacement &&
       (deviceMode === 'gpu' || deviceMode === 'hybrid' || deviceMode === 'specific_device'),
-    showContextSize: supportsLlamaCppPlacement,
+    showContextSize: supportsModelPlacement,
   };
 }
 
@@ -78,8 +82,7 @@ export function getProfileStateBlockReason(
     return null;
   }
 
-  const canLaunchOnServe =
-    isDedicatedLlamaCppProfile(profile) && profile.management_mode === 'managed';
+  const canLaunchOnServe = isManagedLlamaCppProfile(profile);
   const isAvailable = status?.state === 'running' || status?.state === 'external';
 
   return canLaunchOnServe || isAvailable

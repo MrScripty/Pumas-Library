@@ -10,7 +10,7 @@ import {
   getPlacementControls,
   getProfileStateBlockReason,
   isGgufModel,
-  isDedicatedLlamaCppProfile,
+  isManagedLlamaCppProfile,
   isLlamaCppProfile,
   type ModelServeFormState,
 } from './model-serve/modelServeHelpers';
@@ -205,12 +205,11 @@ function selectInitialServeProfile({
       return runningLlamaProfile;
     }
 
-    const launchableDedicatedProfile = profiles.find(
-      (profile) =>
-        isDedicatedLlamaCppProfile(profile) && profile.management_mode === 'managed'
+    const launchableManagedLlamaProfile = profiles.find((profile) =>
+      isManagedLlamaCppProfile(profile)
     );
-    if (launchableDedicatedProfile) {
-      return launchableDedicatedProfile;
+    if (launchableManagedLlamaProfile) {
+      return launchableManagedLlamaProfile;
     }
   }
 

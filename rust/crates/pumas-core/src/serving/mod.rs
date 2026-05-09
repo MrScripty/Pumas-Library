@@ -346,7 +346,10 @@ fn profile_accepts_serving_operation(profile: &ServingValidationProfile) -> bool
     }
 
     profile.provider == RuntimeProviderId::LlamaCpp
-        && profile.provider_mode == RuntimeProviderMode::LlamaCppDedicated
+        && matches!(
+            profile.provider_mode,
+            RuntimeProviderMode::LlamaCppDedicated | RuntimeProviderMode::LlamaCppRouter
+        )
         && profile.management_mode == RuntimeManagementMode::Managed
         && matches!(
             profile.state,
@@ -637,7 +640,7 @@ mod tests {
         context.profile = Some(ServingValidationProfile {
             provider: RuntimeProviderId::LlamaCpp,
             provider_mode: RuntimeProviderMode::LlamaCppRouter,
-            management_mode: RuntimeManagementMode::Managed,
+            management_mode: RuntimeManagementMode::External,
             state: RuntimeLifecycleState::Stopped,
             device_mode: RuntimeDeviceMode::Auto,
             device_id: None,
@@ -729,6 +732,30 @@ mod tests {
             device_id: None,
             gpu_layers: Some(24),
             tensor_split: Some(vec![1.0, 1.0]),
+        });
+
+        let response = validate_model_serving_request(&request, &context);
+
+        assert!(response.valid);
+    }
+
+    #[test]
+    fn validation_accepts_stopped_managed_llama_cpp_router_profile() {
+        let mut request = request();
+        request.config.provider = RuntimeProviderId::LlamaCpp;
+        request.config.profile_id = RuntimeProfileId::parse("llama-router").unwrap();
+        request.config.device_mode = RuntimeDeviceMode::Cpu;
+
+        let mut context = valid_context();
+        context.profile = Some(ServingValidationProfile {
+            provider: RuntimeProviderId::LlamaCpp,
+            provider_mode: RuntimeProviderMode::LlamaCppRouter,
+            management_mode: RuntimeManagementMode::Managed,
+            state: RuntimeLifecycleState::Stopped,
+            device_mode: RuntimeDeviceMode::Cpu,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
         });
 
         let response = validate_model_serving_request(&request, &context);

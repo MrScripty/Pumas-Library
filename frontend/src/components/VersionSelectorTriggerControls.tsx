@@ -74,7 +74,7 @@ export function TriggerDefaultButton({
 }
 
 export function FirstVersionInstallButton({
-  isLoading,
+  isLoading: _isLoading,
   onOpenVersionManager,
 }: {
   isLoading: boolean;
@@ -83,8 +83,7 @@ export function FirstVersionInstallButton({
   return (
     <motion.button
       onClick={onOpenVersionManager}
-      disabled={isLoading}
-      className="rounded p-2 transition-colors hover:bg-[hsl(var(--surface-interactive-hover))] disabled:opacity-50"
+      className="rounded p-2 transition-colors hover:bg-[hsl(var(--surface-interactive-hover))]"
       whileHover={{ scale: 1.2 }}
       whileTap={{ scale: 0.9 }}
       title="Install your first version"
@@ -216,7 +215,7 @@ export function VersionManagerButton({
   installNetworkStatus,
   isInstallFailed,
   isInstallPending,
-  isLoading,
+  isLoading: _isLoading,
   latestVersion,
   onOpenVersionManager,
   ringDegrees,
@@ -238,7 +237,6 @@ export function VersionManagerButton({
   return (
     <motion.button
       onClick={onOpenVersionManager}
-      disabled={isLoading}
       className={`rounded p-1 hover:bg-[hsl(var(--surface-interactive-hover))] disabled:opacity-50 ${
         isEmphasized ? 'ring-1 ring-[hsl(var(--accent-success))]/60' : ''
       }`}

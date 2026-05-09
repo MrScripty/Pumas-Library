@@ -66,4 +66,28 @@ describe('VersionSelectorTrigger', () => {
     fireEvent.click(screen.getByTitle('Install your first version'));
     expect(props.onOpenVersionManager).toHaveBeenCalledTimes(1);
   });
+
+  it('opens the version manager while versions are loading', () => {
+    const props = renderTrigger({
+      isLoading: true,
+    });
+
+    fireEvent.click(screen.getByTitle('Install new version'));
+    expect(props.onOpenVersionManager).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the first-install version manager while versions are loading', () => {
+    const props = renderTrigger({
+      activeVersion: null,
+      canMakeDefault: false,
+      defaultVersion: null,
+      displayVersion: 'No version',
+      hasInstalledVersions: false,
+      hasVersionsToShow: false,
+      isLoading: true,
+    });
+
+    fireEvent.click(screen.getByTitle('Install your first version'));
+    expect(props.onOpenVersionManager).toHaveBeenCalledTimes(1);
+  });
 });

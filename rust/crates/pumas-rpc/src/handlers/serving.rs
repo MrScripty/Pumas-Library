@@ -442,8 +442,9 @@ async fn serve_llama_cpp_router_model(
         }
     }
 
-    let model_alias = effective_gateway_alias_from_config(&request);
-    if let Err(message) = llama_cpp_router_load_model(endpoint.as_str(), &model_alias).await {
+    let gateway_alias = effective_gateway_alias_from_config(&request);
+    let router_model_id = llama_cpp_router_provider_model_id(&request);
+    if let Err(message) = llama_cpp_router_load_model(endpoint.as_str(), &router_model_id).await {
         warn!("llama.cpp router model load failed: {}", message);
         return non_critical_failure_response(
             state,
@@ -453,7 +454,7 @@ async fn serve_llama_cpp_router_model(
     }
     let status = ServedModelStatus {
         model_id: request.model_id.clone(),
-        model_alias: Some(model_alias.clone()),
+        model_alias: Some(gateway_alias.clone()),
         provider: RuntimeProviderId::LlamaCpp,
         profile_id: request.config.profile_id.clone(),
         load_state: ServedModelLoadState::Loaded,
@@ -637,6 +638,10 @@ fn llama_cpp_router_model_unload_url(endpoint: &str) -> String {
     format!("{}/models/unload", endpoint.trim_end_matches('/'))
 }
 
+fn llama_cpp_router_provider_model_id(request: &ServeModelRequest) -> String {
+    request.model_id.trim().to_string()
+}
+
 async fn active_llama_cpp_runtime(
     state: &AppState,
     request: &ServeModelRequest,
@@ -785,7 +790,10 @@ async fn unserve_llama_cpp_model(
                 })?);
             }
         };
-        if let Err(message) = llama_cpp_router_unload_model(endpoint.as_str(), &model_alias).await {
+        let router_model_id = request.model_id.trim();
+        if let Err(message) =
+            llama_cpp_router_unload_model(endpoint.as_str(), router_model_id).await
+        {
             warn!("llama.cpp router model unload failed: {}", message);
             return Ok(serde_json::to_value(UnserveModelResponse {
                 success: true,
@@ -1054,7 +1062,7 @@ async fn request_with_effective_gateway_alias(
                 .unwrap_or_else(|| derive_fallback_model_alias(model_id));
             pumas_app_manager::derive_ollama_name(&display)
         }
-        RuntimeProviderId::LlamaCpp => derive_fallback_model_alias(model_id),
+        RuntimeProviderId::LlamaCpp => model_id.to_string(),
     };
     request.config.model_alias = Some(model_alias);
     Ok(request)
@@ -1185,6 +1193,29 @@ mod tests {
         assert_eq!(device.gpu_layers, Some(20));
         assert_eq!(device.tensor_split, Some(vec![1.0, 1.0]));
         assert_eq!(overrides.context_size, Some(8192));
+    }
+
+    #[test]
+    fn llama_cpp_router_provider_model_id_uses_catalog_model_id_not_gateway_alias() {
+        let request = ServeModelRequest {
+            model_id: "llm/qwen/model-gguf".to_string(),
+            config: pumas_library::models::ModelServingConfig {
+                provider: RuntimeProviderId::LlamaCpp,
+                profile_id: RuntimeProfileId::parse("llama-router").unwrap(),
+                device_mode: RuntimeDeviceMode::Gpu,
+                device_id: None,
+                gpu_layers: None,
+                tensor_split: None,
+                context_size: Some(8192),
+                keep_loaded: true,
+                model_alias: Some("qwen-gpu".to_string()),
+            },
+        };
+
+        assert_eq!(
+            llama_cpp_router_provider_model_id(&request),
+            "llm/qwen/model-gguf"
+        );
     }
 
     #[test]

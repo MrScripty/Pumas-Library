@@ -556,6 +556,16 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
   `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml validation_`,
   and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml
   llama_cpp_router_launch_overrides_use_profile_device_and_request_context`.
+- 2026-05-09: Fixed llama.cpp router model identity handling. Router
+  load/unload calls now use the catalog model id from `models-preset.ini`,
+  while Pumas keeps the user-facing gateway alias for `/v1/models` routing.
+  Gateway proxy requests to llama.cpp rewrite back to the catalog id instead of
+  forwarding the Pumas alias, preventing router 404 `File Not Found` responses
+  when a gateway alias differs from the router preset alias. Verified against a
+  live b9090 router with `/models/load` and `/models/unload`, and with
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_lookup`
+  plus `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml
+  llama_cpp_router`.
 
 **Discovered issues:**
 - Spontaneous runtime process crashes or unreachable provider endpoints are only

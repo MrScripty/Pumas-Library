@@ -33,8 +33,8 @@ use futures::{
 };
 use pumas_library::models::{
     ModelDownloadUpdateNotification, ModelLibraryUpdateNotification, ModelServeErrorCode,
-    RuntimeProfileUpdateFeed, ServedModelLoadState, ServedModelStatus, ServingStatusSnapshot,
-    ServingStatusUpdateFeed, StatusTelemetryUpdateNotification,
+    RuntimeProfileUpdateFeed, RuntimeProviderId, ServedModelLoadState, ServedModelStatus,
+    ServingStatusSnapshot, ServingStatusUpdateFeed, StatusTelemetryUpdateNotification,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -191,10 +191,11 @@ pub async fn handle_openai_proxy(
         );
     };
 
-    if let Some(alias) = served.model_alias.as_deref() {
-        if let Some(object) = body.as_object_mut() {
-            object.insert("model".to_string(), Value::String(alias.to_string()));
-        }
+    if let Some(object) = body.as_object_mut() {
+        object.insert(
+            "model".to_string(),
+            Value::String(provider_request_model_id(&served)),
+        );
     }
 
     let target_url = format!("{}{}", endpoint.as_str().trim_end_matches('/'), path.path());
@@ -216,6 +217,16 @@ fn openai_model_entry(model: ServedModelStatus) -> Value {
         "created": 0,
         "owned_by": "pumas"
     })
+}
+
+fn provider_request_model_id(model: &ServedModelStatus) -> String {
+    match model.provider {
+        RuntimeProviderId::LlamaCpp => model.model_id.clone(),
+        RuntimeProviderId::Ollama => model
+            .model_alias
+            .clone()
+            .unwrap_or_else(|| model.model_id.clone()),
+    }
 }
 
 fn openai_model_id(model: &ServedModelStatus) -> &str {
@@ -445,6 +456,17 @@ mod openai_gateway_tests {
             }
             other => panic!("expected duplicate alias ambiguity, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn provider_request_model_id_keeps_llama_cpp_catalog_id() {
+        let mut llama = loaded_status("models/example", "llama-gpu", Some("example-gpu"));
+        llama.provider = RuntimeProviderId::LlamaCpp;
+        assert_eq!(provider_request_model_id(&llama), "models/example");
+
+        let mut ollama = loaded_status("models/example", "ollama-default", Some("example-gpu"));
+        ollama.provider = RuntimeProviderId::Ollama;
+        assert_eq!(provider_request_model_id(&ollama), "example-gpu");
     }
 }
 

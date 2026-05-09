@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link2, Play, Save, Star } from 'lucide-react';
+import { Link2, Play, Save, Search, Star } from 'lucide-react';
 import { useRuntimeProfiles } from '../../../hooks/useRuntimeProfiles';
 import type { ModelCategory, ModelInfo } from '../../../types/apps';
 import type { ServedModelStatus } from '../../../types/api-serving';
@@ -46,6 +46,35 @@ function getPlacementLabel(row: LlamaCppModelRowViewModel): string {
   return row.servedPlacement?.label ?? row.selectedProfilePlacement?.label ?? 'Auto';
 }
 
+function getPlacementBadge(row: LlamaCppModelRowViewModel): {
+  className: string;
+  label: string;
+  title?: string;
+} {
+  const failedStatus = row.selectedServedStatus?.load_state === 'failed'
+    ? row.selectedServedStatus
+    : row.servedStatuses.find((status) => status.load_state === 'failed');
+  if (failedStatus?.last_error) {
+    return {
+      className: 'bg-[hsl(var(--accent-error)/0.14)] text-[hsl(var(--accent-error))]',
+      label: 'Failed',
+      title: failedStatus.last_error.message,
+    };
+  }
+
+  if (row.servedPlacement?.source === 'served_status') {
+    return {
+      className: 'bg-[hsl(var(--accent-success)/0.14)] text-[hsl(var(--accent-success))]',
+      label: getPlacementLabel(row),
+    };
+  }
+
+  return {
+    className: 'bg-[hsl(var(--surface-low)/0.55)] text-[hsl(var(--text-secondary))]',
+    label: getPlacementLabel(row),
+  };
+}
+
 function getProfileOptionLabel(profile: RuntimeProfileConfig): string {
   return `${profile.name} - ${
     getLlamaCppPlacementLabel({ profile })?.label ?? 'Auto'
@@ -79,6 +108,7 @@ function LlamaCppModelRow({
   const isLinked = row.model.linkedApps?.includes('llama-cpp') ?? false;
   const isExcluded = excludedModels.has(row.model.id);
   const servedCount = row.servedStatuses.filter((status) => status.load_state === 'loaded').length;
+  const placementBadge = getPlacementBadge(row);
   const [draftProfileId, setDraftProfileId] = useState(row.route?.profile_id ?? '');
   const hasDraftChange = draftProfileId !== (row.route?.profile_id ?? '');
 
@@ -112,8 +142,11 @@ function LlamaCppModelRow({
               <span className="rounded bg-[hsl(var(--surface-low)/0.55)] px-1.5 py-0.5 text-[10px] font-medium uppercase text-[hsl(var(--text-secondary))]">
                 {row.modelTypeLabel}
               </span>
-              <span className="rounded bg-[hsl(var(--surface-low)/0.55)] px-1.5 py-0.5 text-[10px] font-medium uppercase text-[hsl(var(--text-secondary))]">
-                {getPlacementLabel(row)}
+              <span
+                className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${placementBadge.className}`}
+                title={placementBadge.title}
+              >
+                {placementBadge.label}
               </span>
               {servedCount > 0 && (
                 <span className="rounded bg-[hsl(var(--accent-success)/0.14)] px-1.5 py-0.5 text-[10px] font-medium uppercase text-[hsl(var(--accent-success))]">
@@ -197,6 +230,7 @@ export function LlamaCppModelLibrarySection({
   const [servingRow, setServingRow] = useState<LlamaCppModelRowViewModel | null>(null);
   const [savingRouteModelId, setSavingRouteModelId] = useState<string | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
   const providerProfiles = profiles.filter((profile) => profile.provider === 'llama_cpp');
   const rows = buildLlamaCppModelRows({
     modelGroups,
@@ -204,6 +238,18 @@ export function LlamaCppModelLibrarySection({
     routes,
     servedStatuses: servedModels,
   });
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
+  const filteredRows = normalizedSearchQuery
+    ? rows.filter((row) => {
+        const searchable = [
+          row.model.name,
+          row.model.id,
+          row.model.category,
+          row.modelTypeLabel,
+        ].join(' ').toLowerCase();
+        return searchable.includes(normalizedSearchQuery);
+      })
+    : rows;
 
   const handleSaveRoute = async (modelId: string, profileId: string) => {
     setSavingRouteModelId(modelId);
@@ -253,6 +299,16 @@ export function LlamaCppModelLibrarySection({
               {rows.length} compatible local model{rows.length === 1 ? '' : 's'}
             </div>
           </div>
+          <label className="relative min-w-44 max-w-64 flex-1">
+            <span className="sr-only">Search llama.cpp models</span>
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[hsl(var(--text-muted))]" />
+            <input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search models"
+              className="h-8 w-full rounded border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface-high))] pl-7 pr-2 text-xs text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))]"
+            />
+          </label>
           {routeError && (
             <div className="mt-2 rounded border border-[hsl(var(--accent-error)/0.35)] bg-[hsl(var(--accent-error)/0.12)] px-3 py-2 text-xs text-[hsl(var(--accent-error))]">
               {routeError}
@@ -264,9 +320,13 @@ export function LlamaCppModelLibrarySection({
             <div className="rounded border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface-low)/0.18)] px-4 py-6 text-sm text-[hsl(var(--text-muted))]">
               No local GGUF models are available for llama.cpp.
             </div>
+          ) : filteredRows.length === 0 ? (
+            <div className="rounded border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface-low)/0.18)] px-4 py-6 text-sm text-[hsl(var(--text-muted))]">
+              No compatible llama.cpp models match the current search.
+            </div>
           ) : (
             <div className="space-y-1.5">
-              {rows.map((row) => (
+              {filteredRows.map((row) => (
                 <LlamaCppModelRow
                   key={row.model.id}
                   excludedModels={excludedModels}

@@ -327,7 +327,7 @@ profiles.
 - Rust test that ambiguous `/v1` requests do not silently route to the first
   matching served instance.
 
-**Status:** In progress.
+**Status:** Completed.
 
 **Progress:**
 - 2026-05-09: Added backend-owned effective alias normalization for serve and
@@ -365,7 +365,7 @@ public usage elsewhere.
       through generic extension points that do not change other app behavior.
 - [x] Avoid putting cards inside cards; keep the panel as the existing app-page
       lower workspace.
-- [ ] Keep search/filter behavior if practical by reusing existing pure
+- [x] Keep search/filter behavior if practical by reusing existing pure
       filtering helpers, but do not expose remote-download mode in this page
       panel unless it remains coherent after compatibility filtering.
 
@@ -385,12 +385,16 @@ public usage elsewhere.
   local models without touching generic `ModelManager` behavior. Verified with
   `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx` and
   `npm run -w frontend check:types`.
+- 2026-05-09: Added local search/filter behavior to the llama.cpp-specific
+  panel without exposing the generic remote-download mode. Verified with
+  `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx` and
+  `npm run -w frontend check:types`.
 
 **Discovered issues:**
 - The first panel slice intentionally passes empty runtime profiles and routes;
   Milestone 5 must wire backend-confirmed route/profile snapshots before route
   labels can be truthful.
-- Search/filter behavior is not yet present in the llama.cpp-specific panel.
+- None open for this milestone.
 
 ### Milestone 5: Row Profile Selection And Route Persistence
 
@@ -418,7 +422,7 @@ the row.
   visible.
 - Rust route mutation tests if backend route behavior needs contract changes.
 
-**Status:** In progress.
+**Status:** Completed.
 
 **Progress:**
 - 2026-05-09: Wired the llama.cpp library rows to backend runtime profile
@@ -444,12 +448,12 @@ the row.
 **Goal:** Make selected and served hardware placement obvious and truthful.
 
 **Tasks:**
-- [ ] Add a display helper that maps profile/device settings to placement tags:
+- [x] Add a display helper that maps profile/device settings to placement tags:
       CPU, GPU, iGPU, Hybrid, or Auto where unavoidable before save.
-- [ ] Show muted selected-profile placement when the model is not loaded.
-- [ ] Show stronger backend-confirmed placement when `ServedModelStatus` is
+- [x] Show muted selected-profile placement when the model is not loaded.
+- [x] Show stronger backend-confirmed placement when `ServedModelStatus` is
       loaded.
-- [ ] Show failed load state and last error instead of a hardware tag if the
+- [x] Show failed load state and last error instead of a hardware tag if the
       backend reports a load failure.
 - [ ] Ensure tags fit in compact rows on small widths.
 
@@ -459,7 +463,15 @@ the row.
 - Component tests for failed state taking precedence over placement display.
 - Visual/manual check of row layout at desktop and narrow widths.
 
-**Status:** Not started.
+**Status:** In progress.
+
+**Progress:**
+- 2026-05-09: Reused the llama.cpp placement display helper in row rendering,
+  differentiated requested profile placement from backend-confirmed loaded
+  placement, and showed failed load state/error details before placement tags.
+  Verified with
+  `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx` and
+  `npm run -w frontend check:types`.
 
 ### Milestone 7: Serve From Selected Profile
 

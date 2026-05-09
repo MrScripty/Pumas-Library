@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelCategory } from '../../../types/apps';
+import type { ServedModelStatus } from '../../../types/api-serving';
 import type {
   ModelRuntimeRoute,
   RuntimeProfileConfig,
@@ -53,12 +54,12 @@ vi.mock('../../ModelServeDialog', () => ({
   },
 }));
 
-function renderSection(modelGroups: ModelCategory[]) {
+function renderSection(modelGroups: ModelCategory[], servedModels: ServedModelStatus[] = []) {
   return render(
     <LlamaCppModelLibrarySection
       excludedModels={new Set()}
       modelGroups={modelGroups}
-      servedModels={[]}
+      servedModels={servedModels}
       starredModels={new Set()}
       onToggleLink={vi.fn()}
       onToggleStar={vi.fn()}
@@ -133,6 +134,112 @@ describe('LlamaCppModelLibrarySection', () => {
     ]);
 
     expect(screen.getByText('No local GGUF models are available for llama.cpp.')).toBeInTheDocument();
+  });
+
+  it('filters compatible models by local search without showing remote download mode', () => {
+    renderSection([
+      {
+        category: 'Chat',
+        models: [
+          {
+            id: 'models/alpha',
+            name: 'Alpha Chat',
+            category: 'Chat',
+            primaryFormat: 'gguf',
+          },
+          {
+            id: 'models/beta',
+            name: 'Beta Embedding',
+            category: 'Embedding',
+            primaryFormat: 'gguf',
+          },
+        ],
+      },
+    ]);
+
+    fireEvent.change(screen.getByLabelText('Search llama.cpp models'), {
+      target: { value: 'beta' },
+    });
+
+    expect(screen.queryByText('Alpha Chat')).not.toBeInTheDocument();
+    expect(screen.getByText('Beta Embedding')).toBeInTheDocument();
+    expect(screen.queryByText('Download')).not.toBeInTheDocument();
+  });
+
+  it('shows backend-confirmed placement and failed load state ahead of requested placement', () => {
+    runtimeProfileState.profiles = [
+      {
+        profile_id: 'llama-gpu',
+        provider: 'llama_cpp',
+        provider_mode: 'llama_cpp_dedicated',
+        management_mode: 'managed',
+        name: 'Emily GPU',
+        enabled: true,
+        device: { mode: 'gpu' },
+        scheduler: { auto_load: false },
+      },
+    ];
+    runtimeProfileState.routes = [
+      {
+        model_id: 'models/llama-loaded',
+        profile_id: 'llama-gpu',
+        auto_load: true,
+      },
+      {
+        model_id: 'models/llama-failed',
+        profile_id: 'llama-gpu',
+        auto_load: true,
+      },
+    ];
+    renderSection(
+      [
+        {
+          category: 'Chat',
+          models: [
+            {
+              id: 'models/llama-loaded',
+              name: 'Loaded Llama',
+              category: 'Chat',
+              primaryFormat: 'gguf',
+            },
+            {
+              id: 'models/llama-failed',
+              name: 'Failed Llama',
+              category: 'Chat',
+              primaryFormat: 'gguf',
+            },
+          ],
+        },
+      ],
+      [
+        {
+          model_id: 'models/llama-loaded',
+          model_alias: 'loaded-llama',
+          provider: 'llama_cpp',
+          profile_id: 'llama-gpu',
+          load_state: 'loaded',
+          device_mode: 'gpu',
+          keep_loaded: true,
+        },
+        {
+          model_id: 'models/llama-failed',
+          model_alias: 'failed-llama',
+          provider: 'llama_cpp',
+          profile_id: 'llama-gpu',
+          load_state: 'failed',
+          device_mode: 'gpu',
+          keep_loaded: true,
+          last_error: {
+            code: 'provider_load_failed',
+            severity: 'non_critical',
+            message: 'Vulkan memory allocation failed',
+          },
+        },
+      ]
+    );
+
+    expect(screen.getByText('Loaded 1')).toBeInTheDocument();
+    expect(screen.getByText('Failed')).toHaveAttribute('title', 'Vulkan memory allocation failed');
   });
 
   it('persists a selected llama.cpp profile route for a model row', async () => {

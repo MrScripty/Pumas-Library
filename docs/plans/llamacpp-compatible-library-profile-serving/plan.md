@@ -556,8 +556,8 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
       library panel and placement-tag behavior.
 - [x] Update `docs/contracts/desktop-rpc-methods.md` only if RPC contracts
       change.
-- [ ] Record manual acceptance results in this plan.
-- [ ] Build release binaries and frontend.
+- [x] Record manual acceptance results in this plan.
+- [x] Build release binaries and frontend.
 
 **Verification:**
 - `npm run -w frontend test:run -- <targeted llama.cpp panel tests>`
@@ -569,7 +569,7 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
 - `bash launcher.sh --release-smoke`
 - Manual CPU+GPU simultaneous serving acceptance path.
 
-**Status:** In progress.
+**Status:** Completed.
 
 **Progress:**
 - 2026-05-09: Updated frontend component READMEs for the llama.cpp-specific
@@ -577,6 +577,31 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
   and placement tag precedence. Updated the desktop RPC contract for
   serving-status SSE delivery, backend-owned alias validation, deterministic
   gateway ambiguity handling, and current llama.cpp serving orchestration.
+- 2026-05-09: Completed release validation. Focused frontend serving tests,
+  frontend typecheck, frontend production build, targeted Rust serving/gateway
+  tests, release build, and release smoke check passed. Manual interactive
+  CPU+GPU serving was not repeated in this final automated pass; the validated
+  path covers the row quick-serve request construction, alias fallback, pushed
+  served-state refresh, gateway alias routing, and release startup.
+
+**Release Validation Results:**
+- `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx
+  ModelServeDialog.test.tsx useModelServingActions.test.ts useServingStatus.test.ts`
+  passed: 4 files, 22 tests.
+- `npm run -w frontend check:types` passed.
+- `npm run -w frontend build` passed.
+- `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml
+  serving_service_removes_profile_models_when_profile_becomes_unavailable`
+  passed.
+- `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml validation_`
+  passed: 28 tests.
+- `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_lookup`
+  passed: 3 tests.
+- `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml
+  test_serving_status_update_event_stream_emits_initial_snapshot_required`
+  passed: 1 test.
+- `bash launcher.sh --build-release` passed.
+- `bash launcher.sh --release-smoke` passed.
 
 ## Lifecycle And Runtime Ownership Notes
 
@@ -825,16 +850,24 @@ Shared files such as `api-serving.ts`, `api-runtime-profiles.ts`, and
 - Blast-radius review incorporated: served-instance identity, gateway alias
   validation, provider-filtered serve dialog behavior, backend-pushed serving
   status, and generic `ModelManager` containment.
+- llama.cpp-compatible model filtering, row profile route selection, placement
+  tags, selected-route serving, duplicate-alias prompting, serving-status push
+  updates, runtime-stop served-state cleanup, documentation updates, release
+  build, and release smoke validation completed.
 
 ### Deviations
 
-- None.
+- Final release validation used automated targeted tests, frontend/release
+  builds, and release smoke startup. It did not repeat the manual interactive
+  CPU+GPU hardware serving path because that requires a live user/hardware
+  acceptance pass.
 
 ### Follow-Ups
 
-- Implement in validated thin vertical slices.
-- Update this plan after each milestone with discovered issues and validation
-  results.
+- Run a live interactive CPU+GPU simultaneous serving acceptance pass on target
+  hardware before tagging a public release.
+- Add crash/unreachable runtime supervision if external llama.cpp process death
+  leaves served-state stale during that acceptance pass.
 
 ### Verification Summary
 

@@ -147,6 +147,9 @@ async fn prepare_runtime_profile_launch_spec(
                 .map_err(|err| PumasError::io_with_path(err, &preset_path))?;
             launch_spec.extra_args =
                 replace_llama_cpp_models_dir_with_preset(&launch_spec.extra_args, &preset_path);
+            if let Some(overrides) = overrides {
+                apply_llama_cpp_launch_overrides(&mut launch_spec, overrides);
+            }
         }
         RuntimeProviderMode::LlamaCppDedicated => {
             let Some(model_id) = model_id else {
@@ -177,7 +180,7 @@ async fn prepare_runtime_profile_launch_spec(
             launch_spec.extra_args =
                 append_llama_cpp_model_arg(&launch_spec.extra_args, &model_path);
             if let Some(overrides) = overrides {
-                apply_llama_cpp_dedicated_overrides(&mut launch_spec, overrides);
+                apply_llama_cpp_launch_overrides(&mut launch_spec, overrides);
             }
         }
         RuntimeProviderMode::OllamaServe => {}
@@ -186,7 +189,7 @@ async fn prepare_runtime_profile_launch_spec(
     Ok(launch_spec)
 }
 
-fn apply_llama_cpp_dedicated_overrides(
+fn apply_llama_cpp_launch_overrides(
     launch_spec: &mut RuntimeProfileLaunchSpec,
     overrides: &RuntimeProfileLaunchOverrides,
 ) {
@@ -322,7 +325,7 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn llama_cpp_dedicated_overrides_replace_profile_device_args() {
+    fn llama_cpp_launch_overrides_replace_profile_device_args() {
         let endpoint_url = RuntimeEndpointUrl::parse("http://127.0.0.1:39191").unwrap();
         let mut launch_spec = RuntimeProfileLaunchSpec {
             profile_id: RuntimeProfileId::parse("llama-dedicated").unwrap(),
@@ -349,7 +352,7 @@ mod tests {
             health_check_url: endpoint_url,
         };
 
-        apply_llama_cpp_dedicated_overrides(
+        apply_llama_cpp_launch_overrides(
             &mut launch_spec,
             &RuntimeProfileLaunchOverrides {
                 device: Some(RuntimeDeviceSettings {
@@ -384,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn llama_cpp_dedicated_gpu_override_defaults_to_full_offload() {
+    fn llama_cpp_launch_gpu_override_defaults_to_full_offload() {
         let endpoint_url = RuntimeEndpointUrl::parse("http://127.0.0.1:39192").unwrap();
         let mut launch_spec = RuntimeProfileLaunchSpec {
             profile_id: RuntimeProfileId::parse("llama-dedicated").unwrap(),
@@ -407,7 +410,7 @@ mod tests {
             health_check_url: endpoint_url,
         };
 
-        apply_llama_cpp_dedicated_overrides(
+        apply_llama_cpp_launch_overrides(
             &mut launch_spec,
             &RuntimeProfileLaunchOverrides {
                 device: Some(RuntimeDeviceSettings {
@@ -424,6 +427,59 @@ mod tests {
             .extra_args
             .windows(2)
             .any(|window| window == ["--n-gpu-layers", "-1"]));
+    }
+
+    #[test]
+    fn llama_cpp_router_override_replaces_stale_cpu_layers() {
+        let endpoint_url = RuntimeEndpointUrl::parse("http://127.0.0.1:39193").unwrap();
+        let mut launch_spec = RuntimeProfileLaunchSpec {
+            profile_id: RuntimeProfileId::parse("llama-router").unwrap(),
+            provider: RuntimeProviderId::LlamaCpp,
+            provider_mode: RuntimeProviderMode::LlamaCppRouter,
+            endpoint_url: endpoint_url.clone(),
+            port: RuntimePort::parse(39193).unwrap(),
+            extra_args: vec![
+                "--host".to_string(),
+                "127.0.0.1".to_string(),
+                "--port".to_string(),
+                "39193".to_string(),
+                "--models-dir".to_string(),
+                "/models".to_string(),
+                "--n-gpu-layers".to_string(),
+                "0".to_string(),
+            ],
+            env_vars: HashMap::new(),
+            runtime_dir: PathBuf::from("/tmp/runtime"),
+            pid_file: PathBuf::from("/tmp/runtime/runtime.pid"),
+            log_file: PathBuf::from("/tmp/runtime/runtime.log"),
+            health_check_url: endpoint_url,
+        };
+
+        apply_llama_cpp_launch_overrides(
+            &mut launch_spec,
+            &RuntimeProfileLaunchOverrides {
+                device: Some(RuntimeDeviceSettings {
+                    mode: RuntimeDeviceMode::Gpu,
+                    device_id: None,
+                    gpu_layers: None,
+                    tensor_split: None,
+                }),
+                context_size: Some(4096),
+            },
+        );
+
+        assert!(launch_spec
+            .extra_args
+            .windows(2)
+            .any(|window| window == ["--n-gpu-layers", "-1"]));
+        assert!(launch_spec
+            .extra_args
+            .windows(2)
+            .any(|window| window == ["--ctx-size", "4096"]));
+        assert!(!launch_spec
+            .extra_args
+            .windows(2)
+            .any(|window| window == ["--n-gpu-layers", "0"]));
     }
 }
 

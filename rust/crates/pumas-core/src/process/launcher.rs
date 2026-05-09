@@ -121,6 +121,7 @@ impl BinaryLaunchConfig {
         let version_dir = version_dir.as_ref().to_path_buf();
         let host = host.into();
         let binary_path = llama_cpp_server_binary_path(&version_dir);
+        let env_vars = llama_cpp_runtime_env(&binary_path);
         let pid_file = version_dir.join("llama-server.pid");
 
         Self {
@@ -136,7 +137,7 @@ impl BinaryLaunchConfig {
                 "--models-dir".to_string(),
                 models_dir.as_ref().to_string_lossy().to_string(),
             ],
-            env_vars: HashMap::new(),
+            env_vars,
             pid_file,
             log_file: None,
             ready_timeout: Duration::from_secs(60),
@@ -155,6 +156,7 @@ impl BinaryLaunchConfig {
         let version_dir = version_dir.as_ref().to_path_buf();
         let host = host.into();
         let binary_path = llama_cpp_server_binary_path(&version_dir);
+        let env_vars = llama_cpp_runtime_env(&binary_path);
         let pid_file = version_dir.join("llama-server.pid");
 
         Self {
@@ -170,7 +172,7 @@ impl BinaryLaunchConfig {
                 "--model".to_string(),
                 model_path.as_ref().to_string_lossy().to_string(),
             ],
-            env_vars: HashMap::new(),
+            env_vars,
             pid_file,
             log_file: None,
             ready_timeout: Duration::from_secs(60),
@@ -235,6 +237,10 @@ fn executable_name(name: &str) -> String {
 
 fn llama_cpp_server_binary_path(version_dir: &Path) -> PathBuf {
     let binary_name = executable_name("llama-server");
+    if let Some(portable_binary) = find_llama_cpp_runtime_binary(version_dir, &binary_name) {
+        return portable_binary;
+    }
+
     let legacy_path = version_dir.join("build").join("bin").join(&binary_name);
     let candidates = [
         version_dir.join("bin").join(&binary_name),
@@ -252,6 +258,82 @@ fn llama_cpp_server_binary_path(version_dir: &Path) -> PathBuf {
         .find(|path| path.exists())
         .or_else(|| find_named_binary(version_dir, &binary_name))
         .unwrap_or(legacy_path)
+}
+
+fn llama_cpp_runtime_env(binary_path: &Path) -> HashMap<String, String> {
+    let mut env_vars = HashMap::new();
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(binary_dir) = binary_path.parent() {
+        let key = if cfg!(target_os = "macos") {
+            "DYLD_LIBRARY_PATH"
+        } else {
+            "LD_LIBRARY_PATH"
+        };
+        let mut value = binary_dir.to_string_lossy().to_string();
+        if let Some(existing) = std::env::var_os(key).filter(|existing| !existing.is_empty()) {
+            value.push(':');
+            value.push_str(&existing.to_string_lossy());
+        }
+        env_vars.insert(key.to_string(), value);
+    }
+
+    env_vars
+}
+
+fn find_llama_cpp_runtime_binary(root: &Path, binary_name: &str) -> Option<PathBuf> {
+    find_all_named_binaries(root, binary_name)
+        .into_iter()
+        .filter(|path| {
+            path.parent()
+                .is_some_and(llama_cpp_binary_dir_has_runtime_libraries)
+        })
+        .min_by_key(|path| path.components().count())
+}
+
+fn find_all_named_binaries(root: &Path, binary_name: &str) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name == binary_name)
+            {
+                found.push(path);
+            } else if path.is_dir() {
+                pending.push(path);
+            }
+        }
+    }
+    found
+}
+
+fn llama_cpp_binary_dir_has_runtime_libraries(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        if !path.is_file() {
+            return false;
+        }
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                let name = name.to_ascii_lowercase();
+                name.starts_with("libllama")
+                    || name.starts_with("libggml")
+                    || name.starts_with("libmtmd")
+                    || name.ends_with(".dll")
+            })
+    })
 }
 
 fn find_named_binary(root: &Path, binary_name: &str) -> Option<PathBuf> {
@@ -764,6 +846,39 @@ mod tests {
             Some("http://127.0.0.1:18080")
         );
         assert_eq!(config.ready_timeout, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn test_llama_cpp_router_prefers_archive_binary_with_runtime_libraries() {
+        let temp_dir = TempDir::new().unwrap();
+        let version_dir = temp_dir.path().join("llama-cpp-versions/b9090+vulkan");
+        let copied_bin_dir = version_dir.join("bin");
+        let archive_dir = version_dir.join("llama-b9090");
+        let binary_name = executable_name("llama-server");
+        fs::create_dir_all(&copied_bin_dir).unwrap();
+        fs::create_dir_all(&archive_dir).unwrap();
+        fs::write(copied_bin_dir.join(&binary_name), b"copied").unwrap();
+        fs::write(archive_dir.join(&binary_name), b"archive").unwrap();
+        fs::write(archive_dir.join("libggml-vulkan.so"), b"library").unwrap();
+
+        let config = BinaryLaunchConfig::llama_cpp_router(
+            "b9090+vulkan",
+            &version_dir,
+            "127.0.0.1",
+            18080,
+            temp_dir.path().join("models"),
+        );
+
+        assert_eq!(config.binary_path, archive_dir.join(binary_name));
+        let library_path_key = if cfg!(target_os = "macos") {
+            "DYLD_LIBRARY_PATH"
+        } else {
+            "LD_LIBRARY_PATH"
+        };
+        assert!(config
+            .env_vars
+            .get(library_path_key)
+            .is_some_and(|value| value.contains(archive_dir.to_string_lossy().as_ref())));
     }
 
     #[test]

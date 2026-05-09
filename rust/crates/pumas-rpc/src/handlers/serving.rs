@@ -528,7 +528,13 @@ async fn launch_llama_cpp_router_profile(
     };
     let launch_response = state
         .api
-        .launch_runtime_profile(request.config.profile_id.clone(), &tag, &version_dir)
+        .launch_runtime_profile_for_model_with_overrides(
+            request.config.profile_id.clone(),
+            &tag,
+            &version_dir,
+            Some(&request.model_id),
+            Some(llama_cpp_launch_overrides(request)),
+        )
         .await;
     match launch_response {
         Ok(response) if response.success => Ok(None),

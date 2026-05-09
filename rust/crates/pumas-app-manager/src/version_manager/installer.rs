@@ -849,21 +849,60 @@ impl VersionInstaller {
             })?;
         }
 
-        std::fs::copy(source, &final_path).map_err(|e| PumasError::Io {
-            message: format!(
-                "Failed to copy llama.cpp server binary into launch path: {}",
-                e
-            ),
-            path: Some(final_path.clone()),
-            source: Some(e),
-        })?;
-        info!(
-            "Copied llama.cpp server binary from {} to {}",
-            source.display(),
-            final_path.display()
-        );
+        #[cfg(unix)]
+        {
+            let binary_dir = source
+                .parent()
+                .ok_or_else(|| PumasError::InstallationFailed {
+                    message: format!(
+                        "Could not determine llama.cpp binary directory for {}",
+                        source.display()
+                    ),
+                })?;
+            let binary_file = source
+                .file_name()
+                .ok_or_else(|| PumasError::InstallationFailed {
+                    message: format!(
+                        "Could not determine llama.cpp binary filename for {}",
+                        source.display()
+                    ),
+                })?;
+            let wrapper = format!(
+                "#!/bin/sh\nBINARY_DIR={}\nexport LD_LIBRARY_PATH=\"$BINARY_DIR${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}\"\nexec \"$BINARY_DIR/{}\" \"$@\"\n",
+                shell_single_quote(&binary_dir.to_string_lossy()),
+                binary_file.to_string_lossy().replace('"', "\\\"")
+            );
+            std::fs::write(&final_path, wrapper).map_err(|e| PumasError::Io {
+                message: format!("Failed to create llama.cpp launch wrapper: {}", e),
+                path: Some(final_path.clone()),
+                source: Some(e),
+            })?;
+            info!(
+                "Created llama.cpp launch wrapper at {} for {}",
+                final_path.display(),
+                source.display()
+            );
+            return Ok(final_path);
+        }
 
-        Ok(final_path)
+        #[cfg(not(unix))]
+        {
+            std::fs::copy(source, &final_path).map_err(|e| PumasError::Io {
+                message: format!(
+                    "Failed to copy llama.cpp server binary into launch path: {}",
+                    e
+                ),
+                path: Some(final_path.clone()),
+                source: Some(e),
+            })?;
+            info!(
+                "Copied llama.cpp server binary from {} to {}",
+                source.display(),
+                final_path.display()
+            );
+
+            Ok(final_path)
+        }
     }
 
     /// Extract a .tar.zst archive (Zstandard compressed tar).
@@ -1930,6 +1969,10 @@ impl VersionInstaller {
     }
 }
 
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1983,6 +2026,33 @@ mod tests {
         let result = VersionInstaller::finalize_ollama_binary(&version_dir);
 
         assert!(matches!(result, Err(PumasError::InstallationFailed { .. })));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn llama_cpp_launch_binary_uses_wrapper_with_runtime_library_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let version_dir = temp_dir.path().join("b9090+vulkan");
+        let archive_dir = version_dir.join("llama-b9090");
+        let source = archive_dir.join("llama-server");
+        std::fs::create_dir_all(&archive_dir).unwrap();
+        std::fs::write(&source, b"binary").unwrap();
+
+        let launch_binary =
+            VersionInstaller::install_llama_cpp_launch_binary(&version_dir, &source).unwrap();
+        VersionInstaller::make_binary_executable(&launch_binary).unwrap();
+
+        assert_eq!(launch_binary, version_dir.join("bin/llama-server"));
+        let wrapper = std::fs::read_to_string(&launch_binary).unwrap();
+        assert!(wrapper.contains("LD_LIBRARY_PATH"));
+        assert!(wrapper.contains(archive_dir.to_string_lossy().as_ref()));
+        let mode = std::fs::metadata(&launch_binary)
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o111, 0o111);
     }
 
     #[test]

@@ -33,6 +33,7 @@ const MODEL_DOWNLOAD_SUBSCRIBE_CHANNEL = 'model-download:subscribe';
 const MODEL_DOWNLOAD_UNSUBSCRIBE_CHANNEL = 'model-download:unsubscribe';
 const RUNTIME_PROFILE_UPDATE_CHANNEL = 'runtime-profile:update';
 const SERVING_STATUS_UPDATE_CHANNEL = 'serving-status:update';
+const SERVING_STATUS_ERROR_CHANNEL = 'serving-status:error';
 const SERVING_STATUS_SUBSCRIBE_CHANNEL = 'serving-status:subscribe';
 const SERVING_STATUS_UNSUBSCRIBE_CHANNEL = 'serving-status:unsubscribe';
 const STATUS_TELEMETRY_UPDATE_CHANNEL = 'status-telemetry:update';
@@ -329,7 +330,12 @@ function registerIPCHandlers(): void {
   ipcMain.handle(SERVING_STATUS_SUBSCRIBE_CHANNEL, () => {
     servingStatusRendererSubscriptions += 1;
     if (servingStatusRendererSubscriptions === 1) {
-      startServingStatusUpdateForwarder();
+      try {
+        startServingStatusUpdateForwarder();
+      } catch (error) {
+        servingStatusRendererSubscriptions = Math.max(0, servingStatusRendererSubscriptions - 1);
+        throw error;
+      }
     }
   });
 
@@ -407,15 +413,28 @@ function startServingStatusUpdateForwarder(): void {
   if (!pythonBridge || servingStatusRendererSubscriptions === 0) {
     return;
   }
+  if (!pythonBridge.isRunning()) {
+    return;
+  }
 
-  pythonBridge.startServingStatusUpdateStream((payload) => {
-    const targetWindow = mainWindow;
-    if (!targetWindow || targetWindow.isDestroyed()) {
-      return;
+  pythonBridge.startServingStatusUpdateStream(
+    (payload) => {
+      const targetWindow = mainWindow;
+      if (!targetWindow || targetWindow.isDestroyed()) {
+        return;
+      }
+
+      targetWindow.webContents.send(SERVING_STATUS_UPDATE_CHANNEL, payload);
+    },
+    (message) => {
+      const targetWindow = mainWindow;
+      if (!targetWindow || targetWindow.isDestroyed()) {
+        return;
+      }
+
+      targetWindow.webContents.send(SERVING_STATUS_ERROR_CHANNEL, { message });
     }
-
-    targetWindow.webContents.send(SERVING_STATUS_UPDATE_CHANNEL, payload);
-  });
+  );
 }
 
 /**

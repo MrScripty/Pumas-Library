@@ -242,14 +242,14 @@ backend-owned serving-status updates through a pushed subscription.
 - [x] Add Electron main/preload forwarding for a new
       `onServingStatusUpdate` bridge subscription.
 - [x] Add renderer bridge types for `onServingStatusUpdate`.
-- [ ] Refactor `useServingStatus` to load an initial `get_serving_status`
+- [x] Refactor `useServingStatus` to load an initial `get_serving_status`
       snapshot, then refresh only when pushed serving-status updates require it.
-- [ ] Remove the `setInterval`/polling path from `useServingStatus`.
-- [ ] Remove interactive renderer use of cursor-based
+- [x] Remove the `setInterval`/polling path from `useServingStatus`.
+- [x] Remove interactive renderer use of cursor-based
       `list_serving_status_updates_since`; pushed subscription delivery is the
       only accepted UI update path.
 - [x] Ensure subscription cleanup happens on unmount and Electron unsubscribe.
-- [ ] Treat subscription setup or delivery failure as a surfaced design/runtime
+- [x] Treat subscription setup or delivery failure as a surfaced design/runtime
       error, not as a reason to start polling.
 
 **Verification:**
@@ -262,7 +262,7 @@ backend-owned serving-status updates through a pushed subscription.
 - Rust/RPC tests cover serving-status SSE event delivery and initial
   snapshot-required behavior for new subscribers.
 
-**Status:** In progress.
+**Status:** Completed.
 
 **Progress:**
 - 2026-05-09: Added `/events/serving-status-updates` in `pumas-rpc`, backed by
@@ -275,11 +275,15 @@ backend-owned serving-status updates through a pushed subscription.
   `npm run -w electron validate`, `npm run -w electron test`, and
   `npm run -w frontend check:types`.
 
+- 2026-05-09: Replaced `useServingStatus` polling with the pushed
+  `onServingStatusUpdate` subscription. Added renderer-visible subscription and
+  stream error delivery for serving status, with early subscriptions queued
+  until the backend bridge is running. Verified with
+  `npm run -w frontend test:run -- useServingStatus.test.ts`,
+  `npm run -w electron test`, and `npm run -w frontend check:types`.
+
 **Discovered issues:**
-- The pushed bridge now forwards serving-status updates, but stream setup or
-  delivery failure is still only logged/retried inside Electron. The
-  `useServingStatus` refactor must add an explicit renderer-visible error path
-  before the subscription failure task can be marked complete.
+- None open for this milestone.
 
 ### Milestone 3: Served-Instance Identity And Gateway Alias Safety
 

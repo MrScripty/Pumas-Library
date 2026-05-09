@@ -71,6 +71,10 @@ type ServingStatusUpdateNotificationPayload = {
   snapshot_required: boolean;
 };
 
+type ServingStatusErrorNotificationPayload = {
+  message: string;
+};
+
 type StatusTelemetryUpdateNotificationPayload = {
   cursor: string;
   snapshot: unknown;
@@ -169,6 +173,12 @@ function isServingStatusUpdateNotificationPayload(
     typeof value['snapshot_required'] === 'boolean' &&
     Array.isArray(events)
   );
+}
+
+function isServingStatusErrorNotificationPayload(
+  value: unknown
+): value is ServingStatusErrorNotificationPayload {
+  return isRecord(value) && typeof value['message'] === 'string';
 }
 
 function isModelDownloadUpdateNotificationPayload(
@@ -857,18 +867,31 @@ const electronAPI = {
     };
   },
   onServingStatusUpdate: (
-    callback: (notification: ServingStatusUpdateNotificationPayload) => void
+    callback: (notification: ServingStatusUpdateNotificationPayload) => void,
+    onError?: (message: string) => void
   ): (() => void) => {
     const listener = (_event: IpcRendererEvent, payload: unknown) => {
       if (isServingStatusUpdateNotificationPayload(payload)) {
         callback(payload);
       }
     };
+    const errorListener = (_event: IpcRendererEvent, payload: unknown) => {
+      if (isServingStatusErrorNotificationPayload(payload)) {
+        onError?.(payload.message);
+      }
+    };
 
     ipcRenderer.on('serving-status:update', listener);
-    void ipcRenderer.invoke('serving-status:subscribe');
+    ipcRenderer.on('serving-status:error', errorListener);
+    void ipcRenderer.invoke('serving-status:subscribe').catch((error: unknown) => {
+      const message = error instanceof Error
+        ? error.message
+        : 'Failed to subscribe to serving status updates';
+      onError?.(message);
+    });
     return () => {
       ipcRenderer.removeListener('serving-status:update', listener);
+      ipcRenderer.removeListener('serving-status:error', errorListener);
       void ipcRenderer.invoke('serving-status:unsubscribe');
     };
   },

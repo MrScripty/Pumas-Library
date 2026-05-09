@@ -4,7 +4,8 @@ import type { ServingStatusSnapshot } from '../types/api-serving';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger('useServingStatus');
-const SERVING_STATUS_UPDATE_INTERVAL_MS = 1500;
+const SERVING_STATUS_SUBSCRIPTION_UNAVAILABLE =
+  'Serving status push subscription unavailable';
 
 export function useServingStatus() {
   const [snapshot, setSnapshot] = useState<ServingStatusSnapshot | null>(null);
@@ -48,41 +49,34 @@ export function useServingStatus() {
 
   useEffect(() => {
     const electronAPI = getElectronAPI();
-    if (!electronAPI?.list_serving_status_updates_since) {
+    if (!electronAPI?.onServingStatusUpdate) {
+      setError(SERVING_STATUS_SUBSCRIPTION_UNAVAILABLE);
       return undefined;
     }
 
-    let isDisposed = false;
-    let isChecking = false;
-    const interval = setInterval(() => {
-      if (isChecking) {
-        return;
+    let isSubscribed = true;
+    const unsubscribe = electronAPI.onServingStatusUpdate(
+      (feed) => {
+        if (!isSubscribed) {
+          return;
+        }
+        cursorRef.current = feed.cursor;
+        if (feed.snapshot_required || feed.stale_cursor || feed.events.length > 0) {
+          void refreshServingStatus();
+        }
+      },
+      (message) => {
+        if (!isSubscribed) {
+          return;
+        }
+        logger.error('Serving status push subscription failed', { error: message });
+        setError(message);
       }
-      isChecking = true;
-      void electronAPI
-        .list_serving_status_updates_since(cursorRef.current)
-        .then((response) => {
-          if (isDisposed || !response.success) {
-            return;
-          }
-          cursorRef.current = response.feed.cursor;
-          if (response.feed.snapshot_required || response.feed.events.length > 0) {
-            void refreshServingStatus();
-          }
-        })
-        .catch((caught: unknown) => {
-          const message =
-            caught instanceof Error ? caught.message : 'Failed to check serving status updates';
-          logger.warn('Failed to check serving status updates', { error: message });
-        })
-        .finally(() => {
-          isChecking = false;
-        });
-    }, SERVING_STATUS_UPDATE_INTERVAL_MS);
+    );
 
     return () => {
-      isDisposed = true;
-      clearInterval(interval);
+      isSubscribed = false;
+      unsubscribe();
     };
   }, [refreshServingStatus]);
 

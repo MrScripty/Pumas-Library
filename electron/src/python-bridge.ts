@@ -56,6 +56,7 @@ export type ModelDownloadUpdateListener = (payload: unknown) => void;
 export type RuntimeProfileUpdateListener = (payload: unknown) => void;
 export type ServingStatusUpdateListener = (payload: unknown) => void;
 export type StatusTelemetryUpdateListener = (payload: unknown) => void;
+type StreamErrorListener = (message: string) => void;
 
 export interface ParsedSseChunk {
   buffer: string;
@@ -154,6 +155,7 @@ class NamedSseStreamOwner {
   buffer = '';
   cursor: string | null = null;
   listener: ((payload: unknown) => void) | null = null;
+  errorListener: StreamErrorListener | null = null;
   reconnectTimer: BridgeTimer | null = null;
 
   constructor(
@@ -162,8 +164,9 @@ class NamedSseStreamOwner {
     private readonly runtime: NamedSseStreamRuntime
   ) {}
 
-  start(listener: (payload: unknown) => void): void {
+  start(listener: (payload: unknown) => void, errorListener?: StreamErrorListener): void {
     this.listener = listener;
+    this.errorListener = errorListener ?? null;
     this.cursor = null;
     if (!this.runtime.isRunning()) {
       throw new Error('Backend bridge not running');
@@ -173,6 +176,7 @@ class NamedSseStreamOwner {
 
   stop(): void {
     this.listener = null;
+    this.errorListener = null;
     this.cursor = null;
     this.close();
     this.clearReconnectTimer();
@@ -246,7 +250,9 @@ class NamedSseStreamOwner {
         this.request = null;
         this.buffer = '';
         if (!this.runtime.isShuttingDown()) {
-          log.warn(`${this.spec.label} stream ended`);
+          const message = `${this.spec.label} stream ended`;
+          log.warn(message);
+          this.errorListener?.(message);
           this.scheduleReconnect();
         }
       });
@@ -256,7 +262,9 @@ class NamedSseStreamOwner {
       this.request = null;
       this.buffer = '';
       if (!this.runtime.isShuttingDown()) {
+        const message = `${this.spec.label} stream failed: ${error.message}`;
         log.warn(`${this.spec.label} stream failed:`, error);
+        this.errorListener?.(message);
         this.scheduleReconnect();
       }
     });
@@ -619,8 +627,11 @@ export class PythonBridge {
     this.runtimeProfileUpdateStream.stop();
   }
 
-  startServingStatusUpdateStream(listener: ServingStatusUpdateListener): void {
-    this.servingStatusUpdateStream.start(listener);
+  startServingStatusUpdateStream(
+    listener: ServingStatusUpdateListener,
+    errorListener?: StreamErrorListener
+  ): void {
+    this.servingStatusUpdateStream.start(listener, errorListener);
   }
 
   stopServingStatusUpdateStream(): void {

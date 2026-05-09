@@ -32,7 +32,8 @@ export interface ElectronWindowAPI {
   ): () => void;
   /** Subscribe to backend-owned serving status update notifications. */
   onServingStatusUpdate(
-    callback: (notification: ServingStatusUpdateFeed) => void
+    callback: (notification: ServingStatusUpdateFeed) => void,
+    onError?: (message: string) => void
   ): () => void;
   /** Subscribe to backend-owned status/resource telemetry notifications. */
   onStatusTelemetryUpdate(

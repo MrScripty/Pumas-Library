@@ -539,6 +539,12 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
   Verified with
   `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx
   useModelServingActions.test.ts` and `npm run -w frontend check:types`.
+- 2026-05-09: Fixed the row quick-serve affordance so selecting a profile in
+  the row enables Play immediately. If the selected profile route is not saved
+  yet, Play now persists the route first and then serves with that profile.
+  Verified with
+  `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx`
+  and `npm run -w frontend check:types`.
 
 **Discovered issues:**
 - Spontaneous runtime process crashes or unreachable provider endpoints are only

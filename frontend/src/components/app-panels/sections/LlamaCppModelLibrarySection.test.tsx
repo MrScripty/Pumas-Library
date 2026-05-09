@@ -374,6 +374,63 @@ describe('LlamaCppModelLibrarySection', () => {
     expect(serveDialogMock).not.toHaveBeenCalled();
   });
 
+  it('saves a newly selected profile before quick serving', async () => {
+    runtimeProfileState.profiles = [
+      {
+        profile_id: 'llama-cpu',
+        provider: 'llama_cpp',
+        provider_mode: 'llama_cpp_dedicated',
+        management_mode: 'managed',
+        name: 'Emily CPU',
+        enabled: true,
+        device: { mode: 'cpu' },
+        scheduler: { auto_load: false },
+      },
+    ];
+
+    renderSection([
+      {
+        category: 'Chat',
+        models: [
+          {
+            id: 'models/llama-gguf',
+            name: 'Llama GGUF',
+            category: 'Chat',
+            primaryFormat: 'gguf',
+          },
+        ],
+      },
+    ]);
+
+    fireEvent.change(screen.getByLabelText('llama.cpp profile for Llama GGUF'), {
+      target: { value: 'llama-cpu' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Quick serve with selected llama.cpp profile' })
+    );
+
+    await waitFor(() => {
+      expect(setModelRuntimeRouteMock).toHaveBeenCalledWith({
+        model_id: 'models/llama-gguf',
+        profile_id: 'llama-cpu',
+        auto_load: true,
+      });
+    });
+    expect(validateModelServingConfigMock).toHaveBeenCalledWith({
+      model_id: 'models/llama-gguf',
+      config: expect.objectContaining({
+        profile_id: 'llama-cpu',
+        device_mode: 'cpu',
+      }),
+    });
+    expect(serveModelMock).toHaveBeenCalledWith({
+      model_id: 'models/llama-gguf',
+      config: expect.objectContaining({
+        profile_id: 'llama-cpu',
+      }),
+    });
+  });
+
   it('opens the serve page with the saved llama.cpp profile locked to llama.cpp for serving options', () => {
     runtimeProfileState.profiles = [
       {

@@ -29,6 +29,11 @@ import {
   type LlamaCppModelRowViewModel,
 } from './llamaCppLibraryViewModels';
 
+interface ServingTarget {
+  row: LlamaCppModelRowViewModel;
+  profileId: string;
+}
+
 export interface LlamaCppModelLibrarySectionProps {
   excludedModels: Set<string>;
   modelGroups: ModelCategory[];
@@ -98,15 +103,18 @@ function formatQuickServeError(error: ModelServeError | null | undefined): strin
   return error.message || error.code.replace(/_/g, ' ');
 }
 
-function requiresAliasBeforeQuickServe(row: LlamaCppModelRowViewModel): boolean {
-  if (!row.selectedProfile) {
+function requiresAliasBeforeQuickServe(
+  row: LlamaCppModelRowViewModel,
+  profile: RuntimeProfileConfig
+): boolean {
+  if (!profile) {
     return false;
   }
 
   return row.servedStatuses.some(
     (status) =>
       status.load_state === 'loaded' &&
-      status.profile_id !== row.selectedProfile?.profile_id
+      status.profile_id !== profile.profile_id
   );
 }
 
@@ -153,8 +161,16 @@ function LlamaCppModelRow({
   row: LlamaCppModelRowViewModel;
   starredModels: Set<string>;
   onOpenMetadata: (modelId: string, modelName: string) => void;
-  onOpenServeOptions: (row: LlamaCppModelRowViewModel) => void;
-  onQuickServe: (row: LlamaCppModelRowViewModel) => void;
+  onOpenServeOptions: (
+    row: LlamaCppModelRowViewModel,
+    profile: RuntimeProfileConfig,
+    shouldPersistRoute: boolean
+  ) => void;
+  onQuickServe: (
+    row: LlamaCppModelRowViewModel,
+    profile: RuntimeProfileConfig,
+    shouldPersistRoute: boolean
+  ) => void;
   onSaveRoute: (modelId: string, profileId: string) => void;
   onToggleLink: (modelId: string) => void;
   onToggleStar: (modelId: string) => void;
@@ -166,8 +182,11 @@ function LlamaCppModelRow({
   const placementBadge = getPlacementBadge(row);
   const [draftProfileId, setDraftProfileId] = useState(row.route?.profile_id ?? '');
   const hasDraftChange = draftProfileId !== (row.route?.profile_id ?? '');
-  const isSelectedProfileLoaded = row.selectedServedStatus?.load_state === 'loaded';
-  const hasSavedRouteReady = Boolean(row.selectedProfile) && !hasDraftChange;
+  const draftProfile = providerProfiles.find((profile) => profile.profile_id === draftProfileId);
+  const isDraftProfileLoaded = row.servedStatuses.some(
+    (status) => status.profile_id === draftProfileId && status.load_state === 'loaded'
+  );
+  const hasRunnableProfile = Boolean(draftProfile);
 
   useEffect(() => {
     setDraftProfileId(row.route?.profile_id ?? '');
@@ -262,21 +281,27 @@ function LlamaCppModelRow({
           <IconButton
             icon={<Play />}
             tooltip={
-              hasDraftChange
-                ? 'Save the llama.cpp route before quick serving'
-                : isSelectedProfileLoaded
+              isDraftProfileLoaded
                 ? 'Already loaded on selected profile'
                 : 'Quick serve with selected llama.cpp profile'
             }
-            onClick={() => onQuickServe(row)}
-            disabled={!hasSavedRouteReady || isQuickServing || isSelectedProfileLoaded}
+            onClick={() => {
+              if (draftProfile) {
+                onQuickServe(row, draftProfile, hasDraftChange);
+              }
+            }}
+            disabled={!hasRunnableProfile || isQuickServing || isSavingRoute || isDraftProfileLoaded}
             size="sm"
           />
           <IconButton
             icon={<SlidersHorizontal />}
             tooltip="Serving options"
-            onClick={() => onOpenServeOptions(row)}
-            disabled={!hasSavedRouteReady}
+            onClick={() => {
+              if (draftProfile) {
+                onOpenServeOptions(row, draftProfile, hasDraftChange);
+              }
+            }}
+            disabled={!hasRunnableProfile || isSavingRoute}
             size="sm"
           />
           <IconButton
@@ -308,7 +333,7 @@ export function LlamaCppModelLibrarySection({
     modelId: string;
     modelName: string;
   } | null>(null);
-  const [servingRow, setServingRow] = useState<LlamaCppModelRowViewModel | null>(null);
+  const [servingTarget, setServingTarget] = useState<ServingTarget | null>(null);
   const [quickServeModelId, setQuickServeModelId] = useState<string | null>(null);
   const [quickServeFeedback, setQuickServeFeedback] = useState<{
     kind: 'error' | 'success';
@@ -338,7 +363,7 @@ export function LlamaCppModelLibrarySection({
       })
     : rows;
 
-  const handleSaveRoute = async (modelId: string, profileId: string) => {
+  const persistRouteSelection = async (modelId: string, profileId: string): Promise<boolean> => {
     setSavingRouteModelId(modelId);
     setRouteError(null);
     try {
@@ -352,25 +377,62 @@ export function LlamaCppModelLibrarySection({
         await clearModelRuntimeRoute(modelId);
       }
       await refreshRuntimeProfiles();
+      return true;
     } catch (caught) {
       setRouteError(caught instanceof Error ? caught.message : 'Failed to save runtime route');
+      return false;
     } finally {
       setSavingRouteModelId(null);
     }
   };
 
-  const handleQuickServe = async (row: LlamaCppModelRowViewModel) => {
-    if (!row.selectedProfile) {
+  const handleSaveRoute = async (modelId: string, profileId: string) => {
+    await persistRouteSelection(modelId, profileId);
+  };
+
+  const handleOpenServeOptions = async (
+    row: LlamaCppModelRowViewModel,
+    profile: RuntimeProfileConfig,
+    shouldPersistRoute: boolean
+  ) => {
+    if (shouldPersistRoute) {
+      const saved = await persistRouteSelection(row.model.id, profile.profile_id);
+      if (!saved) {
+        return;
+      }
+    }
+    setServingTarget({
+      row,
+      profileId: profile.profile_id,
+    });
+  };
+
+  const handleQuickServe = async (
+    row: LlamaCppModelRowViewModel,
+    profile: RuntimeProfileConfig,
+    shouldPersistRoute: boolean
+  ) => {
+    if (!profile) {
       setQuickServeFeedback({
         kind: 'error',
-        message: 'Save a llama.cpp profile route before serving this model.',
+        message: 'Select a llama.cpp profile before serving this model.',
         modelId: row.model.id,
       });
       return;
     }
 
-    if (requiresAliasBeforeQuickServe(row)) {
-      setServingRow(row);
+    if (shouldPersistRoute) {
+      const saved = await persistRouteSelection(row.model.id, profile.profile_id);
+      if (!saved) {
+        return;
+      }
+    }
+
+    if (requiresAliasBeforeQuickServe(row, profile)) {
+      setServingTarget({
+        row,
+        profileId: profile.profile_id,
+      });
       return;
     }
 
@@ -389,12 +451,15 @@ export function LlamaCppModelLibrarySection({
     try {
       const result = await serveModelWithValidation({
         api,
-        config: buildQuickServeConfig(row.selectedProfile),
+        config: buildQuickServeConfig(profile),
         modelId: row.model.id,
       });
 
       if (result.kind === 'validation_failed' && result.error.code === 'duplicate_model_alias') {
-        setServingRow(row);
+        setServingTarget({
+          row,
+          profileId: profile.profile_id,
+        });
         return;
       }
       if (result.kind === 'loaded') {
@@ -431,16 +496,16 @@ export function LlamaCppModelLibrarySection({
     }
   };
 
-  if (servingRow) {
+  if (servingTarget) {
     return (
       <section className="min-h-0 flex-1 overflow-hidden bg-[hsl(var(--launcher-bg-tertiary)/0.2)]">
         <ModelServeDialog
-          model={servingRow.model}
+          model={servingTarget.row.model}
           displayMode="page"
-          initialProfileId={servingRow.selectedProfile?.profile_id ?? servingRow.route?.profile_id ?? null}
+          initialProfileId={servingTarget.profileId}
           providerFilter="llama_cpp"
-          onBack={() => setServingRow(null)}
-          onClose={() => setServingRow(null)}
+          onBack={() => setServingTarget(null)}
+          onClose={() => setServingTarget(null)}
         />
       </section>
     );
@@ -500,9 +565,11 @@ export function LlamaCppModelLibrarySection({
                   onOpenMetadata={(modelId, modelName) => {
                     setMetadataModal({ modelId, modelName });
                   }}
-                  onOpenServeOptions={setServingRow}
-                  onQuickServe={(selectedRow) => {
-                    void handleQuickServe(selectedRow);
+                  onOpenServeOptions={(selectedRow, profile, shouldPersistRoute) => {
+                    void handleOpenServeOptions(selectedRow, profile, shouldPersistRoute);
+                  }}
+                  onQuickServe={(selectedRow, profile, shouldPersistRoute) => {
+                    void handleQuickServe(selectedRow, profile, shouldPersistRoute);
                   }}
                   onSaveRoute={(modelId, profileId) => {
                     void handleSaveRoute(modelId, profileId);

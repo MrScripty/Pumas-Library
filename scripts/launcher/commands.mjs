@@ -57,6 +57,7 @@ export async function runBoundedCommand(command, args, options = {}) {
   const env = { ...process.env, ...options.env };
   const minUptimeMs = options.minUptimeMs ?? 0;
   const maxUptimeMs = options.maxUptimeMs ?? 30_000;
+  const detached = process.platform !== 'win32';
 
   await new Promise((resolve, reject) => {
     const startedAt = Date.now();
@@ -65,13 +66,14 @@ export async function runBoundedCommand(command, args, options = {}) {
     const child = spawn(command, args, {
       cwd: options.cwd,
       env,
+      detached,
       stdio: 'inherit',
       shell: false,
     });
 
     const killTimer = setTimeout(() => {
       timedOut = true;
-      child.kill();
+      terminateBoundedChild(child, detached);
     }, maxUptimeMs);
 
     child.on('error', (error) => {
@@ -131,6 +133,20 @@ export async function runBoundedCommand(command, args, options = {}) {
       resolve();
     });
   });
+}
+
+function terminateBoundedChild(child, detached) {
+  if (detached && child.pid) {
+    try {
+      process.kill(-child.pid, 'SIGTERM');
+      return;
+    } catch {
+      child.kill('SIGTERM');
+      return;
+    }
+  }
+
+  child.kill('SIGTERM');
 }
 
 function formatCommand(command, args) {

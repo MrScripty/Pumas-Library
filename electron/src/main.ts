@@ -48,6 +48,19 @@ let modelDownloadRendererSubscriptions = 0;
 let servingStatusRendererSubscriptions = 0;
 let statusTelemetryRendererSubscriptions = 0;
 
+function focusExistingWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return;
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+
+  mainWindow.show();
+  mainWindow.focus();
+}
+
 function isReleaseSmokeMode(): boolean {
   return process.env.PUMAS_RELEASE_SMOKE === '1';
 }
@@ -510,45 +523,56 @@ async function cleanup(): Promise<void> {
 // Configure Linux display before app is ready
 configureLinuxDisplay();
 
-// App lifecycle handlers
-void app.whenReady().then(async () => {
-  log.info('App ready');
-  const runtimeIconPath = getRuntimeIconPath();
-  const releaseSmokeMode = isReleaseSmokeMode();
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
-  if (process.platform === 'darwin' && runtimeIconPath && app.dock) {
-    app.dock.setIcon(runtimeIconPath);
-  }
+if (!hasSingleInstanceLock) {
+  log.info('Another Pumas Library instance is already running; exiting duplicate launch.');
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    focusExistingWindow();
+  });
 
-  try {
-    // Register IPC handlers
-    registerIPCHandlers();
+  // App lifecycle handlers
+  void app.whenReady().then(async () => {
+    log.info('App ready');
+    const runtimeIconPath = getRuntimeIconPath();
+    const releaseSmokeMode = isReleaseSmokeMode();
 
-    const backendInitialization = initializeBackend();
-
-    // Show the window immediately; backend warmup continues in parallel.
-    await createWindow();
-
-    if (releaseSmokeMode) {
-      await backendInitialization;
-
-      const exitDelayMs = getReleaseSmokeExitDelayMs();
-      log.info(`Release smoke startup succeeded; exiting in ${exitDelayMs}ms`);
-      setTimeout(() => {
-        app.quit();
-      }, exitDelayMs);
-      return;
+    if (process.platform === 'darwin' && runtimeIconPath && app.dock) {
+      app.dock.setIcon(runtimeIconPath);
     }
 
-    void backendInitialization.catch((error) => {
-      log.error('Failed to initialize backend bridge:', error);
+    try {
+      // Register IPC handlers
+      registerIPCHandlers();
+
+      const backendInitialization = initializeBackend();
+
+      // Show the window immediately; backend warmup continues in parallel.
+      await createWindow();
+
+      if (releaseSmokeMode) {
+        await backendInitialization;
+
+        const exitDelayMs = getReleaseSmokeExitDelayMs();
+        log.info(`Release smoke startup succeeded; exiting in ${exitDelayMs}ms`);
+        setTimeout(() => {
+          app.quit();
+        }, exitDelayMs);
+        return;
+      }
+
+      void backendInitialization.catch((error) => {
+        log.error('Failed to initialize backend bridge:', error);
+        app.quit();
+      });
+    } catch (error) {
+      log.error('Failed to initialize app:', error);
       app.quit();
-    });
-  } catch (error) {
-    log.error('Failed to initialize app:', error);
-    app.quit();
-  }
-});
+    }
+  });
+}
 
 app.on('window-all-closed', () => {
   // On macOS, apps typically stay open until explicitly quit

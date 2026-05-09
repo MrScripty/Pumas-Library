@@ -315,6 +315,69 @@ describe('ModelServeDialog', () => {
     expect(screen.getByText('Loaded')).toBeInTheDocument();
   });
 
+  it('keeps start serving actionable while profile refresh is loading', async () => {
+    useRuntimeProfilesMock.mockReturnValue({
+      snapshot,
+      profiles: snapshot.profiles,
+      routes: snapshot.routes,
+      statuses: snapshot.statuses,
+      defaultProfileId: snapshot.default_profile_id,
+      cursor: snapshot.cursor,
+      isLoading: true,
+      error: null,
+      refreshRuntimeProfiles: vi.fn(),
+    });
+    const validateModelServingConfig = vi.fn<
+      (_request: ServeModelRequest) => Promise<ModelServeValidationResponse>
+    >().mockResolvedValue({
+      success: true,
+      valid: true,
+      errors: [],
+      warnings: [],
+    });
+    const serveModel = vi.fn<(_request: ServeModelRequest) => Promise<ServeModelResponse>>()
+      .mockResolvedValue({
+      success: true,
+      loaded: true,
+      loaded_models_unchanged: false,
+      status: null,
+      load_error: null,
+      snapshot: null,
+    });
+    getElectronAPIMock.mockReturnValue({
+      get_serving_status: vi.fn().mockResolvedValue({
+        success: true,
+        snapshot: {
+          cursor: 'serving:0',
+          endpoint: { endpoint_mode: 'not_configured', model_count: 0 },
+          served_models: [],
+          recent_errors: [],
+        },
+      }),
+      validate_model_serving_config: validateModelServingConfig,
+      serve_model: serveModel,
+    });
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'model-loading',
+          name: 'Model Loading',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    const startButton = screen.getByRole('button', { name: 'Start serving' });
+    expect(startButton).toBeEnabled();
+    fireEvent.click(startButton);
+
+    await waitFor(() => expect(serveModel).toHaveBeenCalledTimes(1));
+  });
+
   it('shows feedback when the serving API is unavailable', async () => {
     getElectronAPIMock.mockReturnValue(null);
 

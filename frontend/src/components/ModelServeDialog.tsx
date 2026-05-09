@@ -129,7 +129,6 @@ export function ModelServeDialog({
       dialogRef={dialogRef}
       formState={formState}
       isDialogMode={isDialogMode}
-      isLoading={runtimeProfiles.isLoading}
       isSubmitting={servingActions.isSubmitting}
       message={servingActions.message}
       model={model}

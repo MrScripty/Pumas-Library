@@ -23,7 +23,6 @@ export function ModelServeFeedback({
 
 type ModelServeActionsProps = {
   isDialogMode: boolean;
-  isLoading: boolean;
   isSubmitting: boolean;
   onClose: () => void;
   onServe: () => void;
@@ -33,7 +32,6 @@ type ModelServeActionsProps = {
 
 export function ModelServeActions({
   isDialogMode,
-  isLoading,
   isSubmitting,
   onClose,
   onServe,
@@ -54,7 +52,7 @@ export function ModelServeActions({
       <button
         type="button"
         onClick={onServe}
-        disabled={isLoading || isSubmitting}
+        disabled={isSubmitting}
         className="rounded bg-[hsl(var(--accent-primary))] px-3 py-1.5 text-sm text-[hsl(0_0%_10%)] disabled:opacity-50"
       >
         {isSubmitting ? 'Starting...' : 'Start serving'}

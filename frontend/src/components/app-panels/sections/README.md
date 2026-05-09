@@ -12,7 +12,13 @@ Composable section components used by app panels to render status, selectors, de
 | `OllamaRegisteredModels.tsx` | Presentational registered Ollama model list with load, unload, delete, loaded-state, and VRAM details. |
 | `OllamaRegisteredModels.test.tsx` | Rendering and interaction coverage for registered Ollama model state, actions, disabled controls, and size formatting. |
 | `OllamaModelSection.tsx` | Ollama library/registered model controls; refreshes from running-state changes, local operations, and runtime-profile update events rather than owning a polling interval. |
-| `RuntimeProfileSettingsSection.tsx` | Backend-confirmed runtime profile settings editor for Ollama and llama.cpp profiles, provider modes, endpoint/port settings, device mode, and llama.cpp GPU controls. |
+| `RuntimeProfileSettingsSection.tsx` | Backend-confirmed runtime profile settings section for Ollama and llama.cpp profile lifecycle. |
+| `RuntimeProfileSettingsEditor.tsx` | Runtime profile editor shell that composes field and action subcomponents. |
+| `RuntimeProfileSettingsFields.tsx` | Runtime profile identity, endpoint, mode, and device setting fields. |
+| `RuntimeProfileSettingsActions.tsx` | Runtime profile save, delete, start, and stop controls. |
+| `RuntimeProfileSettingsDraft.ts` | Draft/profile conversion helpers for runtime profile settings. |
+| `RuntimeProfileSettingsList.tsx` | Runtime profile list and status display. |
+| `RuntimeProfileSettingsShared.ts` | Runtime profile labels, mode/device option helpers, and shared draft types. |
 | `ollamaModelFormatting.ts` | Shared display formatter for Ollama model and VRAM sizes. |
 | `TorchModelSlotsSection.tsx` | Torch model slot management section. |
 | `TorchActiveSlots.tsx` | Presentational active Torch slot list with unload controls, state badges, and device memory summaries. |

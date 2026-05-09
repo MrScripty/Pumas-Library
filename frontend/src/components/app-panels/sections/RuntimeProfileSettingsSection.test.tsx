@@ -1,7 +1,10 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RuntimeProfilesSnapshot } from '../../../types/api-runtime-profiles';
+import type {
+  RuntimeProfileConfig,
+  RuntimeProfilesSnapshot,
+} from '../../../types/api-runtime-profiles';
 import { RuntimeProfileSettingsSection } from './RuntimeProfileSettingsSection';
 
 const {
@@ -16,7 +19,14 @@ const {
     getRuntimeProfilesSnapshotMock: vi.fn(),
     launchRuntimeProfileMock: vi.fn(),
     stopRuntimeProfileMock: vi.fn(),
-    upsertRuntimeProfileMock: vi.fn(),
+    upsertRuntimeProfileMock:
+      vi.fn<
+        (profile: RuntimeProfileConfig) => Promise<{
+          success: boolean;
+          profile_id: string;
+          snapshot_required: boolean;
+        }>
+      >(),
   }));
 
 vi.mock('../../../api/adapter', () => ({
@@ -106,14 +116,14 @@ describe('RuntimeProfileSettingsSection', () => {
     await waitFor(() => {
       expect(upsertRuntimeProfileMock).toHaveBeenCalledTimes(1);
     });
-    expect(upsertRuntimeProfileMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        profile_id: expect.not.stringMatching(/^ollama-default$/),
-        management_mode: 'managed',
-        endpoint_url: null,
-        port: null,
-      })
-    );
+    const savedProfile = upsertRuntimeProfileMock.mock.calls[0]?.[0];
+    expect(savedProfile).toBeDefined();
+    expect(savedProfile?.profile_id).not.toBe('ollama-default');
+    expect(savedProfile).toMatchObject({
+      management_mode: 'managed',
+      endpoint_url: null,
+      port: null,
+    });
   });
 
   it('does not allow saved profile ids to be edited into duplicate profiles', async () => {

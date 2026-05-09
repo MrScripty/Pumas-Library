@@ -1,0 +1,121 @@
+import type { RefObject } from 'react';
+import type {
+  RuntimeDeviceMode,
+  RuntimeProfileConfig,
+  RuntimeProfileStatus,
+} from '../../types/api-runtime-profiles';
+import type { ModelInfo } from '../../types/apps';
+import type { ModelServeError, ServedModelStatus } from '../../types/api-serving';
+import { ModelServeActions, ModelServeFeedback } from './ModelServeActions';
+import { ModelServeForm } from './ModelServeForm';
+import { ModelServeHeader } from './ModelServeHeader';
+import type { ModelServeControls, ModelServeFormState } from './modelServeHelpers';
+
+interface ModelServeDialogContentProps {
+  dialogRef: RefObject<HTMLDivElement | null>;
+  profileSelectRef: RefObject<HTMLSelectElement | null>;
+  model: ModelInfo;
+  isDialogMode: boolean;
+  onBack?: () => void;
+  onClose: () => void;
+  profiles: RuntimeProfileConfig[];
+  profileId: string;
+  onProfileIdChange: (value: string) => void;
+  selectedProfile: RuntimeProfileConfig | undefined;
+  selectedStatus: RuntimeProfileStatus | null;
+  serveBlockReason: string | null;
+  formState: ModelServeFormState;
+  setDeviceMode: (value: RuntimeDeviceMode) => void;
+  setDeviceId: (value: string) => void;
+  setGpuLayers: (value: string) => void;
+  setTensorSplit: (value: string) => void;
+  setContextSize: (value: string) => void;
+  setKeepLoaded: (value: boolean) => void;
+  controls: ModelServeControls;
+  serveError: ModelServeError | null;
+  message: string | null;
+  canServe: boolean;
+  isLoading: boolean;
+  isSubmitting: boolean;
+  servedStatus: ServedModelStatus | null;
+  onServe: () => void;
+  onUnload: () => void;
+}
+
+export function ModelServeDialogContent({
+  dialogRef,
+  profileSelectRef,
+  model,
+  isDialogMode,
+  onBack,
+  onClose,
+  profiles,
+  profileId,
+  onProfileIdChange,
+  selectedProfile,
+  selectedStatus,
+  serveBlockReason,
+  formState,
+  setDeviceMode,
+  setDeviceId,
+  setGpuLayers,
+  setTensorSplit,
+  setContextSize,
+  setKeepLoaded,
+  controls,
+  serveError,
+  message,
+  canServe,
+  isLoading,
+  isSubmitting,
+  servedStatus,
+  onServe,
+  onUnload,
+}: ModelServeDialogContentProps) {
+  return (
+    <div
+      ref={dialogRef}
+      className={
+        isDialogMode
+          ? 'w-full max-w-xl rounded-lg border border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-primary))] p-4 shadow-2xl'
+          : 'space-y-4'
+      }
+    >
+      <ModelServeHeader
+        isDialogMode={isDialogMode}
+        model={model}
+        onBack={onBack}
+        onClose={onClose}
+      />
+      <ModelServeForm
+        controls={controls}
+        formState={formState}
+        model={model}
+        onProfileIdChange={onProfileIdChange}
+        profileId={profileId}
+        profileSelectRef={profileSelectRef}
+        profiles={profiles}
+        selectedProfile={selectedProfile}
+        selectedStatus={selectedStatus}
+        serveBlockReason={serveBlockReason}
+        setContextSize={setContextSize}
+        setDeviceId={setDeviceId}
+        setDeviceMode={setDeviceMode}
+        setGpuLayers={setGpuLayers}
+        setKeepLoaded={setKeepLoaded}
+        setTensorSplit={setTensorSplit}
+      />
+      <ModelServeFeedback message={message} serveError={serveError} />
+      <ModelServeActions
+        canServe={canServe}
+        isDialogMode={isDialogMode}
+        isLoading={isLoading}
+        isSubmitting={isSubmitting}
+        onClose={onClose}
+        onServe={onServe}
+        onUnload={onUnload}
+        servedStatus={servedStatus}
+      />
+    </div>
+  );
+}

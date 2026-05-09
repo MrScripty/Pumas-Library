@@ -929,17 +929,17 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 - 2026-05-08 user-directed serving requirements added to the plan, with new milestones 9 through 15.
 - 2026-05-08 continuation: added the first llama.cpp app/version-manager slice so users can reach a llama.cpp runtime page, install managed llama.cpp binaries through the existing version manager, and start llama.cpp runtime profiles from a provider-scoped runtime-profile editor instead of a shared provider dropdown.
 - 2026-05-08 continuation: wired managed llama.cpp launches to the active installed llama.cpp version instead of the legacy `launcher-data/llama-cpp/build/bin/llama-server` local-build-only path.
+- 2026-05-08 continuation: split `ModelServeDialog.tsx` and the runtime-profile settings editor into focused subcomponents/hooks/helpers so the serving/profile frontend surfaces satisfy the component size and complexity standards again.
 
 ### Deviations
 
 - 2026-05-08: The original plan treated CPU/GPU selection primarily as model-to-runtime-profile routing. The updated product requirement is stricter: users choose the device placement for each serve request, and Pumas validates/attempts that selection instead of scheduling or fitting models automatically.
 - 2026-05-08: The original plan explicitly excluded building a new inference server. The updated requirement for one shared endpoint may require a Pumas gateway/facade. The revised plan allows that work but requires endpoint status to state whether gateway mode is implemented.
-- 2026-05-08 continuation: Full frontend lint now surfaces pre-existing component-size and complexity issues in `ModelServeDialog.tsx` plus the legacy runtime-profile editor. These should be resolved as a dedicated frontend standards slice rather than mixed into runtime installation plumbing.
+- 2026-05-08 continuation: Full frontend lint surfaced component-size and complexity issues in `ModelServeDialog.tsx` plus the runtime-profile editor. These were resolved in a dedicated frontend standards slice before adding more serving controls.
 
 ### Follow-Ups
 
 - Keep the Milestone 1 manual Ollama globe smoke check in release validation even though automated crash-containment coverage is complete.
-- Implement the next UI standards slice by splitting `ModelServeDialog.tsx` and `RuntimeProfileSettingsEditor.tsx` into smaller subcomponents before adding more serving controls.
 - Continue Milestone 9: user-directed serving contracts and non-critical error envelope.
 - Decide during Milestone 14 whether the first shared endpoint is a Pumas gateway or an explicit provider-endpoint status mode.
 - Re-check Ollama and llama.cpp upstream documentation before implementing provider-specific serving capability labels, because device-control and router behavior may change across versions.
@@ -951,7 +951,7 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 - For the 2026-05-08 update, intentionally excluded the multithreading/concurrency standard by request.
 - Inspected current Ollama version-manager, model UI, bridge, RPC, client, process-management surfaces, and existing llama.cpp references.
 - 2026-05-08 continuation validation: targeted runtime-profile frontend tests, selected-app version tests, managed-app state tests, AppShell state/panel tests, frontend typecheck, frontend production build, and Rust `cargo check` for `pumas-core`, `pumas-app-manager`, and `pumas-rpc` passed.
-- 2026-05-08 continuation lint note: `npm run -w frontend lint` still fails on existing `ModelServeDialog.tsx` complexity/size findings and runtime-profile editor size/complexity cleanup that is now tracked as the next frontend standards slice.
+- 2026-05-08 continuation validation: frontend standards split passed `npm run -w frontend lint`, `npm run -w frontend check:types`, `npm run -w frontend test:run -- RuntimeProfileSettingsSection ModelServeDialog`, and `npm run -w frontend build`.
 
 ### Traceability Links
 

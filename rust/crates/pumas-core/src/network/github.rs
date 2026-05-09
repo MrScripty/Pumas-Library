@@ -354,6 +354,13 @@ impl GitHubClient {
                     }
                 }
             }
+            AppId::LlamaCpp => {
+                for release in releases.iter_mut() {
+                    if let Some(asset) = Self::find_llama_cpp_asset_for_platform(&release.assets) {
+                        release.archive_size = Some(asset.size);
+                    }
+                }
+            }
             AppId::ComfyUI => {
                 // ComfyUI uses source zipball, which isn't in assets array
                 // Size estimation handled elsewhere
@@ -388,6 +395,113 @@ impl GitHubClient {
         ];
 
         assets.iter().find(|a| exact_patterns.contains(&a.name))
+    }
+
+    /// Find the llama.cpp binary asset matching this host.
+    ///
+    /// Prefer GPU-capable archives on GPU hosts because the CPU archive accepts
+    /// GPU flags but cannot actually offload layers without a GPU backend.
+    fn find_llama_cpp_asset_for_platform(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
+        let os = std::env::consts::OS;
+        let arch = match std::env::consts::ARCH {
+            "x86_64" => "x64",
+            "aarch64" => "arm64",
+            _ => std::env::consts::ARCH,
+        };
+        Self::find_llama_cpp_asset_for_platform_parts(
+            assets,
+            os,
+            arch,
+            Self::host_prefers_llama_cpp_gpu_asset(),
+        )
+    }
+
+    fn find_llama_cpp_asset_for_platform_parts<'a>(
+        assets: &'a [GitHubAsset],
+        os: &str,
+        arch: &str,
+        prefer_gpu_asset: bool,
+    ) -> Option<&'a GitHubAsset> {
+        let platform = match os {
+            "linux" => "ubuntu",
+            "macos" => "macos",
+            "windows" => "win",
+            _ => os,
+        };
+        if prefer_gpu_asset {
+            if let Some(asset) = Self::find_llama_cpp_gpu_asset(assets, os, platform, arch) {
+                return Some(asset);
+            }
+        }
+        Self::find_llama_cpp_cpu_asset(assets, platform, arch)
+    }
+
+    fn host_prefers_llama_cpp_gpu_asset() -> bool {
+        std::path::Path::new("/proc/driver/nvidia/version").exists()
+            || std::path::Path::new("/dev/nvidia0").exists()
+            || std::path::Path::new("/dev/kfd").exists()
+            || std::fs::read_dir("/dev/dri")
+                .map(|entries| {
+                    entries
+                        .filter_map(std::result::Result::ok)
+                        .any(|entry| entry.file_name().to_string_lossy().starts_with("renderD"))
+                })
+                .unwrap_or(false)
+    }
+
+    fn find_llama_cpp_gpu_asset<'a>(
+        assets: &'a [GitHubAsset],
+        os: &str,
+        platform: &str,
+        arch: &str,
+    ) -> Option<&'a GitHubAsset> {
+        let preferred_flavors: &[&str] = match os {
+            "linux" => &["vulkan", "rocm", "sycl"],
+            "windows" => &["cuda-13", "cuda-12", "vulkan", "hip", "sycl"],
+            _ => &[],
+        };
+        preferred_flavors.iter().find_map(|flavor| {
+            assets.iter().find(|asset| {
+                let name = asset.name.to_ascii_lowercase();
+                Self::is_llama_cpp_platform_archive(&name, platform, arch) && name.contains(flavor)
+            })
+        })
+    }
+
+    fn find_llama_cpp_cpu_asset<'a>(
+        assets: &'a [GitHubAsset],
+        platform: &str,
+        arch: &str,
+    ) -> Option<&'a GitHubAsset> {
+        let excluded = [
+            "source",
+            "cudart",
+            "cuda",
+            "vulkan",
+            "rocm",
+            "hip",
+            "sycl",
+            "metal",
+            "kompute",
+            "opencl",
+            "musl",
+            "openvino",
+            "openeuler",
+            "kleidiai",
+        ];
+        assets.iter().find(|asset| {
+            let name = asset.name.to_ascii_lowercase();
+            Self::is_llama_cpp_platform_archive(&name, platform, arch)
+                && !excluded.iter().any(|pattern| name.contains(pattern))
+        })
+    }
+
+    fn is_llama_cpp_platform_archive(name: &str, platform: &str, arch: &str) -> bool {
+        name.starts_with("llama-")
+            && name.contains("-bin-")
+            && name.contains(platform)
+            && name.contains(arch)
+            && (name.ends_with(".zip") || name.ends_with(".tar.gz") || name.ends_with(".tgz"))
     }
 
     /// Get the latest non-prerelease release.
@@ -791,6 +905,46 @@ mod tests {
 
         assert!(cache.get_memory("test/repo").is_none());
         assert!(cache.get_disk("test/repo").is_none());
+    }
+
+    #[test]
+    fn llama_cpp_asset_selection_prefers_linux_vulkan_when_gpu_is_requested() {
+        let assets = vec![
+            github_asset("llama-b9082-bin-ubuntu-x64.tar.gz", 1),
+            github_asset("llama-b9082-bin-ubuntu-vulkan-x64.tar.gz", 2),
+            github_asset("llama-b9082-bin-ubuntu-rocm-7.2-x64.tar.gz", 3),
+        ];
+
+        let selected =
+            GitHubClient::find_llama_cpp_asset_for_platform_parts(&assets, "linux", "x64", true)
+                .unwrap();
+
+        assert_eq!(selected.name, "llama-b9082-bin-ubuntu-vulkan-x64.tar.gz");
+        assert_eq!(selected.size, 2);
+    }
+
+    #[test]
+    fn llama_cpp_asset_selection_keeps_cpu_default_without_gpu() {
+        let assets = vec![
+            github_asset("llama-b9082-bin-ubuntu-x64.tar.gz", 1),
+            github_asset("llama-b9082-bin-ubuntu-vulkan-x64.tar.gz", 2),
+        ];
+
+        let selected =
+            GitHubClient::find_llama_cpp_asset_for_platform_parts(&assets, "linux", "x64", false)
+                .unwrap();
+
+        assert_eq!(selected.name, "llama-b9082-bin-ubuntu-x64.tar.gz");
+        assert_eq!(selected.size, 1);
+    }
+
+    fn github_asset(name: &str, size: u64) -> GitHubAsset {
+        GitHubAsset {
+            name: name.to_string(),
+            size,
+            download_url: format!("https://example.invalid/{name}"),
+            content_type: None,
+        }
     }
 
     #[tokio::test]

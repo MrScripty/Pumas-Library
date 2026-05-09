@@ -639,7 +639,7 @@ impl VersionInstaller {
             })
     }
 
-    /// Select the default CPU llama.cpp binary asset for the current platform.
+    /// Select the llama.cpp binary asset for the current platform.
     fn select_llama_cpp_asset<'a>(&self, assets: &'a [GitHubAsset]) -> Result<&'a GitHubAsset> {
         let os = std::env::consts::OS;
         let arch = match std::env::consts::ARCH {
@@ -647,12 +647,80 @@ impl VersionInstaller {
             "aarch64" => "arm64",
             _ => std::env::consts::ARCH,
         };
+        Self::select_llama_cpp_asset_for_platform(
+            assets,
+            os,
+            arch,
+            Self::host_prefers_llama_cpp_gpu_asset(),
+        )
+    }
+
+    fn select_llama_cpp_asset_for_platform<'a>(
+        assets: &'a [GitHubAsset],
+        os: &str,
+        arch: &str,
+        prefer_gpu_asset: bool,
+    ) -> Result<&'a GitHubAsset> {
         let platform = match os {
             "linux" => "ubuntu",
             "macos" => "macos",
             "windows" => "win",
             _ => os,
         };
+        if prefer_gpu_asset {
+            if let Some(asset) = Self::find_llama_cpp_gpu_asset(assets, os, platform, arch) {
+                return Ok(asset);
+            }
+        }
+        Self::find_llama_cpp_cpu_asset(assets, platform, arch).ok_or_else(|| {
+            PumasError::InstallationFailed {
+                message: format!(
+                    "No llama.cpp CPU binary found for {}-{}. Available assets: {:?}",
+                    platform,
+                    arch,
+                    assets.iter().map(|a| &a.name).collect::<Vec<_>>()
+                ),
+            }
+        })
+    }
+
+    fn host_prefers_llama_cpp_gpu_asset() -> bool {
+        std::path::Path::new("/proc/driver/nvidia/version").exists()
+            || std::path::Path::new("/dev/nvidia0").exists()
+            || std::path::Path::new("/dev/kfd").exists()
+            || std::fs::read_dir("/dev/dri")
+                .map(|entries| {
+                    entries
+                        .filter_map(std::result::Result::ok)
+                        .any(|entry| entry.file_name().to_string_lossy().starts_with("renderD"))
+                })
+                .unwrap_or(false)
+    }
+
+    fn find_llama_cpp_gpu_asset<'a>(
+        assets: &'a [GitHubAsset],
+        os: &str,
+        platform: &str,
+        arch: &str,
+    ) -> Option<&'a GitHubAsset> {
+        let preferred_flavors: &[&str] = match os {
+            "linux" => &["vulkan", "rocm", "sycl"],
+            "windows" => &["cuda-13", "cuda-12", "vulkan", "hip", "sycl"],
+            _ => &[],
+        };
+        preferred_flavors.iter().find_map(|flavor| {
+            assets.iter().find(|asset| {
+                let name = asset.name.to_ascii_lowercase();
+                Self::is_llama_cpp_platform_archive(&name, platform, arch) && name.contains(flavor)
+            })
+        })
+    }
+
+    fn find_llama_cpp_cpu_asset<'a>(
+        assets: &'a [GitHubAsset],
+        platform: &str,
+        arch: &str,
+    ) -> Option<&'a GitHubAsset> {
         let excluded = [
             "source",
             "cudart",
@@ -668,28 +736,19 @@ impl VersionInstaller {
             "openeuler",
             "kleidiai",
         ];
+        assets.iter().find(|asset| {
+            let name = asset.name.to_ascii_lowercase();
+            Self::is_llama_cpp_platform_archive(&name, platform, arch)
+                && !excluded.iter().any(|pattern| name.contains(pattern))
+        })
+    }
 
-        assets
-            .iter()
-            .find(|asset| {
-                let name = asset.name.to_ascii_lowercase();
-                name.starts_with("llama-")
-                    && name.contains("-bin-")
-                    && name.contains(platform)
-                    && name.contains(arch)
-                    && !excluded.iter().any(|pattern| name.contains(pattern))
-                    && (name.ends_with(".zip")
-                        || name.ends_with(".tar.gz")
-                        || name.ends_with(".tgz"))
-            })
-            .ok_or_else(|| PumasError::InstallationFailed {
-                message: format!(
-                    "No llama.cpp CPU binary found for {}-{}. Available assets: {:?}",
-                    platform,
-                    arch,
-                    assets.iter().map(|a| &a.name).collect::<Vec<_>>()
-                ),
-            })
+    fn is_llama_cpp_platform_archive(name: &str, platform: &str, arch: &str) -> bool {
+        name.starts_with("llama-")
+            && name.contains("-bin-")
+            && name.contains(platform)
+            && name.contains(arch)
+            && (name.ends_with(".zip") || name.ends_with(".tar.gz") || name.ends_with(".tgz"))
     }
 
     /// Extract Ollama binary from archive format.
@@ -1086,11 +1145,10 @@ impl VersionInstaller {
             })
             .await;
 
-        let download_url = release
-            .assets
-            .iter()
-            .find(|asset| asset.name.starts_with("llama-") && asset.name.contains("-bin-"))
-            .map(|asset| asset.download_url.clone());
+        let (download_url, size) = self
+            .select_llama_cpp_asset(&release.assets)
+            .map(|asset| (Some(asset.download_url.clone()), Some(asset.size)))
+            .unwrap_or((None, release.archive_size));
 
         let metadata = InstalledVersionMetadata {
             path: tag.to_string(),
@@ -1101,7 +1159,7 @@ impl VersionInstaller {
             release_date: Some(release.published_at.clone()),
             release_notes: release.body.clone(),
             download_url,
-            size: release.archive_size,
+            size,
             requirements_hash: None,
             dependencies_installed: Some(true),
         };
@@ -1925,5 +1983,43 @@ mod tests {
         let result = VersionInstaller::finalize_ollama_binary(&version_dir);
 
         assert!(matches!(result, Err(PumasError::InstallationFailed { .. })));
+    }
+
+    #[test]
+    fn llama_cpp_asset_selection_prefers_linux_vulkan_when_gpu_is_available() {
+        let assets = vec![
+            github_asset("llama-b9082-bin-ubuntu-x64.tar.gz"),
+            github_asset("llama-b9082-bin-ubuntu-vulkan-x64.tar.gz"),
+            github_asset("llama-b9082-bin-ubuntu-rocm-7.2-x64.tar.gz"),
+        ];
+
+        let selected =
+            VersionInstaller::select_llama_cpp_asset_for_platform(&assets, "linux", "x64", true)
+                .unwrap();
+
+        assert_eq!(selected.name, "llama-b9082-bin-ubuntu-vulkan-x64.tar.gz");
+    }
+
+    #[test]
+    fn llama_cpp_asset_selection_keeps_cpu_default_without_gpu() {
+        let assets = vec![
+            github_asset("llama-b9082-bin-ubuntu-x64.tar.gz"),
+            github_asset("llama-b9082-bin-ubuntu-vulkan-x64.tar.gz"),
+        ];
+
+        let selected =
+            VersionInstaller::select_llama_cpp_asset_for_platform(&assets, "linux", "x64", false)
+                .unwrap();
+
+        assert_eq!(selected.name, "llama-b9082-bin-ubuntu-x64.tar.gz");
+    }
+
+    fn github_asset(name: &str) -> GitHubAsset {
+        GitHubAsset {
+            name: name.to_string(),
+            size: 1,
+            download_url: format!("https://example.invalid/{name}"),
+            content_type: None,
+        }
     }
 }

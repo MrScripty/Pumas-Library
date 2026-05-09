@@ -204,12 +204,12 @@ the model row, and tag loaded models with the actual hardware placement used.
 model manager rendering.
 
 **Tasks:**
-- [ ] Add a pure helper for llama.cpp local-model compatibility.
-- [ ] Start with GGUF primary-format detection and preserve a clear extension
+- [x] Add a pure helper for llama.cpp local-model compatibility.
+- [x] Start with GGUF primary-format detection and preserve a clear extension
       point for embedding/reranker/chat labels.
-- [ ] Add a derived row view model for display labels: model type, selected
+- [x] Add a derived row view model for display labels: model type, selected
       route profile, saved route state, served state, and hardware tag.
-- [ ] Keep backend validation authoritative; the filter only improves UI focus.
+- [x] Keep backend validation authoritative; the filter only improves UI focus.
 
 **Verification:**
 - Unit tests for compatible/incompatible model groups:
@@ -218,7 +218,14 @@ model manager rendering.
   - empty filtered groups are removed.
 - Typecheck for frontend view-model helpers.
 
-**Status:** Not started.
+**Status:** Completed.
+
+**Progress:**
+- 2026-05-09: Added pure frontend llama.cpp compatibility and row view-model
+  helpers with provider-filtered served-state grouping and missing-profile
+  route handling. Verified with
+  `npm run -w frontend test:run -- llamaCppLibraryViewModels.test.ts` and
+  `npm run -w frontend check:types`.
 
 ### Milestone 2: Push-Based Serving Status Updates
 
@@ -270,9 +277,9 @@ simultaneous serving of the same underlying model on different llama.cpp
 profiles.
 
 **Tasks:**
-- [ ] Add a small frontend helper for served-instance identity using
+- [x] Add a small frontend helper for served-instance identity using
       `model_id + profile_id + model_alias`.
-- [ ] Derive served-state maps once per llama.cpp panel render path:
+- [x] Derive served-state maps once per llama.cpp panel render path:
       `servedStatusesByModelId`, selected-profile served status, and
       profile/alias keyed status.
 - [ ] Stop using `model_id` alone for llama.cpp row loaded-state display,

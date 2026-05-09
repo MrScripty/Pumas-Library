@@ -24,6 +24,7 @@ Composable section components used by app panels to render status, selectors, de
 | `TorchActiveSlots.tsx` | Presentational active Torch slot list with unload controls, state badges, and device memory summaries. |
 | `TorchActiveSlots.test.tsx` | Rendering and interaction coverage for active Torch slot badges, memory summaries, unload controls, and size formatting. |
 | `torchModelSlotFormatting.ts` | Shared display formatter for Torch model and device memory sizes. |
+| `llamaCppLibraryViewModels.ts` | Pure llama.cpp library compatibility, served-instance identity, route, status, and placement-label derivation helpers. |
 | `TorchServerConfigSection.tsx` | Torch server configuration controls. |
 | `index.ts` | Section exports for panel composition. |
 

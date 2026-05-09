@@ -1,5 +1,6 @@
 //! Runtime profile lifecycle helpers used by primary-state IPC dispatch.
 
+use super::runtime_profiles::ManagedRuntimeShutdownSummary;
 use super::state::PrimaryState;
 use crate::error::PumasError;
 use crate::models::{
@@ -13,6 +14,7 @@ use crate::runtime_profiles::{
 use std::fs;
 use std::path::Path;
 use tokio::fs as async_fs;
+use tracing::warn;
 
 pub(super) async fn launch_runtime_profile(
     primary: &PrimaryState,
@@ -516,6 +518,48 @@ pub(super) async fn stop_runtime_profile(
         .runtime_profile_service
         .managed_profile_launch_spec(profile_id.clone())
         .await?;
+
+    stop_runtime_profile_from_spec(primary, spec).await
+}
+
+pub(super) async fn stop_all_managed_runtime_profiles(
+    primary: &PrimaryState,
+) -> std::result::Result<ManagedRuntimeShutdownSummary, PumasError> {
+    let specs = primary
+        .runtime_profile_service
+        .list_managed_profile_launch_specs()
+        .await?;
+    let mut summary = ManagedRuntimeShutdownSummary {
+        profiles_processed: 0,
+        processes_stopped: 0,
+        errors: Vec::new(),
+    };
+
+    for spec in specs {
+        let profile_id = spec.profile_id.clone();
+        summary.profiles_processed += 1;
+        match stop_runtime_profile_from_spec(primary, spec).await {
+            Ok(stopped) => {
+                if stopped {
+                    summary.processes_stopped += 1;
+                }
+            }
+            Err(error) => {
+                let message = format!("{}: {error}", profile_id.as_str());
+                warn!("managed runtime shutdown failed for {message}");
+                summary.errors.push(message);
+            }
+        }
+    }
+
+    Ok(summary)
+}
+
+async fn stop_runtime_profile_from_spec(
+    primary: &PrimaryState,
+    spec: RuntimeProfileLaunchSpec,
+) -> std::result::Result<bool, PumasError> {
+    let profile_id = spec.profile_id.clone();
 
     primary
         .runtime_profile_service

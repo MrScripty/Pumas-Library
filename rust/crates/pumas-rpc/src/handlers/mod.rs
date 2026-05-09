@@ -743,12 +743,37 @@ pub async fn handle_rpc(
     }
 
     if method == "shutdown" {
-        // In production, this would trigger a graceful shutdown
+        let shutdown_summary = match state.api.stop_all_managed_runtime_profiles().await {
+            Ok(summary) => summary,
+            Err(error) => {
+                warn!(
+                    "managed runtime shutdown failed before backend exit: {}",
+                    error
+                );
+                return (
+                    StatusCode::OK,
+                    Json(JsonRpcResponse::success(
+                        id,
+                        json!({
+                            "status": "shutting_down",
+                            "managed_profiles_processed": 0,
+                            "managed_processes_stopped": 0,
+                            "errors": [error.to_string()],
+                        }),
+                    )),
+                );
+            }
+        };
         return (
             StatusCode::OK,
             Json(JsonRpcResponse::success(
                 id,
-                json!({"status": "shutting_down"}),
+                json!({
+                    "status": "shutting_down",
+                    "managed_profiles_processed": shutdown_summary.profiles_processed,
+                    "managed_processes_stopped": shutdown_summary.processes_stopped,
+                    "errors": shutdown_summary.errors,
+                }),
             )),
         );
     }

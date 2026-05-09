@@ -12,8 +12,9 @@
 use pumas_library::models::{
     ModelArtifactState, ModelEntryPathState, ModelFactFamily, ModelLibraryChangeKind,
     ModelLibraryRefreshScope, ModelLibrarySelectorSnapshotRequest, ModelPackageFactsSummaryStatus,
-    RuntimeEndpointUrl, RuntimeLifecycleState, RuntimeManagementMode, RuntimePort,
-    RuntimeProfileConfig, RuntimeProfileId, RuntimeProviderId, RuntimeProviderMode,
+    RuntimeDeviceMode, RuntimeEndpointUrl, RuntimeLifecycleState, RuntimeManagementMode,
+    RuntimePort, RuntimeProfileConfig, RuntimeProfileId, RuntimeProviderId, RuntimeProviderMode,
+    ServedModelLoadState, ServedModelStatus,
 };
 use pumas_library::{AppId, PumasApi};
 use std::path::Path;
@@ -369,6 +370,55 @@ async fn test_stop_runtime_profile_without_pid_is_profile_scoped() {
         .unwrap();
     assert_eq!(status.state, RuntimeLifecycleState::Stopped);
     assert!(status.last_error.is_none());
+}
+
+#[tokio::test]
+async fn test_shutdown_managed_runtime_profiles_clears_served_models() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
+    let profile_id = RuntimeProfileId::parse("ollama-shutdown-profile").unwrap();
+
+    let mut profile = RuntimeProfileConfig::default_ollama();
+    profile.profile_id = profile_id.clone();
+    profile.name = "Ollama Shutdown Profile".to_string();
+    profile.endpoint_url = None;
+    profile.port = RuntimePort::parse(12557).ok();
+    api.upsert_runtime_profile(profile).await.unwrap();
+    api.record_served_model(ServedModelStatus {
+        model_id: "models/shutdown-test".to_string(),
+        model_alias: Some("shutdown-test".to_string()),
+        provider: RuntimeProviderId::Ollama,
+        profile_id: profile_id.clone(),
+        load_state: ServedModelLoadState::Loaded,
+        device_mode: RuntimeDeviceMode::Auto,
+        device_id: None,
+        gpu_layers: None,
+        tensor_split: None,
+        context_size: None,
+        keep_loaded: true,
+        endpoint_url: None,
+        memory_bytes: None,
+        loaded_at: None,
+        last_error: None,
+    })
+    .await
+    .unwrap();
+
+    let summary = api.stop_all_managed_runtime_profiles().await.unwrap();
+
+    assert!(summary.profiles_processed >= 1);
+    assert!(summary.errors.is_empty());
+    let serving_status = api.get_serving_status().await.unwrap();
+    assert!(serving_status.snapshot.served_models.is_empty());
+    let runtime_status = api.get_runtime_profiles_snapshot().await.unwrap();
+    let status = runtime_status
+        .snapshot
+        .statuses
+        .iter()
+        .find(|status| status.profile_id == profile_id)
+        .unwrap();
+    assert_eq!(status.state, RuntimeLifecycleState::Stopped);
 }
 
 #[tokio::test]

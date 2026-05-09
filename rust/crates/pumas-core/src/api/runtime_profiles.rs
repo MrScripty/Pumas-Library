@@ -9,6 +9,13 @@ use crate::runtime_profiles::RuntimeProfileLaunchOverrides;
 use crate::{PumasApi, Result};
 use std::path::Path;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedRuntimeShutdownSummary {
+    pub profiles_processed: usize,
+    pub processes_stopped: usize,
+    pub errors: Vec<String>,
+}
+
 impl PumasApi {
     pub async fn get_runtime_profiles_snapshot(&self) -> Result<RuntimeProfilesSnapshotResponse> {
         self.primary().runtime_profile_service.snapshot().await
@@ -171,6 +178,10 @@ impl PumasApi {
 
     pub async fn stop_runtime_profile(&self, profile_id: RuntimeProfileId) -> Result<bool> {
         super::state_runtime_profiles::stop_runtime_profile(self.primary(), profile_id).await
+    }
+
+    pub async fn stop_all_managed_runtime_profiles(&self) -> Result<ManagedRuntimeShutdownSummary> {
+        super::state_runtime_profiles::stop_all_managed_runtime_profiles(self.primary()).await
     }
 
     pub async fn refresh_default_ollama_profile_status(&self) -> Result<()> {

@@ -64,7 +64,13 @@ impl NetworkConfig {
     pub const DOWNLOAD_TEMP_SUFFIX: &'static str = ".part";
     pub const GITHUB_API_BASE: &'static str = "https://api.github.com";
     pub const GITHUB_RELEASES_PER_PAGE: u32 = 100;
-    pub const GITHUB_RELEASES_MAX_PAGES: u32 = 10;
+    /// Maximum GitHub release pages fetched for interactive version selection.
+    ///
+    /// Large runtime repos such as llama.cpp publish enough releases that
+    /// walking every page can leave the install page spinner-bound. The first
+    /// page provides the current install choices while keeping UI fetches
+    /// bounded.
+    pub const GITHUB_RELEASES_MAX_PAGES: u32 = 1;
     pub const GITHUB_RELEASES_TTL: Duration = Duration::from_secs(3600);
     /// Maximum retry attempts for HuggingFace model downloads.
     ///

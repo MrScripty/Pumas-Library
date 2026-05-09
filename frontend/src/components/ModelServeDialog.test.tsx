@@ -1,6 +1,11 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RuntimeProfilesSnapshot } from '../types/api-runtime-profiles';
+import type {
+  ModelServeValidationResponse,
+  ServeModelRequest,
+  ServeModelResponse,
+} from '../types/api-serving';
 import { ModelServeDialog } from './ModelServeDialog';
 
 const { getElectronAPIMock, useRuntimeProfilesMock } = vi.hoisted(() => ({
@@ -200,5 +205,97 @@ describe('ModelServeDialog', () => {
 
     expect(screen.getByRole('combobox', { name: /runtime target/i })).toHaveValue('emily-llama');
     expect(screen.getByText('Ready to serve Model Four with Emily Llama.')).toBeInTheDocument();
+  });
+
+  it('calls serve_model when start serving is clicked', async () => {
+    const validateModelServingConfig = vi.fn<
+      (_request: ServeModelRequest) => Promise<ModelServeValidationResponse>
+    >().mockResolvedValue({
+      success: true,
+      valid: true,
+      errors: [],
+      warnings: [],
+    });
+    const serveModel = vi.fn<(_request: ServeModelRequest) => Promise<ServeModelResponse>>()
+      .mockResolvedValue({
+      success: true,
+      loaded: true,
+      loaded_models_unchanged: false,
+      status: {
+        model_id: 'model-5',
+        model_alias: 'model-five',
+        provider: 'llama_cpp',
+        profile_id: 'emily-llama',
+        load_state: 'loaded',
+        device_mode: 'gpu',
+        keep_loaded: true,
+      },
+      load_error: null,
+      snapshot: null,
+    });
+    getElectronAPIMock.mockReturnValue({
+      get_serving_status: vi.fn().mockResolvedValue({
+        success: true,
+        snapshot: {
+          cursor: 'serving:0',
+          endpoint: { endpoint_mode: 'not_configured', model_count: 0 },
+          served_models: [],
+          recent_errors: [],
+        },
+      }),
+      validate_model_serving_config: validateModelServingConfig,
+      serve_model: serveModel,
+    });
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'model-5',
+          name: 'Model Five',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start serving' }));
+
+    await waitFor(() => expect(serveModel).toHaveBeenCalledTimes(1));
+    const request = validateModelServingConfig.mock.calls[0]?.[0];
+    expect(request).toMatchObject({
+      model_id: 'model-5',
+    });
+    expect(request?.config.provider).toBe('llama_cpp');
+    expect(request?.config.profile_id).toBe('emily-llama');
+    expect(request?.config.device_mode).toBe('gpu');
+    expect(request?.config.gpu_layers).toBe(32);
+    expect(request?.config.context_size).toBe(4096);
+    expect(request?.config.keep_loaded).toBe(true);
+    expect(screen.getByText('Loaded')).toBeInTheDocument();
+  });
+
+  it('shows feedback when the serving API is unavailable', async () => {
+    getElectronAPIMock.mockReturnValue(null);
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'model-6',
+          name: 'Model Six',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start serving' }));
+
+    expect(
+      await screen.findByText('Serving API is not available in this app session.')
+    ).toBeInTheDocument();
   });
 });

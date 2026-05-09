@@ -64,29 +64,40 @@ export function useModelServingActions(modelId: string) {
   const serveModel = useCallback(
     async (config: ModelServingConfig | null) => {
       if (!config) {
+        setMessage('Select a runtime target before serving.');
         return;
       }
 
       const api = getElectronAPI();
       if (!api) {
+        setMessage('Serving API is not available in this app session.');
         return;
       }
 
       setIsSubmitting(true);
-      setMessage(null);
+      setMessage('Starting serving...');
       setServeError(null);
 
       try {
         const request = { model_id: modelId, config };
         const validation = await api.validate_model_serving_config(request);
+        if (!validation.success) {
+          setMessage(validation.error ?? 'Serving validation failed.');
+          return;
+        }
         if (!validation.valid) {
           setServeError(
             validation.errors[0] ?? getValidationErrorFallback(modelId, config.profile_id)
           );
+          setMessage(null);
           return;
         }
 
         const response = await api.serve_model(request);
+        if (!response.success) {
+          setMessage(response.error ?? 'Serving request failed.');
+          return;
+        }
         if (response.loaded) {
           setServedStatus(response.status ?? null);
           setMessage('Loaded');
@@ -95,6 +106,7 @@ export function useModelServingActions(modelId: string) {
         setServeError(
           response.load_error ?? getProviderLoadFailedError(modelId, config.profile_id)
         );
+        setMessage(null);
       } catch (caught) {
         setMessage(caught instanceof Error ? caught.message : 'Serving request failed');
       } finally {

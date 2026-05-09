@@ -697,7 +697,7 @@ impl ProcessLauncher {
             config.version_dir.display()
         );
 
-        let child = match cmd.spawn() {
+        let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
                 error!("Failed to spawn binary process: {}", e);
@@ -726,6 +726,20 @@ impl ProcessLauncher {
         } else {
             true
         };
+
+        if let Ok(Some(status)) = child.try_wait() {
+            let error =
+                format!("Process exited before it became the managed runtime (status={status})");
+            error!("{}", error);
+            let _ = fs::remove_file(&config.pid_file);
+            return Ok(LaunchResult {
+                success: false,
+                process: None,
+                log_path,
+                error: Some(error),
+                ready: false,
+            });
+        }
 
         Ok(LaunchResult {
             success: true,
@@ -917,6 +931,40 @@ mod tests {
             config.health_check_url.as_deref(),
             Some("http://127.0.0.1:18081")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_binary_launch_fails_when_spawned_process_exits_immediately() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = TempDir::new().unwrap();
+        let script_path = temp_dir.path().join("exits-immediately");
+        fs::write(&script_path, "#!/bin/sh\nexit 42\n").unwrap();
+        fs::set_permissions(&script_path, fs::Permissions::from_mode(0o755)).unwrap();
+        let pid_file = temp_dir.path().join("runtime.pid");
+
+        let config = BinaryLaunchConfig {
+            tag: "test".to_string(),
+            version_dir: temp_dir.path().to_path_buf(),
+            binary_path: script_path,
+            command: None,
+            extra_args: Vec::new(),
+            env_vars: HashMap::new(),
+            pid_file: pid_file.clone(),
+            log_file: None,
+            ready_timeout: Duration::from_secs(1),
+            health_check_url: Some("http://127.0.0.1:1".to_string()),
+        };
+
+        let result = ProcessLauncher::launch_binary(&config).unwrap();
+
+        assert!(!result.success);
+        assert!(!pid_file.exists());
+        assert!(result
+            .error
+            .as_deref()
+            .is_some_and(|message| message.contains("Process exited before")));
     }
 
     #[test]

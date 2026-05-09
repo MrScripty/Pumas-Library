@@ -49,6 +49,7 @@ pub(super) async fn launch_runtime_profile(
     let version_dir = version_dir.to_path_buf();
     let launch_spec = spec.clone();
     let launch_result = tokio::task::spawn_blocking(move || {
+        stop_orphaned_managed_profile_processes(&launch_spec)?;
         let config = runtime_profile_binary_launch_config(&tag, &version_dir, &launch_spec)?;
         ProcessLauncher::launch_binary(&config)
     })
@@ -85,6 +86,20 @@ pub(super) async fn launch_runtime_profile(
             .map(|path| path.to_string_lossy().to_string()),
         ready: Some(launch_result.ready),
     })
+}
+
+fn stop_orphaned_managed_profile_processes(
+    launch_spec: &RuntimeProfileLaunchSpec,
+) -> std::result::Result<(), PumasError> {
+    if launch_spec.pid_file.exists() {
+        return Ok(());
+    }
+    let runtime_dir = launch_spec.runtime_dir.to_string_lossy();
+    if runtime_dir.trim().is_empty() {
+        return Ok(());
+    }
+    ProcessLauncher::stop_processes_by_pattern(&runtime_dir, 5_000)?;
+    Ok(())
 }
 
 fn runtime_profile_binary_launch_config(

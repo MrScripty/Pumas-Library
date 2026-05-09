@@ -138,6 +138,7 @@ describe('AppShellState', () => {
         installedVersions: [],
       },
       llamaCpp: {
+        isRunning: true,
         isStarting: false,
         isStopping: false,
         launchError: null,
@@ -171,7 +172,7 @@ describe('AppShellState', () => {
       installedVersions: ['torch'],
     });
     expect(managedState.llamaCpp).toMatchObject({
-      isRunning: false,
+      isRunning: true,
       installedVersions: ['llama.cpp'],
     });
   });

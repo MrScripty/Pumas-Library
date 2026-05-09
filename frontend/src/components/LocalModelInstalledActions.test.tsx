@@ -92,4 +92,27 @@ describe('LocalModelInstalledActions', () => {
 
     expect(screen.getByRole('button', { name: /serve model/i })).toBeEnabled();
   });
+
+  it('marks the serve action when the model is loaded', () => {
+    render(
+      <LocalModelInstalledActions
+        model={createModel({ primaryFormat: 'gguf' })}
+        rowState={createRowState()}
+        selectedAppId="llama-cpp"
+        servedStatus={{
+          model_id: 'model-1',
+          model_alias: 'model-1',
+          provider: 'llama_cpp',
+          profile_id: 'llama-profile',
+          load_state: 'loaded',
+          device_mode: 'cpu',
+          keep_loaded: true,
+        }}
+        onServeModel={vi.fn()}
+        onToggleLink={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: /loaded with llama.cpp/i })).toBeEnabled();
+  });
 });

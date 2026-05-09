@@ -66,6 +66,41 @@ describe('LocalModelsList', () => {
     expect(screen.queryByText('Size')).not.toBeInTheDocument();
   });
 
+  it('renders backend-confirmed loaded state for served models', () => {
+    render(
+      <LocalModelsList
+        modelGroups={modelGroups}
+        starredModels={new Set()}
+        excludedModels={new Set()}
+        onToggleStar={vi.fn()}
+        onToggleLink={vi.fn()}
+        selectedAppId="llama-cpp"
+        servedModels={[
+          {
+            model_id: 'llm/llama/test-model',
+            model_alias: 'llm/llama/test-model',
+            provider: 'llama_cpp',
+            profile_id: 'llama-profile',
+            load_state: 'loaded',
+            device_mode: 'cpu',
+            keep_loaded: true,
+            endpoint_url: 'http://127.0.0.1:20617/',
+          },
+        ]}
+        totalModels={1}
+        hasFilters={false}
+        relatedModelsById={{}}
+        expandedRelated={new Set()}
+        onToggleRelated={vi.fn()}
+        onOpenRelatedUrl={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Loaded')).toBeInTheDocument();
+    expect(screen.getByText(/llama.cpp - http:\/\/127.0.0.1:20617\//)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /loaded with llama.cpp/i })).toBeEnabled();
+  });
+
   it('does not render backend compatibility badges on local model rows', () => {
     const firstModel = modelGroups[0]?.models[0];
     if (firstModel === undefined) {

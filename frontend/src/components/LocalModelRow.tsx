@@ -1,5 +1,6 @@
 import { Star } from 'lucide-react';
 import type { ModelInfo, RelatedModelsState } from '../types/apps';
+import type { ServedModelStatus } from '../types/api-serving';
 import { IconButton, ListItem, ListItemContent } from './ui';
 import { LocalModelMetadataSummary } from './LocalModelMetadataSummary';
 import { LocalModelNameButton } from './LocalModelNameButton';
@@ -15,6 +16,7 @@ interface LocalModelRowProps {
   recoveringPartialRepoIds?: Set<string>;
   relatedModelsById: Record<string, RelatedModelsState>;
   selectedAppId: string | null;
+  servedStatus: ServedModelStatus | null;
   starredModels: Set<string>;
   onCancelDownload?: (repoId: string) => void;
   onConvertModel?: (modelId: string) => void;
@@ -38,6 +40,7 @@ export function LocalModelRow({
   recoveringPartialRepoIds,
   relatedModelsById,
   selectedAppId,
+  servedStatus,
   starredModels,
   onCancelDownload,
   onConvertModel,
@@ -97,12 +100,24 @@ export function LocalModelRow({
               dependencyCount={model.dependencyCount}
               partialError={rowState.partialError}
             />
+            {servedStatus && (
+              <div className="mt-1 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[hsl(var(--accent-success))]">
+                <span className="rounded bg-[hsl(var(--accent-success)/0.14)] px-1.5 py-0.5">
+                  Loaded
+                </span>
+                <span className="truncate text-[hsl(var(--launcher-text-muted))]">
+                  {servedStatus.provider === 'llama_cpp' ? 'llama.cpp' : 'Ollama'}
+                  {servedStatus.endpoint_url ? ` - ${servedStatus.endpoint_url}` : ''}
+                </span>
+              </div>
+            )}
           </div>
         </div>
         <LocalModelRowActions
           model={model}
           rowState={rowState}
           selectedAppId={selectedAppId}
+          servedStatus={servedStatus}
           onCancelDownload={onCancelDownload}
           onConvertModel={onConvertModel}
           onDeleteModel={onDeleteModel}

@@ -84,4 +84,41 @@ describe('decorateManagedApps', () => {
     expect(comfyui?.status).toBe('running');
     expect(decorated.find((app) => app.id === 'llama-cpp')?.iconState).toBe('offline');
   });
+
+  it('marks llama.cpp as running when runtime state reports it running', () => {
+    const decorated = decorateManagedApps(DEFAULT_APPS, {
+      comfyui: {
+        isRunning: false,
+        isStarting: false,
+        isStopping: false,
+        launchError: null,
+        installedVersions: [],
+      },
+      ollama: {
+        isRunning: false,
+        isStarting: false,
+        isStopping: false,
+        launchError: null,
+        installedVersions: [],
+      },
+      llamaCpp: {
+        isRunning: true,
+        isStarting: false,
+        isStopping: false,
+        launchError: null,
+        installedVersions: ['b9082'],
+      },
+      torch: {
+        isRunning: false,
+        isStarting: false,
+        isStopping: false,
+        launchError: null,
+        installedVersions: [],
+      },
+    });
+
+    const llamaCpp = decorated.find((app) => app.id === 'llama-cpp');
+    expect(llamaCpp?.status).toBe('running');
+    expect(llamaCpp?.iconState).toBe('running');
+  });
 });

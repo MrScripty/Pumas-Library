@@ -4,6 +4,7 @@ import type { ModelManagerProps } from './ModelManager';
 import type { useManagedApps } from '../hooks/useManagedApps';
 import type { LauncherUpdateState } from '../hooks/useLauncherUpdates';
 import type { AppConfig, ModelCategory, SystemResources } from '../types/apps';
+import type { ServedModelStatus } from '../types/api-serving';
 import type { StatusResponse } from '../types/api-system';
 
 type AppShellProps = ComponentProps<typeof AppShell>;
@@ -12,6 +13,7 @@ type AppSidebarProps = AppShellProps['sidebar'];
 type ManagedAppsState = Parameters<typeof useManagedApps>[0];
 
 interface AppProcessVisualState {
+  isRunning?: boolean;
   installedVersions: string[];
   isStarting: boolean;
   isStopping: boolean;
@@ -51,6 +53,7 @@ interface BuildModelManagerPropsOptions {
   excludedModels: Set<string>;
   modelGroups: ModelCategory[];
   selectedAppId: string | null;
+  servedModels?: ServedModelStatus[];
   starredModels: Set<string>;
   onAddModels: () => void;
   onChooseExistingLibrary: () => void;
@@ -163,7 +166,7 @@ export function buildManagedAppsState({
     },
     llamaCpp: {
       ...llamaCpp,
-      isRunning: false,
+      isRunning: llamaCpp.isRunning ?? false,
     },
     torch: {
       ...torch,
@@ -177,6 +180,7 @@ export function buildModelManagerProps({
   excludedModels,
   modelGroups,
   selectedAppId,
+  servedModels = [],
   starredModels,
   onAddModels,
   onChooseExistingLibrary,
@@ -192,6 +196,7 @@ export function buildModelManagerProps({
     onToggleStar,
     onToggleLink,
     selectedAppId,
+    servedModels,
     onAddModels,
     onOpenModelsRoot,
     onModelsImported,

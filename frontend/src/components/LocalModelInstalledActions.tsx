@@ -1,5 +1,6 @@
-import { ArrowRightLeft, Download, Link2, Play } from 'lucide-react';
+import { ArrowRightLeft, Download, Link2, Play, Square } from 'lucide-react';
 import type { ModelInfo } from '../types/apps';
+import type { ServedModelStatus } from '../types/api-serving';
 import { LocalModelDownloadProgressRing } from './LocalModelDownloadProgressRing';
 import { HoldToDeleteButton, IconButton } from './ui';
 import type { LocalModelRowState } from './LocalModelRowState';
@@ -8,6 +9,7 @@ interface LocalModelInstalledActionsProps {
   model: ModelInfo;
   rowState: LocalModelRowState;
   selectedAppId: string | null;
+  servedStatus?: ServedModelStatus | null;
   onConvertModel?: (modelId: string) => void;
   onDeleteModel?: (modelId: string) => void;
   onRecoverPartialDownload?: (model: ModelInfo) => void;
@@ -37,6 +39,7 @@ export function LocalModelInstalledActions({
   model,
   rowState,
   selectedAppId,
+  servedStatus,
   onConvertModel,
   onDeleteModel,
   onRecoverPartialDownload,
@@ -89,11 +92,21 @@ export function LocalModelInstalledActions({
       )}
       {onServeModel && (
         <IconButton
-          icon={<Play />}
-          tooltip="Serve model"
+          icon={servedStatus ? <Square /> : <Play />}
+          tooltip={
+            servedStatus
+              ? `Loaded with ${servedStatus.provider === 'llama_cpp' ? 'llama.cpp' : 'Ollama'}`
+              : 'Serve model'
+          }
           onClick={() => onServeModel(model)}
           disabled={rowState.isPartialDownload}
           size="sm"
+          active={Boolean(servedStatus)}
+          className={
+            servedStatus
+              ? 'text-[hsl(var(--accent-success))] bg-[hsl(var(--accent-success)/0.12)]'
+              : undefined
+          }
         />
       )}
       {onDeleteModel && (

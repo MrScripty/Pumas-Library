@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { ModelInfo } from '../types/apps';
+import type { ServedModelStatus } from '../types/api-serving';
 import { IconButton } from './ui';
 import { LocalModelDownloadActions } from './LocalModelDownloadActions';
 import { LocalModelInstalledActions } from './LocalModelInstalledActions';
@@ -9,6 +10,7 @@ interface LocalModelRowActionsProps {
   model: ModelInfo;
   rowState: LocalModelRowState;
   selectedAppId: string | null;
+  servedStatus: ServedModelStatus | null;
   onCancelDownload?: (downloadKey: string) => void;
   onConvertModel?: (modelId: string) => void;
   onDeleteModel?: (modelId: string) => void;
@@ -24,6 +26,7 @@ export function LocalModelRowActions({
   model,
   rowState,
   selectedAppId,
+  servedStatus,
   onCancelDownload,
   onConvertModel,
   onDeleteModel,
@@ -58,6 +61,7 @@ export function LocalModelRowActions({
           model={model}
           rowState={rowState}
           selectedAppId={selectedAppId}
+          servedStatus={servedStatus}
           onConvertModel={onConvertModel}
           onDeleteModel={onDeleteModel}
           onRecoverPartialDownload={onRecoverPartialDownload}

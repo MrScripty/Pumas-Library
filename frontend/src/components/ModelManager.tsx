@@ -7,6 +7,7 @@
 
 import React, { useMemo } from 'react';
 import type { ModelCategory, RemoteModelInfo } from '../types/apps';
+import type { ServedModelStatus } from '../types/api-serving';
 import { useDownloadCompletionRefresh } from '../hooks/useDownloadCompletionRefresh';
 import { useExistingLibraryChooser } from '../hooks/useExistingLibraryChooser';
 import { useHfAuthPrompt } from '../hooks/useHfAuthPrompt';
@@ -40,6 +41,7 @@ export interface ModelManagerProps {
   onToggleStar: (modelId: string) => void;
   onToggleLink: (modelId: string) => void;
   selectedAppId: string | null;
+  servedModels?: ServedModelStatus[];
   onAddModels?: () => void;
   onOpenModelsRoot?: () => void;
   /** Callback when models are imported to refresh the list */
@@ -56,6 +58,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   onToggleStar,
   onToggleLink,
   selectedAppId,
+  servedModels = [],
   onAddModels,
   onOpenModelsRoot,
   onModelsImported,
@@ -270,6 +273,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                 onToggleStar={onToggleStar}
                 onToggleLink={onToggleLink}
                 selectedAppId={selectedAppId}
+                servedModels={servedModels}
                 totalModels={totalModels}
                 hasFilters={hasLocalFilters}
                 onClearFilters={handleClearLocalFilters}

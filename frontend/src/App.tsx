@@ -28,7 +28,9 @@ import { useAppWindowActions } from './hooks/useAppWindowActions';
 import { useLauncherUpdates } from './hooks/useLauncherUpdates';
 import { useManagedApps } from './hooks/useManagedApps';
 import { useModelPreferences } from './hooks/useModelPreferences';
+import { useRuntimeProfiles } from './hooks/useRuntimeProfiles';
 import { useSelectedAppVersions } from './hooks/useSelectedAppVersions';
+import { useServingStatus } from './hooks/useServingStatus';
 import { getLogger } from './utils/logger';
 
 const logger = getLogger('App');
@@ -84,6 +86,8 @@ export default function App() {
   } = useTorchProcess(runningState.torchRunning);
   const { modelGroups, scanModels, fetchModels } = useModels();
   const { activeDownload, activeDownloadCount } = useActiveModelDownload();
+  const runtimeProfiles = useRuntimeProfiles();
+  const servingStatus = useServingStatus();
 
   const {
     appVersions,
@@ -94,6 +98,29 @@ export default function App() {
     ollamaInstalledVersions,
     torchInstalledVersions,
   } = useSelectedAppVersions(selectedAppId);
+  const llamaCppProfileIds = useMemo(() => {
+    return new Set(
+      runtimeProfiles.profiles
+        .filter((profile) => profile.provider === 'llama_cpp')
+        .map((profile) => profile.profile_id)
+    );
+  }, [runtimeProfiles.profiles]);
+  const llamaCppRuntimeState = useMemo(() => {
+    const statuses = runtimeProfiles.statuses.filter((status) =>
+      llamaCppProfileIds.has(status.profile_id)
+    );
+    const hasServedModel = servingStatus.servedModels.some(
+      (model) => model.provider === 'llama_cpp' && model.load_state === 'loaded'
+    );
+    return {
+      isRunning:
+        hasServedModel ||
+        statuses.some((status) => status.state === 'running' || status.state === 'external'),
+      isStarting: statuses.some((status) => status.state === 'starting'),
+      isStopping: statuses.some((status) => status.state === 'stopping'),
+      launchError: statuses.find((status) => status.state === 'failed')?.last_error ?? null,
+    };
+  }, [llamaCppProfileIds, runtimeProfiles.statuses, servingStatus.servedModels]);
 
   const managedAppsState = useMemo(() => buildManagedAppsState({
     running: runningState,
@@ -112,9 +139,10 @@ export default function App() {
       installedVersions: ollamaInstalledVersions,
     },
     llamaCpp: {
-      isStarting: false,
-      isStopping: false,
-      launchError: null,
+      isRunning: llamaCppRuntimeState.isRunning,
+      isStarting: llamaCppRuntimeState.isStarting,
+      isStopping: llamaCppRuntimeState.isStopping,
+      launchError: llamaCppRuntimeState.launchError,
       installedVersions: llamaCppInstalledVersions,
     },
     torch: {
@@ -127,6 +155,7 @@ export default function App() {
     comfyInstalledVersions,
     isStarting,
     isStopping,
+    llamaCppRuntimeState,
     llamaCppInstalledVersions,
     launchError,
     ollamaInstalledVersions,
@@ -246,6 +275,7 @@ export default function App() {
     onModelsImported: fetchModels,
     activeVersion: appVersions.activeVersion,
     onChooseExistingLibrary: chooseLibraryRoot,
+    servedModels: servingStatus.servedModels,
   });
   const panels = buildAppShellPanels({
     activeShortcutState: setupDisplayState.activeShortcutState,

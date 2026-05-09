@@ -7,8 +7,9 @@
  * Ctrl+click on a model name opens its metadata modal.
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { ModelCategory, ModelInfo, RelatedModelsState } from '../types/apps';
+import type { ServedModelStatus } from '../types/api-serving';
 import { LocalModelGroupHeader } from './LocalModelGroupHeader';
 import { LocalModelRow } from './LocalModelRow';
 import { LocalModelsEmptyState } from './LocalModelsEmptyState';
@@ -22,6 +23,7 @@ interface LocalModelsListProps {
   onToggleStar: (modelId: string) => void;
   onToggleLink: (modelId: string) => void;
   selectedAppId: string | null;
+  servedModels?: ServedModelStatus[];
   totalModels: number;
   hasFilters: boolean;
   onClearFilters?: () => void;
@@ -48,6 +50,7 @@ export function LocalModelsList({
   onToggleStar,
   onToggleLink,
   selectedAppId,
+  servedModels = [],
   totalModels,
   hasFilters,
   onClearFilters,
@@ -72,6 +75,12 @@ export function LocalModelsList({
     modelName: string;
   } | null>(null);
   const [servingModel, setServingModel] = useState<ModelInfo | null>(null);
+  const servedModelById = useMemo(() => {
+    const entries = servedModels
+      .filter((status) => status.load_state === 'loaded')
+      .map((status) => [status.model_id, status] as const);
+    return new Map(entries);
+  }, [servedModels]);
 
   if (modelGroups.length === 0) {
     return (
@@ -104,6 +113,7 @@ export function LocalModelsList({
                 recoveringPartialRepoIds={recoveringPartialRepoIds}
                 relatedModelsById={relatedModelsById}
                 selectedAppId={selectedAppId}
+                servedStatus={servedModelById.get(model.id) ?? null}
                 starredModels={starredModels}
                 onCancelDownload={onCancelDownload}
                 onConvertModel={onConvertModel}

@@ -421,12 +421,7 @@ impl VersionManager {
         // Create progress channel
         let (tx, rx) = mpsc::channel(32);
 
-        // Get release info
-        let release = self.get_release_by_tag(tag, false).await?.ok_or_else(|| {
-            PumasError::VersionNotFound {
-                tag: tag.to_string(),
-            }
-        })?;
+        let release = self.resolve_installable_release(tag).await?;
 
         // Create installer
         let installer = VersionInstaller::new(
@@ -479,6 +474,28 @@ impl VersionManager {
         });
 
         Ok(rx)
+    }
+
+    async fn resolve_installable_release(
+        &self,
+        tag: &str,
+    ) -> Result<pumas_library::network::GitHubRelease> {
+        if self.app_id == AppId::LlamaCpp {
+            return self
+                .get_available_releases(false)
+                .await?
+                .into_iter()
+                .find(|release| release.tag_name == tag)
+                .ok_or_else(|| PumasError::VersionNotFound {
+                    tag: tag.to_string(),
+                });
+        }
+
+        self.get_release_by_tag(tag, false)
+            .await?
+            .ok_or_else(|| PumasError::VersionNotFound {
+                tag: tag.to_string(),
+            })
     }
 
     /// Remove an installed version.

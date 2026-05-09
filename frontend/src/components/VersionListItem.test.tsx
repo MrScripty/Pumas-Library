@@ -101,6 +101,21 @@ describe('VersionListItem', () => {
     expect(props.onInstall).toHaveBeenCalledTimes(1);
   });
 
+  it('uses the runtime variant name for synthetic llama.cpp asset tags', () => {
+    renderVersionListItem({
+      release: {
+        ...release,
+        tagName: 'b9082+vulkan',
+        name: 'b9082 (Vulkan)',
+        archiveSize: 32 * 1024 ** 2,
+        totalSize: null,
+      },
+    });
+
+    expect(screen.getByText('b9082 (Vulkan)')).toBeInTheDocument();
+    expect(screen.getByText('0.03 GB')).toBeInTheDocument();
+  });
+
   it('renders uninstall and error states for hovered installed releases', () => {
     const { props } = renderVersionListItem({
       isInstalled: true,

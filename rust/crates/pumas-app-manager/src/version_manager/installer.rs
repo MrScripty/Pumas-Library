@@ -672,16 +672,16 @@ impl VersionInstaller {
                 return Ok(asset);
             }
         }
-        Self::find_llama_cpp_cpu_asset(assets, platform, arch).ok_or_else(|| {
-            PumasError::InstallationFailed {
+        Self::find_llama_cpp_cpu_asset(assets, platform, arch)
+            .or_else(|| Self::find_llama_cpp_gpu_asset(assets, os, platform, arch))
+            .ok_or_else(|| PumasError::InstallationFailed {
                 message: format!(
-                    "No llama.cpp CPU binary found for {}-{}. Available assets: {:?}",
+                    "No llama.cpp binary found for {}-{}. Available assets: {:?}",
                     platform,
                     arch,
                     assets.iter().map(|a| &a.name).collect::<Vec<_>>()
                 ),
-            }
-        })
+            })
     }
 
     fn host_prefers_llama_cpp_gpu_asset() -> bool {
@@ -2012,6 +2012,17 @@ mod tests {
                 .unwrap();
 
         assert_eq!(selected.name, "llama-b9082-bin-ubuntu-x64.tar.gz");
+    }
+
+    #[test]
+    fn llama_cpp_asset_selection_accepts_explicit_vulkan_only_release() {
+        let assets = vec![github_asset("llama-b9082-bin-ubuntu-vulkan-x64.tar.gz")];
+
+        let selected =
+            VersionInstaller::select_llama_cpp_asset_for_platform(&assets, "linux", "x64", false)
+                .unwrap();
+
+        assert_eq!(selected.name, "llama-b9082-bin-ubuntu-vulkan-x64.tar.gz");
     }
 
     fn github_asset(name: &str) -> GitHubAsset {

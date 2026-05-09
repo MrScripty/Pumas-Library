@@ -233,6 +233,22 @@ pub struct GitHubClient {
     pending_fetches: Mutex<HashMap<String, watch::Receiver<Option<FetchResult>>>>,
 }
 
+struct LlamaCppReleaseVariant {
+    id: &'static str,
+    label: &'static str,
+    sort_order: u8,
+}
+
+impl LlamaCppReleaseVariant {
+    fn new(id: &'static str, label: &'static str, sort_order: u8) -> Self {
+        Self {
+            id,
+            label,
+            sort_order,
+        }
+    }
+}
+
 impl GitHubClient {
     /// Create a new GitHub client.
     pub fn new(cache_dir: PathBuf) -> Result<Self> {
@@ -332,9 +348,15 @@ impl GitHubClient {
         app_id: AppId,
         force_refresh: bool,
     ) -> Result<Vec<GitHubRelease>> {
-        let mut releases = self
+        let releases = self
             .get_releases(app_id.github_repo(), force_refresh)
             .await?;
+
+        if app_id == AppId::LlamaCpp {
+            return Ok(Self::expand_llama_cpp_release_variants(releases));
+        }
+
+        let mut releases = releases;
 
         // Populate archive_size from platform-matched assets
         Self::populate_archive_sizes(&mut releases, app_id);
@@ -350,13 +372,6 @@ impl GitHubClient {
             AppId::Ollama => {
                 for release in releases.iter_mut() {
                     if let Some(asset) = Self::find_ollama_asset_for_platform(&release.assets) {
-                        release.archive_size = Some(asset.size);
-                    }
-                }
-            }
-            AppId::LlamaCpp => {
-                for release in releases.iter_mut() {
-                    if let Some(asset) = Self::find_llama_cpp_asset_for_platform(&release.assets) {
                         release.archive_size = Some(asset.size);
                     }
                 }
@@ -397,82 +412,90 @@ impl GitHubClient {
         assets.iter().find(|a| exact_patterns.contains(&a.name))
     }
 
-    /// Find the llama.cpp binary asset matching this host.
-    ///
-    /// Prefer GPU-capable archives on GPU hosts because the CPU archive accepts
-    /// GPU flags but cannot actually offload layers without a GPU backend.
-    fn find_llama_cpp_asset_for_platform(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
+    fn expand_llama_cpp_release_variants(releases: Vec<GitHubRelease>) -> Vec<GitHubRelease> {
         let os = std::env::consts::OS;
         let arch = match std::env::consts::ARCH {
             "x86_64" => "x64",
             "aarch64" => "arm64",
             _ => std::env::consts::ARCH,
         };
-        Self::find_llama_cpp_asset_for_platform_parts(
-            assets,
-            os,
-            arch,
-            Self::host_prefers_llama_cpp_gpu_asset(),
-        )
+        releases
+            .into_iter()
+            .flat_map(|release| {
+                Self::expand_llama_cpp_release_variants_for_platform(release, os, arch)
+            })
+            .collect()
     }
 
-    fn find_llama_cpp_asset_for_platform_parts<'a>(
-        assets: &'a [GitHubAsset],
+    fn expand_llama_cpp_release_variants_for_platform(
+        release: GitHubRelease,
         os: &str,
         arch: &str,
-        prefer_gpu_asset: bool,
-    ) -> Option<&'a GitHubAsset> {
+    ) -> Vec<GitHubRelease> {
         let platform = match os {
             "linux" => "ubuntu",
             "macos" => "macos",
             "windows" => "win",
             _ => os,
         };
-        if prefer_gpu_asset {
-            if let Some(asset) = Self::find_llama_cpp_gpu_asset(assets, os, platform, arch) {
-                return Some(asset);
-            }
-        }
-        Self::find_llama_cpp_cpu_asset(assets, platform, arch)
+        let mut variants = release
+            .assets
+            .iter()
+            .filter_map(|asset| {
+                let variant = Self::llama_cpp_asset_variant(asset, os, platform, arch)?;
+                Some((variant, asset.clone()))
+            })
+            .collect::<Vec<_>>();
+        variants.sort_by_key(|(variant, _)| variant.sort_order);
+        variants
+            .into_iter()
+            .map(|(variant, asset)| {
+                let mut variant_release = release.clone();
+                variant_release.tag_name = format!("{}+{}", release.tag_name, variant.id);
+                variant_release.name = format!("{} ({})", release.tag_name, variant.label);
+                variant_release.assets = vec![asset.clone()];
+                variant_release.archive_size = Some(asset.size);
+                variant_release.total_size = Some(asset.size);
+                variant_release
+            })
+            .collect()
     }
 
-    fn host_prefers_llama_cpp_gpu_asset() -> bool {
-        std::path::Path::new("/proc/driver/nvidia/version").exists()
-            || std::path::Path::new("/dev/nvidia0").exists()
-            || std::path::Path::new("/dev/kfd").exists()
-            || std::fs::read_dir("/dev/dri")
-                .map(|entries| {
-                    entries
-                        .filter_map(std::result::Result::ok)
-                        .any(|entry| entry.file_name().to_string_lossy().starts_with("renderD"))
-                })
-                .unwrap_or(false)
-    }
-
-    fn find_llama_cpp_gpu_asset<'a>(
-        assets: &'a [GitHubAsset],
+    fn llama_cpp_asset_variant(
+        asset: &GitHubAsset,
         os: &str,
         platform: &str,
         arch: &str,
-    ) -> Option<&'a GitHubAsset> {
-        let preferred_flavors: &[&str] = match os {
-            "linux" => &["vulkan", "rocm", "sycl"],
-            "windows" => &["cuda-13", "cuda-12", "vulkan", "hip", "sycl"],
-            _ => &[],
-        };
-        preferred_flavors.iter().find_map(|flavor| {
-            assets.iter().find(|asset| {
-                let name = asset.name.to_ascii_lowercase();
-                Self::is_llama_cpp_platform_archive(&name, platform, arch) && name.contains(flavor)
-            })
-        })
+    ) -> Option<LlamaCppReleaseVariant> {
+        let name = asset.name.to_ascii_lowercase();
+        if !Self::is_llama_cpp_platform_archive(&name, platform, arch) {
+            return None;
+        }
+        if Self::is_llama_cpp_cpu_asset_name(&name) {
+            return Some(LlamaCppReleaseVariant::new("cpu", "CPU", 0));
+        }
+        if name.contains("vulkan") {
+            return Some(LlamaCppReleaseVariant::new("vulkan", "Vulkan", 10));
+        }
+        if name.contains("rocm") {
+            return Some(LlamaCppReleaseVariant::new("rocm", "ROCm", 20));
+        }
+        if name.contains("cuda-13") {
+            return Some(LlamaCppReleaseVariant::new("cuda-13", "CUDA 13", 30));
+        }
+        if name.contains("cuda-12") || name.contains("cudart") {
+            return Some(LlamaCppReleaseVariant::new("cuda-12", "CUDA 12", 31));
+        }
+        if name.contains("hip") && os == "windows" {
+            return Some(LlamaCppReleaseVariant::new("hip", "HIP", 40));
+        }
+        if name.contains("sycl") {
+            return Some(LlamaCppReleaseVariant::new("sycl", "SYCL", 50));
+        }
+        None
     }
 
-    fn find_llama_cpp_cpu_asset<'a>(
-        assets: &'a [GitHubAsset],
-        platform: &str,
-        arch: &str,
-    ) -> Option<&'a GitHubAsset> {
+    fn is_llama_cpp_cpu_asset_name(name: &str) -> bool {
         let excluded = [
             "source",
             "cudart",
@@ -489,11 +512,7 @@ impl GitHubClient {
             "openeuler",
             "kleidiai",
         ];
-        assets.iter().find(|asset| {
-            let name = asset.name.to_ascii_lowercase();
-            Self::is_llama_cpp_platform_archive(&name, platform, arch)
-                && !excluded.iter().any(|pattern| name.contains(pattern))
-        })
+        !excluded.iter().any(|pattern| name.contains(pattern))
     }
 
     fn is_llama_cpp_platform_archive(name: &str, platform: &str, arch: &str) -> bool {
@@ -908,34 +927,40 @@ mod tests {
     }
 
     #[test]
-    fn llama_cpp_asset_selection_prefers_linux_vulkan_when_gpu_is_requested() {
-        let assets = vec![
+    fn llama_cpp_release_expansion_exposes_cpu_and_gpu_runtime_variants() {
+        let release = github_release(vec![
             github_asset("llama-b9082-bin-ubuntu-x64.tar.gz", 1),
             github_asset("llama-b9082-bin-ubuntu-vulkan-x64.tar.gz", 2),
             github_asset("llama-b9082-bin-ubuntu-rocm-7.2-x64.tar.gz", 3),
-        ];
+        ]);
 
-        let selected =
-            GitHubClient::find_llama_cpp_asset_for_platform_parts(&assets, "linux", "x64", true)
-                .unwrap();
+        let variants =
+            GitHubClient::expand_llama_cpp_release_variants_for_platform(release, "linux", "x64");
+        let tags = variants
+            .iter()
+            .map(|release| release.tag_name.as_str())
+            .collect::<Vec<_>>();
 
-        assert_eq!(selected.name, "llama-b9082-bin-ubuntu-vulkan-x64.tar.gz");
-        assert_eq!(selected.size, 2);
+        assert_eq!(tags, vec!["b9082+cpu", "b9082+vulkan", "b9082+rocm"]);
+        assert_eq!(variants[1].archive_size, Some(2));
+        assert_eq!(
+            variants[1].assets[0].name,
+            "llama-b9082-bin-ubuntu-vulkan-x64.tar.gz"
+        );
     }
 
     #[test]
-    fn llama_cpp_asset_selection_keeps_cpu_default_without_gpu() {
-        let assets = vec![
+    fn llama_cpp_release_expansion_ignores_other_platform_assets() {
+        let release = github_release(vec![
             github_asset("llama-b9082-bin-ubuntu-x64.tar.gz", 1),
-            github_asset("llama-b9082-bin-ubuntu-vulkan-x64.tar.gz", 2),
-        ];
+            github_asset("llama-b9082-bin-win-vulkan-x64.zip", 2),
+        ]);
 
-        let selected =
-            GitHubClient::find_llama_cpp_asset_for_platform_parts(&assets, "linux", "x64", false)
-                .unwrap();
+        let variants =
+            GitHubClient::expand_llama_cpp_release_variants_for_platform(release, "linux", "x64");
 
-        assert_eq!(selected.name, "llama-b9082-bin-ubuntu-x64.tar.gz");
-        assert_eq!(selected.size, 1);
+        assert_eq!(variants.len(), 1);
+        assert_eq!(variants[0].tag_name, "b9082+cpu");
     }
 
     fn github_asset(name: &str, size: u64) -> GitHubAsset {
@@ -944,6 +969,23 @@ mod tests {
             size,
             download_url: format!("https://example.invalid/{name}"),
             content_type: None,
+        }
+    }
+
+    fn github_release(assets: Vec<GitHubAsset>) -> GitHubRelease {
+        GitHubRelease {
+            tag_name: "b9082".to_string(),
+            name: "b9082".to_string(),
+            published_at: "2026-01-01T00:00:00Z".to_string(),
+            body: None,
+            tarball_url: None,
+            zipball_url: None,
+            prerelease: false,
+            assets,
+            html_url: "https://github.com/ggml-org/llama.cpp/releases/tag/b9082".to_string(),
+            total_size: None,
+            archive_size: None,
+            dependencies_size: None,
         }
     }
 

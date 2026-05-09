@@ -96,6 +96,9 @@ function getDownloadIconStyle(installNetworkStatus: InstallNetworkStatus): CSSPr
 
 function getDisplayTag(release: VersionRelease): string {
   const rawTag = release.tagName || release.name || 'Unknown version';
+  if (release.tagName.includes('+') && release.name) {
+    return release.name.replace(/^v/i, '') || release.name;
+  }
   return rawTag.replace(/^v/i, '') || rawTag;
 }
 

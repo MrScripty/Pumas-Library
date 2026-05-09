@@ -3,7 +3,8 @@
 use super::parse_params;
 use crate::server::AppState;
 use pumas_library::models::{
-    ModelServeError, ModelServeErrorCode, RuntimeDeviceSettings, RuntimeProviderId,
+    ModelServeError, ModelServeErrorCode, RuntimeDeviceMode, RuntimeDeviceSettings,
+    RuntimeManagementMode, RuntimeProfileConfig, RuntimeProfileId, RuntimeProviderId,
     RuntimeProviderMode, ServeModelRequest, ServeModelResponse, ServedModelLoadState,
     ServedModelStatus, UnserveModelRequest, UnserveModelResponse,
 };
@@ -323,6 +324,25 @@ async fn serve_llama_cpp_router_model(
     state: &AppState,
     request: ServeModelRequest,
 ) -> pumas_library::Result<Value> {
+    let profile = state
+        .api
+        .get_runtime_profiles_snapshot()
+        .await?
+        .snapshot
+        .profiles
+        .into_iter()
+        .find(|profile| profile.profile_id == request.config.profile_id);
+    let Some(profile) = profile else {
+        return non_critical_failure_response(
+            state,
+            serving_error(
+                ModelServeErrorCode::ProfileNotFound,
+                "selected llama.cpp router profile was not found",
+                &request,
+            ),
+        )
+        .await;
+    };
     let endpoint = match state
         .api
         .resolve_model_runtime_profile_endpoint(
@@ -360,7 +380,32 @@ async fn serve_llama_cpp_router_model(
         .await
         .is_err();
     let endpoint_unreachable = !llama_cpp_router_endpoint_ready(endpoint.as_str()).await;
-    if profile_not_running || endpoint_unreachable {
+    let should_restart_for_profile_settings =
+        !profile_not_running
+            && !endpoint_unreachable
+            && llama_cpp_router_should_restart_for_profile_settings(state, &profile).await?;
+    if should_restart_for_profile_settings {
+        if let Err(err) = state
+            .api
+            .stop_runtime_profile(request.config.profile_id.clone())
+            .await
+        {
+            warn!(
+                "failed to restart llama.cpp router profile before applying device settings: {}",
+                err
+            );
+            return non_critical_failure_response(
+                state,
+                serving_error(
+                    ModelServeErrorCode::ProviderLoadFailed,
+                    "llama.cpp router profile could not be restarted to apply device settings",
+                    &request,
+                ),
+            )
+            .await;
+        }
+    }
+    if profile_not_running || endpoint_unreachable || should_restart_for_profile_settings {
         if let Some(error) = launch_llama_cpp_router_profile(state, &request).await? {
             return non_critical_failure_response(state, error).await;
         }
@@ -418,6 +463,35 @@ async fn serve_llama_cpp_router_model(
         load_error: None,
         snapshot: Some(snapshot),
     })?)
+}
+
+async fn llama_cpp_router_should_restart_for_profile_settings(
+    state: &AppState,
+    profile: &RuntimeProfileConfig,
+) -> pumas_library::Result<bool> {
+    if profile.management_mode != RuntimeManagementMode::Managed
+        || profile.provider_mode != RuntimeProviderMode::LlamaCppRouter
+        || !llama_cpp_router_profile_has_explicit_device_settings(profile)
+    {
+        return Ok(false);
+    }
+    let snapshot = state.api.get_serving_status().await?.snapshot;
+    Ok(!snapshot.served_models.iter().any(|status| {
+        status.provider == RuntimeProviderId::LlamaCpp
+            && status.profile_id == profile.profile_id
+            && status.load_state == ServedModelLoadState::Loaded
+    }))
+}
+
+fn llama_cpp_router_profile_has_explicit_device_settings(profile: &RuntimeProfileConfig) -> bool {
+    profile.device.mode != RuntimeDeviceMode::Auto
+        || profile.device.device_id.is_some()
+        || profile.device.gpu_layers.is_some()
+        || profile
+            .device
+            .tensor_split
+            .as_ref()
+            .is_some_and(|tensor_split| !tensor_split.is_empty())
 }
 
 async fn launch_llama_cpp_router_profile(
@@ -569,7 +643,7 @@ fn llama_cpp_launch_overrides(request: &ServeModelRequest) -> RuntimeProfileLaun
 async fn unserve_llama_cpp_model(
     state: &AppState,
     request: UnserveModelRequest,
-    profile_id: pumas_library::models::RuntimeProfileId,
+    profile_id: RuntimeProfileId,
     model_alias: String,
 ) -> pumas_library::Result<Value> {
     let provider_mode = state
@@ -911,5 +985,24 @@ mod tests {
             llama_cpp_router_model_unload_url("http://127.0.0.1:20617"),
             "http://127.0.0.1:20617/models/unload"
         );
+    }
+
+    #[test]
+    fn llama_cpp_router_profile_restart_detects_explicit_device_settings() {
+        let mut profile = RuntimeProfileConfig::default_ollama();
+        profile.provider = RuntimeProviderId::LlamaCpp;
+        profile.provider_mode = RuntimeProviderMode::LlamaCppRouter;
+        profile.management_mode = RuntimeManagementMode::Managed;
+        profile.device.mode = RuntimeDeviceMode::Auto;
+
+        assert!(!llama_cpp_router_profile_has_explicit_device_settings(
+            &profile
+        ));
+
+        profile.device.mode = RuntimeDeviceMode::Gpu;
+
+        assert!(llama_cpp_router_profile_has_explicit_device_settings(
+            &profile
+        ));
     }
 }

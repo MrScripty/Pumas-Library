@@ -1198,9 +1198,7 @@ fn profile_runtime_extra_args(
 }
 
 fn apply_llama_cpp_device_args(args: &mut Vec<String>, profile: &RuntimeProfileConfig) {
-    if profile.device.mode == RuntimeDeviceMode::Cpu {
-        args.extend(["--n-gpu-layers".to_string(), "0".to_string()]);
-    } else if let Some(gpu_layers) = profile.device.gpu_layers {
+    if let Some(gpu_layers) = llama_cpp_gpu_layers_arg(&profile.device) {
         args.extend(["--n-gpu-layers".to_string(), gpu_layers.to_string()]);
     }
 
@@ -1215,6 +1213,16 @@ fn apply_llama_cpp_device_args(args: &mut Vec<String>, profile: &RuntimeProfileC
                     .join(","),
             ]);
         }
+    }
+}
+
+fn llama_cpp_gpu_layers_arg(device: &RuntimeDeviceSettings) -> Option<i32> {
+    match device.mode {
+        RuntimeDeviceMode::Cpu => Some(0),
+        RuntimeDeviceMode::Gpu | RuntimeDeviceMode::SpecificDevice => {
+            Some(device.gpu_layers.unwrap_or(-1))
+        }
+        RuntimeDeviceMode::Auto | RuntimeDeviceMode::Hybrid => device.gpu_layers,
     }
 }
 
@@ -1830,6 +1838,31 @@ mod tests {
                 .map(String::as_str),
             Some("1")
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_defaults_llama_cpp_gpu_to_full_offload() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+
+        let mut profile = managed_llama_cpp_profile("llama-router-gpu-default");
+        profile.name = "llama.cpp GPU Default".to_string();
+        profile.endpoint_url = RuntimeEndpointUrl::parse("http://127.0.0.1:18081").ok();
+        profile.port = RuntimePort::parse(18081).ok();
+        profile.device.mode = RuntimeDeviceMode::Gpu;
+        profile.device.gpu_layers = None;
+        service.upsert_profile(profile).await.unwrap();
+
+        let specs = service.list_managed_profile_launch_specs().await.unwrap();
+        let spec = specs
+            .iter()
+            .find(|spec| spec.profile_id.as_str() == "llama-router-gpu-default")
+            .unwrap();
+
+        assert!(spec
+            .extra_args
+            .windows(2)
+            .any(|window| window == ["--n-gpu-layers", "-1"]));
     }
 
     #[tokio::test]

@@ -195,4 +195,30 @@ describe('RuntimeProfileSettingsSection', () => {
       })
     );
   });
+
+  it('defaults llama.cpp GPU profiles to full layer offload', async () => {
+    const user = userEvent.setup();
+
+    render(<RuntimeProfileSettingsSection provider="llama_cpp" />);
+
+    expect(await screen.findByDisplayValue('llama.cpp Router')).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Device'), 'gpu');
+
+    expect(screen.getByRole('spinbutton', { name: /gpu layers/i })).toHaveValue(-1);
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(upsertRuntimeProfileMock).toHaveBeenCalledTimes(1);
+    });
+    expect(upsertRuntimeProfileMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        device: expect.objectContaining({
+          mode: 'gpu',
+          gpu_layers: -1,
+        }),
+      })
+    );
+  });
 });

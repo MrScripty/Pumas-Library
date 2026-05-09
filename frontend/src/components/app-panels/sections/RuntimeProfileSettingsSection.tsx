@@ -104,6 +104,8 @@ export function RuntimeProfileSettingsSection({ provider }: RuntimeProfileSettin
         }
         if (provider !== 'llama_cpp' || value === 'auto' || value === 'cpu') {
           next.gpu_layers = '';
+        } else if ((value === 'gpu' || value === 'specific_device') && !next.gpu_layers.trim()) {
+          next.gpu_layers = '-1';
         }
       }
       if (key === 'management_mode' && value === 'managed') {

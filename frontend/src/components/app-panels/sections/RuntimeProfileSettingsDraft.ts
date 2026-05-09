@@ -60,10 +60,7 @@ export function draftToProfile(draft: RuntimeProfileDraft): RuntimeProfileConfig
     device: {
       mode: draft.device_mode,
       device_id: keepsDeviceId ? draft.device_id.trim() || null : null,
-      gpu_layers:
-        keepsGpuLayers && draft.gpu_layers.trim()
-          ? Number.parseInt(draft.gpu_layers, 10)
-          : null,
+      gpu_layers: keepsGpuLayers ? parseLlamaCppGpuLayers(draft) : null,
       tensor_split: null,
     },
     scheduler: {
@@ -72,4 +69,11 @@ export function draftToProfile(draft: RuntimeProfileDraft): RuntimeProfileConfig
       keep_alive_seconds: null,
     },
   };
+}
+
+function parseLlamaCppGpuLayers(draft: RuntimeProfileDraft): number | null {
+  if (draft.gpu_layers.trim()) {
+    return Number.parseInt(draft.gpu_layers, 10);
+  }
+  return draft.device_mode === 'gpu' || draft.device_mode === 'specific_device' ? -1 : null;
 }

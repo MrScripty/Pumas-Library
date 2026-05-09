@@ -203,6 +203,9 @@ function GpuLayersField({ draft, onUpdateDraft }: DraftFieldProps) {
         onChange={(event) => onUpdateDraft('gpu_layers', event.target.value)}
         className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary))] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))]"
       />
+      <span className="block text-[hsl(var(--launcher-text-muted)/0.75)]">
+        Use -1 for all layers.
+      </span>
     </label>
   );
 }

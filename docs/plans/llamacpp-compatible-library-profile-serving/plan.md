@@ -399,7 +399,7 @@ the row.
 - [x] On selection, persist `ModelRuntimeRoute` through existing backend RPC, or
       use an explicit save affordance if immediate persistence creates stale
       response or accidental-write issues during implementation.
-- [ ] Extract or reuse a focused route save/clear helper so row selection and
+- [x] Extract or reuse a focused route save/clear helper so row selection and
       `ModelRuntimeRouteEditor` do not duplicate backend mutation logic.
 - [x] Refresh route state from the backend snapshot/update feed after save.
 - [x] Surface route-save errors inline without mutating served state.
@@ -426,12 +426,13 @@ the row.
   kept the empty selector label explicit. Verified with
   `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx` and
   `npm run -w frontend check:types`.
+- 2026-05-09: Extracted shared runtime route save/clear helpers and reused them
+  from both `ModelRuntimeRouteEditor` and the llama.cpp row selector. Verified
+  with `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx`
+  and `npm run -w frontend check:types`.
 
 **Discovered issues:**
-- Route mutation logic now exists in both `ModelRuntimeRouteEditor` and
-  `LlamaCppModelLibrarySection`; extract a shared route mutation helper before
-  marking the duplication task complete.
-- Empty-profile selector UX is covered; no open issue.
+- None open for this milestone.
 
 ### Milestone 6: Hardware Placement Tags
 

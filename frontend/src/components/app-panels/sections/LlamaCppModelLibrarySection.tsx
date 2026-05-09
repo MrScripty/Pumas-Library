@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Link2, Play, Save, Star } from 'lucide-react';
-import { getElectronAPI } from '../../../api/adapter';
 import { useRuntimeProfiles } from '../../../hooks/useRuntimeProfiles';
 import type { ModelCategory, ModelInfo } from '../../../types/apps';
 import type { ServedModelStatus } from '../../../types/api-serving';
@@ -10,6 +9,10 @@ import { LocalModelMetadataSummary } from '../../LocalModelMetadataSummary';
 import { LocalModelNameButton } from '../../LocalModelNameButton';
 import { ModelMetadataModal } from '../../ModelMetadataModal';
 import { ModelServeDialog } from '../../ModelServeDialog';
+import {
+  clearModelRuntimeRoute,
+  saveModelRuntimeRoute,
+} from '../../model-serve/runtimeRouteMutations';
 import {
   buildLlamaCppModelRows,
   getLlamaCppPlacementLabel,
@@ -203,29 +206,17 @@ export function LlamaCppModelLibrarySection({
   });
 
   const handleSaveRoute = async (modelId: string, profileId: string) => {
-    const electronAPI = getElectronAPI();
-    if (profileId && !electronAPI?.set_model_runtime_route) {
-      setRouteError('Runtime route API is unavailable');
-      return;
-    }
-    if (!profileId && !electronAPI?.clear_model_runtime_route) {
-      setRouteError('Runtime route API is unavailable');
-      return;
-    }
-
     setSavingRouteModelId(modelId);
     setRouteError(null);
     try {
-      const response = profileId
-        ? await electronAPI!.set_model_runtime_route({
-            model_id: modelId,
-            profile_id: profileId,
-            auto_load: true,
-          })
-        : await electronAPI!.clear_model_runtime_route(modelId);
-      if (!response.success) {
-        setRouteError(response.error ?? 'Failed to save runtime route');
-        return;
+      if (profileId) {
+        await saveModelRuntimeRoute({
+          modelId,
+          profileId,
+          autoLoad: true,
+        });
+      } else {
+        await clearModelRuntimeRoute(modelId);
       }
       await refreshRuntimeProfiles();
     } catch (caught) {

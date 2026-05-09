@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Play, RotateCcw, Save } from 'lucide-react';
-import { getElectronAPI } from '../api/adapter';
 import { useRuntimeProfiles } from '../hooks/useRuntimeProfiles';
 import type { ModelInfo } from '../types/apps';
 import { ModelServeDialog } from './ModelServeDialog';
+import {
+  clearModelRuntimeRoute,
+  saveModelRuntimeRoute,
+} from './model-serve/runtimeRouteMutations';
 
 interface ModelRuntimeRouteEditorProps {
   modelId: string;
@@ -70,23 +73,14 @@ export function ModelRuntimeRouteEditor({
   }
 
   const handleSave = async () => {
-    const electronAPI = getElectronAPI();
-    if (!electronAPI?.set_model_runtime_route) {
-      return;
-    }
-
     setIsSaving(true);
     setSaveError(null);
     try {
-      const response = await electronAPI.set_model_runtime_route({
-        model_id: modelId,
-        profile_id: profileId || null,
-        auto_load: autoLoad,
+      await saveModelRuntimeRoute({
+        modelId,
+        profileId: profileId || null,
+        autoLoad,
       });
-      if (!response.success) {
-        setSaveError(response.error ?? 'Failed to save runtime route');
-        return;
-      }
       await refreshRuntimeProfiles();
     } catch (caught) {
       setSaveError(caught instanceof Error ? caught.message : 'Failed to save runtime route');
@@ -96,19 +90,10 @@ export function ModelRuntimeRouteEditor({
   };
 
   const handleClear = async () => {
-    const electronAPI = getElectronAPI();
-    if (!electronAPI?.clear_model_runtime_route) {
-      return;
-    }
-
     setIsSaving(true);
     setSaveError(null);
     try {
-      const response = await electronAPI.clear_model_runtime_route(modelId);
-      if (!response.success) {
-        setSaveError(response.error ?? 'Failed to clear runtime route');
-        return;
-      }
+      await clearModelRuntimeRoute(modelId);
       await refreshRuntimeProfiles();
     } catch (caught) {
       setSaveError(caught instanceof Error ? caught.message : 'Failed to clear runtime route');

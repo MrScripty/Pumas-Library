@@ -780,10 +780,16 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - 2026-05-08: Added router-profile serving. Running llama.cpp router profiles now record selected models as served through the router endpoint, using the existing deterministic backend-generated router catalog/preset behavior from runtime profile launch. Router unload removes the served-model record without stopping the shared router process.
 - 2026-05-08: Added focused RPC integration coverage proving a managed dedicated llama.cpp serve request returns a successful transport response with a non-critical load error when no local `llama-server` runtime can be launched. Validated with `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml`.
 - 2026-05-08: Added typed runtime-profile launch overrides for dedicated llama.cpp serving. `serve_model` now passes the selected model device, device id, GPU layers, tensor split, and context size into the dedicated launch path, which replaces profile launch args/env for that model-bound process without changing router semantics. Validated with `cargo test -p pumas-library llama_cpp_dedicated_overrides --manifest-path rust/Cargo.toml`, `cargo test -p pumas-library serving --manifest-path rust/Cargo.toml`, `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w frontend test:run -- ModelMetadataModal LocalModelInstalledActions`.
+- 2026-05-09: Hardened managed llama.cpp router serving after live UI validation with the installed `b9082` runtime. `serve_model` now re-checks the resolved router endpoint before trusting cached lifecycle state, relaunches stopped or stale managed routers from the active installed llama.cpp version, and returns a non-critical provider-load error if the endpoint is still unreachable after launch.
+- 2026-05-09: Made generated llama.cpp router presets model-type aware. GGUF embedding records now emit `embeddings = true`, and GGUF reranker records emit `reranking = true`, so the router-spawned child `llama-server` supports the endpoint required by the selected model.
+- 2026-05-09: Changed router-mode `Start serving` from "record as served" to an eager llama.cpp router load. The handler posts to the router `/models/load` endpoint for the selected alias and records `ServedModelStatus::Loaded` only after llama.cpp accepts or reports that the model is already running.
 
 **Discovered Issues:**
 - 2026-05-08: The dedicated llama.cpp serving path initially used only the runtime profile's provider endpoint. Resolved the same day by adding the Pumas `/v1` gateway and reporting aggregate serving status as `pumas_gateway` when models are loaded.
 - 2026-05-08: The first dedicated llama.cpp serving implementation exposed model placement fields but still launched with only the runtime profile's device/context arguments. Resolved the same day by adding model-bound launch overrides for dedicated profiles and keeping router profiles profile-scoped.
+- 2026-05-09: Live app testing found a stale orphaned llama.cpp router could leave the runtime profile journal saying the profile was running while the newly launched process failed to bind the profile port. Resolved by health-checking the router endpoint before trusting cached state.
+- 2026-05-09: Live app testing found `Qwen3-Embedding-0.6B-GGUF` registered in the router but failed `/v1/embeddings` with `This server does not support embeddings`. Resolved by emitting embedding/reranking model-type flags in backend-owned router presets.
+- 2026-05-09: Live app testing showed the previous router `Start serving` path did not prove the model loaded; the first inference request performed the actual load. Resolved by calling llama.cpp `/models/load` during `serve_model`, which is the correct place to surface memory/device fit failures as non-critical domain errors.
 
 ### Milestone 14: Shared Endpoint/Gateway Decision And Validation
 
@@ -820,8 +826,8 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - [x] Update relevant frontend component/app-panel README files.
 - [x] Update `electron/src/README.md` if preload/bridge serving behavior changes.
 - [x] Update `docs/contracts/desktop-rpc-methods.md`.
-- [ ] Run the vertical acceptance path from UI action to backend result/status.
-- [ ] Run frontend typecheck/build, Electron tests, Rust tests for changed crates, and release smoke where feasible. Automated Rust/frontend/Electron validation passed; release smoke is blocked by an already-running Pumas owner process for this launcher root.
+- [x] Run the vertical acceptance path from UI action to backend result/status.
+- [x] Run frontend typecheck/build, Electron tests, Rust tests for changed crates, and release smoke where feasible. The final 2026-05-09 slice rebuilt release binaries/frontend and performed a live release-app UI acceptance test; release smoke was not repeated after the final live test because the served model/runtime was intentionally left running for user verification.
 
 **Verification:**
 - `cargo test -p pumas-library <serving filter> --manifest-path rust/Cargo.toml`.
@@ -832,12 +838,13 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - `npm run -w frontend build`.
 - `bash launcher.sh --release-smoke` when release validation is in scope.
 
-**Status:** In progress. Core API/model/serving, RPC handler, frontend type/component, Electron, and desktop RPC contract docs now reflect the serving status/update-feed contract. Automated frontend build, targeted frontend serving tests, Electron tests, and focused Rust serving tests pass. Manual vertical UI smoke and release smoke remain; release smoke was blocked locally by an existing owner process for this launcher root.
+**Status:** Complete for the current serving wave. Core API/model/serving, RPC handler, frontend type/component, Electron, and desktop RPC contract docs reflect the serving status/update-feed contract. Automated focused Rust tests pass, release binaries/frontend build, and the live release app successfully served `embedding/qwen3/qwen3-embedding-06b-gguf` through the `Emily Lamacpp` profile from the model Serving UI.
 
 **Implementation Notes:**
 - 2026-05-08: Updated serving contract documentation and added `pumas-core/src/serving/README.md`. Corrected the stale models README claim that all DTOs use camelCase; newer runtime-profile, package-facts, and serving DTOs intentionally use snake_case.
 - 2026-05-08: Validated with `cargo test -p pumas-library serving --manifest-path rust/Cargo.toml`, `cargo test -p pumas-rpc serving --manifest-path rust/Cargo.toml`, `npm run -w frontend build`, `npm run -w frontend test:run -- ModelMetadataModal LocalModelInstalledActions`, and `npm run -w electron test`.
 - 2026-05-08: `bash launcher.sh --release-smoke` was attempted but did not complete because the release backend refused to start while another Pumas instance already owned `/media/jeremy/OrangeCream/Linux Software/repos/owned/ai-systems/Pumas-Library` (`pid 2940353`), then the bounded smoke window timed out.
+- 2026-05-09: Rebuilt release binaries/frontend with `bash launcher.sh --build-release`, launched the release app with DevTools, opened `Qwen3-Embedding-0.6B-GGUF` from the model list, selected `Emily Lamacpp`, clicked `Start serving`, and verified the final Pumas gateway (`http://127.0.0.1:38941/v1/embeddings`) and direct llama.cpp router (`http://127.0.0.1:20617/v1/embeddings`) both returned HTTP 200 with a 1024-dimensional embedding.
 
 ## Lifecycle and Runtime Ownership Notes
 
@@ -941,6 +948,7 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 - 2026-05-09 continuation: directly tested the installed `b9082` llama.cpp binary and serving API. Dedicated CPU serving loaded `embedding/qwen3/qwen3-embedding-06b-gguf`; the stopped managed router profile then exposed two blockers: managed profiles with blank endpoint/port could not resolve their derived endpoint, and stopped router profiles were not launchable from `serve_model`.
 - 2026-05-09 continuation: fixed model-start serving for managed llama.cpp router profiles by allowing stopped managed routers through validation, launching them on `serve_model`, resolving implicit managed endpoints from the same derived launch specs used by lifecycle startup, and hiding router per-model placement controls that are profile-owned rather than per-load settings.
 - 2026-05-09 continuation: fixed the remaining apparent no-op state by keeping the Start serving button actionable during runtime-profile refreshes, so clicks always enter the handler and surface either progress, validation feedback, or backend errors instead of being swallowed by a disabled button.
+- 2026-05-09 continuation: completed live release-app validation for `Emily Lamacpp` by serving `embedding/qwen3/qwen3-embedding-06b-gguf` from the model Serving UI. The slice fixed stale router lifecycle state, added model-type-aware llama.cpp router preset flags for embeddings/rerankers, and made `serve_model` eagerly load the selected router model before recording backend served-model status.
 
 ### Deviations
 
@@ -970,6 +978,7 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 - 2026-05-09 installed llama.cpp router validation: `llama-cpp-versions/b9082/llama-b9082/llama-server --version` passed, direct dedicated CPU serving loaded `embedding/qwen3/qwen3-embedding-06b-gguf`, and the rebuilt RPC server launched the stopped `runtime-1778279326877` llama.cpp router profile on a derived endpoint (`http://127.0.0.1:20617/`) via `serve_model`. The router endpoint returned the served model from `/v1/models`; the test runtime was then stopped.
 - 2026-05-09 router-start validation: `npm run -w frontend test:run -- ModelServeDialog`, `npm run -w frontend check:types`, `npm run -w frontend lint -- --quiet`, `npm run -w frontend build`, `cargo test -p pumas-library serving::`, `cargo test -p pumas-library runtime_profile_service_resolves_implicit_managed_llama_cpp_endpoint`, `cargo check -p pumas-rpc`, `cargo build -p pumas-rpc --release`, `bash launcher.sh --build-release`, and `bash launcher.sh --release-smoke` passed.
 - 2026-05-09 start-button validation: `npm run -w frontend test:run -- ModelServeDialog`, `npm run -w frontend check:types`, `npm run -w frontend lint -- --quiet`, `npm run -w frontend build`, `bash launcher.sh --build-release`, and `bash launcher.sh --release-smoke` passed.
+- 2026-05-09 live Emily Lamacpp validation: `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml llama_cpp_router_catalog_sorts_and_writes_preset_entries`, `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml llama_cpp_router_model_load_url_normalizes_trailing_slash`, and `bash launcher.sh --build-release` passed. The rebuilt release app launched `Emily Lamacpp` on `http://127.0.0.1:20617/`, reported `embedding/qwen3/qwen3-embedding-06b-gguf` as backend `load_state = loaded`, and both `http://127.0.0.1:38941/v1/embeddings` and `http://127.0.0.1:20617/v1/embeddings` returned HTTP 200 with `embeddingLength = 1024`.
 
 ### Traceability Links
 

@@ -97,6 +97,7 @@ pub struct LlamaCppRouterCatalog {
 pub struct LlamaCppRouterCatalogEntry {
     pub model_id: String,
     pub alias: String,
+    pub model_type: String,
     pub model_path: PathBuf,
 }
 
@@ -153,6 +154,7 @@ fn llama_cpp_router_catalog_entry_for_record(
     Some(LlamaCppRouterCatalogEntry {
         model_id: record.id.clone(),
         alias: record.id.clone(),
+        model_type: record.model_type.clone(),
         model_path,
     })
 }
@@ -168,6 +170,11 @@ fn build_llama_cpp_router_preset_ini(entries: &[LlamaCppRouterCatalogEntry]) -> 
         ));
         output.push_str("\nalias = ");
         output.push_str(&sanitize_llama_cpp_preset_value(&entry.alias));
+        if entry.model_type.eq_ignore_ascii_case("embedding") {
+            output.push_str("\nembedding = true");
+        } else if entry.model_type.eq_ignore_ascii_case("reranker") {
+            output.push_str("\nreranking = true");
+        }
         output.push_str("\n\n");
     }
     output
@@ -1425,17 +1432,32 @@ mod tests {
             LlamaCppRouterCatalogEntry {
                 model_id: "llm/zeta/model".to_string(),
                 alias: "llm/zeta/model".to_string(),
+                model_type: "llm".to_string(),
                 model_path: PathBuf::from("/models/zeta.gguf"),
             },
             LlamaCppRouterCatalogEntry {
                 model_id: "llm/alpha/model".to_string(),
                 alias: "llm/alpha/model".to_string(),
+                model_type: "llm".to_string(),
                 model_path: PathBuf::from("/models/alpha.gguf"),
+            },
+            LlamaCppRouterCatalogEntry {
+                model_id: "embedding/qwen/model".to_string(),
+                alias: "embedding/qwen/model".to_string(),
+                model_type: "embedding".to_string(),
+                model_path: PathBuf::from("/models/embedding.gguf"),
+            },
+            LlamaCppRouterCatalogEntry {
+                model_id: "reranker/qwen/model".to_string(),
+                alias: "reranker/qwen/model".to_string(),
+                model_type: "reranker".to_string(),
+                model_path: PathBuf::from("/models/reranker.gguf"),
             },
         ]);
 
-        assert_eq!(catalog.entries[0].model_id, "llm/alpha/model");
-        assert_eq!(catalog.entries[1].model_id, "llm/zeta/model");
+        assert_eq!(catalog.entries[0].model_id, "embedding/qwen/model");
+        assert_eq!(catalog.entries[1].model_id, "llm/alpha/model");
+        assert_eq!(catalog.entries[3].model_id, "reranker/qwen/model");
         assert!(catalog.preset_ini.contains("[*]\nload-on-startup = false"));
         assert!(
             catalog.preset_ini.find("[llm/alpha/model]").unwrap()
@@ -1443,6 +1465,12 @@ mod tests {
         );
         assert!(catalog.preset_ini.contains("model = /models/alpha.gguf"));
         assert!(catalog.preset_ini.contains("alias = llm/zeta/model"));
+        assert!(catalog.preset_ini.contains(
+            "[embedding/qwen/model]\nmodel = /models/embedding.gguf\nalias = embedding/qwen/model\nembedding = true"
+        ));
+        assert!(catalog.preset_ini.contains(
+            "[reranker/qwen/model]\nmodel = /models/reranker.gguf\nalias = reranker/qwen/model\nreranking = true"
+        ));
     }
 
     #[tokio::test]

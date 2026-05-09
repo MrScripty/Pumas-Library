@@ -10,7 +10,7 @@ use pumas_library::models::{
 use pumas_library::runtime_profiles::RuntimeProfileLaunchOverrides;
 use serde::Deserialize;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
 use tracing::warn;
 
 #[derive(Debug, Deserialize)]
@@ -350,7 +350,7 @@ async fn serve_llama_cpp_router_model(
         }
     };
 
-    if state
+    let profile_not_running = state
         .api
         .resolve_model_runtime_profile_endpoint_for_operation(
             RuntimeProviderId::LlamaCpp,
@@ -358,48 +358,22 @@ async fn serve_llama_cpp_router_model(
             Some(request.config.profile_id.clone()),
         )
         .await
-        .is_err()
-    {
-        let Some((tag, version_dir)) = active_llama_cpp_runtime(state, &request).await? else {
+        .is_err();
+    let endpoint_unreachable = !llama_cpp_router_endpoint_ready(endpoint.as_str()).await;
+    if profile_not_running || endpoint_unreachable {
+        if let Some(error) = launch_llama_cpp_router_profile(state, &request).await? {
+            return non_critical_failure_response(state, error).await;
+        }
+        if !llama_cpp_router_endpoint_ready(endpoint.as_str()).await {
             return non_critical_failure_response(
                 state,
                 serving_error(
-                    ModelServeErrorCode::MissingRuntime,
-                    "llama.cpp runtime versions are not available",
+                    ModelServeErrorCode::ProviderLoadFailed,
+                    "llama.cpp router profile started but its model endpoint is not reachable",
                     &request,
                 ),
             )
             .await;
-        };
-        let launch_response = state
-            .api
-            .launch_runtime_profile(request.config.profile_id.clone(), &tag, &version_dir)
-            .await;
-        match launch_response {
-            Ok(response) if response.success => {}
-            Ok(response) => {
-                let message = response.error.unwrap_or_else(|| {
-                    "llama.cpp router profile did not start for the selected model".to_string()
-                });
-                warn!("llama.cpp router serve launch failed: {}", message);
-                return non_critical_failure_response(
-                    state,
-                    serving_error(ModelServeErrorCode::ProviderLoadFailed, message, &request),
-                )
-                .await;
-            }
-            Err(err) => {
-                warn!("llama.cpp router serve launch failed: {}", err);
-                return non_critical_failure_response(
-                    state,
-                    serving_error(
-                        ModelServeErrorCode::MissingRuntime,
-                        "llama.cpp router runtime could not be launched",
-                        &request,
-                    ),
-                )
-                .await;
-            }
         }
     }
 
@@ -408,9 +382,17 @@ async fn serve_llama_cpp_router_model(
         .model_alias
         .clone()
         .unwrap_or_else(|| request.model_id.clone());
+    if let Err(message) = llama_cpp_router_load_model(endpoint.as_str(), &model_alias).await {
+        warn!("llama.cpp router model load failed: {}", message);
+        return non_critical_failure_response(
+            state,
+            serving_error(ModelServeErrorCode::ProviderLoadFailed, message, &request),
+        )
+        .await;
+    }
     let status = ServedModelStatus {
         model_id: request.model_id.clone(),
-        model_alias: Some(model_alias),
+        model_alias: Some(model_alias.clone()),
         provider: RuntimeProviderId::LlamaCpp,
         profile_id: request.config.profile_id.clone(),
         load_state: ServedModelLoadState::Loaded,
@@ -436,6 +418,93 @@ async fn serve_llama_cpp_router_model(
         load_error: None,
         snapshot: Some(snapshot),
     })?)
+}
+
+async fn launch_llama_cpp_router_profile(
+    state: &AppState,
+    request: &ServeModelRequest,
+) -> pumas_library::Result<Option<ModelServeError>> {
+    let Some((tag, version_dir)) = active_llama_cpp_runtime(state, request).await? else {
+        return Ok(Some(serving_error(
+            ModelServeErrorCode::MissingRuntime,
+            "llama.cpp runtime versions are not available",
+            request,
+        )));
+    };
+    let launch_response = state
+        .api
+        .launch_runtime_profile(request.config.profile_id.clone(), &tag, &version_dir)
+        .await;
+    match launch_response {
+        Ok(response) if response.success => Ok(None),
+        Ok(response) => {
+            let message = response.error.unwrap_or_else(|| {
+                "llama.cpp router profile did not start for the selected model".to_string()
+            });
+            warn!("llama.cpp router serve launch failed: {}", message);
+            Ok(Some(serving_error(
+                ModelServeErrorCode::ProviderLoadFailed,
+                message,
+                request,
+            )))
+        }
+        Err(err) => {
+            warn!("llama.cpp router serve launch failed: {}", err);
+            Ok(Some(serving_error(
+                ModelServeErrorCode::MissingRuntime,
+                "llama.cpp router runtime could not be launched",
+                request,
+            )))
+        }
+    }
+}
+
+async fn llama_cpp_router_endpoint_ready(endpoint: &str) -> bool {
+    let url = llama_cpp_router_models_url(endpoint);
+    let Ok(client) = reqwest::Client::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+    else {
+        return false;
+    };
+    client
+        .get(url)
+        .send()
+        .await
+        .map(|response| response.status().is_success())
+        .unwrap_or(false)
+}
+
+fn llama_cpp_router_models_url(endpoint: &str) -> String {
+    format!("{}/v1/models", endpoint.trim_end_matches('/'))
+}
+
+async fn llama_cpp_router_load_model(endpoint: &str, model_alias: &str) -> Result<(), String> {
+    let url = llama_cpp_router_model_load_url(endpoint);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(180))
+        .build()
+        .map_err(|err| format!("failed to build llama.cpp router client: {err}"))?;
+    let response = client
+        .post(url)
+        .json(&serde_json::json!({ "model": model_alias }))
+        .send()
+        .await
+        .map_err(|err| format!("failed to load model through llama.cpp router: {err}"))?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if status.is_success() || body.contains("model is already running") {
+        return Ok(());
+    }
+    Err(if body.trim().is_empty() {
+        format!("llama.cpp router failed to load model with HTTP status {status}")
+    } else {
+        format!("llama.cpp router failed to load model with HTTP status {status}: {body}")
+    })
+}
+
+fn llama_cpp_router_model_load_url(endpoint: &str) -> String {
+    format!("{}/models/load", endpoint.trim_end_matches('/'))
 }
 
 async fn active_llama_cpp_runtime(
@@ -735,4 +804,33 @@ fn serving_error(
 
 fn derive_fallback_model_alias(model_id: &str) -> String {
     pumas_app_manager::derive_ollama_name(model_id.split('/').next_back().unwrap_or(model_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn llama_cpp_router_models_url_normalizes_trailing_slash() {
+        assert_eq!(
+            llama_cpp_router_models_url("http://127.0.0.1:20617/"),
+            "http://127.0.0.1:20617/v1/models"
+        );
+        assert_eq!(
+            llama_cpp_router_models_url("http://127.0.0.1:20617"),
+            "http://127.0.0.1:20617/v1/models"
+        );
+    }
+
+    #[test]
+    fn llama_cpp_router_model_load_url_normalizes_trailing_slash() {
+        assert_eq!(
+            llama_cpp_router_model_load_url("http://127.0.0.1:20617/"),
+            "http://127.0.0.1:20617/models/load"
+        );
+        assert_eq!(
+            llama_cpp_router_model_load_url("http://127.0.0.1:20617"),
+            "http://127.0.0.1:20617/models/load"
+        );
+    }
 }

@@ -33,7 +33,8 @@ use futures::{
 };
 use pumas_library::models::{
     ModelDownloadUpdateNotification, ModelLibraryUpdateNotification, RuntimeProfileUpdateFeed,
-    ServedModelLoadState, ServedModelStatus, StatusTelemetryUpdateNotification,
+    ServedModelLoadState, ServedModelStatus, ServingStatusUpdateFeed,
+    StatusTelemetryUpdateNotification,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -298,6 +299,11 @@ pub struct RuntimeProfileUpdateStreamQuery {
 }
 
 #[derive(Debug, Default, Deserialize)]
+pub struct ServingStatusUpdateStreamQuery {
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 pub struct StatusTelemetryUpdateStreamQuery {
     pub cursor: Option<String>,
 }
@@ -431,6 +437,52 @@ async fn build_runtime_profile_update_stream_state(
     };
 
     RuntimeProfileUpdateStreamState {
+        receiver,
+        pending_feed,
+    }
+}
+
+/// Server-sent serving-status update notification stream.
+pub async fn handle_serving_status_update_events(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ServingStatusUpdateStreamQuery>,
+) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+    let stream_state = build_serving_status_update_stream_state(state, query.cursor).await;
+    let stream = stream::unfold(stream_state, next_serving_status_update_event).boxed();
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+async fn build_serving_status_update_stream_state(
+    state: Arc<AppState>,
+    cursor: Option<String>,
+) -> ServingStatusUpdateStreamState {
+    let receiver = state.api.subscribe_serving_status_updates();
+    let pending_feed = match state
+        .api
+        .list_serving_status_updates_since(cursor.as_deref())
+        .await
+    {
+        Ok(response)
+            if !response.feed.events.is_empty()
+                || response.feed.stale_cursor
+                || response.feed.snapshot_required =>
+        {
+            Some(response.feed)
+        }
+        Ok(_) => None,
+        Err(error) => {
+            warn!(
+                "serving-status update stream startup recovery failed: {}",
+                error
+            );
+            Some(ServingStatusUpdateFeed::snapshot_required(
+                "serving:0".to_string(),
+            ))
+        }
+    };
+
+    ServingStatusUpdateStreamState {
         receiver,
         pending_feed,
     }
@@ -599,6 +651,11 @@ struct RuntimeProfileUpdateStreamState {
     pending_feed: Option<RuntimeProfileUpdateFeed>,
 }
 
+struct ServingStatusUpdateStreamState {
+    receiver: broadcast::Receiver<ServingStatusUpdateFeed>,
+    pending_feed: Option<ServingStatusUpdateFeed>,
+}
+
 struct StatusTelemetryUpdateStreamState {
     state: Arc<AppState>,
     receiver: broadcast::Receiver<StatusTelemetryUpdateNotification>,
@@ -698,6 +755,39 @@ fn runtime_profile_update_sse_event(feed: &RuntimeProfileUpdateFeed) -> Event {
             .data(payload),
         Err(error) => Event::default()
             .event("runtime-profile-error")
+            .data(json!({ "error": error.to_string() }).to_string()),
+    }
+}
+
+async fn next_serving_status_update_event(
+    mut state: ServingStatusUpdateStreamState,
+) -> Option<(Result<Event, Infallible>, ServingStatusUpdateStreamState)> {
+    if let Some(feed) = state.pending_feed.take() {
+        let event = serving_status_update_sse_event(&feed);
+        return Some((Ok(event), state));
+    }
+
+    match state.receiver.recv().await {
+        Ok(feed) => {
+            let event = serving_status_update_sse_event(&feed);
+            Some((Ok(event), state))
+        }
+        Err(broadcast::error::RecvError::Lagged(_)) => {
+            let feed = ServingStatusUpdateFeed::snapshot_required("serving:0".to_string());
+            let event = serving_status_update_sse_event(&feed);
+            Some((Ok(event), state))
+        }
+        Err(broadcast::error::RecvError::Closed) => None,
+    }
+}
+
+fn serving_status_update_sse_event(feed: &ServingStatusUpdateFeed) -> Event {
+    match serde_json::to_string(feed) {
+        Ok(payload) => Event::default()
+            .event("serving-status-update")
+            .data(payload),
+        Err(error) => Event::default()
+            .event("serving-status-error")
             .data(json!({ "error": error.to_string() }).to_string()),
     }
 }

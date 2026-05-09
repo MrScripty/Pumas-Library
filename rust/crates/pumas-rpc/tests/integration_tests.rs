@@ -818,6 +818,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_serving_status_update_event_stream_emits_initial_snapshot_required() {
+        if !can_bind_local_tcp_for_tests() {
+            return;
+        }
+        let env = create_test_env();
+        let server = start_rpc_server(env.path()).await.unwrap();
+        let port = server.port;
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!(
+                "http://127.0.0.1:{}/events/serving-status-updates",
+                port
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        assert!(response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("text/event-stream")));
+        let mut stream = response.bytes_stream();
+
+        let body = read_stream_until_contains(
+            &mut stream,
+            "serving-status-update",
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+        assert!(body.contains("event: serving-status-update"));
+        assert!(body.contains("\"snapshot_required\":true"));
+        assert!(body.contains("\"cursor\":\"serving:0\""));
+
+        server.stop().await;
+    }
+
+    #[tokio::test]
     async fn test_model_library_update_event_stream_emits_after_reconcile() {
         if !can_bind_local_tcp_for_tests() {
             return;

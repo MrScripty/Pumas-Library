@@ -226,7 +226,7 @@ model manager rendering.
 backend-owned serving-status updates through a pushed subscription.
 
 **Tasks:**
-- [ ] Add an RPC/SSE serving-status update stream backed by
+- [x] Add an RPC/SSE serving-status update stream backed by
       `PumasApi::subscribe_serving_status_updates`, following the existing
       runtime-profile update stream shape.
 - [ ] Extract or introduce a small reusable named-SSE stream helper in the
@@ -255,7 +255,13 @@ backend-owned serving-status updates through a pushed subscription.
 - Rust/RPC tests cover serving-status SSE event delivery and initial
   snapshot-required behavior for new subscribers.
 
-**Status:** Not started.
+**Status:** In progress.
+
+**Progress:**
+- 2026-05-09: Added `/events/serving-status-updates` in `pumas-rpc`, backed by
+  `PumasApi::subscribe_serving_status_updates`, with initial
+  `snapshot_required` delivery. Verified with
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml test_serving_status_update_event_stream_emits_initial_snapshot_required`.
 
 ### Milestone 3: Served-Instance Identity And Gateway Alias Safety
 

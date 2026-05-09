@@ -3,7 +3,7 @@
 use crate::handlers::{
     handle_health, handle_model_download_update_events, handle_model_library_update_events,
     handle_openai_models, handle_openai_proxy, handle_rpc, handle_runtime_profile_update_events,
-    handle_status_telemetry_update_events,
+    handle_serving_status_update_events, handle_status_telemetry_update_events,
 };
 use crate::shortcut::ShortcutManager;
 use axum::{
@@ -135,6 +135,10 @@ pub async fn start_server(
         .route(
             "/events/runtime-profile-updates",
             get(handle_runtime_profile_update_events),
+        )
+        .route(
+            "/events/serving-status-updates",
+            get(handle_serving_status_update_events),
         )
         .route(
             "/events/status-telemetry-updates",

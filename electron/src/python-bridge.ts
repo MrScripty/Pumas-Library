@@ -54,6 +54,7 @@ interface RPCResponse {
 export type ModelLibraryUpdateListener = (payload: unknown) => void;
 export type ModelDownloadUpdateListener = (payload: unknown) => void;
 export type RuntimeProfileUpdateListener = (payload: unknown) => void;
+export type ServingStatusUpdateListener = (payload: unknown) => void;
 export type StatusTelemetryUpdateListener = (payload: unknown) => void;
 
 export interface ParsedSseChunk {
@@ -120,11 +121,164 @@ export function parseRuntimeProfileUpdateSseChunk(
   return parseNamedSseChunk(previousBuffer, chunk, 'runtime-profile-update', 'runtime-profile');
 }
 
+export function parseServingStatusUpdateSseChunk(
+  previousBuffer: string,
+  chunk: string
+): ParsedSseChunk {
+  return parseNamedSseChunk(previousBuffer, chunk, 'serving-status-update', 'serving-status');
+}
+
 export function parseStatusTelemetryUpdateSseChunk(
   previousBuffer: string,
   chunk: string
 ): ParsedSseChunk {
   return parseNamedSseChunk(previousBuffer, chunk, 'status-telemetry-update', 'status telemetry');
+}
+
+interface NamedSseStreamSpec {
+  label: string;
+  path: string;
+  expectedEventName: string;
+  warningLabel: string;
+  supportsCursor: boolean;
+}
+
+interface NamedSseStreamRuntime {
+  getPort(): number;
+  isRunning(): boolean;
+  isShuttingDown(): boolean;
+}
+
+class NamedSseStreamOwner {
+  request: http.ClientRequest | null = null;
+  buffer = '';
+  cursor: string | null = null;
+  listener: ((payload: unknown) => void) | null = null;
+  reconnectTimer: BridgeTimer | null = null;
+
+  constructor(
+    private readonly spec: NamedSseStreamSpec,
+    private readonly timerController: PythonBridgeTimerController,
+    private readonly runtime: NamedSseStreamRuntime
+  ) {}
+
+  start(listener: (payload: unknown) => void): void {
+    this.listener = listener;
+    this.cursor = null;
+    if (!this.runtime.isRunning()) {
+      throw new Error('Backend bridge not running');
+    }
+    this.open();
+  }
+
+  stop(): void {
+    this.listener = null;
+    this.cursor = null;
+    this.close();
+    this.clearReconnectTimer();
+  }
+
+  resumeIfListening(): void {
+    if (this.listener) {
+      this.open();
+    }
+  }
+
+  close(): void {
+    if (this.request) {
+      this.request.destroy();
+      this.request = null;
+    }
+    this.buffer = '';
+  }
+
+  clearReconnectTimer(): void {
+    if (this.reconnectTimer) {
+      this.timerController.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  open(): void {
+    if (!this.runtime.isRunning() || !this.listener) {
+      return;
+    }
+
+    this.close();
+    this.clearReconnectTimer();
+    this.buffer = '';
+
+    const cursorQuery = this.spec.supportsCursor && this.cursor
+      ? `?cursor=${encodeURIComponent(this.cursor)}`
+      : '';
+
+    const req = http.get({
+      hostname: '127.0.0.1',
+      port: this.runtime.getPort(),
+      path: `${this.spec.path}${cursorQuery}`,
+      method: 'GET',
+      headers: {
+        Accept: 'text/event-stream',
+      },
+    }, (res) => {
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => {
+        const parsed = parseNamedSseChunk(
+          this.buffer,
+          chunk,
+          this.spec.expectedEventName,
+          this.spec.warningLabel
+        );
+        this.buffer = parsed.buffer;
+        for (const payload of parsed.payloads) {
+          if (
+            this.spec.supportsCursor &&
+            payload &&
+            typeof payload === 'object' &&
+            typeof (payload as { cursor?: unknown }).cursor === 'string'
+          ) {
+            this.cursor = (payload as { cursor: string }).cursor;
+          }
+          this.listener?.(payload);
+        }
+      });
+      res.on('end', () => {
+        this.request = null;
+        this.buffer = '';
+        if (!this.runtime.isShuttingDown()) {
+          log.warn(`${this.spec.label} stream ended`);
+          this.scheduleReconnect();
+        }
+      });
+    });
+
+    req.on('error', (error) => {
+      this.request = null;
+      this.buffer = '';
+      if (!this.runtime.isShuttingDown()) {
+        log.warn(`${this.spec.label} stream failed:`, error);
+        this.scheduleReconnect();
+      }
+    });
+
+    this.request = req;
+  }
+
+  scheduleReconnect(): void {
+    if (
+      this.runtime.isShuttingDown() ||
+      !this.runtime.isRunning() ||
+      !this.listener ||
+      this.reconnectTimer
+    ) {
+      return;
+    }
+
+    this.reconnectTimer = this.timerController.setTimeout(() => {
+      this.reconnectTimer = null;
+      this.open();
+    }, 1000);
+  }
 }
 
 export class PythonBridge {
@@ -136,25 +290,11 @@ export class PythonBridge {
   private isShuttingDown = false;
   private healthCheckTimer: BridgeTimer | null = null;
   private restartTimer: BridgeTimer | null = null;
-  private modelLibraryUpdateRequest: http.ClientRequest | null = null;
-  private modelLibraryUpdateBuffer = '';
-  private modelLibraryUpdateCursor: string | null = null;
-  private modelLibraryUpdateListener: ModelLibraryUpdateListener | null = null;
-  private modelLibraryUpdateReconnectTimer: BridgeTimer | null = null;
-  private modelDownloadUpdateRequest: http.ClientRequest | null = null;
-  private modelDownloadUpdateBuffer = '';
-  private modelDownloadUpdateCursor: string | null = null;
-  private modelDownloadUpdateListener: ModelDownloadUpdateListener | null = null;
-  private modelDownloadUpdateReconnectTimer: BridgeTimer | null = null;
-  private runtimeProfileUpdateRequest: http.ClientRequest | null = null;
-  private runtimeProfileUpdateBuffer = '';
-  private runtimeProfileUpdateListener: RuntimeProfileUpdateListener | null = null;
-  private runtimeProfileUpdateReconnectTimer: BridgeTimer | null = null;
-  private statusTelemetryUpdateRequest: http.ClientRequest | null = null;
-  private statusTelemetryUpdateBuffer = '';
-  private statusTelemetryUpdateCursor: string | null = null;
-  private statusTelemetryUpdateListener: StatusTelemetryUpdateListener | null = null;
-  private statusTelemetryUpdateReconnectTimer: BridgeTimer | null = null;
+  private modelLibraryUpdateStream: NamedSseStreamOwner;
+  private modelDownloadUpdateStream: NamedSseStreamOwner;
+  private runtimeProfileUpdateStream: NamedSseStreamOwner;
+  private servingStatusUpdateStream: NamedSseStreamOwner;
+  private statusTelemetryUpdateStream: NamedSseStreamOwner;
 
   constructor(options: PythonBridgeOptions) {
     const { timerController, ...runtimeOptions } = options;
@@ -164,6 +304,47 @@ export class PythonBridge {
       ...runtimeOptions,
     };
     this.timerController = timerController ?? NODE_TIMER_CONTROLLER;
+
+    const streamRuntime: NamedSseStreamRuntime = {
+      getPort: () => this.port,
+      isRunning: () => this.process !== null,
+      isShuttingDown: () => this.isShuttingDown,
+    };
+    this.modelLibraryUpdateStream = new NamedSseStreamOwner({
+      label: 'Model-library update',
+      path: '/events/model-library-updates',
+      expectedEventName: 'model-library-update',
+      warningLabel: 'model-library',
+      supportsCursor: true,
+    }, this.timerController, streamRuntime);
+    this.modelDownloadUpdateStream = new NamedSseStreamOwner({
+      label: 'Model download update',
+      path: '/events/model-download-updates',
+      expectedEventName: 'model-download-update',
+      warningLabel: 'model download',
+      supportsCursor: true,
+    }, this.timerController, streamRuntime);
+    this.runtimeProfileUpdateStream = new NamedSseStreamOwner({
+      label: 'Runtime-profile update',
+      path: '/events/runtime-profile-updates',
+      expectedEventName: 'runtime-profile-update',
+      warningLabel: 'runtime-profile',
+      supportsCursor: false,
+    }, this.timerController, streamRuntime);
+    this.servingStatusUpdateStream = new NamedSseStreamOwner({
+      label: 'Serving-status update',
+      path: '/events/serving-status-updates',
+      expectedEventName: 'serving-status-update',
+      warningLabel: 'serving-status',
+      supportsCursor: false,
+    }, this.timerController, streamRuntime);
+    this.statusTelemetryUpdateStream = new NamedSseStreamOwner({
+      label: 'Status telemetry update',
+      path: '/events/status-telemetry-updates',
+      expectedEventName: 'status-telemetry-update',
+      warningLabel: 'status telemetry',
+      supportsCursor: true,
+    }, this.timerController, streamRuntime);
 
     log.info(`Backend bridge initialized: ${this.options.rustBinaryPath}`);
   }
@@ -266,10 +447,8 @@ export class PythonBridge {
       log.info(`${backendLabel} process exited: code=${code}, signal=${signal}`);
       this.process = null;
       this.clearHealthCheckTimer();
-      this.clearModelLibraryUpdateReconnectTimer();
-      this.clearRuntimeProfileUpdateReconnectTimer();
-      this.closeModelLibraryUpdateStream();
-      this.closeRuntimeProfileUpdateStream();
+      this.closeAllUpdateStreams();
+      this.clearAllUpdateStreamReconnectTimers();
 
       // Auto-restart if enabled and not shutting down
       if (
@@ -295,15 +474,7 @@ export class PythonBridge {
     // Reset restart counter on successful start
     this.restartCount = 0;
 
-    if (this.modelLibraryUpdateListener) {
-      this.openModelLibraryUpdateStream();
-    }
-    if (this.runtimeProfileUpdateListener) {
-      this.openRuntimeProfileUpdateStream();
-    }
-    if (this.statusTelemetryUpdateListener) {
-      this.openStatusTelemetryUpdateStream();
-    }
+    this.resumeListeningUpdateStreams();
 
     log.info(`${backendLabel} backend bridge started successfully`);
   }
@@ -375,6 +546,7 @@ export class PythonBridge {
     this.stopModelLibraryUpdateStream();
     this.stopModelDownloadUpdateStream();
     this.stopRuntimeProfileUpdateStream();
+    this.stopServingStatusUpdateStream();
     this.stopStatusTelemetryUpdateStream();
 
     if (!this.process) {
@@ -424,410 +596,67 @@ export class PythonBridge {
   }
 
   startModelLibraryUpdateStream(listener: ModelLibraryUpdateListener): void {
-    this.modelLibraryUpdateListener = listener;
-    this.modelLibraryUpdateCursor = null;
-    if (!this.process) {
-      throw new Error('Backend bridge not running');
-    }
-    this.openModelLibraryUpdateStream();
+    this.modelLibraryUpdateStream.start(listener);
   }
 
   stopModelLibraryUpdateStream(): void {
-    this.modelLibraryUpdateListener = null;
-    this.modelLibraryUpdateCursor = null;
-    this.closeModelLibraryUpdateStream();
-    this.clearModelLibraryUpdateReconnectTimer();
+    this.modelLibraryUpdateStream.stop();
   }
 
   startModelDownloadUpdateStream(listener: ModelDownloadUpdateListener): void {
-    this.modelDownloadUpdateListener = listener;
-    this.modelDownloadUpdateCursor = null;
-    if (!this.process) {
-      throw new Error('Backend bridge not running');
-    }
-    this.openModelDownloadUpdateStream();
+    this.modelDownloadUpdateStream.start(listener);
   }
 
   stopModelDownloadUpdateStream(): void {
-    this.modelDownloadUpdateListener = null;
-    this.modelDownloadUpdateCursor = null;
-    this.closeModelDownloadUpdateStream();
-    this.clearModelDownloadUpdateReconnectTimer();
+    this.modelDownloadUpdateStream.stop();
   }
 
   startRuntimeProfileUpdateStream(listener: RuntimeProfileUpdateListener): void {
-    this.runtimeProfileUpdateListener = listener;
-    if (!this.process) {
-      throw new Error('Backend bridge not running');
-    }
-    this.openRuntimeProfileUpdateStream();
+    this.runtimeProfileUpdateStream.start(listener);
   }
 
   stopRuntimeProfileUpdateStream(): void {
-    this.runtimeProfileUpdateListener = null;
-    this.closeRuntimeProfileUpdateStream();
-    this.clearRuntimeProfileUpdateReconnectTimer();
+    this.runtimeProfileUpdateStream.stop();
+  }
+
+  startServingStatusUpdateStream(listener: ServingStatusUpdateListener): void {
+    this.servingStatusUpdateStream.start(listener);
+  }
+
+  stopServingStatusUpdateStream(): void {
+    this.servingStatusUpdateStream.stop();
   }
 
   startStatusTelemetryUpdateStream(listener: StatusTelemetryUpdateListener): void {
-    this.statusTelemetryUpdateListener = listener;
-    if (!this.process) {
-      throw new Error('Backend bridge not running');
-    }
-    this.openStatusTelemetryUpdateStream();
+    this.statusTelemetryUpdateStream.start(listener);
   }
 
   stopStatusTelemetryUpdateStream(): void {
-    this.statusTelemetryUpdateListener = null;
-    this.statusTelemetryUpdateCursor = null;
-    this.closeStatusTelemetryUpdateStream();
-    this.clearStatusTelemetryUpdateReconnectTimer();
+    this.statusTelemetryUpdateStream.stop();
   }
 
-  private openModelLibraryUpdateStream(): void {
-    if (!this.process || !this.modelLibraryUpdateListener) {
-      return;
-    }
-
-    this.closeModelLibraryUpdateStream();
-    this.clearModelLibraryUpdateReconnectTimer();
-    this.modelLibraryUpdateBuffer = '';
-    const cursorQuery = this.modelLibraryUpdateCursor
-      ? `?cursor=${encodeURIComponent(this.modelLibraryUpdateCursor)}`
-      : '';
-
-    const req = http.get({
-      hostname: '127.0.0.1',
-      port: this.port,
-      path: `/events/model-library-updates${cursorQuery}`,
-      method: 'GET',
-      headers: {
-        Accept: 'text/event-stream',
-      },
-    }, (res) => {
-      res.setEncoding('utf8');
-      res.on('data', (chunk: string) => {
-        const parsed = parseModelLibraryUpdateSseChunk(this.modelLibraryUpdateBuffer, chunk);
-        this.modelLibraryUpdateBuffer = parsed.buffer;
-        for (const payload of parsed.payloads) {
-          if (
-            payload &&
-            typeof payload === 'object' &&
-            typeof (payload as { cursor?: unknown }).cursor === 'string'
-          ) {
-            this.modelLibraryUpdateCursor = (payload as { cursor: string }).cursor;
-          }
-          this.modelLibraryUpdateListener?.(payload);
-        }
-      });
-      res.on('end', () => {
-        this.modelLibraryUpdateRequest = null;
-        this.modelLibraryUpdateBuffer = '';
-        if (!this.isShuttingDown) {
-          log.warn('Model-library update stream ended');
-          this.scheduleModelLibraryUpdateReconnect();
-        }
-      });
-    });
-
-    req.on('error', (error) => {
-      this.modelLibraryUpdateRequest = null;
-      this.modelLibraryUpdateBuffer = '';
-      if (!this.isShuttingDown) {
-        log.warn('Model-library update stream failed:', error);
-        this.scheduleModelLibraryUpdateReconnect();
-      }
-    });
-
-    this.modelLibraryUpdateRequest = req;
+  private resumeListeningUpdateStreams(): void {
+    this.modelLibraryUpdateStream.resumeIfListening();
+    this.modelDownloadUpdateStream.resumeIfListening();
+    this.runtimeProfileUpdateStream.resumeIfListening();
+    this.servingStatusUpdateStream.resumeIfListening();
+    this.statusTelemetryUpdateStream.resumeIfListening();
   }
 
-  private closeModelLibraryUpdateStream(): void {
-    if (this.modelLibraryUpdateRequest) {
-      this.modelLibraryUpdateRequest.destroy();
-      this.modelLibraryUpdateRequest = null;
-    }
-    this.modelLibraryUpdateBuffer = '';
+  private closeAllUpdateStreams(): void {
+    this.modelLibraryUpdateStream.close();
+    this.modelDownloadUpdateStream.close();
+    this.runtimeProfileUpdateStream.close();
+    this.servingStatusUpdateStream.close();
+    this.statusTelemetryUpdateStream.close();
   }
 
-  private scheduleModelLibraryUpdateReconnect(): void {
-    if (
-      this.isShuttingDown ||
-      !this.process ||
-      !this.modelLibraryUpdateListener ||
-      this.modelLibraryUpdateReconnectTimer
-    ) {
-      return;
-    }
-
-    this.modelLibraryUpdateReconnectTimer = this.timerController.setTimeout(() => {
-      this.modelLibraryUpdateReconnectTimer = null;
-      this.openModelLibraryUpdateStream();
-    }, 1000);
-  }
-
-  private clearModelLibraryUpdateReconnectTimer(): void {
-    if (this.modelLibraryUpdateReconnectTimer) {
-      this.timerController.clearTimeout(this.modelLibraryUpdateReconnectTimer);
-      this.modelLibraryUpdateReconnectTimer = null;
-    }
-  }
-
-  private openModelDownloadUpdateStream(): void {
-    if (!this.process || !this.modelDownloadUpdateListener) {
-      return;
-    }
-
-    this.closeModelDownloadUpdateStream();
-    this.clearModelDownloadUpdateReconnectTimer();
-    this.modelDownloadUpdateBuffer = '';
-    const cursorQuery = this.modelDownloadUpdateCursor
-      ? `?cursor=${encodeURIComponent(this.modelDownloadUpdateCursor)}`
-      : '';
-
-    const req = http.get({
-      hostname: '127.0.0.1',
-      port: this.port,
-      path: `/events/model-download-updates${cursorQuery}`,
-      method: 'GET',
-      headers: {
-        Accept: 'text/event-stream',
-      },
-    }, (res) => {
-      res.setEncoding('utf8');
-      res.on('data', (chunk: string) => {
-        const parsed = parseModelDownloadUpdateSseChunk(this.modelDownloadUpdateBuffer, chunk);
-        this.modelDownloadUpdateBuffer = parsed.buffer;
-        for (const payload of parsed.payloads) {
-          if (
-            payload &&
-            typeof payload === 'object' &&
-            typeof (payload as { cursor?: unknown }).cursor === 'string'
-          ) {
-            this.modelDownloadUpdateCursor = (payload as { cursor: string }).cursor;
-          }
-          this.modelDownloadUpdateListener?.(payload);
-        }
-      });
-      res.on('end', () => {
-        this.modelDownloadUpdateRequest = null;
-        this.modelDownloadUpdateBuffer = '';
-        if (!this.isShuttingDown) {
-          log.warn('Model download update stream ended');
-          this.scheduleModelDownloadUpdateReconnect();
-        }
-      });
-    });
-
-    req.on('error', (error) => {
-      this.modelDownloadUpdateRequest = null;
-      this.modelDownloadUpdateBuffer = '';
-      if (!this.isShuttingDown) {
-        log.warn('Model download update stream failed:', error);
-        this.scheduleModelDownloadUpdateReconnect();
-      }
-    });
-
-    this.modelDownloadUpdateRequest = req;
-  }
-
-  private closeModelDownloadUpdateStream(): void {
-    if (this.modelDownloadUpdateRequest) {
-      this.modelDownloadUpdateRequest.destroy();
-      this.modelDownloadUpdateRequest = null;
-    }
-    this.modelDownloadUpdateBuffer = '';
-  }
-
-  private scheduleModelDownloadUpdateReconnect(): void {
-    if (
-      this.isShuttingDown ||
-      !this.process ||
-      !this.modelDownloadUpdateListener ||
-      this.modelDownloadUpdateReconnectTimer
-    ) {
-      return;
-    }
-
-    this.modelDownloadUpdateReconnectTimer = this.timerController.setTimeout(() => {
-      this.modelDownloadUpdateReconnectTimer = null;
-      this.openModelDownloadUpdateStream();
-    }, 1000);
-  }
-
-  private clearModelDownloadUpdateReconnectTimer(): void {
-    if (this.modelDownloadUpdateReconnectTimer) {
-      this.timerController.clearTimeout(this.modelDownloadUpdateReconnectTimer);
-      this.modelDownloadUpdateReconnectTimer = null;
-    }
-  }
-
-  private openRuntimeProfileUpdateStream(): void {
-    if (!this.process || !this.runtimeProfileUpdateListener) {
-      return;
-    }
-
-    this.closeRuntimeProfileUpdateStream();
-    this.clearRuntimeProfileUpdateReconnectTimer();
-    this.runtimeProfileUpdateBuffer = '';
-
-    const req = http.get({
-      hostname: '127.0.0.1',
-      port: this.port,
-      path: '/events/runtime-profile-updates',
-      method: 'GET',
-      headers: {
-        Accept: 'text/event-stream',
-      },
-    }, (res) => {
-      res.setEncoding('utf8');
-      res.on('data', (chunk: string) => {
-        const parsed = parseRuntimeProfileUpdateSseChunk(this.runtimeProfileUpdateBuffer, chunk);
-        this.runtimeProfileUpdateBuffer = parsed.buffer;
-        for (const payload of parsed.payloads) {
-          this.runtimeProfileUpdateListener?.(payload);
-        }
-      });
-      res.on('end', () => {
-        this.runtimeProfileUpdateRequest = null;
-        this.runtimeProfileUpdateBuffer = '';
-        if (!this.isShuttingDown) {
-          log.warn('Runtime-profile update stream ended');
-          this.scheduleRuntimeProfileUpdateReconnect();
-        }
-      });
-    });
-
-    req.on('error', (error) => {
-      this.runtimeProfileUpdateRequest = null;
-      this.runtimeProfileUpdateBuffer = '';
-      if (!this.isShuttingDown) {
-        log.warn('Runtime-profile update stream failed:', error);
-        this.scheduleRuntimeProfileUpdateReconnect();
-      }
-    });
-
-    this.runtimeProfileUpdateRequest = req;
-  }
-
-  private closeRuntimeProfileUpdateStream(): void {
-    if (this.runtimeProfileUpdateRequest) {
-      this.runtimeProfileUpdateRequest.destroy();
-      this.runtimeProfileUpdateRequest = null;
-    }
-    this.runtimeProfileUpdateBuffer = '';
-  }
-
-  private scheduleRuntimeProfileUpdateReconnect(): void {
-    if (
-      this.isShuttingDown ||
-      !this.process ||
-      !this.runtimeProfileUpdateListener ||
-      this.runtimeProfileUpdateReconnectTimer
-    ) {
-      return;
-    }
-
-    this.runtimeProfileUpdateReconnectTimer = this.timerController.setTimeout(() => {
-      this.runtimeProfileUpdateReconnectTimer = null;
-      this.openRuntimeProfileUpdateStream();
-    }, 1000);
-  }
-
-  private clearRuntimeProfileUpdateReconnectTimer(): void {
-    if (this.runtimeProfileUpdateReconnectTimer) {
-      this.timerController.clearTimeout(this.runtimeProfileUpdateReconnectTimer);
-      this.runtimeProfileUpdateReconnectTimer = null;
-    }
-  }
-
-  private openStatusTelemetryUpdateStream(): void {
-    if (!this.process || !this.statusTelemetryUpdateListener) {
-      return;
-    }
-
-    this.closeStatusTelemetryUpdateStream();
-    this.clearStatusTelemetryUpdateReconnectTimer();
-    this.statusTelemetryUpdateBuffer = '';
-    const cursorQuery = this.statusTelemetryUpdateCursor
-      ? `?cursor=${encodeURIComponent(this.statusTelemetryUpdateCursor)}`
-      : '';
-
-    const req = http.get({
-      hostname: '127.0.0.1',
-      port: this.port,
-      path: `/events/status-telemetry-updates${cursorQuery}`,
-      method: 'GET',
-      headers: {
-        Accept: 'text/event-stream',
-      },
-    }, (res) => {
-      res.setEncoding('utf8');
-      res.on('data', (chunk: string) => {
-        const parsed = parseStatusTelemetryUpdateSseChunk(this.statusTelemetryUpdateBuffer, chunk);
-        this.statusTelemetryUpdateBuffer = parsed.buffer;
-        for (const payload of parsed.payloads) {
-          if (
-            payload &&
-            typeof payload === 'object' &&
-            typeof (payload as { cursor?: unknown }).cursor === 'string'
-          ) {
-            this.statusTelemetryUpdateCursor = (payload as { cursor: string }).cursor;
-          }
-          this.statusTelemetryUpdateListener?.(payload);
-        }
-      });
-      res.on('end', () => {
-        this.statusTelemetryUpdateRequest = null;
-        this.statusTelemetryUpdateBuffer = '';
-        if (!this.isShuttingDown) {
-          log.warn('Status telemetry update stream ended');
-          this.scheduleStatusTelemetryUpdateReconnect();
-        }
-      });
-    });
-
-    req.on('error', (error) => {
-      this.statusTelemetryUpdateRequest = null;
-      this.statusTelemetryUpdateBuffer = '';
-      if (!this.isShuttingDown) {
-        log.warn('Status telemetry update stream failed:', error);
-        this.scheduleStatusTelemetryUpdateReconnect();
-      }
-    });
-
-    this.statusTelemetryUpdateRequest = req;
-  }
-
-  private closeStatusTelemetryUpdateStream(): void {
-    if (this.statusTelemetryUpdateRequest) {
-      this.statusTelemetryUpdateRequest.destroy();
-      this.statusTelemetryUpdateRequest = null;
-    }
-    this.statusTelemetryUpdateBuffer = '';
-  }
-
-  private scheduleStatusTelemetryUpdateReconnect(): void {
-    if (
-      this.isShuttingDown ||
-      !this.process ||
-      !this.statusTelemetryUpdateListener ||
-      this.statusTelemetryUpdateReconnectTimer
-    ) {
-      return;
-    }
-
-    this.statusTelemetryUpdateReconnectTimer = this.timerController.setTimeout(() => {
-      this.statusTelemetryUpdateReconnectTimer = null;
-      this.openStatusTelemetryUpdateStream();
-    }, 1000);
-  }
-
-  private clearStatusTelemetryUpdateReconnectTimer(): void {
-    if (this.statusTelemetryUpdateReconnectTimer) {
-      this.timerController.clearTimeout(this.statusTelemetryUpdateReconnectTimer);
-      this.statusTelemetryUpdateReconnectTimer = null;
-    }
+  private clearAllUpdateStreamReconnectTimers(): void {
+    this.modelLibraryUpdateStream.clearReconnectTimer();
+    this.modelDownloadUpdateStream.clearReconnectTimer();
+    this.runtimeProfileUpdateStream.clearReconnectTimer();
+    this.servingStatusUpdateStream.clearReconnectTimer();
+    this.statusTelemetryUpdateStream.clearReconnectTimer();
   }
 
   private clearHealthCheckTimer(): void {

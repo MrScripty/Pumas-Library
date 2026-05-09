@@ -5,6 +5,7 @@ import {
   parseModelDownloadUpdateSseChunk,
   parseModelLibraryUpdateSseChunk,
   parseRuntimeProfileUpdateSseChunk,
+  parseServingStatusUpdateSseChunk,
   parseStatusTelemetryUpdateSseChunk,
 } from '../dist/python-bridge.js';
 
@@ -215,6 +216,31 @@ test('parseRuntimeProfileUpdateSseChunk parses split runtime-profile update even
   ]);
 });
 
+test('parseServingStatusUpdateSseChunk parses split serving-status update events', () => {
+  let parsed = parseServingStatusUpdateSseChunk(
+    '',
+    'event: serving-status-update\ndata: {"cursor":"serving-status:1"'
+  );
+
+  assert.deepEqual(parsed.payloads, []);
+  assert.notEqual(parsed.buffer, '');
+
+  parsed = parseServingStatusUpdateSseChunk(
+    parsed.buffer,
+    ',"events":[],"stale_cursor":false,"snapshot_required":true}\n\n'
+  );
+
+  assert.equal(parsed.buffer, '');
+  assert.deepEqual(parsed.payloads, [
+    {
+      cursor: 'serving-status:1',
+      events: [],
+      stale_cursor: false,
+      snapshot_required: true,
+    },
+  ]);
+});
+
 test('parseStatusTelemetryUpdateSseChunk parses split status telemetry update events', () => {
   let parsed = parseStatusTelemetryUpdateSseChunk(
     '',
@@ -280,25 +306,25 @@ test('stop clears model-library update stream lifecycle', async () => {
   let destroyed = false;
   const reconnectTimer = { id: 99 };
 
-  bridge.modelLibraryUpdateListener = () => {};
-  bridge.modelLibraryUpdateBuffer = 'partial';
-  bridge.modelLibraryUpdateCursor = 'model-library-updates:42';
-  bridge.modelLibraryUpdateRequest = {
+  bridge.modelLibraryUpdateStream.listener = () => {};
+  bridge.modelLibraryUpdateStream.buffer = 'partial';
+  bridge.modelLibraryUpdateStream.cursor = 'model-library-updates:42';
+  bridge.modelLibraryUpdateStream.request = {
     destroy() {
       destroyed = true;
     },
   };
-  bridge.modelLibraryUpdateReconnectTimer = reconnectTimer;
+  bridge.modelLibraryUpdateStream.reconnectTimer = reconnectTimer;
   timers.timers.push({ timer: reconnectTimer, callback: () => {}, delayMs: 1000 });
 
   await bridge.stop();
 
   assert.equal(destroyed, true);
-  assert.equal(bridge.modelLibraryUpdateListener, null);
-  assert.equal(bridge.modelLibraryUpdateRequest, null);
-  assert.equal(bridge.modelLibraryUpdateBuffer, '');
-  assert.equal(bridge.modelLibraryUpdateCursor, null);
-  assert.equal(bridge.modelLibraryUpdateReconnectTimer, null);
+  assert.equal(bridge.modelLibraryUpdateStream.listener, null);
+  assert.equal(bridge.modelLibraryUpdateStream.request, null);
+  assert.equal(bridge.modelLibraryUpdateStream.buffer, '');
+  assert.equal(bridge.modelLibraryUpdateStream.cursor, null);
+  assert.equal(bridge.modelLibraryUpdateStream.reconnectTimer, null);
   assert.equal(timers.pendingCount(), 0);
 });
 
@@ -308,25 +334,25 @@ test('stop clears model download update stream lifecycle', async () => {
   let destroyed = false;
   const reconnectTimer = { id: 102 };
 
-  bridge.modelDownloadUpdateListener = () => {};
-  bridge.modelDownloadUpdateBuffer = 'partial';
-  bridge.modelDownloadUpdateCursor = 'download:42';
-  bridge.modelDownloadUpdateRequest = {
+  bridge.modelDownloadUpdateStream.listener = () => {};
+  bridge.modelDownloadUpdateStream.buffer = 'partial';
+  bridge.modelDownloadUpdateStream.cursor = 'download:42';
+  bridge.modelDownloadUpdateStream.request = {
     destroy() {
       destroyed = true;
     },
   };
-  bridge.modelDownloadUpdateReconnectTimer = reconnectTimer;
+  bridge.modelDownloadUpdateStream.reconnectTimer = reconnectTimer;
   timers.timers.push({ timer: reconnectTimer, callback: () => {}, delayMs: 1000 });
 
   await bridge.stop();
 
   assert.equal(destroyed, true);
-  assert.equal(bridge.modelDownloadUpdateListener, null);
-  assert.equal(bridge.modelDownloadUpdateRequest, null);
-  assert.equal(bridge.modelDownloadUpdateBuffer, '');
-  assert.equal(bridge.modelDownloadUpdateCursor, null);
-  assert.equal(bridge.modelDownloadUpdateReconnectTimer, null);
+  assert.equal(bridge.modelDownloadUpdateStream.listener, null);
+  assert.equal(bridge.modelDownloadUpdateStream.request, null);
+  assert.equal(bridge.modelDownloadUpdateStream.buffer, '');
+  assert.equal(bridge.modelDownloadUpdateStream.cursor, null);
+  assert.equal(bridge.modelDownloadUpdateStream.reconnectTimer, null);
   assert.equal(timers.pendingCount(), 0);
 });
 
@@ -336,23 +362,50 @@ test('stop clears runtime-profile update stream lifecycle', async () => {
   let destroyed = false;
   const reconnectTimer = { id: 100 };
 
-  bridge.runtimeProfileUpdateListener = () => {};
-  bridge.runtimeProfileUpdateBuffer = 'partial';
-  bridge.runtimeProfileUpdateRequest = {
+  bridge.runtimeProfileUpdateStream.listener = () => {};
+  bridge.runtimeProfileUpdateStream.buffer = 'partial';
+  bridge.runtimeProfileUpdateStream.request = {
     destroy() {
       destroyed = true;
     },
   };
-  bridge.runtimeProfileUpdateReconnectTimer = reconnectTimer;
+  bridge.runtimeProfileUpdateStream.reconnectTimer = reconnectTimer;
   timers.timers.push({ timer: reconnectTimer, callback: () => {}, delayMs: 1000 });
 
   await bridge.stop();
 
   assert.equal(destroyed, true);
-  assert.equal(bridge.runtimeProfileUpdateListener, null);
-  assert.equal(bridge.runtimeProfileUpdateRequest, null);
-  assert.equal(bridge.runtimeProfileUpdateBuffer, '');
-  assert.equal(bridge.runtimeProfileUpdateReconnectTimer, null);
+  assert.equal(bridge.runtimeProfileUpdateStream.listener, null);
+  assert.equal(bridge.runtimeProfileUpdateStream.request, null);
+  assert.equal(bridge.runtimeProfileUpdateStream.buffer, '');
+  assert.equal(bridge.runtimeProfileUpdateStream.reconnectTimer, null);
+  assert.equal(timers.pendingCount(), 0);
+});
+
+test('stop clears serving-status update stream lifecycle', async () => {
+  const timers = new FakeTimerController();
+  const bridge = createBridge(timers);
+  let destroyed = false;
+  const reconnectTimer = { id: 103 };
+
+  bridge.servingStatusUpdateStream.listener = () => {};
+  bridge.servingStatusUpdateStream.buffer = 'partial';
+  bridge.servingStatusUpdateStream.request = {
+    destroy() {
+      destroyed = true;
+    },
+  };
+  bridge.servingStatusUpdateStream.reconnectTimer = reconnectTimer;
+  timers.timers.push({ timer: reconnectTimer, callback: () => {}, delayMs: 1000 });
+
+  await bridge.stop();
+
+  assert.equal(destroyed, true);
+  assert.equal(bridge.servingStatusUpdateStream.listener, null);
+  assert.equal(bridge.servingStatusUpdateStream.request, null);
+  assert.equal(bridge.servingStatusUpdateStream.buffer, '');
+  assert.equal(bridge.servingStatusUpdateStream.cursor, null);
+  assert.equal(bridge.servingStatusUpdateStream.reconnectTimer, null);
   assert.equal(timers.pendingCount(), 0);
 });
 
@@ -362,25 +415,25 @@ test('stop clears status telemetry update stream lifecycle', async () => {
   let destroyed = false;
   const reconnectTimer = { id: 101 };
 
-  bridge.statusTelemetryUpdateListener = () => {};
-  bridge.statusTelemetryUpdateBuffer = 'partial';
-  bridge.statusTelemetryUpdateCursor = 'status-telemetry:42';
-  bridge.statusTelemetryUpdateRequest = {
+  bridge.statusTelemetryUpdateStream.listener = () => {};
+  bridge.statusTelemetryUpdateStream.buffer = 'partial';
+  bridge.statusTelemetryUpdateStream.cursor = 'status-telemetry:42';
+  bridge.statusTelemetryUpdateStream.request = {
     destroy() {
       destroyed = true;
     },
   };
-  bridge.statusTelemetryUpdateReconnectTimer = reconnectTimer;
+  bridge.statusTelemetryUpdateStream.reconnectTimer = reconnectTimer;
   timers.timers.push({ timer: reconnectTimer, callback: () => {}, delayMs: 1000 });
 
   await bridge.stop();
 
   assert.equal(destroyed, true);
-  assert.equal(bridge.statusTelemetryUpdateListener, null);
-  assert.equal(bridge.statusTelemetryUpdateRequest, null);
-  assert.equal(bridge.statusTelemetryUpdateBuffer, '');
-  assert.equal(bridge.statusTelemetryUpdateCursor, null);
-  assert.equal(bridge.statusTelemetryUpdateReconnectTimer, null);
+  assert.equal(bridge.statusTelemetryUpdateStream.listener, null);
+  assert.equal(bridge.statusTelemetryUpdateStream.request, null);
+  assert.equal(bridge.statusTelemetryUpdateStream.buffer, '');
+  assert.equal(bridge.statusTelemetryUpdateStream.cursor, null);
+  assert.equal(bridge.statusTelemetryUpdateStream.reconnectTimer, null);
   assert.equal(timers.pendingCount(), 0);
 });
 
@@ -390,12 +443,12 @@ test('model-library update stream reconnect uses bridge timer ownership', async 
   let opened = 0;
 
   bridge.process = {};
-  bridge.modelLibraryUpdateListener = () => {};
-  bridge.openModelLibraryUpdateStream = () => {
+  bridge.modelLibraryUpdateStream.listener = () => {};
+  bridge.modelLibraryUpdateStream.open = () => {
     opened += 1;
   };
 
-  bridge.scheduleModelLibraryUpdateReconnect();
+  bridge.modelLibraryUpdateStream.scheduleReconnect();
 
   assert.equal(timers.pendingCount(), 1);
   assert.equal(timers.nextDelay(), 1000);
@@ -403,5 +456,5 @@ test('model-library update stream reconnect uses bridge timer ownership', async 
   await timers.runNext();
 
   assert.equal(opened, 1);
-  assert.equal(bridge.modelLibraryUpdateReconnectTimer, null);
+  assert.equal(bridge.modelLibraryUpdateStream.reconnectTimer, null);
 });

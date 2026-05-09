@@ -2,6 +2,7 @@ import type { DesktopBridgeAPI } from './api-bridge';
 import type { ModelDownloadUpdateNotification } from './api-models';
 import type { ModelLibraryUpdateNotification } from './api-package-facts';
 import type { RuntimeProfileUpdateFeed } from './api-runtime-profiles';
+import type { ServingStatusUpdateFeed } from './api-serving';
 import type { StatusTelemetryUpdateNotification } from './api-system';
 
 // ============================================================================
@@ -28,6 +29,10 @@ export interface ElectronWindowAPI {
   /** Subscribe to backend-owned runtime profile update notifications. */
   onRuntimeProfileUpdate(
     callback: (notification: RuntimeProfileUpdateFeed) => void
+  ): () => void;
+  /** Subscribe to backend-owned serving status update notifications. */
+  onServingStatusUpdate(
+    callback: (notification: ServingStatusUpdateFeed) => void
   ): () => void;
   /** Subscribe to backend-owned status/resource telemetry notifications. */
   onStatusTelemetryUpdate(

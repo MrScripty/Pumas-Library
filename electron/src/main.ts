@@ -32,6 +32,9 @@ const MODEL_DOWNLOAD_UPDATE_CHANNEL = 'model-download:update';
 const MODEL_DOWNLOAD_SUBSCRIBE_CHANNEL = 'model-download:subscribe';
 const MODEL_DOWNLOAD_UNSUBSCRIBE_CHANNEL = 'model-download:unsubscribe';
 const RUNTIME_PROFILE_UPDATE_CHANNEL = 'runtime-profile:update';
+const SERVING_STATUS_UPDATE_CHANNEL = 'serving-status:update';
+const SERVING_STATUS_SUBSCRIBE_CHANNEL = 'serving-status:subscribe';
+const SERVING_STATUS_UNSUBSCRIBE_CHANNEL = 'serving-status:unsubscribe';
 const STATUS_TELEMETRY_UPDATE_CHANNEL = 'status-telemetry:update';
 const STATUS_TELEMETRY_SUBSCRIBE_CHANNEL = 'status-telemetry:subscribe';
 const STATUS_TELEMETRY_UNSUBSCRIBE_CHANNEL = 'status-telemetry:unsubscribe';
@@ -41,6 +44,7 @@ let pythonBridge: PythonBridge | null = null;
 let mainWindow: BrowserWindow | null = null;
 let backendInitializationPromise: Promise<void> | null = null;
 let modelDownloadRendererSubscriptions = 0;
+let servingStatusRendererSubscriptions = 0;
 let statusTelemetryRendererSubscriptions = 0;
 
 function isReleaseSmokeMode(): boolean {
@@ -186,7 +190,9 @@ async function createWindow(): Promise<void> {
 
   // Handle window closed
   mainWindow.on('closed', () => {
+    servingStatusRendererSubscriptions = 0;
     statusTelemetryRendererSubscriptions = 0;
+    pythonBridge?.stopServingStatusUpdateStream();
     pythonBridge?.stopStatusTelemetryUpdateStream();
     mainWindow = null;
   });
@@ -320,6 +326,20 @@ function registerIPCHandlers(): void {
     }
   });
 
+  ipcMain.handle(SERVING_STATUS_SUBSCRIBE_CHANNEL, () => {
+    servingStatusRendererSubscriptions += 1;
+    if (servingStatusRendererSubscriptions === 1) {
+      startServingStatusUpdateForwarder();
+    }
+  });
+
+  ipcMain.handle(SERVING_STATUS_UNSUBSCRIBE_CHANNEL, () => {
+    servingStatusRendererSubscriptions = Math.max(0, servingStatusRendererSubscriptions - 1);
+    if (servingStatusRendererSubscriptions === 0) {
+      pythonBridge?.stopServingStatusUpdateStream();
+    }
+  });
+
   log.info('IPC handlers registered');
 }
 
@@ -383,6 +403,21 @@ function startStatusTelemetryUpdateForwarder(): void {
   });
 }
 
+function startServingStatusUpdateForwarder(): void {
+  if (!pythonBridge || servingStatusRendererSubscriptions === 0) {
+    return;
+  }
+
+  pythonBridge.startServingStatusUpdateStream((payload) => {
+    const targetWindow = mainWindow;
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+
+    targetWindow.webContents.send(SERVING_STATUS_UPDATE_CHANNEL, payload);
+  });
+}
+
 /**
  * Initialize the Rust backend sidecar process
  */
@@ -424,6 +459,7 @@ async function initializeBackend(): Promise<void> {
     startModelLibraryUpdateForwarder();
     startModelDownloadUpdateForwarder();
     startRuntimeProfileUpdateForwarder();
+    startServingStatusUpdateForwarder();
     startStatusTelemetryUpdateForwarder();
     log.info('Backend bridge initialized');
   })();

@@ -236,19 +236,19 @@ backend-owned serving-status updates through a pushed subscription.
 - [x] Add an RPC/SSE serving-status update stream backed by
       `PumasApi::subscribe_serving_status_updates`, following the existing
       runtime-profile update stream shape.
-- [ ] Extract or introduce a small reusable named-SSE stream helper in the
+- [x] Extract or introduce a small reusable named-SSE stream helper in the
       Electron bridge before adding another copy of the stream/open/close/error
       handling pattern.
-- [ ] Add Electron main/preload forwarding for a new
+- [x] Add Electron main/preload forwarding for a new
       `onServingStatusUpdate` bridge subscription.
-- [ ] Add renderer bridge types for `onServingStatusUpdate`.
+- [x] Add renderer bridge types for `onServingStatusUpdate`.
 - [ ] Refactor `useServingStatus` to load an initial `get_serving_status`
       snapshot, then refresh only when pushed serving-status updates require it.
 - [ ] Remove the `setInterval`/polling path from `useServingStatus`.
 - [ ] Remove interactive renderer use of cursor-based
       `list_serving_status_updates_since`; pushed subscription delivery is the
       only accepted UI update path.
-- [ ] Ensure subscription cleanup happens on unmount and Electron unsubscribe.
+- [x] Ensure subscription cleanup happens on unmount and Electron unsubscribe.
 - [ ] Treat subscription setup or delivery failure as a surfaced design/runtime
       error, not as a reason to start polling.
 
@@ -269,6 +269,17 @@ backend-owned serving-status updates through a pushed subscription.
   `PumasApi::subscribe_serving_status_updates`, with initial
   `snapshot_required` delivery. Verified with
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml test_serving_status_update_event_stream_emits_initial_snapshot_required`.
+- 2026-05-09: Extracted the Electron named-SSE stream owner, migrated existing
+  backend update streams to it, and added serving-status subscribe/unsubscribe
+  forwarding through main/preload with renderer types. Verified with
+  `npm run -w electron validate`, `npm run -w electron test`, and
+  `npm run -w frontend check:types`.
+
+**Discovered issues:**
+- The pushed bridge now forwards serving-status updates, but stream setup or
+  delivery failure is still only logged/retried inside Electron. The
+  `useServingStatus` refactor must add an explicit renderer-visible error path
+  before the subscription failure task can be marked complete.
 
 ### Milestone 3: Served-Instance Identity And Gateway Alias Safety
 

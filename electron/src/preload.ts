@@ -64,6 +64,13 @@ type RuntimeProfileUpdateNotificationPayload = {
   snapshot_required: boolean;
 };
 
+type ServingStatusUpdateNotificationPayload = {
+  cursor: string;
+  events: unknown[];
+  stale_cursor: boolean;
+  snapshot_required: boolean;
+};
+
 type StatusTelemetryUpdateNotificationPayload = {
   cursor: string;
   snapshot: unknown;
@@ -145,6 +152,22 @@ function isRuntimeProfileUpdateNotificationPayload(
     typeof value['stale_cursor'] === 'boolean' &&
     typeof value['snapshot_required'] === 'boolean' &&
     (events === undefined || Array.isArray(events))
+  );
+}
+
+function isServingStatusUpdateNotificationPayload(
+  value: unknown
+): value is ServingStatusUpdateNotificationPayload {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const events = value['events'];
+  return (
+    typeof value['cursor'] === 'string' &&
+    typeof value['stale_cursor'] === 'boolean' &&
+    typeof value['snapshot_required'] === 'boolean' &&
+    Array.isArray(events)
   );
 }
 
@@ -831,6 +854,22 @@ const electronAPI = {
     ipcRenderer.on('runtime-profile:update', listener);
     return () => {
       ipcRenderer.removeListener('runtime-profile:update', listener);
+    };
+  },
+  onServingStatusUpdate: (
+    callback: (notification: ServingStatusUpdateNotificationPayload) => void
+  ): (() => void) => {
+    const listener = (_event: IpcRendererEvent, payload: unknown) => {
+      if (isServingStatusUpdateNotificationPayload(payload)) {
+        callback(payload);
+      }
+    };
+
+    ipcRenderer.on('serving-status:update', listener);
+    void ipcRenderer.invoke('serving-status:subscribe');
+    return () => {
+      ipcRenderer.removeListener('serving-status:update', listener);
+      void ipcRenderer.invoke('serving-status:unsubscribe');
     };
   },
   onStatusTelemetryUpdate: (

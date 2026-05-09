@@ -11,6 +11,7 @@ const {
   getElectronAPIMock,
   refreshRuntimeProfilesMock,
   runtimeProfileState,
+  serveDialogMock,
   setModelRuntimeRouteMock,
 } = vi.hoisted(() => ({
   getElectronAPIMock: vi.fn(),
@@ -19,6 +20,7 @@ const {
     profiles: [] as RuntimeProfileConfig[],
     routes: [] as ModelRuntimeRoute[],
   },
+  serveDialogMock: vi.fn(),
   setModelRuntimeRouteMock: vi.fn(),
 }));
 
@@ -42,6 +44,13 @@ vi.mock('../../../hooks/useRuntimeProfiles', () => ({
 
 vi.mock('../../ModelMetadataModal', () => ({
   ModelMetadataModal: () => null,
+}));
+
+vi.mock('../../ModelServeDialog', () => ({
+  ModelServeDialog: (props: unknown) => {
+    serveDialogMock(props);
+    return <div>Serve page</div>;
+  },
 }));
 
 function renderSection(modelGroups: ModelCategory[]) {
@@ -176,5 +185,51 @@ describe('LlamaCppModelLibrarySection', () => {
     });
     expect(refreshRuntimeProfilesMock).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('Ollama')).not.toBeInTheDocument();
+  });
+
+  it('opens the serve page with the saved llama.cpp profile locked to llama.cpp', () => {
+    runtimeProfileState.profiles = [
+      {
+        profile_id: 'llama-gpu',
+        provider: 'llama_cpp',
+        provider_mode: 'llama_cpp_dedicated',
+        management_mode: 'managed',
+        name: 'Emily GPU',
+        enabled: true,
+        device: { mode: 'gpu' },
+        scheduler: { auto_load: false },
+      },
+    ];
+    runtimeProfileState.routes = [
+      {
+        model_id: 'models/llama-gguf',
+        profile_id: 'llama-gpu',
+        auto_load: true,
+      },
+    ];
+
+    renderSection([
+      {
+        category: 'Chat',
+        models: [
+          {
+            id: 'models/llama-gguf',
+            name: 'Llama GGUF',
+            category: 'Chat',
+            primaryFormat: 'gguf',
+          },
+        ],
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Serve with selected llama.cpp profile' }));
+
+    expect(screen.getByText('Serve page')).toBeInTheDocument();
+    expect(serveDialogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialProfileId: 'llama-gpu',
+        providerFilter: 'llama_cpp',
+      })
+    );
   });
 });

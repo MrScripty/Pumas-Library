@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRuntimeProfiles } from '../hooks/useRuntimeProfiles';
-import type { RuntimeDeviceMode } from '../types/api-runtime-profiles';
+import type { RuntimeDeviceMode, RuntimeProviderId } from '../types/api-runtime-profiles';
 import type { ModelInfo } from '../types/apps';
 import { ModelServeDialogContent } from './model-serve/ModelServeDialogContent';
 import {
@@ -20,6 +20,7 @@ import { useModelServingActions } from './model-serve/useModelServingActions';
 interface ModelServeDialogProps {
   model: ModelInfo;
   initialProfileId?: string | null;
+  providerFilter?: RuntimeProviderId;
   displayMode?: 'dialog' | 'page';
   onBack?: () => void;
   onClose: () => void;
@@ -28,12 +29,19 @@ interface ModelServeDialogProps {
 export function ModelServeDialog({
   model,
   initialProfileId,
+  providerFilter,
   displayMode = 'dialog',
   onBack,
   onClose,
 }: ModelServeDialogProps) {
   const runtimeProfiles = useRuntimeProfiles();
-  const servingProfiles = useMemo(() => runtimeProfiles.profiles, [runtimeProfiles.profiles]);
+  const servingProfiles = useMemo(
+    () =>
+      providerFilter
+        ? runtimeProfiles.profiles.filter((profile) => profile.provider === providerFilter)
+        : runtimeProfiles.profiles,
+    [providerFilter, runtimeProfiles.profiles]
+  );
   const [profileId, setProfileId] = useState('');
   const [deviceMode, setDeviceMode] = useState<RuntimeDeviceMode>('auto');
   const [deviceId, setDeviceId] = useState('');

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link2, Save, Star } from 'lucide-react';
+import { Link2, Play, Save, Star } from 'lucide-react';
 import { getElectronAPI } from '../../../api/adapter';
 import { useRuntimeProfiles } from '../../../hooks/useRuntimeProfiles';
 import type { ModelCategory, ModelInfo } from '../../../types/apps';
@@ -9,6 +9,7 @@ import { IconButton, ListItem, ListItemContent } from '../../ui';
 import { LocalModelMetadataSummary } from '../../LocalModelMetadataSummary';
 import { LocalModelNameButton } from '../../LocalModelNameButton';
 import { ModelMetadataModal } from '../../ModelMetadataModal';
+import { ModelServeDialog } from '../../ModelServeDialog';
 import {
   buildLlamaCppModelRows,
   getLlamaCppPlacementLabel,
@@ -56,6 +57,7 @@ function LlamaCppModelRow({
   starredModels,
   onOpenMetadata,
   onSaveRoute,
+  onServe,
   onToggleLink,
   onToggleStar,
 }: {
@@ -66,6 +68,7 @@ function LlamaCppModelRow({
   starredModels: Set<string>;
   onOpenMetadata: (modelId: string, modelName: string) => void;
   onSaveRoute: (modelId: string, profileId: string) => void;
+  onServe: (row: LlamaCppModelRowViewModel) => void;
   onToggleLink: (modelId: string) => void;
   onToggleStar: (modelId: string) => void;
 }) {
@@ -132,10 +135,13 @@ function LlamaCppModelRow({
             id={`llamacpp-profile-${row.model.id}`}
             value={draftProfileId}
             onChange={(event) => setDraftProfileId(event.target.value)}
+            disabled={providerProfiles.length === 0}
             className="h-8 max-w-44 rounded border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface-high))] px-2 text-xs text-[hsl(var(--text-primary))]"
             aria-label={`llama.cpp profile for ${row.model.name}`}
           >
-            <option value="">{getRouteLabel(row)}</option>
+            <option value="">
+              {providerProfiles.length === 0 ? 'No llama.cpp profiles' : getRouteLabel(row)}
+            </option>
             {providerProfiles.map((profile) => (
               <option key={profile.profile_id} value={profile.profile_id}>
                 {getProfileOptionLabel(profile)}
@@ -147,6 +153,13 @@ function LlamaCppModelRow({
             tooltip="Save llama.cpp route"
             onClick={() => onSaveRoute(row.model.id, draftProfileId)}
             disabled={!hasDraftChange || isSavingRoute}
+            size="sm"
+          />
+          <IconButton
+            icon={<Play />}
+            tooltip="Serve with selected llama.cpp profile"
+            onClick={() => onServe(row)}
+            disabled={!row.selectedProfile}
             size="sm"
           />
           <IconButton
@@ -178,6 +191,7 @@ export function LlamaCppModelLibrarySection({
     modelId: string;
     modelName: string;
   } | null>(null);
+  const [servingRow, setServingRow] = useState<LlamaCppModelRowViewModel | null>(null);
   const [savingRouteModelId, setSavingRouteModelId] = useState<string | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
   const providerProfiles = profiles.filter((profile) => profile.provider === 'llama_cpp');
@@ -221,6 +235,21 @@ export function LlamaCppModelLibrarySection({
     }
   };
 
+  if (servingRow) {
+    return (
+      <section className="min-h-0 flex-1 overflow-hidden bg-[hsl(var(--launcher-bg-tertiary)/0.2)]">
+        <ModelServeDialog
+          model={servingRow.model}
+          displayMode="page"
+          initialProfileId={servingRow.selectedProfile?.profile_id ?? servingRow.route?.profile_id ?? null}
+          providerFilter="llama_cpp"
+          onBack={() => setServingRow(null)}
+          onClose={() => setServingRow(null)}
+        />
+      </section>
+    );
+  }
+
   return (
     <section className="min-h-0 flex-1 overflow-hidden bg-[hsl(var(--launcher-bg-tertiary)/0.2)]">
       <div className="flex h-full flex-col">
@@ -260,6 +289,7 @@ export function LlamaCppModelLibrarySection({
                   onSaveRoute={(modelId, profileId) => {
                     void handleSaveRoute(modelId, profileId);
                   }}
+                  onServe={setServingRow}
                   onToggleLink={onToggleLink}
                   onToggleStar={onToggleStar}
                 />

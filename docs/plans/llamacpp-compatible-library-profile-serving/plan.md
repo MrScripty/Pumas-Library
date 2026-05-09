@@ -403,7 +403,7 @@ the row.
       `ModelRuntimeRouteEditor` do not duplicate backend mutation logic.
 - [x] Refresh route state from the backend snapshot/update feed after save.
 - [x] Surface route-save errors inline without mutating served state.
-- [ ] Disable or explain selector state when no llama.cpp profiles exist.
+- [x] Disable or explain selector state when no llama.cpp profiles exist.
 
 **Verification:**
 - Frontend tests for selector options filtered to llama.cpp profiles.
@@ -422,12 +422,16 @@ the row.
   route state after successful mutation. Verified with
   `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx` and
   `npm run -w frontend check:types`.
+- 2026-05-09: Disabled the row selector when no llama.cpp profiles exist and
+  kept the empty selector label explicit. Verified with
+  `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx` and
+  `npm run -w frontend check:types`.
 
 **Discovered issues:**
 - Route mutation logic now exists in both `ModelRuntimeRouteEditor` and
   `LlamaCppModelLibrarySection`; extract a shared route mutation helper before
   marking the duplication task complete.
-- Empty-profile selector UX still needs a clear disabled/explanation state.
+- Empty-profile selector UX is covered; no open issue.
 
 ### Milestone 6: Hardware Placement Tags
 
@@ -457,9 +461,9 @@ the row.
 support simultaneous CPU/GPU serving behind the Pumas gateway.
 
 **Tasks:**
-- [ ] When a model row has a selected profile, prefill `ModelServeDialog` with
+- [x] When a model row has a selected profile, prefill `ModelServeDialog` with
       that profile and matching device defaults.
-- [ ] Add provider/profile filtering or locking to `ModelServeDialog` so
+- [x] Add provider/profile filtering or locking to `ModelServeDialog` so
       llama.cpp-specific callers cannot drift into Ollama or unrelated runtime
       profiles.
 - [ ] Allow a quick serve action where the selected route/profile is already
@@ -484,7 +488,15 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
 - Manual release-app acceptance: serve one model on CPU, another on GPU, confirm
   `/v1/models` lists both through the same Pumas gateway.
 
-**Status:** Not started.
+**Status:** In progress.
+
+**Progress:**
+- 2026-05-09: Added a row serve affordance that opens the serving page with the
+  selected llama.cpp route profile prefilled, and added an optional
+  `ModelServeDialog` provider filter so llama.cpp row serving cannot drift into
+  Ollama profiles. Verified with
+  `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx` and
+  `npm run -w frontend check:types`.
 
 ### Milestone 8: Documentation And Release Validation
 

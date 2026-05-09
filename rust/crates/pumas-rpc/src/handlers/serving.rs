@@ -507,6 +507,34 @@ fn llama_cpp_router_model_load_url(endpoint: &str) -> String {
     format!("{}/models/load", endpoint.trim_end_matches('/'))
 }
 
+async fn llama_cpp_router_unload_model(endpoint: &str, model_alias: &str) -> Result<(), String> {
+    let url = llama_cpp_router_model_unload_url(endpoint);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|err| format!("failed to build llama.cpp router client: {err}"))?;
+    let response = client
+        .post(url)
+        .json(&serde_json::json!({ "model": model_alias }))
+        .send()
+        .await
+        .map_err(|err| format!("failed to unload model through llama.cpp router: {err}"))?;
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    if status.is_success() || body.contains("model is not running") {
+        return Ok(());
+    }
+    Err(if body.trim().is_empty() {
+        format!("llama.cpp router failed to unload model with HTTP status {status}")
+    } else {
+        format!("llama.cpp router failed to unload model with HTTP status {status}: {body}")
+    })
+}
+
+fn llama_cpp_router_model_unload_url(endpoint: &str) -> String {
+    format!("{}/models/unload", endpoint.trim_end_matches('/'))
+}
+
 async fn active_llama_cpp_runtime(
     state: &AppState,
     request: &ServeModelRequest,
@@ -544,7 +572,7 @@ async fn unserve_llama_cpp_model(
     profile_id: pumas_library::models::RuntimeProfileId,
     model_alias: String,
 ) -> pumas_library::Result<Value> {
-    let is_dedicated = state
+    let provider_mode = state
         .api
         .get_runtime_profiles_snapshot()
         .await?
@@ -552,11 +580,41 @@ async fn unserve_llama_cpp_model(
         .profiles
         .iter()
         .find(|profile| profile.profile_id == profile_id)
-        .is_some_and(|profile| {
-            profile.provider_mode == pumas_library::models::RuntimeProviderMode::LlamaCppDedicated
-        });
+        .map(|profile| profile.provider_mode);
 
-    if !is_dedicated {
+    if provider_mode == Some(pumas_library::models::RuntimeProviderMode::LlamaCppRouter) {
+        let endpoint = match state
+            .api
+            .resolve_model_runtime_profile_endpoint(
+                RuntimeProviderId::LlamaCpp,
+                &request.model_id,
+                Some(profile_id.clone()),
+            )
+            .await
+        {
+            Ok(endpoint) => endpoint,
+            Err(err) => {
+                warn!(
+                    "failed to resolve llama.cpp router unload endpoint: {}",
+                    err
+                );
+                return Ok(serde_json::to_value(UnserveModelResponse {
+                    success: true,
+                    error: Some("llama.cpp router endpoint is not available".to_string()),
+                    unloaded: false,
+                    snapshot: Some(state.api.get_serving_status().await?.snapshot),
+                })?);
+            }
+        };
+        if let Err(message) = llama_cpp_router_unload_model(endpoint.as_str(), &model_alias).await {
+            warn!("llama.cpp router model unload failed: {}", message);
+            return Ok(serde_json::to_value(UnserveModelResponse {
+                success: true,
+                error: Some(message),
+                unloaded: false,
+                snapshot: Some(state.api.get_serving_status().await?.snapshot),
+            })?);
+        }
         let snapshot = state
             .api
             .record_unserved_model(
@@ -570,6 +628,15 @@ async fn unserve_llama_cpp_model(
             error: None,
             unloaded: true,
             snapshot: Some(snapshot),
+        })?);
+    }
+
+    if provider_mode != Some(pumas_library::models::RuntimeProviderMode::LlamaCppDedicated) {
+        return Ok(serde_json::to_value(UnserveModelResponse {
+            success: true,
+            error: Some("selected llama.cpp runtime profile mode is not supported".to_string()),
+            unloaded: false,
+            snapshot: Some(state.api.get_serving_status().await?.snapshot),
         })?);
     }
 
@@ -831,6 +898,18 @@ mod tests {
         assert_eq!(
             llama_cpp_router_model_load_url("http://127.0.0.1:20617"),
             "http://127.0.0.1:20617/models/load"
+        );
+    }
+
+    #[test]
+    fn llama_cpp_router_model_unload_url_normalizes_trailing_slash() {
+        assert_eq!(
+            llama_cpp_router_model_unload_url("http://127.0.0.1:20617/"),
+            "http://127.0.0.1:20617/models/unload"
+        );
+        assert_eq!(
+            llama_cpp_router_model_unload_url("http://127.0.0.1:20617"),
+            "http://127.0.0.1:20617/models/unload"
         );
     }
 }

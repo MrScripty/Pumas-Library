@@ -151,4 +151,54 @@ describe('ModelServeDialog', () => {
     expect(screen.queryByRole('textbox', { name: /device id/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start serving' })).toBeEnabled();
   });
+
+  it('prefers a running llama.cpp target for GGUF models when no route is selected', () => {
+    useRuntimeProfilesMock.mockReturnValue({
+      snapshot: {
+        ...snapshot,
+        statuses: [
+          {
+            profile_id: 'emily-llama',
+            state: 'running',
+            endpoint_url: 'http://127.0.0.1:18080',
+            pid: 1234,
+            log_path: null,
+            last_error: null,
+          },
+        ],
+      },
+      profiles: snapshot.profiles,
+      routes: snapshot.routes,
+      statuses: [
+        {
+          profile_id: 'emily-llama',
+          state: 'running',
+          endpoint_url: 'http://127.0.0.1:18080',
+          pid: 1234,
+          log_path: null,
+          last_error: null,
+        },
+      ],
+      defaultProfileId: snapshot.default_profile_id,
+      cursor: snapshot.cursor,
+      isLoading: false,
+      error: null,
+      refreshRuntimeProfiles: vi.fn(),
+    });
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'model-4',
+          name: 'Model Four',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('combobox', { name: /runtime target/i })).toHaveValue('emily-llama');
+    expect(screen.getByText('Ready to serve Model Four with Emily Llama.')).toBeInTheDocument();
+  });
 });

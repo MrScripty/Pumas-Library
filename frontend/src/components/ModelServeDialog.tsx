@@ -9,6 +9,7 @@ import {
   DEFAULT_LLAMA_CPP_CONTEXT_SIZE,
   getPlacementControls,
   getProfileStateBlockReason,
+  isGgufModel,
   isDedicatedLlamaCppProfile,
   type ModelServeFormState,
 } from './model-serve/modelServeHelpers';
@@ -56,25 +57,28 @@ export function ModelServeDialog({
       return;
     }
 
-    const fallbackProfile = servingProfiles.at(0);
-    if (!fallbackProfile) {
+    const selectedInitialProfile = selectInitialServeProfile({
+      defaultProfileId: runtimeProfiles.defaultProfileId,
+      initialProfileId,
+      model,
+      profiles: servingProfiles,
+      routes: runtimeProfiles.routes,
+      statuses: runtimeProfiles.statuses,
+    });
+
+    if (!selectedInitialProfile) {
       return;
     }
 
-    const routedProfileId =
-      initialProfileId ??
-      runtimeProfiles.routes.find((route) => route.model_id === model.id)?.profile_id;
-    const routedProfile = servingProfiles.find((profile) => profile.profile_id === routedProfileId);
-    const defaultProfile = servingProfiles.find(
-      (profile) => profile.profile_id === runtimeProfiles.defaultProfileId
-    );
-    setProfileId((routedProfile ?? defaultProfile ?? fallbackProfile).profile_id);
+    setProfileId(selectedInitialProfile.profile_id);
   }, [
     initialProfileId,
     model.id,
+    model,
     profileId,
     runtimeProfiles.defaultProfileId,
     runtimeProfiles.routes,
+    runtimeProfiles.statuses,
     servingProfiles,
   ]);
 
@@ -166,4 +170,51 @@ export function ModelServeDialog({
       {content}
     </div>
   );
+}
+
+function selectInitialServeProfile({
+  defaultProfileId,
+  initialProfileId,
+  model,
+  profiles,
+  routes,
+  statuses,
+}: {
+  defaultProfileId: string | null;
+  initialProfileId?: string | null;
+  model: ModelInfo;
+  profiles: ReturnType<typeof useRuntimeProfiles>['profiles'];
+  routes: ReturnType<typeof useRuntimeProfiles>['routes'];
+  statuses: ReturnType<typeof useRuntimeProfiles>['statuses'];
+}) {
+  const explicitProfileId =
+    initialProfileId ?? routes.find((route) => route.model_id === model.id)?.profile_id;
+  const explicitProfile = profiles.find((profile) => profile.profile_id === explicitProfileId);
+  if (explicitProfile) {
+    return explicitProfile;
+  }
+
+  if (isGgufModel(model)) {
+    const runningLlamaProfile = profiles.find((profile) => {
+      if (profile.provider !== 'llama_cpp') {
+        return false;
+      }
+      const status = statuses.find((candidate) => candidate.profile_id === profile.profile_id);
+      return status?.state === 'running' || status?.state === 'external';
+    });
+    if (runningLlamaProfile) {
+      return runningLlamaProfile;
+    }
+
+    const launchableDedicatedProfile = profiles.find(
+      (profile) =>
+        isDedicatedLlamaCppProfile(profile) && profile.management_mode === 'managed'
+    );
+    if (launchableDedicatedProfile) {
+      return launchableDedicatedProfile;
+    }
+  }
+
+  const defaultProfile = profiles.find((profile) => profile.profile_id === defaultProfileId);
+  return defaultProfile ?? profiles.at(0);
 }

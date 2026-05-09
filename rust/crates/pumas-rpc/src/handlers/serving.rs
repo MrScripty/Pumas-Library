@@ -240,12 +240,34 @@ async fn serve_llama_cpp_model(
         }
     };
 
-    let version_dir = state.api.launcher_data_dir().join("llama-cpp");
+    let Some(version_manager) = super::get_version_manager(state, "llama-cpp").await else {
+        return non_critical_failure_response(
+            state,
+            serving_error(
+                ModelServeErrorCode::MissingRuntime,
+                "llama.cpp runtime versions are not available",
+                &request,
+            ),
+        )
+        .await;
+    };
+    let Some(tag) = version_manager.get_active_version().await? else {
+        return non_critical_failure_response(
+            state,
+            serving_error(
+                ModelServeErrorCode::MissingRuntime,
+                "No active llama.cpp runtime version is set. Open the llama.cpp app page and set an installed runtime active.",
+                &request,
+            ),
+        )
+        .await;
+    };
+    let version_dir = version_manager.version_path(&tag);
     let launch_response = state
         .api
         .launch_runtime_profile_for_model_with_overrides(
             request.config.profile_id.clone(),
-            "local-build",
+            &tag,
             &version_dir,
             Some(&request.model_id),
             Some(llama_cpp_launch_overrides(&request)),

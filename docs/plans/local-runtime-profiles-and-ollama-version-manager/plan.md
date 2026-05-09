@@ -599,6 +599,7 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 - 2026-05-09: The install dialog could stop polling if the first progress read happened before the backend installation tracker initialized, leaving the row on the pending/default progress state. The completion path also reset transient install UI before refreshing installed versions, so a finished install could briefly or persistently render as installable.
 - 2026-05-09: llama.cpp release archives may extract `llama-server` inside a nested archive directory. Existing install validation only checked fixed root/bin/build paths, so a successfully extracted runtime could be treated as incomplete and fail to update the installed-version button state.
 - 2026-05-09: The new llama.cpp version directory was not ignored like `comfyui-versions/`, `ollama-versions/`, and `torch-versions/`, so a successful local install could leave runtime binaries as untracked source-tree files.
+- 2026-05-09: The model-serving path for managed dedicated llama.cpp profiles still used the pre-version-manager `launcher-data/llama-cpp` local-build path, while profile Start used the installed active llama.cpp runtime version. This made Serve fail or appear inert after installing/running llama.cpp from the app page. The model-serving dialog also defaulted GGUF models to the default Ollama profile before considering a running llama.cpp profile.
 
 ### Milestone 9: Define User-Directed Serving Contracts
 
@@ -934,6 +935,7 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 - 2026-05-08 continuation: wired managed llama.cpp launches to the active installed llama.cpp version instead of the legacy `launcher-data/llama-cpp/build/bin/llama-server` local-build-only path.
 - 2026-05-08 continuation: split `ModelServeDialog.tsx` and the runtime-profile settings editor into focused subcomponents/hooks/helpers so the serving/profile frontend surfaces satisfy the component size and complexity standards again.
 - 2026-05-09 continuation: fixed llama.cpp install-page state by preserving polling while backend progress initializes, refreshing installed versions before clearing completed install UI, recognizing nested `llama-server` binaries from upstream archives, canonicalizing new installs to `bin/llama-server`, and ignoring local `llama-cpp-versions/` runtime data.
+- 2026-05-09 continuation: fixed GGUF Serve startup by resolving managed dedicated llama.cpp serving through the active installed llama.cpp version manager path and by preferring a running llama.cpp target in the serving dialog when no model route or explicit profile is selected.
 
 ### Deviations
 
@@ -957,6 +959,7 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 - 2026-05-08 continuation validation: targeted runtime-profile frontend tests, selected-app version tests, managed-app state tests, AppShell state/panel tests, frontend typecheck, frontend production build, and Rust `cargo check` for `pumas-core`, `pumas-app-manager`, and `pumas-rpc` passed.
 - 2026-05-08 continuation validation: frontend standards split passed `npm run -w frontend lint`, `npm run -w frontend check:types`, `npm run -w frontend test:run -- RuntimeProfileSettingsSection ModelServeDialog`, and `npm run -w frontend build`.
 - 2026-05-09 continuation validation: `npm run -w frontend test:run -- useInstallationManager`, `cargo test --manifest-path rust/crates/pumas-app-manager/Cargo.toml llama_cpp_nested_server_binary_is_complete`, `npm run -w frontend check:types`, `npm run -w frontend test:run -- InstallDialog InstallDialogContent VersionListItem`, `cargo check --manifest-path rust/crates/pumas-app-manager/Cargo.toml`, `cargo check --manifest-path rust/crates/pumas-rpc/Cargo.toml`, `npm run -w frontend lint -- --quiet`, `npm run -w frontend build`, `bash launcher.sh --build-release`, and `bash launcher.sh --release-smoke` passed.
+- 2026-05-09 serving continuation validation: `npm run -w frontend test:run -- ModelServeDialog`, `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml test_serving_llama_cpp_missing_runtime_is_non_critical`, `npm run -w frontend check:types`, `npm run -w frontend lint -- --quiet`, `cargo check --manifest-path rust/crates/pumas-rpc/Cargo.toml`, `npm run -w frontend build`, `bash launcher.sh --build-release`, and `bash launcher.sh --release-smoke` passed.
 
 ### Traceability Links
 

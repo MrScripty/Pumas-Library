@@ -34,6 +34,8 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
 | --- | --- | --- | --- |
 | Model library updates | `/events/model-library-updates` | `model-library:update` | `onModelLibraryUpdate` |
 | Runtime profile updates | `/events/runtime-profile-updates` | `runtime-profile:update` | `onRuntimeProfileUpdate` |
+| Serving status updates | `/events/serving-status-updates` | `serving-status:update` / `serving-status:error` | `onServingStatusUpdate` |
+| Status telemetry updates | `/events/status-telemetry-updates` | `status-telemetry:update` | status telemetry store subscription |
 
 ## Serving Gateway
 - The RPC server exposes a local OpenAI-compatible serving gateway at
@@ -42,10 +44,15 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
 - When one or more models are loaded, aggregate serving status reports
   `endpoint_mode = pumas_gateway`; each `ServedModelStatus.endpoint_url`
   remains the provider endpoint used internally by the gateway.
-- Proxy routes select a served model by request `model`, matching either
-  `model_id` or `model_alias`, then forward the JSON body to that model's
-  provider endpoint. If a provider alias exists, the forwarded `model` field is
-  rewritten to that alias.
+- Proxy routes resolve the request `model` by unique gateway alias first, then
+  by base `model_id` only when that id is unambiguous. Ambiguous base-model
+  requests return a deterministic conflict instead of selecting the first
+  loaded instance.
+- Gateway aliases are globally unique across loaded models. The backend derives
+  one effective gateway alias before validation and before recording
+  `ServedModelStatus`.
+- If a provider-facing alias exists, the forwarded `model` field is rewritten
+  to that alias.
 - The gateway is available only on the RPC server bind address. The binary
   already rejects non-loopback binds unless `--allow-lan` is supplied.
 
@@ -69,20 +76,26 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
 - Loaded-model state, endpoint mode, and last load errors are backend-owned.
   Renderer code should not mark a model as served until a backend response or
   serving snapshot confirms it.
-- `list_serving_status_updates_since(cursor?)` is a lightweight serving update
-  feed. It returns an empty feed at the current cursor, or `snapshot_required`
-  when the caller has no cursor or missed an in-memory serving update.
+- Serving status is pushed to the renderer through `onServingStatusUpdate`.
+  Interactive serving UI may call `get_serving_status` for initial state and
+  pushed snapshot refreshes, but must not start renderer polling.
+- `list_serving_status_updates_since(cursor?)` remains a lightweight serving
+  update feed for explicit RPC callers. Renderer serving UI does not use it as
+  a fallback path.
 - A failed fit or provider load is a domain response, not a renderer crash.
   Valid requests that cannot be loaded should return a `ModelServeError` with
   `severity = non_critical` and should preserve already-served models unless a
   user explicitly unloads them.
-- `serve_model` currently wires Ollama orchestration and managed dedicated
-  llama.cpp launch orchestration. llama.cpp router requests return a
-  non-critical `unsupported_provider` response until gateway/router semantics
-  land.
+- `serve_model` wires Ollama orchestration and llama.cpp orchestration for the
+  runtime profile selected by the user. llama.cpp requests may load through a
+  managed dedicated server or through a managed router profile, depending on
+  the saved profile mode.
+- Same-model multi-profile serving requires distinct gateway aliases. Frontend
+  prompts are usability aids; backend validation owns duplicate-alias rejection
+  and gateway ambiguity errors.
 - Endpoint status must report `not_configured`, `provider_endpoint`, or
-  `pumas_gateway` truthfully. The UI must not imply a shared Pumas endpoint
-  exists until gateway/facade behavior is implemented.
+  `pumas_gateway` truthfully. When models are served through the Pumas gateway,
+  `/v1/models` lists the backend-confirmed aliases that clients should use.
 
 ## Contract Rules
 - New method names must be added to `electron/src/rpc-method-registry.ts`.

@@ -12,7 +12,7 @@ Composable section components used by app panels to render status, selectors, de
 | `OllamaRegisteredModels.tsx` | Presentational registered Ollama model list with load, unload, delete, loaded-state, and VRAM details. |
 | `OllamaRegisteredModels.test.tsx` | Rendering and interaction coverage for registered Ollama model state, actions, disabled controls, and size formatting. |
 | `OllamaModelSection.tsx` | Ollama library/registered model controls; refreshes from running-state changes, local operations, and runtime-profile update events rather than owning a polling interval. |
-| `LlamaCppModelLibrarySection.tsx` | Focused llama.cpp local model library panel that lists compatible GGUF models without entering the generic remote-download model manager state machine. |
+| `LlamaCppModelLibrarySection.tsx` | Focused llama.cpp local model library panel that lists compatible GGUF models, saves per-row llama.cpp profile routes, opens serving with the selected route, and shows requested or backend-confirmed placement tags without entering the generic remote-download model manager state machine. |
 | `RuntimeProfileSettingsSection.tsx` | Backend-confirmed runtime profile settings section for Ollama and llama.cpp profile lifecycle. |
 | `RuntimeProfileSettingsEditor.tsx` | Runtime profile editor shell that composes field and action subcomponents. |
 | `RuntimeProfileSettingsFields.tsx` | Runtime profile identity, endpoint, mode, and device setting fields. |
@@ -35,6 +35,13 @@ Composable section components used by app panels to render status, selectors, de
 - Section-level polling is allowed only for backend state that is not available
   through a shared hook or event stream. Runtime/profile views use the
   backend-pushed runtime profile event path.
+- Serving-state display is backend-owned and arrives through the shared
+  serving-status subscription. llama.cpp rows must derive loaded, failed,
+  placement, and unload state from `ServedModelStatus` rather than local
+  optimistic state.
+- Placement tags distinguish requested profile placement from successful
+  backend-confirmed loaded placement. Failed load state and error details take
+  precedence over hardware labels.
 
 ## Timer Ownership
 | Section | Current Reason | Required Guardrail |

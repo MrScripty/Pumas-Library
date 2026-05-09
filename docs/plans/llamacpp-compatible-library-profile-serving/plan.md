@@ -540,9 +540,9 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
 **Goal:** Close the feature with updated docs and full-path validation.
 
 **Tasks:**
-- [ ] Update relevant frontend component READMEs for the llama.cpp-specific
+- [x] Update relevant frontend component READMEs for the llama.cpp-specific
       library panel and placement-tag behavior.
-- [ ] Update `docs/contracts/desktop-rpc-methods.md` only if RPC contracts
+- [x] Update `docs/contracts/desktop-rpc-methods.md` only if RPC contracts
       change.
 - [ ] Record manual acceptance results in this plan.
 - [ ] Build release binaries and frontend.
@@ -558,6 +558,13 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
 - Manual CPU+GPU simultaneous serving acceptance path.
 
 **Status:** Not started.
+
+**Progress:**
+- 2026-05-09: Updated frontend component READMEs for the llama.cpp-specific
+  panel, selected-route serving, alias prompts, pushed served-state ownership,
+  and placement tag precedence. Updated the desktop RPC contract for
+  serving-status SSE delivery, backend-owned alias validation, deterministic
+  gateway ambiguity handling, and current llama.cpp serving orchestration.
 
 ## Lifecycle And Runtime Ownership Notes
 

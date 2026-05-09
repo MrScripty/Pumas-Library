@@ -218,16 +218,13 @@ fn terminate_process_windows(pid: u32) -> Result<bool> {
 /// Terminate a process and its children (Unix) or process tree (Windows).
 ///
 /// # Platform Behavior
-/// - **Linux/macOS**: Sends signal directly to the process (not process group)
+/// - **Linux/macOS**: Signals the process group first, then falls back to the
+///   process PID if no matching group exists
 /// - **Windows**: Uses `taskkill /T` which already handles the tree
-///
-/// Note: We use `kill(pid, ...)` instead of `killpg(pid, ...)` because the process
-/// may not be a process group leader. Using killpg with a non-leader PID would
-/// send signals to the wrong (or non-existent) process group.
 pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
     #[cfg(unix)]
     {
-        use nix::sys::signal::{kill, Signal};
+        use nix::sys::signal::Signal;
         use nix::sys::wait::{waitpid, WaitPidFlag};
         use nix::unistd::Pid;
         use std::thread::sleep;
@@ -242,14 +239,7 @@ pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
 
         let nix_pid = Pid::from_raw(pid as i32);
 
-        // Kill the process directly (not the process group)
-        debug!("Sending SIGTERM to process {}", pid);
-        if let Err(e) = kill(nix_pid, Signal::SIGTERM) {
-            if e == nix::errno::Errno::ESRCH {
-                return Ok(true);
-            }
-            warn!("Failed to send SIGTERM to {}: {}", pid, e);
-        }
+        send_tree_signal(nix_pid, Signal::SIGTERM)?;
 
         // Wait for graceful termination
         let wait_interval = Duration::from_millis(100);
@@ -267,15 +257,7 @@ pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
 
         // Process still running, use SIGKILL
         debug!("Process {} still running, sending SIGKILL", pid);
-        if let Err(e) = kill(nix_pid, Signal::SIGKILL) {
-            if e == nix::errno::Errno::ESRCH {
-                return Ok(true);
-            }
-            return Err(PumasError::Other(format!(
-                "Failed to kill process {}: {}",
-                pid, e
-            )));
-        }
+        send_tree_signal(nix_pid, Signal::SIGKILL)?;
 
         // Brief wait then reap the zombie
         sleep(Duration::from_millis(100));
@@ -308,6 +290,40 @@ pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
     {
         // Fall back to single process termination
         terminate_process(pid, timeout_ms)
+    }
+}
+
+#[cfg(unix)]
+fn send_tree_signal(pid: nix::unistd::Pid, signal: nix::sys::signal::Signal) -> Result<()> {
+    use nix::sys::signal::{kill, killpg};
+
+    let raw_pid = pid.as_raw();
+    debug!(
+        "Sending {:?} to process group {}, falling back to process if needed",
+        signal, raw_pid
+    );
+
+    match killpg(pid, signal) {
+        Ok(()) => return Ok(()),
+        Err(nix::errno::Errno::ESRCH) => {
+            debug!(
+                "Process group {} not found while sending {:?}; trying process PID",
+                raw_pid, signal
+            );
+        }
+        Err(error) => {
+            warn!(
+                "Failed to send {:?} to process group {}: {}",
+                signal, raw_pid, error
+            );
+        }
+    }
+
+    match kill(pid, signal) {
+        Ok(()) | Err(nix::errno::Errno::ESRCH) => Ok(()),
+        Err(error) => Err(PumasError::Other(format!(
+            "Failed to send {signal:?} to process {raw_pid}: {error}"
+        ))),
     }
 }
 
@@ -455,5 +471,57 @@ mod tests {
         let processes = find_processes_by_cmdline("rust");
         // May or may not find matches depending on how tests are run
         let _ = processes;
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_terminate_process_tree_stops_detached_child_processes() {
+        use std::process::{Command, Stdio};
+        use std::time::Duration;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let child_pid_file = temp_dir.path().join("child.pid");
+        let ready_file = temp_dir.path().join("ready");
+
+        let mut command = Command::new("bash");
+        command
+            .arg("-c")
+            .arg("sleep 60 & echo $! > \"$CHILD_PID_FILE\"; touch \"$READY_FILE\"; wait")
+            .env("CHILD_PID_FILE", &child_pid_file)
+            .env("READY_FILE", &ready_file)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        configure_detached_command(&mut command);
+
+        let child = command.spawn().unwrap();
+        let parent_pid = child.id();
+
+        wait_until(Duration::from_secs(5), || ready_file.exists());
+        let worker_pid = std::fs::read_to_string(&child_pid_file)
+            .unwrap()
+            .trim()
+            .parse::<u32>()
+            .unwrap();
+
+        assert!(is_process_alive(parent_pid));
+        assert!(is_process_alive(worker_pid));
+
+        let stopped = terminate_process_tree(parent_pid, 1_000).unwrap();
+
+        assert!(stopped);
+        wait_until(Duration::from_secs(5), || !is_process_alive(worker_pid));
+        assert!(!is_process_alive(worker_pid));
+    }
+
+    #[cfg(unix)]
+    fn wait_until(timeout: std::time::Duration, mut condition: impl FnMut() -> bool) {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            if condition() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
     }
 }

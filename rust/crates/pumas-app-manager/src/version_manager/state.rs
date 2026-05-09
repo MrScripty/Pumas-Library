@@ -7,13 +7,33 @@ use crate::version_manager::ValidationResult;
 use pumas_library::config::AppId;
 use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
 use pumas_library::{PumasError, Result};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tracing::{debug, info, warn};
 
 const LLAMA_CPP_BINARY_SEARCH_LIMIT: usize = 4096;
+
+fn legacy_llama_cpp_sycl_replacements(
+    installed: &HashMap<String, InstalledVersionMetadata>,
+) -> Vec<(String, String)> {
+    installed
+        .iter()
+        .filter_map(|(tag, metadata)| {
+            let base_tag = tag.strip_suffix("+sycl")?;
+            let download_url = metadata.download_url.as_deref()?.to_ascii_lowercase();
+            let precision = if download_url.contains("sycl-fp16") {
+                "sycl-fp16"
+            } else if download_url.contains("sycl-fp32") {
+                "sycl-fp32"
+            } else {
+                return None;
+            };
+            Some((tag.clone(), format!("{base_tag}+{precision}")))
+        })
+        .collect()
+}
 
 /// Tracks the state of all versions.
 pub struct VersionState {
@@ -96,6 +116,8 @@ impl VersionState {
 
     /// Initialize state from metadata and filesystem.
     async fn initialize(&mut self) -> Result<()> {
+        self.normalize_llama_cpp_legacy_sycl_variants().await?;
+
         // Load metadata
         let versions = self.load_versions_metadata().await?;
 
@@ -177,6 +199,8 @@ impl VersionState {
 
     /// Refresh state from disk.
     pub async fn refresh(&mut self) -> Result<()> {
+        self.normalize_llama_cpp_legacy_sycl_variants().await?;
+
         let versions = self.load_versions_metadata().await?;
         self.installed_tags = versions.installed.keys().cloned().collect();
         self.default_version = versions.default_version.clone();
@@ -191,6 +215,125 @@ impl VersionState {
         }
 
         Ok(())
+    }
+
+    async fn normalize_llama_cpp_legacy_sycl_variants(&self) -> Result<()> {
+        if self.app_id != AppId::LlamaCpp {
+            return Ok(());
+        }
+
+        let metadata_manager = self.metadata_manager.clone();
+        let versions = tokio::task::spawn_blocking(move || {
+            let mut versions = metadata_manager.load_versions(Some(AppId::LlamaCpp))?;
+            let replacements = legacy_llama_cpp_sycl_replacements(&versions.installed);
+            if replacements.is_empty() {
+                return Ok::<_, PumasError>((versions, replacements));
+            }
+
+            for (old_tag, new_tag) in &replacements {
+                let Some(mut metadata) = versions.installed.remove(old_tag) else {
+                    continue;
+                };
+                metadata.path = new_tag.clone();
+                metadata.release_tag = new_tag.clone();
+                versions
+                    .installed
+                    .entry(new_tag.clone())
+                    .or_insert(metadata);
+                if versions.last_selected_version.as_ref() == Some(old_tag) {
+                    versions.last_selected_version = Some(new_tag.clone());
+                }
+                if versions.default_version.as_ref() == Some(old_tag) {
+                    versions.default_version = Some(new_tag.clone());
+                }
+            }
+            metadata_manager.save_versions(&versions, Some(AppId::LlamaCpp))?;
+            Ok((versions, replacements))
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join llama.cpp SYCL metadata migration task: {}",
+                err
+            ))
+        })??;
+
+        let (_versions, replacements) = versions;
+        for (old_tag, new_tag) in replacements {
+            self.rename_version_dir_if_needed(&old_tag, &new_tag)
+                .await?;
+            self.rewrite_active_version_if_needed(&old_tag, &new_tag)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn rename_version_dir_if_needed(&self, old_tag: &str, new_tag: &str) -> Result<()> {
+        let versions_dir = self.launcher_root.join(self.app_id.versions_dir_name());
+        let old_path = versions_dir.join(old_tag);
+        let new_path = versions_dir.join(new_tag);
+        if !fs::try_exists(&old_path)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to check legacy version directory: {}", e),
+                path: Some(old_path.clone()),
+                source: Some(e),
+            })?
+            || fs::try_exists(&new_path)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to check replacement version directory: {}", e),
+                    path: Some(new_path.clone()),
+                    source: Some(e),
+                })?
+        {
+            return Ok(());
+        }
+
+        fs::rename(&old_path, &new_path)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!(
+                    "Failed to rename legacy llama.cpp SYCL version directory: {}",
+                    e
+                ),
+                path: Some(old_path),
+                source: Some(e),
+            })
+    }
+
+    async fn rewrite_active_version_if_needed(&self, old_tag: &str, new_tag: &str) -> Result<()> {
+        let active_file = self.launcher_root.join(".active-version");
+        if !fs::try_exists(&active_file)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to check active version file: {}", e),
+                path: Some(active_file.clone()),
+                source: Some(e),
+            })?
+        {
+            return Ok(());
+        }
+
+        let active_tag = fs::read_to_string(&active_file)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to read active version file: {}", e),
+                path: Some(active_file.clone()),
+                source: Some(e),
+            })?;
+        if active_tag.trim() != old_tag {
+            return Ok(());
+        }
+
+        fs::write(&active_file, new_tag)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to update active version file: {}", e),
+                path: Some(active_file),
+                source: Some(e),
+            })
     }
 
     // ========================================
@@ -768,5 +911,74 @@ mod tests {
 
         assert!(result.removed_tags.is_empty());
         assert!(state.is_installed("v1.0.0"));
+    }
+
+    #[tokio::test]
+    async fn test_llama_cpp_legacy_sycl_tag_migrates_to_precision_variant() {
+        let temp_dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(temp_dir.path().join("launcher-data/metadata")).unwrap();
+        std::fs::create_dir_all(temp_dir.path().join("launcher-data/cache")).unwrap();
+        let legacy_dir = temp_dir.path().join("llama-cpp-versions/b9090+sycl/bin");
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+        std::fs::write(legacy_dir.join("llama-server"), "#!/bin/sh").unwrap();
+        std::fs::write(temp_dir.path().join(".active-version"), "b9090+sycl").unwrap();
+
+        let metadata_manager = Arc::new(MetadataManager::new(temp_dir.path()));
+        metadata_manager.ensure_directories().unwrap();
+        metadata_manager
+            .update_installed_version(
+                "b9090+sycl",
+                InstalledVersionMetadata {
+                    path: "b9090+sycl".to_string(),
+                    installed_date: "2026-05-09T00:00:00Z".to_string(),
+                    release_tag: "b9090+sycl".to_string(),
+                    download_url: Some(
+                        "https://github.com/ggml-org/llama.cpp/releases/download/b9090/llama-b9090-bin-ubuntu-sycl-fp16-x64.tar.gz"
+                            .to_string(),
+                    ),
+                    ..Default::default()
+                },
+                Some(AppId::LlamaCpp),
+            )
+            .unwrap();
+        metadata_manager
+            .set_last_selected_version(Some("b9090+sycl"), Some(AppId::LlamaCpp))
+            .unwrap();
+        metadata_manager
+            .set_default_version(Some("b9090+sycl"), Some(AppId::LlamaCpp))
+            .unwrap();
+
+        let state = VersionState::new(temp_dir.path(), AppId::LlamaCpp, metadata_manager.clone())
+            .await
+            .unwrap();
+
+        assert!(!state.is_installed("b9090+sycl"));
+        assert!(state.is_installed("b9090+sycl-fp16"));
+        assert_eq!(
+            state.get_active_version(),
+            Some("b9090+sycl-fp16".to_string())
+        );
+        assert_eq!(
+            std::fs::read_to_string(temp_dir.path().join(".active-version")).unwrap(),
+            "b9090+sycl-fp16"
+        );
+        assert!(temp_dir
+            .path()
+            .join("llama-cpp-versions/b9090+sycl-fp16/bin/llama-server")
+            .exists());
+
+        let versions = metadata_manager
+            .load_versions(Some(AppId::LlamaCpp))
+            .unwrap();
+        assert!(versions.installed.contains_key("b9090+sycl-fp16"));
+        assert!(!versions.installed.contains_key("b9090+sycl"));
+        assert_eq!(
+            versions.last_selected_version,
+            Some("b9090+sycl-fp16".to_string())
+        );
+        assert_eq!(
+            versions.default_version,
+            Some("b9090+sycl-fp16".to_string())
+        );
     }
 }

@@ -489,8 +489,14 @@ impl GitHubClient {
         if name.contains("hip") && os == "windows" {
             return Some(LlamaCppReleaseVariant::new("hip", "HIP", 40));
         }
+        if name.contains("sycl-fp32") {
+            return Some(LlamaCppReleaseVariant::new("sycl-fp32", "SYCL FP32", 50));
+        }
+        if name.contains("sycl-fp16") {
+            return Some(LlamaCppReleaseVariant::new("sycl-fp16", "SYCL FP16", 51));
+        }
         if name.contains("sycl") {
-            return Some(LlamaCppReleaseVariant::new("sycl", "SYCL", 50));
+            return Some(LlamaCppReleaseVariant::new("sycl", "SYCL", 52));
         }
         None
     }
@@ -932,6 +938,8 @@ mod tests {
             github_asset("llama-b9082-bin-ubuntu-x64.tar.gz", 1),
             github_asset("llama-b9082-bin-ubuntu-vulkan-x64.tar.gz", 2),
             github_asset("llama-b9082-bin-ubuntu-rocm-7.2-x64.tar.gz", 3),
+            github_asset("llama-b9082-bin-ubuntu-sycl-fp32-x64.tar.gz", 4),
+            github_asset("llama-b9082-bin-ubuntu-sycl-fp16-x64.tar.gz", 5),
         ]);
 
         let variants =
@@ -941,7 +949,16 @@ mod tests {
             .map(|release| release.tag_name.as_str())
             .collect::<Vec<_>>();
 
-        assert_eq!(tags, vec!["b9082+cpu", "b9082+vulkan", "b9082+rocm"]);
+        assert_eq!(
+            tags,
+            vec![
+                "b9082+cpu",
+                "b9082+vulkan",
+                "b9082+rocm",
+                "b9082+sycl-fp32",
+                "b9082+sycl-fp16",
+            ]
+        );
         assert_eq!(variants[1].archive_size, Some(2));
         assert_eq!(
             variants[1].assets[0].name,

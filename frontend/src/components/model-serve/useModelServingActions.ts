@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getElectronAPI } from '../../api/adapter';
+import type { DesktopBridgeRuntimeAPI } from '../../types/api-bridge-runtime';
 import type { ModelServeError, ModelServingConfig, ServedModelStatus } from '../../types/api-serving';
 
 const INVALID_CONFIGURATION_ERROR = {
@@ -33,6 +34,64 @@ function getProviderLoadFailedError(modelId: string, profileId: string): ModelSe
 export interface ModelServingActionTarget {
   modelAlias?: string | null;
   profileId?: string | null;
+}
+
+export type ModelServeWithValidationResult =
+  | { kind: 'missing_config'; message: string }
+  | { kind: 'validation_request_failed'; message: string }
+  | { kind: 'validation_failed'; error: ModelServeError }
+  | { kind: 'serve_request_failed'; message: string }
+  | { kind: 'load_failed'; error: ModelServeError }
+  | { kind: 'loaded'; status: ServedModelStatus | null };
+
+export async function serveModelWithValidation({
+  api,
+  config,
+  modelId,
+}: {
+  api: Pick<DesktopBridgeRuntimeAPI, 'validate_model_serving_config' | 'serve_model'>;
+  config: ModelServingConfig | null;
+  modelId: string;
+}): Promise<ModelServeWithValidationResult> {
+  if (!config) {
+    return {
+      kind: 'missing_config',
+      message: 'Select a runtime target before serving.',
+    };
+  }
+
+  const request = { model_id: modelId, config };
+  const validation = await api.validate_model_serving_config(request);
+  if (!validation.success) {
+    return {
+      kind: 'validation_request_failed',
+      message: validation.error ?? 'Serving validation failed.',
+    };
+  }
+  if (!validation.valid) {
+    return {
+      kind: 'validation_failed',
+      error: validation.errors[0] ?? getValidationErrorFallback(modelId, config.profile_id),
+    };
+  }
+
+  const response = await api.serve_model(request);
+  if (!response.success) {
+    return {
+      kind: 'serve_request_failed',
+      message: response.error ?? 'Serving request failed.',
+    };
+  }
+  if (response.loaded) {
+    return {
+      kind: 'loaded',
+      status: response.status ?? null,
+    };
+  }
+  return {
+    kind: 'load_failed',
+    error: response.load_error ?? getProviderLoadFailedError(modelId, config.profile_id),
+  };
 }
 
 function matchesServingTarget(
@@ -107,34 +166,27 @@ export function useModelServingActions(
       setServeError(null);
 
       try {
-        const request = { model_id: modelId, config };
-        const validation = await api.validate_model_serving_config(request);
-        if (!validation.success) {
-          setMessage(validation.error ?? 'Serving validation failed.');
+        const result = await serveModelWithValidation({ api, config, modelId });
+        if (result.kind === 'missing_config') {
+          setMessage(result.message);
           return;
         }
-        if (!validation.valid) {
-          setServeError(
-            validation.errors[0] ?? getValidationErrorFallback(modelId, config.profile_id)
-          );
+        if (
+          result.kind === 'validation_request_failed' ||
+          result.kind === 'serve_request_failed'
+        ) {
+          setMessage(result.message);
+          return;
+        }
+        if (result.kind === 'validation_failed' || result.kind === 'load_failed') {
+          setServeError(result.error);
           setMessage(null);
           return;
         }
-
-        const response = await api.serve_model(request);
-        if (!response.success) {
-          setMessage(response.error ?? 'Serving request failed.');
-          return;
-        }
-        if (response.loaded) {
-          setServedStatus(response.status ?? null);
+        if (result.kind === 'loaded') {
+          setServedStatus(result.status);
           setMessage('Loaded');
-          return;
         }
-        setServeError(
-          response.load_error ?? getProviderLoadFailedError(modelId, config.profile_id)
-        );
-        setMessage(null);
       } catch (caught) {
         setMessage(caught instanceof Error ? caught.message : 'Serving request failed');
       } finally {

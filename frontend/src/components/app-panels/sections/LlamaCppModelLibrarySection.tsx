@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Link2, Play, Save, Search, Star } from 'lucide-react';
+import { Link2, Play, Save, Search, SlidersHorizontal, Star } from 'lucide-react';
+import { getElectronAPI } from '../../../api/adapter';
 import { useRuntimeProfiles } from '../../../hooks/useRuntimeProfiles';
 import type { ModelCategory, ModelInfo } from '../../../types/apps';
-import type { ServedModelStatus } from '../../../types/api-serving';
+import type {
+  ModelServeError,
+  ModelServingConfig,
+  ServedModelStatus,
+} from '../../../types/api-serving';
 import type { RuntimeProfileConfig } from '../../../types/api-runtime-profiles';
 import { IconButton, ListItem, ListItemContent } from '../../ui';
 import { LocalModelMetadataSummary } from '../../LocalModelMetadataSummary';
@@ -13,6 +18,11 @@ import {
   clearModelRuntimeRoute,
   saveModelRuntimeRoute,
 } from '../../model-serve/runtimeRouteMutations';
+import {
+  DEFAULT_LLAMA_CPP_CONTEXT_SIZE,
+  getPlacementControls,
+} from '../../model-serve/modelServeHelpers';
+import { serveModelWithValidation } from '../../model-serve/useModelServingActions';
 import {
   buildLlamaCppModelRows,
   getLlamaCppPlacementLabel,
@@ -81,26 +91,71 @@ function getProfileOptionLabel(profile: RuntimeProfileConfig): string {
   }`;
 }
 
+function formatQuickServeError(error: ModelServeError | null | undefined): string | null {
+  if (!error) {
+    return null;
+  }
+  return error.message || error.code.replace(/_/g, ' ');
+}
+
+function requiresAliasBeforeQuickServe(row: LlamaCppModelRowViewModel): boolean {
+  if (!row.selectedProfile) {
+    return false;
+  }
+
+  return row.servedStatuses.some(
+    (status) =>
+      status.load_state === 'loaded' &&
+      status.profile_id !== row.selectedProfile?.profile_id
+  );
+}
+
+function buildQuickServeConfig(profile: RuntimeProfileConfig): ModelServingConfig {
+  const deviceMode = profile.device.mode;
+  const controls = getPlacementControls(profile, deviceMode);
+
+  return {
+    provider: 'llama_cpp',
+    profile_id: profile.profile_id,
+    device_mode: deviceMode,
+    device_id:
+      controls.showDeviceId && profile.device.device_id?.trim()
+        ? profile.device.device_id.trim()
+        : null,
+    gpu_layers: controls.showGpuLayers ? profile.device.gpu_layers ?? null : null,
+    tensor_split: controls.showTensorSplit ? profile.device.tensor_split ?? null : null,
+    context_size: Number(DEFAULT_LLAMA_CPP_CONTEXT_SIZE),
+    keep_loaded: true,
+    model_alias: null,
+  };
+}
+
 function LlamaCppModelRow({
   excludedModels,
+  isQuickServing,
   isSavingRoute,
   providerProfiles,
+  quickServeFeedback,
   row,
   starredModels,
   onOpenMetadata,
+  onOpenServeOptions,
+  onQuickServe,
   onSaveRoute,
-  onServe,
   onToggleLink,
   onToggleStar,
 }: {
   excludedModels: Set<string>;
+  isQuickServing: boolean;
   isSavingRoute: boolean;
   providerProfiles: RuntimeProfileConfig[];
+  quickServeFeedback?: { kind: 'error' | 'success'; message: string } | null;
   row: LlamaCppModelRowViewModel;
   starredModels: Set<string>;
   onOpenMetadata: (modelId: string, modelName: string) => void;
+  onOpenServeOptions: (row: LlamaCppModelRowViewModel) => void;
+  onQuickServe: (row: LlamaCppModelRowViewModel) => void;
   onSaveRoute: (modelId: string, profileId: string) => void;
-  onServe: (row: LlamaCppModelRowViewModel) => void;
   onToggleLink: (modelId: string) => void;
   onToggleStar: (modelId: string) => void;
 }) {
@@ -111,6 +166,8 @@ function LlamaCppModelRow({
   const placementBadge = getPlacementBadge(row);
   const [draftProfileId, setDraftProfileId] = useState(row.route?.profile_id ?? '');
   const hasDraftChange = draftProfileId !== (row.route?.profile_id ?? '');
+  const isSelectedProfileLoaded = row.selectedServedStatus?.load_state === 'loaded';
+  const hasSavedRouteReady = Boolean(row.selectedProfile) && !hasDraftChange;
 
   useEffect(() => {
     setDraftProfileId(row.route?.profile_id ?? '');
@@ -161,6 +218,17 @@ function LlamaCppModelRow({
               hasDependencies={row.model.hasDependencies}
               dependencyCount={row.model.dependencyCount}
             />
+            {quickServeFeedback && (
+              <div
+                className={
+                  quickServeFeedback.kind === 'error'
+                    ? 'mt-1 text-xs text-[hsl(var(--accent-error))]'
+                    : 'mt-1 text-xs text-[hsl(var(--accent-success))]'
+                }
+              >
+                {quickServeFeedback.message}
+              </div>
+            )}
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pt-0.5">
@@ -193,9 +261,22 @@ function LlamaCppModelRow({
           />
           <IconButton
             icon={<Play />}
-            tooltip="Serve with selected llama.cpp profile"
-            onClick={() => onServe(row)}
-            disabled={!row.selectedProfile}
+            tooltip={
+              hasDraftChange
+                ? 'Save the llama.cpp route before quick serving'
+                : isSelectedProfileLoaded
+                ? 'Already loaded on selected profile'
+                : 'Quick serve with selected llama.cpp profile'
+            }
+            onClick={() => onQuickServe(row)}
+            disabled={!hasSavedRouteReady || isQuickServing || isSelectedProfileLoaded}
+            size="sm"
+          />
+          <IconButton
+            icon={<SlidersHorizontal />}
+            tooltip="Serving options"
+            onClick={() => onOpenServeOptions(row)}
+            disabled={!hasSavedRouteReady}
             size="sm"
           />
           <IconButton
@@ -228,6 +309,12 @@ export function LlamaCppModelLibrarySection({
     modelName: string;
   } | null>(null);
   const [servingRow, setServingRow] = useState<LlamaCppModelRowViewModel | null>(null);
+  const [quickServeModelId, setQuickServeModelId] = useState<string | null>(null);
+  const [quickServeFeedback, setQuickServeFeedback] = useState<{
+    kind: 'error' | 'success';
+    message: string;
+    modelId: string;
+  } | null>(null);
   const [savingRouteModelId, setSavingRouteModelId] = useState<string | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -269,6 +356,78 @@ export function LlamaCppModelLibrarySection({
       setRouteError(caught instanceof Error ? caught.message : 'Failed to save runtime route');
     } finally {
       setSavingRouteModelId(null);
+    }
+  };
+
+  const handleQuickServe = async (row: LlamaCppModelRowViewModel) => {
+    if (!row.selectedProfile) {
+      setQuickServeFeedback({
+        kind: 'error',
+        message: 'Save a llama.cpp profile route before serving this model.',
+        modelId: row.model.id,
+      });
+      return;
+    }
+
+    if (requiresAliasBeforeQuickServe(row)) {
+      setServingRow(row);
+      return;
+    }
+
+    const api = getElectronAPI();
+    if (!api?.validate_model_serving_config || !api.serve_model) {
+      setQuickServeFeedback({
+        kind: 'error',
+        message: 'Serving API is not available in this app session.',
+        modelId: row.model.id,
+      });
+      return;
+    }
+
+    setQuickServeModelId(row.model.id);
+    setQuickServeFeedback(null);
+    try {
+      const result = await serveModelWithValidation({
+        api,
+        config: buildQuickServeConfig(row.selectedProfile),
+        modelId: row.model.id,
+      });
+
+      if (result.kind === 'validation_failed' && result.error.code === 'duplicate_model_alias') {
+        setServingRow(row);
+        return;
+      }
+      if (result.kind === 'loaded') {
+        setQuickServeFeedback({
+          kind: 'success',
+          message: 'Loaded',
+          modelId: row.model.id,
+        });
+        return;
+      }
+      if (result.kind === 'validation_failed' || result.kind === 'load_failed') {
+        setQuickServeFeedback({
+          kind: 'error',
+          message:
+            formatQuickServeError(result.error) ??
+            'The selected llama.cpp profile cannot serve this model.',
+          modelId: row.model.id,
+        });
+        return;
+      }
+      setQuickServeFeedback({
+        kind: 'error',
+        message: result.message,
+        modelId: row.model.id,
+      });
+    } catch (caught) {
+      setQuickServeFeedback({
+        kind: 'error',
+        message: caught instanceof Error ? caught.message : 'Serving request failed',
+        modelId: row.model.id,
+      });
+    } finally {
+      setQuickServeModelId(null);
     }
   };
 
@@ -330,17 +489,24 @@ export function LlamaCppModelLibrarySection({
                 <LlamaCppModelRow
                   key={row.model.id}
                   excludedModels={excludedModels}
+                  isQuickServing={quickServeModelId === row.model.id}
                   isSavingRoute={savingRouteModelId === row.model.id}
                   providerProfiles={providerProfiles}
+                  quickServeFeedback={
+                    quickServeFeedback?.modelId === row.model.id ? quickServeFeedback : null
+                  }
                   row={row}
                   starredModels={starredModels}
                   onOpenMetadata={(modelId, modelName) => {
                     setMetadataModal({ modelId, modelName });
                   }}
+                  onOpenServeOptions={setServingRow}
+                  onQuickServe={(selectedRow) => {
+                    void handleQuickServe(selectedRow);
+                  }}
                   onSaveRoute={(modelId, profileId) => {
                     void handleSaveRoute(modelId, profileId);
                   }}
-                  onServe={setServingRow}
                   onToggleLink={onToggleLink}
                   onToggleStar={onToggleStar}
                 />

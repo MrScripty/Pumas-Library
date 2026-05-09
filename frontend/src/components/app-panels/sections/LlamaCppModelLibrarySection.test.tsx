@@ -13,7 +13,9 @@ const {
   refreshRuntimeProfilesMock,
   runtimeProfileState,
   serveDialogMock,
+  serveModelMock,
   setModelRuntimeRouteMock,
+  validateModelServingConfigMock,
 } = vi.hoisted(() => ({
   getElectronAPIMock: vi.fn(),
   refreshRuntimeProfilesMock: vi.fn(),
@@ -22,7 +24,9 @@ const {
     routes: [] as ModelRuntimeRoute[],
   },
   serveDialogMock: vi.fn(),
+  serveModelMock: vi.fn(),
   setModelRuntimeRouteMock: vi.fn(),
+  validateModelServingConfigMock: vi.fn(),
 }));
 
 vi.mock('../../../api/adapter', () => ({
@@ -77,9 +81,23 @@ describe('LlamaCppModelLibrarySection', () => {
       success: true,
       snapshot_required: true,
     });
+    validateModelServingConfigMock.mockResolvedValue({
+      success: true,
+      valid: true,
+      errors: [],
+      warnings: [],
+    });
+    serveModelMock.mockResolvedValue({
+      success: true,
+      loaded: true,
+      loaded_models_unchanged: false,
+      status: null,
+    });
     getElectronAPIMock.mockReturnValue({
       set_model_runtime_route: setModelRuntimeRouteMock,
       clear_model_runtime_route: vi.fn(),
+      validate_model_serving_config: validateModelServingConfigMock,
+      serve_model: serveModelMock,
     });
   });
 
@@ -294,7 +312,7 @@ describe('LlamaCppModelLibrarySection', () => {
     expect(screen.queryByText('Ollama')).not.toBeInTheDocument();
   });
 
-  it('opens the serve page with the saved llama.cpp profile locked to llama.cpp', () => {
+  it('quick serves with the saved llama.cpp profile route', async () => {
     runtimeProfileState.profiles = [
       {
         profile_id: 'llama-gpu',
@@ -329,7 +347,69 @@ describe('LlamaCppModelLibrarySection', () => {
       },
     ]);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Serve with selected llama.cpp profile' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Quick serve with selected llama.cpp profile' })
+    );
+
+    await waitFor(() => {
+      expect(validateModelServingConfigMock).toHaveBeenCalledWith({
+        model_id: 'models/llama-gguf',
+        config: expect.objectContaining({
+          provider: 'llama_cpp',
+          profile_id: 'llama-gpu',
+          device_mode: 'gpu',
+          context_size: 4096,
+          keep_loaded: true,
+          model_alias: null,
+        }),
+      });
+    });
+    expect(serveModelMock).toHaveBeenCalledWith({
+      model_id: 'models/llama-gguf',
+      config: expect.objectContaining({
+        profile_id: 'llama-gpu',
+      }),
+    });
+    expect(screen.getByText('Loaded')).toBeInTheDocument();
+    expect(serveDialogMock).not.toHaveBeenCalled();
+  });
+
+  it('opens the serve page with the saved llama.cpp profile locked to llama.cpp for serving options', () => {
+    runtimeProfileState.profiles = [
+      {
+        profile_id: 'llama-gpu',
+        provider: 'llama_cpp',
+        provider_mode: 'llama_cpp_dedicated',
+        management_mode: 'managed',
+        name: 'Emily GPU',
+        enabled: true,
+        device: { mode: 'gpu' },
+        scheduler: { auto_load: false },
+      },
+    ];
+    runtimeProfileState.routes = [
+      {
+        model_id: 'models/llama-gguf',
+        profile_id: 'llama-gpu',
+        auto_load: true,
+      },
+    ];
+
+    renderSection([
+      {
+        category: 'Chat',
+        models: [
+          {
+            id: 'models/llama-gguf',
+            name: 'Llama GGUF',
+            category: 'Chat',
+            primaryFormat: 'gguf',
+          },
+        ],
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Serving options' }));
 
     expect(screen.getByText('Serve page')).toBeInTheDocument();
     expect(serveDialogMock).toHaveBeenCalledWith(
@@ -338,5 +418,62 @@ describe('LlamaCppModelLibrarySection', () => {
         providerFilter: 'llama_cpp',
       })
     );
+  });
+
+  it('opens the serve page for duplicate alias validation instead of serving', async () => {
+    runtimeProfileState.profiles = [
+      {
+        profile_id: 'llama-gpu',
+        provider: 'llama_cpp',
+        provider_mode: 'llama_cpp_dedicated',
+        management_mode: 'managed',
+        name: 'Emily GPU',
+        enabled: true,
+        device: { mode: 'gpu' },
+        scheduler: { auto_load: false },
+      },
+    ];
+    runtimeProfileState.routes = [
+      {
+        model_id: 'models/llama-gguf',
+        profile_id: 'llama-gpu',
+        auto_load: true,
+      },
+    ];
+    validateModelServingConfigMock.mockResolvedValue({
+      success: true,
+      valid: false,
+      errors: [
+        {
+          code: 'duplicate_model_alias',
+          severity: 'non_critical',
+          message: 'Alias is already loaded.',
+        },
+      ],
+      warnings: [],
+    });
+
+    renderSection([
+      {
+        category: 'Chat',
+        models: [
+          {
+            id: 'models/llama-gguf',
+            name: 'Llama GGUF',
+            category: 'Chat',
+            primaryFormat: 'gguf',
+          },
+        ],
+      },
+    ]);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Quick serve with selected llama.cpp profile' })
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Serve page')).toBeInTheDocument();
+    });
+    expect(serveModelMock).not.toHaveBeenCalled();
   });
 });

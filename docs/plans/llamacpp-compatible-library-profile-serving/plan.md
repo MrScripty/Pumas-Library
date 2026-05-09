@@ -455,7 +455,7 @@ the row.
       loaded.
 - [x] Show failed load state and last error instead of a hardware tag if the
       backend reports a load failure.
-- [ ] Ensure tags fit in compact rows on small widths.
+- [x] Ensure tags fit in compact rows on small widths.
 
 **Verification:**
 - Unit tests for device-to-label mapping.
@@ -463,7 +463,7 @@ the row.
 - Component tests for failed state taking precedence over placement display.
 - Visual/manual check of row layout at desktop and narrow widths.
 
-**Status:** In progress.
+**Status:** Completed.
 
 **Progress:**
 - 2026-05-09: Reused the llama.cpp placement display helper in row rendering,
@@ -472,6 +472,10 @@ the row.
   Verified with
   `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx` and
   `npm run -w frontend check:types`.
+- 2026-05-09: Kept placement and served-count badges in the row's wrapping
+  header/action layout so compact widths wrap instead of overlapping. No
+  browser visual test harness is present in this repo; covered by component
+  rendering tests and final frontend build validation.
 
 ### Milestone 7: Serve From Selected Profile
 
@@ -484,14 +488,14 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
 - [x] Add provider/profile filtering or locking to `ModelServeDialog` so
       llama.cpp-specific callers cannot drift into Ollama or unrelated runtime
       profiles.
-- [ ] Allow a quick serve action where the selected route/profile is already
+- [x] Allow a quick serve action where the selected route/profile is already
       valid and no alias conflict exists.
 - [x] Require or prompt for a unique alias when the same model is already served
       through another profile, and pass that alias through
       `ModelServingConfig.model_alias`.
 - [x] Preserve the existing dialog for advanced context/gpu-layer/tensor-split
       overrides.
-- [ ] Ensure successful serve refreshes backend serving status and row display.
+- [x] Ensure successful serve refreshes backend serving status and row display.
 - [x] Ensure row unload targets the selected served instance instead of the first
       status with the same `model_id`.
 - [x] Ensure runtime-profile stop/failure paths remove or mark affected
@@ -506,7 +510,7 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
 - Manual release-app acceptance: serve one model on CPU, another on GPU, confirm
   `/v1/models` lists both through the same Pumas gateway.
 
-**Status:** In progress.
+**Status:** Completed.
 
 **Progress:**
 - 2026-05-09: Added a row serve affordance that opens the serving page with the
@@ -526,6 +530,14 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
   `ModelServingConfig.model_alias` while preserving existing advanced placement
   controls. Verified with
   `npm run -w frontend test:run -- ModelServeDialog.test.tsx
+  useModelServingActions.test.ts` and `npm run -w frontend check:types`.
+- 2026-05-09: Added row-level quick serve for saved llama.cpp profile routes by
+  sharing the existing validate-then-serve action path. Quick serve uses the
+  backend-confirmed saved route, falls back to the serving page for duplicate
+  alias validation, and leaves successful row display to the backend-pushed
+  serving-status subscription while showing immediate response feedback.
+  Verified with
+  `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx
   useModelServingActions.test.ts` and `npm run -w frontend check:types`.
 
 **Discovered issues:**
@@ -557,7 +569,7 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
 - `bash launcher.sh --release-smoke`
 - Manual CPU+GPU simultaneous serving acceptance path.
 
-**Status:** Not started.
+**Status:** In progress.
 
 **Progress:**
 - 2026-05-09: Updated frontend component READMEs for the llama.cpp-specific

@@ -301,18 +301,18 @@ profiles.
       selected-profile status, or unload targeting.
 - [ ] Update `useModelServingActions` or add a llama.cpp-specific action wrapper
       so serve/unserve can target an optional `profile_id` and `model_alias`.
-- [ ] Add backend serving validation that rejects ambiguous duplicate aliases
+- [x] Add backend serving validation that rejects ambiguous duplicate aliases
       before recording a loaded model or exposing it through the Pumas `/v1`
       gateway.
-- [ ] Add a backend helper that resolves the effective gateway alias from
+- [x] Add a backend helper that resolves the effective gateway alias from
       explicit `model_alias`, provider defaults, or model identity before both
       validation and `ServedModelStatus` recording.
-- [ ] Extend serving validation context with the current served-model snapshot
+- [x] Extend serving validation context with the current served-model snapshot
       so alias checks are backend-authoritative.
-- [ ] Add explicit model-serve error codes for duplicate alias and ambiguous
+- [x] Add explicit model-serve error codes for duplicate alias and ambiguous
       served-model routing instead of overloading `invalid_request` or
       `unknown`.
-- [ ] Decide and document gateway behavior when a user requests the base
+- [x] Decide and document gateway behavior when a user requests the base
       `model_id` while multiple served instances exist. Prefer a clear
       non-critical/HTTP error unless one instance is unambiguous.
 
@@ -327,7 +327,19 @@ profiles.
 - Rust test that ambiguous `/v1` requests do not silently route to the first
   matching served instance.
 
-**Status:** Not started.
+**Status:** In progress.
+
+**Progress:**
+- 2026-05-09: Added backend-owned effective alias normalization for serve and
+  validation requests, explicit duplicate-alias and ambiguous-routing error
+  codes, served-snapshot validation context, canonical alias uniqueness checks,
+  and deterministic `/v1` gateway conflict behavior for ambiguous base
+  `model_id` requests. Verified with `cargo fmt --manifest-path
+  rust/crates/pumas-core/Cargo.toml`, `cargo fmt --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml validation_`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml openai_lookup`, and
+  `npm run -w frontend check:types`.
 
 ### Milestone 4: llama.cpp-Specific Library Panel
 

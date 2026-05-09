@@ -53,6 +53,8 @@ pub enum ModelServeErrorCode {
     MissingRuntime,
     InvalidFormat,
     EndpointUnavailable,
+    DuplicateModelAlias,
+    AmbiguousModelRouting,
     Unknown,
 }
 

@@ -82,6 +82,12 @@ impl PumasApi {
             model_exists: model.is_some(),
             primary_artifact_extension,
             profile,
+            served_models: primary
+                .serving_service
+                .status()
+                .await
+                .snapshot
+                .served_models,
         };
 
         Ok(crate::serving::ServingService::validate_request(

@@ -62,34 +62,33 @@ pub async fn validate_model_serving_config(
 ) -> pumas_library::Result<Value> {
     let command: ValidateModelServingConfigParams =
         parse_params("validate_model_serving_config", params)?;
+    let request = request_with_effective_gateway_alias(state, command.request).await?;
     Ok(serde_json::to_value(
-        state
-            .api
-            .validate_model_serving_config(command.request)
-            .await?,
+        state.api.validate_model_serving_config(request).await?,
     )?)
 }
 
 pub async fn serve_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let command: ServeModelParams = parse_params("serve_model", params)?;
+    let request = request_with_effective_gateway_alias(state, command.request).await?;
     let validation = state
         .api
-        .validate_model_serving_config(command.request.clone())
+        .validate_model_serving_config(request.clone())
         .await?;
     if !validation.valid {
         let error = validation.errors.into_iter().next().unwrap_or_else(|| {
             serving_error(
                 ModelServeErrorCode::InvalidRequest,
                 "serving request is invalid",
-                &command.request,
+                &request,
             )
         });
         return non_critical_failure_response(state, error).await;
     }
 
-    match command.request.config.provider {
-        RuntimeProviderId::Ollama => serve_ollama_model(state, command.request).await,
-        RuntimeProviderId::LlamaCpp => serve_llama_cpp_model(state, command.request).await,
+    match request.config.provider {
+        RuntimeProviderId::Ollama => serve_ollama_model(state, request).await,
+        RuntimeProviderId::LlamaCpp => serve_llama_cpp_model(state, request).await,
     }
 }
 
@@ -299,7 +298,7 @@ async fn serve_llama_cpp_model(
 
     let status = ServedModelStatus {
         model_id: request.model_id.clone(),
-        model_alias: request.config.model_alias.clone(),
+        model_alias: Some(effective_gateway_alias_from_config(&request)),
         provider: RuntimeProviderId::LlamaCpp,
         profile_id: request.config.profile_id.clone(),
         load_state: ServedModelLoadState::Loaded,
@@ -443,11 +442,7 @@ async fn serve_llama_cpp_router_model(
         }
     }
 
-    let model_alias = request
-        .config
-        .model_alias
-        .clone()
-        .unwrap_or_else(|| request.model_id.clone());
+    let model_alias = effective_gateway_alias_from_config(&request);
     if let Err(message) = llama_cpp_router_load_model(endpoint.as_str(), &model_alias).await {
         warn!("llama.cpp router model load failed: {}", message);
         return non_critical_failure_response(
@@ -1014,6 +1009,50 @@ async fn resolve_ollama_model_inputs(
         .cloned();
 
     Ok(Some((gguf_path, model_alias, known_sha256)))
+}
+
+async fn request_with_effective_gateway_alias(
+    state: &AppState,
+    mut request: ServeModelRequest,
+) -> pumas_library::Result<ServeModelRequest> {
+    if let Some(model_alias) = request.config.model_alias.as_deref() {
+        let trimmed = model_alias.trim();
+        if trimmed.is_empty() {
+            return Ok(request);
+        }
+        request.config.model_alias = Some(trimmed.to_string());
+        return Ok(request);
+    }
+
+    let model_id = request.model_id.trim();
+    if model_id.is_empty() {
+        return Ok(request);
+    }
+
+    let model_alias = match request.config.provider {
+        RuntimeProviderId::Ollama => {
+            let model = state.api.get_model(model_id).await?;
+            let display = model
+                .as_ref()
+                .map(|record| record.cleaned_name.clone())
+                .unwrap_or_else(|| derive_fallback_model_alias(model_id));
+            pumas_app_manager::derive_ollama_name(&display)
+        }
+        RuntimeProviderId::LlamaCpp => derive_fallback_model_alias(model_id),
+    };
+    request.config.model_alias = Some(model_alias);
+    Ok(request)
+}
+
+fn effective_gateway_alias_from_config(request: &ServeModelRequest) -> String {
+    request
+        .config
+        .model_alias
+        .as_deref()
+        .map(str::trim)
+        .filter(|model_alias| !model_alias.is_empty())
+        .unwrap_or_else(|| request.model_id.trim())
+        .to_string()
 }
 
 async fn non_critical_failure_response(

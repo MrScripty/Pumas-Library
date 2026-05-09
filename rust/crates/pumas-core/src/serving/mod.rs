@@ -15,6 +15,7 @@ use crate::models::{
 };
 
 const SERVING_STATUS_UPDATE_CHANNEL_CAPACITY: usize = 64;
+const MAX_GATEWAY_ALIAS_LEN: usize = 128;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServingValidationProfile {
@@ -33,6 +34,7 @@ pub struct ServingValidationContext {
     pub model_exists: bool,
     pub primary_artifact_extension: Option<String>,
     pub profile: Option<ServingValidationProfile>,
+    pub served_models: Vec<ServedModelStatus>,
 }
 
 #[derive(Debug)]
@@ -251,6 +253,7 @@ pub fn validate_model_serving_request(
 ) -> ModelServeValidationResponse {
     let mut errors = Vec::new();
     let model_id = request.model_id.trim();
+    let effective_alias = effective_gateway_model_alias(request);
 
     if model_id.is_empty() {
         errors.push(ModelServeError::non_critical(
@@ -268,6 +271,18 @@ pub fn validate_model_serving_request(
     }
 
     errors.extend(request.config.validate_numeric_bounds(model_id));
+    errors.extend(validate_gateway_alias_contract(
+        model_id,
+        &request.config.profile_id,
+        request.config.provider,
+        request.config.model_alias.as_deref(),
+    ));
+    errors.extend(validate_gateway_alias_is_unique(
+        model_id,
+        effective_alias.as_str(),
+        request,
+        context,
+    ));
 
     match &context.profile {
         Some(profile) => {
@@ -335,6 +350,166 @@ pub fn validate_model_serving_request(
     }
 
     ModelServeValidationResponse::from_errors(errors)
+}
+
+fn validate_gateway_alias_contract(
+    model_id: &str,
+    profile_id: &RuntimeProfileId,
+    provider: RuntimeProviderId,
+    model_alias: Option<&str>,
+) -> Vec<ModelServeError> {
+    let Some(model_alias) = model_alias else {
+        return Vec::new();
+    };
+    let alias = model_alias.trim();
+    if alias.is_empty() {
+        return Vec::new();
+    }
+
+    let mut message = None;
+    if alias.len() > MAX_GATEWAY_ALIAS_LEN {
+        message = Some(format!(
+            "model_alias must be {MAX_GATEWAY_ALIAS_LEN} characters or fewer"
+        ));
+    } else if alias.starts_with('/') || alias.ends_with('/') || alias.contains("//") {
+        message = Some("model_alias cannot begin or end with '/', or contain '//'".to_string());
+    } else if alias
+        .split('/')
+        .any(|segment| segment == "." || segment == "..")
+    {
+        message = Some("model_alias cannot contain path traversal segments".to_string());
+    } else if !alias.chars().all(is_allowed_gateway_alias_char) {
+        message = Some(
+            "model_alias may contain only lowercase ASCII letters, digits, '.', '_', '-', and '/'"
+                .to_string(),
+        );
+    }
+
+    message
+        .map(|message| {
+            vec![
+                ModelServeError::non_critical(ModelServeErrorCode::InvalidRequest, message)
+                    .for_model(model_id)
+                    .for_profile(profile_id.clone())
+                    .for_provider(provider),
+            ]
+        })
+        .unwrap_or_default()
+}
+
+fn is_allowed_gateway_alias_char(character: char) -> bool {
+    character.is_ascii_lowercase()
+        || character.is_ascii_digit()
+        || matches!(character, '.' | '_' | '-' | '/')
+}
+
+pub fn effective_gateway_model_alias(request: &ServeModelRequest) -> String {
+    request
+        .config
+        .model_alias
+        .as_deref()
+        .map(str::trim)
+        .filter(|model_alias| !model_alias.is_empty())
+        .unwrap_or_else(|| request.model_id.trim())
+        .to_string()
+}
+
+fn validate_gateway_alias_is_unique(
+    model_id: &str,
+    effective_alias: &str,
+    request: &ServeModelRequest,
+    context: &ServingValidationContext,
+) -> Vec<ModelServeError> {
+    let Some(effective_alias_key) = gateway_alias_key(effective_alias) else {
+        return Vec::new();
+    };
+
+    context
+        .served_models
+        .iter()
+        .find(|status| {
+            served_model_reserves_gateway_alias(status)
+                && gateway_alias_key(served_status_effective_gateway_alias(status)).as_deref()
+                    == Some(effective_alias_key.as_str())
+                && !same_requested_served_instance(
+                    model_id,
+                    effective_alias_key.as_str(),
+                    request,
+                    status,
+                )
+        })
+        .map(|status| {
+            vec![
+                ModelServeError::non_critical(
+                    ModelServeErrorCode::DuplicateModelAlias,
+                    format!(
+                        "gateway model alias '{effective_alias}' is already served by model '{}' on profile '{}'; choose a unique alias",
+                        status.model_id,
+                        status.profile_id.as_str()
+                    ),
+                )
+                .for_model(model_id)
+                .for_profile(request.config.profile_id.clone())
+                .for_provider(request.config.provider),
+            ]
+        })
+        .unwrap_or_default()
+}
+
+fn gateway_alias_key(alias: &str) -> Option<String> {
+    let alias = alias.trim();
+    if alias.is_empty() {
+        return None;
+    }
+
+    let mut key = String::with_capacity(alias.len());
+    let mut previous_was_separator = false;
+    for character in alias.chars() {
+        let normalized = character.to_ascii_lowercase();
+        let is_separator = matches!(normalized, '.' | '_' | '-' | '/');
+        if is_separator {
+            if !previous_was_separator {
+                key.push('-');
+            }
+            previous_was_separator = true;
+        } else {
+            key.push(normalized);
+            previous_was_separator = false;
+        }
+    }
+
+    Some(key.trim_matches('-').to_string()).filter(|key| !key.is_empty())
+}
+
+fn served_model_reserves_gateway_alias(status: &ServedModelStatus) -> bool {
+    matches!(
+        status.load_state,
+        crate::models::ServedModelLoadState::Requested
+            | crate::models::ServedModelLoadState::Loading
+            | crate::models::ServedModelLoadState::Loaded
+            | crate::models::ServedModelLoadState::Unloading
+    )
+}
+
+fn served_status_effective_gateway_alias(status: &ServedModelStatus) -> &str {
+    status
+        .model_alias
+        .as_deref()
+        .map(str::trim)
+        .filter(|model_alias| !model_alias.is_empty())
+        .unwrap_or(status.model_id.as_str())
+}
+
+fn same_requested_served_instance(
+    model_id: &str,
+    effective_alias_key: &str,
+    request: &ServeModelRequest,
+    status: &ServedModelStatus,
+) -> bool {
+    status.model_id == model_id
+        && status.profile_id == request.config.profile_id
+        && gateway_alias_key(served_status_effective_gateway_alias(status)).as_deref()
+            == Some(effective_alias_key)
 }
 
 fn profile_accepts_serving_operation(profile: &ServingValidationProfile) -> bool {
@@ -502,6 +677,7 @@ mod tests {
     use super::*;
     use crate::models::{
         ModelServeErrorSeverity, ModelServingConfig, RuntimeDeviceMode, RuntimeProfileId,
+        ServedModelLoadState,
     };
 
     fn request() -> ServeModelRequest {
@@ -535,6 +711,31 @@ mod tests {
                 gpu_layers: None,
                 tensor_split: None,
             }),
+            served_models: Vec::new(),
+        }
+    }
+
+    fn loaded_status(
+        model_id: &str,
+        profile_id: &str,
+        model_alias: Option<&str>,
+    ) -> ServedModelStatus {
+        ServedModelStatus {
+            model_id: model_id.to_string(),
+            model_alias: model_alias.map(str::to_string),
+            provider: RuntimeProviderId::LlamaCpp,
+            profile_id: RuntimeProfileId::parse(profile_id).unwrap(),
+            load_state: ServedModelLoadState::Loaded,
+            device_mode: RuntimeDeviceMode::Auto,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
+            context_size: None,
+            keep_loaded: true,
+            endpoint_url: None,
+            memory_bytes: None,
+            loaded_at: None,
+            last_error: None,
         }
     }
 
@@ -801,5 +1002,84 @@ mod tests {
                 .count(),
             5
         );
+    }
+
+    #[test]
+    fn validation_rejects_duplicate_effective_gateway_alias() {
+        let mut request = request();
+        request.config.provider = RuntimeProviderId::LlamaCpp;
+        request.config.profile_id = RuntimeProfileId::parse("llama-gpu").unwrap();
+        request.config.model_alias = Some("shared_alias".to_string());
+
+        let mut context = valid_context();
+        context.profile = Some(ServingValidationProfile {
+            provider: RuntimeProviderId::LlamaCpp,
+            provider_mode: RuntimeProviderMode::LlamaCppDedicated,
+            management_mode: RuntimeManagementMode::Managed,
+            state: RuntimeLifecycleState::Stopped,
+            device_mode: RuntimeDeviceMode::Auto,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
+        });
+        context.served_models = vec![loaded_status(
+            "models/other",
+            "llama-cpu",
+            Some("shared.alias"),
+        )];
+
+        let response = validate_model_serving_request(&request, &context);
+
+        assert!(!response.valid);
+        assert!(response
+            .errors
+            .iter()
+            .any(|error| error.code == ModelServeErrorCode::DuplicateModelAlias));
+    }
+
+    #[test]
+    fn validation_rejects_invalid_gateway_alias_characters() {
+        let mut request = request();
+        request.config.provider = RuntimeProviderId::LlamaCpp;
+        request.config.profile_id = RuntimeProfileId::parse("llama-gpu").unwrap();
+        request.config.model_alias = Some("Bad Alias".to_string());
+
+        let response = validate_model_serving_request(&request, &valid_context());
+
+        assert!(!response.valid);
+        assert!(response
+            .errors
+            .iter()
+            .any(|error| error.code == ModelServeErrorCode::InvalidRequest
+                && error.message.contains("model_alias")));
+    }
+
+    #[test]
+    fn validation_allows_revalidating_same_served_instance_alias() {
+        let mut request = request();
+        request.config.provider = RuntimeProviderId::LlamaCpp;
+        request.config.profile_id = RuntimeProfileId::parse("llama-cpu").unwrap();
+        request.config.model_alias = Some("example-cpu".to_string());
+
+        let mut context = valid_context();
+        context.profile = Some(ServingValidationProfile {
+            provider: RuntimeProviderId::LlamaCpp,
+            provider_mode: RuntimeProviderMode::LlamaCppDedicated,
+            management_mode: RuntimeManagementMode::Managed,
+            state: RuntimeLifecycleState::Stopped,
+            device_mode: RuntimeDeviceMode::Auto,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
+        });
+        context.served_models = vec![loaded_status(
+            "models/example",
+            "llama-cpu",
+            Some("example-cpu"),
+        )];
+
+        let response = validate_model_serving_request(&request, &context);
+
+        assert!(response.valid);
     }
 }

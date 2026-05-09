@@ -32,9 +32,9 @@ use futures::{
     StreamExt,
 };
 use pumas_library::models::{
-    ModelDownloadUpdateNotification, ModelLibraryUpdateNotification, RuntimeProfileUpdateFeed,
-    ServedModelLoadState, ServedModelStatus, ServingStatusUpdateFeed,
-    StatusTelemetryUpdateNotification,
+    ModelDownloadUpdateNotification, ModelLibraryUpdateNotification, ModelServeErrorCode,
+    RuntimeProfileUpdateFeed, ServedModelLoadState, ServedModelStatus, ServingStatusSnapshot,
+    ServingStatusUpdateFeed, StatusTelemetryUpdateNotification,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -125,17 +125,23 @@ pub async fn handle_health() -> impl IntoResponse {
 /// OpenAI-compatible served-model listing backed by Pumas serving status.
 pub async fn handle_openai_models(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.api.get_serving_status().await {
-        Ok(response) => Json(json!({
-            "object": "list",
-            "data": response
-                .snapshot
-                .served_models
-                .into_iter()
-                .filter(|model| model.load_state == ServedModelLoadState::Loaded)
-                .map(openai_model_entry)
-                .collect::<Vec<_>>()
-        }))
-        .into_response(),
+        Ok(response) => {
+            let mut served_models = response.snapshot.served_models;
+            served_models.retain(|model| model.load_state == ServedModelLoadState::Loaded);
+            served_models.sort_by(|left, right| {
+                openai_model_id(left)
+                    .cmp(openai_model_id(right))
+                    .then_with(|| left.profile_id.as_str().cmp(right.profile_id.as_str()))
+            });
+            Json(json!({
+                "object": "list",
+                "data": served_models
+                    .into_iter()
+                    .map(openai_model_entry)
+                    .collect::<Vec<_>>()
+            }))
+            .into_response()
+        }
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({
@@ -163,12 +169,15 @@ pub async fn handle_openai_proxy(
     };
 
     let served = match find_openai_served_model(&state, requested_model).await {
-        Ok(Some(model)) => model,
-        Ok(None) => {
+        Ok(OpenAiServedModelLookup::Found(model)) => model,
+        Ok(OpenAiServedModelLookup::NotFound) => {
             return openai_error_response(
                 StatusCode::NOT_FOUND,
                 format!("model is not served: {requested_model}"),
             );
+        }
+        Ok(OpenAiServedModelLookup::Ambiguous { code, message }) => {
+            return openai_error_response_with_code(StatusCode::CONFLICT, code, message);
         }
         Err(error) => {
             return openai_error_response(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
@@ -209,16 +218,75 @@ fn openai_model_entry(model: ServedModelStatus) -> Value {
     })
 }
 
+fn openai_model_id(model: &ServedModelStatus) -> &str {
+    model
+        .model_alias
+        .as_deref()
+        .unwrap_or(model.model_id.as_str())
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum OpenAiServedModelLookup {
+    Found(ServedModelStatus),
+    NotFound,
+    Ambiguous {
+        code: ModelServeErrorCode,
+        message: String,
+    },
+}
+
 async fn find_openai_served_model(
     state: &AppState,
     requested_model: &str,
-) -> pumas_library::Result<Option<ServedModelStatus>> {
+) -> pumas_library::Result<OpenAiServedModelLookup> {
     let snapshot = state.api.get_serving_status().await?.snapshot;
-    Ok(snapshot.served_models.into_iter().find(|model| {
-        model.load_state == ServedModelLoadState::Loaded
-            && (model.model_id == requested_model
-                || model.model_alias.as_deref() == Some(requested_model))
-    }))
+    Ok(resolve_openai_served_model(snapshot, requested_model))
+}
+
+fn resolve_openai_served_model(
+    snapshot: ServingStatusSnapshot,
+    requested_model: &str,
+) -> OpenAiServedModelLookup {
+    let loaded: Vec<ServedModelStatus> = snapshot
+        .served_models
+        .into_iter()
+        .filter(|model| model.load_state == ServedModelLoadState::Loaded)
+        .collect();
+    let alias_matches: Vec<ServedModelStatus> = loaded
+        .iter()
+        .filter(|model| model.model_alias.as_deref() == Some(requested_model))
+        .cloned()
+        .collect();
+
+    if alias_matches.len() == 1 {
+        return OpenAiServedModelLookup::Found(alias_matches.into_iter().next().unwrap());
+    }
+    if alias_matches.len() > 1 {
+        return OpenAiServedModelLookup::Ambiguous {
+            code: ModelServeErrorCode::DuplicateModelAlias,
+            message: format!(
+                "gateway model alias '{requested_model}' matches multiple served instances"
+            ),
+        };
+    }
+
+    let model_id_matches: Vec<ServedModelStatus> = loaded
+        .into_iter()
+        .filter(|model| model.model_id == requested_model)
+        .collect();
+    if model_id_matches.len() == 1 {
+        return OpenAiServedModelLookup::Found(model_id_matches.into_iter().next().unwrap());
+    }
+    if model_id_matches.len() > 1 {
+        return OpenAiServedModelLookup::Ambiguous {
+            code: ModelServeErrorCode::AmbiguousModelRouting,
+            message: format!(
+                "base model id '{requested_model}' matches multiple served instances; request one of the listed gateway aliases instead"
+            ),
+        };
+    }
+
+    OpenAiServedModelLookup::NotFound
 }
 
 async fn proxy_response(response: reqwest::Response) -> Response {
@@ -247,9 +315,31 @@ fn response_with_bytes(
 }
 
 fn openai_error_response(status: StatusCode, message: impl Into<String>) -> Response {
+    openai_error_response_body(status, message, None)
+}
+
+fn openai_error_response_with_code(
+    status: StatusCode,
+    code: ModelServeErrorCode,
+    message: impl Into<String>,
+) -> Response {
+    openai_error_response_body(status, message, Some(code))
+}
+
+fn openai_error_response_body(
+    status: StatusCode,
+    message: impl Into<String>,
+    code: Option<ModelServeErrorCode>,
+) -> Response {
     let mut error = Map::new();
     error.insert("message".to_string(), Value::String(message.into()));
     error.insert("type".to_string(), Value::String("pumas_error".to_string()));
+    if let Some(code) = code {
+        error.insert(
+            "code".to_string(),
+            serde_json::to_value(code).unwrap_or_else(|_| json!("unknown")),
+        );
+    }
     (
         status,
         Json(json!({
@@ -257,6 +347,105 @@ fn openai_error_response(status: StatusCode, message: impl Into<String>) -> Resp
         })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod openai_gateway_tests {
+    use super::*;
+    use pumas_library::models::{
+        RuntimeDeviceMode, RuntimeProfileId, RuntimeProviderId, ServedModelLoadState,
+        ServingEndpointStatus, ServingStatusSnapshot,
+    };
+
+    fn loaded_status(
+        model_id: &str,
+        profile_id: &str,
+        model_alias: Option<&str>,
+    ) -> ServedModelStatus {
+        ServedModelStatus {
+            model_id: model_id.to_string(),
+            model_alias: model_alias.map(str::to_string),
+            provider: RuntimeProviderId::LlamaCpp,
+            profile_id: RuntimeProfileId::parse(profile_id).unwrap(),
+            load_state: ServedModelLoadState::Loaded,
+            device_mode: RuntimeDeviceMode::Auto,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
+            context_size: None,
+            keep_loaded: true,
+            endpoint_url: None,
+            memory_bytes: None,
+            loaded_at: None,
+            last_error: None,
+        }
+    }
+
+    fn snapshot(served_models: Vec<ServedModelStatus>) -> ServingStatusSnapshot {
+        ServingStatusSnapshot {
+            schema_version: 1,
+            cursor: "serving:1".to_string(),
+            endpoint: ServingEndpointStatus::not_configured(),
+            served_models,
+            last_errors: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn openai_lookup_routes_unique_alias_before_base_model_id() {
+        let result = resolve_openai_served_model(
+            snapshot(vec![
+                loaded_status("models/example", "llama-cpu", Some("example-cpu")),
+                loaded_status("models/example", "llama-gpu", Some("example-gpu")),
+            ]),
+            "example-gpu",
+        );
+
+        match result {
+            OpenAiServedModelLookup::Found(status) => {
+                assert_eq!(status.profile_id.as_str(), "llama-gpu");
+            }
+            other => panic!("expected a routed model, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn openai_lookup_rejects_ambiguous_base_model_id() {
+        let result = resolve_openai_served_model(
+            snapshot(vec![
+                loaded_status("models/example", "llama-cpu", Some("example-cpu")),
+                loaded_status("models/example", "llama-gpu", Some("example-gpu")),
+            ]),
+            "models/example",
+        );
+
+        match result {
+            OpenAiServedModelLookup::Ambiguous { code, message } => {
+                assert_eq!(code, ModelServeErrorCode::AmbiguousModelRouting);
+                assert!(message.contains("multiple served instances"));
+            }
+            other => panic!("expected ambiguous routing, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn openai_lookup_rejects_duplicate_aliases() {
+        let result = resolve_openai_served_model(
+            snapshot(vec![
+                loaded_status("models/one", "llama-cpu", Some("shared")),
+                loaded_status("models/two", "llama-gpu", Some("shared")),
+            ]),
+            "shared",
+        );
+
+        match result {
+            OpenAiServedModelLookup::Ambiguous { code, message } => {
+                assert_eq!(code, ModelServeErrorCode::DuplicateModelAlias);
+                assert!(message.contains("multiple served instances"));
+            }
+            other => panic!("expected duplicate alias ambiguity, got {other:?}"),
+        }
+    }
 }
 
 /// Server-sent model-library update notification stream.

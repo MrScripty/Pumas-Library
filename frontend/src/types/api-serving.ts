@@ -27,6 +27,8 @@ export type ModelServeErrorCode =
   | 'missing_runtime'
   | 'invalid_format'
   | 'endpoint_unavailable'
+  | 'duplicate_model_alias'
+  | 'ambiguous_model_routing'
   | 'unknown';
 
 export interface ModelServeError {

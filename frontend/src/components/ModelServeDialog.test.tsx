@@ -62,6 +62,18 @@ describe('ModelServeDialog', () => {
         device: { mode: 'cpu' },
         scheduler: { auto_load: true },
       },
+      {
+        profile_id: 'router-llama',
+        provider: 'llama_cpp',
+        provider_mode: 'llama_cpp_router',
+        management_mode: 'managed',
+        name: 'Router Llama',
+        enabled: true,
+        endpoint_url: 'http://127.0.0.1:18080',
+        port: 18080,
+        device: { mode: 'gpu', gpu_layers: 20, tensor_split: [1, 1] },
+        scheduler: { auto_load: true },
+      },
     ],
     routes: [],
     statuses: [],
@@ -129,7 +141,7 @@ describe('ModelServeDialog', () => {
     expect(
       screen.getByText('Cannot serve yet: Only GGUF models can be served locally in this flow.')
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Start serving' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start serving' })).toBeEnabled();
   });
 
   it('hides GPU-only controls for CPU dedicated profiles and defaults context', () => {
@@ -154,6 +166,30 @@ describe('ModelServeDialog', () => {
     expect(screen.queryByRole('spinbutton', { name: /model gpu layers/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: /model tensor split/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: /device id/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start serving' })).toBeEnabled();
+  });
+
+  it('shows llama.cpp placement controls for router profiles', () => {
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'model-router',
+          name: 'Router Model',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        displayMode="page"
+        initialProfileId="router-llama"
+        onBack={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('combobox', { name: /runtime target/i })).toHaveValue('router-llama');
+    expect(screen.getByRole('combobox', { name: /model device/i })).toHaveValue('gpu');
+    expect(screen.getByRole('spinbutton', { name: /model gpu layers/i })).toHaveValue(20);
+    expect(screen.getByRole('textbox', { name: /model tensor split/i })).toHaveValue('1,1');
+    expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(4096);
     expect(screen.getByRole('button', { name: 'Start serving' })).toBeEnabled();
   });
 

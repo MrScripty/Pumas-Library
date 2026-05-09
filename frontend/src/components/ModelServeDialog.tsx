@@ -11,6 +11,7 @@ import {
   getProfileStateBlockReason,
   isGgufModel,
   isDedicatedLlamaCppProfile,
+  isLlamaCppProfile,
   type ModelServeFormState,
 } from './model-serve/modelServeHelpers';
 import { useDialogFocusTrap } from './model-serve/useDialogFocusTrap';
@@ -95,7 +96,6 @@ export function ModelServeDialog({
     profileStateBlockReason,
     model,
   });
-  const canServe = !serveBlockReason && !servingActions.isSubmitting;
 
   useEffect(() => {
     if (!selectedProfile) {
@@ -106,7 +106,7 @@ export function ModelServeDialog({
     setDeviceId(selectedProfile.device.device_id ?? '');
     setGpuLayers(selectedProfile.device.gpu_layers?.toString() ?? '');
     setTensorSplit(selectedProfile.device.tensor_split?.join(',') ?? '');
-    setContextSize(isDedicatedLlamaCppProfile(selectedProfile) ? DEFAULT_LLAMA_CPP_CONTEXT_SIZE : '');
+    setContextSize(isLlamaCppProfile(selectedProfile) ? DEFAULT_LLAMA_CPP_CONTEXT_SIZE : '');
   }, [selectedProfile]);
 
   const formState: ModelServeFormState = {
@@ -125,7 +125,6 @@ export function ModelServeDialog({
     });
   const content = (
     <ModelServeDialogContent
-      canServe={canServe}
       controls={controls}
       dialogRef={dialogRef}
       formState={formState}

@@ -48,21 +48,25 @@ export function isDedicatedLlamaCppProfile(profile: RuntimeProfileConfig | undef
   return profile?.provider === 'llama_cpp' && profile.provider_mode === 'llama_cpp_dedicated';
 }
 
+export function isLlamaCppProfile(profile: RuntimeProfileConfig | undefined): boolean {
+  return profile?.provider === 'llama_cpp';
+}
+
 export function getPlacementControls(
   profile: RuntimeProfileConfig | undefined,
   deviceMode: RuntimeDeviceMode
 ): ModelServeControls {
-  const supportsDedicatedPlacement = isDedicatedLlamaCppProfile(profile);
-  const canUseGpuPlacement = supportsDedicatedPlacement && deviceMode !== 'cpu';
+  const supportsLlamaCppPlacement = isLlamaCppProfile(profile);
+  const canUseGpuPlacement = supportsLlamaCppPlacement && deviceMode !== 'cpu';
 
   return {
-    showDeviceControls: supportsDedicatedPlacement,
-    showDeviceId: supportsDedicatedPlacement && deviceMode === 'specific_device',
+    showDeviceControls: supportsLlamaCppPlacement,
+    showDeviceId: supportsLlamaCppPlacement && deviceMode === 'specific_device',
     showGpuLayers: canUseGpuPlacement,
     showTensorSplit:
       canUseGpuPlacement &&
       (deviceMode === 'gpu' || deviceMode === 'hybrid' || deviceMode === 'specific_device'),
-    showContextSize: supportsDedicatedPlacement,
+    showContextSize: supportsLlamaCppPlacement,
   };
 }
 

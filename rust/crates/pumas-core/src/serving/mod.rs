@@ -364,7 +364,9 @@ pub fn validate_model_serving_request(
                 );
             }
 
-            errors.extend(validate_provider_placement(model_id, request, profile));
+            errors.extend(validate_provider_placement(
+                model_id, request, profile, context,
+            ));
         }
         None => {
             errors.push(
@@ -592,10 +594,13 @@ fn validate_provider_placement(
     model_id: &str,
     request: &ServeModelRequest,
     profile: &ServingValidationProfile,
+    context: &ServingValidationContext,
 ) -> Vec<ModelServeError> {
     match profile.provider {
         RuntimeProviderId::Ollama => validate_ollama_placement(model_id, request, profile),
-        RuntimeProviderId::LlamaCpp => validate_llama_cpp_placement(model_id, request, profile),
+        RuntimeProviderId::LlamaCpp => {
+            validate_llama_cpp_placement(model_id, request, profile, context)
+        }
     }
 }
 
@@ -603,6 +608,7 @@ fn validate_llama_cpp_placement(
     model_id: &str,
     request: &ServeModelRequest,
     profile: &ServingValidationProfile,
+    context: &ServingValidationContext,
 ) -> Vec<ModelServeError> {
     if profile.provider_mode == RuntimeProviderMode::LlamaCppDedicated {
         return Vec::new();
@@ -650,12 +656,23 @@ fn validate_llama_cpp_placement(
         }
     }
 
-    if request.config.context_size.is_some() {
-        errors.push(unsupported_placement(
-            model_id,
-            request,
-            "llama.cpp router context size is not applied by this serving path",
-        ));
+    if let Some(requested_context_size) = request.config.context_size {
+        if context
+            .served_models
+            .iter()
+            .filter(|status| {
+                status.provider == RuntimeProviderId::LlamaCpp
+                    && status.profile_id == request.config.profile_id
+                    && served_model_reserves_gateway_alias(status)
+            })
+            .any(|status| status.context_size != Some(requested_context_size))
+        {
+            errors.push(unsupported_placement(
+                model_id,
+                request,
+                "llama.cpp router context size cannot be changed while models are loaded on the selected profile",
+            ));
+        }
     }
 
     errors
@@ -1089,7 +1106,6 @@ mod tests {
         request.config.device_id = Some("cuda:1".to_string());
         request.config.gpu_layers = Some(36);
         request.config.tensor_split = Some(vec![3.0, 1.0]);
-        request.config.context_size = Some(8192);
 
         let mut context = valid_context();
         context.profile = Some(ServingValidationProfile {
@@ -1116,8 +1132,65 @@ mod tests {
                 .iter()
                 .filter(|error| error.code == ModelServeErrorCode::UnsupportedPlacement)
                 .count(),
-            5
+            4
         );
+    }
+
+    #[test]
+    fn validation_accepts_llama_cpp_router_context_size_before_load() {
+        let mut request = request();
+        request.config.provider = RuntimeProviderId::LlamaCpp;
+        request.config.profile_id = RuntimeProfileId::parse("llama-router").unwrap();
+        request.config.device_mode = RuntimeDeviceMode::Cpu;
+        request.config.context_size = Some(8192);
+
+        let mut context = valid_context();
+        context.profile = Some(ServingValidationProfile {
+            provider: RuntimeProviderId::LlamaCpp,
+            provider_mode: RuntimeProviderMode::LlamaCppRouter,
+            management_mode: RuntimeManagementMode::Managed,
+            state: RuntimeLifecycleState::Running,
+            device_mode: RuntimeDeviceMode::Cpu,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
+        });
+
+        let response = validate_model_serving_request(&request, &context);
+
+        assert!(response.valid);
+    }
+
+    #[test]
+    fn validation_rejects_llama_cpp_router_context_change_with_loaded_models() {
+        let mut request = request();
+        request.config.provider = RuntimeProviderId::LlamaCpp;
+        request.config.profile_id = RuntimeProfileId::parse("llama-router").unwrap();
+        request.config.device_mode = RuntimeDeviceMode::Cpu;
+        request.config.context_size = Some(8192);
+
+        let mut context = valid_context();
+        context.profile = Some(ServingValidationProfile {
+            provider: RuntimeProviderId::LlamaCpp,
+            provider_mode: RuntimeProviderMode::LlamaCppRouter,
+            management_mode: RuntimeManagementMode::Managed,
+            state: RuntimeLifecycleState::Running,
+            device_mode: RuntimeDeviceMode::Cpu,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
+        });
+        let mut loaded = loaded_status("models/loaded", "llama-router", Some("loaded"));
+        loaded.context_size = Some(4096);
+        context.served_models = vec![loaded];
+
+        let response = validate_model_serving_request(&request, &context);
+
+        assert!(!response.valid);
+        assert!(response.errors.iter().any(|error| {
+            error.code == ModelServeErrorCode::UnsupportedPlacement
+                && error.message.contains("cannot be changed")
+        }));
     }
 
     #[test]

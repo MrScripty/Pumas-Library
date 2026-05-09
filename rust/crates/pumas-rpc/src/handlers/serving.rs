@@ -403,7 +403,7 @@ async fn serve_llama_cpp_router_model(
     let endpoint_unreachable = !llama_cpp_router_endpoint_ready(endpoint.as_str()).await;
     let should_restart_for_profile_settings = !profile_not_running
         && !endpoint_unreachable
-        && llama_cpp_router_should_restart_for_profile_settings(state, &profile).await?;
+        && llama_cpp_router_should_restart_for_launch_settings(state, &request, &profile).await?;
     if should_restart_for_profile_settings {
         if let Err(err) = state
             .api
@@ -426,7 +426,7 @@ async fn serve_llama_cpp_router_model(
         }
     }
     if profile_not_running || endpoint_unreachable || should_restart_for_profile_settings {
-        if let Some(error) = launch_llama_cpp_router_profile(state, &request).await? {
+        if let Some(error) = launch_llama_cpp_router_profile(state, &request, &profile).await? {
             return non_critical_failure_response(state, error).await;
         }
         if !llama_cpp_router_endpoint_ready(endpoint.as_str()).await {
@@ -481,14 +481,19 @@ async fn serve_llama_cpp_router_model(
     })?)
 }
 
-async fn llama_cpp_router_should_restart_for_profile_settings(
+async fn llama_cpp_router_should_restart_for_launch_settings(
     state: &AppState,
+    request: &ServeModelRequest,
     profile: &RuntimeProfileConfig,
 ) -> pumas_library::Result<bool> {
     if profile.management_mode != RuntimeManagementMode::Managed
         || profile.provider_mode != RuntimeProviderMode::LlamaCppRouter
-        || !llama_cpp_router_profile_has_explicit_device_settings(profile)
     {
+        return Ok(false);
+    }
+    let has_launch_overrides = llama_cpp_router_profile_has_explicit_device_settings(profile)
+        || request.config.context_size.is_some();
+    if !has_launch_overrides {
         return Ok(false);
     }
     let snapshot = state.api.get_serving_status().await?.snapshot;
@@ -513,6 +518,7 @@ fn llama_cpp_router_profile_has_explicit_device_settings(profile: &RuntimeProfil
 async fn launch_llama_cpp_router_profile(
     state: &AppState,
     request: &ServeModelRequest,
+    profile: &RuntimeProfileConfig,
 ) -> pumas_library::Result<Option<ModelServeError>> {
     let Some((tag, version_dir)) = active_llama_cpp_runtime(state, request).await? else {
         return Ok(Some(serving_error(
@@ -528,7 +534,7 @@ async fn launch_llama_cpp_router_profile(
             &tag,
             &version_dir,
             Some(&request.model_id),
-            Some(llama_cpp_launch_overrides(request)),
+            Some(llama_cpp_router_launch_overrides(request, profile)),
         )
         .await;
     match launch_response {
@@ -658,6 +664,16 @@ fn llama_cpp_launch_overrides(request: &ServeModelRequest) -> RuntimeProfileLaun
             gpu_layers: request.config.gpu_layers,
             tensor_split: request.config.tensor_split.clone(),
         }),
+        context_size: request.config.context_size,
+    }
+}
+
+fn llama_cpp_router_launch_overrides(
+    request: &ServeModelRequest,
+    profile: &RuntimeProfileConfig,
+) -> RuntimeProfileLaunchOverrides {
+    RuntimeProfileLaunchOverrides {
+        device: Some(profile.device.clone()),
         context_size: request.config.context_size,
     }
 }
@@ -1137,6 +1153,38 @@ mod tests {
         assert!(llama_cpp_router_profile_has_explicit_device_settings(
             &profile
         ));
+    }
+
+    #[test]
+    fn llama_cpp_router_launch_overrides_use_profile_device_and_request_context() {
+        let mut profile = RuntimeProfileConfig::default_ollama();
+        profile.provider = RuntimeProviderId::LlamaCpp;
+        profile.provider_mode = RuntimeProviderMode::LlamaCppRouter;
+        profile.device.mode = RuntimeDeviceMode::Gpu;
+        profile.device.gpu_layers = Some(20);
+        profile.device.tensor_split = Some(vec![1.0, 1.0]);
+        let request = ServeModelRequest {
+            model_id: "models/example.gguf".to_string(),
+            config: pumas_library::models::ModelServingConfig {
+                provider: RuntimeProviderId::LlamaCpp,
+                profile_id: RuntimeProfileId::parse("llama-router").unwrap(),
+                device_mode: RuntimeDeviceMode::Gpu,
+                device_id: None,
+                gpu_layers: None,
+                tensor_split: None,
+                context_size: Some(8192),
+                keep_loaded: true,
+                model_alias: None,
+            },
+        };
+
+        let overrides = llama_cpp_router_launch_overrides(&request, &profile);
+
+        let device = overrides.device.expect("router device override");
+        assert_eq!(device.mode, RuntimeDeviceMode::Gpu);
+        assert_eq!(device.gpu_layers, Some(20));
+        assert_eq!(device.tensor_split, Some(vec![1.0, 1.0]));
+        assert_eq!(overrides.context_size, Some(8192));
     }
 
     #[test]

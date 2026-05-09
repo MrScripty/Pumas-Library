@@ -63,6 +63,7 @@ export function getPlacementControls(
 ): ModelServeControls {
   const supportsModelPlacement = isDedicatedLlamaCppProfile(profile);
   const canUseGpuPlacement = supportsModelPlacement && deviceMode !== 'cpu';
+  const supportsContextSize = isLlamaCppProfile(profile);
 
   return {
     showDeviceControls: supportsModelPlacement,
@@ -71,7 +72,7 @@ export function getPlacementControls(
     showTensorSplit:
       canUseGpuPlacement &&
       (deviceMode === 'gpu' || deviceMode === 'hybrid' || deviceMode === 'specific_device'),
-    showContextSize: supportsModelPlacement,
+    showContextSize: supportsContextSize,
   };
 }
 

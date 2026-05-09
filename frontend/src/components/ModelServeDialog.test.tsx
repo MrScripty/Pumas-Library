@@ -169,7 +169,7 @@ describe('ModelServeDialog', () => {
     expect(screen.getByRole('button', { name: 'Start serving' })).toBeEnabled();
   });
 
-  it('uses router profile placement without per-model overrides', () => {
+  it('uses router profile placement with launch-level context', () => {
     render(
       <ModelServeDialog
         model={{
@@ -192,7 +192,7 @@ describe('ModelServeDialog', () => {
     expect(screen.queryByRole('combobox', { name: /model device/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('spinbutton', { name: /model gpu layers/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: /model tensor split/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('spinbutton', { name: /context/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(4096);
     expect(screen.getByRole('button', { name: 'Start serving' })).toBeEnabled();
   });
 
@@ -313,6 +313,67 @@ describe('ModelServeDialog', () => {
     expect(request?.config.context_size).toBe(4096);
     expect(request?.config.keep_loaded).toBe(true);
     expect(screen.getByText('Loaded')).toBeInTheDocument();
+  });
+
+  it('passes context size for router profile serving', async () => {
+    const validateModelServingConfig = vi.fn<
+      (_request: ServeModelRequest) => Promise<ModelServeValidationResponse>
+    >().mockResolvedValue({
+      success: true,
+      valid: true,
+      errors: [],
+      warnings: [],
+    });
+    const serveModel = vi.fn<(_request: ServeModelRequest) => Promise<ServeModelResponse>>()
+      .mockResolvedValue({
+        success: true,
+        loaded: true,
+        loaded_models_unchanged: false,
+        status: null,
+        load_error: null,
+        snapshot: null,
+      });
+    getElectronAPIMock.mockReturnValue({
+      get_serving_status: vi.fn().mockResolvedValue({
+        success: true,
+        snapshot: {
+          cursor: 'serving:0',
+          endpoint: { endpoint_mode: 'not_configured', model_count: 0 },
+          served_models: [],
+          recent_errors: [],
+        },
+      }),
+      validate_model_serving_config: validateModelServingConfig,
+      serve_model: serveModel,
+    });
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'model-router-serve',
+          name: 'Router Serve Model',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        initialProfileId="router-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByRole('spinbutton', { name: /context/i }), {
+      target: { value: '8192' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start serving' }));
+
+    await waitFor(() => expect(serveModel).toHaveBeenCalledTimes(1));
+    expect(validateModelServingConfig.mock.calls[0]?.[0].config).toMatchObject({
+      provider: 'llama_cpp',
+      profile_id: 'router-llama',
+      device_mode: 'gpu',
+      context_size: 8192,
+    });
+    expect(validateModelServingConfig.mock.calls[0]?.[0].config.gpu_layers).toBeNull();
+    expect(validateModelServingConfig.mock.calls[0]?.[0].config.tensor_split).toBeNull();
   });
 
   it('requires a unique alias when the same model is served on another profile', async () => {

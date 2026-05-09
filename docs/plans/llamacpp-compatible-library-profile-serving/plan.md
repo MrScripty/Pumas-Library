@@ -545,6 +545,17 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
   Verified with
   `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx`
   and `npm run -w frontend check:types`.
+- 2026-05-09: Fixed router context handling. The serving form now exposes
+  context size for llama.cpp router profiles, backend validation allows router
+  context before load, managed idle routers relaunch with `--ctx-size`, and
+  context changes are rejected only when models are already loaded on that
+  router profile. Router launches now use the saved profile device settings
+  plus the requested context size, instead of sparse per-load device fields.
+  Verified with `npm run -w frontend test:run -- ModelServeDialog.test.tsx
+  LlamaCppModelLibrarySection.test.tsx`, `npm run -w frontend check:types`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml validation_`,
+  and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml
+  llama_cpp_router_launch_overrides_use_profile_device_and_request_context`.
 
 **Discovered issues:**
 - Spontaneous runtime process crashes or unreachable provider endpoints are only

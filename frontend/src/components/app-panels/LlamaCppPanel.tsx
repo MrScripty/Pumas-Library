@@ -1,6 +1,7 @@
 import { AppConnectionInfo } from '../AppConnectionInfo';
-import { ModelManager, type ModelManagerProps } from '../ModelManager';
+import type { ModelManagerProps } from '../ModelManager';
 import { VersionManagementPanel } from './VersionManagementPanel';
+import { LlamaCppModelLibrarySection } from './sections/LlamaCppModelLibrarySection';
 import { RuntimeProfileSettingsSection } from './sections/RuntimeProfileSettingsSection';
 import type { AppVersionState } from '../../utils/appVersionState';
 
@@ -45,7 +46,16 @@ export function LlamaCppPanel({
 
       {!isManagerOpen && <RuntimeProfileSettingsSection provider="llama_cpp" />}
 
-      {!isManagerOpen && <ModelManager {...modelManagerProps} />}
+      {!isManagerOpen && (
+        <LlamaCppModelLibrarySection
+          excludedModels={modelManagerProps.excludedModels}
+          modelGroups={modelManagerProps.modelGroups}
+          servedModels={modelManagerProps.servedModels}
+          starredModels={modelManagerProps.starredModels}
+          onToggleLink={modelManagerProps.onToggleLink}
+          onToggleStar={modelManagerProps.onToggleStar}
+        />
+      )}
     </div>
   );
 }

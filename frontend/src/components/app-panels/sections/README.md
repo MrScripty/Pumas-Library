@@ -12,6 +12,7 @@ Composable section components used by app panels to render status, selectors, de
 | `OllamaRegisteredModels.tsx` | Presentational registered Ollama model list with load, unload, delete, loaded-state, and VRAM details. |
 | `OllamaRegisteredModels.test.tsx` | Rendering and interaction coverage for registered Ollama model state, actions, disabled controls, and size formatting. |
 | `OllamaModelSection.tsx` | Ollama library/registered model controls; refreshes from running-state changes, local operations, and runtime-profile update events rather than owning a polling interval. |
+| `LlamaCppModelLibrarySection.tsx` | Focused llama.cpp local model library panel that lists compatible GGUF models without entering the generic remote-download model manager state machine. |
 | `RuntimeProfileSettingsSection.tsx` | Backend-confirmed runtime profile settings section for Ollama and llama.cpp profile lifecycle. |
 | `RuntimeProfileSettingsEditor.tsx` | Runtime profile editor shell that composes field and action subcomponents. |
 | `RuntimeProfileSettingsFields.tsx` | Runtime profile identity, endpoint, mode, and device setting fields. |

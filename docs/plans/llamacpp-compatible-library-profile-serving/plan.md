@@ -348,17 +348,17 @@ focused compatible-model panel while preserving the existing `ModelManager`
 public usage elsewhere.
 
 **Tasks:**
-- [ ] Add a `LlamaCppModelLibrarySection` or equivalent component under the
+- [x] Add a `LlamaCppModelLibrarySection` or equivalent component under the
       app-panel section area.
 - [ ] Feed it the existing model groups, runtime profile snapshot, route
       snapshot, and serving snapshot.
-- [ ] Render only compatible models using existing row visual patterns without
+- [x] Render only compatible models using existing row visual patterns without
       importing the generic model manager's remote-search/download state
       machine.
-- [ ] Do not add llama.cpp-specific profile controls to `ModelManager`,
+- [x] Do not add llama.cpp-specific profile controls to `ModelManager`,
       `LocalModelsList`, `LocalModelRow`, or `LocalModelInstalledActions` except
       through generic extension points that do not change other app behavior.
-- [ ] Avoid putting cards inside cards; keep the panel as the existing app-page
+- [x] Avoid putting cards inside cards; keep the panel as the existing app-page
       lower workspace.
 - [ ] Keep search/filter behavior if practical by reusing existing pure
       filtering helpers, but do not expose remote-download mode in this page
@@ -371,7 +371,21 @@ public usage elsewhere.
   `ModelManager` path.
 - Accessibility tests use named buttons/selectors, not generic role counts.
 
-**Status:** Not started.
+**Status:** In progress.
+
+**Progress:**
+- 2026-05-09: Added a display-only llama.cpp model library section and swapped
+  the llama.cpp page away from the generic `ModelManager` lower panel. The new
+  panel uses the llama.cpp compatibility view model and excludes incompatible
+  local models without touching generic `ModelManager` behavior. Verified with
+  `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx` and
+  `npm run -w frontend check:types`.
+
+**Discovered issues:**
+- The first panel slice intentionally passes empty runtime profiles and routes;
+  Milestone 5 must wire backend-confirmed route/profile snapshots before route
+  labels can be truthful.
+- Search/filter behavior is not yet present in the llama.cpp-specific panel.
 
 ### Milestone 5: Row Profile Selection And Route Persistence
 

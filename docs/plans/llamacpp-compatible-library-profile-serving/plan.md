@@ -486,10 +486,10 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
       profiles.
 - [ ] Allow a quick serve action where the selected route/profile is already
       valid and no alias conflict exists.
-- [ ] Require or prompt for a unique alias when the same model is already served
+- [x] Require or prompt for a unique alias when the same model is already served
       through another profile, and pass that alias through
       `ModelServingConfig.model_alias`.
-- [ ] Preserve the existing dialog for advanced context/gpu-layer/tensor-split
+- [x] Preserve the existing dialog for advanced context/gpu-layer/tensor-split
       overrides.
 - [ ] Ensure successful serve refreshes backend serving status and row display.
 - [x] Ensure row unload targets the selected served instance instead of the first
@@ -520,6 +520,13 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
   serving-status unload updates. Verified with
   `cargo fmt --manifest-path rust/crates/pumas-core/Cargo.toml` and
   `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml serving_service_removes_profile_models_when_profile_becomes_unavailable`.
+- 2026-05-09: Added duplicate-instance alias prompting in
+  `ModelServeDialog`; when the same model is already served through another
+  profile, start serving requires a unique gateway alias and passes it through
+  `ModelServingConfig.model_alias` while preserving existing advanced placement
+  controls. Verified with
+  `npm run -w frontend test:run -- ModelServeDialog.test.tsx
+  useModelServingActions.test.ts` and `npm run -w frontend check:types`.
 
 **Discovered issues:**
 - Spontaneous runtime process crashes or unreachable provider endpoints are only

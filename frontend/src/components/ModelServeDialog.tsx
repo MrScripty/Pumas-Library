@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRuntimeProfiles } from '../hooks/useRuntimeProfiles';
 import type { RuntimeDeviceMode, RuntimeProviderId } from '../types/api-runtime-profiles';
 import type { ModelInfo } from '../types/apps';
+import type { ServedModelStatus } from '../types/api-serving';
+import { getElectronAPI } from '../api/adapter';
 import { ModelServeDialogContent } from './model-serve/ModelServeDialogContent';
 import {
   buildModelServingConfig,
@@ -49,6 +51,8 @@ export function ModelServeDialog({
   const [tensorSplit, setTensorSplit] = useState('');
   const [contextSize, setContextSize] = useState('');
   const [keepLoaded, setKeepLoaded] = useState(true);
+  const [modelAlias, setModelAlias] = useState('');
+  const [servedModels, setServedModels] = useState<ServedModelStatus[]>([]);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const profileSelectRef = useRef<HTMLSelectElement | null>(null);
   const isDialogMode = displayMode === 'dialog';
@@ -94,6 +98,16 @@ export function ModelServeDialog({
   const selectedProfile = servingProfiles.find((profile) => profile.profile_id === profileId);
   const selectedStatus =
     runtimeProfiles.statuses.find((status) => status.profile_id === profileId) ?? null;
+  const aliasRequired = servedModels.some(
+    (servedModel) =>
+      servedModel.model_id === model.id &&
+      servedModel.load_state !== 'failed' &&
+      servedModel.profile_id !== profileId
+  );
+  const aliasError =
+    aliasRequired && !modelAlias.trim()
+      ? 'Enter a unique gateway alias before serving this additional instance.'
+      : null;
   const controls = getPlacementControls(selectedProfile, deviceMode);
   const profileStateBlockReason = getProfileStateBlockReason(selectedProfile, selectedStatus);
   const serveBlockReason = buildServeBlockReason({
@@ -117,6 +131,23 @@ export function ModelServeDialog({
     setContextSize(isLlamaCppProfile(selectedProfile) ? DEFAULT_LLAMA_CPP_CONTEXT_SIZE : '');
   }, [selectedProfile]);
 
+  useEffect(() => {
+    const electronAPI = getElectronAPI();
+    if (!electronAPI?.get_serving_status) {
+      return;
+    }
+
+    let isActive = true;
+    void electronAPI.get_serving_status().then((response) => {
+      if (isActive && response.success) {
+        setServedModels(response.snapshot.served_models);
+      }
+    });
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
   const formState: ModelServeFormState = {
     deviceMode,
     deviceId,
@@ -124,6 +155,7 @@ export function ModelServeDialog({
     tensorSplit,
     contextSize,
     keepLoaded,
+    modelAlias,
   };
   const buildConfig = () =>
     buildModelServingConfig({
@@ -140,10 +172,17 @@ export function ModelServeDialog({
       isSubmitting={servingActions.isSubmitting}
       message={servingActions.message}
       model={model}
+      aliasRequired={aliasRequired}
+      aliasError={aliasError}
       onBack={onBack}
       onClose={onClose}
       onProfileIdChange={setProfileId}
-      onServe={() => void servingActions.serveModel(buildConfig())}
+      onServe={() => {
+        if (aliasError) {
+          return;
+        }
+        void servingActions.serveModel(buildConfig());
+      }}
       onUnload={() => void servingActions.unloadModel()}
       profileId={profileId}
       profileSelectRef={profileSelectRef}
@@ -158,6 +197,7 @@ export function ModelServeDialog({
       setDeviceMode={setDeviceMode}
       setGpuLayers={setGpuLayers}
       setKeepLoaded={setKeepLoaded}
+      setModelAlias={setModelAlias}
       setTensorSplit={setTensorSplit}
     />
   );

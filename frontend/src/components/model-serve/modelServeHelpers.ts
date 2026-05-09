@@ -31,6 +31,7 @@ export interface ModelServeFormState {
   tensorSplit: string;
   contextSize: string;
   keepLoaded: boolean;
+  modelAlias: string;
 }
 
 export function formatServeError(error: ModelServeError | null): string | null {
@@ -152,6 +153,6 @@ export function buildModelServingConfig({
         ? Number(formState.contextSize)
         : null,
     keep_loaded: formState.keepLoaded,
-    model_alias: null,
+    model_alias: formState.modelAlias.trim() ? formState.modelAlias.trim() : null,
   };
 }

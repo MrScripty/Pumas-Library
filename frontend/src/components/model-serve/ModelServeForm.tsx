@@ -22,11 +22,14 @@ type ModelServeFormProps = {
   selectedProfile: RuntimeProfileConfig | undefined;
   selectedStatus: RuntimeProfileStatus | null;
   serveBlockReason: string | null;
+  aliasRequired: boolean;
+  aliasError: string | null;
   setContextSize: (value: string) => void;
   setDeviceId: (value: string) => void;
   setDeviceMode: (value: RuntimeDeviceMode) => void;
   setGpuLayers: (value: string) => void;
   setKeepLoaded: (value: boolean) => void;
+  setModelAlias: (value: string) => void;
   setTensorSplit: (value: string) => void;
 };
 
@@ -41,11 +44,14 @@ export function ModelServeForm({
   selectedProfile,
   selectedStatus,
   serveBlockReason,
+  aliasRequired,
+  aliasError,
   setContextSize,
   setDeviceId,
   setDeviceMode,
   setGpuLayers,
   setKeepLoaded,
+  setModelAlias,
   setTensorSplit,
 }: ModelServeFormProps) {
   return (
@@ -62,6 +68,12 @@ export function ModelServeForm({
         serveBlockReason={serveBlockReason}
       />
       <ProfileSummary selectedProfile={selectedProfile} selectedStatus={selectedStatus} />
+      <AliasControls
+        aliasError={aliasError}
+        aliasRequired={aliasRequired}
+        formState={formState}
+        setModelAlias={setModelAlias}
+      />
       <PlacementControls
         controls={controls}
         formState={formState}
@@ -80,6 +92,42 @@ export function ModelServeForm({
         Keep loaded
       </label>
     </div>
+  );
+}
+
+function AliasControls({
+  aliasError,
+  aliasRequired,
+  formState,
+  setModelAlias,
+}: {
+  aliasError: string | null;
+  aliasRequired: boolean;
+  formState: ModelServeFormState;
+  setModelAlias: (value: string) => void;
+}) {
+  if (!aliasRequired && !formState.modelAlias.trim()) {
+    return null;
+  }
+
+  return (
+    <label className="grid gap-1 text-xs text-[hsl(var(--text-secondary))]">
+      Gateway alias
+      <input
+        value={formState.modelAlias}
+        onChange={(event) => setModelAlias(event.target.value)}
+        placeholder="unique-model-alias"
+        className="rounded border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-base))] px-2 py-1.5 text-sm text-[hsl(var(--text-primary))]"
+      />
+      {aliasRequired && (
+        <span className="text-[hsl(var(--text-muted))]">
+          This model is already served on another profile. Use a unique alias for this instance.
+        </span>
+      )}
+      {aliasError && (
+        <span className="text-[hsl(var(--accent-error))]">{aliasError}</span>
+      )}
+    </label>
   );
 }
 

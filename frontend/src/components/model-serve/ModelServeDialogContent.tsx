@@ -24,6 +24,8 @@ interface ModelServeDialogContentProps {
   selectedProfile: RuntimeProfileConfig | undefined;
   selectedStatus: RuntimeProfileStatus | null;
   serveBlockReason: string | null;
+  aliasRequired: boolean;
+  aliasError: string | null;
   formState: ModelServeFormState;
   setDeviceMode: (value: RuntimeDeviceMode) => void;
   setDeviceId: (value: string) => void;
@@ -31,6 +33,7 @@ interface ModelServeDialogContentProps {
   setTensorSplit: (value: string) => void;
   setContextSize: (value: string) => void;
   setKeepLoaded: (value: boolean) => void;
+  setModelAlias: (value: string) => void;
   controls: ModelServeControls;
   serveError: ModelServeError | null;
   message: string | null;
@@ -53,6 +56,8 @@ export function ModelServeDialogContent({
   selectedProfile,
   selectedStatus,
   serveBlockReason,
+  aliasRequired,
+  aliasError,
   formState,
   setDeviceMode,
   setDeviceId,
@@ -60,6 +65,7 @@ export function ModelServeDialogContent({
   setTensorSplit,
   setContextSize,
   setKeepLoaded,
+  setModelAlias,
   controls,
   serveError,
   message,
@@ -94,11 +100,14 @@ export function ModelServeDialogContent({
         selectedProfile={selectedProfile}
         selectedStatus={selectedStatus}
         serveBlockReason={serveBlockReason}
+        aliasRequired={aliasRequired}
+        aliasError={aliasError}
         setContextSize={setContextSize}
         setDeviceId={setDeviceId}
         setDeviceMode={setDeviceMode}
         setGpuLayers={setGpuLayers}
         setKeepLoaded={setKeepLoaded}
+        setModelAlias={setModelAlias}
         setTensorSplit={setTensorSplit}
       />
       <ModelServeFeedback message={message} serveError={serveError} />

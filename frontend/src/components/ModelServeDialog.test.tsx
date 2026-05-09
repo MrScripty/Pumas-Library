@@ -315,6 +315,79 @@ describe('ModelServeDialog', () => {
     expect(screen.getByText('Loaded')).toBeInTheDocument();
   });
 
+  it('requires a unique alias when the same model is served on another profile', async () => {
+    const validateModelServingConfig = vi.fn<
+      (_request: ServeModelRequest) => Promise<ModelServeValidationResponse>
+    >().mockResolvedValue({
+      success: true,
+      valid: true,
+      errors: [],
+      warnings: [],
+    });
+    const serveModel = vi.fn<(_request: ServeModelRequest) => Promise<ServeModelResponse>>()
+      .mockResolvedValue({
+        success: true,
+        loaded: true,
+        loaded_models_unchanged: false,
+        status: null,
+        load_error: null,
+        snapshot: null,
+      });
+    getElectronAPIMock.mockReturnValue({
+      get_serving_status: vi.fn().mockResolvedValue({
+        success: true,
+        snapshot: {
+          cursor: 'serving:1',
+          endpoint: { endpoint_mode: 'pumas_gateway', model_count: 1 },
+          served_models: [
+            {
+              model_id: 'model-duplicate',
+              model_alias: 'duplicate-cpu',
+              provider: 'llama_cpp',
+              profile_id: 'cpu-llama',
+              load_state: 'loaded',
+              device_mode: 'cpu',
+              keep_loaded: true,
+            },
+          ],
+          last_errors: [],
+        },
+      }),
+      validate_model_serving_config: validateModelServingConfig,
+      serve_model: serveModel,
+    });
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'model-duplicate',
+          name: 'Duplicate Model',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(
+      await screen.findByText(
+        'This model is already served on another profile. Use a unique alias for this instance.'
+      )
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start serving' }));
+    expect(serveModel).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole('textbox', { name: /gateway alias/i }), {
+      target: { value: 'duplicate-gpu' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Start serving' }));
+
+    await waitFor(() => expect(serveModel).toHaveBeenCalledTimes(1));
+    expect(validateModelServingConfig.mock.calls[0]?.[0].config.model_alias).toBe('duplicate-gpu');
+  });
+
   it('keeps start serving actionable while profile refresh is loading', async () => {
     useRuntimeProfilesMock.mockReturnValue({
       snapshot,

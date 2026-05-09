@@ -52,7 +52,7 @@ export function ModelServeDialog({
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const profileSelectRef = useRef<HTMLSelectElement | null>(null);
   const isDialogMode = displayMode === 'dialog';
-  const servingActions = useModelServingActions(model.id);
+  const servingActions = useModelServingActions(model.id, { profileId });
 
   useDialogFocusTrap({
     dialogRef,

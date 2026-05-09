@@ -30,7 +30,35 @@ function getProviderLoadFailedError(modelId: string, profileId: string): ModelSe
   };
 }
 
-export function useModelServingActions(modelId: string) {
+export interface ModelServingActionTarget {
+  modelAlias?: string | null;
+  profileId?: string | null;
+}
+
+function matchesServingTarget(
+  servedModel: ServedModelStatus,
+  modelId: string,
+  target: ModelServingActionTarget
+): boolean {
+  if (servedModel.model_id !== modelId) {
+    return false;
+  }
+  if (target.profileId && servedModel.profile_id !== target.profileId) {
+    return false;
+  }
+  if (
+    target.modelAlias !== undefined &&
+    (servedModel.model_alias ?? null) !== target.modelAlias
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function useModelServingActions(
+  modelId: string,
+  target: ModelServingActionTarget = {}
+) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [serveError, setServeError] = useState<ModelServeError | null>(null);
@@ -47,8 +75,8 @@ export function useModelServingActions(modelId: string) {
       if (!isActive || !response.success) {
         return;
       }
-      const status = response.snapshot.served_models.find(
-        (servedModel) => servedModel.model_id === modelId
+      const status = response.snapshot.served_models.find((servedModel) =>
+        matchesServingTarget(servedModel, modelId, target)
       );
       setServedStatus(status ?? null);
       if (status) {
@@ -59,7 +87,7 @@ export function useModelServingActions(modelId: string) {
     return () => {
       isActive = false;
     };
-  }, [modelId]);
+  }, [modelId, target.modelAlias, target.profileId]);
 
   const serveModel = useCallback(
     async (config: ModelServingConfig | null) => {

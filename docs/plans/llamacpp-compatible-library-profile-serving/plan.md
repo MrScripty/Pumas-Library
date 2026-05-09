@@ -297,9 +297,9 @@ profiles.
 - [x] Derive served-state maps once per llama.cpp panel render path:
       `servedStatusesByModelId`, selected-profile served status, and
       profile/alias keyed status.
-- [ ] Stop using `model_id` alone for llama.cpp row loaded-state display,
+- [x] Stop using `model_id` alone for llama.cpp row loaded-state display,
       selected-profile status, or unload targeting.
-- [ ] Update `useModelServingActions` or add a llama.cpp-specific action wrapper
+- [x] Update `useModelServingActions` or add a llama.cpp-specific action wrapper
       so serve/unserve can target an optional `profile_id` and `model_alias`.
 - [x] Add backend serving validation that rejects ambiguous duplicate aliases
       before recording a loaded model or exposing it through the Pumas `/v1`
@@ -340,6 +340,11 @@ profiles.
   rust/crates/pumas-core/Cargo.toml validation_`, `cargo test --manifest-path
   rust/crates/pumas-rpc/Cargo.toml openai_lookup`, and
   `npm run -w frontend check:types`.
+- 2026-05-09: Updated serving actions to target the selected served profile
+  instead of the first matching `model_id`, so row/page unload requests include
+  the intended `profile_id` and backend-confirmed `model_alias`. Verified with
+  `npm run -w frontend test:run -- useModelServingActions.test.ts
+  LlamaCppModelLibrarySection.test.tsx` and `npm run -w frontend check:types`.
 
 ### Milestone 4: llama.cpp-Specific Library Panel
 
@@ -475,7 +480,7 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
 - [ ] Preserve the existing dialog for advanced context/gpu-layer/tensor-split
       overrides.
 - [ ] Ensure successful serve refreshes backend serving status and row display.
-- [ ] Ensure row unload targets the selected served instance instead of the first
+- [x] Ensure row unload targets the selected served instance instead of the first
       status with the same `model_id`.
 - [ ] Ensure runtime-profile stop/failure paths remove or mark affected
       `ServedModelStatus` entries and publish serving-status updates.

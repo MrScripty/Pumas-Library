@@ -494,7 +494,7 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
 - [ ] Ensure successful serve refreshes backend serving status and row display.
 - [x] Ensure row unload targets the selected served instance instead of the first
       status with the same `model_id`.
-- [ ] Ensure runtime-profile stop/failure paths remove or mark affected
+- [x] Ensure runtime-profile stop/failure paths remove or mark affected
       `ServedModelStatus` entries and publish serving-status updates.
 
 **Verification:**
@@ -515,6 +515,18 @@ support simultaneous CPU/GPU serving behind the Pumas gateway.
   Ollama profiles. Verified with
   `npm run -w frontend test:run -- LlamaCppModelLibrarySection.test.tsx` and
   `npm run -w frontend check:types`.
+- 2026-05-09: Runtime profile launch failure, stop success, and stop failure
+  now clear served-model state owned by that profile and publish
+  serving-status unload updates. Verified with
+  `cargo fmt --manifest-path rust/crates/pumas-core/Cargo.toml` and
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml serving_service_removes_profile_models_when_profile_becomes_unavailable`.
+
+**Discovered issues:**
+- Spontaneous runtime process crashes or unreachable provider endpoints are only
+  reflected in served-model state after another backend lifecycle/status path
+  records that profile as failed or stopped. Add crash/unreachable detection in
+  a separate runtime supervision slice if manual testing shows stale served
+  state after external process death.
 
 ### Milestone 8: Documentation And Release Validation
 

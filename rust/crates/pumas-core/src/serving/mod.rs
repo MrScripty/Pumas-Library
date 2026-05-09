@@ -159,6 +159,51 @@ impl ServingService {
         snapshot.clone()
     }
 
+    pub async fn record_profile_unavailable(
+        &self,
+        profile_id: &RuntimeProfileId,
+    ) -> Option<ServingStatusSnapshot> {
+        let mut snapshot = self.snapshot.write().await;
+        let mut removed_models = Vec::new();
+        snapshot.served_models.retain(|status| {
+            if &status.profile_id == profile_id {
+                removed_models.push(status.clone());
+                return false;
+            }
+            true
+        });
+
+        if removed_models.is_empty() {
+            return None;
+        }
+
+        snapshot.endpoint.model_count = snapshot.served_models.len() as u32;
+        if snapshot.served_models.is_empty() {
+            snapshot.endpoint = ServingEndpointStatus::not_configured();
+        }
+        bump_snapshot_cursor(&mut snapshot);
+        let cursor = snapshot.cursor.clone();
+        let events = removed_models
+            .into_iter()
+            .map(|status| {
+                serving_status_event(
+                    cursor.clone(),
+                    ServingStatusEventKind::ModelUnloaded,
+                    Some(status.model_id),
+                    Some(status.profile_id),
+                    Some(status.provider),
+                )
+            })
+            .collect();
+        self.publish_feed(ServingStatusUpdateFeed {
+            cursor,
+            events,
+            stale_cursor: false,
+            snapshot_required: false,
+        });
+        Some(snapshot.clone())
+    }
+
     pub async fn find_served_model(
         &self,
         model_id: &str,
@@ -184,11 +229,20 @@ impl ServingService {
     }
 
     fn publish_event(&self, event: ServingStatusEvent) {
-        let _ = self.updates.send(ServingStatusUpdateFeed {
+        self.publish_feed(ServingStatusUpdateFeed {
             cursor: event.cursor.clone(),
             events: vec![event],
             stale_cursor: false,
             snapshot_required: false,
+        });
+    }
+
+    fn publish_feed(&self, feed: ServingStatusUpdateFeed) {
+        let _ = self.updates.send(ServingStatusUpdateFeed {
+            cursor: feed.cursor,
+            events: feed.events,
+            stale_cursor: feed.stale_cursor,
+            snapshot_required: feed.snapshot_required,
         });
     }
 }
@@ -822,6 +876,68 @@ mod tests {
                 .feed
                 .snapshot_required
         );
+    }
+
+    #[tokio::test]
+    async fn serving_service_removes_profile_models_when_profile_becomes_unavailable() {
+        let service = ServingService::new();
+        let mut updates = service.subscribe_updates();
+        let profile_id = RuntimeProfileId::parse("llama-gpu").unwrap();
+
+        service
+            .record_loaded_model(loaded_status("models/keep", "llama-cpu", Some("keep-cpu")))
+            .await;
+        service
+            .record_loaded_model(loaded_status(
+                "models/remove-a",
+                "llama-gpu",
+                Some("remove-gpu-a"),
+            ))
+            .await;
+        service
+            .record_loaded_model(loaded_status(
+                "models/remove-b",
+                "llama-gpu",
+                Some("remove-gpu-b"),
+            ))
+            .await;
+        for _ in 0..3 {
+            updates.recv().await.unwrap();
+        }
+
+        let snapshot = service
+            .record_profile_unavailable(&profile_id)
+            .await
+            .expect("profile-owned served models should be removed");
+
+        assert_eq!(snapshot.served_models.len(), 1);
+        assert_eq!(snapshot.served_models[0].model_id, "models/keep");
+        assert_eq!(snapshot.endpoint.model_count, 1);
+        assert_eq!(
+            snapshot.endpoint.endpoint_mode,
+            ServingEndpointMode::PumasGateway
+        );
+
+        let feed = updates.recv().await.unwrap();
+        assert_eq!(feed.cursor, snapshot.cursor);
+        assert_eq!(feed.events.len(), 2);
+        assert!(feed.events.iter().all(|event| event.event_kind
+            == ServingStatusEventKind::ModelUnloaded
+            && event.profile_id.as_ref() == Some(&profile_id)
+            && event.provider == Some(RuntimeProviderId::LlamaCpp)));
+        assert!(feed
+            .events
+            .iter()
+            .any(|event| event.model_id.as_deref() == Some("models/remove-a")));
+        assert!(feed
+            .events
+            .iter()
+            .any(|event| event.model_id.as_deref() == Some("models/remove-b")));
+        assert!(service
+            .record_profile_unavailable(&profile_id)
+            .await
+            .is_none());
+        assert!(updates.try_recv().is_err());
     }
 
     #[test]

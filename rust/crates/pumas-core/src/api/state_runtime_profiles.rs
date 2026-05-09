@@ -63,7 +63,7 @@ pub(super) async fn launch_runtime_profile(
     primary
         .runtime_profile_service
         .record_profile_lifecycle_status(RuntimeProfileStatus {
-            profile_id,
+            profile_id: profile_id.clone(),
             state: if launch_result.success {
                 RuntimeLifecycleState::Running
             } else {
@@ -77,6 +77,13 @@ pub(super) async fn launch_runtime_profile(
                 .map(|path| path.to_string_lossy().to_string()),
             last_error: error.clone(),
         })?;
+
+    if !launch_result.success {
+        primary
+            .serving_service
+            .record_profile_unavailable(&profile_id)
+            .await;
+    }
 
     Ok(LaunchResponse {
         success: launch_result.success,
@@ -533,13 +540,17 @@ pub(super) async fn stop_runtime_profile(
             primary
                 .runtime_profile_service
                 .record_profile_lifecycle_status(RuntimeProfileStatus {
-                    profile_id,
+                    profile_id: profile_id.clone(),
                     state: RuntimeLifecycleState::Stopped,
                     endpoint_url: Some(spec.endpoint_url),
                     pid: None,
                     log_path: Some(spec.log_file.to_string_lossy().to_string()),
                     last_error: None,
                 })?;
+            primary
+                .serving_service
+                .record_profile_unavailable(&profile_id)
+                .await;
             Ok(stopped)
         }
         Err(error) => {
@@ -547,13 +558,17 @@ pub(super) async fn stop_runtime_profile(
             primary
                 .runtime_profile_service
                 .record_profile_lifecycle_status(RuntimeProfileStatus {
-                    profile_id,
+                    profile_id: profile_id.clone(),
                     state: RuntimeLifecycleState::Failed,
                     endpoint_url: Some(spec.endpoint_url),
                     pid: None,
                     log_path: Some(spec.log_file.to_string_lossy().to_string()),
                     last_error: Some(error_message),
                 })?;
+            primary
+                .serving_service
+                .record_profile_unavailable(&profile_id)
+                .await;
             Err(error)
         }
     }

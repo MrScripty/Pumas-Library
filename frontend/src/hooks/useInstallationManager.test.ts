@@ -259,12 +259,37 @@ describe('useInstallationManager', () => {
 
     expect(installVersionApiMock).toHaveBeenCalledWith('v1.2.3', 'torch');
     expect(getInstallationProgressMock).toHaveBeenCalledTimes(1);
-    expect(onRefreshVersions).toHaveBeenCalledTimes(1);
+    expect(onRefreshVersions).not.toHaveBeenCalled();
 
     await act(async () => {
       vi.advanceTimersByTime(800);
     });
 
     expect(getInstallationProgressMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps polling when install progress is not initialized yet', async () => {
+    vi.useFakeTimers();
+    getInstallationProgressMock.mockResolvedValue(null);
+
+    const { result } = renderHook(() => useInstallationManager({
+      appId: 'llama-cpp',
+      availableVersions,
+      onRefreshVersions: vi.fn(),
+    }));
+
+    await act(async () => {
+      await result.current.installVersion('v1.2.3');
+    });
+
+    expect(result.current.installingTag).toBe('v1.2.3');
+    expect(result.current.installationProgress).toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+    });
+
+    expect(getInstallationProgressMock).toHaveBeenCalledTimes(2);
+    expect(result.current.installingTag).toBe('v1.2.3');
   });
 });

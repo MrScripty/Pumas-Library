@@ -57,6 +57,8 @@ export function useInstallationManager({
   const installPollRef = useRef<NodeJS.Timeout | null>(null);
   const lastDownloadTagRef = useRef<string | null>(null);
   const lastStageRef = useRef<InstallationProgress['stage'] | null>(null);
+  const pendingInstallTagRef = useRef<string | null>(null);
+  const missingProgressPollsRef = useRef(0);
   const networkStateRef = useRef<NetworkStatusState>(createNetworkStatusState());
   const { getVersionInfo, openActiveInstall, openPath } = useInstallationAccess({
     isEnabled,
@@ -74,7 +76,21 @@ export function useInstallationManager({
     });
     lastDownloadTagRef.current = null;
     lastStageRef.current = null;
+    pendingInstallTagRef.current = null;
+    missingProgressPollsRef.current = 0;
   }, []);
+
+  const stopInstallPolling = useCallback(() => {
+    if (installPollRef.current) {
+      clearInterval(installPollRef.current);
+      installPollRef.current = null;
+    }
+  }, []);
+
+  const startInstallPolling = useCallback((poll: () => void) => {
+    stopInstallPolling();
+    installPollRef.current = setInterval(poll, 800);
+  }, [stopInstallPolling]);
 
   useEffect(() => {
     if (installPollRef.current) {
@@ -94,6 +110,8 @@ export function useInstallationManager({
       const progress = await api.get_installation_progress(resolvedAppId);
 
       if (progress && !progress.completed_at) {
+        pendingInstallTagRef.current = progress.tag || pendingInstallTagRef.current;
+        missingProgressPollsRef.current = 0;
         setInstallingTag(progress.tag || null);
         const trackerState = {
           lastDownloadTag: lastDownloadTagRef.current,
@@ -114,6 +132,8 @@ export function useInstallationManager({
 
         return adjustedProgress;
       } else if (progress?.completed_at && !progress.success) {
+        pendingInstallTagRef.current = null;
+        missingProgressPollsRef.current = 0;
         const trackerState = {
           lastDownloadTag: lastDownloadTagRef.current,
           lastStage: lastStageRef.current,
@@ -128,28 +148,32 @@ export function useInstallationManager({
         lastDownloadTagRef.current = trackerState.lastDownloadTag;
         lastStageRef.current = trackerState.lastStage;
 
-        if (installPollRef.current) {
-          clearInterval(installPollRef.current);
-          installPollRef.current = null;
-        }
+        stopInstallPolling();
         setInstallingTag(null);
         setInstallationProgress(adjustedProgress);
         setInstallNetworkStatus('failed');
 
         return adjustedProgress;
       } else {
+        if (!progress?.completed_at && pendingInstallTagRef.current && missingProgressPollsRef.current < 10) {
+          missingProgressPollsRef.current += 1;
+          setInstallingTag(pendingInstallTagRef.current);
+          return null;
+        }
+
         // Installation completed (progress.completed_at set) or no progress
-        // Clear all state and stop polling
-        if (installPollRef.current) {
-          clearInterval(installPollRef.current);
-          installPollRef.current = null;
+        // Clear all state and stop polling. On successful completion, refresh first so
+        // installed rows can switch to Ready/Uninstall instead of briefly returning to Download.
+        stopInstallPolling();
+
+        if (progress?.completed_at) {
+          pendingInstallTagRef.current = null;
+          missingProgressPollsRef.current = 0;
+          await onRefreshVersions();
+        } else if (pendingInstallTagRef.current) {
+          await onRefreshVersions();
         }
         resetInstallState();
-
-        // Refresh version list when installation completes
-        if (progress?.completed_at) {
-          void onRefreshVersions();
-        }
       }
 
       return null;
@@ -164,7 +188,7 @@ export function useInstallationManager({
       setInstallNetworkStatus('failed');
       return null;
     }
-  }, [availableVersions, isEnabled, onRefreshVersions, resetInstallState, resolvedAppId]);
+  }, [availableVersions, isEnabled, onRefreshVersions, resetInstallState, resolvedAppId, stopInstallPolling]);
 
   // Switch to a different installed version
   const switchVersion = useCallback(async (tag: string) => {
@@ -198,30 +222,23 @@ export function useInstallationManager({
       throw new APIError('API not available', 'install_version');
     }
 
+    pendingInstallTagRef.current = tag;
+    missingProgressPollsRef.current = 0;
     setInstallingTag(tag);
+    startInstallPolling(() => {
+      void fetchInstallationProgress();
+    });
 
     try {
       const result = await api.install_version(tag, resolvedAppId);
       if (result.success) {
-        // Start polling for installation progress
-        if (installPollRef.current) {
-          clearInterval(installPollRef.current);
-        }
-        installPollRef.current = setInterval(() => {
-          void fetchInstallationProgress();
-        }, 800);
-
         await fetchInstallationProgress();
-        await onRefreshVersions();
         return true;
       } else {
         throw new APIError(result.error || 'Failed to install version', 'install_version');
       }
     } catch (error) {
-      if (installPollRef.current) {
-        clearInterval(installPollRef.current);
-        installPollRef.current = null;
-      }
+      stopInstallPolling();
       resetInstallState();
 
       if (error instanceof APIError) {
@@ -233,7 +250,7 @@ export function useInstallationManager({
       }
       throw error;
     }
-  }, [fetchInstallationProgress, isEnabled, onRefreshVersions, resetInstallState, resolvedAppId]);
+  }, [fetchInstallationProgress, isEnabled, resetInstallState, resolvedAppId, startInstallPolling, stopInstallPolling]);
 
   // Remove a version
   const removeVersion = useCallback(async (tag: string) => {

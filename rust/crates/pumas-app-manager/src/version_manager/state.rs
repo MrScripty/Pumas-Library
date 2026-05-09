@@ -13,6 +13,8 @@ use std::sync::Arc;
 use tokio::fs;
 use tracing::{debug, info, warn};
 
+const LLAMA_CPP_BINARY_SEARCH_LIMIT: usize = 4096;
+
 /// Tracks the state of all versions.
 pub struct VersionState {
     /// Root directory for launcher.
@@ -495,7 +497,7 @@ impl VersionState {
                         return Ok(true);
                     }
                 }
-                vec![candidates[0].clone()]
+                return Self::contains_llama_cpp_server_binary(version_path).await;
             }
             _ => {
                 // Generic check - just need the directory to exist
@@ -518,6 +520,59 @@ impl VersionState {
 
         Ok(true)
     }
+
+    async fn contains_llama_cpp_server_binary(version_path: &Path) -> Result<bool> {
+        let binary_names = if cfg!(windows) {
+            ["llama-server.exe", "llama-server", "server.exe", "server"]
+        } else {
+            ["llama-server", "server", "llama-server.exe", "server.exe"]
+        };
+        let mut directories = vec![version_path.to_path_buf()];
+        let mut inspected_entries = 0usize;
+
+        while let Some(directory) = directories.pop() {
+            let mut entries = fs::read_dir(&directory).await.map_err(|e| PumasError::Io {
+                message: format!("Failed to read version directory: {}", e),
+                path: Some(directory.clone()),
+                source: Some(e),
+            })?;
+
+            while let Some(entry) = entries.next_entry().await.map_err(|e| PumasError::Io {
+                message: format!("Failed to iterate version directory: {}", e),
+                path: Some(directory.clone()),
+                source: Some(e),
+            })? {
+                inspected_entries += 1;
+                if inspected_entries > LLAMA_CPP_BINARY_SEARCH_LIMIT {
+                    warn!(
+                        "Stopping llama.cpp binary search after {} entries under {}",
+                        LLAMA_CPP_BINARY_SEARCH_LIMIT,
+                        version_path.display()
+                    );
+                    return Ok(false);
+                }
+
+                let entry_path = entry.path();
+                let file_type = entry.file_type().await.map_err(|e| PumasError::Io {
+                    message: format!("Failed to inspect version entry: {}", e),
+                    path: Some(entry_path.clone()),
+                    source: Some(e),
+                })?;
+
+                if file_type.is_file() {
+                    if let Some(name) = entry_path.file_name().and_then(|name| name.to_str()) {
+                        if binary_names.contains(&name) {
+                            return Ok(true);
+                        }
+                    }
+                } else if file_type.is_dir() {
+                    directories.push(entry_path);
+                }
+            }
+        }
+
+        Ok(false)
+    }
 }
 
 #[cfg(test)]
@@ -525,22 +580,26 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    async fn create_test_state() -> (VersionState, TempDir) {
+    async fn create_test_state_for_app(app_id: AppId) -> (VersionState, TempDir) {
         let temp_dir = TempDir::new().unwrap();
 
         // Create required directories
         std::fs::create_dir_all(temp_dir.path().join("launcher-data/metadata")).unwrap();
         std::fs::create_dir_all(temp_dir.path().join("launcher-data/cache")).unwrap();
-        std::fs::create_dir_all(temp_dir.path().join("comfyui-versions")).unwrap();
+        std::fs::create_dir_all(temp_dir.path().join(app_id.versions_dir_name())).unwrap();
 
         let metadata_manager = Arc::new(MetadataManager::new(temp_dir.path()));
         metadata_manager.ensure_directories().unwrap();
 
-        let state = VersionState::new(temp_dir.path(), AppId::ComfyUI, metadata_manager)
+        let state = VersionState::new(temp_dir.path(), app_id, metadata_manager)
             .await
             .unwrap();
 
         (state, temp_dir)
+    }
+
+    async fn create_test_state() -> (VersionState, TempDir) {
+        create_test_state_for_app(AppId::ComfyUI).await
     }
 
     #[tokio::test]
@@ -686,5 +745,28 @@ mod tests {
         let result = state.validate_installations().await.unwrap();
         assert!(result.removed_tags.contains(&"v1.0.0".to_string()));
         assert!(!state.is_installed("v1.0.0"));
+    }
+
+    #[tokio::test]
+    async fn test_llama_cpp_nested_server_binary_is_complete() {
+        let (mut state, temp) = create_test_state_for_app(AppId::LlamaCpp).await;
+        let version_dir = temp
+            .path()
+            .join("llama-cpp-versions/v1.0.0/llama-b999-bin-ubuntu-x64");
+        std::fs::create_dir_all(&version_dir).unwrap();
+        std::fs::write(version_dir.join("llama-server"), "#!/bin/sh").unwrap();
+
+        let metadata = InstalledVersionMetadata {
+            path: "v1.0.0".to_string(),
+            installed_date: "2024-01-01T00:00:00Z".to_string(),
+            release_tag: "v1.0.0".to_string(),
+            ..Default::default()
+        };
+        state.add_installed_version("v1.0.0", metadata).unwrap();
+
+        let result = state.validate_installations().await.unwrap();
+
+        assert!(result.removed_tags.is_empty());
+        assert!(state.is_installed("v1.0.0"));
     }
 }

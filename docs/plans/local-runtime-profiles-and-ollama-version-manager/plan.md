@@ -596,6 +596,9 @@ The runtime-profile foundation now exists, but the user workflow is still incomp
 **Discovered Issues:**
 - 2026-05-05: `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml` and the plural `runtime_profiles` filter currently match no RPC tests. The full `pumas-rpc` suite covers the registered RPC unit tests, but dedicated runtime-profile handler tests should be added if handler-level behavior expands.
 - 2026-05-05: Release smoke can connect to an already-running primary backend from a previous build. Runtime-profile event compatibility is now throttled for older primaries, but manual verification should restart the app fully before judging new runtime-profile UI behavior.
+- 2026-05-09: The install dialog could stop polling if the first progress read happened before the backend installation tracker initialized, leaving the row on the pending/default progress state. The completion path also reset transient install UI before refreshing installed versions, so a finished install could briefly or persistently render as installable.
+- 2026-05-09: llama.cpp release archives may extract `llama-server` inside a nested archive directory. Existing install validation only checked fixed root/bin/build paths, so a successfully extracted runtime could be treated as incomplete and fail to update the installed-version button state.
+- 2026-05-09: The new llama.cpp version directory was not ignored like `comfyui-versions/`, `ollama-versions/`, and `torch-versions/`, so a successful local install could leave runtime binaries as untracked source-tree files.
 
 ### Milestone 9: Define User-Directed Serving Contracts
 
@@ -930,6 +933,7 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 - 2026-05-08 continuation: added the first llama.cpp app/version-manager slice so users can reach a llama.cpp runtime page, install managed llama.cpp binaries through the existing version manager, and start llama.cpp runtime profiles from a provider-scoped runtime-profile editor instead of a shared provider dropdown.
 - 2026-05-08 continuation: wired managed llama.cpp launches to the active installed llama.cpp version instead of the legacy `launcher-data/llama-cpp/build/bin/llama-server` local-build-only path.
 - 2026-05-08 continuation: split `ModelServeDialog.tsx` and the runtime-profile settings editor into focused subcomponents/hooks/helpers so the serving/profile frontend surfaces satisfy the component size and complexity standards again.
+- 2026-05-09 continuation: fixed llama.cpp install-page state by preserving polling while backend progress initializes, refreshing installed versions before clearing completed install UI, recognizing nested `llama-server` binaries from upstream archives, canonicalizing new installs to `bin/llama-server`, and ignoring local `llama-cpp-versions/` runtime data.
 
 ### Deviations
 
@@ -952,6 +956,7 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 - Inspected current Ollama version-manager, model UI, bridge, RPC, client, process-management surfaces, and existing llama.cpp references.
 - 2026-05-08 continuation validation: targeted runtime-profile frontend tests, selected-app version tests, managed-app state tests, AppShell state/panel tests, frontend typecheck, frontend production build, and Rust `cargo check` for `pumas-core`, `pumas-app-manager`, and `pumas-rpc` passed.
 - 2026-05-08 continuation validation: frontend standards split passed `npm run -w frontend lint`, `npm run -w frontend check:types`, `npm run -w frontend test:run -- RuntimeProfileSettingsSection ModelServeDialog`, and `npm run -w frontend build`.
+- 2026-05-09 continuation validation: `npm run -w frontend test:run -- useInstallationManager`, `cargo test --manifest-path rust/crates/pumas-app-manager/Cargo.toml llama_cpp_nested_server_binary_is_complete`, `npm run -w frontend check:types`, `npm run -w frontend test:run -- InstallDialog InstallDialogContent VersionListItem`, `cargo check --manifest-path rust/crates/pumas-app-manager/Cargo.toml`, `cargo check --manifest-path rust/crates/pumas-rpc/Cargo.toml`, `npm run -w frontend lint -- --quiet`, `npm run -w frontend build`, `bash launcher.sh --build-release`, and `bash launcher.sh --release-smoke` passed.
 
 ### Traceability Links
 

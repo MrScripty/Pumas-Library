@@ -760,13 +760,51 @@ impl VersionInstaller {
             .ok_or_else(|| PumasError::InstallationFailed {
                 message: "Could not find llama-server in extracted archive".to_string(),
             })?;
-        Self::make_binary_executable(&server_binary)?;
+        let launch_binary = Self::install_llama_cpp_launch_binary(version_dir, &server_binary)?;
+        Self::make_binary_executable(&launch_binary)?;
 
         info!(
             "llama.cpp server binary available at {}",
-            server_binary.display()
+            launch_binary.display()
         );
         Ok(())
+    }
+
+    fn install_llama_cpp_launch_binary(version_dir: &Path, source: &Path) -> Result<PathBuf> {
+        let binary_name = if cfg!(windows) {
+            "llama-server.exe"
+        } else {
+            "llama-server"
+        };
+        let final_path = version_dir.join("bin").join(binary_name);
+
+        if source == final_path {
+            return Ok(final_path);
+        }
+
+        if let Some(parent) = final_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| PumasError::Io {
+                message: format!("Failed to create llama.cpp binary parent directory: {}", e),
+                path: Some(parent.to_path_buf()),
+                source: Some(e),
+            })?;
+        }
+
+        std::fs::copy(source, &final_path).map_err(|e| PumasError::Io {
+            message: format!(
+                "Failed to copy llama.cpp server binary into launch path: {}",
+                e
+            ),
+            path: Some(final_path.clone()),
+            source: Some(e),
+        })?;
+        info!(
+            "Copied llama.cpp server binary from {} to {}",
+            source.display(),
+            final_path.display()
+        );
+
+        Ok(final_path)
     }
 
     /// Extract a .tar.zst archive (Zstandard compressed tar).

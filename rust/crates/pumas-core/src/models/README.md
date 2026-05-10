@@ -39,6 +39,16 @@ frontend, ensuring type-compatible serialization across all layers.
   routing and provider settings. They do not claim upstream provider
   capabilities that are not represented by the selected provider adapter.
 
+## Decomposition Review
+
+- 2026-05-10: `package_facts.rs` is 684 lines after adding image-generation
+  package-facts DTOs. It remains a readable single contract module because it
+  owns only wire DTOs, serde defaults, contract constants, and DTO-level tests.
+  Package inspection, summary projection, cache classification, and parser
+  behavior live outside `models/`. Split this file when it crosses roughly 800
+  lines, when generated schema output is introduced, or when a DTO group needs a
+  separate lifecycle/version boundary.
+
 ## Dependencies
 
 ### Internal

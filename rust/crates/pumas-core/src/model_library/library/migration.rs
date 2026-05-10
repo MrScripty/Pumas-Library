@@ -49,6 +49,22 @@ async fn write_migration_execution_reports_async(
         })?
 }
 
+async fn write_package_facts_cache_migration_dry_run_reports_async(
+    library_root: PathBuf,
+    report: PackageFactsCacheMigrationDryRunReport,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        write_package_facts_cache_migration_dry_run_reports(&library_root, &report)
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join package-facts migration dry-run report write task: {}",
+            err
+        ))
+    })?
+}
+
 async fn append_migration_report_index_entry_async(
     library_root: PathBuf,
     entry: MigrationReportIndexEntry,
@@ -261,6 +277,36 @@ impl ModelLibrary {
             report.items.push(item);
         }
 
+        Ok(report)
+    }
+
+    /// Generate a package-facts cache migration dry-run report and persist
+    /// package-facts-specific JSON/Markdown artifacts.
+    pub async fn generate_package_facts_cache_migration_dry_run_report_with_artifacts(
+        &self,
+    ) -> Result<PackageFactsCacheMigrationDryRunReport> {
+        let mut report = self
+            .generate_package_facts_cache_migration_dry_run_report()
+            .await?;
+        let (json_report_path, markdown_report_path) =
+            package_facts_cache_migration_report_paths(&self.library_root, "dry-run");
+        report.machine_readable_report_path = Some(json_report_path.display().to_string());
+        report.human_readable_report_path = Some(markdown_report_path.display().to_string());
+        write_package_facts_cache_migration_dry_run_reports_async(
+            self.library_root.clone(),
+            report.clone(),
+        )
+        .await?;
+        append_migration_report_index_entry_async(
+            self.library_root.clone(),
+            MigrationReportIndexEntry {
+                generated_at: report.generated_at.clone(),
+                report_kind: "package_facts_cache_dry_run".to_string(),
+                json_report_path: json_report_path.display().to_string(),
+                markdown_report_path: markdown_report_path.display().to_string(),
+            },
+        )
+        .await?;
         Ok(report)
     }
 
@@ -1826,6 +1872,10 @@ pub struct PackageFactsCacheMigrationDryRunReport {
     pub regenerate_summary_count: usize,
     pub delete_obsolete_row_count: usize,
     pub error_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_readable_report_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub human_readable_report_path: Option<String>,
     pub items: Vec<PackageFactsCacheMigrationDryRunItem>,
 }
 

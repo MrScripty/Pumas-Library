@@ -13,7 +13,8 @@ mod projection;
 use crate::error::{PumasError, Result};
 use crate::index::{
     DependencyProfileRecord, ModelDependencyBindingRecord, ModelIndex,
-    ModelPackageFactsCacheRecord, ModelPackageFactsCacheScope, ModelRecord, SearchResult,
+    ModelPackageFactsCacheRecord, ModelPackageFactsCacheRowState, ModelPackageFactsCacheScope,
+    ModelRecord, SearchResult,
 };
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::external_assets::{
@@ -4811,6 +4812,20 @@ fn migration_report_paths(library_root: &Path, kind: &str) -> (PathBuf, PathBuf)
     (json, markdown)
 }
 
+fn package_facts_cache_migration_report_paths(
+    library_root: &Path,
+    kind: &str,
+) -> (PathBuf, PathBuf) {
+    let reports_dir = library_root.join(MIGRATION_REPORTS_DIR);
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let json = reports_dir.join(format!("package-facts-cache-{}-{}.json", kind, nonce));
+    let markdown = reports_dir.join(format!("package-facts-cache-{}-{}.md", kind, nonce));
+    (json, markdown)
+}
+
 fn migration_report_index_path(library_root: &Path) -> PathBuf {
     library_root
         .join(MIGRATION_REPORTS_DIR)
@@ -4952,6 +4967,39 @@ fn write_migration_execution_reports(
     Ok(())
 }
 
+fn write_package_facts_cache_migration_dry_run_reports(
+    library_root: &Path,
+    report: &PackageFactsCacheMigrationDryRunReport,
+) -> Result<()> {
+    let json_path = report
+        .machine_readable_report_path
+        .as_ref()
+        .map(PathBuf::from)
+        .ok_or_else(|| PumasError::Validation {
+            field: "machine_readable_report_path".to_string(),
+            message: "missing JSON report path for package-facts migration dry-run report"
+                .to_string(),
+        })?;
+    let markdown_path = report
+        .human_readable_report_path
+        .as_ref()
+        .map(PathBuf::from)
+        .ok_or_else(|| PumasError::Validation {
+            field: "human_readable_report_path".to_string(),
+            message: "missing Markdown report path for package-facts migration dry-run report"
+                .to_string(),
+        })?;
+
+    let reports_dir = library_root.join(MIGRATION_REPORTS_DIR);
+    std::fs::create_dir_all(&reports_dir)?;
+    atomic_write_json(&json_path, report, true)?;
+    std::fs::write(
+        &markdown_path,
+        render_package_facts_cache_migration_dry_run_markdown(report),
+    )?;
+    Ok(())
+}
+
 fn render_migration_dry_run_markdown(report: &MigrationDryRunReport) -> String {
     let mut output = String::new();
     output.push_str("# Metadata v2 Migration Dry-Run Report\n\n");
@@ -5025,6 +5073,95 @@ fn render_migration_dry_run_markdown(report: &MigrationDryRunReport) -> String {
     }
 
     output
+}
+
+fn render_package_facts_cache_migration_dry_run_markdown(
+    report: &PackageFactsCacheMigrationDryRunReport,
+) -> String {
+    let mut output = String::new();
+    output.push_str("# Package-Facts Cache Migration Dry-Run Report\n\n");
+    output.push_str(&format!("- Generated At: `{}`\n", report.generated_at));
+    output.push_str(&format!(
+        "- Target Package-Facts Contract Version: `{}`\n",
+        report.target_package_facts_contract_version
+    ));
+    output.push_str(&format!("- Total Models: `{}`\n", report.total_models));
+    output.push_str(&format!("- Fresh Models: `{}`\n", report.fresh_count));
+    output.push_str(&format!("- Missing Rows: `{}`\n", report.missing_count));
+    output.push_str(&format!(
+        "- Stale Contract Rows: `{}`\n",
+        report.stale_contract_count
+    ));
+    output.push_str(&format!(
+        "- Stale Fingerprint Rows: `{}`\n",
+        report.stale_fingerprint_count
+    ));
+    output.push_str(&format!(
+        "- Invalid JSON Rows: `{}`\n",
+        report.invalid_json_count
+    ));
+    output.push_str(&format!(
+        "- Wrong Selected Artifact Rows: `{}`\n",
+        report.wrong_selected_artifact_count
+    ));
+    output.push_str(&format!(
+        "- Blocked Partial Downloads: `{}`\n",
+        report.blocked_partial_download_count
+    ));
+    output.push_str(&format!(
+        "- Regenerate Detail Rows: `{}`\n",
+        report.regenerate_detail_count
+    ));
+    output.push_str(&format!(
+        "- Regenerate Summary Rows: `{}`\n",
+        report.regenerate_summary_count
+    ));
+    output.push_str(&format!(
+        "- Delete Obsolete Rows: `{}`\n",
+        report.delete_obsolete_row_count
+    ));
+    output.push_str(&format!("- Errors: `{}`\n", report.error_count));
+    if let Some(path) = &report.machine_readable_report_path {
+        output.push_str(&format!("- JSON Report Path: `{}`\n", path));
+    }
+    if let Some(path) = &report.human_readable_report_path {
+        output.push_str(&format!("- Markdown Report Path: `{}`\n", path));
+    }
+    output.push('\n');
+    output.push_str("## Items\n\n");
+    output.push_str(
+        "| Model ID | Artifact ID | Artifact Path | Detail State | Summary State | Regenerate Detail | Regenerate Summary | Delete Obsolete Rows | Obsolete Row Count | Blocked Partial | Error |\n",
+    );
+    output.push_str("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
+    for item in &report.items {
+        output.push_str(&format!(
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |\n",
+            item.model_id,
+            item.selected_artifact_id.as_deref().unwrap_or(""),
+            item.selected_artifact_path.as_deref().unwrap_or(""),
+            package_facts_cache_row_state_label(item.detail_state),
+            package_facts_cache_row_state_label(item.summary_state),
+            item.will_regenerate_detail,
+            item.will_regenerate_summary,
+            item.will_delete_obsolete_rows,
+            item.obsolete_empty_selected_artifact_rows,
+            item.blocked_partial_download,
+            item.error.as_deref().unwrap_or("")
+        ));
+    }
+
+    output
+}
+
+fn package_facts_cache_row_state_label(state: ModelPackageFactsCacheRowState) -> &'static str {
+    match state {
+        ModelPackageFactsCacheRowState::Fresh => "fresh",
+        ModelPackageFactsCacheRowState::Missing => "missing",
+        ModelPackageFactsCacheRowState::StaleContract => "stale_contract",
+        ModelPackageFactsCacheRowState::StaleFingerprint => "stale_fingerprint",
+        ModelPackageFactsCacheRowState::InvalidJson => "invalid_json",
+        ModelPackageFactsCacheRowState::WrongSelectedArtifact => "wrong_selected_artifact",
+    }
 }
 
 fn render_migration_execution_markdown(report: &MigrationExecutionReport) -> String {

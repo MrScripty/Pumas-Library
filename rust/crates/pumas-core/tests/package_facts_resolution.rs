@@ -9,7 +9,7 @@ use pumas_library::models::{
     ResolvedModelPackageFactsSummary, StorageKind, PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use pumas_library::ModelLibrary;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 async fn setup_library() -> (TempDir, ModelLibrary) {
@@ -1421,6 +1421,37 @@ async fn package_facts_cache_migration_dry_run_reports_missing_rows() {
         .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Summary)
         .unwrap()
         .is_none());
+}
+
+#[tokio::test]
+async fn package_facts_cache_migration_dry_run_with_artifacts_writes_reports_and_index() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/cache-test";
+    create_cache_test_model(&library, model_id).await;
+
+    let report = library
+        .generate_package_facts_cache_migration_dry_run_report_with_artifacts()
+        .await
+        .unwrap();
+
+    let json_report_path = PathBuf::from(report.machine_readable_report_path.unwrap());
+    let markdown_report_path = PathBuf::from(report.human_readable_report_path.unwrap());
+    assert!(json_report_path.exists());
+    assert!(markdown_report_path.exists());
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(json_report_path).unwrap()).unwrap();
+    assert_eq!(json["total_models"], 1);
+    assert_eq!(json["regenerate_detail_count"], 1);
+    assert_eq!(json["regenerate_summary_count"], 1);
+    let markdown = std::fs::read_to_string(markdown_report_path).unwrap();
+    assert!(markdown.contains("Package-Facts Cache Migration Dry-Run Report"));
+    assert!(markdown.contains("Regenerate Detail Rows"));
+    assert!(markdown.contains(model_id));
+
+    let reports = library.list_migration_reports().unwrap();
+    assert!(reports
+        .iter()
+        .any(|artifact| artifact.report_kind == "package_facts_cache_dry_run"));
 }
 
 #[tokio::test]

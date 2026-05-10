@@ -2418,6 +2418,9 @@ impl ModelLibrary {
             },
             components: component_facts,
             transformers,
+            diffusers: None,
+            gguf: None,
+            inspection_manifest: None,
             task: TaskEvidence {
                 pipeline_tag: context.metadata().pipeline_tag.clone().or_else(|| {
                     context
@@ -8463,7 +8466,7 @@ mod tests {
                 model_id: model_id.to_string(),
                 selected_artifact_id: String::new(),
                 cache_scope: ModelPackageFactsCacheScope::Summary,
-                package_facts_contract_version: 1,
+                package_facts_contract_version: i64::from(PACKAGE_FACTS_CONTRACT_VERSION),
                 producer_revision: None,
                 source_fingerprint: "source-fingerprint".to_string(),
                 facts_json: serde_json::json!({

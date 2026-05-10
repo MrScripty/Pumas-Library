@@ -16,6 +16,7 @@ export type ProcessorComponentKind =
   | 'config'
   | 'tokenizer'
   | 'tokenizer_config'
+  | 'special_tokens_map'
   | 'processor'
   | 'preprocessor'
   | 'image_processor'
@@ -26,10 +27,111 @@ export type ProcessorComponentKind =
   | 'generation_config'
   | 'model_index'
   | 'weight_index'
+  | 'shard'
   | 'weights'
   | 'adapter'
   | 'quantization'
   | 'other';
+
+export type PackageFactValueSource =
+  | 'header'
+  | 'config'
+  | 'upstream_metadata'
+  | 'component_layout'
+  | 'filename_weak'
+  | 'ambiguous'
+  | 'unavailable';
+
+export type ImageGenerationFamilyLabel =
+  | 'stable_diffusion'
+  | 'stable_diffusion_xl'
+  | 'flux'
+  | 'flux2'
+  | 'qwen_image'
+  | 'lumina_image'
+  | 'glm_image'
+  | 'z_image'
+  | 'unknown'
+  | 'ambiguous';
+
+export type ImageGenerationFamilyEvidenceSource =
+  | 'pipeline_class'
+  | 'model_index_component'
+  | 'component_config'
+  | 'repo_metadata'
+  | 'ambiguous';
+
+export interface ImageGenerationFamilyEvidence {
+  family: ImageGenerationFamilyLabel;
+  source: ImageGenerationFamilyEvidenceSource;
+  value_source: PackageFactValueSource;
+  source_path?: string | null;
+  message?: string | null;
+}
+
+export type DiffusersComponentRole =
+  | 'pipeline_index'
+  | 'scheduler'
+  | 'tokenizer'
+  | 'tokenizer_2'
+  | 'text_encoder'
+  | 'text_encoder_2'
+  | 'text_encoder_3'
+  | 'image_processor'
+  | 'processor'
+  | 'unet'
+  | 'transformer'
+  | 'vae'
+  | 'controlnet'
+  | 'adapter'
+  | 'weights'
+  | 'generation_config';
+
+export interface DiffusersComponentFacts {
+  role: DiffusersComponentRole;
+  status: PackageFactStatus;
+  relative_path?: string | null;
+  source_library?: string | null;
+  class_name?: string | null;
+  config_path?: string | null;
+  config_model_type?: string | null;
+}
+
+export interface DiffusersPackageEvidence {
+  status: PackageFactStatus;
+  pipeline_class?: string | null;
+  diffusers_version?: string | null;
+  name_or_path?: string | null;
+  task: TaskEvidence;
+  family_evidence?: ImageGenerationFamilyEvidence[];
+  components?: DiffusersComponentFacts[];
+}
+
+export interface GgufPackageEvidence {
+  status: PackageFactStatus;
+  architecture?: string | null;
+  file_type?: string | null;
+  quantization?: string | null;
+  tokenizer_model?: string | null;
+  chat_template_present?: boolean | null;
+  context_length?: number | null;
+  embedding_length?: number | null;
+  block_count?: number | null;
+  attention_head_count?: number | null;
+  task_type?: string | null;
+  value_source?: PackageFactValueSource | null;
+  metadata_keys?: string[];
+  companion_artifacts?: string[];
+}
+
+export interface PackageInspectionManifest {
+  entries?: PackageInspectionManifestEntry[];
+}
+
+export interface PackageInspectionManifestEntry {
+  relative_path: string;
+  value_source: PackageFactValueSource;
+}
 
 export type BackendHintLabel =
   | 'transformers'
@@ -134,6 +236,9 @@ export interface ResolvedModelPackageFacts {
   artifact: ResolvedArtifactFacts;
   components: ProcessorComponentFacts[];
   transformers?: TransformersPackageEvidence | null;
+  diffusers?: DiffusersPackageEvidence | null;
+  gguf?: GgufPackageEvidence | null;
+  inspection_manifest?: PackageInspectionManifest | null;
   task: TaskEvidence;
   generation_defaults: GenerationDefaultFacts;
   custom_code: CustomCodeFacts;
@@ -268,6 +373,9 @@ export interface ResolvedModelPackageFactsSummary {
   processor_status: PackageFactStatus;
   generation_config_status: PackageFactStatus;
   generation_defaults_status: PackageFactStatus;
+  image_generation_family_evidence?: ImageGenerationFamilyEvidence[];
+  diffusers_pipeline_class?: string | null;
+  gguf_architecture?: string | null;
   diagnostic_codes?: string[];
 }
 

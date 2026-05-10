@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Bumped the package-facts contract to version 2 with structured Diffusers, image-family, GGUF, value-source, and inspection-manifest DTOs for image-generation planning.
 - Updated the repo Node.js toolchain pin and Node typings to 24.15.0 while opting GitHub JavaScript actions into the Node 24 runner runtime.
 - Added a Windows CI RAM disk setup for temporary files in Windows frontend/package jobs.
 

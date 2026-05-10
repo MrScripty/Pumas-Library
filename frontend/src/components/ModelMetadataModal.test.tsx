@@ -62,7 +62,7 @@ describe('ModelMetadataModal', () => {
       inference_settings: [],
     });
     resolveModelPackageFactsMock.mockResolvedValue({
-      package_facts_contract_version: 1,
+      package_facts_contract_version: 2,
       model_ref: { model_id: 'model-1' },
       artifact: {
         artifact_kind: 'hf_compatible_directory',

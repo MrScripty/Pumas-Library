@@ -1,8 +1,9 @@
 use pumas_library::index::{ModelPackageFactsCacheRecord, ModelPackageFactsCacheScope};
 use pumas_library::models::{
-    BackendHintLabel, HuggingFaceModel, ModelFactFamily, ModelLibraryChangeKind,
-    ModelLibraryRefreshScope, ModelLibraryUpdateEvent, PackageArtifactKind, PackageFactStatus,
-    ProcessorComponentKind, ResolvedModelPackageFacts, PACKAGE_FACTS_CONTRACT_VERSION,
+    BackendHintLabel, DiffusersComponentRole, HuggingFaceModel, ImageGenerationFamilyLabel,
+    ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope, ModelLibraryUpdateEvent,
+    PackageArtifactKind, PackageFactStatus, ProcessorComponentKind, ResolvedModelPackageFacts,
+    ResolvedModelPackageFactsSummary, PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use serde_json::Value;
 use std::fs;
@@ -202,6 +203,57 @@ fn gguf_embedding_fixture_matches_contract() {
     assert!(
         raw.get("sqlite").is_none() && raw.get("metadata_json").is_none(),
         "consumer fixtures must not expose Pumas SQLite/index internals"
+    );
+}
+
+#[test]
+fn diffusers_text_to_image_fixture_matches_contract() {
+    let (_raw, parsed) = load_fixture("diffusers_sd_text_to_image_package_facts.json");
+
+    assert_eq!(
+        parsed.package_facts_contract_version,
+        PACKAGE_FACTS_CONTRACT_VERSION
+    );
+    assert_eq!(
+        parsed.artifact.artifact_kind,
+        PackageArtifactKind::DiffusersBundle
+    );
+    assert!(
+        parsed.transformers.is_none(),
+        "Diffusers fixture should use structured diffusers evidence instead of masquerading as Transformers"
+    );
+    let diffusers = parsed
+        .diffusers
+        .as_ref()
+        .expect("diffusers evidence should be present");
+    assert_eq!(
+        diffusers.pipeline_class.as_deref(),
+        Some("StableDiffusionPipeline")
+    );
+    assert!(diffusers.family_evidence.iter().any(|evidence| {
+        evidence.family == ImageGenerationFamilyLabel::StableDiffusion
+            && evidence.source_path.as_deref() == Some("model_index.json")
+    }));
+    assert!(diffusers.components.iter().any(|component| {
+        component.role == DiffusersComponentRole::Scheduler
+            && component.config_path.as_deref() == Some("scheduler/scheduler_config.json")
+    }));
+    assert!(parsed
+        .backend_hints
+        .accepted
+        .contains(&BackendHintLabel::Diffusers));
+
+    let summary = ResolvedModelPackageFactsSummary::from(&parsed);
+    assert_eq!(
+        summary.diffusers_pipeline_class.as_deref(),
+        Some("StableDiffusionPipeline")
+    );
+    assert_eq!(
+        summary
+            .image_generation_family_evidence
+            .first()
+            .map(|evidence| evidence.family),
+        Some(ImageGenerationFamilyLabel::StableDiffusion)
     );
 }
 

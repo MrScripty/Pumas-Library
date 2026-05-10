@@ -446,6 +446,9 @@ mod tests {
             processor_status: PackageFactStatus::Uninspected,
             generation_config_status: PackageFactStatus::Present,
             generation_defaults_status: PackageFactStatus::Present,
+            image_generation_family_evidence: Vec::new(),
+            diffusers_pipeline_class: None,
+            gguf_architecture: None,
             diagnostic_codes: Vec::new(),
         }
     }

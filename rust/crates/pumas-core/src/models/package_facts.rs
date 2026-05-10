@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::{AssetValidationError, AssetValidationState, StorageKind};
 
 /// Current producer contract version for resolved package facts.
-pub const PACKAGE_FACTS_CONTRACT_VERSION: u32 = 1;
+pub const PACKAGE_FACTS_CONTRACT_VERSION: u32 = 2;
 
 /// Current stable contract version for `PumasModelRef`.
 pub const PUMAS_MODEL_REF_CONTRACT_VERSION: u32 = 1;
@@ -121,6 +121,166 @@ pub enum ProcessorComponentKind {
     Adapter,
     Quantization,
     Other,
+}
+
+/// Source strength for a package fact value.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PackageFactValueSource {
+    Header,
+    Config,
+    UpstreamMetadata,
+    ComponentLayout,
+    FilenameWeak,
+    Ambiguous,
+    Unavailable,
+}
+
+/// Image-generation family labels produced only from package evidence.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageGenerationFamilyLabel {
+    StableDiffusion,
+    StableDiffusionXl,
+    Flux,
+    Flux2,
+    QwenImage,
+    LuminaImage,
+    GlmImage,
+    ZImage,
+    Unknown,
+    Ambiguous,
+}
+
+/// Package evidence source used for image-generation family labels.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageGenerationFamilyEvidenceSource {
+    PipelineClass,
+    ModelIndexComponent,
+    ComponentConfig,
+    RepoMetadata,
+    Ambiguous,
+}
+
+/// Source-tagged image-generation family evidence.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ImageGenerationFamilyEvidence {
+    pub family: ImageGenerationFamilyLabel,
+    pub source: ImageGenerationFamilyEvidenceSource,
+    pub value_source: PackageFactValueSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// Stable roles for Diffusers-style package components.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DiffusersComponentRole {
+    PipelineIndex,
+    Scheduler,
+    Tokenizer,
+    Tokenizer2,
+    TextEncoder,
+    TextEncoder2,
+    TextEncoder3,
+    ImageProcessor,
+    Processor,
+    Unet,
+    Transformer,
+    Vae,
+    Controlnet,
+    Adapter,
+    Weights,
+    GenerationConfig,
+}
+
+/// Component facts from a Diffusers bundle without importing Python classes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct DiffusersComponentFacts {
+    pub role: DiffusersComponentRole,
+    pub status: PackageFactStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_library: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub class_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_model_type: Option<String>,
+}
+
+/// Diffusers bundle evidence from `model_index.json` and bounded component configs.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct DiffusersPackageEvidence {
+    pub status: PackageFactStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pipeline_class: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diffusers_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_or_path: Option<String>,
+    pub task: TaskEvidence,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub family_evidence: Vec<ImageGenerationFamilyEvidence>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub components: Vec<DiffusersComponentFacts>,
+}
+
+/// Bounded GGUF metadata evidence from the selected artifact header.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct GgufPackageEvidence {
+    pub status: PackageFactStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub architecture: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantization: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokenizer_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_template_present: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_length: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_length: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention_head_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_source: Option<PackageFactValueSource>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub metadata_keys: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub companion_artifacts: Vec<String>,
+}
+
+/// Serializable package inspection manifest used for cache/debug contracts.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct PackageInspectionManifest {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entries: Vec<PackageInspectionManifestEntry>,
+}
+
+/// One bounded manifest entry that may affect package facts.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct PackageInspectionManifestEntry {
+    pub relative_path: String,
+    pub value_source: PackageFactValueSource,
 }
 
 /// Component-level package-file evidence.
@@ -411,6 +571,12 @@ pub struct ResolvedModelPackageFacts {
     pub components: Vec<ProcessorComponentFacts>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transformers: Option<TransformersPackageEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diffusers: Option<DiffusersPackageEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gguf: Option<GgufPackageEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inspection_manifest: Option<PackageInspectionManifest>,
     pub task: TaskEvidence,
     pub generation_defaults: GenerationDefaultFacts,
     pub custom_code: CustomCodeFacts,
@@ -437,6 +603,12 @@ pub struct ResolvedModelPackageFactsSummary {
     pub processor_status: PackageFactStatus,
     pub generation_config_status: PackageFactStatus,
     pub generation_defaults_status: PackageFactStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub image_generation_family_evidence: Vec<ImageGenerationFamilyEvidence>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diffusers_pipeline_class: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gguf_architecture: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostic_codes: Vec<String>,
 }
@@ -483,6 +655,19 @@ impl From<&ResolvedModelPackageFacts> for ResolvedModelPackageFactsSummary {
                 .map(|evidence| evidence.generation_config_status)
                 .unwrap_or(PackageFactStatus::Uninspected),
             generation_defaults_status: facts.generation_defaults.status,
+            image_generation_family_evidence: facts
+                .diffusers
+                .as_ref()
+                .map(|evidence| evidence.family_evidence.clone())
+                .unwrap_or_default(),
+            diffusers_pipeline_class: facts
+                .diffusers
+                .as_ref()
+                .and_then(|evidence| evidence.pipeline_class.clone()),
+            gguf_architecture: facts
+                .gguf
+                .as_ref()
+                .and_then(|evidence| evidence.architecture.clone()),
             diagnostic_codes: facts
                 .diagnostics
                 .iter()

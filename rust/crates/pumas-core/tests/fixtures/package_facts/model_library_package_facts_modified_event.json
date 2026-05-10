@@ -5,5 +5,5 @@
   "fact_family": "package_facts",
   "refresh_scope": "detail",
   "selected_artifact_id": "main",
-  "producer_revision": "package-facts-v1:abc123"
+  "producer_revision": "package-facts-v2:abc123"
 }

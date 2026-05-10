@@ -1114,7 +1114,9 @@ mod tests {
             model_id: model_id.to_string(),
             selected_artifact_id: String::new(),
             cache_scope: scope,
-            package_facts_contract_version: 1,
+            package_facts_contract_version: i64::from(
+                crate::models::PACKAGE_FACTS_CONTRACT_VERSION,
+            ),
             producer_revision: Some("test-producer".to_string()),
             source_fingerprint: source_fingerprint.to_string(),
             facts_json,
@@ -1314,7 +1316,7 @@ mod tests {
             .upsert(&create_test_record("facts-model", "Facts Model", "llm"))
             .unwrap();
         let facts_json = serde_json::json!({
-            "package_facts_contract_version": 1,
+            "package_facts_contract_version": crate::models::PACKAGE_FACTS_CONTRACT_VERSION,
             "artifact": {"artifact_kind": "safetensors"}
         })
         .to_string();

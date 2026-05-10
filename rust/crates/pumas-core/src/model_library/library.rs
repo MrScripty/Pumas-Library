@@ -28,7 +28,7 @@ use crate::model_library::package_facts::{
     auto_map_sources_from_config, backend_hint_facts, companion_artifacts,
     custom_generate_dependency_manifests, custom_generate_sources, generation_default_facts,
     merge_string_lists, package_artifact_kind, package_class_references, package_component_facts,
-    package_facts_summary, transformers_package_evidence, PackageInspectionManifest,
+    package_facts_summary, transformers_package_evidence, PackageInspectionContext,
 };
 use crate::model_library::types::{
     HuggingFaceEvidence, ModelMetadata, ModelOverrides, ModelReviewFilter, ModelReviewItem,
@@ -2322,8 +2322,6 @@ impl ModelLibrary {
         &self,
         model_id: &str,
     ) -> Result<ResolvedModelPackageFacts> {
-        let package_facts_lock = self.package_facts_lock(model_id, None).await;
-        let _package_facts_guard = package_facts_lock.lock().await;
         let descriptor = self.resolve_model_execution_descriptor(model_id).await?;
         let model_dir = self.library_root.join(model_id);
         let metadata = load_effective_metadata_by_id_async(self.clone(), model_id.to_string())
@@ -2331,20 +2329,28 @@ impl ModelLibrary {
             .ok_or_else(|| PumasError::ModelNotFound {
                 model_id: model_id.to_string(),
             })?;
-
-        let manifest = PackageInspectionManifest::build(&model_dir, &metadata).await?;
-        let selected_files = manifest.selected_files();
         let dependency_bindings = self
             .index
             .list_active_model_dependency_bindings(model_id, None)?;
-        let source_fingerprint = manifest
-            .source_fingerprint(&model_dir, &descriptor, &metadata, &dependency_bindings)
-            .await?;
+        let context = PackageInspectionContext::build(
+            model_id.to_string(),
+            model_dir,
+            descriptor,
+            metadata,
+            dependency_bindings,
+        )
+        .await?;
+        let package_facts_lock = self
+            .package_facts_lock(context.model_id(), context.selected_artifact_id())
+            .await;
+        let _package_facts_guard = package_facts_lock.lock().await;
+        let selected_files = context.selected_files();
+        let source_fingerprint = context.source_fingerprint().await?;
         let can_persist_package_facts = self.index.get(model_id)?.is_some();
         if can_persist_package_facts {
             if let Some(cached) = self.index.get_model_package_facts_cache(
-                model_id,
-                None,
+                context.model_id(),
+                context.selected_artifact_id(),
                 ModelPackageFactsCacheScope::Detail,
             )? {
                 if cached.package_facts_contract_version
@@ -2354,8 +2360,7 @@ impl ModelLibrary {
                     match serde_json::from_str::<ResolvedModelPackageFacts>(&cached.facts_json) {
                         Ok(facts) => {
                             self.upsert_model_package_facts_summary_cache(
-                                model_id,
-                                metadata.updated_date.clone(),
+                                &context,
                                 &source_fingerprint,
                                 &facts,
                             )?;
@@ -2373,38 +2378,38 @@ impl ModelLibrary {
             }
         }
 
-        let artifact_kind = package_artifact_kind(&model_dir, &metadata, &selected_files).await?;
-        let component_facts = package_component_facts(&model_dir, &selected_files).await?;
+        let artifact_kind =
+            package_artifact_kind(context.model_dir(), context.metadata(), selected_files).await?;
+        let component_facts = package_component_facts(context.model_dir(), selected_files).await?;
         let transformers =
-            transformers_package_evidence(&model_dir, &metadata, &selected_files).await?;
+            transformers_package_evidence(context.model_dir(), context.metadata(), selected_files)
+                .await?;
         let class_references = package_class_references(&component_facts, transformers.as_ref());
-        let generation_defaults = generation_default_facts(&model_dir).await?;
-        let auto_map_sources = auto_map_sources_from_config(&model_dir).await?;
-        let custom_generate_sources = custom_generate_sources(&model_dir).await?;
+        let generation_defaults = generation_default_facts(context.model_dir()).await?;
+        let auto_map_sources = auto_map_sources_from_config(context.model_dir()).await?;
+        let custom_generate_sources = custom_generate_sources(context.model_dir()).await?;
         let custom_generate_dependency_manifests =
-            custom_generate_dependency_manifests(&model_dir).await?;
-        let requires_custom_code = metadata.requires_custom_code.unwrap_or(false)
+            custom_generate_dependency_manifests(context.model_dir()).await?;
+        let requires_custom_code = context.metadata().requires_custom_code.unwrap_or(false)
             || !auto_map_sources.is_empty()
             || !custom_generate_sources.is_empty();
 
         let facts = ResolvedModelPackageFacts {
             package_facts_contract_version: PACKAGE_FACTS_CONTRACT_VERSION,
-            model_ref: PumasModelRef {
-                model_ref_contract_version: crate::models::PUMAS_MODEL_REF_CONTRACT_VERSION,
-                model_id: model_id.to_string(),
-                revision: None,
-                selected_artifact_id: None,
-                selected_artifact_path: Some(descriptor.entry_path.clone()),
-                migration_diagnostics: Vec::new(),
-            },
+            model_ref: context.model_ref(),
             artifact: ResolvedArtifactFacts {
                 artifact_kind,
-                entry_path: descriptor.entry_path,
-                storage_kind: descriptor.storage_kind,
-                validation_state: descriptor.validation_state,
-                validation_errors: metadata.validation_errors.clone().unwrap_or_default(),
-                companion_artifacts: companion_artifacts(&selected_files),
-                sibling_files: metadata
+                entry_path: context.descriptor().entry_path.clone(),
+                storage_kind: context.descriptor().storage_kind,
+                validation_state: context.descriptor().validation_state,
+                validation_errors: context
+                    .metadata()
+                    .validation_errors
+                    .clone()
+                    .unwrap_or_default(),
+                companion_artifacts: companion_artifacts(selected_files),
+                sibling_files: context
+                    .metadata()
                     .huggingface_evidence
                     .as_ref()
                     .and_then(|evidence| evidence.sibling_filenames.clone())
@@ -2414,21 +2419,34 @@ impl ModelLibrary {
             components: component_facts,
             transformers,
             task: TaskEvidence {
-                pipeline_tag: metadata.pipeline_tag.clone().or_else(|| {
-                    metadata
+                pipeline_tag: context.metadata().pipeline_tag.clone().or_else(|| {
+                    context
+                        .metadata()
                         .huggingface_evidence
                         .as_ref()
                         .and_then(|evidence| evidence.pipeline_tag.clone())
                 }),
-                task_type_primary: metadata.task_type_primary.clone(),
-                input_modalities: metadata.input_modalities.clone().unwrap_or_default(),
-                output_modalities: metadata.output_modalities.clone().unwrap_or_default(),
+                task_type_primary: context.metadata().task_type_primary.clone(),
+                input_modalities: context
+                    .metadata()
+                    .input_modalities
+                    .clone()
+                    .unwrap_or_default(),
+                output_modalities: context
+                    .metadata()
+                    .output_modalities
+                    .clone()
+                    .unwrap_or_default(),
             },
             generation_defaults,
             custom_code: CustomCodeFacts {
                 requires_custom_code,
                 custom_code_sources: merge_string_lists(
-                    metadata.custom_code_sources.clone().unwrap_or_default(),
+                    context
+                        .metadata()
+                        .custom_code_sources
+                        .clone()
+                        .unwrap_or_default(),
                     custom_generate_sources,
                 ),
                 auto_map_sources,
@@ -2443,26 +2461,25 @@ impl ModelLibrary {
                 ),
             },
             backend_hints: backend_hint_facts(
-                metadata.recommended_backend.as_deref(),
-                metadata.runtime_engine_hints.as_deref().unwrap_or(&[]),
+                context.metadata().recommended_backend.as_deref(),
+                context
+                    .metadata()
+                    .runtime_engine_hints
+                    .as_deref()
+                    .unwrap_or(&[]),
             ),
             diagnostics: Vec::new(),
         };
         if can_persist_package_facts {
-            self.upsert_model_package_facts_summary_cache(
-                model_id,
-                metadata.updated_date.clone(),
-                &source_fingerprint,
-                &facts,
-            )?;
+            self.upsert_model_package_facts_summary_cache(&context, &source_fingerprint, &facts)?;
             let now = chrono::Utc::now().to_rfc3339();
             self.index
                 .upsert_model_package_facts_cache(&ModelPackageFactsCacheRecord {
-                    model_id: model_id.to_string(),
-                    selected_artifact_id: String::new(),
+                    model_id: context.model_id().to_string(),
+                    selected_artifact_id: context.cache_selected_artifact_id().to_string(),
                     cache_scope: ModelPackageFactsCacheScope::Detail,
                     package_facts_contract_version: i64::from(PACKAGE_FACTS_CONTRACT_VERSION),
-                    producer_revision: metadata.updated_date.clone(),
+                    producer_revision: context.metadata().updated_date.clone(),
                     source_fingerprint,
                     facts_json: serde_json::to_string(&facts)?,
                     cached_at: now.clone(),
@@ -2475,8 +2492,7 @@ impl ModelLibrary {
 
     fn upsert_model_package_facts_summary_cache(
         &self,
-        model_id: &str,
-        producer_revision: Option<String>,
+        context: &PackageInspectionContext,
         source_fingerprint: &str,
         facts: &ResolvedModelPackageFacts,
     ) -> Result<()> {
@@ -2484,11 +2500,11 @@ impl ModelLibrary {
         let summary = package_facts_summary(facts);
         self.index
             .upsert_model_package_facts_cache(&ModelPackageFactsCacheRecord {
-                model_id: model_id.to_string(),
-                selected_artifact_id: String::new(),
+                model_id: context.model_id().to_string(),
+                selected_artifact_id: context.cache_selected_artifact_id().to_string(),
                 cache_scope: ModelPackageFactsCacheScope::Summary,
                 package_facts_contract_version: i64::from(PACKAGE_FACTS_CONTRACT_VERSION),
-                producer_revision,
+                producer_revision: context.metadata().updated_date.clone(),
                 source_fingerprint: source_fingerprint.to_string(),
                 facts_json: serde_json::to_string(&summary)?,
                 cached_at: now.clone(),
@@ -2521,17 +2537,22 @@ impl ModelLibrary {
             .ok_or_else(|| PumasError::ModelNotFound {
                 model_id: model_id.to_string(),
             })?;
-        let manifest = PackageInspectionManifest::build(&model_dir, &metadata).await?;
         let dependency_bindings = self
             .index
             .list_active_model_dependency_bindings(model_id, None)?;
-        let source_fingerprint = manifest
-            .source_fingerprint(&model_dir, &descriptor, &metadata, &dependency_bindings)
-            .await?;
+        let context = PackageInspectionContext::build(
+            model_id.to_string(),
+            model_dir,
+            descriptor,
+            metadata,
+            dependency_bindings,
+        )
+        .await?;
+        let source_fingerprint = context.source_fingerprint().await?;
 
         if let Some(cached) = self.index.get_model_package_facts_cache(
-            model_id,
-            None,
+            context.model_id(),
+            context.selected_artifact_id(),
             ModelPackageFactsCacheScope::Summary,
         )? {
             if cached.package_facts_contract_version == i64::from(PACKAGE_FACTS_CONTRACT_VERSION)
@@ -2550,8 +2571,8 @@ impl ModelLibrary {
         }
 
         if let Some(cached) = self.index.get_model_package_facts_cache(
-            model_id,
-            None,
+            context.model_id(),
+            context.selected_artifact_id(),
             ModelPackageFactsCacheScope::Detail,
         )? {
             if cached.package_facts_contract_version == i64::from(PACKAGE_FACTS_CONTRACT_VERSION)
@@ -2561,8 +2582,7 @@ impl ModelLibrary {
                     serde_json::from_str::<ResolvedModelPackageFacts>(&cached.facts_json)
                 {
                     self.upsert_model_package_facts_summary_cache(
-                        model_id,
-                        metadata.updated_date.clone(),
+                        &context,
                         &source_fingerprint,
                         &facts,
                     )?;

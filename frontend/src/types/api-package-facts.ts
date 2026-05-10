@@ -354,6 +354,10 @@ export type ModelPackageFactsSummaryStatus =
   | 'cached'
   | 'missing'
   | 'invalid'
+  | 'stale_contract'
+  | 'stale_fingerprint'
+  | 'wrong_selected_artifact'
+  | 'error'
   | 'fresh'
   | 'detail_derived'
   | 'regenerated';

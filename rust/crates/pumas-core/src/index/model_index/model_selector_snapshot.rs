@@ -340,7 +340,11 @@ fn detail_state(
     artifact_state: ModelArtifactState,
 ) -> ModelLibrarySelectorDetailState {
     match summary_status {
-        ModelPackageFactsSummaryStatus::Invalid => ModelLibrarySelectorDetailState::Error,
+        ModelPackageFactsSummaryStatus::Invalid
+        | ModelPackageFactsSummaryStatus::StaleContract
+        | ModelPackageFactsSummaryStatus::StaleFingerprint
+        | ModelPackageFactsSummaryStatus::WrongSelectedArtifact
+        | ModelPackageFactsSummaryStatus::Error => ModelLibrarySelectorDetailState::Error,
         ModelPackageFactsSummaryStatus::Missing => {
             ModelLibrarySelectorDetailState::NeedsPackageFacts
         }

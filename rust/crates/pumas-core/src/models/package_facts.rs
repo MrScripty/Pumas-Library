@@ -516,6 +516,10 @@ pub enum ModelPackageFactsSummaryStatus {
     Cached,
     Missing,
     Invalid,
+    StaleContract,
+    StaleFingerprint,
+    WrongSelectedArtifact,
+    Error,
     Fresh,
     DetailDerived,
     Regenerated,
@@ -737,5 +741,21 @@ mod tests {
         assert!(notification.events.is_empty());
         assert!(notification.stale_cursor);
         assert!(notification.snapshot_required);
+    }
+
+    #[test]
+    fn package_facts_summary_status_serializes_stale_states() {
+        assert_eq!(
+            serde_json::to_value(ModelPackageFactsSummaryStatus::StaleContract).unwrap(),
+            serde_json::json!("stale_contract")
+        );
+        assert_eq!(
+            serde_json::to_value(ModelPackageFactsSummaryStatus::StaleFingerprint).unwrap(),
+            serde_json::json!("stale_fingerprint")
+        );
+        assert_eq!(
+            serde_json::to_value(ModelPackageFactsSummaryStatus::WrongSelectedArtifact).unwrap(),
+            serde_json::json!("wrong_selected_artifact")
+        );
     }
 }

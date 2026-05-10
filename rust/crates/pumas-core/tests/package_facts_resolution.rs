@@ -1665,6 +1665,82 @@ async fn package_facts_cache_migration_execution_reports_partial_download_skip()
 }
 
 #[tokio::test]
+async fn package_facts_cache_migration_execution_recomputes_fingerprint_on_resume() {
+    let (temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/cache-test";
+    create_cache_test_model(&library, model_id).await;
+
+    let dry_run = library
+        .generate_package_facts_cache_migration_dry_run_report()
+        .await
+        .unwrap();
+    let item = dry_run
+        .items
+        .iter()
+        .find(|item| item.model_id == model_id)
+        .expect("dry-run item for cache test model");
+    let planned_source_fingerprint = item.source_fingerprint.clone();
+    let checkpoint_path = temp_dir
+        .path()
+        .join(".package_facts_cache_migration_checkpoint.json");
+    let checkpoint = serde_json::json!({
+        "created_at": "2026-05-02T00:08:00Z",
+        "updated_at": "2026-05-02T00:08:00Z",
+        "pending_work": [
+            {
+                "model_id": model_id,
+                "selected_artifact_id": null,
+                "target_package_facts_contract_version": PACKAGE_FACTS_CONTRACT_VERSION,
+                "source_fingerprint": planned_source_fingerprint,
+                "regenerate_detail": true,
+                "regenerate_summary": true,
+                "delete_obsolete_rows": false,
+                "skip_partial_download": false
+            }
+        ],
+        "completed_results": []
+    });
+    std::fs::write(
+        &checkpoint_path,
+        serde_json::to_string_pretty(&checkpoint).unwrap(),
+    )
+    .unwrap();
+    let model_dir = library.build_model_path("llm", "example", "cache-test");
+    tokio::fs::write(model_dir.join("config.json"), r#"{"model_type":"mistral"}"#)
+        .await
+        .unwrap();
+
+    let report = library
+        .execute_package_facts_cache_migration_with_checkpoint()
+        .await
+        .unwrap();
+
+    assert!(report.resumed_from_checkpoint);
+    assert_eq!(report.planned_work_count, 1);
+    assert_eq!(report.error_count, 0);
+    let result = &report.results[0];
+    assert_eq!(
+        result.planned_source_fingerprint,
+        planned_source_fingerprint
+    );
+    assert!(result.written_source_fingerprint.is_some());
+    assert_ne!(
+        result.written_source_fingerprint,
+        result.planned_source_fingerprint
+    );
+    let detail_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        Some(detail_row.source_fingerprint),
+        result.written_source_fingerprint
+    );
+    assert!(!checkpoint_path.exists());
+}
+
+#[tokio::test]
 async fn package_facts_cache_migration_dry_run_reports_stale_and_invalid_rows() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/cache-test";

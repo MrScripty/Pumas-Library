@@ -1455,6 +1455,58 @@ async fn package_facts_cache_migration_dry_run_with_artifacts_writes_reports_and
 }
 
 #[tokio::test]
+async fn package_facts_cache_migration_dry_run_reports_partial_download_without_hydrating() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/partial-cache-test";
+    let partial_dir = library.build_model_path("llm", "example", "partial-cache-test");
+    std::fs::create_dir_all(&partial_dir).unwrap();
+    std::fs::write(partial_dir.join("model.safetensors.part"), b"partial").unwrap();
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("example".to_string()),
+        cleaned_name: Some("partial-cache-test".to_string()),
+        official_name: Some("Partial Cache Test".to_string()),
+        match_source: Some("download_partial".to_string()),
+        selected_artifact_id: Some("model-partial".to_string()),
+        selected_artifact_files: Some(vec!["model.safetensors".to_string()]),
+        ..Default::default()
+    };
+    library
+        .upsert_index_from_metadata(&partial_dir, &metadata)
+        .unwrap();
+
+    let report = library
+        .generate_package_facts_cache_migration_dry_run_report()
+        .await
+        .unwrap();
+
+    assert_eq!(report.total_models, 1);
+    assert_eq!(report.blocked_partial_download_count, 1);
+    assert_eq!(report.regenerate_detail_count, 0);
+    assert_eq!(report.regenerate_summary_count, 0);
+    assert_eq!(report.error_count, 0);
+    let item = report
+        .items
+        .iter()
+        .find(|item| item.model_id == model_id)
+        .expect("dry-run item for partial download model");
+    assert!(item.blocked_partial_download);
+    assert_eq!(item.selected_artifact_id.as_deref(), Some("model-partial"));
+    assert_eq!(
+        item.selected_artifact_path.as_deref(),
+        Some("model.safetensors")
+    );
+    assert_eq!(item.detail_state, ModelPackageFactsCacheRowState::Missing);
+    assert_eq!(item.summary_state, ModelPackageFactsCacheRowState::Missing);
+    assert!(item.source_fingerprint.is_none());
+    assert!(!item.will_regenerate_detail);
+    assert!(!item.will_regenerate_summary);
+    assert!(item.error.is_none());
+}
+
+#[tokio::test]
 async fn package_facts_cache_migration_dry_run_reports_stale_and_invalid_rows() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/cache-test";

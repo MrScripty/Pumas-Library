@@ -321,6 +321,10 @@ impl ModelLibrary {
                 model_id: model_id.to_string(),
             })?;
         let blocked_partial_download = record_is_download_incomplete(&record);
+        if blocked_partial_download {
+            return self
+                .build_blocked_package_facts_cache_migration_dry_run_item(model_id, &record);
+        }
         let descriptor = self.resolve_model_execution_descriptor(model_id).await?;
         let model_dir = self.library_root.join(model_id);
         let metadata = load_effective_metadata_by_id_async(self.clone(), model_id.to_string())
@@ -384,6 +388,60 @@ impl ModelLibrary {
             blocked_partial_download,
             will_regenerate_detail,
             will_regenerate_summary,
+            will_delete_obsolete_rows: obsolete_empty_selected_artifact_rows > 0,
+            obsolete_empty_selected_artifact_rows,
+            error: None,
+        })
+    }
+
+    fn build_blocked_package_facts_cache_migration_dry_run_item(
+        &self,
+        model_id: &str,
+        record: &ModelRecord,
+    ) -> Result<PackageFactsCacheMigrationDryRunItem> {
+        let expected_selected_artifact_id = string_field(&record.metadata, "selected_artifact_id");
+        let selected_artifact_path =
+            string_array_field(&record.metadata, "selected_artifact_files")
+                .and_then(|mut files| files.drain(..).next());
+        let detail_row = self.index.get_model_package_facts_cache(
+            model_id,
+            expected_selected_artifact_id.as_deref(),
+            ModelPackageFactsCacheScope::Detail,
+        )?;
+        let summary_row = self.index.get_model_package_facts_cache(
+            model_id,
+            expected_selected_artifact_id.as_deref(),
+            ModelPackageFactsCacheScope::Summary,
+        )?;
+        let (detail_state, _detail) =
+            classify_package_facts_cache_record::<ResolvedModelPackageFacts>(
+                expected_selected_artifact_id.as_deref(),
+                None,
+                detail_row.as_ref(),
+            );
+        let (summary_state, _summary) =
+            classify_package_facts_cache_record::<ResolvedModelPackageFactsSummary>(
+                expected_selected_artifact_id.as_deref(),
+                None,
+                summary_row.as_ref(),
+            );
+        let obsolete_empty_selected_artifact_rows = if expected_selected_artifact_id.is_some() {
+            self.index
+                .count_model_package_facts_cache_rows_without_selected_artifact(model_id)?
+        } else {
+            0
+        };
+
+        Ok(PackageFactsCacheMigrationDryRunItem {
+            model_id: model_id.to_string(),
+            selected_artifact_id: expected_selected_artifact_id,
+            selected_artifact_path,
+            source_fingerprint: None,
+            detail_state,
+            summary_state,
+            blocked_partial_download: true,
+            will_regenerate_detail: false,
+            will_regenerate_summary: false,
             will_delete_obsolete_rows: obsolete_empty_selected_artifact_rows > 0,
             obsolete_empty_selected_artifact_rows,
             error: None,

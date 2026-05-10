@@ -1502,6 +1502,68 @@ mod tests {
     }
 
     #[test]
+    fn test_package_facts_cache_delete_without_selected_artifact_preserves_selected_rows() {
+        let (index, _temp) = create_test_index();
+
+        index
+            .upsert(&create_test_record("facts-model", "Facts Model", "llm"))
+            .unwrap();
+        let cursor_after_model_add = index.current_model_library_update_cursor().unwrap();
+        let default_detail = create_package_facts_cache_record(
+            "facts-model",
+            ModelPackageFactsCacheScope::Detail,
+            "fingerprint-v1",
+            serde_json::json!({"detail": true}).to_string(),
+        );
+        let default_summary = create_package_facts_cache_record(
+            "facts-model",
+            ModelPackageFactsCacheScope::Summary,
+            "fingerprint-v1",
+            serde_json::json!({"summary": true}).to_string(),
+        );
+        let mut selected_detail = default_detail.clone();
+        selected_detail.selected_artifact_id = "model-q5".to_string();
+        index
+            .upsert_model_package_facts_cache(&default_detail)
+            .unwrap();
+        index
+            .upsert_model_package_facts_cache(&default_summary)
+            .unwrap();
+        index
+            .upsert_model_package_facts_cache(&selected_detail)
+            .unwrap();
+
+        assert_eq!(
+            index
+                .delete_model_package_facts_cache_without_selected_artifact("facts-model")
+                .unwrap(),
+            2
+        );
+
+        assert!(index
+            .get_model_package_facts_cache("facts-model", None, ModelPackageFactsCacheScope::Detail)
+            .unwrap()
+            .is_none());
+        assert!(index
+            .get_model_package_facts_cache(
+                "facts-model",
+                Some("model-q5"),
+                ModelPackageFactsCacheScope::Detail
+            )
+            .unwrap()
+            .is_some());
+        let feed = index
+            .list_model_library_updates_since(Some(&cursor_after_model_add), 100)
+            .unwrap();
+        assert!(feed.events.iter().any(|event| {
+            event.change_kind == ModelLibraryChangeKind::PackageFactsModified
+                && event.fact_family == ModelFactFamily::PackageFacts
+                && event.refresh_scope == ModelLibraryRefreshScope::SummaryAndDetail
+                && event.selected_artifact_id.is_none()
+        }));
+    }
+
+    #[test]
     fn test_package_facts_cache_cascades_when_model_deleted() {
         let (index, _temp) = create_test_index();
 

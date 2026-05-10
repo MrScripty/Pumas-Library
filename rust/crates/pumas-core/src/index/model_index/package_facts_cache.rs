@@ -187,6 +187,37 @@ impl ModelIndex {
         )?)
     }
 
+    pub fn delete_model_package_facts_cache_without_selected_artifact(
+        &self,
+        model_id: &str,
+    ) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let deleted = conn.execute(
+            "DELETE FROM model_package_facts_cache
+             WHERE model_id = ?1 AND selected_artifact_id = ''",
+            params![model_id],
+        )?;
+
+        if deleted > 0 {
+            let event_id = Self::append_model_library_update_event_with_conn(
+                &conn,
+                model_id,
+                ModelLibraryChangeKind::PackageFactsModified,
+                ModelFactFamily::PackageFacts,
+                ModelLibraryRefreshScope::SummaryAndDetail,
+                None,
+                None,
+            )?;
+            self.publish_model_library_update_event_with_conn(&conn, event_id)?;
+        }
+
+        Ok(deleted)
+    }
+
     pub fn count_model_package_facts_cache_rows(&self, model_id: &str) -> Result<usize> {
         let conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),

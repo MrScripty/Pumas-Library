@@ -26,7 +26,8 @@ use crate::model_library::importer::detect_dllm_from_config_json;
 use crate::model_library::naming::normalize_name;
 use crate::model_library::package_facts::{
     auto_map_sources_from_config, backend_hint_facts, companion_artifacts,
-    custom_generate_dependency_manifests, custom_generate_sources, generation_default_facts,
+    custom_generate_dependency_manifests, custom_generate_sources, diffusers_package_evidence,
+    generation_default_facts, gguf_package_evidence, invalid_gguf_package_evidence,
     merge_string_lists, package_artifact_kind, package_class_references, package_component_facts,
     package_facts_summary, transformers_package_evidence, PackageInspectionContext,
 };
@@ -45,7 +46,7 @@ use crate::models::{
     ModelExecutionDescriptorBatchItem, ModelFactFamily, ModelLibraryChangeKind,
     ModelLibraryRefreshScope, ModelPackageFactsSummaryBatchItem, ModelPackageFactsSummaryResult,
     ModelPackageFactsSummarySnapshot, ModelPackageFactsSummaryStatus, ModelRefMigrationDiagnostic,
-    PumasModelRef, ResolvedArtifactFacts, ResolvedModelPackageFacts,
+    PackageArtifactKind, PumasModelRef, ResolvedArtifactFacts, ResolvedModelPackageFacts,
     ResolvedModelPackageFactsSummary, StorageKind, TaskEvidence, PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use serde_json::Value;
@@ -2386,6 +2387,39 @@ impl ModelLibrary {
                 .await?;
         let class_references = package_class_references(&component_facts, transformers.as_ref());
         let generation_defaults = generation_default_facts(context.model_dir()).await?;
+        let diffusers_extraction = if artifact_kind == PackageArtifactKind::DiffusersBundle {
+            Some(diffusers_package_evidence(context.model_dir()).await?)
+        } else {
+            None
+        };
+        let gguf = if artifact_kind == PackageArtifactKind::Gguf {
+            let companion_artifacts = companion_artifacts(selected_files);
+            selected_files
+                .iter()
+                .find(|file| {
+                    file.to_lowercase().ends_with(".gguf")
+                        && !file.to_lowercase().contains("mmproj")
+                })
+                .map(|file| context.model_dir().join(file))
+                .filter(|path| path.is_file())
+                .map(
+                    |path| match gguf_package_evidence(&path, &companion_artifacts) {
+                        Ok(evidence) => Ok::<_, PumasError>(evidence),
+                        Err(err) => {
+                            tracing::warn!(
+                                model_id = context.model_id(),
+                                path = %path.display(),
+                                error = %err,
+                                "Failed to parse GGUF package metadata"
+                            );
+                            Ok(invalid_gguf_package_evidence(&companion_artifacts))
+                        }
+                    },
+                )
+                .transpose()?
+        } else {
+            None
+        };
         let auto_map_sources = auto_map_sources_from_config(context.model_dir()).await?;
         let custom_generate_sources = custom_generate_sources(context.model_dir()).await?;
         let custom_generate_dependency_manifests =
@@ -2418,8 +2452,10 @@ impl ModelLibrary {
             },
             components: component_facts,
             transformers,
-            diffusers: None,
-            gguf: None,
+            diffusers: diffusers_extraction
+                .as_ref()
+                .and_then(|extraction| extraction.evidence.clone()),
+            gguf,
             inspection_manifest: None,
             task: TaskEvidence {
                 pipeline_tag: context.metadata().pipeline_tag.clone().or_else(|| {
@@ -2471,7 +2507,9 @@ impl ModelLibrary {
                     .as_deref()
                     .unwrap_or(&[]),
             ),
-            diagnostics: Vec::new(),
+            diagnostics: diffusers_extraction
+                .map(|extraction| extraction.diagnostics)
+                .unwrap_or_default(),
         };
         if can_persist_package_facts {
             self.upsert_model_package_facts_summary_cache(&context, &source_fingerprint, &facts)?;

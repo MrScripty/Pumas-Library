@@ -2,10 +2,13 @@ use pumas_library::index::{
     DependencyProfileRecord, ModelDependencyBindingRecord, ModelPackageFactsCacheScope,
 };
 use pumas_library::models::{
-    BackendHintLabel, HuggingFaceEvidence, ModelFileInfo, ModelMetadata, PackageArtifactKind,
-    PackageFactStatus, ProcessorComponentKind, ResolvedModelPackageFactsSummary,
+    AssetValidationState, BackendHintLabel, BundleFormat, HuggingFaceEvidence,
+    ImageGenerationFamilyLabel, ModelFileInfo, ModelMetadata, PackageArtifactKind,
+    PackageFactStatus, PackageFactValueSource, ProcessorComponentKind,
+    ResolvedModelPackageFactsSummary, StorageKind,
 };
 use pumas_library::ModelLibrary;
+use std::path::Path;
 use tempfile::TempDir;
 
 async fn setup_library() -> (TempDir, ModelLibrary) {
@@ -24,6 +27,48 @@ fn pinned_profile_spec(package: &str, version: &str) -> String {
         ]
     })
     .to_string()
+}
+
+fn write_minimal_gguf(path: &Path, metadata: &[Vec<u8>]) {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"GGUF");
+    bytes.extend_from_slice(&2_u32.to_le_bytes());
+    bytes.extend_from_slice(&0_u64.to_le_bytes());
+    bytes.extend_from_slice(&(metadata.len() as u64).to_le_bytes());
+    for kv in metadata {
+        bytes.extend_from_slice(kv);
+    }
+    std::fs::write(path, bytes).unwrap();
+}
+
+fn gguf_kv_string(key: &str, value: &str) -> Vec<u8> {
+    let mut bytes = gguf_kv_header(key, 8);
+    gguf_write_string(&mut bytes, value);
+    bytes
+}
+
+fn gguf_kv_u32(key: &str, value: u32) -> Vec<u8> {
+    let mut bytes = gguf_kv_header(key, 4);
+    bytes.extend_from_slice(&value.to_le_bytes());
+    bytes
+}
+
+fn gguf_kv_u64(key: &str, value: u64) -> Vec<u8> {
+    let mut bytes = gguf_kv_header(key, 10);
+    bytes.extend_from_slice(&value.to_le_bytes());
+    bytes
+}
+
+fn gguf_kv_header(key: &str, value_type: u32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    gguf_write_string(&mut bytes, key);
+    bytes.extend_from_slice(&value_type.to_le_bytes());
+    bytes
+}
+
+fn gguf_write_string(bytes: &mut Vec<u8>, value: &str) {
+    bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+    bytes.extend_from_slice(value.as_bytes());
 }
 
 async fn create_cache_test_model(library: &ModelLibrary, model_id: &str) {
@@ -973,6 +1018,137 @@ async fn keeps_gguf_companion_facts_distinct_from_transformers_evidence() {
         .backend_hints
         .accepted
         .contains(&BackendHintLabel::LlamaCpp));
+}
+
+#[tokio::test]
+async fn extracts_diffusers_package_evidence_from_bundle_files() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "image/stable-diffusion/tiny-sd";
+    let model_dir = library.build_model_path("image", "stable-diffusion", "tiny-sd");
+    tokio::fs::create_dir_all(model_dir.join("scheduler"))
+        .await
+        .unwrap();
+    tokio::fs::create_dir_all(model_dir.join("unet"))
+        .await
+        .unwrap();
+    tokio::fs::create_dir_all(model_dir.join("vae"))
+        .await
+        .unwrap();
+    tokio::fs::write(
+        model_dir.join("model_index.json"),
+        r#"{
+  "_class_name": "StableDiffusionPipeline",
+  "_diffusers_version": "0.32.0",
+  "_name_or_path": "synthetic/tiny-sd",
+  "scheduler": ["diffusers", "EulerDiscreteScheduler"],
+  "unet": ["diffusers", "UNet2DConditionModel"],
+  "vae": ["diffusers", "AutoencoderKL"]
+}"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        model_dir.join("scheduler/scheduler_config.json"),
+        r#"{"model_type":"euler_scheduler"}"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        model_dir.join("unet/config.json"),
+        r#"{"model_type":"unet_2d_condition"}"#,
+    )
+    .await
+    .unwrap();
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("image".to_string()),
+        family: Some("stable-diffusion".to_string()),
+        cleaned_name: Some("tiny-sd".to_string()),
+        official_name: Some("Tiny SD".to_string()),
+        bundle_format: Some(BundleFormat::DiffusersDirectory),
+        storage_kind: Some(StorageKind::LibraryOwned),
+        validation_state: Some(AssetValidationState::Valid),
+        task_type_primary: Some("image_generation".to_string()),
+        recommended_backend: Some("diffusers".to_string()),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+    let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+    let diffusers = facts
+        .diffusers
+        .expect("diffusers evidence should be present");
+
+    assert_eq!(
+        facts.artifact.artifact_kind,
+        PackageArtifactKind::DiffusersBundle
+    );
+    assert_eq!(
+        diffusers.pipeline_class.as_deref(),
+        Some("StableDiffusionPipeline")
+    );
+    assert_eq!(
+        diffusers
+            .family_evidence
+            .first()
+            .map(|evidence| evidence.family),
+        Some(ImageGenerationFamilyLabel::StableDiffusion)
+    );
+    assert!(diffusers.components.iter().any(|component| {
+        component.config_path.as_deref() == Some("unet/config.json")
+            && component.config_model_type.as_deref() == Some("unet_2d_condition")
+    }));
+    assert!(facts
+        .backend_hints
+        .accepted
+        .contains(&BackendHintLabel::Diffusers));
+}
+
+#[tokio::test]
+async fn extracts_header_derived_gguf_package_evidence() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/llama/tiny-header-gguf";
+    let model_dir = library.build_model_path("llm", "llama", "tiny-header-gguf");
+    tokio::fs::create_dir_all(&model_dir).await.unwrap();
+    write_minimal_gguf(
+        &model_dir.join("model-Q4_K_M.gguf"),
+        &[
+            gguf_kv_string("general.architecture", "llama"),
+            gguf_kv_u32("general.file_type", 13),
+            gguf_kv_u64("llama.context_length", 4096),
+            gguf_kv_u64("llama.embedding_length", 4096),
+        ],
+    );
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("llama".to_string()),
+        cleaned_name: Some("tiny-header-gguf".to_string()),
+        official_name: Some("Tiny Header GGUF".to_string()),
+        task_type_primary: Some("text_generation".to_string()),
+        recommended_backend: Some("llama.cpp".to_string()),
+        files: Some(vec![ModelFileInfo {
+            name: "model-Q4_K_M.gguf".to_string(),
+            original_name: None,
+            size: None,
+            sha256: None,
+            blake3: None,
+        }]),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+    let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+    let gguf = facts.gguf.expect("gguf evidence should be present");
+
+    assert_eq!(facts.artifact.artifact_kind, PackageArtifactKind::Gguf);
+    assert_eq!(gguf.architecture.as_deref(), Some("llama"));
+    assert_eq!(gguf.quantization.as_deref(), Some("MOSTLY_Q4_K_M"));
+    assert_eq!(gguf.value_source, Some(PackageFactValueSource::Header));
+    assert_eq!(gguf.context_length, Some(4096));
+    assert_eq!(gguf.embedding_length, Some(4096));
 }
 
 #[tokio::test]

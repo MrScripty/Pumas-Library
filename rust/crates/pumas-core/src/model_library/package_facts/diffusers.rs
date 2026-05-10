@@ -66,6 +66,7 @@ pub(crate) async fn diffusers_package_evidence(
     let pipeline_class = string_field(&model_index, "_class_name");
     let diffusers_version = string_field(&model_index, "_diffusers_version");
     let name_or_path = string_field(&model_index, "_name_or_path");
+    let mut diagnostics = Vec::new();
     let mut components = vec![DiffusersComponentFacts {
         role: DiffusersComponentRole::PipelineIndex,
         status: PackageFactStatus::Present,
@@ -81,12 +82,44 @@ pub(crate) async fn diffusers_package_evidence(
             continue;
         };
         let (source_library, class_name) = component_reference(value);
-        let config =
-            read_component_config(bundle_root, component.key, component.config_candidates).await?;
+        let (status, config) = if source_library.is_none() || class_name.is_none() {
+            diagnostics.push(ModelPackageDiagnostic {
+                code: "diffusers_component_reference_invalid".to_string(),
+                message: format!(
+                    "model_index.json component '{}' must be a non-empty [source_library, class_name] array",
+                    component.key
+                ),
+                path: Some(MODEL_INDEX_PATH.to_string()),
+            });
+            (PackageFactStatus::Invalid, None)
+        } else {
+            let component_path =
+                bundle_root.join(normalized_component_relative_path(component.key)?);
+            if !tokio::fs::try_exists(&component_path).await? {
+                diagnostics.push(ModelPackageDiagnostic {
+                    code: "diffusers_component_missing".to_string(),
+                    message: format!(
+                        "model_index.json references missing component directory '{}'",
+                        component.key
+                    ),
+                    path: Some(component.key.to_string()),
+                });
+                (PackageFactStatus::Missing, None)
+            } else {
+                let config = read_component_config(
+                    bundle_root,
+                    component.key,
+                    component.config_candidates,
+                    &mut diagnostics,
+                )
+                .await?;
+                (PackageFactStatus::Present, config)
+            }
+        };
 
         components.push(DiffusersComponentFacts {
             role: component.role,
-            status: PackageFactStatus::Present,
+            status,
             relative_path: Some(component.key.to_string()),
             source_library,
             class_name,
@@ -96,6 +129,8 @@ pub(crate) async fn diffusers_package_evidence(
             config_model_type: config.and_then(|config| config.model_type),
         });
     }
+    let mut family_evidence = family_evidence(&model_index, pipeline_class.as_deref());
+    append_ambiguity_diagnostics(&mut family_evidence, &mut diagnostics);
 
     Ok(DiffusersPackageExtraction {
         evidence: Some(DiffusersPackageEvidence {
@@ -104,10 +139,10 @@ pub(crate) async fn diffusers_package_evidence(
             diffusers_version,
             name_or_path,
             task: task_for_pipeline(pipeline_class.as_deref()),
-            family_evidence: family_evidence(&model_index, pipeline_class.as_deref()),
+            family_evidence,
             components,
         }),
-        diagnostics: Vec::new(),
+        diagnostics,
     })
 }
 
@@ -206,6 +241,7 @@ async fn read_component_config(
     bundle_root: &Path,
     component_key: &'static str,
     candidates: &'static [&'static str],
+    diagnostics: &mut Vec<ModelPackageDiagnostic>,
 ) -> Result<Option<ComponentConfig>> {
     for candidate in candidates {
         let relative_path = bounded_component_config_path(component_key, candidate)?;
@@ -213,10 +249,18 @@ async fn read_component_config(
         if !tokio::fs::try_exists(&path).await? {
             continue;
         }
-        let model_type = read_json(path)
-            .await
-            .ok()
-            .and_then(|config| string_field(&config, "model_type"));
+        let relative_path_string = relative_path.display().to_string();
+        let model_type = match read_json(path).await {
+            Ok(config) => string_field(&config, "model_type"),
+            Err(err) => {
+                diagnostics.push(ModelPackageDiagnostic {
+                    code: "diffusers_component_config_invalid".to_string(),
+                    message: format!("failed to parse {}: {}", relative_path_string, err),
+                    path: Some(relative_path_string),
+                });
+                None
+            }
+        };
         return Ok(Some(ComponentConfig {
             relative_file: candidate,
             model_type,
@@ -353,6 +397,39 @@ fn family_evidence(
     evidence
 }
 
+fn append_ambiguity_diagnostics(
+    evidence: &mut Vec<ImageGenerationFamilyEvidence>,
+    diagnostics: &mut Vec<ModelPackageDiagnostic>,
+) {
+    let mut families = Vec::new();
+    for item in evidence.iter() {
+        if item.family == ImageGenerationFamilyLabel::Unknown
+            || item.family == ImageGenerationFamilyLabel::Ambiguous
+        {
+            continue;
+        }
+        if !families.contains(&item.family) {
+            families.push(item.family);
+        }
+    }
+    if families.len() <= 1 {
+        return;
+    }
+
+    evidence.push(ImageGenerationFamilyEvidence {
+        family: ImageGenerationFamilyLabel::Ambiguous,
+        source: ImageGenerationFamilyEvidenceSource::Ambiguous,
+        value_source: PackageFactValueSource::Ambiguous,
+        source_path: Some(MODEL_INDEX_PATH.to_string()),
+        message: Some("multiple package-standard family signals disagree".to_string()),
+    });
+    diagnostics.push(ModelPackageDiagnostic {
+        code: "diffusers_family_ambiguous".to_string(),
+        message: "multiple package-standard family signals disagree".to_string(),
+        path: Some(MODEL_INDEX_PATH.to_string()),
+    });
+}
+
 fn family_from_pipeline_class(pipeline_class: &str) -> ImageGenerationFamilyLabel {
     match pipeline_class {
         "StableDiffusionPipeline" => ImageGenerationFamilyLabel::StableDiffusion,
@@ -408,6 +485,9 @@ mod tests {
     #[tokio::test]
     async fn extracts_stable_diffusion_model_index_facts() {
         let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("scheduler")).unwrap();
+        fs::create_dir_all(temp.path().join("unet")).unwrap();
+        fs::create_dir_all(temp.path().join("vae")).unwrap();
         fs::write(
             temp.path().join(MODEL_INDEX_PATH),
             r#"{
@@ -492,6 +572,75 @@ mod tests {
             extraction.diagnostics[0].path.as_deref(),
             Some(MODEL_INDEX_PATH)
         );
+    }
+
+    #[tokio::test]
+    async fn reports_missing_and_invalid_components_without_failing_extraction() {
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join(MODEL_INDEX_PATH),
+            r#"{
+  "_class_name": "StableDiffusionPipeline",
+  "scheduler": "invalid",
+  "unet": ["diffusers", "UNet2DConditionModel"]
+}"#,
+        )
+        .unwrap();
+
+        let extraction = diffusers_package_evidence(temp.path()).await.unwrap();
+        let evidence = extraction.evidence.unwrap();
+
+        assert_eq!(evidence.status, PackageFactStatus::Present);
+        assert!(evidence.components.iter().any(|component| {
+            component.role == DiffusersComponentRole::Scheduler
+                && component.status == PackageFactStatus::Invalid
+        }));
+        assert!(evidence.components.iter().any(|component| {
+            component.role == DiffusersComponentRole::Unet
+                && component.status == PackageFactStatus::Missing
+        }));
+        assert!(extraction
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "diffusers_component_reference_invalid"));
+        assert!(extraction
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "diffusers_component_missing"));
+    }
+
+    #[tokio::test]
+    async fn reports_invalid_nested_component_config() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("scheduler")).unwrap();
+        fs::write(
+            temp.path().join(MODEL_INDEX_PATH),
+            r#"{
+  "_class_name": "StableDiffusionPipeline",
+  "scheduler": ["diffusers", "EulerDiscreteScheduler"]
+}"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("scheduler/scheduler_config.json"),
+            "{ not json",
+        )
+        .unwrap();
+
+        let extraction = diffusers_package_evidence(temp.path()).await.unwrap();
+        let evidence = extraction.evidence.unwrap();
+
+        assert_eq!(evidence.status, PackageFactStatus::Present);
+        assert!(evidence.components.iter().any(|component| {
+            component.role == DiffusersComponentRole::Scheduler
+                && component.status == PackageFactStatus::Present
+                && component.config_path.as_deref() == Some("scheduler/scheduler_config.json")
+                && component.config_model_type.is_none()
+        }));
+        assert!(extraction.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "diffusers_component_config_invalid"
+                && diagnostic.path.as_deref() == Some("scheduler/scheduler_config.json")
+        }));
     }
 
     #[tokio::test]
@@ -605,6 +754,32 @@ mod tests {
             item.family == ImageGenerationFamilyLabel::Flux
                 && item.source == ImageGenerationFamilyEvidenceSource::ModelIndexComponent
         }));
+    }
+
+    #[tokio::test]
+    async fn reports_ambiguous_family_evidence() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("transformer")).unwrap();
+        fs::write(
+            temp.path().join(MODEL_INDEX_PATH),
+            r#"{
+  "_class_name": "StableDiffusionPipeline",
+  "transformer": ["diffusers", "FluxTransformer2DModel"]
+}"#,
+        )
+        .unwrap();
+
+        let extraction = diffusers_package_evidence(temp.path()).await.unwrap();
+        let evidence = extraction.evidence.unwrap();
+
+        assert!(evidence
+            .family_evidence
+            .iter()
+            .any(|item| item.family == ImageGenerationFamilyLabel::Ambiguous));
+        assert!(extraction
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "diffusers_family_ambiguous"));
     }
 
     #[test]

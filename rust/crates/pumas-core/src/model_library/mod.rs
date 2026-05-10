@@ -77,7 +77,9 @@ pub use library::{
     MetadataProjectionCleanupExecutionReport, MigrationDryRunItem, MigrationDryRunReport,
     MigrationExecutionItem, MigrationExecutionReport, MigrationPlannedMove,
     MigrationReportArtifact, ModelLibrary, ModelLibraryUpdateSubscriber,
-    PackageFactsCacheMigrationDryRunItem, PackageFactsCacheMigrationDryRunReport, ReclassifyResult,
+    PackageFactsCacheMigrationDryRunItem, PackageFactsCacheMigrationDryRunReport,
+    PackageFactsCacheMigrationExecutionItem, PackageFactsCacheMigrationExecutionReport,
+    PackageFactsCacheMigrationPlannedWork, ReclassifyResult,
 };
 pub use link_registry::LinkRegistry;
 pub use mapper::ModelMapper;

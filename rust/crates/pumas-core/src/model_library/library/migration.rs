@@ -35,6 +35,35 @@ async fn save_migration_checkpoint_async(
         })?
 }
 
+async fn load_package_facts_cache_migration_checkpoint_async(
+    path: PathBuf,
+) -> Result<Option<PackageFactsCacheMigrationCheckpointState>> {
+    tokio::task::spawn_blocking(move || load_package_facts_cache_migration_checkpoint(&path))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join package-facts migration checkpoint load task: {}",
+                err
+            ))
+        })?
+}
+
+async fn save_package_facts_cache_migration_checkpoint_async(
+    path: PathBuf,
+    state: PackageFactsCacheMigrationCheckpointState,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        save_package_facts_cache_migration_checkpoint(&path, &state)
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join package-facts migration checkpoint save task: {}",
+            err
+        ))
+    })?
+}
+
 async fn write_migration_execution_reports_async(
     library_root: PathBuf,
     report: MigrationExecutionReport,
@@ -446,6 +475,155 @@ impl ModelLibrary {
             obsolete_empty_selected_artifact_rows,
             error: None,
         })
+    }
+
+    /// Execute package-facts cache migration work with checkpoint/resume
+    /// support. Work is materialized from the dry-run inventory when no
+    /// checkpoint exists, then each model is regenerated through the canonical
+    /// selected-model package-facts hydration path.
+    pub async fn execute_package_facts_cache_migration_with_checkpoint(
+        &self,
+    ) -> Result<PackageFactsCacheMigrationExecutionReport> {
+        let checkpoint_path = self
+            .library_root
+            .join(PACKAGE_FACTS_CACHE_MIGRATION_CHECKPOINT_FILENAME);
+        let mut resumed_from_checkpoint = false;
+        let mut checkpoint_state = if path_exists(&checkpoint_path).await? {
+            resumed_from_checkpoint = true;
+            load_package_facts_cache_migration_checkpoint_async(checkpoint_path.clone())
+                .await?
+                .ok_or_else(|| {
+                    PumasError::Other(format!(
+                        "Package-facts migration checkpoint file exists but could not be loaded: {}",
+                        checkpoint_path.display()
+                    ))
+                })?
+        } else {
+            let dry_run = self
+                .generate_package_facts_cache_migration_dry_run_report()
+                .await?;
+            let initialized = package_facts_cache_checkpoint_from_dry_run(&dry_run);
+            save_package_facts_cache_migration_checkpoint_async(
+                checkpoint_path.clone(),
+                initialized.clone(),
+            )
+            .await?;
+            initialized
+        };
+
+        let planned_work_count =
+            checkpoint_state.pending_work.len() + checkpoint_state.completed_results.len();
+        while !checkpoint_state.pending_work.is_empty() {
+            let planned = checkpoint_state.pending_work.remove(0);
+            let result = self
+                .execute_package_facts_cache_migration_work(&planned)
+                .await;
+            checkpoint_state.completed_results.push(result);
+            checkpoint_state.updated_at = chrono::Utc::now().to_rfc3339();
+            save_package_facts_cache_migration_checkpoint_async(
+                checkpoint_path.clone(),
+                checkpoint_state.clone(),
+            )
+            .await?;
+        }
+
+        let mut report = PackageFactsCacheMigrationExecutionReport {
+            generated_at: checkpoint_state.created_at.clone(),
+            completed_at: Some(chrono::Utc::now().to_rfc3339()),
+            resumed_from_checkpoint,
+            checkpoint_path: checkpoint_path.display().to_string(),
+            planned_work_count,
+            results: checkpoint_state.completed_results.clone(),
+            ..Default::default()
+        };
+        for result in &report.results {
+            if result.regenerated_detail {
+                report.regenerated_detail_count += 1;
+            }
+            if result.regenerated_summary {
+                report.regenerated_summary_count += 1;
+            }
+            report.deleted_obsolete_row_count += result.deleted_obsolete_rows;
+            if result.skipped_partial_download {
+                report.skipped_partial_download_count += 1;
+            }
+            if result.error.is_some() {
+                report.error_count += 1;
+            }
+        }
+
+        if checkpoint_state.pending_work.is_empty() {
+            let _ = fs::remove_file(&checkpoint_path).await;
+        } else {
+            save_package_facts_cache_migration_checkpoint_async(
+                checkpoint_path.clone(),
+                checkpoint_state.clone(),
+            )
+            .await?;
+        }
+
+        Ok(report)
+    }
+
+    async fn execute_package_facts_cache_migration_work(
+        &self,
+        planned: &PackageFactsCacheMigrationPlannedWork,
+    ) -> PackageFactsCacheMigrationExecutionItem {
+        let mut result = PackageFactsCacheMigrationExecutionItem {
+            model_id: planned.model_id.clone(),
+            selected_artifact_id: planned.selected_artifact_id.clone(),
+            target_package_facts_contract_version: planned.target_package_facts_contract_version,
+            planned_source_fingerprint: planned.source_fingerprint.clone(),
+            action: "completed".to_string(),
+            ..Default::default()
+        };
+
+        if planned.skip_partial_download {
+            result.action = "skipped_partial_download".to_string();
+            result.skipped_partial_download = true;
+            return result;
+        }
+
+        if planned.regenerate_detail || planned.regenerate_summary {
+            match self.resolve_model_package_facts(&planned.model_id).await {
+                Ok(_) => {
+                    result.regenerated_detail = planned.regenerate_detail;
+                    result.regenerated_summary = planned.regenerate_summary;
+                    result.written_source_fingerprint = self
+                        .index
+                        .get_model_package_facts_cache(
+                            &planned.model_id,
+                            planned.selected_artifact_id.as_deref(),
+                            ModelPackageFactsCacheScope::Detail,
+                        )
+                        .ok()
+                        .flatten()
+                        .map(|row| row.source_fingerprint);
+                }
+                Err(err) => {
+                    result.action = "error".to_string();
+                    result.error = Some(err.to_string());
+                    return result;
+                }
+            }
+        }
+
+        if planned.delete_obsolete_rows {
+            match self
+                .index
+                .delete_model_package_facts_cache_without_selected_artifact(&planned.model_id)
+            {
+                Ok(deleted) => {
+                    result.deleted_obsolete_rows = deleted;
+                }
+                Err(err) => {
+                    result.action = "error".to_string();
+                    result.error = Some(err.to_string());
+                }
+            }
+        }
+
+        result
     }
 
     /// List generated migration report artifacts from index.json (newest-first).
@@ -1958,6 +2136,118 @@ pub struct PackageFactsCacheMigrationDryRunItem {
     pub error: Option<String>,
 }
 
+fn package_facts_cache_checkpoint_from_dry_run(
+    dry_run: &PackageFactsCacheMigrationDryRunReport,
+) -> PackageFactsCacheMigrationCheckpointState {
+    let mut pending_work = Vec::new();
+    let mut completed_results = Vec::new();
+
+    for item in &dry_run.items {
+        if item.blocked_partial_download {
+            completed_results.push(PackageFactsCacheMigrationExecutionItem {
+                model_id: item.model_id.clone(),
+                selected_artifact_id: item.selected_artifact_id.clone(),
+                target_package_facts_contract_version: dry_run
+                    .target_package_facts_contract_version,
+                planned_source_fingerprint: item.source_fingerprint.clone(),
+                action: "skipped_partial_download".to_string(),
+                skipped_partial_download: true,
+                ..Default::default()
+            });
+            continue;
+        }
+        if let Some(error) = &item.error {
+            completed_results.push(PackageFactsCacheMigrationExecutionItem {
+                model_id: item.model_id.clone(),
+                selected_artifact_id: item.selected_artifact_id.clone(),
+                target_package_facts_contract_version: dry_run
+                    .target_package_facts_contract_version,
+                planned_source_fingerprint: item.source_fingerprint.clone(),
+                action: "error".to_string(),
+                error: Some(error.clone()),
+                ..Default::default()
+            });
+            continue;
+        }
+        if item.will_regenerate_detail
+            || item.will_regenerate_summary
+            || item.will_delete_obsolete_rows
+        {
+            pending_work.push(PackageFactsCacheMigrationPlannedWork {
+                model_id: item.model_id.clone(),
+                selected_artifact_id: item.selected_artifact_id.clone(),
+                target_package_facts_contract_version: dry_run
+                    .target_package_facts_contract_version,
+                source_fingerprint: item.source_fingerprint.clone(),
+                regenerate_detail: item.will_regenerate_detail,
+                regenerate_summary: item.will_regenerate_summary,
+                delete_obsolete_rows: item.will_delete_obsolete_rows,
+                skip_partial_download: false,
+            });
+        }
+    }
+
+    PackageFactsCacheMigrationCheckpointState {
+        created_at: chrono::Utc::now().to_rfc3339(),
+        updated_at: chrono::Utc::now().to_rfc3339(),
+        pending_work,
+        completed_results,
+    }
+}
+
+/// Planned package-facts cache migration work persisted in the checkpoint.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PackageFactsCacheMigrationPlannedWork {
+    pub model_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_artifact_id: Option<String>,
+    pub target_package_facts_contract_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_fingerprint: Option<String>,
+    pub regenerate_detail: bool,
+    pub regenerate_summary: bool,
+    pub delete_obsolete_rows: bool,
+    #[serde(default)]
+    pub skip_partial_download: bool,
+}
+
+/// Per-model package-facts cache migration execution result.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PackageFactsCacheMigrationExecutionItem {
+    pub model_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_artifact_id: Option<String>,
+    pub target_package_facts_contract_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub planned_source_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written_source_fingerprint: Option<String>,
+    pub action: String,
+    pub regenerated_detail: bool,
+    pub regenerated_summary: bool,
+    pub deleted_obsolete_rows: usize,
+    pub skipped_partial_download: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Execution report for checkpointed package-facts cache migration.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PackageFactsCacheMigrationExecutionReport {
+    pub generated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
+    pub resumed_from_checkpoint: bool,
+    pub checkpoint_path: String,
+    pub planned_work_count: usize,
+    pub regenerated_detail_count: usize,
+    pub regenerated_summary_count: usize,
+    pub deleted_obsolete_row_count: usize,
+    pub skipped_partial_download_count: usize,
+    pub error_count: usize,
+    pub results: Vec<PackageFactsCacheMigrationExecutionItem>,
+}
+
 /// Planned move row persisted in migration checkpoint state.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct MigrationPlannedMove {
@@ -2025,6 +2315,14 @@ pub(super) struct MigrationCheckpointState {
     pub(super) updated_at: String,
     pub(super) pending_moves: Vec<MigrationPlannedMove>,
     pub(super) completed_results: Vec<MigrationExecutionItem>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub(super) struct PackageFactsCacheMigrationCheckpointState {
+    pub(super) created_at: String,
+    pub(super) updated_at: String,
+    pub(super) pending_work: Vec<PackageFactsCacheMigrationPlannedWork>,
+    pub(super) completed_results: Vec<PackageFactsCacheMigrationExecutionItem>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]

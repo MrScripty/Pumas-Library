@@ -1507,6 +1507,53 @@ async fn package_facts_cache_migration_dry_run_reports_partial_download_without_
 }
 
 #[tokio::test]
+async fn package_facts_cache_migration_execution_regenerates_missing_rows_and_clears_checkpoint() {
+    let (temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/cache-test";
+    create_cache_test_model(&library, model_id).await;
+
+    let report = library
+        .execute_package_facts_cache_migration_with_checkpoint()
+        .await
+        .unwrap();
+
+    assert!(!report.resumed_from_checkpoint);
+    assert_eq!(report.planned_work_count, 1);
+    assert_eq!(report.regenerated_detail_count, 1);
+    assert_eq!(report.regenerated_summary_count, 1);
+    assert_eq!(report.deleted_obsolete_row_count, 0);
+    assert_eq!(report.skipped_partial_download_count, 0);
+    assert_eq!(report.error_count, 0);
+    assert_eq!(report.results.len(), 1);
+    let result = &report.results[0];
+    assert_eq!(result.model_id, model_id);
+    assert_eq!(result.action, "completed");
+    assert!(result.regenerated_detail);
+    assert!(result.regenerated_summary);
+    assert!(result.planned_source_fingerprint.is_some());
+    assert!(result.written_source_fingerprint.is_some());
+    assert_eq!(
+        result.planned_source_fingerprint,
+        result.written_source_fingerprint
+    );
+
+    assert!(library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .is_some());
+    assert!(library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Summary)
+        .unwrap()
+        .is_some());
+    assert!(!temp_dir
+        .path()
+        .join(".package_facts_cache_migration_checkpoint.json")
+        .exists());
+}
+
+#[tokio::test]
 async fn package_facts_cache_migration_dry_run_reports_stale_and_invalid_rows() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/cache-test";

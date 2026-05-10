@@ -60,11 +60,15 @@ use tokio::sync::broadcast;
 use tokio::sync::{Mutex, RwLock};
 use walkdir::WalkDir;
 
-use migration::{MigrationCheckpointState, MigrationReportIndex, MigrationReportIndexEntry};
+use migration::{
+    MigrationCheckpointState, MigrationReportIndex, MigrationReportIndexEntry,
+    PackageFactsCacheMigrationCheckpointState,
+};
 pub use migration::{
     MigrationDryRunItem, MigrationDryRunReport, MigrationExecutionItem, MigrationExecutionReport,
     MigrationPlannedMove, MigrationReportArtifact, PackageFactsCacheMigrationDryRunItem,
-    PackageFactsCacheMigrationDryRunReport,
+    PackageFactsCacheMigrationDryRunReport, PackageFactsCacheMigrationExecutionItem,
+    PackageFactsCacheMigrationExecutionReport, PackageFactsCacheMigrationPlannedWork,
 };
 pub use projection::MetadataProjectionCleanupExecutionReport;
 use projection::{
@@ -128,6 +132,9 @@ const OVERRIDES_FILENAME: &str = "overrides.json";
 const DB_FILENAME: &str = "models.db";
 /// Checkpoint file used by metadata v2 migration runner.
 const MIGRATION_CHECKPOINT_FILENAME: &str = ".metadata_v2_migration_checkpoint.json";
+/// Checkpoint file used by package-facts cache migration runner.
+const PACKAGE_FACTS_CACHE_MIGRATION_CHECKPOINT_FILENAME: &str =
+    ".package_facts_cache_migration_checkpoint.json";
 /// Directory for migration report artifacts.
 const MIGRATION_REPORTS_DIR: &str = "migration-reports";
 /// Index file for generated migration report artifacts.
@@ -4704,6 +4711,19 @@ fn load_migration_checkpoint(path: &Path) -> Result<Option<MigrationCheckpointSt
 }
 
 fn save_migration_checkpoint(path: &Path, checkpoint: &MigrationCheckpointState) -> Result<()> {
+    atomic_write_json(path, checkpoint, true)
+}
+
+fn load_package_facts_cache_migration_checkpoint(
+    path: &Path,
+) -> Result<Option<PackageFactsCacheMigrationCheckpointState>> {
+    atomic_read_json(path)
+}
+
+fn save_package_facts_cache_migration_checkpoint(
+    path: &Path,
+    checkpoint: &PackageFactsCacheMigrationCheckpointState,
+) -> Result<()> {
     atomic_write_json(path, checkpoint, true)
 }
 

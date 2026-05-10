@@ -4,6 +4,7 @@ use crate::models::{ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefresh
 use crate::models::{
     ModelPackageFactsSummarySnapshot, ModelPackageFactsSummarySnapshotItem,
     ModelPackageFactsSummaryStatus, ResolvedModelPackageFactsSummary,
+    PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use crate::{PumasError, Result};
 use rusqlite::types::Type;
@@ -231,6 +232,8 @@ impl ModelIndex {
         let mut stmt = conn.prepare(
             "SELECT
                 models.id,
+                model_package_facts_cache.selected_artifact_id,
+                model_package_facts_cache.package_facts_contract_version,
                 model_package_facts_cache.facts_json
              FROM models
              LEFT JOIN model_package_facts_cache
@@ -243,8 +246,20 @@ impl ModelIndex {
         let items = stmt
             .query_map(params![limit as i64, offset as i64], |row| {
                 let model_id: String = row.get(0)?;
-                let facts_json: Option<String> = row.get(1)?;
-                Ok(summary_snapshot_item_from_json(model_id, facts_json))
+                let selected_artifact_id: Option<String> = row.get(1)?;
+                let package_facts_contract_version: Option<i64> = row.get(2)?;
+                let facts_json: Option<String> = row.get(3)?;
+                let (status, summary) = classify_package_facts_summary_cache_row(
+                    None,
+                    selected_artifact_id.as_deref(),
+                    package_facts_contract_version,
+                    facts_json.as_deref(),
+                );
+                Ok(ModelPackageFactsSummarySnapshotItem {
+                    model_id,
+                    status,
+                    summary,
+                })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let cursor = model_library_update_cursor(
@@ -255,28 +270,52 @@ impl ModelIndex {
     }
 }
 
-fn summary_snapshot_item_from_json(
-    model_id: String,
-    facts_json: Option<String>,
-) -> ModelPackageFactsSummarySnapshotItem {
+pub(super) fn classify_package_facts_summary_cache_row(
+    expected_selected_artifact_id: Option<&str>,
+    row_selected_artifact_id: Option<&str>,
+    row_package_facts_contract_version: Option<i64>,
+    facts_json: Option<&str>,
+) -> (
+    ModelPackageFactsSummaryStatus,
+    Option<ResolvedModelPackageFactsSummary>,
+) {
     let Some(facts_json) = facts_json else {
-        return ModelPackageFactsSummarySnapshotItem {
-            model_id,
-            status: ModelPackageFactsSummaryStatus::Missing,
-            summary: None,
-        };
+        return (ModelPackageFactsSummaryStatus::Missing, None);
     };
+    let expected_selected_artifact_id =
+        normalized_selected_artifact_id(expected_selected_artifact_id);
+    let row_selected_artifact_id = normalized_selected_artifact_id(row_selected_artifact_id);
+    if row_selected_artifact_id != expected_selected_artifact_id {
+        return (ModelPackageFactsSummaryStatus::WrongSelectedArtifact, None);
+    }
+    if row_package_facts_contract_version != Some(i64::from(PACKAGE_FACTS_CONTRACT_VERSION)) {
+        return (ModelPackageFactsSummaryStatus::StaleContract, None);
+    }
 
     match serde_json::from_str::<ResolvedModelPackageFactsSummary>(&facts_json) {
-        Ok(summary) => ModelPackageFactsSummarySnapshotItem {
-            model_id,
-            status: ModelPackageFactsSummaryStatus::Cached,
-            summary: Some(summary),
-        },
-        Err(_) => ModelPackageFactsSummarySnapshotItem {
-            model_id,
-            status: ModelPackageFactsSummaryStatus::Invalid,
-            summary: None,
-        },
+        Ok(summary) if summary.package_facts_contract_version != PACKAGE_FACTS_CONTRACT_VERSION => {
+            (ModelPackageFactsSummaryStatus::StaleContract, None)
+        }
+        Ok(summary)
+            if expected_selected_artifact_id.is_some()
+                && normalized_selected_artifact_id(
+                    summary.model_ref.selected_artifact_id.as_deref(),
+                ) != expected_selected_artifact_id =>
+        {
+            (ModelPackageFactsSummaryStatus::WrongSelectedArtifact, None)
+        }
+        Ok(summary) => (ModelPackageFactsSummaryStatus::Cached, Some(summary)),
+        Err(_) => (ModelPackageFactsSummaryStatus::Invalid, None),
     }
+}
+
+fn normalized_selected_artifact_id(value: Option<&str>) -> Option<&str> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
 }

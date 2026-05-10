@@ -1,11 +1,11 @@
 use super::model_library_updates::model_library_update_cursor;
+use super::package_facts_cache::classify_package_facts_summary_cache_row;
 use super::ModelIndex;
 use crate::models::{
     AssetValidationState, BackendHintLabel, ModelArtifactState, ModelEntryPathState,
     ModelLibrarySelectorDetailState, ModelLibrarySelectorSnapshot,
     ModelLibrarySelectorSnapshotRequest, ModelLibrarySelectorSnapshotRow,
-    ModelPackageFactsSummaryStatus, PumasModelRef, ResolvedModelPackageFactsSummary, StorageKind,
-    PUMAS_MODEL_REF_CONTRACT_VERSION,
+    ModelPackageFactsSummaryStatus, PumasModelRef, StorageKind, PUMAS_MODEL_REF_CONTRACT_VERSION,
 };
 use crate::{PumasError, Result};
 use rusqlite::params;
@@ -58,6 +58,11 @@ impl ModelIndex {
                 json_extract(m.metadata_json, '$.download_has_part_files'),
                 json_extract(m.metadata_json, '$.download_missing_expected_files'),
                 json_extract(m.metadata_json, '$.match_source'),
+                COALESCE(pf_selected.selected_artifact_id, pf_default.selected_artifact_id),
+                COALESCE(
+                    pf_selected.package_facts_contract_version,
+                    pf_default.package_facts_contract_version
+                ),
                 COALESCE(pf_selected.facts_json, pf_default.facts_json)
              FROM models m
              LEFT JOIN model_package_facts_cache pf_selected
@@ -136,13 +141,20 @@ fn row_to_selector_snapshot_row(
     let download_has_part_files: Option<i64> = row.get(19)?;
     let download_missing_expected_files: Option<i64> = row.get(20)?;
     let match_source: Option<String> = row.get(21)?;
-    let summary_json: Option<String> = row.get(22)?;
+    let summary_selected_artifact_id: Option<String> = row.get(22)?;
+    let summary_package_facts_contract_version: Option<i64> = row.get(23)?;
+    let summary_json: Option<String> = row.get(24)?;
 
     let tags = parse_string_vec(&tags_json);
     let mut runtime_engine_hints =
         parse_optional_string_vec(runtime_engine_hints_json.as_deref()).unwrap_or_default();
     let (package_facts_summary_status, package_facts_summary) =
-        package_facts_summary_from_json(summary_json.as_deref());
+        classify_package_facts_summary_cache_row(
+            metadata_selected_artifact_id.as_deref(),
+            summary_selected_artifact_id.as_deref(),
+            summary_package_facts_contract_version,
+            summary_json.as_deref(),
+        );
     let summary = package_facts_summary.as_ref();
 
     let mut model_ref = summary
@@ -269,22 +281,6 @@ where
     value.and_then(|value| serde_json::from_value(serde_json::Value::String(value)).ok())
 }
 
-fn package_facts_summary_from_json(
-    summary_json: Option<&str>,
-) -> (
-    ModelPackageFactsSummaryStatus,
-    Option<ResolvedModelPackageFactsSummary>,
-) {
-    let Some(summary_json) = summary_json else {
-        return (ModelPackageFactsSummaryStatus::Missing, None);
-    };
-
-    match serde_json::from_str::<ResolvedModelPackageFactsSummary>(summary_json) {
-        Ok(summary) => (ModelPackageFactsSummaryStatus::Cached, Some(summary)),
-        Err(_) => (ModelPackageFactsSummaryStatus::Invalid, None),
-    }
-}
-
 fn derive_artifact_state(
     import_state: Option<&str>,
     validation_state: Option<AssetValidationState>,
@@ -387,7 +383,8 @@ mod tests {
     use crate::index::{ModelPackageFactsCacheRecord, ModelPackageFactsCacheScope, ModelRecord};
     use crate::models::{
         BackendHintFacts, ModelFactFamily, ModelLibraryChangeKind, PackageArtifactKind,
-        PackageFactStatus, TaskEvidence, PACKAGE_FACTS_CONTRACT_VERSION,
+        PackageFactStatus, ResolvedModelPackageFactsSummary, TaskEvidence,
+        PACKAGE_FACTS_CONTRACT_VERSION,
     };
     use std::collections::HashMap;
     use tempfile::TempDir;
@@ -458,11 +455,36 @@ mod tests {
     }
 
     fn cache_summary(index: &ModelIndex, model_id: &str, facts_json: String) {
+        cache_summary_for_selected(index, model_id, "", facts_json);
+    }
+
+    fn cache_summary_for_selected(
+        index: &ModelIndex,
+        model_id: &str,
+        selected_artifact_id: &str,
+        facts_json: String,
+    ) {
+        cache_summary_for_selected_with_contract(
+            index,
+            model_id,
+            selected_artifact_id,
+            PACKAGE_FACTS_CONTRACT_VERSION as i64,
+            facts_json,
+        );
+    }
+
+    fn cache_summary_for_selected_with_contract(
+        index: &ModelIndex,
+        model_id: &str,
+        selected_artifact_id: &str,
+        package_facts_contract_version: i64,
+        facts_json: String,
+    ) {
         let record = ModelPackageFactsCacheRecord {
             model_id: model_id.to_string(),
-            selected_artifact_id: String::new(),
+            selected_artifact_id: selected_artifact_id.to_string(),
             cache_scope: ModelPackageFactsCacheScope::Summary,
-            package_facts_contract_version: PACKAGE_FACTS_CONTRACT_VERSION as i64,
+            package_facts_contract_version,
             producer_revision: Some("test-producer".to_string()),
             source_fingerprint: "fingerprint-v1".to_string(),
             facts_json,
@@ -535,9 +557,10 @@ mod tests {
                 }),
             ))
             .unwrap();
-        cache_summary(
+        cache_summary_for_selected(
             &index,
             model_id,
+            "model-q4.gguf",
             serde_json::to_string(&summary_for(
                 model_id,
                 "/models/llm/example/model-q4/model-q4.gguf",
@@ -589,6 +612,85 @@ mod tests {
         assert_eq!(
             row.package_facts_summary_status,
             ModelPackageFactsSummaryStatus::Invalid
+        );
+        assert_eq!(row.detail_state, ModelLibrarySelectorDetailState::Error);
+        assert!(row.package_facts_summary.is_none());
+    }
+
+    #[test]
+    fn selector_snapshot_marks_default_summary_wrong_when_selected_artifact_expected() {
+        let (index, _temp) = create_test_index();
+        let model_id = "llm/example/wrong-artifact";
+        index
+            .upsert(&create_selector_record(
+                model_id,
+                "Wrong Artifact",
+                "llm",
+                serde_json::json!({
+                    "selected_artifact_id": "model-q4.gguf",
+                    "entry_path": "/models/llm/example/wrong-artifact/model-q4.gguf",
+                    "validation_state": "valid"
+                }),
+            ))
+            .unwrap();
+        cache_summary(
+            &index,
+            model_id,
+            serde_json::to_string(&summary_for(
+                model_id,
+                "/models/llm/example/wrong-artifact/model-q4.gguf",
+            ))
+            .unwrap(),
+        );
+
+        let snapshot = index
+            .list_model_library_selector_snapshot(&ModelLibrarySelectorSnapshotRequest::default())
+            .unwrap();
+
+        let row = &snapshot.rows[0];
+        assert_eq!(
+            row.package_facts_summary_status,
+            ModelPackageFactsSummaryStatus::WrongSelectedArtifact
+        );
+        assert_eq!(row.detail_state, ModelLibrarySelectorDetailState::Error);
+        assert!(row.package_facts_summary.is_none());
+    }
+
+    #[test]
+    fn selector_snapshot_marks_old_contract_summary_stale() {
+        let (index, _temp) = create_test_index();
+        let model_id = "llm/example/stale-contract";
+        index
+            .upsert(&create_selector_record(
+                model_id,
+                "Stale Contract",
+                "llm",
+                serde_json::json!({
+                    "entry_path": "/models/llm/example/stale-contract/model.gguf",
+                    "validation_state": "valid"
+                }),
+            ))
+            .unwrap();
+        cache_summary_for_selected_with_contract(
+            &index,
+            model_id,
+            "",
+            i64::from(PACKAGE_FACTS_CONTRACT_VERSION) - 1,
+            serde_json::to_string(&summary_for(
+                model_id,
+                "/models/llm/example/stale-contract/model.gguf",
+            ))
+            .unwrap(),
+        );
+
+        let snapshot = index
+            .list_model_library_selector_snapshot(&ModelLibrarySelectorSnapshotRequest::default())
+            .unwrap();
+
+        let row = &snapshot.rows[0];
+        assert_eq!(
+            row.package_facts_summary_status,
+            ModelPackageFactsSummaryStatus::StaleContract
         );
         assert_eq!(row.detail_state, ModelLibrarySelectorDetailState::Error);
         assert!(row.package_facts_summary.is_none());

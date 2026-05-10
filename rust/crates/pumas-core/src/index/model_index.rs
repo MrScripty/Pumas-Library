@@ -1125,6 +1125,29 @@ mod tests {
         }
     }
 
+    fn package_facts_summary_json(model_id: &str) -> String {
+        serde_json::json!({
+            "package_facts_contract_version": crate::models::PACKAGE_FACTS_CONTRACT_VERSION,
+            "model_ref": {
+                "model_ref_contract_version": crate::models::PUMAS_MODEL_REF_CONTRACT_VERSION,
+                "model_id": model_id
+            },
+            "artifact_kind": "gguf",
+            "entry_path": "/models/test/model.gguf",
+            "storage_kind": "library_owned",
+            "validation_state": "valid",
+            "task": {},
+            "backend_hints": {},
+            "requires_custom_code": false,
+            "config_status": "present",
+            "tokenizer_status": "present",
+            "processor_status": "uninspected",
+            "generation_config_status": "present",
+            "generation_defaults_status": "present"
+        })
+        .to_string()
+    }
+
     #[test]
     fn test_upsert_and_get() {
         let (index, _temp) = create_test_index();
@@ -1373,6 +1396,36 @@ mod tests {
         assert_eq!(loaded.cached_at, first.cached_at);
         assert_eq!(loaded.updated_at, changed.updated_at);
         assert_eq!(loaded.source_fingerprint, "fingerprint-v2");
+    }
+
+    #[test]
+    fn test_package_facts_cache_summary_snapshot_uses_contract_classifier() {
+        let (index, _temp) = create_test_index();
+        let model_id = "facts-model";
+
+        index
+            .upsert(&create_test_record(model_id, "Facts Model", "llm"))
+            .unwrap();
+        let mut record = create_package_facts_cache_record(
+            model_id,
+            ModelPackageFactsCacheScope::Summary,
+            "fingerprint-v1",
+            package_facts_summary_json(model_id),
+        );
+        record.package_facts_contract_version =
+            i64::from(crate::models::PACKAGE_FACTS_CONTRACT_VERSION) - 1;
+        assert!(index.upsert_model_package_facts_cache(&record).unwrap());
+
+        let snapshot = index
+            .list_model_package_facts_summary_snapshot(100, 0)
+            .unwrap();
+
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(
+            snapshot.items[0].status,
+            crate::models::ModelPackageFactsSummaryStatus::StaleContract
+        );
+        assert!(snapshot.items[0].summary.is_none());
     }
 
     #[test]

@@ -7,6 +7,8 @@ mod model_library_updates;
 mod model_selector_snapshot;
 mod package_facts_cache;
 
+pub(crate) use package_facts_cache::classify_package_facts_cache_record;
+
 use crate::models::{
     ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope, ModelLibraryUpdateEvent,
 };
@@ -55,6 +57,18 @@ impl ModelPackageFactsCacheScope {
             Self::Detail => "detail",
         }
     }
+}
+
+/// Internal freshness state for one package-facts cache row.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelPackageFactsCacheRowState {
+    Fresh,
+    Missing,
+    StaleContract,
+    StaleFingerprint,
+    InvalidJson,
+    WrongSelectedArtifact,
 }
 
 /// Durable package-facts cache row owned by a model record.
@@ -1414,6 +1428,38 @@ mod tests {
         );
         record.package_facts_contract_version =
             i64::from(crate::models::PACKAGE_FACTS_CONTRACT_VERSION) - 1;
+        assert!(index.upsert_model_package_facts_cache(&record).unwrap());
+
+        let snapshot = index
+            .list_model_package_facts_summary_snapshot(100, 0)
+            .unwrap();
+
+        assert_eq!(snapshot.items.len(), 1);
+        assert_eq!(
+            snapshot.items[0].status,
+            crate::models::ModelPackageFactsSummaryStatus::StaleContract
+        );
+        assert!(snapshot.items[0].summary.is_none());
+    }
+
+    #[test]
+    fn test_package_facts_cache_summary_snapshot_rejects_stale_payload_contract() {
+        let (index, _temp) = create_test_index();
+        let model_id = "facts-model";
+
+        index
+            .upsert(&create_test_record(model_id, "Facts Model", "llm"))
+            .unwrap();
+        let mut payload: serde_json::Value =
+            serde_json::from_str(&package_facts_summary_json(model_id)).unwrap();
+        payload["package_facts_contract_version"] =
+            serde_json::json!(crate::models::PACKAGE_FACTS_CONTRACT_VERSION - 1);
+        let record = create_package_facts_cache_record(
+            model_id,
+            ModelPackageFactsCacheScope::Summary,
+            "fingerprint-v1",
+            payload.to_string(),
+        );
         assert!(index.upsert_model_package_facts_cache(&record).unwrap());
 
         let snapshot = index

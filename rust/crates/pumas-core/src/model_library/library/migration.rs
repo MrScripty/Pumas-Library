@@ -1,4 +1,5 @@
 use super::*;
+use crate::index::{classify_package_facts_cache_record, ModelPackageFactsCacheRowState};
 use tokio::fs;
 
 async fn path_exists(path: &Path) -> Result<bool> {
@@ -171,6 +172,176 @@ impl ModelLibrary {
             },
         )?;
         Ok(report)
+    }
+
+    /// Generate a non-mutating dry-run report for package-facts cache backfill.
+    ///
+    /// This inventories existing detail and summary cache rows for each indexed
+    /// model's current selected artifact identity. It does not regenerate facts,
+    /// delete obsolete rows, write checkpoints, or publish update events.
+    pub async fn generate_package_facts_cache_migration_dry_run_report(
+        &self,
+    ) -> Result<PackageFactsCacheMigrationDryRunReport> {
+        let model_ids = self.index.get_all_ids()?;
+        let mut report = PackageFactsCacheMigrationDryRunReport {
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            target_package_facts_contract_version: PACKAGE_FACTS_CONTRACT_VERSION,
+            total_models: model_ids.len(),
+            ..Default::default()
+        };
+
+        for model_id in model_ids {
+            let item = match self
+                .build_package_facts_cache_migration_dry_run_item(&model_id)
+                .await
+            {
+                Ok(item) => item,
+                Err(err) => PackageFactsCacheMigrationDryRunItem {
+                    model_id: model_id.clone(),
+                    selected_artifact_id: None,
+                    selected_artifact_path: None,
+                    source_fingerprint: None,
+                    detail_state: ModelPackageFactsCacheRowState::Missing,
+                    summary_state: ModelPackageFactsCacheRowState::Missing,
+                    blocked_partial_download: false,
+                    will_regenerate_detail: false,
+                    will_regenerate_summary: false,
+                    will_delete_obsolete_rows: false,
+                    obsolete_empty_selected_artifact_rows: 0,
+                    error: Some(err.to_string()),
+                },
+            };
+
+            if item.error.is_some() {
+                report.error_count += 1;
+            }
+            if item.detail_state == ModelPackageFactsCacheRowState::Fresh
+                && item.summary_state == ModelPackageFactsCacheRowState::Fresh
+                && !item.will_delete_obsolete_rows
+            {
+                report.fresh_count += 1;
+            }
+            if item.detail_state == ModelPackageFactsCacheRowState::Missing
+                || item.summary_state == ModelPackageFactsCacheRowState::Missing
+            {
+                report.missing_count += 1;
+            }
+            if item.detail_state == ModelPackageFactsCacheRowState::StaleContract
+                || item.summary_state == ModelPackageFactsCacheRowState::StaleContract
+            {
+                report.stale_contract_count += 1;
+            }
+            if item.detail_state == ModelPackageFactsCacheRowState::StaleFingerprint
+                || item.summary_state == ModelPackageFactsCacheRowState::StaleFingerprint
+            {
+                report.stale_fingerprint_count += 1;
+            }
+            if item.detail_state == ModelPackageFactsCacheRowState::InvalidJson
+                || item.summary_state == ModelPackageFactsCacheRowState::InvalidJson
+            {
+                report.invalid_json_count += 1;
+            }
+            if item.detail_state == ModelPackageFactsCacheRowState::WrongSelectedArtifact
+                || item.summary_state == ModelPackageFactsCacheRowState::WrongSelectedArtifact
+            {
+                report.wrong_selected_artifact_count += 1;
+            }
+            if item.blocked_partial_download {
+                report.blocked_partial_download_count += 1;
+            }
+            if item.will_regenerate_detail {
+                report.regenerate_detail_count += 1;
+            }
+            if item.will_regenerate_summary {
+                report.regenerate_summary_count += 1;
+            }
+            if item.will_delete_obsolete_rows {
+                report.delete_obsolete_row_count += item.obsolete_empty_selected_artifact_rows;
+            }
+            report.items.push(item);
+        }
+
+        Ok(report)
+    }
+
+    async fn build_package_facts_cache_migration_dry_run_item(
+        &self,
+        model_id: &str,
+    ) -> Result<PackageFactsCacheMigrationDryRunItem> {
+        let record = self
+            .index
+            .get(model_id)?
+            .ok_or_else(|| PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            })?;
+        let blocked_partial_download = record_is_download_incomplete(&record);
+        let descriptor = self.resolve_model_execution_descriptor(model_id).await?;
+        let model_dir = self.library_root.join(model_id);
+        let metadata = load_effective_metadata_by_id_async(self.clone(), model_id.to_string())
+            .await?
+            .ok_or_else(|| PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            })?;
+        let dependency_bindings = self
+            .index
+            .list_active_model_dependency_bindings(model_id, None)?;
+        let context = PackageInspectionContext::build(
+            model_id.to_string(),
+            model_dir,
+            descriptor,
+            metadata,
+            dependency_bindings,
+        )
+        .await?;
+        let source_fingerprint = context.source_fingerprint().await?;
+        let expected_selected_artifact_id = context.selected_artifact_id();
+        let detail_row = self.index.get_model_package_facts_cache(
+            context.model_id(),
+            expected_selected_artifact_id,
+            ModelPackageFactsCacheScope::Detail,
+        )?;
+        let summary_row = self.index.get_model_package_facts_cache(
+            context.model_id(),
+            expected_selected_artifact_id,
+            ModelPackageFactsCacheScope::Summary,
+        )?;
+        let (detail_state, _detail) =
+            classify_package_facts_cache_record::<ResolvedModelPackageFacts>(
+                expected_selected_artifact_id,
+                Some(&source_fingerprint),
+                detail_row.as_ref(),
+            );
+        let (summary_state, _summary) =
+            classify_package_facts_cache_record::<ResolvedModelPackageFactsSummary>(
+                expected_selected_artifact_id,
+                Some(&source_fingerprint),
+                summary_row.as_ref(),
+            );
+        let obsolete_empty_selected_artifact_rows = if expected_selected_artifact_id.is_some() {
+            self.index
+                .count_model_package_facts_cache_rows_without_selected_artifact(model_id)?
+        } else {
+            0
+        };
+        let will_regenerate_detail =
+            !blocked_partial_download && detail_state != ModelPackageFactsCacheRowState::Fresh;
+        let will_regenerate_summary =
+            !blocked_partial_download && summary_state != ModelPackageFactsCacheRowState::Fresh;
+
+        Ok(PackageFactsCacheMigrationDryRunItem {
+            model_id: model_id.to_string(),
+            selected_artifact_id: expected_selected_artifact_id.map(str::to_string),
+            selected_artifact_path: context.model_ref().selected_artifact_path,
+            source_fingerprint: Some(source_fingerprint),
+            detail_state,
+            summary_state,
+            blocked_partial_download,
+            will_regenerate_detail,
+            will_regenerate_summary,
+            will_delete_obsolete_rows: obsolete_empty_selected_artifact_rows > 0,
+            obsolete_empty_selected_artifact_rows,
+            error: None,
+        })
     }
 
     /// List generated migration report artifacts from index.json (newest-first).
@@ -1635,6 +1806,47 @@ pub struct MigrationDryRunItem {
     #[serde(default)]
     pub link_exclusion_count: usize,
     pub findings: Vec<String>,
+    pub error: Option<String>,
+}
+
+/// Package-facts cache migration dry-run report.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PackageFactsCacheMigrationDryRunReport {
+    pub generated_at: String,
+    pub target_package_facts_contract_version: u32,
+    pub total_models: usize,
+    pub fresh_count: usize,
+    pub missing_count: usize,
+    pub stale_contract_count: usize,
+    pub stale_fingerprint_count: usize,
+    pub invalid_json_count: usize,
+    pub wrong_selected_artifact_count: usize,
+    pub blocked_partial_download_count: usize,
+    pub regenerate_detail_count: usize,
+    pub regenerate_summary_count: usize,
+    pub delete_obsolete_row_count: usize,
+    pub error_count: usize,
+    pub items: Vec<PackageFactsCacheMigrationDryRunItem>,
+}
+
+/// Per-model package-facts cache migration dry-run row.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PackageFactsCacheMigrationDryRunItem {
+    pub model_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_artifact_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_artifact_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_fingerprint: Option<String>,
+    pub detail_state: ModelPackageFactsCacheRowState,
+    pub summary_state: ModelPackageFactsCacheRowState,
+    pub blocked_partial_download: bool,
+    pub will_regenerate_detail: bool,
+    pub will_regenerate_summary: bool,
+    pub will_delete_obsolete_rows: bool,
+    pub obsolete_empty_selected_artifact_rows: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
 

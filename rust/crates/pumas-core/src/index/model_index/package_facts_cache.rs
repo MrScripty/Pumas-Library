@@ -1,14 +1,18 @@
 use super::model_library_updates::model_library_update_cursor;
-use super::{ModelIndex, ModelPackageFactsCacheRecord, ModelPackageFactsCacheScope};
+use super::{
+    ModelIndex, ModelPackageFactsCacheRecord, ModelPackageFactsCacheRowState,
+    ModelPackageFactsCacheScope,
+};
 use crate::models::{ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope};
 use crate::models::{
     ModelPackageFactsSummarySnapshot, ModelPackageFactsSummarySnapshotItem,
-    ModelPackageFactsSummaryStatus, ResolvedModelPackageFactsSummary,
+    ModelPackageFactsSummaryStatus, ResolvedModelPackageFacts, ResolvedModelPackageFactsSummary,
     PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use crate::{PumasError, Result};
 use rusqlite::types::Type;
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::de::DeserializeOwned;
 
 impl ModelPackageFactsCacheScope {
     fn from_db(column_index: usize, value: &str) -> rusqlite::Result<Self> {
@@ -279,33 +283,117 @@ pub(super) fn classify_package_facts_summary_cache_row(
     ModelPackageFactsSummaryStatus,
     Option<ResolvedModelPackageFactsSummary>,
 ) {
+    let (state, summary) = classify_package_facts_cache_json::<ResolvedModelPackageFactsSummary>(
+        expected_selected_artifact_id,
+        row_selected_artifact_id,
+        row_package_facts_contract_version,
+        None,
+        None,
+        facts_json,
+    );
+    match (state, summary) {
+        (ModelPackageFactsCacheRowState::Fresh, Some(summary))
+            if expected_selected_artifact_id.is_some()
+                && normalized_selected_artifact_id(
+                    summary.model_ref.selected_artifact_id.as_deref(),
+                ) != normalized_selected_artifact_id(expected_selected_artifact_id) =>
+        {
+            (ModelPackageFactsSummaryStatus::WrongSelectedArtifact, None)
+        }
+        (ModelPackageFactsCacheRowState::Fresh, summary) => {
+            (ModelPackageFactsSummaryStatus::Cached, summary)
+        }
+        (ModelPackageFactsCacheRowState::Missing, _) => {
+            (ModelPackageFactsSummaryStatus::Missing, None)
+        }
+        (ModelPackageFactsCacheRowState::StaleContract, _) => {
+            (ModelPackageFactsSummaryStatus::StaleContract, None)
+        }
+        (ModelPackageFactsCacheRowState::StaleFingerprint, _) => {
+            (ModelPackageFactsSummaryStatus::StaleFingerprint, None)
+        }
+        (ModelPackageFactsCacheRowState::InvalidJson, _) => {
+            (ModelPackageFactsSummaryStatus::Invalid, None)
+        }
+        (ModelPackageFactsCacheRowState::WrongSelectedArtifact, _) => {
+            (ModelPackageFactsSummaryStatus::WrongSelectedArtifact, None)
+        }
+    }
+}
+
+pub(crate) fn classify_package_facts_cache_record<T>(
+    expected_selected_artifact_id: Option<&str>,
+    expected_source_fingerprint: Option<&str>,
+    record: Option<&ModelPackageFactsCacheRecord>,
+) -> (ModelPackageFactsCacheRowState, Option<T>)
+where
+    T: DeserializeOwned + PackageFactsPayloadContract,
+{
+    let Some(record) = record else {
+        return (ModelPackageFactsCacheRowState::Missing, None);
+    };
+
+    classify_package_facts_cache_json(
+        expected_selected_artifact_id,
+        Some(record.selected_artifact_id.as_str()),
+        Some(record.package_facts_contract_version),
+        expected_source_fingerprint,
+        Some(record.source_fingerprint.as_str()),
+        Some(record.facts_json.as_str()),
+    )
+}
+
+fn classify_package_facts_cache_json<T>(
+    expected_selected_artifact_id: Option<&str>,
+    row_selected_artifact_id: Option<&str>,
+    row_package_facts_contract_version: Option<i64>,
+    expected_source_fingerprint: Option<&str>,
+    row_source_fingerprint: Option<&str>,
+    facts_json: Option<&str>,
+) -> (ModelPackageFactsCacheRowState, Option<T>)
+where
+    T: DeserializeOwned + PackageFactsPayloadContract,
+{
     let Some(facts_json) = facts_json else {
-        return (ModelPackageFactsSummaryStatus::Missing, None);
+        return (ModelPackageFactsCacheRowState::Missing, None);
     };
     let expected_selected_artifact_id =
         normalized_selected_artifact_id(expected_selected_artifact_id);
     let row_selected_artifact_id = normalized_selected_artifact_id(row_selected_artifact_id);
     if row_selected_artifact_id != expected_selected_artifact_id {
-        return (ModelPackageFactsSummaryStatus::WrongSelectedArtifact, None);
+        return (ModelPackageFactsCacheRowState::WrongSelectedArtifact, None);
     }
     if row_package_facts_contract_version != Some(i64::from(PACKAGE_FACTS_CONTRACT_VERSION)) {
-        return (ModelPackageFactsSummaryStatus::StaleContract, None);
+        return (ModelPackageFactsCacheRowState::StaleContract, None);
+    }
+    if let Some(expected_source_fingerprint) = expected_source_fingerprint {
+        if row_source_fingerprint != Some(expected_source_fingerprint) {
+            return (ModelPackageFactsCacheRowState::StaleFingerprint, None);
+        }
     }
 
-    match serde_json::from_str::<ResolvedModelPackageFactsSummary>(&facts_json) {
-        Ok(summary) if summary.package_facts_contract_version != PACKAGE_FACTS_CONTRACT_VERSION => {
-            (ModelPackageFactsSummaryStatus::StaleContract, None)
+    match serde_json::from_str::<T>(facts_json) {
+        Ok(parsed) if parsed.package_facts_contract_version() != PACKAGE_FACTS_CONTRACT_VERSION => {
+            (ModelPackageFactsCacheRowState::StaleContract, None)
         }
-        Ok(summary)
-            if expected_selected_artifact_id.is_some()
-                && normalized_selected_artifact_id(
-                    summary.model_ref.selected_artifact_id.as_deref(),
-                ) != expected_selected_artifact_id =>
-        {
-            (ModelPackageFactsSummaryStatus::WrongSelectedArtifact, None)
-        }
-        Ok(summary) => (ModelPackageFactsSummaryStatus::Cached, Some(summary)),
-        Err(_) => (ModelPackageFactsSummaryStatus::Invalid, None),
+        Ok(parsed) => (ModelPackageFactsCacheRowState::Fresh, Some(parsed)),
+        Err(_) => (ModelPackageFactsCacheRowState::InvalidJson, None),
+    }
+}
+
+pub(crate) trait PackageFactsPayloadContract {
+    fn package_facts_contract_version(&self) -> u32;
+}
+
+impl PackageFactsPayloadContract for ResolvedModelPackageFacts {
+    fn package_facts_contract_version(&self) -> u32 {
+        self.package_facts_contract_version
+    }
+}
+
+impl PackageFactsPayloadContract for ResolvedModelPackageFactsSummary {
+    fn package_facts_contract_version(&self) -> u32 {
+        self.package_facts_contract_version
     }
 }
 

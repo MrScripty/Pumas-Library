@@ -62,7 +62,8 @@ use walkdir::WalkDir;
 use migration::{MigrationCheckpointState, MigrationReportIndex, MigrationReportIndexEntry};
 pub use migration::{
     MigrationDryRunItem, MigrationDryRunReport, MigrationExecutionItem, MigrationExecutionReport,
-    MigrationPlannedMove, MigrationReportArtifact,
+    MigrationPlannedMove, MigrationReportArtifact, PackageFactsCacheMigrationDryRunItem,
+    PackageFactsCacheMigrationDryRunReport,
 };
 pub use projection::MetadataProjectionCleanupExecutionReport;
 use projection::{

@@ -1,11 +1,12 @@
 use pumas_library::index::{
-    DependencyProfileRecord, ModelDependencyBindingRecord, ModelPackageFactsCacheScope,
+    DependencyProfileRecord, ModelDependencyBindingRecord, ModelPackageFactsCacheRowState,
+    ModelPackageFactsCacheScope,
 };
 use pumas_library::models::{
     AssetValidationState, BackendHintLabel, BundleFormat, HuggingFaceEvidence,
     ImageGenerationFamilyLabel, ModelFileInfo, ModelMetadata, PackageArtifactKind,
     PackageFactStatus, PackageFactValueSource, ProcessorComponentKind,
-    ResolvedModelPackageFactsSummary, StorageKind,
+    ResolvedModelPackageFactsSummary, StorageKind, PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use pumas_library::ModelLibrary;
 use std::path::Path;
@@ -89,6 +90,56 @@ async fn create_cache_test_model(library: &ModelLibrary, model_id: &str) {
         official_name: Some("Cache Test".to_string()),
         task_type_primary: Some("text_generation".to_string()),
         updated_date: Some("2026-05-02T00:00:00Z".to_string()),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+    library.rebuild_index().await.unwrap();
+}
+
+async fn create_selected_artifact_gguf_model(library: &ModelLibrary, model_id: &str) {
+    let model_dir = library.build_model_path("llm", "llama", "multi-quant-gguf");
+    tokio::fs::create_dir_all(&model_dir).await.unwrap();
+    write_minimal_gguf(
+        &model_dir.join("model-Q4_K_M.gguf"),
+        &[
+            gguf_kv_string("general.architecture", "llama"),
+            gguf_kv_u32("general.file_type", 13),
+        ],
+    );
+    write_minimal_gguf(
+        &model_dir.join("model-Q5_K_M.gguf"),
+        &[
+            gguf_kv_string("general.architecture", "llama"),
+            gguf_kv_u32("general.file_type", 15),
+        ],
+    );
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("llama".to_string()),
+        cleaned_name: Some("multi-quant-gguf".to_string()),
+        official_name: Some("Multi Quant GGUF".to_string()),
+        task_type_primary: Some("text_generation".to_string()),
+        recommended_backend: Some("llama.cpp".to_string()),
+        selected_artifact_id: Some("model-q5".to_string()),
+        selected_artifact_files: Some(vec!["model-Q5_K_M.gguf".to_string()]),
+        files: Some(vec![
+            ModelFileInfo {
+                name: "model-Q4_K_M.gguf".to_string(),
+                original_name: None,
+                size: None,
+                sha256: None,
+                blake3: None,
+            },
+            ModelFileInfo {
+                name: "model-Q5_K_M.gguf".to_string(),
+                original_name: None,
+                size: None,
+                sha256: None,
+                blake3: None,
+            },
+        ]),
         ..Default::default()
     };
     library.save_metadata(&model_dir, &metadata).await.unwrap();
@@ -1155,53 +1206,7 @@ async fn extracts_header_derived_gguf_package_evidence() {
 async fn scopes_package_facts_cache_to_selected_artifact_id() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/llama/multi-quant-gguf";
-    let model_dir = library.build_model_path("llm", "llama", "multi-quant-gguf");
-    tokio::fs::create_dir_all(&model_dir).await.unwrap();
-    write_minimal_gguf(
-        &model_dir.join("model-Q4_K_M.gguf"),
-        &[
-            gguf_kv_string("general.architecture", "llama"),
-            gguf_kv_u32("general.file_type", 13),
-        ],
-    );
-    write_minimal_gguf(
-        &model_dir.join("model-Q5_K_M.gguf"),
-        &[
-            gguf_kv_string("general.architecture", "llama"),
-            gguf_kv_u32("general.file_type", 15),
-        ],
-    );
-
-    let metadata = ModelMetadata {
-        model_id: Some(model_id.to_string()),
-        model_type: Some("llm".to_string()),
-        family: Some("llama".to_string()),
-        cleaned_name: Some("multi-quant-gguf".to_string()),
-        official_name: Some("Multi Quant GGUF".to_string()),
-        task_type_primary: Some("text_generation".to_string()),
-        recommended_backend: Some("llama.cpp".to_string()),
-        selected_artifact_id: Some("model-q5".to_string()),
-        selected_artifact_files: Some(vec!["model-Q5_K_M.gguf".to_string()]),
-        files: Some(vec![
-            ModelFileInfo {
-                name: "model-Q4_K_M.gguf".to_string(),
-                original_name: None,
-                size: None,
-                sha256: None,
-                blake3: None,
-            },
-            ModelFileInfo {
-                name: "model-Q5_K_M.gguf".to_string(),
-                original_name: None,
-                size: None,
-                sha256: None,
-                blake3: None,
-            },
-        ]),
-        ..Default::default()
-    };
-    library.save_metadata(&model_dir, &metadata).await.unwrap();
-    library.rebuild_index().await.unwrap();
+    create_selected_artifact_gguf_model(&library, model_id).await;
 
     let facts = library.resolve_model_package_facts(model_id).await.unwrap();
 
@@ -1371,6 +1376,210 @@ async fn persists_compact_package_facts_summary_cache() {
     assert!(summary_row.facts_json.len() < detail_row.facts_json.len());
     assert!(!summary_row.facts_json.contains("\"components\""));
     assert!(!summary_row.facts_json.contains("\"generation_defaults\""));
+}
+
+#[tokio::test]
+async fn package_facts_cache_migration_dry_run_reports_missing_rows() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/cache-test";
+    create_cache_test_model(&library, model_id).await;
+
+    let report = library
+        .generate_package_facts_cache_migration_dry_run_report()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        report.target_package_facts_contract_version,
+        PACKAGE_FACTS_CONTRACT_VERSION
+    );
+    assert_eq!(report.total_models, 1);
+    assert_eq!(report.fresh_count, 0);
+    assert_eq!(report.missing_count, 1);
+    assert_eq!(report.regenerate_detail_count, 1);
+    assert_eq!(report.regenerate_summary_count, 1);
+    assert_eq!(report.error_count, 0);
+    let item = report
+        .items
+        .iter()
+        .find(|item| item.model_id == model_id)
+        .expect("dry-run item for cache test model");
+    assert_eq!(item.detail_state, ModelPackageFactsCacheRowState::Missing);
+    assert_eq!(item.summary_state, ModelPackageFactsCacheRowState::Missing);
+    assert!(item.source_fingerprint.is_some());
+    assert!(item.will_regenerate_detail);
+    assert!(item.will_regenerate_summary);
+    assert!(!item.will_delete_obsolete_rows);
+
+    assert!(library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .is_none());
+    assert!(library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Summary)
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn package_facts_cache_migration_dry_run_reports_stale_and_invalid_rows() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/cache-test";
+    create_cache_test_model(&library, model_id).await;
+
+    library.resolve_model_package_facts(model_id).await.unwrap();
+    let detail_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+    let summary_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Summary)
+        .unwrap()
+        .unwrap();
+    let invalid_detail_payload =
+        serde_json::json!({"not": "resolved_model_package_facts"}).to_string();
+    let mut invalid_detail_row = detail_row.clone();
+    invalid_detail_row.facts_json = invalid_detail_payload.clone();
+    invalid_detail_row.updated_at = "2026-05-02T00:05:00Z".to_string();
+    assert!(library
+        .index()
+        .upsert_model_package_facts_cache(&invalid_detail_row)
+        .unwrap());
+    let mut stale_summary_row = summary_row.clone();
+    stale_summary_row.package_facts_contract_version =
+        i64::from(PACKAGE_FACTS_CONTRACT_VERSION) - 1;
+    stale_summary_row.updated_at = "2026-05-02T00:05:00Z".to_string();
+    assert!(library
+        .index()
+        .upsert_model_package_facts_cache(&stale_summary_row)
+        .unwrap());
+
+    let report = library
+        .generate_package_facts_cache_migration_dry_run_report()
+        .await
+        .unwrap();
+
+    assert_eq!(report.total_models, 1);
+    assert_eq!(report.fresh_count, 0);
+    assert_eq!(report.missing_count, 0);
+    assert_eq!(report.stale_contract_count, 1);
+    assert_eq!(report.invalid_json_count, 1);
+    assert_eq!(report.regenerate_detail_count, 1);
+    assert_eq!(report.regenerate_summary_count, 1);
+    assert_eq!(report.error_count, 0);
+    let item = report
+        .items
+        .iter()
+        .find(|item| item.model_id == model_id)
+        .expect("dry-run item for cache test model");
+    assert_eq!(
+        item.detail_state,
+        ModelPackageFactsCacheRowState::InvalidJson
+    );
+    assert_eq!(
+        item.summary_state,
+        ModelPackageFactsCacheRowState::StaleContract
+    );
+    assert!(item.will_regenerate_detail);
+    assert!(item.will_regenerate_summary);
+
+    let unchanged_detail_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+    let unchanged_summary_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Summary)
+        .unwrap()
+        .unwrap();
+    assert_eq!(unchanged_detail_row.facts_json, invalid_detail_payload);
+    assert_eq!(
+        unchanged_summary_row.package_facts_contract_version,
+        stale_summary_row.package_facts_contract_version
+    );
+}
+
+#[tokio::test]
+async fn package_facts_cache_migration_dry_run_scopes_selected_artifact_rows() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/llama/multi-quant-gguf";
+    create_selected_artifact_gguf_model(&library, model_id).await;
+
+    library.resolve_model_package_facts(model_id).await.unwrap();
+    let selected_detail_row = library
+        .index()
+        .get_model_package_facts_cache(
+            model_id,
+            Some("model-q5"),
+            ModelPackageFactsCacheScope::Detail,
+        )
+        .unwrap()
+        .unwrap();
+    let selected_summary_row = library
+        .index()
+        .get_model_package_facts_cache(
+            model_id,
+            Some("model-q5"),
+            ModelPackageFactsCacheScope::Summary,
+        )
+        .unwrap()
+        .unwrap();
+    let mut obsolete_detail_row = selected_detail_row.clone();
+    obsolete_detail_row.selected_artifact_id = String::new();
+    obsolete_detail_row.updated_at = "2026-05-02T00:06:00Z".to_string();
+    assert!(library
+        .index()
+        .upsert_model_package_facts_cache(&obsolete_detail_row)
+        .unwrap());
+    let mut obsolete_summary_row = selected_summary_row.clone();
+    obsolete_summary_row.selected_artifact_id = String::new();
+    obsolete_summary_row.updated_at = "2026-05-02T00:06:00Z".to_string();
+    assert!(library
+        .index()
+        .upsert_model_package_facts_cache(&obsolete_summary_row)
+        .unwrap());
+
+    let report = library
+        .generate_package_facts_cache_migration_dry_run_report()
+        .await
+        .unwrap();
+
+    assert_eq!(report.total_models, 1);
+    assert_eq!(report.fresh_count, 0);
+    assert_eq!(report.missing_count, 0);
+    assert_eq!(report.regenerate_detail_count, 0);
+    assert_eq!(report.regenerate_summary_count, 0);
+    assert_eq!(report.delete_obsolete_row_count, 2);
+    let item = report
+        .items
+        .iter()
+        .find(|item| item.model_id == model_id)
+        .expect("dry-run item for selected artifact model");
+    assert_eq!(item.selected_artifact_id.as_deref(), Some("model-q5"));
+    assert!(item
+        .selected_artifact_path
+        .as_deref()
+        .is_some_and(|path| path.ends_with("model-Q5_K_M.gguf")));
+    assert_eq!(item.detail_state, ModelPackageFactsCacheRowState::Fresh);
+    assert_eq!(item.summary_state, ModelPackageFactsCacheRowState::Fresh);
+    assert!(item.will_delete_obsolete_rows);
+    assert_eq!(item.obsolete_empty_selected_artifact_rows, 2);
+
+    assert!(library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .is_some());
+    assert!(library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Summary)
+        .unwrap()
+        .is_some());
 }
 
 #[tokio::test]

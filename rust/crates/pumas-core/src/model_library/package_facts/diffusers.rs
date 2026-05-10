@@ -1,13 +1,17 @@
 use crate::error::{PumasError, Result};
+use crate::model_library::external_assets::normalized_component_relative_path;
 use crate::models::{
     DiffusersComponentFacts, DiffusersComponentRole, DiffusersPackageEvidence,
     ImageGenerationFamilyEvidence, ImageGenerationFamilyEvidenceSource, ImageGenerationFamilyLabel,
     ModelPackageDiagnostic, PackageFactStatus, PackageFactValueSource, TaskEvidence,
 };
 use serde_json::Value;
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const MODEL_INDEX_PATH: &str = "model_index.json";
+const MAX_DIFFUSERS_JSON_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DiffusersPackageExtraction {
@@ -204,7 +208,7 @@ async fn read_component_config(
     candidates: &'static [&'static str],
 ) -> Result<Option<ComponentConfig>> {
     for candidate in candidates {
-        let relative_path = bounded_component_config_path(component_key, candidate);
+        let relative_path = bounded_component_config_path(component_key, candidate)?;
         let path = bundle_root.join(&relative_path);
         if !tokio::fs::try_exists(&path).await? {
             continue;
@@ -221,23 +225,62 @@ async fn read_component_config(
     Ok(None)
 }
 
-fn bounded_component_config_path(component_key: &str, config_file: &str) -> PathBuf {
-    debug_assert!(component_key
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_'));
-    debug_assert!(config_file
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '.'));
-    PathBuf::from(component_key).join(config_file)
+fn bounded_component_config_path(component_key: &str, config_file: &str) -> Result<PathBuf> {
+    let component_path = normalized_component_relative_path(component_key)?;
+    let config_path = PathBuf::from(config_file);
+    if config_path.is_absolute()
+        || config_path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err(PumasError::Validation {
+            field: "config_file".to_string(),
+            message: "component config path must remain inside the bundle root".to_string(),
+        });
+    }
+    Ok(component_path.join(config_path))
 }
 
 async fn read_json(path: PathBuf) -> Result<Value> {
     tokio::task::spawn_blocking(move || {
-        let raw = std::fs::read_to_string(&path)?;
+        let raw = read_bounded_utf8_file(&path, MAX_DIFFUSERS_JSON_BYTES)?;
         serde_json::from_str::<Value>(&raw).map_err(|err| PumasError::Other(err.to_string()))
     })
     .await
     .map_err(|err| PumasError::Other(format!("Failed to join diffusers JSON parse: {}", err)))?
+}
+
+fn read_bounded_utf8_file(path: &Path, max_bytes: u64) -> Result<String> {
+    let metadata = std::fs::metadata(path).map_err(|err| PumasError::io_with_path(err, path))?;
+    if metadata.len() > max_bytes {
+        return Err(PumasError::Other(format!(
+            "{} exceeds bounded Diffusers JSON limit of {} bytes",
+            path.display(),
+            max_bytes
+        )));
+    }
+
+    let mut file = File::open(path).map_err(|err| PumasError::io_with_path(err, path))?;
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|err| PumasError::io_with_path(err, path))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(PumasError::Other(format!(
+            "{} exceeds bounded Diffusers JSON limit of {} bytes",
+            path.display(),
+            max_bytes
+        )));
+    }
+
+    String::from_utf8(bytes)
+        .map_err(|_| PumasError::Other(format!("{} is not valid UTF-8", path.display())))
 }
 
 fn string_field(value: &Value, key: &str) -> Option<String> {
@@ -452,6 +495,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oversized_model_index_returns_invalid_status_and_diagnostic() {
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join(MODEL_INDEX_PATH),
+            vec![b' '; (MAX_DIFFUSERS_JSON_BYTES + 1) as usize],
+        )
+        .unwrap();
+
+        let extraction = diffusers_package_evidence(temp.path()).await.unwrap();
+        let evidence = extraction.evidence.unwrap();
+        assert_eq!(evidence.status, PackageFactStatus::Invalid);
+        assert_eq!(extraction.diagnostics.len(), 1);
+        assert_eq!(
+            extraction.diagnostics[0].code,
+            "diffusers_model_index_invalid"
+        );
+        assert!(extraction.diagnostics[0]
+            .message
+            .contains("bounded Diffusers JSON limit"));
+    }
+
+    #[tokio::test]
     async fn extracts_bounded_nested_component_config_model_types() {
         let temp = tempdir().unwrap();
         fs::write(
@@ -540,6 +605,19 @@ mod tests {
             item.family == ImageGenerationFamilyLabel::Flux
                 && item.source == ImageGenerationFamilyEvidenceSource::ModelIndexComponent
         }));
+    }
+
+    #[test]
+    fn rejects_component_config_path_escapes() {
+        let error = bounded_component_config_path("../escape", "config.json").unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("component path must remain inside the bundle root"));
+
+        let error = bounded_component_config_path("scheduler", "../config.json").unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("component config path must remain inside the bundle root"));
     }
 
     fn write_json(root: &Path, relative_path: &str, contents: &str) {

@@ -1554,6 +1554,117 @@ async fn package_facts_cache_migration_execution_regenerates_missing_rows_and_cl
 }
 
 #[tokio::test]
+async fn package_facts_cache_migration_execution_deletes_obsolete_default_rows() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/llama/multi-quant-gguf";
+    create_selected_artifact_gguf_model(&library, model_id).await;
+
+    library.resolve_model_package_facts(model_id).await.unwrap();
+    let selected_detail_row = library
+        .index()
+        .get_model_package_facts_cache(
+            model_id,
+            Some("model-q5"),
+            ModelPackageFactsCacheScope::Detail,
+        )
+        .unwrap()
+        .unwrap();
+    let selected_summary_row = library
+        .index()
+        .get_model_package_facts_cache(
+            model_id,
+            Some("model-q5"),
+            ModelPackageFactsCacheScope::Summary,
+        )
+        .unwrap()
+        .unwrap();
+    let mut obsolete_detail_row = selected_detail_row.clone();
+    obsolete_detail_row.selected_artifact_id = String::new();
+    obsolete_detail_row.updated_at = "2026-05-02T00:07:00Z".to_string();
+    library
+        .index()
+        .upsert_model_package_facts_cache(&obsolete_detail_row)
+        .unwrap();
+    let mut obsolete_summary_row = selected_summary_row.clone();
+    obsolete_summary_row.selected_artifact_id = String::new();
+    obsolete_summary_row.updated_at = "2026-05-02T00:07:00Z".to_string();
+    library
+        .index()
+        .upsert_model_package_facts_cache(&obsolete_summary_row)
+        .unwrap();
+
+    let report = library
+        .execute_package_facts_cache_migration_with_checkpoint()
+        .await
+        .unwrap();
+
+    assert_eq!(report.planned_work_count, 1);
+    assert_eq!(report.regenerated_detail_count, 0);
+    assert_eq!(report.regenerated_summary_count, 0);
+    assert_eq!(report.deleted_obsolete_row_count, 2);
+    assert_eq!(report.error_count, 0);
+    assert_eq!(report.results[0].deleted_obsolete_rows, 2);
+    assert!(library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .is_none());
+    assert!(library
+        .index()
+        .get_model_package_facts_cache(
+            model_id,
+            Some("model-q5"),
+            ModelPackageFactsCacheScope::Detail
+        )
+        .unwrap()
+        .is_some());
+}
+
+#[tokio::test]
+async fn package_facts_cache_migration_execution_reports_partial_download_skip() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/partial-cache-test";
+    let partial_dir = library.build_model_path("llm", "example", "partial-cache-test");
+    std::fs::create_dir_all(&partial_dir).unwrap();
+    std::fs::write(partial_dir.join("model.safetensors.part"), b"partial").unwrap();
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("example".to_string()),
+        cleaned_name: Some("partial-cache-test".to_string()),
+        official_name: Some("Partial Cache Test".to_string()),
+        match_source: Some("download_partial".to_string()),
+        selected_artifact_id: Some("model-partial".to_string()),
+        selected_artifact_files: Some(vec!["model.safetensors".to_string()]),
+        ..Default::default()
+    };
+    library
+        .upsert_index_from_metadata(&partial_dir, &metadata)
+        .unwrap();
+
+    let report = library
+        .execute_package_facts_cache_migration_with_checkpoint()
+        .await
+        .unwrap();
+
+    assert_eq!(report.planned_work_count, 1);
+    assert_eq!(report.regenerated_detail_count, 0);
+    assert_eq!(report.regenerated_summary_count, 0);
+    assert_eq!(report.skipped_partial_download_count, 1);
+    assert_eq!(report.error_count, 0);
+    let result = &report.results[0];
+    assert_eq!(result.model_id, model_id);
+    assert_eq!(result.action, "skipped_partial_download");
+    assert_eq!(
+        result.selected_artifact_id.as_deref(),
+        Some("model-partial")
+    );
+    assert!(result.skipped_partial_download);
+    assert!(result.error.is_none());
+}
+
+#[tokio::test]
 async fn package_facts_cache_migration_dry_run_reports_stale_and_invalid_rows() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/cache-test";

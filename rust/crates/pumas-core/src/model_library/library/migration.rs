@@ -94,6 +94,22 @@ async fn write_package_facts_cache_migration_dry_run_reports_async(
     })?
 }
 
+async fn write_package_facts_cache_migration_execution_reports_async(
+    library_root: PathBuf,
+    report: PackageFactsCacheMigrationExecutionReport,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        write_package_facts_cache_migration_execution_reports(&library_root, &report)
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join package-facts migration execution report write task: {}",
+            err
+        ))
+    })?
+}
+
 async fn append_migration_report_index_entry_async(
     library_root: PathBuf,
     entry: MigrationReportIndexEntry,
@@ -561,6 +577,26 @@ impl ModelLibrary {
             )
             .await?;
         }
+
+        let (json_report_path, markdown_report_path) =
+            package_facts_cache_migration_report_paths(&self.library_root, "execution");
+        report.machine_readable_report_path = Some(json_report_path.display().to_string());
+        report.human_readable_report_path = Some(markdown_report_path.display().to_string());
+        write_package_facts_cache_migration_execution_reports_async(
+            self.library_root.clone(),
+            report.clone(),
+        )
+        .await?;
+        append_migration_report_index_entry_async(
+            self.library_root.clone(),
+            MigrationReportIndexEntry {
+                generated_at: report.generated_at.clone(),
+                report_kind: "package_facts_cache_execution".to_string(),
+                json_report_path: json_report_path.display().to_string(),
+                markdown_report_path: markdown_report_path.display().to_string(),
+            },
+        )
+        .await?;
 
         Ok(report)
     }
@@ -2275,6 +2311,10 @@ pub struct PackageFactsCacheMigrationExecutionReport {
     pub deleted_obsolete_row_count: usize,
     pub skipped_partial_download_count: usize,
     pub error_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine_readable_report_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub human_readable_report_path: Option<String>,
     pub results: Vec<PackageFactsCacheMigrationExecutionItem>,
 }
 

@@ -1548,6 +1548,21 @@ async fn package_facts_cache_migration_execution_regenerates_missing_rows_and_cl
         .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Summary)
         .unwrap()
         .is_some());
+    let json_report_path = PathBuf::from(report.machine_readable_report_path.unwrap());
+    let markdown_report_path = PathBuf::from(report.human_readable_report_path.unwrap());
+    assert!(json_report_path.exists());
+    assert!(markdown_report_path.exists());
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(json_report_path).unwrap()).unwrap();
+    assert_eq!(json["regenerated_detail_count"], 1);
+    assert_eq!(json["regenerated_summary_count"], 1);
+    let markdown = std::fs::read_to_string(markdown_report_path).unwrap();
+    assert!(markdown.contains("Package-Facts Cache Migration Execution Report"));
+    assert!(markdown.contains("Regenerated Detail Rows"));
+    let reports = library.list_migration_reports().unwrap();
+    assert!(reports
+        .iter()
+        .any(|artifact| artifact.report_kind == "package_facts_cache_execution"));
     assert!(!temp_dir
         .path()
         .join(".package_facts_cache_migration_checkpoint.json")

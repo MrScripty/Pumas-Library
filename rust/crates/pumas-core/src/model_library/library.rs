@@ -5021,6 +5021,39 @@ fn write_package_facts_cache_migration_dry_run_reports(
     Ok(())
 }
 
+fn write_package_facts_cache_migration_execution_reports(
+    library_root: &Path,
+    report: &PackageFactsCacheMigrationExecutionReport,
+) -> Result<()> {
+    let json_path = report
+        .machine_readable_report_path
+        .as_ref()
+        .map(PathBuf::from)
+        .ok_or_else(|| PumasError::Validation {
+            field: "machine_readable_report_path".to_string(),
+            message: "missing JSON report path for package-facts migration execution report"
+                .to_string(),
+        })?;
+    let markdown_path = report
+        .human_readable_report_path
+        .as_ref()
+        .map(PathBuf::from)
+        .ok_or_else(|| PumasError::Validation {
+            field: "human_readable_report_path".to_string(),
+            message: "missing Markdown report path for package-facts migration execution report"
+                .to_string(),
+        })?;
+
+    let reports_dir = library_root.join(MIGRATION_REPORTS_DIR);
+    std::fs::create_dir_all(&reports_dir)?;
+    atomic_write_json(&json_path, report, true)?;
+    std::fs::write(
+        &markdown_path,
+        render_package_facts_cache_migration_execution_markdown(report),
+    )?;
+    Ok(())
+}
+
 fn render_migration_dry_run_markdown(report: &MigrationDryRunReport) -> String {
     let mut output = String::new();
     output.push_str("# Metadata v2 Migration Dry-Run Report\n\n");
@@ -5183,6 +5216,74 @@ fn package_facts_cache_row_state_label(state: ModelPackageFactsCacheRowState) ->
         ModelPackageFactsCacheRowState::InvalidJson => "invalid_json",
         ModelPackageFactsCacheRowState::WrongSelectedArtifact => "wrong_selected_artifact",
     }
+}
+
+fn render_package_facts_cache_migration_execution_markdown(
+    report: &PackageFactsCacheMigrationExecutionReport,
+) -> String {
+    let mut output = String::new();
+    output.push_str("# Package-Facts Cache Migration Execution Report\n\n");
+    output.push_str(&format!("- Generated At: `{}`\n", report.generated_at));
+    output.push_str(&format!(
+        "- Completed At: `{}`\n",
+        report.completed_at.as_deref().unwrap_or("not_completed")
+    ));
+    output.push_str(&format!(
+        "- Resumed From Checkpoint: `{}`\n",
+        report.resumed_from_checkpoint
+    ));
+    output.push_str(&format!(
+        "- Planned Work: `{}`\n",
+        report.planned_work_count
+    ));
+    output.push_str(&format!(
+        "- Regenerated Detail Rows: `{}`\n",
+        report.regenerated_detail_count
+    ));
+    output.push_str(&format!(
+        "- Regenerated Summary Rows: `{}`\n",
+        report.regenerated_summary_count
+    ));
+    output.push_str(&format!(
+        "- Deleted Obsolete Rows: `{}`\n",
+        report.deleted_obsolete_row_count
+    ));
+    output.push_str(&format!(
+        "- Skipped Partial Downloads: `{}`\n",
+        report.skipped_partial_download_count
+    ));
+    output.push_str(&format!("- Errors: `{}`\n", report.error_count));
+    output.push_str(&format!(
+        "- Checkpoint Path: `{}`\n",
+        report.checkpoint_path
+    ));
+    if let Some(path) = &report.machine_readable_report_path {
+        output.push_str(&format!("- JSON Report Path: `{}`\n", path));
+    }
+    if let Some(path) = &report.human_readable_report_path {
+        output.push_str(&format!("- Markdown Report Path: `{}`\n", path));
+    }
+    output.push('\n');
+    output.push_str("## Results\n\n");
+    output.push_str(
+        "| Model ID | Artifact ID | Action | Regenerated Detail | Regenerated Summary | Deleted Obsolete Rows | Skipped Partial | Error |\n",
+    );
+    output.push_str("| --- | --- | --- | --- | --- | --- | --- | --- |\n");
+    for result in &report.results {
+        output.push_str(&format!(
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |\n",
+            result.model_id,
+            result.selected_artifact_id.as_deref().unwrap_or(""),
+            result.action,
+            result.regenerated_detail,
+            result.regenerated_summary,
+            result.deleted_obsolete_rows,
+            result.skipped_partial_download,
+            result.error.as_deref().unwrap_or("")
+        ));
+    }
+
+    output
 }
 
 fn render_migration_execution_markdown(report: &MigrationExecutionReport) -> String {

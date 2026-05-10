@@ -4,9 +4,10 @@ use pumas_library::index::{
 };
 use pumas_library::models::{
     AssetValidationState, BackendHintLabel, BundleFormat, HuggingFaceEvidence,
-    ImageGenerationFamilyLabel, ModelFileInfo, ModelMetadata, PackageArtifactKind,
-    PackageFactStatus, PackageFactValueSource, ProcessorComponentKind,
-    ResolvedModelPackageFactsSummary, StorageKind, PACKAGE_FACTS_CONTRACT_VERSION,
+    ImageGenerationFamilyLabel, ModelFactFamily, ModelFileInfo, ModelLibraryChangeKind,
+    ModelLibraryRefreshScope, ModelMetadata, PackageArtifactKind, PackageFactStatus,
+    PackageFactValueSource, ProcessorComponentKind, ResolvedModelPackageFactsSummary, StorageKind,
+    PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use pumas_library::ModelLibrary;
 use std::path::{Path, PathBuf};
@@ -1618,6 +1619,42 @@ async fn package_facts_cache_migration_execution_deletes_obsolete_default_rows()
         )
         .unwrap()
         .is_some());
+}
+
+#[tokio::test]
+async fn package_facts_cache_migration_execution_emits_selected_artifact_update_events() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/llama/multi-quant-gguf";
+    create_selected_artifact_gguf_model(&library, model_id).await;
+    let baseline = library
+        .list_model_library_updates_since(None, 100)
+        .await
+        .unwrap()
+        .cursor;
+
+    library
+        .execute_package_facts_cache_migration_with_checkpoint()
+        .await
+        .unwrap();
+
+    let feed = library
+        .list_model_library_updates_since(Some(&baseline), 100)
+        .await
+        .unwrap();
+    assert!(feed.events.iter().any(|event| {
+        event.model_id == model_id
+            && event.selected_artifact_id.as_deref() == Some("model-q5")
+            && event.change_kind == ModelLibraryChangeKind::PackageFactsModified
+            && event.fact_family == ModelFactFamily::PackageFacts
+            && event.refresh_scope == ModelLibraryRefreshScope::Summary
+    }));
+    assert!(feed.events.iter().any(|event| {
+        event.model_id == model_id
+            && event.selected_artifact_id.as_deref() == Some("model-q5")
+            && event.change_kind == ModelLibraryChangeKind::PackageFactsModified
+            && event.fact_family == ModelFactFamily::PackageFacts
+            && event.refresh_scope == ModelLibraryRefreshScope::SummaryAndDetail
+    }));
 }
 
 #[tokio::test]

@@ -1152,6 +1152,100 @@ async fn extracts_header_derived_gguf_package_evidence() {
 }
 
 #[tokio::test]
+async fn scopes_package_facts_cache_to_selected_artifact_id() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/llama/multi-quant-gguf";
+    let model_dir = library.build_model_path("llm", "llama", "multi-quant-gguf");
+    tokio::fs::create_dir_all(&model_dir).await.unwrap();
+    write_minimal_gguf(
+        &model_dir.join("model-Q4_K_M.gguf"),
+        &[
+            gguf_kv_string("general.architecture", "llama"),
+            gguf_kv_u32("general.file_type", 13),
+        ],
+    );
+    write_minimal_gguf(
+        &model_dir.join("model-Q5_K_M.gguf"),
+        &[
+            gguf_kv_string("general.architecture", "llama"),
+            gguf_kv_u32("general.file_type", 15),
+        ],
+    );
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("llama".to_string()),
+        cleaned_name: Some("multi-quant-gguf".to_string()),
+        official_name: Some("Multi Quant GGUF".to_string()),
+        task_type_primary: Some("text_generation".to_string()),
+        recommended_backend: Some("llama.cpp".to_string()),
+        selected_artifact_id: Some("model-q5".to_string()),
+        selected_artifact_files: Some(vec!["model-Q5_K_M.gguf".to_string()]),
+        files: Some(vec![
+            ModelFileInfo {
+                name: "model-Q4_K_M.gguf".to_string(),
+                original_name: None,
+                size: None,
+                sha256: None,
+                blake3: None,
+            },
+            ModelFileInfo {
+                name: "model-Q5_K_M.gguf".to_string(),
+                original_name: None,
+                size: None,
+                sha256: None,
+                blake3: None,
+            },
+        ]),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+    library.rebuild_index().await.unwrap();
+
+    let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+
+    assert_eq!(
+        facts.model_ref.selected_artifact_id.as_deref(),
+        Some("model-q5")
+    );
+    assert!(facts
+        .model_ref
+        .selected_artifact_path
+        .as_deref()
+        .is_some_and(|path| path.ends_with("model-Q5_K_M.gguf")));
+    let gguf = facts.gguf.expect("gguf evidence should be present");
+    assert_eq!(gguf.quantization.as_deref(), Some("MOSTLY_Q5_K_M"));
+
+    let detail_row = library
+        .index()
+        .get_model_package_facts_cache(
+            model_id,
+            Some("model-q5"),
+            ModelPackageFactsCacheScope::Detail,
+        )
+        .unwrap()
+        .expect("selected artifact detail cache row");
+    let summary_row = library
+        .index()
+        .get_model_package_facts_cache(
+            model_id,
+            Some("model-q5"),
+            ModelPackageFactsCacheScope::Summary,
+        )
+        .unwrap()
+        .expect("selected artifact summary cache row");
+
+    assert_eq!(detail_row.selected_artifact_id, "model-q5");
+    assert_eq!(summary_row.selected_artifact_id, "model-q5");
+    assert!(library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
 async fn extracts_adapter_package_evidence() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/lora-adapter";

@@ -27,6 +27,14 @@ impl PackageInspectionContext {
     ) -> Result<Self> {
         let manifest = PackageInspectionManifest::build(&model_dir, &metadata).await?;
         let selected_artifact_path = Some(descriptor.entry_path.clone());
+        let selected_artifact_id = metadata.selected_artifact_id.clone().and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
 
         Ok(Self {
             model_id,
@@ -35,7 +43,7 @@ impl PackageInspectionContext {
             metadata,
             dependency_bindings,
             manifest,
-            selected_artifact_id: None,
+            selected_artifact_id,
             selected_artifact_path,
         })
     }

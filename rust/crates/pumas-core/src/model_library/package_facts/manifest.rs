@@ -227,7 +227,9 @@ async fn package_manifest_entries(
 
 async fn package_selected_files(model_dir: &Path, metadata: &ModelMetadata) -> Result<Vec<String>> {
     let mut names = BTreeSet::new();
-    if let Some(files) = metadata.files.as_ref() {
+    if let Some(selected_artifact_files) = metadata.selected_artifact_files.as_ref() {
+        names.extend(selected_artifact_files.iter().cloned());
+    } else if let Some(files) = metadata.files.as_ref() {
         names.extend(files.iter().map(|file| file.name.clone()));
         names.extend(
             metadata

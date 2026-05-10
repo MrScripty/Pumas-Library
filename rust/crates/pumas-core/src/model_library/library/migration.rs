@@ -626,6 +626,36 @@ impl ModelLibrary {
         result
     }
 
+    /// Validate package-facts cache migration state without hydrating selector
+    /// snapshots. This reuses the dry-run cache classifier so post-migration
+    /// validation counts the same missing, stale, invalid, and selected-artifact
+    /// states as migration planning.
+    pub async fn validate_package_facts_cache_migration(
+        &self,
+    ) -> Result<PackageFactsCacheMigrationValidationReport> {
+        let dry_run = self
+            .generate_package_facts_cache_migration_dry_run_report()
+            .await?;
+        Ok(PackageFactsCacheMigrationValidationReport {
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            total_models: dry_run.total_models,
+            fresh_count: dry_run.fresh_count,
+            missing_count: dry_run.missing_count,
+            stale_contract_count: dry_run.stale_contract_count,
+            stale_fingerprint_count: dry_run.stale_fingerprint_count,
+            invalid_json_count: dry_run.invalid_json_count,
+            wrong_selected_artifact_count: dry_run.wrong_selected_artifact_count,
+            blocked_partial_download_count: dry_run.blocked_partial_download_count,
+            error_count: dry_run.error_count,
+            valid: dry_run.missing_count == 0
+                && dry_run.stale_contract_count == 0
+                && dry_run.stale_fingerprint_count == 0
+                && dry_run.invalid_json_count == 0
+                && dry_run.wrong_selected_artifact_count == 0
+                && dry_run.error_count == 0,
+        })
+    }
+
     /// List generated migration report artifacts from index.json (newest-first).
     pub fn list_migration_reports(&self) -> Result<Vec<MigrationReportArtifact>> {
         let index_path = migration_report_index_path(&self.library_root);
@@ -2246,6 +2276,22 @@ pub struct PackageFactsCacheMigrationExecutionReport {
     pub skipped_partial_download_count: usize,
     pub error_count: usize,
     pub results: Vec<PackageFactsCacheMigrationExecutionItem>,
+}
+
+/// Post-migration package-facts cache validation counts.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct PackageFactsCacheMigrationValidationReport {
+    pub generated_at: String,
+    pub total_models: usize,
+    pub fresh_count: usize,
+    pub missing_count: usize,
+    pub stale_contract_count: usize,
+    pub stale_fingerprint_count: usize,
+    pub invalid_json_count: usize,
+    pub wrong_selected_artifact_count: usize,
+    pub blocked_partial_download_count: usize,
+    pub error_count: usize,
+    pub valid: bool,
 }
 
 /// Planned move row persisted in migration checkpoint state.

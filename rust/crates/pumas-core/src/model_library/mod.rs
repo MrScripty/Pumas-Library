@@ -79,7 +79,8 @@ pub use library::{
     MigrationReportArtifact, ModelLibrary, ModelLibraryUpdateSubscriber,
     PackageFactsCacheMigrationDryRunItem, PackageFactsCacheMigrationDryRunReport,
     PackageFactsCacheMigrationExecutionItem, PackageFactsCacheMigrationExecutionReport,
-    PackageFactsCacheMigrationPlannedWork, ReclassifyResult,
+    PackageFactsCacheMigrationPlannedWork, PackageFactsCacheMigrationValidationReport,
+    ReclassifyResult,
 };
 pub use link_registry::LinkRegistry;
 pub use mapper::ModelMapper;

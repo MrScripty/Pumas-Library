@@ -69,6 +69,7 @@ pub use migration::{
     MigrationPlannedMove, MigrationReportArtifact, PackageFactsCacheMigrationDryRunItem,
     PackageFactsCacheMigrationDryRunReport, PackageFactsCacheMigrationExecutionItem,
     PackageFactsCacheMigrationExecutionReport, PackageFactsCacheMigrationPlannedWork,
+    PackageFactsCacheMigrationValidationReport,
 };
 pub use projection::MetadataProjectionCleanupExecutionReport;
 use projection::{

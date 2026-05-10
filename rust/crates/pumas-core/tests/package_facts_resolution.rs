@@ -1810,6 +1810,53 @@ async fn package_facts_cache_migration_execution_repairs_invalid_and_stale_rows(
 }
 
 #[tokio::test]
+async fn package_facts_cache_migration_validation_counts_stale_and_clean_rows() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/cache-test";
+    create_cache_test_model(&library, model_id).await;
+
+    library.resolve_model_package_facts(model_id).await.unwrap();
+    let summary_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Summary)
+        .unwrap()
+        .unwrap();
+    let mut stale_summary_row = summary_row.clone();
+    stale_summary_row.package_facts_contract_version =
+        i64::from(PACKAGE_FACTS_CONTRACT_VERSION) - 1;
+    stale_summary_row.updated_at = "2026-05-02T00:10:00Z".to_string();
+    library
+        .index()
+        .upsert_model_package_facts_cache(&stale_summary_row)
+        .unwrap();
+
+    let stale_validation = library
+        .validate_package_facts_cache_migration()
+        .await
+        .unwrap();
+    assert!(!stale_validation.valid);
+    assert_eq!(stale_validation.stale_contract_count, 1);
+
+    library
+        .execute_package_facts_cache_migration_with_checkpoint()
+        .await
+        .unwrap();
+    let clean_validation = library
+        .validate_package_facts_cache_migration()
+        .await
+        .unwrap();
+    assert!(clean_validation.valid);
+    assert_eq!(clean_validation.total_models, 1);
+    assert_eq!(clean_validation.fresh_count, 1);
+    assert_eq!(clean_validation.missing_count, 0);
+    assert_eq!(clean_validation.stale_contract_count, 0);
+    assert_eq!(clean_validation.stale_fingerprint_count, 0);
+    assert_eq!(clean_validation.invalid_json_count, 0);
+    assert_eq!(clean_validation.wrong_selected_artifact_count, 0);
+    assert_eq!(clean_validation.error_count, 0);
+}
+
+#[tokio::test]
 async fn package_facts_cache_migration_dry_run_reports_stale_and_invalid_rows() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/cache-test";

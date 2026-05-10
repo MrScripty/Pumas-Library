@@ -1741,6 +1741,75 @@ async fn package_facts_cache_migration_execution_recomputes_fingerprint_on_resum
 }
 
 #[tokio::test]
+async fn package_facts_cache_migration_execution_repairs_invalid_and_stale_rows() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/cache-test";
+    create_cache_test_model(&library, model_id).await;
+
+    library.resolve_model_package_facts(model_id).await.unwrap();
+    let detail_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+    let summary_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Summary)
+        .unwrap()
+        .unwrap();
+    let invalid_detail_payload =
+        serde_json::json!({"not": "resolved_model_package_facts"}).to_string();
+    let mut invalid_detail_row = detail_row.clone();
+    invalid_detail_row.facts_json = invalid_detail_payload.clone();
+    invalid_detail_row.updated_at = "2026-05-02T00:09:00Z".to_string();
+    library
+        .index()
+        .upsert_model_package_facts_cache(&invalid_detail_row)
+        .unwrap();
+    let mut stale_summary_row = summary_row.clone();
+    stale_summary_row.package_facts_contract_version =
+        i64::from(PACKAGE_FACTS_CONTRACT_VERSION) - 1;
+    stale_summary_row.updated_at = "2026-05-02T00:09:00Z".to_string();
+    library
+        .index()
+        .upsert_model_package_facts_cache(&stale_summary_row)
+        .unwrap();
+
+    let report = library
+        .execute_package_facts_cache_migration_with_checkpoint()
+        .await
+        .unwrap();
+
+    assert_eq!(report.planned_work_count, 1);
+    assert_eq!(report.regenerated_detail_count, 1);
+    assert_eq!(report.regenerated_summary_count, 1);
+    assert_eq!(report.error_count, 0);
+    let repaired_detail_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+    let repaired_summary_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Summary)
+        .unwrap()
+        .unwrap();
+    assert_ne!(repaired_detail_row.facts_json, invalid_detail_payload);
+    assert_eq!(
+        repaired_detail_row.package_facts_contract_version,
+        i64::from(PACKAGE_FACTS_CONTRACT_VERSION)
+    );
+    assert_eq!(
+        repaired_summary_row.package_facts_contract_version,
+        i64::from(PACKAGE_FACTS_CONTRACT_VERSION)
+    );
+    assert_eq!(
+        repaired_summary_row.source_fingerprint,
+        repaired_detail_row.source_fingerprint
+    );
+}
+
+#[tokio::test]
 async fn package_facts_cache_migration_dry_run_reports_stale_and_invalid_rows() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/cache-test";

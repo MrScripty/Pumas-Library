@@ -51,6 +51,9 @@ repository from Pumas package facts, summaries, and update events.
   processor requirements.
 - `gguf_embedding_package_facts.json`: GGUF embedding artifact proving embedding
   tasks use the same package-facts contract as generation models.
+- `diffusers_sd_text_to_image_package_facts.json`: Diffusers text-to-image
+  package with `model_index.json`, component roles, Stable Diffusion family
+  evidence, image-generation task facts, and advisory Diffusers backend hinting.
 - `unsupported_ollama_hint_package_facts.json`: ecosystem hint preserved as
   unsupported evidence rather than converted into executable support.
 - `invalid_generation_config_package_facts.json`: invalid model-provided
@@ -73,3 +76,23 @@ repository from Pumas package facts, summaries, and update events.
   proving recovery paths can bypass malformed cached detail.
 - `model_library_package_facts_modified_event.json`: host cache-invalidation
   event for package-fact detail refresh.
+
+## Canonical Image-Generation Fixtures
+
+The canonical producer fixture for host-side image-generation planning is
+`diffusers_sd_text_to_image_package_facts.json`.
+
+Consumers should treat this fixture as a Pumas-owned package-facts contract
+sample, not a Pantograph adapter contract. The stable planning facts it exposes
+are:
+
+- `artifact.artifact_kind = "diffusers_bundle"`
+- `task.task_type_primary = "image_generation"`
+- `task.pipeline_tag = "text-to-image"`
+- `diffusers.pipeline_class = "StableDiffusionPipeline"`
+- `diffusers.family_evidence[].family = "stable_diffusion"`
+- `backend_hints.accepted[] = "diffusers"`
+
+The fixture intentionally does not include host runtime registry state,
+workflow-node fields, scheduler policy, queue state, diagnostics-ledger payloads,
+or any consumer-specific adapter fields.

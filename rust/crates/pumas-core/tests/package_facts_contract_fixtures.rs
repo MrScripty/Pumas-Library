@@ -208,7 +208,7 @@ fn gguf_embedding_fixture_matches_contract() {
 
 #[test]
 fn diffusers_text_to_image_fixture_matches_contract() {
-    let (_raw, parsed) = load_fixture("diffusers_sd_text_to_image_package_facts.json");
+    let (raw, parsed) = load_fixture("diffusers_sd_text_to_image_package_facts.json");
 
     assert_eq!(
         parsed.package_facts_contract_version,
@@ -242,6 +242,14 @@ fn diffusers_text_to_image_fixture_matches_contract() {
         .backend_hints
         .accepted
         .contains(&BackendHintLabel::Diffusers));
+    assert!(
+        raw.get("pantograph").is_none()
+            && raw.get("workflow").is_none()
+            && raw.get("runtime_registry").is_none()
+            && raw.get("diagnostics_ledger").is_none()
+            && raw.get("scheduler_policy").is_none(),
+        "canonical Pumas fixtures must not expose consumer/runtime internals"
+    );
 
     let summary = ResolvedModelPackageFactsSummary::from(&parsed);
     assert_eq!(

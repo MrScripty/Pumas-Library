@@ -20,9 +20,9 @@ async fn get_primary_model_file(
         })?
 }
 
-pub async fn ollama_list_models(_state: &AppState, params: &Value) -> pumas_library::Result<Value> {
+pub async fn ollama_list_models(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
-    let client = ollama_client_for_connection_url(connection_url)?;
+    let client = ollama_client_for_connection_url(state, connection_url)?;
     let models = client.list_models().await?;
     Ok(json!({
         "success": true,
@@ -59,18 +59,25 @@ async fn resolve_ollama_profile_endpoint(
         .await
 }
 
-fn ollama_client_for_connection_url(
+fn legacy_ollama_endpoint(
     connection_url: Option<&str>,
-) -> pumas_library::Result<pumas_app_manager::OllamaClient> {
-    let endpoint = connection_url
+) -> pumas_library::Result<Option<RuntimeEndpointUrl>> {
+    connection_url
         .map(RuntimeEndpointUrl::parse)
         .transpose()
         .map_err(|message| pumas_library::error::PumasError::InvalidParams {
             message: format!("invalid legacy Ollama connection_url: {message}"),
-        })?;
-    Ok(pumas_app_manager::OllamaClient::new(
-        endpoint.as_ref().map(RuntimeEndpointUrl::as_str),
-    ))
+        })
+}
+
+fn ollama_client_for_connection_url(
+    state: &AppState,
+    connection_url: Option<&str>,
+) -> pumas_library::Result<pumas_app_manager::OllamaClient> {
+    let endpoint = legacy_ollama_endpoint(connection_url)?;
+    Ok(state
+        .ollama_client_factory
+        .client(endpoint.as_ref().map(RuntimeEndpointUrl::as_str)))
 }
 
 async fn resolve_ollama_operation_endpoint(
@@ -114,7 +121,7 @@ pub async fn ollama_list_models_for_profile(
 ) -> pumas_library::Result<Value> {
     let command: OllamaProfileParams = parse_params("ollama_list_models_for_profile", params)?;
     let endpoint = resolve_ollama_profile_endpoint(state, command.profile_id).await?;
-    let client = pumas_app_manager::OllamaClient::new(Some(endpoint.as_str()));
+    let client = state.ollama_client_factory.client(Some(endpoint.as_str()));
     let models = client.list_models().await?;
     Ok(json!({
         "success": true,
@@ -138,7 +145,7 @@ pub async fn ollama_load_model_for_profile(
     let endpoint =
         resolve_ollama_operation_endpoint(state, command.model_id.as_deref(), command.profile_id)
             .await?;
-    let client = pumas_app_manager::OllamaClient::new(Some(endpoint.as_str()));
+    let client = state.ollama_client_factory.client(Some(endpoint.as_str()));
     client.load_model(model_name).await?;
 
     Ok(json!({ "success": true }))
@@ -161,7 +168,7 @@ pub async fn ollama_unload_model_for_profile(
     let endpoint =
         resolve_ollama_operation_endpoint(state, command.model_id.as_deref(), command.profile_id)
             .await?;
-    let client = pumas_app_manager::OllamaClient::new(Some(endpoint.as_str()));
+    let client = state.ollama_client_factory.client(Some(endpoint.as_str()));
     client.unload_model(model_name).await?;
 
     Ok(json!({ "success": true }))
@@ -182,7 +189,7 @@ pub async fn ollama_delete_model_for_profile(
     }
 
     let endpoint = resolve_ollama_profile_endpoint(state, command.profile_id).await?;
-    let client = pumas_app_manager::OllamaClient::new(Some(endpoint.as_str()));
+    let client = state.ollama_client_factory.client(Some(endpoint.as_str()));
     client.delete_model(model_name).await?;
 
     Ok(json!({ "success": true }))
@@ -278,7 +285,7 @@ async fn create_ollama_model(
         .and_then(|r| r.hashes.get("sha256"))
         .cloned();
 
-    let client = ollama_client_for_connection_url(connection_url)?;
+    let client = ollama_client_for_connection_url(state, connection_url)?;
     client
         .create_model(&ollama_name, &gguf_path, known_sha256.as_deref())
         .await?;
@@ -293,49 +300,40 @@ async fn create_ollama_model(
     }))
 }
 
-pub async fn ollama_delete_model(
-    _state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn ollama_delete_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let model_name = require_str_param(params, "model_name", "modelName")?;
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    let client = ollama_client_for_connection_url(connection_url)?;
+    let client = ollama_client_for_connection_url(state, connection_url)?;
     client.delete_model(&model_name).await?;
 
     Ok(json!({ "success": true }))
 }
 
-pub async fn ollama_load_model(_state: &AppState, params: &Value) -> pumas_library::Result<Value> {
+pub async fn ollama_load_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let model_name = require_str_param(params, "model_name", "modelName")?;
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    let client = ollama_client_for_connection_url(connection_url)?;
+    let client = ollama_client_for_connection_url(state, connection_url)?;
     client.load_model(&model_name).await?;
 
     Ok(json!({ "success": true }))
 }
 
-pub async fn ollama_unload_model(
-    _state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn ollama_unload_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let model_name = require_str_param(params, "model_name", "modelName")?;
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    let client = ollama_client_for_connection_url(connection_url)?;
+    let client = ollama_client_for_connection_url(state, connection_url)?;
     client.unload_model(&model_name).await?;
 
     Ok(json!({ "success": true }))
 }
 
-pub async fn ollama_list_running(
-    _state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn ollama_list_running(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    let client = ollama_client_for_connection_url(connection_url)?;
+    let client = ollama_client_for_connection_url(state, connection_url)?;
     let models = client.list_running_models().await?;
 
     Ok(json!({ "success": true, "models": models }))
@@ -347,7 +345,7 @@ mod tests {
 
     #[test]
     fn legacy_connection_url_is_validated_at_rpc_boundary() {
-        let err = match ollama_client_for_connection_url(Some("file:///tmp/ollama.sock")) {
+        let err = match legacy_ollama_endpoint(Some("file:///tmp/ollama.sock")) {
             Ok(_) => panic!("legacy connection_url should reject unsupported schemes"),
             Err(err) => err,
         };

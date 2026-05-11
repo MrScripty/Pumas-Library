@@ -46,7 +46,7 @@ provider and widens the blast radius.
       Feature modules may request provider behavior from the registry, but must
       not construct HTTP clients, process launchers, sidecar clients, or
       concrete provider implementations ad hoc.
-- [ ] Build reusable provider HTTP clients and gateway clients at composition
+- [x] Build reusable provider HTTP clients and gateway clients at composition
       roots with explicit timeout/body/error policy. Provider serving adapters
       consume those clients; request handlers must not build clients directly.
 - [ ] Include alias defaulting, served-instance identity, route identity,
@@ -247,8 +247,13 @@ launch strategy remain open under their separate tasks.
 Reusable provider-client work has started with llama.cpp router serving:
 `LlamaCppRouterClient` is owned by RPC `AppState` and the router serving
 adapter consumes it for readiness/load/unload requests with explicit operation
-timeouts. The provider-client milestone task remains open because Ollama
-serving/app handlers still construct `OllamaClient` inside request handling.
+timeouts.
+Ollama provider-client reuse is now complete for existing RPC paths:
+`OllamaClient` accepts reusable `OllamaHttpClients`, RPC `AppState` owns an
+`OllamaClientFactory`, and Ollama serving/app handlers use that factory instead
+of constructing client stacks in request handling. Existing-provider gateway and
+provider HTTP client ownership is now composition-rooted; plugin proxy HTTP
+client construction is unrelated to runtime provider serving.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

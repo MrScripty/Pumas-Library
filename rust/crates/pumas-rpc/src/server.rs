@@ -5,7 +5,7 @@ use crate::handlers::{
     handle_openai_models, handle_openai_proxy, handle_rpc, handle_runtime_profile_update_events,
     handle_serving_status_update_events, handle_status_telemetry_update_events,
 };
-use crate::provider_clients::LlamaCppRouterClient;
+use crate::provider_clients::{LlamaCppRouterClient, OllamaClientFactory};
 use crate::shortcut::ShortcutManager;
 use axum::{
     extract::DefaultBodyLimit,
@@ -53,6 +53,8 @@ pub struct AppState {
     pub provider_registry: ProviderRegistry,
     /// Shared llama.cpp router client for provider serving operations.
     pub llama_cpp_router_client: LlamaCppRouterClient,
+    /// Shared Ollama client factory for provider serving and app operations.
+    pub ollama_client_factory: OllamaClientFactory,
 }
 
 /// Owned handle for the running HTTP server task.
@@ -116,6 +118,7 @@ pub async fn start_server(
 
     let gateway_http_client = build_gateway_http_client()?;
     let provider_http_client = build_provider_http_client()?;
+    let ollama_client_factory = build_ollama_client_factory()?;
     let provider_registry = ProviderRegistry::builtin();
     let state = Arc::new(AppState {
         api,
@@ -127,6 +130,7 @@ pub async fn start_server(
         gateway_http_client,
         provider_registry,
         llama_cpp_router_client: LlamaCppRouterClient::new(provider_http_client),
+        ollama_client_factory,
     });
 
     // Configure CORS for local development and packaged renderer diagnostics.
@@ -206,6 +210,12 @@ fn build_provider_http_client() -> anyhow::Result<reqwest::Client> {
         .connect_timeout(PROVIDER_HTTP_CONNECT_TIMEOUT)
         .user_agent("pumas-library")
         .build()?)
+}
+
+fn build_ollama_client_factory() -> anyhow::Result<OllamaClientFactory> {
+    let http_clients = pumas_app_manager::OllamaHttpClients::new()
+        .map_err(|err| anyhow::anyhow!("failed to build Ollama HTTP clients: {err}"))?;
+    Ok(OllamaClientFactory::new(http_clients))
 }
 
 fn is_allowed_cors_origin(origin: &HeaderValue) -> bool {

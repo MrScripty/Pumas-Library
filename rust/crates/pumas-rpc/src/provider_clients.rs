@@ -7,6 +7,21 @@ const LLAMA_CPP_ROUTER_LOAD_TIMEOUT: Duration = Duration::from_secs(180);
 const LLAMA_CPP_ROUTER_UNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
+pub struct OllamaClientFactory {
+    http_clients: pumas_app_manager::OllamaHttpClients,
+}
+
+impl OllamaClientFactory {
+    pub fn new(http_clients: pumas_app_manager::OllamaHttpClients) -> Self {
+        Self { http_clients }
+    }
+
+    pub fn client(&self, endpoint: Option<&str>) -> pumas_app_manager::OllamaClient {
+        pumas_app_manager::OllamaClient::with_http_clients(endpoint, self.http_clients.clone())
+    }
+}
+
+#[derive(Clone)]
 pub struct LlamaCppRouterClient {
     http: reqwest::Client,
 }

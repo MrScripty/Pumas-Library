@@ -20,7 +20,9 @@ pub mod version_manager;
 // Re-export commonly used types
 pub use api_proxy::PluginApiProxy;
 pub use custom_nodes::{CustomNodesManager, InstallResult, InstalledCustomNode, UpdateResult};
-pub use ollama_client::{derive_ollama_name, OllamaClient, OllamaModel, RunningModel};
+pub use ollama_client::{
+    derive_ollama_name, OllamaClient, OllamaHttpClients, OllamaModel, RunningModel,
+};
 pub use process::{AppProcessManager, ProcessHandle, ProcessManagerFactory, ProcessStatus};
 pub use torch_client::{
     ComputeDevice, DeviceInfo, ModelSlot, SlotState, TorchClient, TorchServerConfig,

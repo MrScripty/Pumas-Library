@@ -87,6 +87,7 @@ struct CreateProgressLine {
 }
 
 /// HTTP client for a running Ollama instance.
+#[derive(Clone)]
 pub struct OllamaClient {
     base_url: String,
     client: reqwest::Client,
@@ -95,40 +96,62 @@ pub struct OllamaClient {
     create_client: reqwest::Client,
 }
 
-impl OllamaClient {
-    /// Create a new client targeting the given base URL.
-    ///
-    /// If `base_url` is `None`, defaults to `http://127.0.0.1:11434`.
-    pub fn new(base_url: Option<&str>) -> Self {
-        let base_url = base_url
-            .unwrap_or(default_base_url())
-            .trim_end_matches('/')
-            .to_string();
+#[derive(Clone)]
+pub struct OllamaHttpClients {
+    client: reqwest::Client,
+    upload_client: reqwest::Client,
+    create_client: reqwest::Client,
+}
 
+impl OllamaHttpClients {
+    pub fn new() -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(API_TIMEOUT)
             .user_agent("pumas-library")
             .build()
-            .expect("failed to build reqwest client");
+            .map_err(|err| net_err(format!("failed to build Ollama API client: {err}")))?;
 
         let upload_client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(10))
             // No total timeout -- large blob uploads can take a while.
             .user_agent("pumas-library")
             .build()
-            .expect("failed to build reqwest upload client");
+            .map_err(|err| net_err(format!("failed to build Ollama upload client: {err}")))?;
 
         let create_client = reqwest::Client::builder()
             .timeout(CREATE_TIMEOUT)
             .user_agent("pumas-library")
             .build()
-            .expect("failed to build reqwest create client");
+            .map_err(|err| net_err(format!("failed to build Ollama create client: {err}")))?;
 
-        Self {
-            base_url,
+        Ok(Self {
             client,
             upload_client,
             create_client,
+        })
+    }
+}
+
+impl OllamaClient {
+    /// Create a new client targeting the given base URL.
+    ///
+    /// If `base_url` is `None`, defaults to `http://127.0.0.1:11434`.
+    pub fn new(base_url: Option<&str>) -> Self {
+        let http_clients = OllamaHttpClients::new().expect("failed to build Ollama HTTP clients");
+        Self::with_http_clients(base_url, http_clients)
+    }
+
+    pub fn with_http_clients(base_url: Option<&str>, http_clients: OllamaHttpClients) -> Self {
+        let base_url = base_url
+            .unwrap_or(default_base_url())
+            .trim_end_matches('/')
+            .to_string();
+
+        Self {
+            base_url,
+            client: http_clients.client,
+            upload_client: http_clients.upload_client,
+            create_client: http_clients.create_client,
         }
     }
 

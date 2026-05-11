@@ -237,6 +237,12 @@ Update during implementation:
   provider-client construction is still present in Ollama serving/app handlers
   and must be handled in a separate slice before the provider-client task is
   complete.
+- 2026-05-11: Completed the existing-provider client reuse slice for Ollama.
+  `OllamaClient` now accepts reusable `OllamaHttpClients`, RPC `AppState` owns
+  an `OllamaClientFactory`, and Ollama serving/app handlers obtain endpoint
+  clients from that state-owned factory instead of constructing client stacks
+  in request handling. The remaining `reqwest::Client::builder()` usage in RPC
+  handlers is plugin proxy code, not runtime provider serving.
 
 ## Commit Cadence Notes
 
@@ -396,6 +402,9 @@ changes remain.
   composition for core services.
 - llama.cpp router serving HTTP operations now consume a reusable
   composition-root-owned provider client.
+- Existing Ollama and llama.cpp provider serving/app HTTP clients are now owned
+  by RPC composition state or factories instead of being built in serving
+  request handlers.
 
 ### Deviations
 
@@ -502,6 +511,12 @@ changes remain.
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
 - llama.cpp router provider-client slice verified with `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml provider_clients`, `cargo
+  test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo
+  fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Ollama provider-client reuse slice verified with `cargo test --manifest-path
+  rust/crates/pumas-app-manager/Cargo.toml ollama_client`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml ollama`, `cargo test
   --manifest-path rust/crates/pumas-rpc/Cargo.toml provider_clients`, `cargo
   test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo
   fmt --manifest-path rust/Cargo.toml --all -- --check`.

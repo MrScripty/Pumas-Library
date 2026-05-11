@@ -53,7 +53,7 @@ pub(super) async fn serve_ollama_model(
         .await;
     };
 
-    let client = pumas_app_manager::OllamaClient::new(Some(endpoint.as_str()));
+    let client = state.ollama_client_factory.client(Some(endpoint.as_str()));
     let registered = match client.list_models().await {
         Ok(models) => models.iter().any(|model| model.name == model_alias),
         Err(err) => {
@@ -175,7 +175,7 @@ pub(super) async fn unserve_ollama_model(
         }
     };
 
-    let client = pumas_app_manager::OllamaClient::new(Some(endpoint.as_str()));
+    let client = state.ollama_client_factory.client(Some(endpoint.as_str()));
     if let Err(err) = client.unload_model(&model_alias).await {
         warn!("Ollama serving unload failed: {}", err);
         return Ok(serde_json::to_value(UnserveModelResponse {

@@ -160,6 +160,13 @@ Update during implementation:
   to the existing Ollama and llama.cpp load routines, but both load and unload
   dispatch now select through provider behavior rather than direct provider-id
   matches. Full provider serving adapter extraction remains pending.
+- 2026-05-11: Extracted OpenAI-compatible gateway handlers and proxy helpers
+  from the oversized RPC handlers module into
+  `rust/crates/pumas-rpc/src/handlers/openai_gateway.rs`. The public route
+  handlers remain re-exported from `handlers::mod` so the server route contract
+  is unchanged. During extraction, removed duplicate gateway sort/return lines
+  found in the moved code; behavior is covered by the existing gateway lookup
+  and endpoint-policy tests.
 
 ## Commit Cadence Notes
 
@@ -294,6 +301,9 @@ changes remain.
 - Serving alias defaulting now derives from provider behavior policy.
 - `unserve_model` dispatch now derives from provider unload behavior policy.
 - `serve_model` dispatch now derives from provider serving adapter kind.
+- OpenAI-compatible gateway handlers and proxy helpers now live in a focused
+  `handlers/openai_gateway.rs` module instead of the oversized RPC handlers
+  module.
 
 ### Deviations
 
@@ -360,6 +370,10 @@ changes remain.
   --manifest-path rust/Cargo.toml --all -- --check`.
 - Provider serving adapter kind dispatch slice verified with `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml providers`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`.
+- Gateway helper extraction slice verified with `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml openai_gateway`, `cargo test
   --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt
   --manifest-path rust/Cargo.toml --all -- --check`.
 

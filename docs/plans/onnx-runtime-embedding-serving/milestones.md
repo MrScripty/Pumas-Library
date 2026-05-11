@@ -199,6 +199,11 @@ provider serving adapter extraction before ONNX load/unload can be wired.
 instead of matching directly on the requested provider id. Existing Ollama and
 llama.cpp load routines are still the concrete implementations; full adapter
 extraction remains pending before ONNX load/unload wiring.
+OpenAI-compatible gateway handlers and proxy helpers have been extracted from
+the oversized RPC handlers module into a focused gateway module while preserving
+the public route exports. The broader large-file split task remains open for
+route migration, serving adapters, launch strategy, and frontend provider row
+work.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

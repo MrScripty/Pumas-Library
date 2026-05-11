@@ -28,11 +28,13 @@ export type RuntimeProfileDraft = {
 export const providerModes: Record<RuntimeProviderId, RuntimeProviderMode[]> = {
   ollama: runtimeProviderDescriptors.ollama.profileModes,
   llama_cpp: runtimeProviderDescriptors.llama_cpp.profileModes,
+  onnx_runtime: runtimeProviderDescriptors.onnx_runtime.profileModes,
 };
 
 export const providerDeviceModes: Record<RuntimeProviderId, RuntimeDeviceMode[]> = {
   ollama: runtimeProviderDescriptors.ollama.deviceModes,
   llama_cpp: runtimeProviderDescriptors.llama_cpp.deviceModes,
+  onnx_runtime: runtimeProviderDescriptors.onnx_runtime.deviceModes,
 };
 
 export { deviceModeLabel, modeLabel, providerLabel };

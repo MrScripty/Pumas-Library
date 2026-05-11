@@ -385,6 +385,13 @@ Update during implementation:
   `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml providers`,
   `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`,
   and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`.
+- 2026-05-11: Synced frontend runtime-provider contracts with the new Rust ONNX
+  provider enums. `RuntimeProviderId` now includes `onnx_runtime`,
+  `RuntimeProviderMode` includes `onnx_serve`, runtime provider descriptors
+  declare ONNX as `.onnx`/CPU embedding-only without llama.cpp placement
+  controls, and runtime profile settings exhaustively consume the descriptor
+  maps. Verification passed: `npm run -w frontend check:types` and
+  `npm run -w frontend test:run -- runtimeProviderDescriptors`.
 
 ## Commit Cadence Notes
 
@@ -603,6 +610,8 @@ changes remain.
   enums and behavior now model ONNX as an embedding-only in-process runtime,
   and RPC serving has explicit non-critical ONNX not-yet-wired paths until the
   serving adapter slice connects the session manager.
+- Frontend runtime-provider contracts are synced for ONNX provider ids, modes,
+  labels, CPU-only device options, `.onnx` compatibility, and descriptor tests.
 
 ### Deviations
 

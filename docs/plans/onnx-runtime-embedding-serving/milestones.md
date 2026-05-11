@@ -486,7 +486,7 @@ Ollama or llama.cpp profiles.
 - [ ] Remove assumptions that provider enums and runtime-profile DTOs are
       append-only. Replace route DTOs and provider behavior contracts cleanly
       where the old shape is wrong for ONNX.
-- [ ] Update Rust and TypeScript contracts in the same logical slice and verify
+- [x] Update Rust and TypeScript contracts in the same logical slice and verify
       serde/JSON casing for every new enum value and field.
 - [ ] Add or update executable schema/fixture tests for runtime profile
       snapshots, provider capabilities, route mutations, and plugin metadata
@@ -530,9 +530,11 @@ Ollama or llama.cpp profiles.
 **Status:** In progress. The Rust provider contract now includes
 `RuntimeProviderId::OnnxRuntime`, `RuntimeProviderMode::OnnxServe`,
 `.onnx` executable artifact support, an embedding-only ONNX provider behavior,
-an `in_process_runtime` managed launch target, and contract tests. TypeScript,
-plugin/app identity, frontend state, ONNX runtime profile lifecycle, and full
-schema/fixture coverage remain open.
+an `in_process_runtime` managed launch target, and contract tests. Frontend
+runtime provider types/descriptors now include `onnx_runtime` and `onnx_serve`
+with focused descriptor tests and typecheck coverage. Plugin/app identity,
+frontend app state, ONNX runtime profile lifecycle, and full schema/fixture
+coverage remain open.
 
 ### Milestone 4: Serving Validation And Load/Unload
 

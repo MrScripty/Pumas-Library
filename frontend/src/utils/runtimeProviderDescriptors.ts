@@ -46,12 +46,26 @@ export const runtimeProviderDescriptors: Record<RuntimeProviderId, RuntimeProvid
     defaultContextSize: '4096',
     canLaunchOnServe: true,
   },
+  onnx_runtime: {
+    id: 'onnx_runtime',
+    label: 'ONNX Runtime',
+    profileModes: ['onnx_serve'],
+    deviceModes: ['auto', 'cpu'],
+    compatibleExecutableFormats: ['onnx'],
+    dedicatedPlacementModes: [],
+    supportsGpuLayers: false,
+    supportsTensorSplit: false,
+    supportsContextSize: false,
+    defaultContextSize: null,
+    canLaunchOnServe: false,
+  },
 };
 
 const modeLabels: Record<RuntimeProviderMode, string> = {
   ollama_serve: 'Serve',
   llama_cpp_router: 'Router',
   llama_cpp_dedicated: 'Dedicated',
+  onnx_serve: 'Serve',
 };
 
 const deviceModeLabels: Record<RuntimeDeviceMode, string> = {

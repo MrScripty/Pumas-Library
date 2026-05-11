@@ -22,7 +22,9 @@ describe('runtime provider descriptors', () => {
   it('declares existing provider labels, modes, and capability flags', () => {
     expect(providerLabel('ollama')).toBe('Ollama');
     expect(providerLabel('llama_cpp')).toBe('llama.cpp');
+    expect(providerLabel('onnx_runtime')).toBe('ONNX Runtime');
     expect(modeLabel('llama_cpp_dedicated')).toBe('Dedicated');
+    expect(modeLabel('onnx_serve')).toBe('Serve');
     expect(deviceModeLabel('specific_device')).toBe('Specific device');
 
     expect(getRuntimeProviderDescriptor('ollama')).toMatchObject({
@@ -37,6 +39,14 @@ describe('runtime provider descriptors', () => {
       supportsGpuLayers: true,
       supportsContextSize: true,
       defaultContextSize: '4096',
+    });
+    expect(getRuntimeProviderDescriptor('onnx_runtime')).toMatchObject({
+      profileModes: ['onnx_serve'],
+      deviceModes: ['auto', 'cpu'],
+      compatibleExecutableFormats: ['onnx'],
+      supportsGpuLayers: false,
+      supportsContextSize: false,
+      defaultContextSize: null,
     });
   });
 
@@ -62,6 +72,18 @@ describe('runtime provider descriptors', () => {
         'llama_cpp'
       )
     ).toBe(false);
+    expect(
+      isModelCompatibleWithProvider(
+        model({ id: 'onnx', path: '/models/model.onnx' }),
+        'onnx_runtime'
+      )
+    ).toBe(true);
+    expect(
+      isModelCompatibleWithProvider(
+        model({ id: 'gguf', path: '/models/model.gguf' }),
+        'onnx_runtime'
+      )
+    ).toBe(false);
   });
 
   it('filters model groups through provider compatibility', () => {
@@ -83,6 +105,16 @@ describe('runtime provider descriptors', () => {
       {
         category: 'language',
         models: [expect.objectContaining({ id: 'chat' })],
+      },
+    ]);
+    expect(filterProviderCompatibleModelGroups(groups, 'onnx_runtime')).toEqual([
+      {
+        category: 'language',
+        models: [expect.objectContaining({ id: 'onnx' })],
+      },
+      {
+        category: 'audio',
+        models: [expect.objectContaining({ id: 'audio' })],
       },
     ]);
   });

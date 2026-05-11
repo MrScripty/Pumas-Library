@@ -110,7 +110,7 @@ provider and widens the blast radius.
       helpers out of the large library implementation path where possible.
       Updates to custom ONNX runtime projections and generic ONNX embedding
       compatibility must be isolated and separately tested.
-- [ ] Add a typed managed launch strategy abstraction for binary process,
+- [x] Add a typed managed launch strategy abstraction for binary process,
       Python sidecar, and external-only profiles. Use it for existing Ollama and
       llama.cpp launch behavior before adding ONNX managed launch behavior.
 - [ ] Add frontend provider descriptors consumed by profile settings, compatible
@@ -262,6 +262,12 @@ Runtime-profile provider-specific validation now dispatches through
 composing the existing Ollama and llama.cpp adapters. Runtime-profile
 launch-spec derivation still contains provider-specific branching and remains
 open under the managed launch-strategy abstraction task.
+Runtime-profile launch specs now carry `RuntimeProfileLaunchStrategy`. Existing
+Ollama and llama.cpp managed profiles map to binary-process launch kinds, and
+lifecycle launch config construction consumes that strategy instead of matching
+provider ids directly. `PythonSidecar(OnnxRuntime)` is represented for the
+future ONNX managed sidecar path; actual ONNX sidecar launch/shutdown wiring
+remains open in the ONNX provider milestones.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

@@ -10,7 +10,8 @@ use crate::models::{
 use crate::process::{BinaryLaunchConfig, ProcessLauncher};
 use crate::providers::ExecutableArtifactFormat;
 use crate::runtime_profiles::{
-    generate_llama_cpp_router_catalog, RuntimeProfileLaunchOverrides, RuntimeProfileLaunchSpec,
+    generate_llama_cpp_router_catalog, RuntimeProfileBinaryLaunchKind,
+    RuntimeProfileLaunchOverrides, RuntimeProfileLaunchSpec, RuntimeProfileLaunchStrategy,
 };
 use std::fs;
 use std::path::Path;
@@ -117,29 +118,39 @@ fn runtime_profile_binary_launch_config(
     version_dir: &Path,
     launch_spec: &RuntimeProfileLaunchSpec,
 ) -> std::result::Result<BinaryLaunchConfig, PumasError> {
-    let config = match launch_spec.provider {
-        RuntimeProviderId::Ollama => BinaryLaunchConfig::ollama(tag, version_dir),
-        RuntimeProviderId::LlamaCpp => match launch_spec.provider_mode {
-            RuntimeProviderMode::LlamaCppRouter => BinaryLaunchConfig::llama_cpp_router(
-                tag,
-                version_dir,
-                "127.0.0.1",
-                launch_spec.port.value(),
-                version_dir,
-            ),
-            RuntimeProviderMode::LlamaCppDedicated => BinaryLaunchConfig::llama_cpp_dedicated(
-                tag,
-                version_dir,
-                "127.0.0.1",
-                launch_spec.port.value(),
-                version_dir,
-            ),
-            RuntimeProviderMode::OllamaServe => {
-                return Err(PumasError::InvalidParams {
-                    message: "llama.cpp runtime profile cannot use ollama_serve mode".to_string(),
-                });
-            }
-        },
+    let config = match launch_spec.launch_strategy {
+        RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::OllamaServe,
+        ) => BinaryLaunchConfig::ollama(tag, version_dir),
+        RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::LlamaCppRouter,
+        ) => BinaryLaunchConfig::llama_cpp_router(
+            tag,
+            version_dir,
+            "127.0.0.1",
+            launch_spec.port.value(),
+            version_dir,
+        ),
+        RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::LlamaCppDedicated,
+        ) => BinaryLaunchConfig::llama_cpp_dedicated(
+            tag,
+            version_dir,
+            "127.0.0.1",
+            launch_spec.port.value(),
+            version_dir,
+        ),
+        RuntimeProfileLaunchStrategy::PythonSidecar(_) => {
+            return Err(PumasError::InvalidParams {
+                message: "Python sidecar runtime profiles are not wired yet".to_string(),
+            });
+        }
+        RuntimeProfileLaunchStrategy::ExternalOnly => {
+            return Err(PumasError::InvalidParams {
+                message: "external-only runtime profiles cannot be launched as managed processes"
+                    .to_string(),
+            });
+        }
     };
 
     Ok(config
@@ -353,6 +364,9 @@ mod tests {
             profile_id: RuntimeProfileId::parse("llama-dedicated").unwrap(),
             provider: RuntimeProviderId::LlamaCpp,
             provider_mode: RuntimeProviderMode::LlamaCppDedicated,
+            launch_strategy: RuntimeProfileLaunchStrategy::BinaryProcess(
+                RuntimeProfileBinaryLaunchKind::LlamaCppDedicated,
+            ),
             endpoint_url: endpoint_url.clone(),
             port: RuntimePort::parse(39191).unwrap(),
             extra_args: vec![
@@ -415,6 +429,9 @@ mod tests {
             profile_id: RuntimeProfileId::parse("llama-dedicated").unwrap(),
             provider: RuntimeProviderId::LlamaCpp,
             provider_mode: RuntimeProviderMode::LlamaCppDedicated,
+            launch_strategy: RuntimeProfileLaunchStrategy::BinaryProcess(
+                RuntimeProfileBinaryLaunchKind::LlamaCppDedicated,
+            ),
             endpoint_url: endpoint_url.clone(),
             port: RuntimePort::parse(39192).unwrap(),
             extra_args: vec![
@@ -458,6 +475,9 @@ mod tests {
             profile_id: RuntimeProfileId::parse("llama-router").unwrap(),
             provider: RuntimeProviderId::LlamaCpp,
             provider_mode: RuntimeProviderMode::LlamaCppRouter,
+            launch_strategy: RuntimeProfileLaunchStrategy::BinaryProcess(
+                RuntimeProfileBinaryLaunchKind::LlamaCppRouter,
+            ),
             endpoint_url: endpoint_url.clone(),
             port: RuntimePort::parse(39193).unwrap(),
             extra_args: vec![

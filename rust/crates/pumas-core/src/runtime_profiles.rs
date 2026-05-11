@@ -1,5 +1,8 @@
 //! Provider-neutral runtime profile service contracts.
 
+#[path = "runtime_profiles/launch_strategy.rs"]
+mod launch_strategy;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -24,6 +27,10 @@ use crate::{PumasError, Result};
 use serde_json::Value;
 use tokio::sync::broadcast;
 use tracing::warn;
+
+pub use launch_strategy::{
+    RuntimeProfileBinaryLaunchKind, RuntimeProfileLaunchStrategy, RuntimeProfilePythonSidecarKind,
+};
 
 const RUNTIME_PROFILE_EVENT_RETAIN_LIMIT: usize = 256;
 const RUNTIME_PROFILE_UPDATE_CHANNEL_CAPACITY: usize = 64;
@@ -317,6 +324,7 @@ pub struct RuntimeProfileLaunchSpec {
     pub profile_id: RuntimeProfileId,
     pub provider: RuntimeProviderId,
     pub provider_mode: RuntimeProviderMode,
+    pub launch_strategy: RuntimeProfileLaunchStrategy,
     pub endpoint_url: RuntimeEndpointUrl,
     pub port: RuntimePort,
     pub extra_args: Vec<String>,
@@ -1072,6 +1080,7 @@ fn derive_managed_profile_launch_specs(
             profile_id: profile.profile_id.clone(),
             provider: profile.provider,
             provider_mode: profile.provider_mode,
+            launch_strategy: RuntimeProfileLaunchStrategy::for_profile(profile)?,
             endpoint_url: endpoint_url.clone(),
             port,
             extra_args: profile_runtime_extra_args(launcher_root, profile, &endpoint_url, port)?,
@@ -2074,6 +2083,12 @@ mod tests {
             .unwrap();
         assert_eq!(default_spec.port.value(), 11434);
         assert_eq!(
+            default_spec.launch_strategy,
+            RuntimeProfileLaunchStrategy::BinaryProcess(
+                RuntimeProfileBinaryLaunchKind::OllamaServe
+            )
+        );
+        assert_eq!(
             default_spec.endpoint_url.as_str(),
             "http://127.0.0.1:11434/"
         );
@@ -2193,6 +2208,12 @@ mod tests {
             .unwrap();
 
         assert_eq!(spec.provider, RuntimeProviderId::LlamaCpp);
+        assert_eq!(
+            spec.launch_strategy,
+            RuntimeProfileLaunchStrategy::BinaryProcess(
+                RuntimeProfileBinaryLaunchKind::LlamaCppRouter
+            )
+        );
         assert_eq!(spec.port.value(), 18080);
         assert!(spec
             .runtime_dir

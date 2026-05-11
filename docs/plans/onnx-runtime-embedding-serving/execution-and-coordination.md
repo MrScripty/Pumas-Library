@@ -255,6 +255,14 @@ Update during implementation:
   adapters control validation. Runtime-profile launch-spec derivation still has
   provider-specific branching and remains part of the managed launch-strategy
   abstraction task.
+- 2026-05-11: Added the typed runtime-profile launch strategy abstraction under
+  `rust/crates/pumas-core/src/runtime_profiles/`. Managed Ollama and llama.cpp
+  launch specs now carry `RuntimeProfileLaunchStrategy::BinaryProcess(...)`,
+  external profiles map to `ExternalOnly`, and the enum reserves the
+  `PythonSidecar` path for the ONNX managed sidecar slice. Runtime lifecycle
+  launch-config construction now consumes the typed strategy instead of
+  matching provider ids directly. Added the directory README required for the
+  new launch-strategy module.
 
 ## Commit Cadence Notes
 
@@ -421,6 +429,8 @@ changes remain.
   have focused JSON serialization/round-trip coverage.
 - Runtime-profile provider-specific validation now dispatches through composed
   runtime provider adapters instead of a direct provider match.
+- Runtime-profile launch specs now carry a typed launch strategy consumed by
+  lifecycle launch-config construction for existing managed providers.
 
 ### Deviations
 
@@ -546,10 +556,16 @@ changes remain.
   --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`, `cargo
   test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo
   fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Runtime-profile launch strategy slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml launch_strategy`, `cargo
+  test --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`,
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 
 - Module README updated: `rust/crates/pumas-rpc/src/handlers/README.md`.
 - Module README updated: `rust/crates/pumas-core/src/providers/README.md`.
+- Module README added: `rust/crates/pumas-core/src/runtime_profiles/README.md`.
 - ADR added/updated: `docs/adr/0001-onnx-runtime-provider-model.md`.
 - PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: pending.

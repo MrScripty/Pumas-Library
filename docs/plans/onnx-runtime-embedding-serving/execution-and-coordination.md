@@ -327,6 +327,12 @@ Update during implementation:
   runtime-profile README now documents this persistence boundary. This reduces
   `runtime_profiles.rs` before ONNX route assignment while preserving the
   schema-2 provider-scoped route contract.
+- 2026-05-11: Extracted the llama.cpp compatible-model row renderer into
+  `frontend/src/components/app-panels/sections/LlamaCppModelRow.tsx`. The row
+  owns profile selection, placement/failed/load badges, quick serve/options,
+  link, and star controls; `LlamaCppModelLibrarySection.tsx` keeps route
+  persistence and serving orchestration. The section is now below the
+  large-component threshold, and the sections README records the boundary.
 
 ## Commit Cadence Notes
 
@@ -519,6 +525,9 @@ changes remain.
   instead of provider-id/provider-mode dispatch for llama.cpp prep.
 - Runtime-profile route config initialization, legacy route migration, and
   route validation now live in `runtime_profiles/route_config.rs`.
+- llama.cpp compatible-model row rendering now lives in
+  `LlamaCppModelRow.tsx`, leaving the section below the large-component
+  threshold before ONNX adds a sibling model row.
 
 ### Deviations
 
@@ -694,6 +703,9 @@ changes remain.
 - Runtime-profile route config extraction slice verified with `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles` and
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Frontend llama.cpp row extraction slice verified with `npm run -w frontend
+  check:types` and `npm run -w frontend test:run --
+  LlamaCppModelLibrarySection llamaCppLibraryViewModels`.
 
 ### Traceability Links
 
@@ -702,5 +714,7 @@ changes remain.
 - Module README added: `rust/crates/pumas-core/src/runtime_profiles/README.md`.
 - Module README updated: `rust/crates/pumas-core/src/serving/README.md`.
 - Module README updated: `frontend/src/utils/README.md`.
+- Module README updated:
+  `frontend/src/components/app-panels/sections/README.md`.
 - ADR added/updated: `docs/adr/0001-onnx-runtime-provider-model.md`.
 - PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: pending.

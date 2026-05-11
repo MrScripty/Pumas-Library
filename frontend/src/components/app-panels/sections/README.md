@@ -12,7 +12,8 @@ Composable section components used by app panels to render status, selectors, de
 | `OllamaRegisteredModels.tsx` | Presentational registered Ollama model list with load, unload, delete, loaded-state, and VRAM details. |
 | `OllamaRegisteredModels.test.tsx` | Rendering and interaction coverage for registered Ollama model state, actions, disabled controls, and size formatting. |
 | `OllamaModelSection.tsx` | Ollama library/registered model controls; refreshes from running-state changes, local operations, and runtime-profile update events rather than owning a polling interval. |
-| `LlamaCppModelLibrarySection.tsx` | Focused llama.cpp local model library panel that lists compatible GGUF models, saves per-row llama.cpp profile routes, opens serving with the selected route, and shows requested or backend-confirmed placement tags without entering the generic remote-download model manager state machine. |
+| `LlamaCppModelLibrarySection.tsx` | Focused llama.cpp local model library panel that lists compatible GGUF models, saves per-row llama.cpp profile routes, and opens serving with the selected route without entering the generic remote-download model manager state machine. |
+| `LlamaCppModelRow.tsx` | Presentational llama.cpp compatible-model row with route profile selection, loaded/failed placement badges, quick serve, options, link, and star controls. |
 | `RuntimeProfileSettingsSection.tsx` | Backend-confirmed runtime profile settings section for Ollama and llama.cpp profile lifecycle. |
 | `RuntimeProfileSettingsEditor.tsx` | Runtime profile editor shell that composes field and action subcomponents. |
 | `RuntimeProfileSettingsFields.tsx` | Runtime profile identity, endpoint, mode, and device setting fields. |
@@ -42,6 +43,9 @@ Composable section components used by app panels to render status, selectors, de
 - Placement tags distinguish requested profile placement from successful
   backend-confirmed loaded placement. Failed load state and error details take
   precedence over hardware labels.
+- Provider-specific compatible-model rows stay below the component size
+  threshold so ONNX can add a sibling row/panel without expanding the existing
+  llama.cpp section.
 
 ## Timer Ownership
 | Section | Current Reason | Required Guardrail |

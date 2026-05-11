@@ -439,6 +439,14 @@ Update during implementation:
   Verification passed:
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` and
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`.
+- 2026-05-11: Completed the focused M5 gateway-routing test coverage slice for
+  body limits and lookup errors. The public gateway handler tests now prove
+  `/v1/embeddings` rejects an oversized body with HTTP 413 before JSON parsing
+  or ONNX session dispatch, rejects an unknown model with HTTP 404, and rejects
+  duplicate gateway aliases with HTTP 409 plus the duplicate-alias error code.
+  Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` and
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`.
 
 ## Commit Cadence Notes
 

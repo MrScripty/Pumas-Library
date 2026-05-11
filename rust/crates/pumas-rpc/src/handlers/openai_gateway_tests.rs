@@ -135,6 +135,14 @@ async fn openai_proxy_json(state: Arc<AppState>, path: &str, body: Value) -> (St
     (status, serde_json::from_slice(&bytes).unwrap())
 }
 
+async fn openai_proxy_bytes(state: Arc<AppState>, path: &str, body: Bytes) -> (StatusCode, Value) {
+    let response =
+        handle_openai_proxy(State(state), OriginalUri(path.parse().unwrap()), body).await;
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), 1_048_576).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
+}
+
 #[test]
 fn openai_lookup_routes_unique_alias_before_base_model_id() {
     let result = resolve_openai_served_model(
@@ -331,5 +339,83 @@ async fn openai_proxy_maps_onnx_not_loaded_to_openai_error() {
     assert_eq!(
         body.pointer("/error/code").and_then(Value::as_str),
         Some("model_not_found")
+    );
+}
+
+#[tokio::test]
+async fn openai_proxy_rejects_oversized_embedding_body_before_json() {
+    let (_temp_dir, state) = gateway_test_state().await;
+    let body = Bytes::from(vec![b'x'; OPENAI_EMBEDDINGS_BODY_BYTES + 1]);
+
+    let (status, body) = openai_proxy_bytes(state, "/v1/embeddings", body).await;
+
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert!(body
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .is_some_and(|message| message.contains("request body exceeds")));
+}
+
+#[tokio::test]
+async fn openai_proxy_rejects_unknown_embedding_model() {
+    let (_temp_dir, state) = gateway_test_state().await;
+
+    let (status, body) = openai_proxy_json(
+        state,
+        "/v1/embeddings",
+        json!({
+            "model": "missing",
+            "input": "hello"
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .is_some_and(|message| message.contains("model is not served")));
+}
+
+#[tokio::test]
+async fn openai_proxy_rejects_ambiguous_embedding_alias() {
+    let (_temp_dir, state) = gateway_test_state().await;
+    record_onnx_served_model(&state).await;
+    state
+        .api
+        .record_served_model(ServedModelStatus {
+            model_id: "embeddings/other".to_string(),
+            model_alias: Some("nomic".to_string()),
+            provider: RuntimeProviderId::OnnxRuntime,
+            profile_id: RuntimeProfileId::parse("onnx-cpu-alt").unwrap(),
+            load_state: ServedModelLoadState::Loaded,
+            device_mode: RuntimeDeviceMode::Cpu,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
+            context_size: Some(4),
+            keep_loaded: true,
+            endpoint_url: None,
+            memory_bytes: None,
+            loaded_at: None,
+            last_error: None,
+        })
+        .await
+        .unwrap();
+
+    let (status, body) = openai_proxy_json(
+        state,
+        "/v1/embeddings",
+        json!({
+            "model": "nomic",
+            "input": "hello"
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        body.pointer("/error/code").and_then(Value::as_str),
+        Some("duplicate_model_alias")
     );
 }

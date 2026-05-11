@@ -629,7 +629,7 @@ existing Pumas `/v1` gateway.
 - [x] Validate OpenAI-compatible request JSON at the gateway boundary before
       dispatch, including model field shape, endpoint support, body limit, and
       provider capability.
-- [ ] Add endpoint-specific body-limit tests so `/v1/embeddings` rejects
+- [x] Add endpoint-specific body-limit tests so `/v1/embeddings` rejects
       oversized embedding payloads before entering ONNX Runtime.
 - [x] Use provider endpoint capabilities to keep `/v1/chat/completions` and
       `/v1/completions` unavailable for ONNX embedding-only models unless a
@@ -642,7 +642,7 @@ existing Pumas `/v1` gateway.
 - [ ] Add request correlation or structured logging at the gateway/provider
       boundary without logging embedding input text, tokens, secrets, or full
       model paths.
-- [ ] Add gateway tests for success, unknown model, ambiguous alias, and
+- [x] Add gateway tests for success, unknown model, ambiguous alias, and
       provider error pass-through.
 
 **Verification:**
@@ -682,6 +682,14 @@ OpenAI-compatible embedding JSON through the in-process adapter, ONNX rejects
 `/v1/chat/completions` through provider endpoint capabilities, and an ONNX
 served status without a loaded session maps to a bounded OpenAI-compatible
 `model_not_found` error. Verification passed:
+`cargo fmt --manifest-path rust/Cargo.toml --all -- --check` and
+`cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`.
+The next focused M5 test slice added public gateway handler coverage for
+oversized embedding bodies, unknown models, and ambiguous aliases. Oversized
+embedding request bodies now have a test proving they return HTTP 413 before
+JSON parsing or ONNX session dispatch, unknown models return HTTP 404, and
+duplicate gateway aliases return HTTP 409 with the provider-scoped ambiguity
+code. Verification passed:
 `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` and
 `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`.
 

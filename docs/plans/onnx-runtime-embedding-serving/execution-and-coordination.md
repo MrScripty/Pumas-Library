@@ -204,6 +204,12 @@ Update during implementation:
   and `external_only` to external profiles. This is the launch-strategy contract
   slice only; process launch still needs the later binary/Python sidecar
   abstraction before ONNX managed launch is wired.
+- 2026-05-11: Reconciled Milestone 0 registry usage after the launch-kind
+  validation slice. The built-in provider registry is now consumed by
+  runtime-profile validation/capability projection, serving adapter selection,
+  gateway endpoint routing, provider request model-id policy, alias defaulting,
+  unload behavior, artifact compatibility, and launch-kind validation.
+  Composition-root lifecycle ownership remains open.
 
 ## Commit Cadence Notes
 
@@ -353,6 +359,8 @@ changes remain.
   artifact values.
 - Runtime-profile managed/external validation now derives from provider launch
   kinds, including the reserved Python sidecar kind.
+- Backend provider registry usage across existing runtime profiles, serving,
+  gateway, compatibility, and launch-kind validation is complete.
 
 ### Deviations
 

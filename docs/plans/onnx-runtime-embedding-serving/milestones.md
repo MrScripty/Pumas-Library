@@ -39,7 +39,7 @@ provider and widens the blast radius.
       OpenAI gateway endpoints, provider modes, device/placement support,
       launch-on-serve support, unload behavior, and provider-side model id
       policy.
-- [ ] Create a backend provider registry used by runtime profiles, serving
+- [x] Create a backend provider registry used by runtime profiles, serving
       adapters, gateway routing, and launch strategy selection. The registry is
       the extension point for Ollama, llama.cpp, and ONNX Runtime.
 - [ ] Establish the provider registry composition root and lifecycle owner.
@@ -223,6 +223,12 @@ Runtime-profile management-mode validation now consumes provider launch kinds
 through `ProviderBehavior::supports_management_mode`. The provider contract has
 a `python_sidecar` launch kind for the future ONNX managed sidecar path, but
 the process-launch abstraction itself remains pending.
+The backend provider registry is now consumed by runtime-profile validation and
+capability projection, serving adapter selection, gateway endpoint routing,
+provider-side request model-id policy, artifact compatibility, alias defaulting,
+unload behavior, and launch-kind validation. The registry is ready to accept an
+ONNX Runtime behavior entry; composition-root lifecycle ownership remains a
+separate open task.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

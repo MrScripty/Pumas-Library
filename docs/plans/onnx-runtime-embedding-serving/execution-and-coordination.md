@@ -210,6 +210,12 @@ Update during implementation:
   gateway endpoint routing, provider request model-id policy, alias defaulting,
   unload behavior, artifact compatibility, and launch-kind validation.
   Composition-root lifecycle ownership remains open.
+- 2026-05-11: Added RPC composition-root ownership for provider behavior.
+  `AppState` now owns the provider registry used by OpenAI gateway and serving
+  handlers, replacing handler-local `ProviderRegistry::builtin()`
+  construction. Core serving/runtime-profile services still construct built-ins
+  internally and need a separate injection slice before the lifecycle ownership
+  task is complete.
 
 ## Commit Cadence Notes
 
@@ -361,6 +367,8 @@ changes remain.
   kinds, including the reserved Python sidecar kind.
 - Backend provider registry usage across existing runtime profiles, serving,
   gateway, compatibility, and launch-kind validation is complete.
+- RPC gateway and serving handlers now consume the provider registry from
+  `AppState`.
 
 ### Deviations
 
@@ -453,6 +461,10 @@ changes remain.
   --manifest-path rust/crates/pumas-core/Cargo.toml providers`, `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`, and
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- RPC provider registry composition slice verified with `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

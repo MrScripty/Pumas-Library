@@ -9,8 +9,7 @@ use pumas_library::models::{
     UnserveModelRequest, UnserveModelResponse,
 };
 use pumas_library::{
-    ProviderGatewayAliasPolicy, ProviderRegistry, ProviderServingAdapterKind,
-    ProviderUnloadBehavior,
+    ProviderGatewayAliasPolicy, ProviderServingAdapterKind, ProviderUnloadBehavior,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -83,8 +82,8 @@ pub async fn serve_model(state: &AppState, params: &Value) -> pumas_library::Res
         return non_critical_failure_response(state, error).await;
     }
 
-    let registry = ProviderRegistry::builtin();
-    match registry
+    match state
+        .provider_registry
         .get(request.config.provider)
         .map(|behavior| behavior.serving_adapter_kind)
     {
@@ -135,8 +134,8 @@ pub async fn unserve_model(state: &AppState, params: &Value) -> pumas_library::R
         .or_else(|| served_status.model_alias.clone())
         .unwrap_or_else(|| derive_fallback_model_alias(&command.request.model_id));
 
-    let registry = ProviderRegistry::builtin();
-    match registry
+    match state
+        .provider_registry
         .get(served_status.provider)
         .map(|behavior| behavior.unload_behavior)
     {
@@ -173,8 +172,8 @@ async fn request_with_effective_gateway_alias(
         return Ok(request);
     }
 
-    let registry = ProviderRegistry::builtin();
-    let model_alias = match registry
+    let model_alias = match state
+        .provider_registry
         .get(request.config.provider)
         .map(|behavior| behavior.gateway_alias_policy)
     {

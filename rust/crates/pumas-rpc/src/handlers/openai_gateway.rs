@@ -111,8 +111,11 @@ pub async fn handle_openai_proxy(
         }
     };
 
-    let registry = ProviderRegistry::builtin();
-    if !provider_supports_openai_gateway_endpoint(served.provider, policy.endpoint, &registry) {
+    if !provider_supports_openai_gateway_endpoint(
+        served.provider,
+        policy.endpoint,
+        &state.provider_registry,
+    ) {
         return openai_error_response_with_code(
             StatusCode::BAD_REQUEST,
             ModelServeErrorCode::EndpointUnavailable,
@@ -133,7 +136,7 @@ pub async fn handle_openai_proxy(
     if let Some(object) = body.as_object_mut() {
         object.insert(
             "model".to_string(),
-            Value::String(provider_request_model_id(&served)),
+            Value::String(provider_request_model_id(&served, &state.provider_registry)),
         );
     }
 
@@ -203,8 +206,8 @@ fn openai_model_entry(model: ServedModelStatus) -> Value {
     })
 }
 
-fn provider_request_model_id(model: &ServedModelStatus) -> String {
-    ProviderRegistry::builtin()
+fn provider_request_model_id(model: &ServedModelStatus, registry: &ProviderRegistry) -> String {
+    registry
         .get(model.provider)
         .map(|behavior| {
             behavior
@@ -445,13 +448,17 @@ mod tests {
 
     #[test]
     fn provider_request_model_id_keeps_llama_cpp_catalog_id() {
+        let registry = ProviderRegistry::builtin();
         let mut llama = loaded_status("models/example", "llama-gpu", Some("example-gpu"));
         llama.provider = RuntimeProviderId::LlamaCpp;
-        assert_eq!(provider_request_model_id(&llama), "models/example");
+        assert_eq!(
+            provider_request_model_id(&llama, &registry),
+            "models/example"
+        );
 
         let mut ollama = loaded_status("models/example", "ollama-default", Some("example-gpu"));
         ollama.provider = RuntimeProviderId::Ollama;
-        assert_eq!(provider_request_model_id(&ollama), "example-gpu");
+        assert_eq!(provider_request_model_id(&ollama, &registry), "example-gpu");
     }
 
     #[test]

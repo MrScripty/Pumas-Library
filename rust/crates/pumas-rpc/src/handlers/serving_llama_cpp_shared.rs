@@ -14,9 +14,12 @@ use std::{
 };
 use tracing::warn;
 
-pub(super) fn provider_request_model_id(request: &ServeModelRequest) -> String {
+pub(super) fn provider_request_model_id(
+    request: &ServeModelRequest,
+    registry: &ProviderRegistry,
+) -> String {
     let library_model_id = request.model_id.trim();
-    ProviderRegistry::builtin()
+    registry
         .get(request.config.provider)
         .map(|behavior| {
             behavior
@@ -148,8 +151,12 @@ mod tests {
                 model_alias: Some("qwen-gpu".to_string()),
             },
         };
+        let registry = ProviderRegistry::builtin();
 
-        assert_eq!(provider_request_model_id(&request), "llm/qwen/model-gguf");
+        assert_eq!(
+            provider_request_model_id(&request, &registry),
+            "llm/qwen/model-gguf"
+        );
 
         let ollama_request = ServeModelRequest {
             model_id: "llm/qwen/model-gguf".to_string(),
@@ -166,7 +173,10 @@ mod tests {
             },
         };
 
-        assert_eq!(provider_request_model_id(&ollama_request), "qwen-gpu");
+        assert_eq!(
+            provider_request_model_id(&ollama_request, &registry),
+            "qwen-gpu"
+        );
     }
 
     #[test]

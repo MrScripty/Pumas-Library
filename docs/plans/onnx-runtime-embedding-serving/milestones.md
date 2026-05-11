@@ -229,6 +229,10 @@ provider-side request model-id policy, artifact compatibility, alias defaulting,
 unload behavior, and launch-kind validation. The registry is ready to accept an
 ONNX Runtime behavior entry; composition-root lifecycle ownership remains a
 separate open task.
+RPC server state now owns the provider registry for gateway and serving handler
+boundaries, so those handlers no longer construct built-in registries ad hoc.
+Core serving/runtime-profile services still need a separate injection slice
+before the composition-root lifecycle ownership task can be closed.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

@@ -134,7 +134,7 @@ pub(super) async fn serve_llama_cpp_router_model(
     }
 
     let gateway_alias = effective_gateway_alias_from_config(&request);
-    let router_model_id = provider_request_model_id(&request);
+    let router_model_id = provider_request_model_id(&request, &state.provider_registry);
     if let Err(message) = llama_cpp_router_load_model(endpoint.as_str(), &router_model_id).await {
         warn!("llama.cpp router model load failed: {}", message);
         return non_critical_failure_response(

@@ -13,7 +13,7 @@ use axum::{
     Router,
 };
 use pumas_app_manager::{CustomNodesManager, SizeCalculator, VersionManager};
-use pumas_library::{PluginLoader, PumasApi};
+use pumas_library::{PluginLoader, ProviderRegistry, PumasApi};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -47,6 +47,8 @@ pub struct AppState {
     pub plugin_loader: Arc<PluginLoader>,
     /// Shared HTTP client for OpenAI-compatible gateway proxying.
     pub gateway_http_client: reqwest::Client,
+    /// Runtime provider behavior registry for RPC boundary routing.
+    pub provider_registry: ProviderRegistry,
 }
 
 /// Owned handle for the running HTTP server task.
@@ -109,6 +111,7 @@ pub async fn start_server(
     };
 
     let gateway_http_client = build_gateway_http_client()?;
+    let provider_registry = ProviderRegistry::builtin();
     let state = Arc::new(AppState {
         api,
         version_managers: Arc::new(RwLock::new(version_managers)),
@@ -117,6 +120,7 @@ pub async fn start_server(
         shortcut_manager: Arc::new(RwLock::new(shortcut_manager)),
         plugin_loader: Arc::new(plugin_loader),
         gateway_http_client,
+        provider_registry,
     });
 
     // Configure CORS for local development and packaged renderer diagnostics.

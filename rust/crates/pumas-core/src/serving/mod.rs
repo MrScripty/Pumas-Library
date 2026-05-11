@@ -1085,6 +1085,25 @@ mod tests {
     }
 
     #[test]
+    fn validation_uses_composed_provider_artifact_compatibility() {
+        let mut behavior = ProviderBehavior::ollama();
+        behavior.local_artifact_formats.clear();
+        let service =
+            ServingService::with_provider_registry(ProviderRegistry::from_behaviors([behavior]));
+
+        let response = service.validate_request(&request(), &valid_context());
+
+        assert!(response.success);
+        assert!(!response.valid);
+        assert!(response.errors.iter().any(|error| {
+            error.code == ModelServeErrorCode::InvalidFormat
+                && error
+                    .message
+                    .contains("selected provider does not support this model artifact format")
+        }));
+    }
+
+    #[test]
     fn validation_returns_non_critical_domain_errors() {
         let mut context = valid_context();
         context.model_exists = false;

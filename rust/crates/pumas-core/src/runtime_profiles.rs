@@ -1433,6 +1433,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn runtime_profile_launch_specs_require_composed_provider_behavior() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir
+            .path()
+            .join("launcher-data/metadata/runtime-profiles.json");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        let mut llama_profile = managed_llama_cpp_profile("llama-router");
+        llama_profile.endpoint_url = RuntimeEndpointUrl::parse("http://127.0.0.1:18181").ok();
+        llama_profile.port = RuntimePort::parse(18181).ok();
+        let config = serde_json::json!({
+            "schema_version": RUNTIME_PROFILES_SCHEMA_VERSION,
+            "cursor": "runtime-profiles:1",
+            "profiles": [llama_profile],
+            "routes": [],
+            "default_profile_id": null
+        });
+        std::fs::write(&config_path, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+        let service = RuntimeProfileService::with_provider_registry_and_adapters(
+            temp_dir.path(),
+            ProviderRegistry::from_behaviors([ProviderBehavior::ollama()]),
+            RuntimeProviderAdapters::builtin(),
+        );
+
+        let error = service
+            .list_managed_profile_launch_specs()
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("runtime profile provider is not registered"));
+    }
+
+    #[tokio::test]
     async fn runtime_profile_service_validation_uses_composed_provider_adapters() {
         let temp_dir = tempfile::tempdir().unwrap();
         let service = RuntimeProfileService::with_provider_registry_and_adapters(

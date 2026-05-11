@@ -284,6 +284,12 @@ Update during implementation:
   provider launch args/env vars, and provider-behavior launch target projection.
   This reduces `runtime_profiles.rs` before ONNX launch wiring; route
   persistence/migration and frontend provider row decomposition remain open.
+- 2026-05-11: Added Milestone 0 backend provider-path verification tests.
+  Runtime-profile launch-spec derivation now has an explicit test proving a
+  missing composed provider behavior blocks launch specs, and serving validation
+  now has an explicit test proving artifact compatibility comes from composed
+  provider behavior. Existing provider-scoped route and served-state tests cover
+  same-model-id routing/unload behavior for separate providers.
 
 ## Commit Cadence Notes
 
@@ -459,6 +465,9 @@ changes remain.
   flags.
 - Managed runtime-profile launch-spec derivation now lives in
   `runtime_profiles/launch_specs.rs`.
+- Backend provider-path verification now covers composed-registry launch-spec
+  derivation, provider-declared artifact compatibility, and the existing
+  provider-scoped route/served-instance contracts.
 
 ### Deviations
 
@@ -602,6 +611,14 @@ changes remain.
 - Runtime-profile launch-spec extraction slice verified with `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`, `cargo
   test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo
+  fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Backend provider-path verification slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml
+  runtime_profile_launch_specs_require_composed_provider_behavior`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml
+  validation_uses_composed_provider_artifact_compatibility`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`, `cargo
+  test --manifest-path rust/crates/pumas-core/Cargo.toml serving`, and `cargo
   fmt --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links

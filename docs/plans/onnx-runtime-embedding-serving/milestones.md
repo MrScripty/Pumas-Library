@@ -128,7 +128,7 @@ provider and widens the blast radius.
 - [ ] Make managed ONNX Runtime profiles the implementation target for the
       first complete slice. External ONNX profiles may be supported only through
       the same provider behavior and route contracts.
-- [ ] Add backend tests that prove Ollama and llama.cpp behavior now flows
+- [x] Add backend tests that prove Ollama and llama.cpp behavior now flows
       through the new provider behavior and provider-scoped route contracts,
       while unsupported provider/path combinations fail cleanly.
 - [x] Add contract serialization tests for provider capabilities and any new
@@ -285,6 +285,12 @@ Managed launch-spec derivation has been extracted from the oversized
 runtime launch-strategy portion of the large-file split task; route
 persistence/migration and frontend provider row decomposition remain open under
 that task.
+Backend provider-path verification now includes focused tests proving managed
+launch-spec derivation consumes the composed provider registry and serving
+validation consumes provider-declared artifact compatibility instead of
+hard-coded provider/format fallback. Existing provider-scoped route tests
+already cover same-model-id routing and served-instance identity for separate
+providers.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

@@ -87,7 +87,7 @@ provider and widens the blast radius.
       from provider behavior instead of the current unconditional GGUF check.
 - [x] Refactor `serve_model` and `unserve_model` dispatch so load/unload paths
       are selected by provider without a non-llama.cpp-implies-Ollama fallback.
-- [ ] Introduce provider serving adapters for Ollama and llama.cpp before adding
+- [x] Introduce provider serving adapters for Ollama and llama.cpp before adding
       the ONNX adapter. The RPC handler should keep only boundary parsing,
       validation orchestration, and response shaping.
 - [x] Add provider to served-instance lookup/unload identity where ambiguity is
@@ -161,14 +161,13 @@ managed/external support checks without changing user-visible profile behavior.
 Runtime profile capability DTOs now project from provider behavior values.
 Runtime profile routes are now provider-scoped across Rust DTOs, RPC/Electron
 parameters, frontend bridge types, llama.cpp route helpers, endpoint lookup,
-auto-load lookup, and one-way persisted config migration. Next slice is moving
-serving dispatch toward provider adapters. `unserve_model` no longer has the
-non-llama.cpp-implies-Ollama fallback; full adapter extraction remains pending.
+auto-load lookup, and one-way persisted config migration. Serving dispatch now
+flows through provider behavior and focused existing-provider adapter modules.
+`unserve_model` no longer has the non-llama.cpp-implies-Ollama fallback.
 Serving and gateway request model-id rewriting now consume provider behavior
 policy instead of transport-layer Ollama/llama.cpp matches. This completes the
-model-id rewriting portion of provider behavior migration; alias defaulting,
-full serving adapter extraction, endpoint capability checks, reusable provider
-clients, and launch strategy selection remain pending.
+model-id rewriting portion of provider behavior migration; launch strategy
+selection remains pending.
 Gateway proxy routes now map `/v1/*` paths to typed `OpenAiGatewayEndpoint`
 values and reject unsupported provider/endpoint combinations before proxying.
 The current built-in Ollama and llama.cpp behavior remains unchanged because
@@ -189,25 +188,23 @@ state tests cover two providers serving the same model/profile/alias without
 cross-provider unload.
 Serving alias defaulting now consumes provider behavior policy instead of
 matching directly on `RuntimeProviderId`: Ollama keeps generated Ollama model
-names and llama.cpp keeps the library model id. Managed launch strategy,
-provider-specific unload behavior consumption, and full serving adapter
-extraction remain pending.
+names and llama.cpp keeps the library model id. Managed launch strategy remains
+pending.
 `unserve_model` dispatch now consumes provider behavior unload policy instead
-of matching directly on the served provider id. Load dispatch still needs full
-provider serving adapter extraction before ONNX load/unload can be wired.
+of matching directly on the served provider id.
 `serve_model` dispatch now consumes provider behavior serving-adapter kind
 instead of matching directly on the requested provider id. Existing Ollama and
-llama.cpp load routines are still the concrete implementations; full adapter
-extraction remains pending before ONNX load/unload wiring.
+llama.cpp load routines are now behind focused adapter modules.
 OpenAI-compatible gateway handlers and proxy helpers have been extracted from
 the oversized RPC handlers module into a focused gateway module while preserving
 the public route exports. The broader large-file split task remains open for
-route migration, serving adapters, launch strategy, and frontend provider row
-work.
+route migration, launch strategy, and frontend provider row work.
 Ollama serving load/unload has been extracted into a focused adapter module.
-The provider serving adapter task remains open until llama.cpp serving is also
-extracted and the handler owns only boundary parsing, validation orchestration,
-provider behavior dispatch, and response shaping.
+llama.cpp serving load/unload, router behavior, and shared compatibility helpers
+have also been extracted into focused modules. The serving handler now owns the
+JSON-RPC boundary, validation orchestration, provider behavior dispatch, and
+shared response shaping. Launch strategy extraction remains a separate open
+task.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

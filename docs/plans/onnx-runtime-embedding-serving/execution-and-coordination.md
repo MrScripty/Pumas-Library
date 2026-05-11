@@ -173,6 +173,13 @@ Update during implementation:
   parsing, validation orchestration, non-critical response shaping, and provider
   behavior dispatch. llama.cpp adapter extraction remains pending and must stay
   separate from launch-strategy redesign.
+- 2026-05-11: Extracted llama.cpp serving into focused modules:
+  `serving_llama_cpp.rs` for adapter entry points,
+  `serving_llama_cpp_router.rs` for router-specific behavior, and
+  `serving_llama_cpp_shared.rs` for runtime/model-id compatibility helpers.
+  This completes the existing-provider serving adapter extraction without
+  mixing in ONNX behavior or the later launch-strategy abstraction. The new
+  serving modules are below the 500-line standards threshold.
 
 ## Commit Cadence Notes
 
@@ -311,8 +318,9 @@ changes remain.
   `handlers/openai_gateway.rs` module instead of the oversized RPC handlers
   module.
 - Ollama serving load/unload now lives in a focused
-  `handlers/serving_ollama.rs` adapter module; llama.cpp serving extraction
-  remains pending.
+  `handlers/serving_ollama.rs` adapter module.
+- llama.cpp serving now lives in focused adapter, router, and shared helper
+  modules. Existing-provider serving adapter extraction is complete.
 
 ### Deviations
 
@@ -386,6 +394,9 @@ changes remain.
   --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt
   --manifest-path rust/Cargo.toml --all -- --check`.
 - Ollama serving adapter extraction slice verified with `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml serving` and `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`.
+- llama.cpp serving adapter extraction slice verified with `cargo test
   --manifest-path rust/crates/pumas-rpc/Cargo.toml serving` and `cargo fmt
   --manifest-path rust/Cargo.toml --all -- --check`.
 

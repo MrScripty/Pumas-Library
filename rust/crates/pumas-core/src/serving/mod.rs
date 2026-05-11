@@ -371,7 +371,7 @@ pub fn validate_model_serving_request(
                 );
             }
 
-            if !profile_accepts_serving_operation(profile) {
+            if !profile_accepts_serving_operation(profile, provider_registry) {
                 errors.push(
                     ModelServeError::non_critical(
                         ModelServeErrorCode::ProfileStopped,
@@ -459,7 +459,10 @@ fn validate_provider_artifact_compatibility(
     .for_provider(request.config.provider)]
 }
 
-fn profile_accepts_serving_operation(profile: &ServingValidationProfile) -> bool {
+fn profile_accepts_serving_operation(
+    profile: &ServingValidationProfile,
+    provider_registry: &ProviderRegistry,
+) -> bool {
     if matches!(
         profile.state,
         RuntimeLifecycleState::Running | RuntimeLifecycleState::External
@@ -467,11 +470,11 @@ fn profile_accepts_serving_operation(profile: &ServingValidationProfile) -> bool
         return true;
     }
 
-    profile.provider == RuntimeProviderId::LlamaCpp
-        && matches!(
-            profile.provider_mode,
-            RuntimeProviderMode::LlamaCppDedicated | RuntimeProviderMode::LlamaCppRouter
-        )
+    let Some(behavior) = provider_registry.get(profile.provider) else {
+        return false;
+    };
+
+    behavior.supports_launch_on_serve(profile.provider_mode)
         && profile.management_mode == RuntimeManagementMode::Managed
         && matches!(
             profile.state,

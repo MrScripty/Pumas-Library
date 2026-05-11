@@ -306,6 +306,10 @@ for those values. Launch-spec env/arg derivation now consumes
 `RuntimeProfileLaunchStrategy` instead of matching directly on provider ids;
 Python sidecar env/args fail explicitly until the ONNX sidecar lifecycle slice
 implements that target.
+Serving validation now consumes provider-owned launch-on-serve support for
+stopped managed profiles instead of hard-coding llama.cpp as the only accepted
+provider path. Existing Ollama remains rejected for stopped managed serving
+requests, while llama.cpp router/dedicated behavior is preserved.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

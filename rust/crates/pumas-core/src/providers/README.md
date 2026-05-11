@@ -4,7 +4,7 @@
 
 Own backend runtime-provider behavior contracts for profile validation,
 serving compatibility, gateway endpoint support, model-id policy, unload
-behavior, and launch-strategy selection.
+behavior, launch-on-serve support, and launch-strategy selection.
 
 ## Contents
 
@@ -40,6 +40,8 @@ Serving load dispatch consumes the provider serving adapter kind. Runtime
 profile launch-spec derivation consumes managed launch strategies declared by
 provider behavior, including provider-owned runtime directory segments and
 implicit managed base ports.
+Serving validation consumes provider launch-on-serve policy instead of accepting
+stopped managed profiles by matching provider ids.
 Later slices migrate frontend bridge contracts onto this registry.
 
 ## Alternatives Rejected
@@ -68,6 +70,9 @@ Later slices migrate frontend bridge contracts onto this registry.
 - Managed runtime profile path segments and implicit base ports are declared by
   provider behavior so launch-spec derivation does not infer launch layout from
   provider ids.
+- Launch-on-serve support is provider-owned policy. Serving validation may
+  accept a stopped managed profile only when provider behavior declares support
+  for that provider mode.
 - Executable artifact formats are parsed into `ExecutableArtifactFormat` at
   boundaries before serving validation consumes them.
 
@@ -115,6 +120,8 @@ assert!(behavior.supports_openai_endpoint(
 - `managed_runtime_path_segment` and `managed_runtime_base_port` are consumed
   by launch-spec derivation for managed runtime directories and implicit port
   allocation.
+- `ProviderBehavior::supports_launch_on_serve` is the shared policy check for
+  serving validation of stopped managed profiles.
 - `ExecutableArtifactFormat::from_path` is the shared boundary parser for
   local executable model artifact paths.
 - `ProviderBehavior::supports_management_mode` is the shared policy check for
@@ -125,7 +132,7 @@ assert!(behavior.supports_openai_endpoint(
 - Stable producer fields are provider id, provider modes, device modes, local
   artifact formats, serving tasks, OpenAI endpoints, launch strategies,
   managed runtime layout, provider model-id policy, gateway alias policy,
-  serving adapter kind, and unload behavior.
+  serving adapter kind, unload behavior, and launch-on-serve support.
 - Enum values serialize with snake_case when they cross a boundary.
 - Adding ONNX Runtime requires adding one provider behavior entry and matching
   contract tests before consumers depend on it.

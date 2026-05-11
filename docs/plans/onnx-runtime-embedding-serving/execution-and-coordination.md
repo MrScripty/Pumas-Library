@@ -311,6 +311,11 @@ Update during implementation:
   Existing Ollama and llama.cpp launch output remains unchanged; Python sidecar
   env/args now fail explicitly until the ONNX lifecycle slice implements that
   launch target.
+- 2026-05-11: Added provider-owned launch-on-serve support and moved stopped
+  managed profile acceptance in serving validation onto `ProviderBehavior`.
+  Existing Ollama remains rejected for stopped managed serve requests, and
+  llama.cpp router/dedicated launch-on-serve behavior is preserved through the
+  provider contract.
 
 ## Commit Cadence Notes
 
@@ -497,6 +502,8 @@ changes remain.
   ports consumed by runtime-profile launch-spec derivation.
 - Runtime-profile launch-spec env/arg derivation now consumes
   `RuntimeProfileLaunchStrategy` rather than provider-id dispatch.
+- Serving validation now consumes provider-owned launch-on-serve policy instead
+  of provider-id dispatch for stopped managed profiles.
 
 ### Deviations
 
@@ -662,6 +669,10 @@ changes remain.
 - Launch-strategy env/arg derivation slice verified with `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles` and
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Provider launch-on-serve policy slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml providers`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml serving`, and `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

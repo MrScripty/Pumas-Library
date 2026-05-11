@@ -133,6 +133,7 @@ pub struct ProviderBehavior {
     pub supports_external_profiles: bool,
     pub supports_model_catalog: bool,
     pub supports_dedicated_model_processes: bool,
+    pub supports_launch_on_serve: bool,
 }
 
 impl ProviderBehavior {
@@ -178,6 +179,7 @@ impl ProviderBehavior {
             supports_external_profiles: true,
             supports_model_catalog: false,
             supports_dedicated_model_processes: false,
+            supports_launch_on_serve: false,
         }
     }
 
@@ -235,6 +237,7 @@ impl ProviderBehavior {
             supports_external_profiles: true,
             supports_model_catalog: true,
             supports_dedicated_model_processes: true,
+            supports_launch_on_serve: true,
         }
     }
 
@@ -278,6 +281,10 @@ impl ProviderBehavior {
             .iter()
             .find(|strategy| strategy.provider_mode == provider_mode)
             .map(|strategy| strategy.target)
+    }
+
+    pub fn supports_launch_on_serve(&self, provider_mode: RuntimeProviderMode) -> bool {
+        self.supports_launch_on_serve && self.supports_mode(provider_mode)
     }
 
     pub fn provider_request_model_id(
@@ -377,6 +384,7 @@ mod tests {
         assert!(behavior.supports_artifact_format(ExecutableArtifactFormat::Gguf));
         assert!(behavior.supports_managed_profiles);
         assert!(behavior.supports_external_profiles);
+        assert!(!behavior.supports_launch_on_serve(RuntimeProviderMode::OllamaServe));
     }
 
     #[test]
@@ -409,6 +417,9 @@ mod tests {
         assert_eq!(behavior.managed_runtime_base_port, 18_080);
         assert!(behavior.supports_model_catalog);
         assert!(behavior.supports_dedicated_model_processes);
+        assert!(behavior.supports_launch_on_serve(RuntimeProviderMode::LlamaCppRouter));
+        assert!(behavior.supports_launch_on_serve(RuntimeProviderMode::LlamaCppDedicated));
+        assert!(!behavior.supports_launch_on_serve(RuntimeProviderMode::OllamaServe));
     }
 
     #[test]
@@ -439,6 +450,7 @@ mod tests {
         assert_eq!(serialized["gateway_alias_policy"], "library_model_id");
         assert_eq!(serialized["serving_adapter_kind"], "llama_cpp_runtime");
         assert_eq!(serialized["unload_behavior"], "router_preset");
+        assert_eq!(serialized["supports_launch_on_serve"], true);
     }
 
     #[test]

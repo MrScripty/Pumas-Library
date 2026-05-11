@@ -30,6 +30,7 @@ struct SetModelRuntimeRouteParams {
 
 #[derive(Debug, Deserialize)]
 struct ClearModelRuntimeRouteParams {
+    provider: RuntimeProviderId,
     model_id: String,
 }
 
@@ -106,7 +107,7 @@ pub async fn clear_model_runtime_route(
     Ok(serde_json::to_value(
         state
             .api
-            .clear_model_runtime_route(command.model_id)
+            .clear_model_runtime_route(command.provider, command.model_id)
             .await?,
     )?)
 }

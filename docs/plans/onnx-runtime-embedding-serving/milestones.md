@@ -66,14 +66,14 @@ provider and widens the blast radius.
 - [ ] Migrate existing Ollama and llama.cpp runtime-profile behavior onto the
       provider behavior/registry path before ONNX load/unload is wired. Preserve
       user-visible behavior; do not preserve the legacy internal branching.
-- [ ] Replace `ModelRuntimeRoute` with a provider-scoped route type keyed by
+- [x] Replace `ModelRuntimeRoute` with a provider-scoped route type keyed by
       provider and model id. Update Rust DTOs, TypeScript bridge types, IPC
       parameters, runtime profile snapshots, mutation handlers, route lookup,
       auto-load lookup, and frontend route helpers in the same contract slice.
-- [ ] Replace `clear_model_runtime_route` and `model_runtime_route_auto_load`
+- [x] Replace `clear_model_runtime_route` and `model_runtime_route_auto_load`
       contracts so they accept provider plus model id. Update Electron/RPC
       method parameters and frontend call sites in the same slice.
-- [ ] Add a one-way runtime-profile config schema migration/cleanup that rewrites
+- [x] Add a one-way runtime-profile config schema migration/cleanup that rewrites
       persisted routes to the new provider-scoped shape where unambiguous and
       drops ambiguous legacy global routes with an explicit event/error record.
       Do not keep a dual old/new route reader after cleanup.
@@ -158,8 +158,11 @@ contracts and built-in registry values now exist in
 `rust/crates/pumas-core/src/providers/`, with tests for Ollama and llama.cpp.
 Runtime-profile validation now consumes the registry for provider-mode and
 managed/external support checks without changing user-visible profile behavior.
-Runtime profile capability DTOs now project from provider behavior values. Next
-slice is introducing provider-scoped route identity contracts.
+Runtime profile capability DTOs now project from provider behavior values.
+Runtime profile routes are now provider-scoped across Rust DTOs, RPC/Electron
+parameters, frontend bridge types, llama.cpp route helpers, endpoint lookup,
+auto-load lookup, and one-way persisted config migration. Next slice is moving
+serving artifact validation onto provider compatibility.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

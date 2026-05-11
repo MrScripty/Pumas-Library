@@ -213,7 +213,11 @@ export function buildLlamaCppModelRows({
       .filter((profile) => profile.provider === 'llama_cpp')
       .map((profile) => [profile.profile_id, profile])
   );
-  const routeByModelId = new Map(routes.map((route) => [route.model_id, route]));
+  const routeByModelId = new Map(
+    routes
+      .filter((route) => route.provider === 'llama_cpp')
+      .map((route) => [route.model_id, route])
+  );
   const servedState = deriveLlamaCppServedState(servedStatuses);
 
   return compatibleGroups.flatMap((group) =>

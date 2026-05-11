@@ -356,6 +356,7 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
   },
   clear_model_runtime_route: {
     required: {
+      provider: 'string',
       model_id: 'string',
     },
   },

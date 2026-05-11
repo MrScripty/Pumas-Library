@@ -369,12 +369,13 @@ export function LlamaCppModelLibrarySection({
     try {
       if (profileId) {
         await saveModelRuntimeRoute({
+          provider: 'llama_cpp',
           modelId,
           profileId,
           autoLoad: true,
         });
       } else {
-        await clearModelRuntimeRoute(modelId);
+        await clearModelRuntimeRoute('llama_cpp', modelId);
       }
       await refreshRuntimeProfiles();
       return true;

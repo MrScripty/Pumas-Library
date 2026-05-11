@@ -75,6 +75,7 @@ export function ModelServeDialog({
       initialProfileId,
       model,
       profiles: servingProfiles,
+      providerFilter,
       routes: runtimeProfiles.routes,
       statuses: runtimeProfiles.statuses,
     });
@@ -89,6 +90,7 @@ export function ModelServeDialog({
     model.id,
     model,
     profileId,
+    providerFilter,
     runtimeProfiles.defaultProfileId,
     runtimeProfiles.routes,
     runtimeProfiles.statuses,
@@ -223,6 +225,7 @@ function selectInitialServeProfile({
   initialProfileId,
   model,
   profiles,
+  providerFilter,
   routes,
   statuses,
 }: {
@@ -230,11 +233,16 @@ function selectInitialServeProfile({
   initialProfileId?: string | null;
   model: ModelInfo;
   profiles: ReturnType<typeof useRuntimeProfiles>['profiles'];
+  providerFilter?: RuntimeProviderId;
   routes: ReturnType<typeof useRuntimeProfiles>['routes'];
   statuses: ReturnType<typeof useRuntimeProfiles>['statuses'];
 }) {
   const explicitProfileId =
-    initialProfileId ?? routes.find((route) => route.model_id === model.id)?.profile_id;
+    initialProfileId ??
+    routes.find(
+      (route) =>
+        route.model_id === model.id && (!providerFilter || route.provider === providerFilter)
+    )?.profile_id;
   const explicitProfile = profiles.find((profile) => profile.profile_id === explicitProfileId);
   if (explicitProfile) {
     return explicitProfile;

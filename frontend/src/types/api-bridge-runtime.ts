@@ -31,6 +31,7 @@ import type {
   RuntimeProfileConfig,
   RuntimeProfileMutationResponse,
   RuntimeProfileUpdateFeedResponse,
+  RuntimeProviderId,
   RuntimeProfilesSnapshotResponse,
 } from './api-runtime-profiles';
 import type {
@@ -136,7 +137,10 @@ export interface DesktopBridgeRuntimeAPI {
   ): Promise<RuntimeProfileMutationResponse>;
   delete_runtime_profile(profileId: string): Promise<RuntimeProfileMutationResponse>;
   set_model_runtime_route(route: ModelRuntimeRoute): Promise<RuntimeProfileMutationResponse>;
-  clear_model_runtime_route(modelId: string): Promise<RuntimeProfileMutationResponse>;
+  clear_model_runtime_route(
+    provider: RuntimeProviderId,
+    modelId: string
+  ): Promise<RuntimeProfileMutationResponse>;
   launch_runtime_profile(
     profileId: string,
     tag?: string | null,

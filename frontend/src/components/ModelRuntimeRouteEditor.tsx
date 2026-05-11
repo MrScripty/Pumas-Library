@@ -38,7 +38,10 @@ export function ModelRuntimeRouteEditor({
     refreshRuntimeProfiles,
   } = useRuntimeProfiles();
   const currentRoute = useMemo(
-    () => routes.find((route) => route.model_id === modelId) ?? null,
+    () => {
+      const modelRoutes = routes.filter((route) => route.model_id === modelId);
+      return modelRoutes.length === 1 ? modelRoutes[0] : null;
+    },
     [modelId, routes]
   );
   const [profileId, setProfileId] = useState<string>('');
@@ -76,7 +79,12 @@ export function ModelRuntimeRouteEditor({
     setIsSaving(true);
     setSaveError(null);
     try {
+      const routeProvider = selectedProfile?.provider ?? currentRoute?.provider;
+      if (!routeProvider) {
+        throw new Error('Select a runtime profile before saving route');
+      }
       await saveModelRuntimeRoute({
+        provider: routeProvider,
         modelId,
         profileId: profileId || null,
         autoLoad,
@@ -93,7 +101,10 @@ export function ModelRuntimeRouteEditor({
     setIsSaving(true);
     setSaveError(null);
     try {
-      await clearModelRuntimeRoute(modelId);
+      if (!currentRoute) {
+        throw new Error('No runtime route is saved for this model');
+      }
+      await clearModelRuntimeRoute(currentRoute.provider, modelId);
       await refreshRuntimeProfiles();
     } catch (caught) {
       setSaveError(caught instanceof Error ? caught.message : 'Failed to clear runtime route');

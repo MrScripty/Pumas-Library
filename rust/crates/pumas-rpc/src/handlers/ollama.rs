@@ -198,7 +198,7 @@ pub async fn ollama_create_model_for_profile(
         resolve_ollama_registration_endpoint(state, &command.model_id, command.profile_id).await?;
     let auto_load = state
         .api
-        .model_runtime_route_auto_load(&command.model_id)
+        .model_runtime_route_auto_load(RuntimeProviderId::Ollama, &command.model_id)
         .await?
         .unwrap_or(true);
     create_ollama_model(

@@ -605,6 +605,12 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::to_value(response)?)
             }
             "clear_model_runtime_route" => {
+                let provider: models::RuntimeProviderId =
+                    serde_json::from_value(params["provider"].clone()).map_err(|e| {
+                        PumasError::InvalidParams {
+                            message: format!("Invalid runtime provider: {e}"),
+                        }
+                    })?;
                 let model_id =
                     params["model_id"]
                         .as_str()
@@ -613,7 +619,7 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         })?;
                 let response = self
                     .runtime_profile_service
-                    .clear_model_route(model_id.to_string())
+                    .clear_model_route(provider, model_id.to_string())
                     .await?;
                 Ok(serde_json::to_value(response)?)
             }
@@ -726,6 +732,12 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::to_value(endpoint)?)
             }
             "model_runtime_route_auto_load" => {
+                let provider: models::RuntimeProviderId =
+                    serde_json::from_value(params["provider"].clone()).map_err(|e| {
+                        PumasError::InvalidParams {
+                            message: format!("Invalid runtime provider: {e}"),
+                        }
+                    })?;
                 let model_id =
                     params["model_id"]
                         .as_str()
@@ -734,7 +746,7 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         })?;
                 let auto_load = self
                     .runtime_profile_service
-                    .model_route_auto_load(model_id)
+                    .model_route_auto_load(provider, model_id)
                     .await?;
                 Ok(serde_json::to_value(auto_load)?)
             }

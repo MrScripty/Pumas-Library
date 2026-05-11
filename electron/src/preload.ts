@@ -417,8 +417,8 @@ const electronAPI = {
     apiCall('delete_runtime_profile', { profile_id: profileId }),
   set_model_runtime_route: (route: Record<string, unknown>) =>
     apiCall('set_model_runtime_route', { route }),
-  clear_model_runtime_route: (modelId: string) =>
-    apiCall('clear_model_runtime_route', { model_id: modelId }),
+  clear_model_runtime_route: (provider: string, modelId: string) =>
+    apiCall('clear_model_runtime_route', { provider, model_id: modelId }),
   launch_runtime_profile: (profileId: string, tag?: string | null, modelId?: string | null) =>
     apiCall('launch_runtime_profile', { profile_id: profileId, tag, model_id: modelId }),
   stop_runtime_profile: (profileId: string) =>

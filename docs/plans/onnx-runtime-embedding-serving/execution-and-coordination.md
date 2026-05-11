@@ -98,6 +98,13 @@ Update during implementation:
   `RuntimeProviderCapabilities` shape stable while removing the duplicate
   hard-coded provider mode/device lists from runtime profile capability
   constructors.
+- 2026-05-11: Replaced model-only runtime routes with provider-scoped route
+  records across Rust DTOs, runtime profile mutations, endpoint lookup,
+  auto-load lookup, RPC/Electron params, frontend bridge types, llama.cpp route
+  helpers, and serve-dialog initial route selection. Runtime-profile config
+  schema version is now `2`; legacy schema `1` routes are rewritten when the
+  referenced profile makes the provider unambiguous, and ambiguous legacy routes
+  are dropped during the one-way cleanup.
 
 ## Commit Cadence Notes
 
@@ -213,6 +220,8 @@ changes remain.
 - Runtime-profile validation now consumes provider behavior for provider mode
   and management-mode support.
 - Runtime profile capability DTOs now project from provider behavior values.
+- Provider-scoped runtime route contracts and runtime-profile config migration
+  completed for existing providers.
 
 ### Deviations
 
@@ -236,6 +245,10 @@ changes remain.
   runtime profile tests recorded for that slice.
 - Runtime profile capability projection slice verified with the focused runtime
   profile tests recorded for that slice.
+- Provider-scoped route slice verified with focused Rust runtime profile tests,
+  the runtime route contract serialization test, pumas-rpc runtime profile
+  build/test filter, frontend typecheck, Electron type validation, and focused
+  frontend route/serve dialog tests.
 
 ### Traceability Links
 

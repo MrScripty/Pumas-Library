@@ -40,6 +40,7 @@ function profile(overrides: Partial<RuntimeProfileConfig> = {}): RuntimeProfileC
 
 function route(overrides: Partial<ModelRuntimeRoute> = {}): ModelRuntimeRoute {
   return {
+    provider: 'llama_cpp',
     model_id: 'models/chat.gguf',
     profile_id: 'llama-cpu',
     auto_load: false,
@@ -192,7 +193,7 @@ describe('llama.cpp library view models', () => {
     expect(rows[0]?.selectedServedStatus).toBeNull();
   });
 
-  it('treats routes to non-llama profiles as missing on the llama.cpp page', () => {
+  it('ignores non-llama provider routes on the llama.cpp page', () => {
     const rows = buildLlamaCppModelRows({
       modelGroups: [{ category: 'chat', models: [model({ primaryFormat: 'gguf' })] }],
       profiles: [
@@ -202,7 +203,7 @@ describe('llama.cpp library view models', () => {
           provider_mode: 'ollama_serve',
         }),
       ],
-      routes: [route({ profile_id: 'ollama-default' })],
+      routes: [route({ provider: 'ollama', profile_id: 'ollama-default' })],
       servedStatuses: [
         servedStatus({
           provider: 'ollama',
@@ -213,7 +214,7 @@ describe('llama.cpp library view models', () => {
     });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.routeState).toBe('missing_profile');
+    expect(rows[0]?.routeState).toBe('unrouted');
     expect(rows[0]?.selectedProfile).toBeNull();
     expect(rows[0]?.servedStatuses).toEqual([]);
   });

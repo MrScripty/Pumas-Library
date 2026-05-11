@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 const RUNTIME_PROFILE_CURSOR_ZERO: &str = "runtime-profiles:0";
+pub const RUNTIME_PROFILES_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -217,6 +218,7 @@ fn default_profile_enabled() -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ModelRuntimeRoute {
+    pub provider: RuntimeProviderId,
     pub model_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<RuntimeProfileId>,
@@ -254,7 +256,7 @@ pub struct RuntimeProfilesSnapshot {
 impl RuntimeProfilesSnapshot {
     pub fn empty() -> Self {
         Self {
-            schema_version: 1,
+            schema_version: RUNTIME_PROFILES_SCHEMA_VERSION,
             cursor: RUNTIME_PROFILE_CURSOR_ZERO.to_string(),
             profiles: Vec::new(),
             routes: Vec::new(),
@@ -279,7 +281,7 @@ impl RuntimeProfilesConfigFile {
     pub fn default_seed() -> Self {
         let default_profile = RuntimeProfileConfig::default_ollama();
         Self {
-            schema_version: 1,
+            schema_version: RUNTIME_PROFILES_SCHEMA_VERSION,
             cursor: RUNTIME_PROFILE_CURSOR_ZERO.to_string(),
             default_profile_id: Some(default_profile.profile_id.clone()),
             profiles: vec![default_profile],
@@ -332,6 +334,8 @@ pub struct RuntimeProfileEvent {
     pub event_kind: RuntimeProfileEventKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<RuntimeProfileId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<RuntimeProviderId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -453,6 +457,26 @@ mod tests {
     }
 
     #[test]
+    fn runtime_route_contract_requires_provider_scope() {
+        let route = ModelRuntimeRoute {
+            provider: RuntimeProviderId::LlamaCpp,
+            model_id: "llm/example/model".to_string(),
+            profile_id: Some(RuntimeProfileId::parse("llama-default").unwrap()),
+            auto_load: true,
+        };
+        let encoded = serde_json::to_value(&route).unwrap();
+
+        assert_eq!(encoded["provider"], json!("llama_cpp"));
+        assert_eq!(encoded["model_id"], json!("llm/example/model"));
+        assert!(serde_json::from_value::<ModelRuntimeRoute>(json!({
+            "model_id": "llm/example/model",
+            "profile_id": "llama-default",
+            "auto_load": true
+        }))
+        .is_err());
+    }
+
+    #[test]
     fn empty_runtime_update_feed_preserves_cursor() {
         let feed = RuntimeProfileUpdateFeed::empty(Some("runtime-profiles:42"));
         assert_eq!(feed.cursor, "runtime-profiles:42");
@@ -466,7 +490,7 @@ mod tests {
         let config = RuntimeProfilesConfigFile::default_seed();
         let snapshot = config.snapshot();
 
-        assert_eq!(snapshot.schema_version, 1);
+        assert_eq!(snapshot.schema_version, RUNTIME_PROFILES_SCHEMA_VERSION);
         assert_eq!(snapshot.profiles.len(), 1);
         assert_eq!(
             snapshot

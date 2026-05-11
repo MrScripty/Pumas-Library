@@ -199,11 +199,13 @@ describe('LlamaCppModelLibrarySection', () => {
     ];
     runtimeProfileState.routes = [
       {
+        provider: 'llama_cpp',
         model_id: 'models/llama-loaded',
         profile_id: 'llama-gpu',
         auto_load: true,
       },
       {
+        provider: 'llama_cpp',
         model_id: 'models/llama-failed',
         profile_id: 'llama-gpu',
         auto_load: true,
@@ -303,6 +305,7 @@ describe('LlamaCppModelLibrarySection', () => {
 
     await waitFor(() => {
       expect(setModelRuntimeRouteMock).toHaveBeenCalledWith({
+        provider: 'llama_cpp',
         model_id: 'models/llama-gguf',
         profile_id: 'llama-cpu',
         auto_load: true,
@@ -327,6 +330,7 @@ describe('LlamaCppModelLibrarySection', () => {
     ];
     runtimeProfileState.routes = [
       {
+        provider: 'llama_cpp',
         model_id: 'models/llama-gguf',
         profile_id: 'llama-gpu',
         auto_load: true,
@@ -411,6 +415,7 @@ describe('LlamaCppModelLibrarySection', () => {
 
     await waitFor(() => {
       expect(setModelRuntimeRouteMock).toHaveBeenCalledWith({
+        provider: 'llama_cpp',
         model_id: 'models/llama-gguf',
         profile_id: 'llama-cpu',
         auto_load: true,
@@ -446,6 +451,7 @@ describe('LlamaCppModelLibrarySection', () => {
     ];
     runtimeProfileState.routes = [
       {
+        provider: 'llama_cpp',
         model_id: 'models/llama-gguf',
         profile_id: 'llama-gpu',
         auto_load: true,
@@ -492,6 +498,7 @@ describe('LlamaCppModelLibrarySection', () => {
     ];
     runtimeProfileState.routes = [
       {
+        provider: 'llama_cpp',
         model_id: 'models/llama-gguf',
         profile_id: 'llama-gpu',
         auto_load: true,

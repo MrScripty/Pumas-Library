@@ -69,11 +69,12 @@ impl PumasApi {
 
     pub async fn clear_model_runtime_route(
         &self,
+        provider: RuntimeProviderId,
         model_id: String,
     ) -> Result<RuntimeProfileMutationResponse> {
         self.primary()
             .runtime_profile_service
-            .clear_model_route(model_id)
+            .clear_model_route(provider, model_id)
             .await
     }
 
@@ -123,10 +124,14 @@ impl PumasApi {
             .await
     }
 
-    pub async fn model_runtime_route_auto_load(&self, model_id: &str) -> Result<Option<bool>> {
+    pub async fn model_runtime_route_auto_load(
+        &self,
+        provider: RuntimeProviderId,
+        model_id: &str,
+    ) -> Result<Option<bool>> {
         self.primary()
             .runtime_profile_service
-            .model_route_auto_load(model_id)
+            .model_route_auto_load(provider, model_id)
             .await
     }
 

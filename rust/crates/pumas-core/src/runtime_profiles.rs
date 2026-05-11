@@ -16,11 +16,13 @@ use crate::models::{
     RuntimeProfileEvent, RuntimeProfileEventKind, RuntimeProfileId, RuntimeProfileMutationResponse,
     RuntimeProfileStatus, RuntimeProfileUpdateFeed, RuntimeProfileUpdateFeedResponse,
     RuntimeProfilesConfigFile, RuntimeProfilesSnapshot, RuntimeProfilesSnapshotResponse,
-    RuntimeProviderId, RuntimeProviderMode,
+    RuntimeProviderId, RuntimeProviderMode, RUNTIME_PROFILES_SCHEMA_VERSION,
 };
 use crate::providers::{ProviderBehavior, ProviderRegistry};
 use crate::{PumasError, Result};
+use serde_json::Value;
 use tokio::sync::broadcast;
+use tracing::warn;
 
 const RUNTIME_PROFILE_EVENT_RETAIN_LIMIT: usize = 256;
 const RUNTIME_PROFILE_UPDATE_CHANNEL_CAPACITY: usize = 64;
@@ -553,11 +555,9 @@ impl RuntimeProfileService {
                     });
                 }
             }
-            if let Some(existing) = config
-                .routes
-                .iter_mut()
-                .find(|existing| existing.model_id == route.model_id)
-            {
+            if let Some(existing) = config.routes.iter_mut().find(|existing| {
+                existing.provider == route.provider && existing.model_id == route.model_id
+            }) {
                 *existing = route;
             } else {
                 config.routes.push(route);
@@ -569,6 +569,7 @@ impl RuntimeProfileService {
 
     pub async fn clear_model_route(
         &self,
+        provider: RuntimeProviderId,
         model_id: String,
     ) -> Result<RuntimeProfileMutationResponse> {
         let model_id = model_id.trim().to_string();
@@ -578,7 +579,9 @@ impl RuntimeProfileService {
             });
         }
         self.mutate_config(move |config| {
-            config.routes.retain(|route| route.model_id != model_id);
+            config
+                .routes
+                .retain(|route| !(route.provider == provider && route.model_id == model_id));
             Ok(RuntimeProfileMutationResponse::success(None))
         })
         .await
@@ -686,7 +689,7 @@ impl RuntimeProfileService {
                     config
                         .routes
                         .iter()
-                        .find(|route| route.model_id == model_id)
+                        .find(|route| route.provider == provider && route.model_id == model_id)
                         .and_then(|route| route.profile_id.clone())
                 })
                 .or_else(|| config.default_profile_id.clone())
@@ -703,7 +706,11 @@ impl RuntimeProfileService {
         })?
     }
 
-    pub async fn model_route_auto_load(&self, model_id: &str) -> Result<Option<bool>> {
+    pub async fn model_route_auto_load(
+        &self,
+        provider: RuntimeProviderId,
+        model_id: &str,
+    ) -> Result<Option<bool>> {
         let model_id = model_id.trim().to_string();
         if model_id.is_empty() {
             return Err(PumasError::InvalidParams {
@@ -721,7 +728,7 @@ impl RuntimeProfileService {
             Ok(config
                 .routes
                 .iter()
-                .find(|route| route.model_id == model_id)
+                .find(|route| route.provider == provider && route.model_id == model_id)
                 .map(|route| route.auto_load))
         })
         .await
@@ -937,6 +944,7 @@ impl RuntimeProfileEventJournal {
             cursor: self.current_cursor(),
             event_kind: RuntimeProfileEventKind::StatusChanged,
             profile_id: Some(status.profile_id),
+            provider: None,
             model_id: None,
             producer_revision: Some("runtime-profile-status".to_string()),
         };
@@ -1268,14 +1276,92 @@ fn provider_path_segment(provider: RuntimeProviderId) -> &'static str {
 }
 
 fn load_or_initialize_config(path: &Path) -> Result<RuntimeProfilesConfigFile> {
-    match atomic_read_json(path)? {
-        Some(config) => Ok(config),
+    let raw_config: Option<Value> = atomic_read_json(path)?;
+    match raw_config {
+        Some(raw_config) => {
+            let (config, migrated) = migrate_runtime_profiles_config(raw_config)?;
+            if migrated {
+                atomic_write_json(path, &config, true)?;
+            }
+            Ok(config)
+        }
         None => {
             let config = RuntimeProfilesConfigFile::default_seed();
             atomic_write_json(path, &config, true)?;
             Ok(config)
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct LegacyRuntimeProfilesConfigFile {
+    cursor: String,
+    profiles: Vec<RuntimeProfileConfig>,
+    #[serde(default)]
+    routes: Vec<LegacyModelRuntimeRoute>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    default_profile_id: Option<RuntimeProfileId>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LegacyModelRuntimeRoute {
+    model_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    profile_id: Option<RuntimeProfileId>,
+    #[serde(default)]
+    auto_load: bool,
+}
+
+fn migrate_runtime_profiles_config(raw_config: Value) -> Result<(RuntimeProfilesConfigFile, bool)> {
+    let schema_version = raw_config
+        .get("schema_version")
+        .and_then(Value::as_u64)
+        .unwrap_or(1);
+    if schema_version >= u64::from(RUNTIME_PROFILES_SCHEMA_VERSION) {
+        return serde_json::from_value(raw_config)
+            .map(|config| (config, false))
+            .map_err(Into::into);
+    }
+
+    let legacy: LegacyRuntimeProfilesConfigFile = serde_json::from_value(raw_config)?;
+    let mut routes = Vec::new();
+    let mut dropped_ambiguous_routes = Vec::new();
+    for route in legacy.routes {
+        let model_id = route.model_id;
+        let Some(provider) = route.profile_id.as_ref().and_then(|profile_id| {
+            legacy
+                .profiles
+                .iter()
+                .find(|profile| &profile.profile_id == profile_id)
+                .map(|profile| profile.provider)
+        }) else {
+            dropped_ambiguous_routes.push(model_id);
+            continue;
+        };
+        routes.push(ModelRuntimeRoute {
+            provider,
+            model_id,
+            profile_id: route.profile_id,
+            auto_load: route.auto_load,
+        });
+    }
+    if !dropped_ambiguous_routes.is_empty() {
+        warn!(
+            dropped_routes = ?dropped_ambiguous_routes,
+            "dropped ambiguous legacy runtime profile routes during provider-scope migration"
+        );
+    }
+
+    Ok((
+        RuntimeProfilesConfigFile {
+            schema_version: RUNTIME_PROFILES_SCHEMA_VERSION,
+            cursor: legacy.cursor,
+            profiles: legacy.profiles,
+            routes,
+            default_profile_id: legacy.default_profile_id,
+        },
+        true,
+    ))
 }
 
 fn bump_cursor(config: &mut RuntimeProfilesConfigFile) {
@@ -1563,6 +1649,7 @@ mod tests {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let service = RuntimeProfileService::new(temp_dir.path());
         let route = ModelRuntimeRoute {
+            provider: RuntimeProviderId::Ollama,
             model_id: "llm/test/model".to_string(),
             profile_id: Some(RuntimeProfileId::parse("ollama-default").unwrap()),
             auto_load: true,
@@ -1572,9 +1659,14 @@ mod tests {
         let snapshot = service.snapshot().await.unwrap();
 
         assert_eq!(snapshot.snapshot.routes.len(), 1);
+        assert_eq!(
+            snapshot.snapshot.routes[0].provider,
+            RuntimeProviderId::Ollama
+        );
         assert_eq!(snapshot.snapshot.routes[0].model_id, "llm/test/model");
 
         let invalid_route = ModelRuntimeRoute {
+            provider: RuntimeProviderId::Ollama,
             model_id: "llm/test/model".to_string(),
             profile_id: Some(RuntimeProfileId::parse("missing-profile").unwrap()),
             auto_load: true,
@@ -1594,6 +1686,7 @@ mod tests {
         service.upsert_profile(profile).await.unwrap();
         service
             .set_model_route(ModelRuntimeRoute {
+                provider: RuntimeProviderId::Ollama,
                 model_id: "llm/test/model".to_string(),
                 profile_id: Some(RuntimeProfileId::parse("ollama-route").unwrap()),
                 auto_load: true,
@@ -1619,19 +1712,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn runtime_profile_service_routes_same_model_id_by_provider() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+
+        let mut ollama = RuntimeProfileConfig::default_ollama();
+        ollama.profile_id = RuntimeProfileId::parse("ollama-route").unwrap();
+        ollama.name = "Ollama Route".to_string();
+        ollama.endpoint_url = RuntimeEndpointUrl::parse("http://127.0.0.1:12557").ok();
+        ollama.port = RuntimePort::parse(12557).ok();
+        service.upsert_profile(ollama).await.unwrap();
+
+        let mut llama = managed_llama_cpp_profile("llama-route");
+        llama.endpoint_url = RuntimeEndpointUrl::parse("http://127.0.0.1:18088").ok();
+        llama.port = RuntimePort::parse(18088).ok();
+        service.upsert_profile(llama).await.unwrap();
+
+        service
+            .set_model_route(ModelRuntimeRoute {
+                provider: RuntimeProviderId::Ollama,
+                model_id: "shared/model".to_string(),
+                profile_id: Some(RuntimeProfileId::parse("ollama-route").unwrap()),
+                auto_load: true,
+            })
+            .await
+            .unwrap();
+        service
+            .set_model_route(ModelRuntimeRoute {
+                provider: RuntimeProviderId::LlamaCpp,
+                model_id: "shared/model".to_string(),
+                profile_id: Some(RuntimeProfileId::parse("llama-route").unwrap()),
+                auto_load: false,
+            })
+            .await
+            .unwrap();
+
+        let ollama_endpoint = service
+            .resolve_model_endpoint(RuntimeProviderId::Ollama, "shared/model", None)
+            .await
+            .unwrap();
+        let llama_endpoint = service
+            .resolve_model_endpoint(RuntimeProviderId::LlamaCpp, "shared/model", None)
+            .await
+            .unwrap();
+
+        assert_eq!(ollama_endpoint.as_str(), "http://127.0.0.1:12557/");
+        assert_eq!(llama_endpoint.as_str(), "http://127.0.0.1:18088/");
+        assert_eq!(
+            service
+                .model_route_auto_load(RuntimeProviderId::Ollama, "shared/model")
+                .await
+                .unwrap(),
+            Some(true)
+        );
+        assert_eq!(
+            service
+                .model_route_auto_load(RuntimeProviderId::LlamaCpp, "shared/model")
+                .await
+                .unwrap(),
+            Some(false)
+        );
+    }
+
+    #[tokio::test]
     async fn runtime_profile_service_reads_model_route_auto_load_policy() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let service = RuntimeProfileService::new(temp_dir.path());
 
         assert_eq!(
             service
-                .model_route_auto_load("llm/test/model")
+                .model_route_auto_load(RuntimeProviderId::Ollama, "llm/test/model")
                 .await
                 .unwrap(),
             None
         );
         service
             .set_model_route(ModelRuntimeRoute {
+                provider: RuntimeProviderId::Ollama,
                 model_id: "llm/test/model".to_string(),
                 profile_id: Some(RuntimeProfileId::parse("ollama-default").unwrap()),
                 auto_load: false,
@@ -1641,11 +1798,63 @@ mod tests {
 
         assert_eq!(
             service
-                .model_route_auto_load("llm/test/model")
+                .model_route_auto_load(RuntimeProviderId::Ollama, "llm/test/model")
                 .await
                 .unwrap(),
             Some(false)
         );
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_migrates_legacy_routes_to_provider_scope() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let config_path = temp_dir
+            .path()
+            .join("launcher-data/metadata/runtime-profiles.json");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        let legacy_config = serde_json::json!({
+            "schema_version": 1,
+            "cursor": "runtime-profiles:7",
+            "profiles": [RuntimeProfileConfig::default_ollama()],
+            "routes": [
+                {
+                    "model_id": "llm/test/model",
+                    "profile_id": "ollama-default",
+                    "auto_load": false
+                },
+                {
+                    "model_id": "ambiguous/model",
+                    "auto_load": true
+                }
+            ],
+            "default_profile_id": "ollama-default"
+        });
+        std::fs::write(
+            &config_path,
+            serde_json::to_vec_pretty(&legacy_config).unwrap(),
+        )
+        .unwrap();
+
+        let service = RuntimeProfileService::new(temp_dir.path());
+        let snapshot = service.snapshot().await.unwrap();
+
+        assert_eq!(
+            snapshot.snapshot.schema_version,
+            RUNTIME_PROFILES_SCHEMA_VERSION
+        );
+        assert_eq!(snapshot.snapshot.routes.len(), 1);
+        assert_eq!(
+            snapshot.snapshot.routes[0].provider,
+            RuntimeProviderId::Ollama
+        );
+        assert_eq!(snapshot.snapshot.routes[0].model_id, "llm/test/model");
+        assert_eq!(snapshot.snapshot.routes[0].auto_load, false);
+
+        let persisted: Value =
+            serde_json::from_slice(&std::fs::read(config_path).unwrap()).unwrap();
+        assert_eq!(persisted["schema_version"], RUNTIME_PROFILES_SCHEMA_VERSION);
+        assert_eq!(persisted["routes"][0]["provider"], "ollama");
+        assert_eq!(persisted["routes"].as_array().unwrap().len(), 1);
     }
 
     #[tokio::test]

@@ -49,6 +49,7 @@ export interface RuntimeProfileConfig {
 }
 
 export interface ModelRuntimeRoute {
+  provider: RuntimeProviderId;
   model_id: string;
   profile_id?: string | null;
   auto_load: boolean;
@@ -85,6 +86,7 @@ export interface RuntimeProfileEvent {
   cursor: string;
   event_kind: RuntimeProfileEventKind;
   profile_id?: string | null;
+  provider?: RuntimeProviderId | null;
   model_id?: string | null;
   producer_revision?: string | null;
 }

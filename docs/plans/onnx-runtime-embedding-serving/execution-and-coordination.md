@@ -296,6 +296,11 @@ Update during implementation:
   before ONNX placement rules are added; route persistence/migration and
   frontend provider row/view-model decomposition remain open under the
   large-file split task.
+- 2026-05-11: Moved core serving placement rule selection onto
+  `ProviderBehavior::serving_placement_policy`. Existing Ollama profile-only
+  placement behavior and llama.cpp router/dedicated placement behavior are
+  preserved, while the validation entrypoint no longer selects placement rules
+  by matching `RuntimeProviderId`.
 - 2026-05-11: Extracted core serving gateway alias validation into
   `rust/crates/pumas-core/src/serving/gateway_alias.rs` and updated the serving
   README module table/design notes. Effective alias derivation remains exported
@@ -520,6 +525,8 @@ changes remain.
   provider-scoped route/served-instance contracts.
 - Core serving placement validation now lives in a focused
   `serving/placement.rs` module instead of the serving service entrypoint.
+- Core serving placement rule selection now derives from provider behavior
+  instead of provider-id dispatch.
 - Core serving gateway alias validation and effective-alias derivation now live
   in a focused `serving/gateway_alias.rs` module.
 - Provider behavior now owns managed runtime path segments and implicit base
@@ -692,6 +699,10 @@ changes remain.
 - Core serving placement extraction slice verified with `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml serving` and `cargo fmt
   --manifest-path rust/Cargo.toml --all -- --check`.
+- Provider serving placement policy slice verified with `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml providers`, and `cargo
+  test --manifest-path rust/crates/pumas-core/Cargo.toml serving`.
 - Core serving gateway alias extraction slice verified with `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml serving` and `cargo fmt
   --manifest-path rust/Cargo.toml --all -- --check`.

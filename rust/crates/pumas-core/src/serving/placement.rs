@@ -1,7 +1,7 @@
 use crate::models::{
-    ModelServeError, ModelServeErrorCode, RuntimeDeviceMode, RuntimeProviderId,
-    RuntimeProviderMode, ServeModelRequest,
+    ModelServeError, ModelServeErrorCode, RuntimeDeviceMode, RuntimeProviderMode, ServeModelRequest,
 };
+use crate::providers::{ProviderBehavior, ProviderServingPlacementPolicy};
 
 use super::{
     served_model_reserves_gateway_alias, ServingValidationContext, ServingValidationProfile,
@@ -12,10 +12,13 @@ pub(super) fn validate_provider_placement(
     request: &ServeModelRequest,
     profile: &ServingValidationProfile,
     context: &ServingValidationContext,
+    behavior: &ProviderBehavior,
 ) -> Vec<ModelServeError> {
-    match profile.provider {
-        RuntimeProviderId::Ollama => validate_ollama_placement(model_id, request, profile),
-        RuntimeProviderId::LlamaCpp => {
+    match behavior.serving_placement_policy {
+        ProviderServingPlacementPolicy::ProfileOnly => {
+            validate_profile_only_placement(model_id, request, profile)
+        }
+        ProviderServingPlacementPolicy::LlamaCppRuntime => {
             validate_llama_cpp_placement(model_id, request, profile, context)
         }
     }
@@ -78,7 +81,7 @@ fn validate_llama_cpp_placement(
             .served_models
             .iter()
             .filter(|status| {
-                status.provider == RuntimeProviderId::LlamaCpp
+                status.provider == request.config.provider
                     && status.profile_id == request.config.profile_id
                     && served_model_reserves_gateway_alias(status)
             })
@@ -95,7 +98,7 @@ fn validate_llama_cpp_placement(
     errors
 }
 
-fn validate_ollama_placement(
+fn validate_profile_only_placement(
     model_id: &str,
     request: &ServeModelRequest,
     profile: &ServingValidationProfile,

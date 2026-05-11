@@ -107,6 +107,13 @@ pub enum ProviderServingAdapterKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ProviderServingPlacementPolicy {
+    ProfileOnly,
+    LlamaCppRuntime,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProviderUnloadBehavior {
     ProviderApi,
     RouterPreset,
@@ -128,6 +135,7 @@ pub struct ProviderBehavior {
     pub provider_model_id_policy: ProviderModelIdPolicy,
     pub gateway_alias_policy: ProviderGatewayAliasPolicy,
     pub serving_adapter_kind: ProviderServingAdapterKind,
+    pub serving_placement_policy: ProviderServingPlacementPolicy,
     pub unload_behavior: ProviderUnloadBehavior,
     pub supports_managed_profiles: bool,
     pub supports_external_profiles: bool,
@@ -174,6 +182,7 @@ impl ProviderBehavior {
             provider_model_id_policy: ProviderModelIdPolicy::GatewayAlias,
             gateway_alias_policy: ProviderGatewayAliasPolicy::OllamaModelName,
             serving_adapter_kind: ProviderServingAdapterKind::OllamaProviderApi,
+            serving_placement_policy: ProviderServingPlacementPolicy::ProfileOnly,
             unload_behavior: ProviderUnloadBehavior::ProviderApi,
             supports_managed_profiles: true,
             supports_external_profiles: true,
@@ -232,6 +241,7 @@ impl ProviderBehavior {
             provider_model_id_policy: ProviderModelIdPolicy::LibraryModelId,
             gateway_alias_policy: ProviderGatewayAliasPolicy::LibraryModelId,
             serving_adapter_kind: ProviderServingAdapterKind::LlamaCppRuntime,
+            serving_placement_policy: ProviderServingPlacementPolicy::LlamaCppRuntime,
             unload_behavior: ProviderUnloadBehavior::RouterPreset,
             supports_managed_profiles: true,
             supports_external_profiles: true,
@@ -379,6 +389,10 @@ mod tests {
             behavior.serving_adapter_kind,
             ProviderServingAdapterKind::OllamaProviderApi
         );
+        assert_eq!(
+            behavior.serving_placement_policy,
+            ProviderServingPlacementPolicy::ProfileOnly
+        );
         assert_eq!(behavior.managed_runtime_path_segment, "ollama");
         assert_eq!(behavior.managed_runtime_base_port, 11_434);
         assert!(behavior.supports_artifact_format(ExecutableArtifactFormat::Gguf));
@@ -408,6 +422,10 @@ mod tests {
         assert_eq!(
             behavior.serving_adapter_kind,
             ProviderServingAdapterKind::LlamaCppRuntime
+        );
+        assert_eq!(
+            behavior.serving_placement_policy,
+            ProviderServingPlacementPolicy::LlamaCppRuntime
         );
         assert_eq!(
             behavior.unload_behavior,
@@ -449,6 +467,7 @@ mod tests {
         assert_eq!(serialized["provider_model_id_policy"], "library_model_id");
         assert_eq!(serialized["gateway_alias_policy"], "library_model_id");
         assert_eq!(serialized["serving_adapter_kind"], "llama_cpp_runtime");
+        assert_eq!(serialized["serving_placement_policy"], "llama_cpp_runtime");
         assert_eq!(serialized["unload_behavior"], "router_preset");
         assert_eq!(serialized["supports_launch_on_serve"], true);
     }

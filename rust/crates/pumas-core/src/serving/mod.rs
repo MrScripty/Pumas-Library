@@ -383,9 +383,11 @@ pub fn validate_model_serving_request(
                 );
             }
 
-            errors.extend(validate_provider_placement(
-                model_id, request, profile, context,
-            ));
+            if let Some(behavior) = provider_registry.get(request.config.provider) {
+                errors.extend(validate_provider_placement(
+                    model_id, request, profile, context, behavior,
+                ));
+            }
         }
         None => {
             errors.push(

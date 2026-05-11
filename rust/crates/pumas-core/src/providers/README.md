@@ -4,7 +4,8 @@
 
 Own backend runtime-provider behavior contracts for profile validation,
 serving compatibility, gateway endpoint support, model-id policy, unload
-behavior, launch-on-serve support, and launch-strategy selection.
+behavior, launch-on-serve support, placement policy, and launch-strategy
+selection.
 
 ## Contents
 
@@ -42,6 +43,10 @@ provider behavior, including provider-owned runtime directory segments and
 implicit managed base ports.
 Serving validation consumes provider launch-on-serve policy instead of accepting
 stopped managed profiles by matching provider ids.
+Serving placement validation consumes provider placement policy instead of
+selecting rules by matching provider ids. Existing Ollama requests use the
+profile-only placement policy, while llama.cpp requests use the llama.cpp
+runtime policy for router/dedicated placement behavior.
 Later slices migrate frontend bridge contracts onto this registry.
 
 ## Alternatives Rejected
@@ -73,6 +78,9 @@ Later slices migrate frontend bridge contracts onto this registry.
 - Launch-on-serve support is provider-owned policy. Serving validation may
   accept a stopped managed profile only when provider behavior declares support
   for that provider mode.
+- Serving placement rule selection is provider-owned policy. Serving validation
+  asks provider behavior which placement policy to apply before checking
+  per-model placement fields.
 - Executable artifact formats are parsed into `ExecutableArtifactFormat` at
   boundaries before serving validation consumes them.
 
@@ -132,7 +140,8 @@ assert!(behavior.supports_openai_endpoint(
 - Stable producer fields are provider id, provider modes, device modes, local
   artifact formats, serving tasks, OpenAI endpoints, launch strategies,
   managed runtime layout, provider model-id policy, gateway alias policy,
-  serving adapter kind, unload behavior, and launch-on-serve support.
+  serving adapter kind, serving placement policy, unload behavior, and
+  launch-on-serve support.
 - Enum values serialize with snake_case when they cross a boundary.
 - Adding ONNX Runtime requires adding one provider behavior entry and matching
   contract tests before consumers depend on it.

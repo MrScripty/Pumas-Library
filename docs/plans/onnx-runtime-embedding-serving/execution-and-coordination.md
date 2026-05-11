@@ -296,6 +296,11 @@ Update during implementation:
   before ONNX placement rules are added; route persistence/migration and
   frontend provider row/view-model decomposition remain open under the
   large-file split task.
+- 2026-05-11: Extracted core serving gateway alias validation into
+  `rust/crates/pumas-core/src/serving/gateway_alias.rs` and updated the serving
+  README module table/design notes. Effective alias derivation remains exported
+  through the serving module, but validation orchestration no longer owns alias
+  character, path-segment, or duplicate-alias policy directly.
 
 ## Commit Cadence Notes
 
@@ -476,6 +481,8 @@ changes remain.
   provider-scoped route/served-instance contracts.
 - Core serving placement validation now lives in a focused
   `serving/placement.rs` module instead of the serving service entrypoint.
+- Core serving gateway alias validation and effective-alias derivation now live
+  in a focused `serving/gateway_alias.rs` module.
 
 ### Deviations
 
@@ -629,6 +636,9 @@ changes remain.
   test --manifest-path rust/crates/pumas-core/Cargo.toml serving`, and `cargo
   fmt --manifest-path rust/Cargo.toml --all -- --check`.
 - Core serving placement extraction slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml serving` and `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`.
+- Core serving gateway alias extraction slice verified with `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml serving` and `cargo fmt
   --manifest-path rust/Cargo.toml --all -- --check`.
 

@@ -295,6 +295,11 @@ Core serving placement validation has been extracted into
 `rust/crates/pumas-core/src/serving/placement.rs`, and the serving README now
 documents the focused module. The large-file split task remains open for route
 persistence/migration and frontend provider row/view-model decomposition.
+Core serving gateway alias validation and effective-alias derivation have been
+extracted into `rust/crates/pumas-core/src/serving/gateway_alias.rs`, and the
+serving README now documents alias policy ownership. This keeps alias boundary
+rules out of the serving service entrypoint before ONNX adds embedding-serving
+routes.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

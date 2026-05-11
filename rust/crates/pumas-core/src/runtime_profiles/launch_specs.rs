@@ -6,12 +6,15 @@ use std::path::{Path, PathBuf};
 
 use crate::models::{
     RuntimeDeviceMode, RuntimeDeviceSettings, RuntimeEndpointUrl, RuntimeManagementMode,
-    RuntimePort, RuntimeProfileConfig, RuntimeProfileId, RuntimeProviderId, RuntimeProviderMode,
+    RuntimePort, RuntimeProfileConfig, RuntimeProfileId,
 };
 use crate::providers::{ProviderBehavior, ProviderRegistry};
 use crate::{PumasError, Result};
 
-use super::{RuntimeProfileLaunchSpec, RuntimeProfileLaunchStrategy, RuntimeProfilesConfigFile};
+use super::{
+    RuntimeProfileBinaryLaunchKind, RuntimeProfileLaunchSpec, RuntimeProfileLaunchStrategy,
+    RuntimeProfilesConfigFile,
+};
 
 const IMPLICIT_RUNTIME_PORT_SPAN: u16 = 10_000;
 
@@ -76,16 +79,23 @@ pub(super) fn derive_managed_profile_launch_specs(
             .join("runtime-profiles")
             .join(&behavior.managed_runtime_path_segment)
             .join(profile.profile_id.as_str());
+        let launch_strategy = RuntimeProfileLaunchStrategy::for_profile(profile, behavior)?;
 
         specs.push(RuntimeProfileLaunchSpec {
             profile_id: profile.profile_id.clone(),
             provider: profile.provider,
             provider_mode: profile.provider_mode,
-            launch_strategy: RuntimeProfileLaunchStrategy::for_profile(profile, behavior)?,
+            launch_strategy,
             endpoint_url: endpoint_url.clone(),
             port,
-            extra_args: profile_runtime_extra_args(launcher_root, profile, &endpoint_url, port)?,
-            env_vars: profile_runtime_env_vars(profile, &endpoint_url, port)?,
+            extra_args: profile_runtime_extra_args(
+                launcher_root,
+                profile,
+                &endpoint_url,
+                port,
+                launch_strategy,
+            )?,
+            env_vars: profile_runtime_env_vars(profile, &endpoint_url, port, launch_strategy)?,
             pid_file: runtime_dir.join("runtime.pid"),
             log_file: runtime_dir.join("runtime.log"),
             health_check_url: endpoint_url,
@@ -152,20 +162,32 @@ fn profile_runtime_env_vars(
     profile: &RuntimeProfileConfig,
     endpoint_url: &RuntimeEndpointUrl,
     port: RuntimePort,
+    launch_strategy: RuntimeProfileLaunchStrategy,
 ) -> Result<HashMap<String, String>> {
     let mut env_vars = HashMap::new();
     env_vars.insert(
         "PUMAS_RUNTIME_PROFILE_ID".to_string(),
         profile.profile_id.as_str().to_string(),
     );
-    match profile.provider {
-        RuntimeProviderId::Ollama => {
+    match launch_strategy {
+        RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::OllamaServe,
+        ) => {
             env_vars.insert(
                 "OLLAMA_HOST".to_string(),
                 runtime_host_port(endpoint_url, port)?,
             );
         }
-        RuntimeProviderId::LlamaCpp => {}
+        RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::LlamaCppRouter
+            | RuntimeProfileBinaryLaunchKind::LlamaCppDedicated,
+        )
+        | RuntimeProfileLaunchStrategy::ExternalOnly => {}
+        RuntimeProfileLaunchStrategy::PythonSidecar(_) => {
+            return Err(PumasError::InvalidParams {
+                message: "python sidecar launch environment is not implemented".to_string(),
+            });
+        }
     }
     apply_device_visibility_env(&mut env_vars, profile);
     Ok(env_vars)
@@ -176,33 +198,49 @@ fn profile_runtime_extra_args(
     profile: &RuntimeProfileConfig,
     endpoint_url: &RuntimeEndpointUrl,
     port: RuntimePort,
+    launch_strategy: RuntimeProfileLaunchStrategy,
 ) -> Result<Vec<String>> {
-    match profile.provider {
-        RuntimeProviderId::Ollama => Ok(Vec::new()),
-        RuntimeProviderId::LlamaCpp => match profile.provider_mode {
-            RuntimeProviderMode::LlamaCppRouter | RuntimeProviderMode::LlamaCppDedicated => {
-                let mut args = vec![
-                    "--host".to_string(),
-                    runtime_host(endpoint_url)?.to_string(),
-                    "--port".to_string(),
-                    port.value().to_string(),
-                ];
-                if profile.provider_mode == RuntimeProviderMode::LlamaCppRouter {
-                    args.extend([
-                        "--models-dir".to_string(),
-                        llama_cpp_router_models_dir(launcher_root)
-                            .to_string_lossy()
-                            .to_string(),
-                    ]);
-                }
-                apply_llama_cpp_device_args(&mut args, profile);
-                Ok(args)
-            }
-            RuntimeProviderMode::OllamaServe => Err(PumasError::InvalidParams {
-                message: "llama.cpp runtime profile cannot use ollama_serve mode".to_string(),
-            }),
-        },
+    match launch_strategy {
+        RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::OllamaServe,
+        ) => Ok(Vec::new()),
+        RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::LlamaCppRouter,
+        ) => {
+            let mut args = llama_cpp_runtime_args(endpoint_url, port)?;
+            args.extend([
+                "--models-dir".to_string(),
+                llama_cpp_router_models_dir(launcher_root)
+                    .to_string_lossy()
+                    .to_string(),
+            ]);
+            apply_llama_cpp_device_args(&mut args, profile);
+            Ok(args)
+        }
+        RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::LlamaCppDedicated,
+        ) => {
+            let mut args = llama_cpp_runtime_args(endpoint_url, port)?;
+            apply_llama_cpp_device_args(&mut args, profile);
+            Ok(args)
+        }
+        RuntimeProfileLaunchStrategy::PythonSidecar(_) => Err(PumasError::InvalidParams {
+            message: "python sidecar launch arguments are not implemented".to_string(),
+        }),
+        RuntimeProfileLaunchStrategy::ExternalOnly => Ok(Vec::new()),
     }
+}
+
+fn llama_cpp_runtime_args(
+    endpoint_url: &RuntimeEndpointUrl,
+    port: RuntimePort,
+) -> Result<Vec<String>> {
+    Ok(vec![
+        "--host".to_string(),
+        runtime_host(endpoint_url)?.to_string(),
+        "--port".to_string(),
+        port.value().to_string(),
+    ])
 }
 
 fn apply_llama_cpp_device_args(args: &mut Vec<String>, profile: &RuntimeProfileConfig) {

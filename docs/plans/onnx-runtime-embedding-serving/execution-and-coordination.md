@@ -306,6 +306,11 @@ Update during implementation:
   provider-owned values. Existing provider-specific env/arg construction still
   remains in launch-spec derivation and is recorded as a remaining Milestone 0
   cleanup before ONNX sidecar launch wiring.
+- 2026-05-11: Updated managed launch-spec env/arg derivation to consume
+  `RuntimeProfileLaunchStrategy` instead of matching directly on provider ids.
+  Existing Ollama and llama.cpp launch output remains unchanged; Python sidecar
+  env/args now fail explicitly until the ONNX lifecycle slice implements that
+  launch target.
 
 ## Commit Cadence Notes
 
@@ -490,6 +495,8 @@ changes remain.
   in a focused `serving/gateway_alias.rs` module.
 - Provider behavior now owns managed runtime path segments and implicit base
   ports consumed by runtime-profile launch-spec derivation.
+- Runtime-profile launch-spec env/arg derivation now consumes
+  `RuntimeProfileLaunchStrategy` rather than provider-id dispatch.
 
 ### Deviations
 
@@ -651,6 +658,9 @@ changes remain.
 - Provider-owned managed runtime layout slice verified with `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml providers`, `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`, and
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Launch-strategy env/arg derivation slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles` and
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links

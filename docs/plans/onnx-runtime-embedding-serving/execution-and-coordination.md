@@ -371,6 +371,20 @@ Update during implementation:
   Verification passed: `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
   `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, and
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`.
+- 2026-05-11: Added the Rust provider-contract slice for ONNX Runtime.
+  `RuntimeProviderId::OnnxRuntime`, `RuntimeProviderMode::OnnxServe`,
+  `ExecutableArtifactFormat::Onnx`, `ProviderLaunchKind::InProcessRuntime`,
+  and the ONNX provider behavior are now in core contracts. The old reserved
+  Python-sidecar launch target was removed from Rust provider/runtime-profile
+  contracts. ONNX is declared embedding-only with `.onnx` artifact support,
+  `/v1/models` and `/v1/embeddings` capability, session-manager unload policy,
+  and in-process runtime launch strategy. RPC serving dispatch now returns
+  explicit non-critical "not wired in this slice" errors for ONNX load/unload
+  rather than falling through an existing provider path. Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml providers`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`,
+  and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`.
 
 ## Commit Cadence Notes
 
@@ -585,6 +599,10 @@ changes remain.
   validated ONNX provider/session contracts, a fake embedding backend, bounded
   session manager, README, and focused tests. Composition-root integration,
   gateway error shaping, and full shutdown/cancellation ordering remain open.
+- Rust ONNX provider-contract work is in progress: core provider/runtime-profile
+  enums and behavior now model ONNX as an embedding-only in-process runtime,
+  and RPC serving has explicit non-critical ONNX not-yet-wired paths until the
+  serving adapter slice connects the session manager.
 
 ### Deviations
 

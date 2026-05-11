@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::{RuntimeManagementMode, RuntimeProfileConfig};
 use crate::providers::{
-    ProviderBehavior, ProviderBinaryLaunchTarget, ProviderManagedLaunchTarget,
-    ProviderPythonSidecarTarget,
+    ProviderBehavior, ProviderBinaryLaunchTarget, ProviderInProcessRuntimeTarget,
+    ProviderManagedLaunchTarget,
 };
 use crate::{PumasError, Result};
 
@@ -19,7 +19,7 @@ pub enum RuntimeProfileBinaryLaunchKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum RuntimeProfilePythonSidecarKind {
+pub enum RuntimeProfileInProcessRuntimeKind {
     OnnxRuntime,
 }
 
@@ -27,7 +27,7 @@ pub enum RuntimeProfilePythonSidecarKind {
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
 pub enum RuntimeProfileLaunchStrategy {
     BinaryProcess(RuntimeProfileBinaryLaunchKind),
-    PythonSidecar(RuntimeProfilePythonSidecarKind),
+    InProcessRuntime(RuntimeProfileInProcessRuntimeKind),
     ExternalOnly,
 }
 
@@ -62,8 +62,8 @@ impl From<ProviderManagedLaunchTarget> for RuntimeProfileLaunchStrategy {
             ProviderManagedLaunchTarget::BinaryProcess(target) => {
                 Self::BinaryProcess(target.into())
             }
-            ProviderManagedLaunchTarget::PythonSidecar(target) => {
-                Self::PythonSidecar(target.into())
+            ProviderManagedLaunchTarget::InProcessRuntime(target) => {
+                Self::InProcessRuntime(target.into())
             }
         }
     }
@@ -79,10 +79,10 @@ impl From<ProviderBinaryLaunchTarget> for RuntimeProfileBinaryLaunchKind {
     }
 }
 
-impl From<ProviderPythonSidecarTarget> for RuntimeProfilePythonSidecarKind {
-    fn from(target: ProviderPythonSidecarTarget) -> Self {
+impl From<ProviderInProcessRuntimeTarget> for RuntimeProfileInProcessRuntimeKind {
+    fn from(target: ProviderInProcessRuntimeTarget) -> Self {
         match target {
-            ProviderPythonSidecarTarget::OnnxRuntime => Self::OnnxRuntime,
+            ProviderInProcessRuntimeTarget::OnnxRuntime => Self::OnnxRuntime,
         }
     }
 }
@@ -122,6 +122,21 @@ mod tests {
                 .unwrap(),
             RuntimeProfileLaunchStrategy::BinaryProcess(
                 RuntimeProfileBinaryLaunchKind::LlamaCppDedicated
+            )
+        );
+    }
+
+    #[test]
+    fn launch_strategy_maps_onnx_managed_profile_to_in_process_runtime() {
+        let mut profile = RuntimeProfileConfig::default_ollama();
+        profile.provider = RuntimeProviderId::OnnxRuntime;
+        profile.provider_mode = RuntimeProviderMode::OnnxServe;
+
+        assert_eq!(
+            RuntimeProfileLaunchStrategy::for_profile(&profile, &ProviderBehavior::onnx_runtime())
+                .unwrap(),
+            RuntimeProfileLaunchStrategy::InProcessRuntime(
+                RuntimeProfileInProcessRuntimeKind::OnnxRuntime
             )
         );
     }

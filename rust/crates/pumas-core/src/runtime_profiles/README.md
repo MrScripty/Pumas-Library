@@ -10,7 +10,7 @@ runtime profile launch-spec derivation and lifecycle code. `launch_specs.rs`
 owns managed launch-spec derivation, implicit port allocation, process
 environment, and existing provider launch arguments. Launch-spec derivation
 consumes the typed launch strategy for process environment and argument
-selection. The contract separates binary-process, Python-sidecar, and
+selection. The contract separates binary-process, in-process runtime, and
 external-only profile intent so new providers can be added without encoding
 another provider match in launch callers.
 
@@ -32,7 +32,7 @@ runtime-profile orchestration.
 
 Launch strategy values are Rust DTOs with `serde` support and snake_case wire
 names. Tests cover the current Ollama and llama.cpp mappings plus the
-external-only strategy.
+ONNX in-process runtime and external-only strategies.
 
 Runtime profile config files are persisted as JSON through the metadata atomic
 read/write helpers. Legacy schema-1 model-only routes are rewritten once into
@@ -42,8 +42,9 @@ ambiguous legacy routes are dropped.
 ## Lifecycle
 
 Existing managed Ollama and llama.cpp profiles map to binary process
-strategies. The ONNX Runtime provider will use the Python sidecar strategy in a
-later slice.
+strategies. The ONNX Runtime provider maps to an in-process runtime strategy;
+session-manager construction and lifecycle ownership are wired in later ONNX
+slices.
 
 ## Errors
 
@@ -60,5 +61,5 @@ not reintroduce a dual old/new route reader.
 
 ## Revisit Trigger
 
-Revisit this README when ONNX Runtime sidecar launch wiring, shutdown ownership,
-or additional launch kinds are added.
+Revisit this README when ONNX Runtime session-manager lifecycle, shutdown
+ownership, or additional launch kinds are added.

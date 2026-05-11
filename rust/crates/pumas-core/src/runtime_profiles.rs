@@ -31,7 +31,8 @@ use tokio::sync::broadcast;
 
 use launch_specs::derive_managed_profile_launch_specs;
 pub use launch_strategy::{
-    RuntimeProfileBinaryLaunchKind, RuntimeProfileLaunchStrategy, RuntimeProfilePythonSidecarKind,
+    RuntimeProfileBinaryLaunchKind, RuntimeProfileInProcessRuntimeKind,
+    RuntimeProfileLaunchStrategy,
 };
 use route_config::{load_or_initialize_config, validate_model_route};
 

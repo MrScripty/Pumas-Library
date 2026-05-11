@@ -51,6 +51,10 @@ Serving placement validation consumes provider placement policy instead of
 selecting rules by matching provider ids. Existing Ollama requests use the
 profile-only placement policy, while llama.cpp requests use the llama.cpp
 runtime policy for router/dedicated placement behavior.
+ONNX Runtime is represented as an embedding-only provider with `.onnx`
+artifact support, an in-process managed runtime target, and a session-manager
+unload policy. Real ONNX execution and gateway routing are owned by later ONNX
+provider/session slices.
 Later slices migrate frontend bridge contracts onto this registry.
 
 ## Alternatives Rejected
@@ -67,7 +71,7 @@ Later slices migrate frontend bridge contracts onto this registry.
 - Provider modes are declared by provider behavior before profile validation
   consumes them.
 - Runtime profile management-mode support is derived from provider launch kinds:
-  `binary_process` and `python_sidecar` support managed profiles, and
+  `binary_process` and `in_process_runtime` support managed profiles, and
   `external_only` supports external profiles.
 - OpenAI-compatible endpoint support is explicit per provider.
 - Local executable artifact compatibility is separate from gateway endpoint
@@ -150,5 +154,5 @@ assert!(behavior.supports_openai_endpoint(
   model-id policy, gateway alias policy, serving adapter kind, serving
   placement policy, unload behavior, and launch-on-serve support.
 - Enum values serialize with snake_case when they cross a boundary.
-- Adding ONNX Runtime requires adding one provider behavior entry and matching
-  contract tests before consumers depend on it.
+- ONNX Runtime consumers depend on the existing provider behavior entry and
+  matching contract tests before wiring load, unload, or gateway behavior.

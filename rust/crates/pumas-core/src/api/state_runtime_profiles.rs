@@ -140,9 +140,10 @@ fn runtime_profile_binary_launch_config(
             launch_spec.port.value(),
             version_dir,
         ),
-        RuntimeProfileLaunchStrategy::PythonSidecar(_) => {
+        RuntimeProfileLaunchStrategy::InProcessRuntime(_) => {
             return Err(PumasError::InvalidParams {
-                message: "Python sidecar runtime profiles are not wired yet".to_string(),
+                message: "in-process runtime profiles are not launched as binary processes"
+                    .to_string(),
             });
         }
         RuntimeProfileLaunchStrategy::ExternalOnly => {
@@ -219,7 +220,7 @@ async fn prepare_runtime_profile_launch_spec(
         RuntimeProfileLaunchStrategy::BinaryProcess(
             RuntimeProfileBinaryLaunchKind::OllamaServe,
         )
-        | RuntimeProfileLaunchStrategy::PythonSidecar(_)
+        | RuntimeProfileLaunchStrategy::InProcessRuntime(_)
         | RuntimeProfileLaunchStrategy::ExternalOnly => {}
     }
 

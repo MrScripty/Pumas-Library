@@ -84,6 +84,7 @@ impl RuntimePort {
 pub enum RuntimeProviderId {
     Ollama,
     LlamaCpp,
+    OnnxRuntime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -92,6 +93,7 @@ pub enum RuntimeProviderMode {
     OllamaServe,
     LlamaCppRouter,
     LlamaCppDedicated,
+    OnnxServe,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

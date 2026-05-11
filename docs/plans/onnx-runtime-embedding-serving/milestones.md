@@ -462,7 +462,7 @@ Ollama or llama.cpp profiles.
 
 **Tasks:**
 - [ ] Add `launcher-data/plugins/onnx-runtime.json`.
-- [ ] Add `RuntimeProviderId::OnnxRuntime` and
+- [x] Add `RuntimeProviderId::OnnxRuntime` and
       `RuntimeProviderMode::OnnxServe`.
 - [ ] Add ONNX Runtime to the frontend app registry with a sidebar icon,
       display name, description, default connection URL/port, and status
@@ -481,7 +481,7 @@ Ollama or llama.cpp profiles.
       selected lifecycle slice requires. If ONNX uses runtime profiles instead
       of standalone process hooks, keep the icon state derived from profile
       statuses rather than adding duplicate process state.
-- [ ] Register ONNX Runtime capabilities in the provider capability/behavior
+- [x] Register ONNX Runtime capabilities in the provider capability/behavior
       boundary created in Milestone 0.
 - [ ] Remove assumptions that provider enums and runtime-profile DTOs are
       append-only. Replace route DTOs and provider behavior contracts cleanly
@@ -496,7 +496,7 @@ Ollama or llama.cpp profiles.
       rules.
 - [ ] Add managed runtime specs for ONNX in-process lifecycle, status/health
       projection, and environment/configuration values.
-- [ ] Extract runtime-profile launch/runtime strategy so managed profiles can
+- [x] Extract runtime-profile launch/runtime strategy so managed profiles can
       launch binary runtimes or initialize in-process runtimes without forcing
       ONNX through Ollama/llama.cpp binary constructors or generic lifecycle
       branches.
@@ -527,7 +527,12 @@ Ollama or llama.cpp profiles.
 - App identity tests prove plugin metadata, Rust version-manager key, frontend
   app id, selected-version state, and rendered panel remain aligned.
 
-**Status:** Not started.
+**Status:** In progress. The Rust provider contract now includes
+`RuntimeProviderId::OnnxRuntime`, `RuntimeProviderMode::OnnxServe`,
+`.onnx` executable artifact support, an embedding-only ONNX provider behavior,
+an `in_process_runtime` managed launch target, and contract tests. TypeScript,
+plugin/app identity, frontend state, ONNX runtime profile lifecycle, and full
+schema/fixture coverage remain open.
 
 ### Milestone 4: Serving Validation And Load/Unload
 

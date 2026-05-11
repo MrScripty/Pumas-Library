@@ -93,6 +93,14 @@ pub async fn serve_model(state: &AppState, params: &Value) -> pumas_library::Res
         Some(ProviderServingAdapterKind::LlamaCppRuntime) => {
             serve_llama_cpp_model(state, request).await
         }
+        Some(ProviderServingAdapterKind::OnnxRuntime) => {
+            let error = serving_error(
+                ModelServeErrorCode::UnsupportedProvider,
+                "ONNX Runtime serving is not wired in this slice",
+                &request,
+            );
+            non_critical_failure_response(state, error).await
+        }
         None => {
             let error = serving_error(
                 ModelServeErrorCode::UnsupportedProvider,
@@ -144,6 +152,14 @@ pub async fn unserve_model(state: &AppState, params: &Value) -> pumas_library::R
         }
         Some(ProviderUnloadBehavior::RouterPreset) => {
             unserve_llama_cpp_model(state, command.request, profile_id, model_alias).await
+        }
+        Some(ProviderUnloadBehavior::SessionManager) => {
+            Ok(serde_json::to_value(UnserveModelResponse {
+                success: true,
+                error: Some("ONNX Runtime unload is not wired in this slice".to_string()),
+                unloaded: false,
+                snapshot: Some(state.api.get_serving_status().await?.snapshot),
+            })?)
         }
         None => Ok(serde_json::to_value(UnserveModelResponse {
             success: true,

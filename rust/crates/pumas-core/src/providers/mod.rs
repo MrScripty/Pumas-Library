@@ -12,14 +12,15 @@ use crate::models::{
 #[serde(rename_all = "snake_case")]
 pub enum ExecutableArtifactFormat {
     Gguf,
+    Onnx,
 }
 
 impl ExecutableArtifactFormat {
     pub fn from_extension(extension: &str) -> Option<Self> {
-        if extension.eq_ignore_ascii_case("gguf") {
-            Some(Self::Gguf)
-        } else {
-            None
+        match extension.to_ascii_lowercase().as_str() {
+            "gguf" => Some(Self::Gguf),
+            "onnx" => Some(Self::Onnx),
+            _ => None,
         }
     }
 
@@ -52,7 +53,7 @@ pub enum OpenAiGatewayEndpoint {
 #[serde(rename_all = "snake_case")]
 pub enum ProviderLaunchKind {
     BinaryProcess,
-    PythonSidecar,
+    InProcessRuntime,
     ExternalOnly,
 }
 
@@ -66,7 +67,7 @@ pub enum ProviderBinaryLaunchTarget {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ProviderPythonSidecarTarget {
+pub enum ProviderInProcessRuntimeTarget {
     OnnxRuntime,
 }
 
@@ -74,7 +75,7 @@ pub enum ProviderPythonSidecarTarget {
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
 pub enum ProviderManagedLaunchTarget {
     BinaryProcess(ProviderBinaryLaunchTarget),
-    PythonSidecar(ProviderPythonSidecarTarget),
+    InProcessRuntime(ProviderInProcessRuntimeTarget),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -103,6 +104,7 @@ pub enum ProviderGatewayAliasPolicy {
 pub enum ProviderServingAdapterKind {
     OllamaProviderApi,
     LlamaCppRuntime,
+    OnnxRuntime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -117,6 +119,7 @@ pub enum ProviderServingPlacementPolicy {
 pub enum ProviderUnloadBehavior {
     ProviderApi,
     RouterPreset,
+    SessionManager,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -262,6 +265,44 @@ impl ProviderBehavior {
         }
     }
 
+    pub fn onnx_runtime() -> Self {
+        Self {
+            provider: RuntimeProviderId::OnnxRuntime,
+            provider_modes: vec![RuntimeProviderMode::OnnxServe],
+            device_modes: vec![RuntimeDeviceMode::Auto, RuntimeDeviceMode::Cpu],
+            local_artifact_formats: vec![ExecutableArtifactFormat::Onnx],
+            serving_tasks: vec![ServingTask::Embedding],
+            openai_endpoints: vec![
+                OpenAiGatewayEndpoint::Models,
+                OpenAiGatewayEndpoint::Embeddings,
+            ],
+            launch_kinds: vec![ProviderLaunchKind::InProcessRuntime],
+            managed_launch_strategies: vec![ProviderManagedLaunchStrategy {
+                provider_mode: RuntimeProviderMode::OnnxServe,
+                target: ProviderManagedLaunchTarget::InProcessRuntime(
+                    ProviderInProcessRuntimeTarget::OnnxRuntime,
+                ),
+            }],
+            managed_runtime_app_id: "onnx-runtime".to_string(),
+            managed_runtime_uninitialized_message: "ONNX Runtime session manager not initialized"
+                .to_string(),
+            managed_runtime_no_active_version_message:
+                "ONNX Runtime is provided by the Pumas Rust runtime".to_string(),
+            managed_runtime_path_segment: "onnx-runtime".to_string(),
+            managed_runtime_base_port: 19_080,
+            provider_model_id_policy: ProviderModelIdPolicy::LibraryModelId,
+            gateway_alias_policy: ProviderGatewayAliasPolicy::LibraryModelId,
+            serving_adapter_kind: ProviderServingAdapterKind::OnnxRuntime,
+            serving_placement_policy: ProviderServingPlacementPolicy::ProfileOnly,
+            unload_behavior: ProviderUnloadBehavior::SessionManager,
+            supports_managed_profiles: true,
+            supports_external_profiles: false,
+            supports_model_catalog: true,
+            supports_dedicated_model_processes: false,
+            supports_launch_on_serve: false,
+        }
+    }
+
     pub fn supports_mode(&self, mode: RuntimeProviderMode) -> bool {
         self.provider_modes.contains(&mode)
     }
@@ -286,7 +327,7 @@ impl ProviderBehavior {
         match management_mode {
             RuntimeManagementMode::Managed => {
                 self.supports_launch_kind(ProviderLaunchKind::BinaryProcess)
-                    || self.supports_launch_kind(ProviderLaunchKind::PythonSidecar)
+                    || self.supports_launch_kind(ProviderLaunchKind::InProcessRuntime)
             }
             RuntimeManagementMode::External => {
                 self.supports_launch_kind(ProviderLaunchKind::ExternalOnly)
@@ -329,7 +370,11 @@ pub struct ProviderRegistry {
 
 impl ProviderRegistry {
     pub fn builtin() -> Self {
-        Self::from_behaviors([ProviderBehavior::ollama(), ProviderBehavior::llama_cpp()])
+        Self::from_behaviors([
+            ProviderBehavior::ollama(),
+            ProviderBehavior::llama_cpp(),
+            ProviderBehavior::onnx_runtime(),
+        ])
     }
 
     pub fn from_behaviors(behaviors: impl IntoIterator<Item = ProviderBehavior>) -> Self {
@@ -350,7 +395,11 @@ impl ProviderRegistry {
 
     pub fn providers(&self) -> Vec<&ProviderBehavior> {
         let mut providers = Vec::new();
-        for provider in [RuntimeProviderId::Ollama, RuntimeProviderId::LlamaCpp] {
+        for provider in [
+            RuntimeProviderId::Ollama,
+            RuntimeProviderId::LlamaCpp,
+            RuntimeProviderId::OnnxRuntime,
+        ] {
             if let Some(behavior) = self.providers.get(&provider) {
                 providers.push(behavior);
             }
@@ -375,7 +424,8 @@ mod tests {
 
         assert!(registry.contains(RuntimeProviderId::Ollama));
         assert!(registry.contains(RuntimeProviderId::LlamaCpp));
-        assert_eq!(registry.providers().len(), 2);
+        assert!(registry.contains(RuntimeProviderId::OnnxRuntime));
+        assert_eq!(registry.providers().len(), 3);
     }
 
     #[test]
@@ -470,6 +520,36 @@ mod tests {
     }
 
     #[test]
+    fn onnx_runtime_behavior_declares_embedding_only_in_process_surface() {
+        let registry = ProviderRegistry::builtin();
+        let behavior = registry.get(RuntimeProviderId::OnnxRuntime).unwrap();
+
+        assert!(behavior.supports_mode(RuntimeProviderMode::OnnxServe));
+        assert!(behavior.supports_artifact_format(ExecutableArtifactFormat::Onnx));
+        assert!(behavior.supports_serving_task(ServingTask::Embedding));
+        assert!(behavior.supports_openai_endpoint(OpenAiGatewayEndpoint::Models));
+        assert!(behavior.supports_openai_endpoint(OpenAiGatewayEndpoint::Embeddings));
+        assert!(!behavior.supports_openai_endpoint(OpenAiGatewayEndpoint::ChatCompletions));
+        assert!(behavior.supports_launch_kind(ProviderLaunchKind::InProcessRuntime));
+        assert_eq!(
+            behavior.managed_launch_target(RuntimeProviderMode::OnnxServe),
+            Some(ProviderManagedLaunchTarget::InProcessRuntime(
+                ProviderInProcessRuntimeTarget::OnnxRuntime
+            ))
+        );
+        assert_eq!(
+            behavior.serving_adapter_kind,
+            ProviderServingAdapterKind::OnnxRuntime
+        );
+        assert_eq!(
+            behavior.unload_behavior,
+            ProviderUnloadBehavior::SessionManager
+        );
+        assert!(behavior.supports_management_mode(RuntimeManagementMode::Managed));
+        assert!(!behavior.supports_management_mode(RuntimeManagementMode::External));
+    }
+
+    #[test]
     fn provider_behavior_serializes_contract_enums_as_snake_case() {
         let behavior = ProviderBehavior::llama_cpp();
         let serialized = serde_json::to_value(behavior).unwrap();
@@ -537,7 +617,7 @@ mod tests {
         );
         assert_eq!(
             ExecutableArtifactFormat::from_path(Path::new("/models/example.onnx")),
-            None
+            Some(ExecutableArtifactFormat::Onnx)
         );
         assert_eq!(
             ExecutableArtifactFormat::from_path(Path::new("/models")),
@@ -553,7 +633,7 @@ mod tests {
         assert!(!behavior.supports_management_mode(RuntimeManagementMode::Managed));
         assert!(behavior.supports_management_mode(RuntimeManagementMode::External));
 
-        behavior.launch_kinds = vec![ProviderLaunchKind::PythonSidecar];
+        behavior.launch_kinds = vec![ProviderLaunchKind::InProcessRuntime];
 
         assert!(behavior.supports_management_mode(RuntimeManagementMode::Managed));
         assert!(!behavior.supports_management_mode(RuntimeManagementMode::External));

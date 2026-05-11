@@ -182,12 +182,8 @@ fn profile_runtime_env_vars(
             RuntimeProfileBinaryLaunchKind::LlamaCppRouter
             | RuntimeProfileBinaryLaunchKind::LlamaCppDedicated,
         )
+        | RuntimeProfileLaunchStrategy::InProcessRuntime(_)
         | RuntimeProfileLaunchStrategy::ExternalOnly => {}
-        RuntimeProfileLaunchStrategy::PythonSidecar(_) => {
-            return Err(PumasError::InvalidParams {
-                message: "python sidecar launch environment is not implemented".to_string(),
-            });
-        }
     }
     apply_device_visibility_env(&mut env_vars, profile);
     Ok(env_vars)
@@ -224,9 +220,7 @@ fn profile_runtime_extra_args(
             apply_llama_cpp_device_args(&mut args, profile);
             Ok(args)
         }
-        RuntimeProfileLaunchStrategy::PythonSidecar(_) => Err(PumasError::InvalidParams {
-            message: "python sidecar launch arguments are not implemented".to_string(),
-        }),
+        RuntimeProfileLaunchStrategy::InProcessRuntime(_) => Ok(Vec::new()),
         RuntimeProfileLaunchStrategy::ExternalOnly => Ok(Vec::new()),
     }
 }

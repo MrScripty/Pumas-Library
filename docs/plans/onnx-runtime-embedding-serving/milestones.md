@@ -314,6 +314,11 @@ Runtime-profile lifecycle launch preparation now branches on
 `RuntimeProfileLaunchStrategy` for llama.cpp router/dedicated prep instead of
 checking provider id plus provider mode. ONNX Python sidecar preparation remains
 explicitly unwired until the managed sidecar lifecycle slice.
+Runtime-profile route config initialization, one-way legacy route migration,
+and route validation now live in
+`rust/crates/pumas-core/src/runtime_profiles/route_config.rs`. The runtime
+profile README documents the persistence boundary, and provider-scoped route
+migration remains verified through the public runtime profile service tests.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

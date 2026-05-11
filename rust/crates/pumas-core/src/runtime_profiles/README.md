@@ -14,18 +14,30 @@ selection. The contract separates binary-process, Python-sidecar, and
 external-only profile intent so new providers can be added without encoding
 another provider match in launch callers.
 
+`route_config.rs` owns runtime-profile config initialization, one-way legacy
+route migration, and model-route validation. The service consumes this module
+as a persistence boundary so provider-scoped route cleanup does not live inside
+runtime-profile orchestration.
+
 ## API Consumers
 
 - `runtime_profiles.rs` projects provider behavior launch targets into
   `RuntimeProfileLaunchStrategy` values for managed launch specs.
 - `api/state_runtime_profiles.rs` consumes the typed strategy when converting a
   launch spec into a concrete process launch config.
+- `runtime_profiles.rs` delegates persisted config loading and route validation
+  to `route_config.rs`.
 
 ## Structured Producer Contract
 
 Launch strategy values are Rust DTOs with `serde` support and snake_case wire
 names. Tests cover the current Ollama and llama.cpp mappings plus the
 external-only strategy.
+
+Runtime profile config files are persisted as JSON through the metadata atomic
+read/write helpers. Legacy schema-1 model-only routes are rewritten once into
+provider-scoped routes only when the referenced profile identifies the provider;
+ambiguous legacy routes are dropped.
 
 ## Lifecycle
 
@@ -42,6 +54,9 @@ structured `InvalidParams` errors before process launch.
 
 The strategy layer preserves existing Ollama and llama.cpp launch behavior. It
 does not change persisted runtime profile schema.
+
+Route config migration preserves schema-2 provider-scoped route shape and does
+not reintroduce a dual old/new route reader.
 
 ## Revisit Trigger
 

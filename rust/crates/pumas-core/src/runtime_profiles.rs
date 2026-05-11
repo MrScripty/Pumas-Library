@@ -4,6 +4,8 @@
 mod launch_specs;
 #[path = "runtime_profiles/launch_strategy.rs"]
 mod launch_strategy;
+#[path = "runtime_profiles/route_config.rs"]
+mod route_config;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -13,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
 use crate::index::ModelRecord;
-use crate::metadata::{atomic_read_json, atomic_write_json};
+use crate::metadata::atomic_write_json;
 use crate::model_library::ModelLibrary;
 use crate::models::{
     ModelRuntimeRoute, RuntimeDeviceMode, RuntimeDeviceSettings, RuntimeEndpointUrl,
@@ -21,18 +23,17 @@ use crate::models::{
     RuntimeProfileEvent, RuntimeProfileEventKind, RuntimeProfileId, RuntimeProfileMutationResponse,
     RuntimeProfileStatus, RuntimeProfileUpdateFeed, RuntimeProfileUpdateFeedResponse,
     RuntimeProfilesConfigFile, RuntimeProfilesSnapshot, RuntimeProfilesSnapshotResponse,
-    RuntimeProviderId, RuntimeProviderMode, RUNTIME_PROFILES_SCHEMA_VERSION,
+    RuntimeProviderId, RuntimeProviderMode,
 };
 use crate::providers::{ExecutableArtifactFormat, ProviderBehavior, ProviderRegistry};
 use crate::{PumasError, Result};
-use serde_json::Value;
 use tokio::sync::broadcast;
-use tracing::warn;
 
 use launch_specs::derive_managed_profile_launch_specs;
 pub use launch_strategy::{
     RuntimeProfileBinaryLaunchKind, RuntimeProfileLaunchStrategy, RuntimeProfilePythonSidecarKind,
 };
+use route_config::{load_or_initialize_config, validate_model_route};
 
 const RUNTIME_PROFILE_EVENT_RETAIN_LIMIT: usize = 256;
 const RUNTIME_PROFILE_UPDATE_CHANNEL_CAPACITY: usize = 64;
@@ -1089,95 +1090,6 @@ fn resolve_config_profile_endpoint(
     })
 }
 
-fn load_or_initialize_config(path: &Path) -> Result<RuntimeProfilesConfigFile> {
-    let raw_config: Option<Value> = atomic_read_json(path)?;
-    match raw_config {
-        Some(raw_config) => {
-            let (config, migrated) = migrate_runtime_profiles_config(raw_config)?;
-            if migrated {
-                atomic_write_json(path, &config, true)?;
-            }
-            Ok(config)
-        }
-        None => {
-            let config = RuntimeProfilesConfigFile::default_seed();
-            atomic_write_json(path, &config, true)?;
-            Ok(config)
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct LegacyRuntimeProfilesConfigFile {
-    cursor: String,
-    profiles: Vec<RuntimeProfileConfig>,
-    #[serde(default)]
-    routes: Vec<LegacyModelRuntimeRoute>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    default_profile_id: Option<RuntimeProfileId>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LegacyModelRuntimeRoute {
-    model_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    profile_id: Option<RuntimeProfileId>,
-    #[serde(default)]
-    auto_load: bool,
-}
-
-fn migrate_runtime_profiles_config(raw_config: Value) -> Result<(RuntimeProfilesConfigFile, bool)> {
-    let schema_version = raw_config
-        .get("schema_version")
-        .and_then(Value::as_u64)
-        .unwrap_or(1);
-    if schema_version >= u64::from(RUNTIME_PROFILES_SCHEMA_VERSION) {
-        return serde_json::from_value(raw_config)
-            .map(|config| (config, false))
-            .map_err(Into::into);
-    }
-
-    let legacy: LegacyRuntimeProfilesConfigFile = serde_json::from_value(raw_config)?;
-    let mut routes = Vec::new();
-    let mut dropped_ambiguous_routes = Vec::new();
-    for route in legacy.routes {
-        let model_id = route.model_id;
-        let Some(provider) = route.profile_id.as_ref().and_then(|profile_id| {
-            legacy
-                .profiles
-                .iter()
-                .find(|profile| &profile.profile_id == profile_id)
-                .map(|profile| profile.provider)
-        }) else {
-            dropped_ambiguous_routes.push(model_id);
-            continue;
-        };
-        routes.push(ModelRuntimeRoute {
-            provider,
-            model_id,
-            profile_id: route.profile_id,
-            auto_load: route.auto_load,
-        });
-    }
-    if !dropped_ambiguous_routes.is_empty() {
-        warn!(
-            dropped_routes = ?dropped_ambiguous_routes,
-            "dropped ambiguous legacy runtime profile routes during provider-scope migration"
-        );
-    }
-
-    Ok((
-        RuntimeProfilesConfigFile {
-            schema_version: RUNTIME_PROFILES_SCHEMA_VERSION,
-            cursor: legacy.cursor,
-            profiles: legacy.profiles,
-            routes,
-            default_profile_id: legacy.default_profile_id,
-        },
-        true,
-    ))
-}
-
 fn bump_cursor(config: &mut RuntimeProfilesConfigFile) {
     let next = config
         .cursor
@@ -1238,19 +1150,13 @@ fn validate_profile_provider_behavior(
     Ok(())
 }
 
-fn validate_model_route(route: &ModelRuntimeRoute) -> Result<()> {
-    if route.model_id.trim().is_empty() {
-        return Err(PumasError::InvalidParams {
-            message: "model_id is required".to_string(),
-        });
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{RuntimeDeviceSettings, RuntimeSchedulerSettings};
+    use crate::models::{
+        RuntimeDeviceSettings, RuntimeSchedulerSettings, RUNTIME_PROFILES_SCHEMA_VERSION,
+    };
+    use serde_json::Value;
     use std::time::Duration;
 
     #[test]

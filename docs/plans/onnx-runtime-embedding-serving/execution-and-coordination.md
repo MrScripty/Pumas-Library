@@ -321,6 +321,12 @@ Update during implementation:
   prep instead of matching on provider id plus provider mode. ONNX Python
   sidecar launch preparation remains explicitly unwired until the managed
   sidecar lifecycle slice.
+- 2026-05-11: Extracted runtime-profile route config initialization, one-way
+  legacy route migration, and model-route validation into
+  `rust/crates/pumas-core/src/runtime_profiles/route_config.rs`. The
+  runtime-profile README now documents this persistence boundary. This reduces
+  `runtime_profiles.rs` before ONNX route assignment while preserving the
+  schema-2 provider-scoped route contract.
 
 ## Commit Cadence Notes
 
@@ -511,6 +517,8 @@ changes remain.
   of provider-id dispatch for stopped managed profiles.
 - Runtime-profile lifecycle launch preparation now consumes launch strategy
   instead of provider-id/provider-mode dispatch for llama.cpp prep.
+- Runtime-profile route config initialization, legacy route migration, and
+  route validation now live in `runtime_profiles/route_config.rs`.
 
 ### Deviations
 
@@ -681,6 +689,9 @@ changes remain.
   --manifest-path rust/crates/pumas-core/Cargo.toml serving`, and `cargo fmt
   --manifest-path rust/Cargo.toml --all -- --check`.
 - Runtime-profile launch-preparation strategy slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles` and
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Runtime-profile route config extraction slice verified with `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles` and
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
 

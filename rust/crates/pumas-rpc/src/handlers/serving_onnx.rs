@@ -50,6 +50,7 @@ pub(super) async fn serve_onnx_model(
         }
     };
 
+    let onnx_model_id = load_request.model_id.clone();
     let session = match state.onnx_session_manager.load(load_request).await {
         Ok(session) => session,
         Err(error) => {
@@ -65,6 +66,18 @@ pub(super) async fn serve_onnx_model(
             .await;
         }
     };
+    if let Err(error) = confirm_onnx_session_loaded(state, &onnx_model_id).await {
+        warn!("ONNX fake session status confirmation failed: {}", error);
+        return non_critical_failure_response(
+            state,
+            serving_error(
+                ModelServeErrorCode::ProviderLoadFailed,
+                "ONNX Runtime loaded the selected model but did not report it as available",
+                &request,
+            ),
+        )
+        .await;
+    }
 
     let status = ServedModelStatus {
         model_id: request.model_id.clone(),
@@ -175,4 +188,25 @@ async fn resolve_onnx_model_path(
         return Ok(None);
     }
     Ok(Some(onnx_path))
+}
+
+async fn confirm_onnx_session_loaded(
+    state: &AppState,
+    model_id: &OnnxModelId,
+) -> Result<(), String> {
+    let sessions = state
+        .onnx_session_manager
+        .list()
+        .await
+        .map_err(|error| error.to_string())?;
+    if sessions
+        .iter()
+        .any(|session| session.model_id.as_str() == model_id.as_str())
+    {
+        return Ok(());
+    }
+    Err(format!(
+        "ONNX model '{}' was absent from session list after load",
+        model_id.as_str()
+    ))
 }

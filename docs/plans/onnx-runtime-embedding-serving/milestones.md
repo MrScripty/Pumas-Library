@@ -578,7 +578,7 @@ state.
 - [ ] Move existing Ollama and llama.cpp serving paths behind provider serving
       adapters before adding ONNX load/unload so the RPC handler only performs
       boundary parsing, validation orchestration, and response shaping.
-- [ ] Confirm the Rust ONNX provider status/list includes the model before
+- [x] Confirm the Rust ONNX provider status/list includes the model before
       recording loaded status.
 - [x] Add unload support through the Rust ONNX session manager and served
       status removal.
@@ -608,9 +608,11 @@ selected ONNX profile is running and the primary executable artifact is `.onnx`.
 Provider behavior drives ONNX artifact compatibility, and ONNX rejects
 llama.cpp-specific placement overrides with non-critical domain errors. The RPC
 serving boundary now loads/unloads ONNX through the Rust fake session manager
-and records/removes backend served status. Real ONNX Runtime execution,
-duplicate load/unload idempotency, session status reconciliation before record,
-and gateway embedding routing remain open.
+and records/removes backend served status. The ONNX serving adapter now
+confirms the Rust session manager lists the loaded model before recording
+backend served status. Real ONNX Runtime execution, duplicate load/unload
+idempotency, and route/profile fallback cleanup remain open. Gateway embedding
+routing has started under Milestone 5.
 
 ### Milestone 5: Pumas Gateway Routing
 

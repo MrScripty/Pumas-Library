@@ -454,6 +454,15 @@ Update during implementation:
   secrets, or full model paths. Verification passed:
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` and
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`.
+- 2026-05-11: Added an ONNX serving status reconciliation guard before durable
+  served-state updates. After the Rust ONNX session manager reports a successful
+  load, `serving_onnx.rs` now lists sessions and verifies the requested model is
+  present before calling `record_served_model`; a mismatch returns a
+  non-critical provider-load failure instead of publishing stale loaded status.
+  Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml serving`.
 
 ## Commit Cadence Notes
 

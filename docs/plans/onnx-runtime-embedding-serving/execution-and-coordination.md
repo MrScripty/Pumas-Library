@@ -222,6 +222,13 @@ Update during implementation:
   constructs `ProviderRegistry::builtin()`. Added a focused test proving a
   composed registry controls artifact/provider validation. Runtime-profile
   validation remains the next core injection sub-slice.
+- 2026-05-11: Injected provider behavior into core runtime-profile validation
+  and made the primary API builder the composition root for the core provider
+  registry. `RuntimeProfileService` now owns an injected registry, `PumasApi`
+  builds one registry and passes it to both runtime-profile and serving
+  services, and service-level default constructors no longer construct built-in
+  registries in production code. Reusable provider clients and the managed
+  launch-strategy abstraction remain separate open tasks.
 
 ## Commit Cadence Notes
 
@@ -376,6 +383,9 @@ changes remain.
 - RPC gateway and serving handlers now consume the provider registry from
   `AppState`.
 - Core serving validation now consumes the registry owned by `ServingService`.
+- Core runtime-profile validation now consumes the registry owned by
+  `RuntimeProfileService`, and the primary API builder owns registry
+  composition for core services.
 
 ### Deviations
 
@@ -476,6 +486,11 @@ changes remain.
   --manifest-path rust/crates/pumas-core/Cargo.toml serving`, `cargo test
   --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt
   --manifest-path rust/Cargo.toml --all -- --check`.
+- Core runtime-profile provider-registry injection slice verified with `cargo
+  test --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml serving`,
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

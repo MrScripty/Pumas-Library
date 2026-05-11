@@ -46,10 +46,6 @@ pub struct ServingService {
 }
 
 impl ServingService {
-    pub fn new() -> Self {
-        Self::with_provider_registry(ProviderRegistry::builtin())
-    }
-
     pub fn with_provider_registry(provider_registry: ProviderRegistry) -> Self {
         Self {
             snapshot: RwLock::new(ServingStatusSnapshot::empty()),
@@ -835,6 +831,10 @@ mod tests {
         validate_model_serving_request(request, context, &ProviderRegistry::builtin())
     }
 
+    fn service() -> ServingService {
+        ServingService::with_provider_registry(ProviderRegistry::builtin())
+    }
+
     fn loaded_status(
         model_id: &str,
         profile_id: &str,
@@ -861,7 +861,7 @@ mod tests {
 
     #[tokio::test]
     async fn serving_service_starts_with_not_configured_snapshot() {
-        let service = ServingService::new();
+        let service = service();
 
         let status = service.status().await;
 
@@ -872,7 +872,7 @@ mod tests {
 
     #[tokio::test]
     async fn serving_service_records_loaded_and_unloaded_models() {
-        let service = ServingService::new();
+        let service = service();
         let mut updates = service.subscribe_updates();
         let status = ServedModelStatus {
             model_id: "models/example".to_string(),
@@ -955,7 +955,7 @@ mod tests {
 
     #[tokio::test]
     async fn serving_service_unloads_only_matching_provider_instance() {
-        let service = ServingService::new();
+        let service = service();
         let mut llama = loaded_status("models/shared", "shared-profile", Some("shared"));
         llama.provider = RuntimeProviderId::LlamaCpp;
         let mut ollama = loaded_status("models/shared", "shared-profile", Some("shared"));
@@ -1000,7 +1000,7 @@ mod tests {
 
     #[tokio::test]
     async fn serving_service_removes_profile_models_when_profile_becomes_unavailable() {
-        let service = ServingService::new();
+        let service = service();
         let mut updates = service.subscribe_updates();
         let profile_id = RuntimeProfileId::parse("llama-gpu").unwrap();
 

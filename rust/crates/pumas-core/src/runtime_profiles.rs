@@ -263,6 +263,7 @@ pub struct RuntimeProfileService {
     event_journal: Arc<RwLock<RuntimeProfileEventJournal>>,
     updates: broadcast::Sender<RuntimeProfileUpdateFeed>,
     operation_locks: Arc<Mutex<HashSet<RuntimeProfileId>>>,
+    provider_registry: ProviderRegistry,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -308,7 +309,10 @@ impl Drop for RuntimeProfileOperationGuard {
 }
 
 impl RuntimeProfileService {
-    pub fn new(launcher_root: impl AsRef<Path>) -> Self {
+    pub fn with_provider_registry(
+        launcher_root: impl AsRef<Path>,
+        provider_registry: ProviderRegistry,
+    ) -> Self {
         let launcher_root = launcher_root.as_ref().to_path_buf();
         Self {
             config_path: launcher_root
@@ -320,6 +324,7 @@ impl RuntimeProfileService {
             event_journal: Arc::new(RwLock::new(RuntimeProfileEventJournal::default())),
             updates: broadcast::channel(RUNTIME_PROFILE_UPDATE_CHANNEL_CAPACITY).0,
             operation_locks: Arc::new(Mutex::new(HashSet::new())),
+            provider_registry,
         }
     }
 
@@ -497,7 +502,7 @@ impl RuntimeProfileService {
         &self,
         profile: RuntimeProfileConfig,
     ) -> Result<RuntimeProfileMutationResponse> {
-        validate_profile_config(&profile).await?;
+        validate_profile_config(&profile, &self.provider_registry).await?;
         let profile_id = profile.profile_id.clone();
         let launcher_root = self.launcher_root.clone();
         self.mutate_config(move |config| {
@@ -1388,14 +1393,17 @@ fn format_runtime_profile_cursor(cursor: u64) -> String {
     format!("runtime-profiles:{cursor}")
 }
 
-async fn validate_profile_config(profile: &RuntimeProfileConfig) -> Result<()> {
+async fn validate_profile_config(
+    profile: &RuntimeProfileConfig,
+    provider_registry: &ProviderRegistry,
+) -> Result<()> {
     if profile.name.trim().is_empty() {
         return Err(PumasError::InvalidParams {
             message: "runtime profile name is required".to_string(),
         });
     }
 
-    validate_profile_provider_behavior(profile, &ProviderRegistry::builtin())?;
+    validate_profile_provider_behavior(profile, provider_registry)?;
 
     match profile.provider {
         RuntimeProviderId::Ollama => OllamaRuntimeProviderAdapter.validate_profile(profile).await,
@@ -1510,6 +1518,14 @@ mod tests {
         }
     }
 
+    async fn validate_builtin_profile_config(profile: &RuntimeProfileConfig) -> Result<()> {
+        validate_profile_config(profile, &ProviderRegistry::builtin()).await
+    }
+
+    fn runtime_profile_service(launcher_root: impl AsRef<Path>) -> RuntimeProfileService {
+        RuntimeProfileService::with_provider_registry(launcher_root, ProviderRegistry::builtin())
+    }
+
     #[tokio::test]
     async fn llama_cpp_provider_adapter_accepts_router_and_dedicated_modes() {
         let mut profile = managed_llama_cpp_profile("llama-router");
@@ -1552,10 +1568,10 @@ mod tests {
 
     #[tokio::test]
     async fn validate_profile_config_accepts_builtin_provider_behavior() {
-        validate_profile_config(&RuntimeProfileConfig::default_ollama())
+        validate_builtin_profile_config(&RuntimeProfileConfig::default_ollama())
             .await
             .unwrap();
-        validate_profile_config(&managed_llama_cpp_profile("llama-router"))
+        validate_builtin_profile_config(&managed_llama_cpp_profile("llama-router"))
             .await
             .unwrap();
     }
@@ -1565,11 +1581,29 @@ mod tests {
         let mut profile = RuntimeProfileConfig::default_ollama();
         profile.provider_mode = RuntimeProviderMode::LlamaCppRouter;
 
-        let error = validate_profile_config(&profile).await.unwrap_err();
+        let error = validate_builtin_profile_config(&profile).await.unwrap_err();
 
         assert!(error
             .to_string()
             .contains("provider does not support provider_mode"));
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_validation_uses_composed_provider_registry() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let service = RuntimeProfileService::with_provider_registry(
+            temp_dir.path(),
+            ProviderRegistry::from_behaviors([ProviderBehavior::ollama()]),
+        );
+
+        let error = service
+            .upsert_profile(managed_llama_cpp_profile("llama-router"))
+            .await
+            .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("runtime profile provider is not registered"));
     }
 
     #[test]
@@ -1622,7 +1656,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_seeds_and_persists_default_profile() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
 
         let snapshot = service.snapshot().await.unwrap();
 
@@ -1645,7 +1679,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_updates_routes_and_requires_known_profiles() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
         let route = ModelRuntimeRoute {
             provider: RuntimeProviderId::Ollama,
             model_id: "llm/test/model".to_string(),
@@ -1675,7 +1709,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_resolves_model_route_endpoint() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
         let mut profile = RuntimeProfileConfig::default_ollama();
         profile.profile_id = RuntimeProfileId::parse("ollama-route").unwrap();
         profile.name = "Ollama Route".to_string();
@@ -1712,7 +1746,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_routes_same_model_id_by_provider() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
 
         let mut ollama = RuntimeProfileConfig::default_ollama();
         ollama.profile_id = RuntimeProfileId::parse("ollama-route").unwrap();
@@ -1775,7 +1809,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_reads_model_route_auto_load_policy() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
 
         assert_eq!(
             service
@@ -1833,7 +1867,7 @@ mod tests {
         )
         .unwrap();
 
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
         let snapshot = service.snapshot().await.unwrap();
 
         assert_eq!(
@@ -1858,7 +1892,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_rejects_stopped_model_operation_routes() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
 
         let stopped = service
             .resolve_model_endpoint_for_operation(
@@ -1893,7 +1927,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_allows_external_model_operation_routes() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
         let mut profile = RuntimeProfileConfig::default_ollama();
         profile.profile_id = RuntimeProfileId::parse("ollama-external").unwrap();
         profile.name = "External Ollama".to_string();
@@ -1917,7 +1951,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_resolves_default_ollama_endpoint() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
 
         let endpoint = service
             .resolve_profile_endpoint(RuntimeProviderId::Ollama, None)
@@ -1930,7 +1964,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_derives_managed_launch_specs() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
 
         let mut gpu_profile = RuntimeProfileConfig::default_ollama();
         gpu_profile.profile_id = RuntimeProfileId::parse("ollama-gpu").unwrap();
@@ -1992,7 +2026,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_rejects_managed_port_collisions() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
 
         let mut duplicate_port_profile = RuntimeProfileConfig::default_ollama();
         duplicate_port_profile.profile_id = RuntimeProfileId::parse("ollama-duplicate").unwrap();
@@ -2008,7 +2042,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_derives_cpu_visibility_env() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
 
         let mut cpu_profile = RuntimeProfileConfig::default_ollama();
         cpu_profile.profile_id = RuntimeProfileId::parse("ollama-cpu").unwrap();
@@ -2050,7 +2084,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_derives_llama_cpp_router_launch_specs() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
 
         let mut profile = managed_llama_cpp_profile("llama-router-gpu");
         profile.name = "llama.cpp GPU Router".to_string();
@@ -2104,7 +2138,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_defaults_llama_cpp_gpu_to_full_offload() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
 
         let mut profile = managed_llama_cpp_profile("llama-router-gpu-default");
         profile.name = "llama.cpp GPU Default".to_string();
@@ -2129,7 +2163,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_resolves_implicit_managed_llama_cpp_endpoint() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
 
         let mut profile = managed_llama_cpp_profile("llama-router-auto-port");
         profile.endpoint_url = None;
@@ -2158,7 +2192,7 @@ mod tests {
     #[test]
     fn runtime_profile_service_serializes_profile_operations() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
         let profile_id = RuntimeProfileId::parse("ollama-default").unwrap();
 
         let guard = service
@@ -2175,7 +2209,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_status_changes_emit_update_events() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
         let mut updates = service.subscribe_updates();
         let snapshot = service.snapshot().await.unwrap();
         let cursor = snapshot.snapshot.cursor.clone();
@@ -2224,7 +2258,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_config_mutations_push_snapshot_required_update() {
         let temp_dir = tempfile::TempDir::new().unwrap();
-        let service = RuntimeProfileService::new(temp_dir.path());
+        let service = runtime_profile_service(temp_dir.path());
         let mut updates = service.subscribe_updates();
         let mut profile = RuntimeProfileConfig::default_ollama();
         profile.profile_id = RuntimeProfileId::parse("ollama-extra").unwrap();

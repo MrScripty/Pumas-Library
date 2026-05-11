@@ -42,7 +42,7 @@ provider and widens the blast radius.
 - [x] Create a backend provider registry used by runtime profiles, serving
       adapters, gateway routing, and launch strategy selection. The registry is
       the extension point for Ollama, llama.cpp, and ONNX Runtime.
-- [ ] Establish the provider registry composition root and lifecycle owner.
+- [x] Establish the provider registry composition root and lifecycle owner.
       Feature modules may request provider behavior from the registry, but must
       not construct HTTP clients, process launchers, sidecar clients, or
       concrete provider implementations ad hoc.
@@ -237,6 +237,13 @@ Core serving validation now consumes the provider registry owned by
 `ServingService` instead of constructing a built-in registry inside shared
 validation. Runtime-profile validation still needs the same service-owned
 registry treatment before the composition-root lifecycle task can be closed.
+Core runtime-profile validation now consumes the provider registry owned by
+`RuntimeProfileService`, and the primary API builder is the composition root for
+the core provider registry passed into both runtime-profile and serving
+services. Service-level default constructors no longer construct built-in
+registries in production code. This closes the provider-registry composition
+root task for existing core services; reusable provider clients and managed
+launch strategy remain open under their separate tasks.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

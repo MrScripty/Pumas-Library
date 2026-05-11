@@ -493,6 +493,39 @@ mod tests {
     }
 
     #[test]
+    fn served_model_status_contract_serializes_provider_scoped_identity() {
+        let status = ServedModelStatus {
+            model_id: "models/example".to_string(),
+            model_alias: Some("local-model".to_string()),
+            provider: RuntimeProviderId::LlamaCpp,
+            profile_id: RuntimeProfileId::parse("llama-router").unwrap(),
+            load_state: ServedModelLoadState::Loaded,
+            device_mode: RuntimeDeviceMode::Gpu,
+            device_id: Some("cuda:0".to_string()),
+            gpu_layers: Some(35),
+            tensor_split: None,
+            context_size: Some(4096),
+            keep_loaded: true,
+            endpoint_url: RuntimeEndpointUrl::parse("http://127.0.0.1:18080").ok(),
+            memory_bytes: Some(1024),
+            loaded_at: Some("2026-05-11T00:00:00Z".to_string()),
+            last_error: None,
+        };
+        let encoded = serde_json::to_value(&status).unwrap();
+
+        assert_eq!(encoded["model_id"], json!("models/example"));
+        assert_eq!(encoded["model_alias"], json!("local-model"));
+        assert_eq!(encoded["provider"], json!("llama_cpp"));
+        assert_eq!(encoded["profile_id"], json!("llama-router"));
+        assert_eq!(encoded["load_state"], json!("loaded"));
+        assert_eq!(encoded["device_mode"], json!("gpu"));
+        assert_eq!(encoded["endpoint_url"], json!("http://127.0.0.1:18080/"));
+
+        let decoded: ServedModelStatus = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, status);
+    }
+
+    #[test]
     fn serving_config_numeric_validation_returns_non_critical_errors() {
         let config = ModelServingConfig {
             gpu_layers: Some(-2),

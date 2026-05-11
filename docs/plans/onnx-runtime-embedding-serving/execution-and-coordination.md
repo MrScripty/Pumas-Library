@@ -243,6 +243,11 @@ Update during implementation:
   clients from that state-owned factory instead of constructing client stacks
   in request handling. The remaining `reqwest::Client::builder()` usage in RPC
   handlers is plugin proxy code, not runtime provider serving.
+- 2026-05-11: Added contract serialization coverage for provider capabilities
+  projected from provider behavior and provider-scoped served-model status
+  fields. The tests round-trip the Rust DTOs through JSON so provider,
+  provider-mode, device-mode, profile, endpoint, and served identity wire names
+  are locked before ONNX adds new values.
 
 ## Commit Cadence Notes
 
@@ -405,6 +410,8 @@ changes remain.
 - Existing Ollama and llama.cpp provider serving/app HTTP clients are now owned
   by RPC composition state or factories instead of being built in serving
   request handlers.
+- Provider capability DTOs and provider-scoped served-model status fields now
+  have focused JSON serialization/round-trip coverage.
 
 ### Deviations
 
@@ -520,6 +527,12 @@ changes remain.
   --manifest-path rust/crates/pumas-rpc/Cargo.toml provider_clients`, `cargo
   test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo
   fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Provider contract serialization slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`, `cargo
+  test --manifest-path rust/crates/pumas-core/Cargo.toml serving_contract`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml
+  served_model_status_contract`, and `cargo fmt --manifest-path rust/Cargo.toml
+  --all -- --check`.
 
 ### Traceability Links
 

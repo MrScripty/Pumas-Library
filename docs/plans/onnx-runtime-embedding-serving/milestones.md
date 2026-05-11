@@ -131,7 +131,7 @@ provider and widens the blast radius.
 - [ ] Add backend tests that prove Ollama and llama.cpp behavior now flows
       through the new provider behavior and provider-scoped route contracts,
       while unsupported provider/path combinations fail cleanly.
-- [ ] Add contract serialization tests for provider capabilities and any new
+- [x] Add contract serialization tests for provider capabilities and any new
       served-model fields so Rust and frontend wire shapes stay aligned.
 
 **Verification:**
@@ -254,6 +254,9 @@ Ollama provider-client reuse is now complete for existing RPC paths:
 of constructing client stacks in request handling. Existing-provider gateway and
 provider HTTP client ownership is now composition-rooted; plugin proxy HTTP
 client construction is unrelated to runtime provider serving.
+Provider capability DTOs and provider-scoped served-model status fields now
+have focused JSON serialization/round-trip tests in Rust, locking the current
+wire names before ONNX adds new provider and artifact values.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

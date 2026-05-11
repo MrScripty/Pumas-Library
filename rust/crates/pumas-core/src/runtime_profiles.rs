@@ -1491,6 +1491,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn provider_capabilities_contract_serializes_from_behavior() {
+        let capabilities =
+            RuntimeProviderCapabilities::from_behavior(&ProviderBehavior::llama_cpp());
+        let encoded = serde_json::to_value(&capabilities).unwrap();
+
+        assert_eq!(encoded["provider"], "llama_cpp");
+        assert_eq!(encoded["provider_modes"][0], "llama_cpp_router");
+        assert_eq!(encoded["device_modes"][0], "auto");
+        assert_eq!(encoded["supports_managed_profiles"], true);
+        assert_eq!(encoded["supports_external_profiles"], true);
+        assert_eq!(encoded["supports_model_catalog"], true);
+        assert_eq!(encoded["supports_dedicated_model_processes"], true);
+
+        let decoded: RuntimeProviderCapabilities = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, capabilities);
+    }
+
     #[tokio::test]
     async fn ollama_provider_adapter_rejects_invalid_modes() {
         let mut profile = RuntimeProfileConfig::default_ollama();

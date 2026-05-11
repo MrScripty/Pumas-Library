@@ -13,6 +13,7 @@ use pumas_library::{
     OpenAiGatewayEndpoint,
 };
 use serde_json::{json, Value};
+use tracing::{debug, warn};
 
 pub(crate) async fn handle_onnx_embedding(
     state: &AppState,
@@ -33,10 +34,29 @@ pub(crate) async fn handle_onnx_embedding(
         Ok(request) => request,
         Err(error) => return error.into_response(),
     };
+    debug!(
+        provider = "onnx_runtime",
+        model_id = %served.model_id,
+        gateway_model = %requested_model,
+        profile_id = %served.profile_id.as_str(),
+        input_count = request.input.len(),
+        dimensions = ?request.dimensions,
+        "routing ONNX embedding request through in-process session manager"
+    );
 
     match state.onnx_session_manager.embed(request).await {
         Ok(response) => Json(openai_embedding_response(response, requested_model)).into_response(),
-        Err(error) => onnx_runtime_error_response(error),
+        Err(error) => {
+            warn!(
+                provider = "onnx_runtime",
+                model_id = %served.model_id,
+                gateway_model = %requested_model,
+                profile_id = %served.profile_id.as_str(),
+                error_code = ?error.code,
+                "ONNX embedding gateway request failed"
+            );
+            onnx_runtime_error_response(error)
+        }
     }
 }
 

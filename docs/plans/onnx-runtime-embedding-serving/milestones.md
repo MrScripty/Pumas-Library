@@ -639,7 +639,7 @@ existing Pumas `/v1` gateway.
       limits/timeouts, and no per-request client construction.
 - [ ] Preserve timeout and error mapping semantics so provider failures return
       bounded OpenAI-compatible error bodies and do not hang external callers.
-- [ ] Add request correlation or structured logging at the gateway/provider
+- [x] Add request correlation or structured logging at the gateway/provider
       boundary without logging embedding input text, tokens, secrets, or full
       model paths.
 - [x] Add gateway tests for success, unknown model, ambiguous alias, and
@@ -672,10 +672,9 @@ standards threshold. Focused verification passed:
 `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
 `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`,
 and `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`.
-Remaining M5 work includes real facade acceptance tests, explicit oversized
-body handler tests, timeout/cancellation semantics, request
-correlation/logging, unknown-model/provider pass-through coverage, and manual
-curl evidence after frontend/serve workflow is available.
+Remaining M5 work includes real facade acceptance tests, timeout/cancellation
+semantics, gateway shared-client/no-client-construction proof, provider-timeout
+coverage, and manual curl evidence after frontend/serve workflow is available.
 The follow-up handler-contract slice added direct gateway handler tests for the
 ONNX public `/v1/embeddings` path: a served and loaded ONNX model returns
 OpenAI-compatible embedding JSON through the in-process adapter, ONNX rejects
@@ -690,6 +689,12 @@ embedding request bodies now have a test proving they return HTTP 413 before
 JSON parsing or ONNX session dispatch, unknown models return HTTP 404, and
 duplicate gateway aliases return HTTP 409 with the provider-scoped ambiguity
 code. Verification passed:
+`cargo fmt --manifest-path rust/Cargo.toml --all -- --check` and
+`cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`.
+The structured-logging slice added ONNX gateway/provider boundary logs for
+successful routing and provider failures with provider id, model id, gateway
+model, profile id, input count, dimensions, and error code only. It does not
+log embedding input text, tokens, secrets, or model paths. Verification passed:
 `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` and
 `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`.
 

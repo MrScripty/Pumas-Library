@@ -447,6 +447,13 @@ Update during implementation:
   Verification passed:
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` and
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`.
+- 2026-05-11: Added structured ONNX gateway/provider boundary logging without
+  request text or path leakage. The in-process ONNX embedding adapter logs
+  provider id, served model id, gateway model, profile id, input count,
+  dimensions, and backend error code, but not embedding input text, tokens,
+  secrets, or full model paths. Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` and
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`.
 
 ## Commit Cadence Notes
 

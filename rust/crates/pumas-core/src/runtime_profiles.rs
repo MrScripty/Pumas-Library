@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
@@ -69,6 +70,50 @@ pub trait RuntimeProviderAdapter: Send + Sync {
     fn provider(&self) -> RuntimeProviderId;
     fn capabilities(&self) -> RuntimeProviderCapabilities;
     async fn validate_profile(&self, profile: &RuntimeProfileConfig) -> Result<()>;
+}
+
+#[derive(Clone)]
+pub struct RuntimeProviderAdapters {
+    adapters: Arc<HashMap<RuntimeProviderId, Arc<dyn RuntimeProviderAdapter>>>,
+}
+
+impl RuntimeProviderAdapters {
+    pub fn builtin() -> Self {
+        Self::from_adapters(vec![
+            Arc::new(OllamaRuntimeProviderAdapter) as Arc<dyn RuntimeProviderAdapter>,
+            Arc::new(LlamaCppRuntimeProviderAdapter) as Arc<dyn RuntimeProviderAdapter>,
+        ])
+    }
+
+    pub fn from_adapters(
+        adapters: impl IntoIterator<Item = Arc<dyn RuntimeProviderAdapter>>,
+    ) -> Self {
+        let adapters = adapters
+            .into_iter()
+            .map(|adapter| (adapter.provider(), adapter))
+            .collect();
+        Self {
+            adapters: Arc::new(adapters),
+        }
+    }
+
+    async fn validate_profile(&self, profile: &RuntimeProfileConfig) -> Result<()> {
+        let Some(adapter) = self.adapters.get(&profile.provider) else {
+            return Err(PumasError::InvalidParams {
+                message: "runtime profile provider adapter is not registered".to_string(),
+            });
+        };
+        adapter.validate_profile(profile).await
+    }
+}
+
+impl fmt::Debug for RuntimeProviderAdapters {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RuntimeProviderAdapters")
+            .field("providers", &self.adapters.keys().collect::<Vec<_>>())
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -264,6 +309,7 @@ pub struct RuntimeProfileService {
     updates: broadcast::Sender<RuntimeProfileUpdateFeed>,
     operation_locks: Arc<Mutex<HashSet<RuntimeProfileId>>>,
     provider_registry: ProviderRegistry,
+    provider_adapters: RuntimeProviderAdapters,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -309,9 +355,10 @@ impl Drop for RuntimeProfileOperationGuard {
 }
 
 impl RuntimeProfileService {
-    pub fn with_provider_registry(
+    pub fn with_provider_registry_and_adapters(
         launcher_root: impl AsRef<Path>,
         provider_registry: ProviderRegistry,
+        provider_adapters: RuntimeProviderAdapters,
     ) -> Self {
         let launcher_root = launcher_root.as_ref().to_path_buf();
         Self {
@@ -325,6 +372,7 @@ impl RuntimeProfileService {
             updates: broadcast::channel(RUNTIME_PROFILE_UPDATE_CHANNEL_CAPACITY).0,
             operation_locks: Arc::new(Mutex::new(HashSet::new())),
             provider_registry,
+            provider_adapters,
         }
     }
 
@@ -502,7 +550,7 @@ impl RuntimeProfileService {
         &self,
         profile: RuntimeProfileConfig,
     ) -> Result<RuntimeProfileMutationResponse> {
-        validate_profile_config(&profile, &self.provider_registry).await?;
+        validate_profile_config(&profile, &self.provider_registry, &self.provider_adapters).await?;
         let profile_id = profile.profile_id.clone();
         let launcher_root = self.launcher_root.clone();
         self.mutate_config(move |config| {
@@ -1396,6 +1444,7 @@ fn format_runtime_profile_cursor(cursor: u64) -> String {
 async fn validate_profile_config(
     profile: &RuntimeProfileConfig,
     provider_registry: &ProviderRegistry,
+    provider_adapters: &RuntimeProviderAdapters,
 ) -> Result<()> {
     if profile.name.trim().is_empty() {
         return Err(PumasError::InvalidParams {
@@ -1404,15 +1453,7 @@ async fn validate_profile_config(
     }
 
     validate_profile_provider_behavior(profile, provider_registry)?;
-
-    match profile.provider {
-        RuntimeProviderId::Ollama => OllamaRuntimeProviderAdapter.validate_profile(profile).await,
-        RuntimeProviderId::LlamaCpp => {
-            LlamaCppRuntimeProviderAdapter
-                .validate_profile(profile)
-                .await
-        }
-    }
+    provider_adapters.validate_profile(profile).await
 }
 
 fn validate_profile_provider_behavior(
@@ -1537,11 +1578,20 @@ mod tests {
     }
 
     async fn validate_builtin_profile_config(profile: &RuntimeProfileConfig) -> Result<()> {
-        validate_profile_config(profile, &ProviderRegistry::builtin()).await
+        validate_profile_config(
+            profile,
+            &ProviderRegistry::builtin(),
+            &RuntimeProviderAdapters::builtin(),
+        )
+        .await
     }
 
     fn runtime_profile_service(launcher_root: impl AsRef<Path>) -> RuntimeProfileService {
-        RuntimeProfileService::with_provider_registry(launcher_root, ProviderRegistry::builtin())
+        RuntimeProfileService::with_provider_registry_and_adapters(
+            launcher_root,
+            ProviderRegistry::builtin(),
+            RuntimeProviderAdapters::builtin(),
+        )
     }
 
     #[tokio::test]
@@ -1609,9 +1659,10 @@ mod tests {
     #[tokio::test]
     async fn runtime_profile_service_validation_uses_composed_provider_registry() {
         let temp_dir = tempfile::tempdir().unwrap();
-        let service = RuntimeProfileService::with_provider_registry(
+        let service = RuntimeProfileService::with_provider_registry_and_adapters(
             temp_dir.path(),
             ProviderRegistry::from_behaviors([ProviderBehavior::ollama()]),
+            RuntimeProviderAdapters::builtin(),
         );
 
         let error = service
@@ -1622,6 +1673,27 @@ mod tests {
         assert!(error
             .to_string()
             .contains("runtime profile provider is not registered"));
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_validation_uses_composed_provider_adapters() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let service = RuntimeProfileService::with_provider_registry_and_adapters(
+            temp_dir.path(),
+            ProviderRegistry::builtin(),
+            RuntimeProviderAdapters::from_adapters(vec![
+                Arc::new(OllamaRuntimeProviderAdapter) as Arc<dyn RuntimeProviderAdapter>
+            ]),
+        );
+
+        let error = service
+            .upsert_profile(managed_llama_cpp_profile("llama-router"))
+            .await
+            .unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("runtime profile provider adapter is not registered"));
     }
 
     #[test]

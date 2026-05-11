@@ -248,6 +248,13 @@ Update during implementation:
   fields. The tests round-trip the Rust DTOs through JSON so provider,
   provider-mode, device-mode, profile, endpoint, and served identity wire names
   are locked before ONNX adds new values.
+- 2026-05-11: Moved runtime-profile provider-specific validation dispatch
+  behind a composed `RuntimeProviderAdapters` registry owned by
+  `RuntimeProfileService`. `PumasApiBuilder` now composes both provider
+  behavior and runtime-profile adapters, and a focused test proves injected
+  adapters control validation. Runtime-profile launch-spec derivation still has
+  provider-specific branching and remains part of the managed launch-strategy
+  abstraction task.
 
 ## Commit Cadence Notes
 
@@ -412,6 +419,8 @@ changes remain.
   request handlers.
 - Provider capability DTOs and provider-scoped served-model status fields now
   have focused JSON serialization/round-trip coverage.
+- Runtime-profile provider-specific validation now dispatches through composed
+  runtime provider adapters instead of a direct provider match.
 
 ### Deviations
 
@@ -533,6 +542,10 @@ changes remain.
   `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml
   served_model_status_contract`, and `cargo fmt --manifest-path rust/Cargo.toml
   --all -- --check`.
+- Runtime-profile provider-adapter dispatch slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`, `cargo
+  test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo
+  fmt --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

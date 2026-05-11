@@ -257,6 +257,11 @@ client construction is unrelated to runtime provider serving.
 Provider capability DTOs and provider-scoped served-model status fields now
 have focused JSON serialization/round-trip tests in Rust, locking the current
 wire names before ONNX adds new provider and artifact values.
+Runtime-profile provider-specific validation now dispatches through
+`RuntimeProviderAdapters` owned by `RuntimeProfileService`, with `PumasApiBuilder`
+composing the existing Ollama and llama.cpp adapters. Runtime-profile
+launch-spec derivation still contains provider-specific branching and remains
+open under the managed launch-strategy abstraction task.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

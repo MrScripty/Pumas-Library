@@ -564,6 +564,7 @@ impl PumasApiBuilder {
         .await;
 
         let provider_registry = crate::providers::ProviderRegistry::builtin();
+        let runtime_provider_adapters = crate::runtime_profiles::RuntimeProviderAdapters::builtin();
         let primary_state = Arc::new(PrimaryState {
             _state: state,
             network_manager,
@@ -577,9 +578,10 @@ impl PumasApiBuilder {
             model_importer,
             conversion_manager,
             runtime_profile_service: Arc::new(
-                crate::runtime_profiles::RuntimeProfileService::with_provider_registry(
+                crate::runtime_profiles::RuntimeProfileService::with_provider_registry_and_adapters(
                     &self.launcher_root,
                     provider_registry.clone(),
+                    runtime_provider_adapters,
                 ),
             ),
             serving_service: Arc::new(crate::serving::ServingService::with_provider_registry(

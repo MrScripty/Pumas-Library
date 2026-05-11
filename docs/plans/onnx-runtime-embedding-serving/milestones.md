@@ -274,6 +274,11 @@ consumes the composed provider registry for launch targets, so existing Ollama
 and llama.cpp launch mapping no longer lives in a runtime-profile provider
 match. This closes the managed-launch portion of the provider behavior contract;
 ONNX sidecar process launch still remains a later provider lifecycle slice.
+Provider behavior now separately declares the managed runtime app id used for
+version-manager lookup plus the existing launch failure messages for missing
+version manager or active version. RPC runtime-profile launch no longer matches
+provider ids to select Ollama versus llama.cpp version managers, and current
+user-visible launch errors are preserved.
 Frontend runtime provider descriptors now live in
 `frontend/src/utils/runtimeProviderDescriptors.ts`. Runtime profile settings,
 llama.cpp compatible model rows, provider-scoped route mutations, and serve

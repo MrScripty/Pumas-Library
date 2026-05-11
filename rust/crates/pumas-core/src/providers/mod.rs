@@ -130,6 +130,9 @@ pub struct ProviderBehavior {
     pub openai_endpoints: Vec<OpenAiGatewayEndpoint>,
     pub launch_kinds: Vec<ProviderLaunchKind>,
     pub managed_launch_strategies: Vec<ProviderManagedLaunchStrategy>,
+    pub managed_runtime_app_id: String,
+    pub managed_runtime_uninitialized_message: String,
+    pub managed_runtime_no_active_version_message: String,
     pub managed_runtime_path_segment: String,
     pub managed_runtime_base_port: u16,
     pub provider_model_id_policy: ProviderModelIdPolicy,
@@ -177,6 +180,10 @@ impl ProviderBehavior {
                     ProviderBinaryLaunchTarget::OllamaServe,
                 ),
             }],
+            managed_runtime_app_id: "ollama".to_string(),
+            managed_runtime_uninitialized_message: "Version manager not initialized for ollama"
+                .to_string(),
+            managed_runtime_no_active_version_message: "No active Ollama version set".to_string(),
             managed_runtime_path_segment: "ollama".to_string(),
             managed_runtime_base_port: 11_434,
             provider_model_id_policy: ProviderModelIdPolicy::GatewayAlias,
@@ -236,6 +243,10 @@ impl ProviderBehavior {
                     ),
                 },
             ],
+            managed_runtime_app_id: "llama-cpp".to_string(),
+            managed_runtime_uninitialized_message:
+                "Version manager not initialized for llama.cpp".to_string(),
+            managed_runtime_no_active_version_message: "No active llama.cpp version set. Open the llama.cpp app page, install a runtime version, and set it active.".to_string(),
             managed_runtime_path_segment: "llama-cpp".to_string(),
             managed_runtime_base_port: 18_080,
             provider_model_id_policy: ProviderModelIdPolicy::LibraryModelId,
@@ -393,6 +404,15 @@ mod tests {
             behavior.serving_placement_policy,
             ProviderServingPlacementPolicy::ProfileOnly
         );
+        assert_eq!(behavior.managed_runtime_app_id, "ollama");
+        assert_eq!(
+            behavior.managed_runtime_uninitialized_message,
+            "Version manager not initialized for ollama"
+        );
+        assert_eq!(
+            behavior.managed_runtime_no_active_version_message,
+            "No active Ollama version set"
+        );
         assert_eq!(behavior.managed_runtime_path_segment, "ollama");
         assert_eq!(behavior.managed_runtime_base_port, 11_434);
         assert!(behavior.supports_artifact_format(ExecutableArtifactFormat::Gguf));
@@ -431,6 +451,15 @@ mod tests {
             behavior.unload_behavior,
             ProviderUnloadBehavior::RouterPreset
         );
+        assert_eq!(behavior.managed_runtime_app_id, "llama-cpp");
+        assert_eq!(
+            behavior.managed_runtime_uninitialized_message,
+            "Version manager not initialized for llama.cpp"
+        );
+        assert_eq!(
+            behavior.managed_runtime_no_active_version_message,
+            "No active llama.cpp version set. Open the llama.cpp app page, install a runtime version, and set it active."
+        );
         assert_eq!(behavior.managed_runtime_path_segment, "llama-cpp");
         assert_eq!(behavior.managed_runtime_base_port, 18_080);
         assert!(behavior.supports_model_catalog);
@@ -461,6 +490,15 @@ mod tests {
         assert_eq!(
             serialized["managed_launch_strategies"][0]["target"]["value"],
             "llama_cpp_router"
+        );
+        assert_eq!(serialized["managed_runtime_app_id"], "llama-cpp");
+        assert_eq!(
+            serialized["managed_runtime_uninitialized_message"],
+            "Version manager not initialized for llama.cpp"
+        );
+        assert_eq!(
+            serialized["managed_runtime_no_active_version_message"],
+            "No active llama.cpp version set. Open the llama.cpp app page, install a runtime version, and set it active."
         );
         assert_eq!(serialized["managed_runtime_path_segment"], "llama-cpp");
         assert_eq!(serialized["managed_runtime_base_port"], 18_080);

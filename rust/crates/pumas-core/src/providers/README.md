@@ -41,6 +41,10 @@ Serving load dispatch consumes the provider serving adapter kind. Runtime
 profile launch-spec derivation consumes managed launch strategies declared by
 provider behavior, including provider-owned runtime directory segments and
 implicit managed base ports.
+Runtime profile launch handlers consume provider-owned managed runtime app ids
+for version-manager lookup, with existing provider-specific launch failure
+messages kept in the provider contract so the handler does not dispatch on
+provider ids.
 Serving validation consumes provider launch-on-serve policy instead of accepting
 stopped managed profiles by matching provider ids.
 Serving placement validation consumes provider placement policy instead of
@@ -72,6 +76,9 @@ Later slices migrate frontend bridge contracts onto this registry.
   policy, not from transport-layer provider matches.
 - Managed runtime profile launch targets are declared per provider mode by
   provider behavior, then projected into runtime-profile launch specs.
+- Managed runtime app identity is declared separately from provider id and
+  runtime directory layout so launch handlers do not use provider ids as hidden
+  app/version-manager keys.
 - Managed runtime profile path segments and implicit base ports are declared by
   provider behavior so launch-spec derivation does not infer launch layout from
   provider ids.
@@ -139,9 +146,9 @@ assert!(behavior.supports_openai_endpoint(
 
 - Stable producer fields are provider id, provider modes, device modes, local
   artifact formats, serving tasks, OpenAI endpoints, launch strategies,
-  managed runtime layout, provider model-id policy, gateway alias policy,
-  serving adapter kind, serving placement policy, unload behavior, and
-  launch-on-serve support.
+  managed runtime app/version messages, managed runtime layout, provider
+  model-id policy, gateway alias policy, serving adapter kind, serving
+  placement policy, unload behavior, and launch-on-serve support.
 - Enum values serialize with snake_case when they cross a boundary.
 - Adding ONNX Runtime requires adding one provider behavior entry and matching
   contract tests before consumers depend on it.

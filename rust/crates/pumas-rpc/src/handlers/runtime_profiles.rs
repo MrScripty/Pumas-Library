@@ -5,6 +5,7 @@ use crate::server::AppState;
 use pumas_library::models::{
     ModelRuntimeRoute, RuntimeProfileConfig, RuntimeProfileId, RuntimeProviderId,
 };
+use pumas_library::PumasError;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -131,56 +132,33 @@ pub async fn launch_runtime_profile(
         }));
     };
 
-    let (tag, version_dir) = match profile.provider {
-        RuntimeProviderId::Ollama => {
-            let Some(version_manager) = super::get_version_manager(state, "ollama").await else {
-                return Ok(serde_json::json!({
-                    "success": false,
-                    "error": "Version manager not initialized for ollama",
-                    "ready": false
-                }));
-            };
-            let tag = match command.tag {
-                Some(tag) => tag,
-                None => match version_manager.get_active_version().await? {
-                    Some(tag) => tag,
-                    None => {
-                        return Ok(serde_json::json!({
-                            "success": false,
-                            "error": "No active Ollama version set",
-                            "ready": false
-                        }));
-                    }
-                },
-            };
-            let version_dir = version_manager.version_path(&tag);
-            (tag, version_dir)
-        }
-        RuntimeProviderId::LlamaCpp => {
-            let Some(version_manager) = super::get_version_manager(state, "llama-cpp").await else {
-                return Ok(serde_json::json!({
-                    "success": false,
-                    "error": "Version manager not initialized for llama.cpp",
-                    "ready": false
-                }));
-            };
-            let tag = match command.tag {
-                Some(tag) => tag,
-                None => match version_manager.get_active_version().await? {
-                    Some(tag) => tag,
-                    None => {
-                        return Ok(serde_json::json!({
-                            "success": false,
-                            "error": "No active llama.cpp version set. Open the llama.cpp app page, install a runtime version, and set it active.",
-                            "ready": false
-                        }));
-                    }
-                },
-            };
-            let version_dir = version_manager.version_path(&tag);
-            (tag, version_dir)
-        }
+    let Some(behavior) = state.provider_registry.get(profile.provider) else {
+        return Err(PumasError::InvalidParams {
+            message: "runtime profile provider is not registered".to_string(),
+        });
     };
+    let app_id = behavior.managed_runtime_app_id.as_str();
+    let Some(version_manager) = super::get_version_manager(state, app_id).await else {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": behavior.managed_runtime_uninitialized_message.as_str(),
+            "ready": false
+        }));
+    };
+    let tag = match command.tag {
+        Some(tag) => tag,
+        None => match version_manager.get_active_version().await? {
+            Some(tag) => tag,
+            None => {
+                return Ok(serde_json::json!({
+                    "success": false,
+                    "error": behavior.managed_runtime_no_active_version_message.as_str(),
+                    "ready": false
+                }));
+            }
+        },
+    };
+    let version_dir = version_manager.version_path(&tag);
     Ok(serde_json::to_value(
         state
             .api

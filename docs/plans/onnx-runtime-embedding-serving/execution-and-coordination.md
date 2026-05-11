@@ -270,6 +270,11 @@ Update during implementation:
   provider contract serialization tests cover the new launch target wire shape.
   ONNX sidecar process launch remains deferred to the managed ONNX lifecycle
   slice.
+- 2026-05-11: Moved runtime-profile launch version-manager selection onto
+  provider behavior. `ProviderBehavior` now declares the managed runtime app id
+  and existing launch failure messages, so the RPC launch handler no longer
+  matches Ollama versus llama.cpp to find the version manager or shape those
+  errors.
 - 2026-05-11: Added frontend runtime provider descriptors in
   `frontend/src/utils/runtimeProviderDescriptors.ts`. Runtime profile settings
   now consume descriptor-owned provider labels, modes, and device modes;
@@ -515,6 +520,8 @@ changes remain.
   lifecycle launch-config construction for existing managed providers.
 - Provider behavior now owns per-mode managed launch targets consumed by
   runtime-profile launch-spec derivation.
+- Provider behavior now owns managed runtime app ids used by runtime-profile
+  launch version-manager lookup.
 - Frontend provider descriptors now centralize existing provider labels, modes,
   device modes, executable-format compatibility, and serve-dialog capability
   flags.
@@ -680,6 +687,10 @@ changes remain.
   test --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`,
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Provider-owned runtime app id slice verified with `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml providers`, and `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml runtime_profiles`.
 - Frontend provider descriptor slice verified with `npm run -w frontend
   check:types` and `npm run -w frontend test:run --
   runtimeProviderDescriptors llamaCppLibraryViewModels

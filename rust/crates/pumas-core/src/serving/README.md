@@ -6,13 +6,15 @@ Own backend serving snapshots, request validation, non-critical error shaping, a
 ## Contents
 | File | Description |
 | ---- | ----------- |
-| `mod.rs` | `ServingService`, serving request validation, snapshot mutation helpers, and update-feed publication. |
+| `mod.rs` | `ServingService`, serving request validation orchestration, snapshot mutation helpers, and update-feed publication. |
+| `placement.rs` | Provider-specific placement validation for user-selected serving profiles and per-load placement fields. |
 
 ## Design Decisions
 - Serving requests are user-directed. The service validates the selected model, runtime profile, provider, and placement instead of choosing another device or evicting models automatically.
 - Served-model state is backend-owned. Frontend code may keep form drafts, but loaded/unloaded/error status comes from serving responses, snapshots, or update feeds.
 - Update feeds are in-memory invalidation signals. Missed or stale cursors return `snapshot_required` so consumers refresh `get_serving_status` rather than replaying durable history.
 - Provider-specific load/unload calls stay behind adapter boundaries. `pumas-core` owns validation and status state, while RPC/provider adapter code may perform operations that depend on crates outside `pumas-core`.
+- Placement policy is isolated from validation orchestration so new runtime providers can add capability-specific placement rules without expanding the serving service entrypoint.
 
 ## Invariants
 - Renderer-supplied model paths are never accepted. Serving validation resolves executable artifacts through `ModelLibrary`.

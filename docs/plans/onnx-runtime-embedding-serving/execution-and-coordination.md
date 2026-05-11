@@ -290,6 +290,12 @@ Update during implementation:
   now has an explicit test proving artifact compatibility comes from composed
   provider behavior. Existing provider-scoped route and served-state tests cover
   same-model-id routing/unload behavior for separate providers.
+- 2026-05-11: Extracted core serving placement validation into
+  `rust/crates/pumas-core/src/serving/placement.rs` and updated the serving
+  README module table/design notes. This reduces the serving service entrypoint
+  before ONNX placement rules are added; route persistence/migration and
+  frontend provider row/view-model decomposition remain open under the
+  large-file split task.
 
 ## Commit Cadence Notes
 
@@ -468,6 +474,8 @@ changes remain.
 - Backend provider-path verification now covers composed-registry launch-spec
   derivation, provider-declared artifact compatibility, and the existing
   provider-scoped route/served-instance contracts.
+- Core serving placement validation now lives in a focused
+  `serving/placement.rs` module instead of the serving service entrypoint.
 
 ### Deviations
 
@@ -620,12 +628,16 @@ changes remain.
   --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`, `cargo
   test --manifest-path rust/crates/pumas-core/Cargo.toml serving`, and `cargo
   fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Core serving placement extraction slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml serving` and `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 
 - Module README updated: `rust/crates/pumas-rpc/src/handlers/README.md`.
 - Module README updated: `rust/crates/pumas-core/src/providers/README.md`.
 - Module README added: `rust/crates/pumas-core/src/runtime_profiles/README.md`.
+- Module README updated: `rust/crates/pumas-core/src/serving/README.md`.
 - Module README updated: `frontend/src/utils/README.md`.
 - ADR added/updated: `docs/adr/0001-onnx-runtime-provider-model.md`.
 - PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: pending.

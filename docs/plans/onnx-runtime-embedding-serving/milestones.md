@@ -291,6 +291,10 @@ validation consumes provider-declared artifact compatibility instead of
 hard-coded provider/format fallback. Existing provider-scoped route tests
 already cover same-model-id routing and served-instance identity for separate
 providers.
+Core serving placement validation has been extracted into
+`rust/crates/pumas-core/src/serving/placement.rs`, and the serving README now
+documents the focused module. The large-file split task remains open for route
+persistence/migration and frontend provider row/view-model decomposition.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

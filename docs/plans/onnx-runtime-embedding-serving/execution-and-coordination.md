@@ -155,6 +155,11 @@ Update during implementation:
   Ollama and llama.cpp unload routines, but the extension point is now provider
   behavior rather than a direct provider-id match. Load dispatch and full
   serving adapter extraction remain pending.
+- 2026-05-11: Added `ProviderServingAdapterKind` to provider behavior and moved
+  `serve_model` load dispatch onto that behavior. The handler still delegates
+  to the existing Ollama and llama.cpp load routines, but both load and unload
+  dispatch now select through provider behavior rather than direct provider-id
+  matches. Full provider serving adapter extraction remains pending.
 
 ## Commit Cadence Notes
 
@@ -288,6 +293,7 @@ changes remain.
   unload requests send the served provider.
 - Serving alias defaulting now derives from provider behavior policy.
 - `unserve_model` dispatch now derives from provider unload behavior policy.
+- `serve_model` dispatch now derives from provider serving adapter kind.
 
 ### Deviations
 
@@ -349,6 +355,10 @@ changes remain.
   rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt --manifest-path
   rust/Cargo.toml --all -- --check`.
 - Provider unload behavior dispatch slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml providers`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`.
+- Provider serving adapter kind dispatch slice verified with `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml providers`, `cargo test
   --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt
   --manifest-path rust/Cargo.toml --all -- --check`.

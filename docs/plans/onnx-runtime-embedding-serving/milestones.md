@@ -85,7 +85,7 @@ provider and widens the blast radius.
       must consume validated types rather than re-validating strings.
 - [x] Refactor serving artifact validation so supported formats are derived
       from provider behavior instead of the current unconditional GGUF check.
-- [ ] Refactor `serve_model` and `unserve_model` dispatch so load/unload paths
+- [x] Refactor `serve_model` and `unserve_model` dispatch so load/unload paths
       are selected by provider without a non-llama.cpp-implies-Ollama fallback.
 - [ ] Introduce provider serving adapters for Ollama and llama.cpp before adding
       the ONNX adapter. The RPC handler should keep only boundary parsing,
@@ -195,6 +195,10 @@ extraction remain pending.
 `unserve_model` dispatch now consumes provider behavior unload policy instead
 of matching directly on the served provider id. Load dispatch still needs full
 provider serving adapter extraction before ONNX load/unload can be wired.
+`serve_model` dispatch now consumes provider behavior serving-adapter kind
+instead of matching directly on the requested provider id. Existing Ollama and
+llama.cpp load routines are still the concrete implementations; full adapter
+extraction remains pending before ONNX load/unload wiring.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

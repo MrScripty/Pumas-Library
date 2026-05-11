@@ -63,6 +63,13 @@ pub enum ProviderGatewayAliasPolicy {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ProviderServingAdapterKind {
+    OllamaProviderApi,
+    LlamaCppRuntime,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProviderUnloadBehavior {
     ProviderApi,
     RouterPreset,
@@ -80,6 +87,7 @@ pub struct ProviderBehavior {
     pub launch_kinds: Vec<ProviderLaunchKind>,
     pub provider_model_id_policy: ProviderModelIdPolicy,
     pub gateway_alias_policy: ProviderGatewayAliasPolicy,
+    pub serving_adapter_kind: ProviderServingAdapterKind,
     pub unload_behavior: ProviderUnloadBehavior,
     pub supports_managed_profiles: bool,
     pub supports_external_profiles: bool,
@@ -116,6 +124,7 @@ impl ProviderBehavior {
             ],
             provider_model_id_policy: ProviderModelIdPolicy::GatewayAlias,
             gateway_alias_policy: ProviderGatewayAliasPolicy::OllamaModelName,
+            serving_adapter_kind: ProviderServingAdapterKind::OllamaProviderApi,
             unload_behavior: ProviderUnloadBehavior::ProviderApi,
             supports_managed_profiles: true,
             supports_external_profiles: true,
@@ -156,6 +165,7 @@ impl ProviderBehavior {
             ],
             provider_model_id_policy: ProviderModelIdPolicy::LibraryModelId,
             gateway_alias_policy: ProviderGatewayAliasPolicy::LibraryModelId,
+            serving_adapter_kind: ProviderServingAdapterKind::LlamaCppRuntime,
             unload_behavior: ProviderUnloadBehavior::RouterPreset,
             supports_managed_profiles: true,
             supports_external_profiles: true,
@@ -268,6 +278,10 @@ mod tests {
             behavior.gateway_alias_policy,
             ProviderGatewayAliasPolicy::OllamaModelName
         );
+        assert_eq!(
+            behavior.serving_adapter_kind,
+            ProviderServingAdapterKind::OllamaProviderApi
+        );
         assert!(behavior.supports_artifact_format(ExecutableArtifactFormat::Gguf));
         assert!(behavior.supports_managed_profiles);
         assert!(behavior.supports_external_profiles);
@@ -292,6 +306,10 @@ mod tests {
             ProviderGatewayAliasPolicy::LibraryModelId
         );
         assert_eq!(
+            behavior.serving_adapter_kind,
+            ProviderServingAdapterKind::LlamaCppRuntime
+        );
+        assert_eq!(
             behavior.unload_behavior,
             ProviderUnloadBehavior::RouterPreset
         );
@@ -310,6 +328,7 @@ mod tests {
         assert_eq!(serialized["openai_endpoints"][3], "embeddings");
         assert_eq!(serialized["provider_model_id_policy"], "library_model_id");
         assert_eq!(serialized["gateway_alias_policy"], "library_model_id");
+        assert_eq!(serialized["serving_adapter_kind"], "llama_cpp_runtime");
         assert_eq!(serialized["unload_behavior"], "router_preset");
     }
 

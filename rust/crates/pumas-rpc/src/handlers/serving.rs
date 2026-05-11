@@ -9,7 +9,10 @@ use pumas_library::models::{
     ServedModelStatus, UnserveModelRequest, UnserveModelResponse,
 };
 use pumas_library::runtime_profiles::RuntimeProfileLaunchOverrides;
-use pumas_library::{ProviderGatewayAliasPolicy, ProviderRegistry, ProviderUnloadBehavior};
+use pumas_library::{
+    ProviderGatewayAliasPolicy, ProviderRegistry, ProviderServingAdapterKind,
+    ProviderUnloadBehavior,
+};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
@@ -87,9 +90,25 @@ pub async fn serve_model(state: &AppState, params: &Value) -> pumas_library::Res
         return non_critical_failure_response(state, error).await;
     }
 
-    match request.config.provider {
-        RuntimeProviderId::Ollama => serve_ollama_model(state, request).await,
-        RuntimeProviderId::LlamaCpp => serve_llama_cpp_model(state, request).await,
+    let registry = ProviderRegistry::builtin();
+    match registry
+        .get(request.config.provider)
+        .map(|behavior| behavior.serving_adapter_kind)
+    {
+        Some(ProviderServingAdapterKind::OllamaProviderApi) => {
+            serve_ollama_model(state, request).await
+        }
+        Some(ProviderServingAdapterKind::LlamaCppRuntime) => {
+            serve_llama_cpp_model(state, request).await
+        }
+        None => {
+            let error = serving_error(
+                ModelServeErrorCode::UnsupportedProvider,
+                "selected serving provider is not registered",
+                &request,
+            );
+            non_critical_failure_response(state, error).await
+        }
     }
 }
 

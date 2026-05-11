@@ -76,8 +76,8 @@ pub use plugins::{PluginConfig, PluginLoader};
 pub use process::{ProcessInfo, ProcessManager};
 pub use providers::{
     ExecutableArtifactFormat, OpenAiGatewayEndpoint, ProviderBehavior, ProviderGatewayAliasPolicy,
-    ProviderLaunchKind, ProviderModelIdPolicy, ProviderRegistry, ProviderUnloadBehavior,
-    ServingTask,
+    ProviderLaunchKind, ProviderModelIdPolicy, ProviderRegistry, ProviderServingAdapterKind,
+    ProviderUnloadBehavior, ServingTask,
 };
 pub use runtime_profiles::{
     OllamaRuntimeProviderAdapter, RuntimeProviderAdapter, RuntimeProviderCapabilities,

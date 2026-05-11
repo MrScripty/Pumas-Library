@@ -36,6 +36,7 @@ and managed/external support checks. Serving and gateway request model-id
 rewriting now consume the provider model-id policy, and gateway proxying checks
 provider endpoint capabilities before forwarding through a shared gateway HTTP
 client. Serving alias defaulting consumes the provider gateway-alias policy.
+Serving load dispatch consumes the provider serving adapter kind.
 Later slices migrate full serving adapters, launcher strategies, serving-side
 provider clients, and frontend bridge contracts onto this registry.
 
@@ -102,7 +103,8 @@ assert!(behavior.supports_openai_endpoint(
 
 - Stable producer fields are provider id, provider modes, device modes, local
   artifact formats, serving tasks, OpenAI endpoints, launch strategies,
-  provider model-id policy, gateway alias policy, and unload behavior.
+  provider model-id policy, gateway alias policy, serving adapter kind, and
+  unload behavior.
 - Enum values serialize with snake_case when they cross a boundary.
 - Adding ONNX Runtime requires adding one provider behavior entry and matching
   contract tests before consumers depend on it.

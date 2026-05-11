@@ -1,0 +1,273 @@
+//! Runtime provider behavior contracts and built-in provider registry.
+
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
+
+use crate::models::{RuntimeDeviceMode, RuntimeProviderId, RuntimeProviderMode};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutableArtifactFormat {
+    Gguf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServingTask {
+    Chat,
+    Completion,
+    Embedding,
+    Reranking,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenAiGatewayEndpoint {
+    Models,
+    ChatCompletions,
+    Completions,
+    Embeddings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderLaunchKind {
+    BinaryProcess,
+    ExternalOnly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderModelIdPolicy {
+    GatewayAlias,
+    LibraryModelId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderUnloadBehavior {
+    ProviderApi,
+    RouterPreset,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ProviderBehavior {
+    pub provider: RuntimeProviderId,
+    pub provider_modes: Vec<RuntimeProviderMode>,
+    pub device_modes: Vec<RuntimeDeviceMode>,
+    pub local_artifact_formats: Vec<ExecutableArtifactFormat>,
+    pub serving_tasks: Vec<ServingTask>,
+    pub openai_endpoints: Vec<OpenAiGatewayEndpoint>,
+    pub launch_kinds: Vec<ProviderLaunchKind>,
+    pub provider_model_id_policy: ProviderModelIdPolicy,
+    pub unload_behavior: ProviderUnloadBehavior,
+    pub supports_managed_profiles: bool,
+    pub supports_external_profiles: bool,
+    pub supports_model_catalog: bool,
+    pub supports_dedicated_model_processes: bool,
+}
+
+impl ProviderBehavior {
+    pub fn ollama() -> Self {
+        Self {
+            provider: RuntimeProviderId::Ollama,
+            provider_modes: vec![RuntimeProviderMode::OllamaServe],
+            device_modes: vec![
+                RuntimeDeviceMode::Auto,
+                RuntimeDeviceMode::Cpu,
+                RuntimeDeviceMode::Gpu,
+                RuntimeDeviceMode::Hybrid,
+            ],
+            local_artifact_formats: Vec::new(),
+            serving_tasks: vec![
+                ServingTask::Chat,
+                ServingTask::Completion,
+                ServingTask::Embedding,
+            ],
+            openai_endpoints: vec![
+                OpenAiGatewayEndpoint::Models,
+                OpenAiGatewayEndpoint::ChatCompletions,
+                OpenAiGatewayEndpoint::Completions,
+                OpenAiGatewayEndpoint::Embeddings,
+            ],
+            launch_kinds: vec![
+                ProviderLaunchKind::BinaryProcess,
+                ProviderLaunchKind::ExternalOnly,
+            ],
+            provider_model_id_policy: ProviderModelIdPolicy::GatewayAlias,
+            unload_behavior: ProviderUnloadBehavior::ProviderApi,
+            supports_managed_profiles: true,
+            supports_external_profiles: true,
+            supports_model_catalog: false,
+            supports_dedicated_model_processes: false,
+        }
+    }
+
+    pub fn llama_cpp() -> Self {
+        Self {
+            provider: RuntimeProviderId::LlamaCpp,
+            provider_modes: vec![
+                RuntimeProviderMode::LlamaCppRouter,
+                RuntimeProviderMode::LlamaCppDedicated,
+            ],
+            device_modes: vec![
+                RuntimeDeviceMode::Auto,
+                RuntimeDeviceMode::Cpu,
+                RuntimeDeviceMode::Gpu,
+                RuntimeDeviceMode::SpecificDevice,
+            ],
+            local_artifact_formats: vec![ExecutableArtifactFormat::Gguf],
+            serving_tasks: vec![
+                ServingTask::Chat,
+                ServingTask::Completion,
+                ServingTask::Embedding,
+                ServingTask::Reranking,
+            ],
+            openai_endpoints: vec![
+                OpenAiGatewayEndpoint::Models,
+                OpenAiGatewayEndpoint::ChatCompletions,
+                OpenAiGatewayEndpoint::Completions,
+                OpenAiGatewayEndpoint::Embeddings,
+            ],
+            launch_kinds: vec![
+                ProviderLaunchKind::BinaryProcess,
+                ProviderLaunchKind::ExternalOnly,
+            ],
+            provider_model_id_policy: ProviderModelIdPolicy::LibraryModelId,
+            unload_behavior: ProviderUnloadBehavior::RouterPreset,
+            supports_managed_profiles: true,
+            supports_external_profiles: true,
+            supports_model_catalog: true,
+            supports_dedicated_model_processes: true,
+        }
+    }
+
+    pub fn supports_mode(&self, mode: RuntimeProviderMode) -> bool {
+        self.provider_modes.contains(&mode)
+    }
+
+    pub fn supports_openai_endpoint(&self, endpoint: OpenAiGatewayEndpoint) -> bool {
+        self.openai_endpoints.contains(&endpoint)
+    }
+
+    pub fn supports_artifact_format(&self, format: ExecutableArtifactFormat) -> bool {
+        self.local_artifact_formats.contains(&format)
+    }
+
+    pub fn supports_serving_task(&self, task: ServingTask) -> bool {
+        self.serving_tasks.contains(&task)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderRegistry {
+    providers: HashMap<RuntimeProviderId, ProviderBehavior>,
+}
+
+impl ProviderRegistry {
+    pub fn builtin() -> Self {
+        Self::from_behaviors([ProviderBehavior::ollama(), ProviderBehavior::llama_cpp()])
+    }
+
+    pub fn from_behaviors(behaviors: impl IntoIterator<Item = ProviderBehavior>) -> Self {
+        let providers = behaviors
+            .into_iter()
+            .map(|behavior| (behavior.provider, behavior))
+            .collect();
+        Self { providers }
+    }
+
+    pub fn get(&self, provider: RuntimeProviderId) -> Option<&ProviderBehavior> {
+        self.providers.get(&provider)
+    }
+
+    pub fn contains(&self, provider: RuntimeProviderId) -> bool {
+        self.providers.contains_key(&provider)
+    }
+
+    pub fn providers(&self) -> Vec<&ProviderBehavior> {
+        let mut providers = Vec::new();
+        for provider in [RuntimeProviderId::Ollama, RuntimeProviderId::LlamaCpp] {
+            if let Some(behavior) = self.providers.get(&provider) {
+                providers.push(behavior);
+            }
+        }
+        providers
+    }
+}
+
+impl Default for ProviderRegistry {
+    fn default() -> Self {
+        Self::builtin()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builtin_registry_contains_existing_runtime_providers() {
+        let registry = ProviderRegistry::builtin();
+
+        assert!(registry.contains(RuntimeProviderId::Ollama));
+        assert!(registry.contains(RuntimeProviderId::LlamaCpp));
+        assert_eq!(registry.providers().len(), 2);
+    }
+
+    #[test]
+    fn ollama_behavior_matches_existing_profile_surface() {
+        let registry = ProviderRegistry::builtin();
+        let behavior = registry.get(RuntimeProviderId::Ollama).unwrap();
+
+        assert!(behavior.supports_mode(RuntimeProviderMode::OllamaServe));
+        assert!(behavior.supports_openai_endpoint(OpenAiGatewayEndpoint::Models));
+        assert!(behavior.supports_openai_endpoint(OpenAiGatewayEndpoint::ChatCompletions));
+        assert!(behavior.supports_openai_endpoint(OpenAiGatewayEndpoint::Completions));
+        assert!(behavior.supports_openai_endpoint(OpenAiGatewayEndpoint::Embeddings));
+        assert_eq!(
+            behavior.provider_model_id_policy,
+            ProviderModelIdPolicy::GatewayAlias
+        );
+        assert!(behavior.local_artifact_formats.is_empty());
+        assert!(behavior.supports_managed_profiles);
+        assert!(behavior.supports_external_profiles);
+    }
+
+    #[test]
+    fn llama_cpp_behavior_matches_existing_profile_surface() {
+        let registry = ProviderRegistry::builtin();
+        let behavior = registry.get(RuntimeProviderId::LlamaCpp).unwrap();
+
+        assert!(behavior.supports_mode(RuntimeProviderMode::LlamaCppRouter));
+        assert!(behavior.supports_mode(RuntimeProviderMode::LlamaCppDedicated));
+        assert!(behavior.supports_artifact_format(ExecutableArtifactFormat::Gguf));
+        assert!(behavior.supports_serving_task(ServingTask::Embedding));
+        assert!(behavior.supports_serving_task(ServingTask::Reranking));
+        assert_eq!(
+            behavior.provider_model_id_policy,
+            ProviderModelIdPolicy::LibraryModelId
+        );
+        assert_eq!(
+            behavior.unload_behavior,
+            ProviderUnloadBehavior::RouterPreset
+        );
+        assert!(behavior.supports_model_catalog);
+        assert!(behavior.supports_dedicated_model_processes);
+    }
+
+    #[test]
+    fn provider_behavior_serializes_contract_enums_as_snake_case() {
+        let behavior = ProviderBehavior::llama_cpp();
+        let serialized = serde_json::to_value(behavior).unwrap();
+
+        assert_eq!(serialized["provider"], "llama_cpp");
+        assert_eq!(serialized["provider_modes"][0], "llama_cpp_router");
+        assert_eq!(serialized["local_artifact_formats"][0], "gguf");
+        assert_eq!(serialized["openai_endpoints"][3], "embeddings");
+        assert_eq!(serialized["provider_model_id_policy"], "library_model_id");
+        assert_eq!(serialized["unload_behavior"], "router_preset");
+    }
+}

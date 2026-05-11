@@ -46,6 +46,7 @@ pub mod network;
 pub mod platform;
 pub mod plugins;
 pub mod process;
+pub mod providers;
 pub mod registry;
 pub mod runtime_profiles;
 pub mod serving;
@@ -73,6 +74,10 @@ pub use models::{
 };
 pub use plugins::{PluginConfig, PluginLoader};
 pub use process::{ProcessInfo, ProcessManager};
+pub use providers::{
+    ExecutableArtifactFormat, OpenAiGatewayEndpoint, ProviderBehavior, ProviderLaunchKind,
+    ProviderModelIdPolicy, ProviderRegistry, ProviderUnloadBehavior, ServingTask,
+};
 pub use runtime_profiles::{
     OllamaRuntimeProviderAdapter, RuntimeProviderAdapter, RuntimeProviderCapabilities,
 };

@@ -81,6 +81,13 @@ Update during implementation:
   first vertical acceptance path, and decomposition review. Next implementation
   slice is the first backend provider behavior/registry contract test and
   implementation.
+- 2026-05-11: Added the first backend provider behavior registry slice in
+  `rust/crates/pumas-core/src/providers/`. The slice defines typed provider
+  behavior for existing Ollama and llama.cpp providers, including provider
+  modes, device modes, local artifact formats, serving tasks, OpenAI gateway
+  endpoints, launch kinds, model-id policy, and unload behavior. This slice does
+  not yet route runtime-profile validation, serving, gateway, or launcher code
+  through the registry; that is the next slice.
 
 ## Commit Cadence Notes
 
@@ -191,6 +198,8 @@ changes remain.
   implementation resumed.
 - Provider-model documentation setup completed in
   `docs/adr/0001-onnx-runtime-provider-model.md`.
+- Backend provider behavior contract and built-in provider registry added under
+  `rust/crates/pumas-core/src/providers/`.
 
 ### Deviations
 
@@ -207,9 +216,13 @@ changes remain.
   migration dry-run tests and Rust workspace formatting. ONNX plan verification
   for the documentation slice is limited to link/file existence and pre-commit
   Markdown hygiene.
+- Provider registry slice verified with `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml providers` and `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 
 - Module README updated: pending.
+- Module README updated: `rust/crates/pumas-core/src/providers/README.md`.
 - ADR added/updated: `docs/adr/0001-onnx-runtime-provider-model.md`.
 - PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: pending.

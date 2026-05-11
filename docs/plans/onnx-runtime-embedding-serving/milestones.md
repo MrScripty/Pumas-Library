@@ -35,7 +35,7 @@ provider and widens the blast radius.
       `/v1/models` and `/v1/embeddings` against a fake or fixture sidecar. Add
       the failing-first acceptance test at the earliest slice where the public
       gateway contract can be exercised.
-- [ ] Define provider capabilities/behavior for supported artifact formats,
+- [x] Define provider capabilities/behavior for supported artifact formats,
       OpenAI gateway endpoints, provider modes, device/placement support,
       launch-on-serve support, unload behavior, and provider-side model id
       policy.
@@ -153,8 +153,11 @@ provider and widens the blast radius.
 **Status:** In progress. Initial worktree hygiene found dirty model-library
 implementation files, which were committed before ONNX implementation resumed.
 Provider-model documentation setup is complete in
-`docs/adr/0001-onnx-runtime-provider-model.md`. Next slice is the first backend
-provider behavior/registry contract test and implementation slice.
+`docs/adr/0001-onnx-runtime-provider-model.md`. Backend provider behavior
+contracts and built-in registry values now exist in
+`rust/crates/pumas-core/src/providers/`, with tests for Ollama and llama.cpp.
+Next slice is integrating the registry into runtime-profile validation without
+changing user-visible profile behavior.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

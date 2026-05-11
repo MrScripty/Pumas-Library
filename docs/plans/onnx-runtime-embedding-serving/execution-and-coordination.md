@@ -216,6 +216,12 @@ Update during implementation:
   construction. Core serving/runtime-profile services still construct built-ins
   internally and need a separate injection slice before the lifecycle ownership
   task is complete.
+- 2026-05-11: Injected provider behavior into core serving validation.
+  `ServingService` now owns a provider registry and `PumasApi` validates serving
+  requests through that service instance instead of a static validator that
+  constructs `ProviderRegistry::builtin()`. Added a focused test proving a
+  composed registry controls artifact/provider validation. Runtime-profile
+  validation remains the next core injection sub-slice.
 
 ## Commit Cadence Notes
 
@@ -369,6 +375,7 @@ changes remain.
   gateway, compatibility, and launch-kind validation is complete.
 - RPC gateway and serving handlers now consume the provider registry from
   `AppState`.
+- Core serving validation now consumes the registry owned by `ServingService`.
 
 ### Deviations
 
@@ -463,6 +470,10 @@ changes remain.
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
 - RPC provider registry composition slice verified with `cargo test
   --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`.
+- Core serving provider-registry injection slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml serving`, `cargo test
   --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt
   --manifest-path rust/Cargo.toml --all -- --check`.
 

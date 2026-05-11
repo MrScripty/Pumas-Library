@@ -233,6 +233,10 @@ RPC server state now owns the provider registry for gateway and serving handler
 boundaries, so those handlers no longer construct built-in registries ad hoc.
 Core serving/runtime-profile services still need a separate injection slice
 before the composition-root lifecycle ownership task can be closed.
+Core serving validation now consumes the provider registry owned by
+`ServingService` instead of constructing a built-in registry inside shared
+validation. Runtime-profile validation still needs the same service-owned
+registry treatment before the composition-root lifecycle task can be closed.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

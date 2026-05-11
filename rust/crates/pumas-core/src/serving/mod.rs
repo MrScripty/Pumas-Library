@@ -42,13 +42,19 @@ pub struct ServingValidationContext {
 pub struct ServingService {
     snapshot: RwLock<ServingStatusSnapshot>,
     updates: broadcast::Sender<ServingStatusUpdateFeed>,
+    provider_registry: ProviderRegistry,
 }
 
 impl ServingService {
     pub fn new() -> Self {
+        Self::with_provider_registry(ProviderRegistry::builtin())
+    }
+
+    pub fn with_provider_registry(provider_registry: ProviderRegistry) -> Self {
         Self {
             snapshot: RwLock::new(ServingStatusSnapshot::empty()),
             updates: broadcast::channel(SERVING_STATUS_UPDATE_CHANNEL_CAPACITY).0,
+            provider_registry,
         }
     }
 
@@ -231,10 +237,11 @@ impl ServingService {
     }
 
     pub fn validate_request(
+        &self,
         request: &ServeModelRequest,
         context: &ServingValidationContext,
     ) -> ModelServeValidationResponse {
-        validate_model_serving_request(request, context)
+        validate_model_serving_request(request, context, &self.provider_registry)
     }
 
     fn publish_event(&self, event: ServingStatusEvent) {
@@ -314,6 +321,7 @@ fn serving_status_event(
 pub fn validate_model_serving_request(
     request: &ServeModelRequest,
     context: &ServingValidationContext,
+    provider_registry: &ProviderRegistry,
 ) -> ModelServeValidationResponse {
     let mut errors = Vec::new();
     let model_id = request.model_id.trim();
@@ -393,7 +401,10 @@ pub fn validate_model_serving_request(
 
     if context.model_exists {
         errors.extend(validate_provider_artifact_compatibility(
-            model_id, request, context,
+            model_id,
+            request,
+            context,
+            provider_registry,
         ));
     }
 
@@ -565,6 +576,7 @@ fn validate_provider_artifact_compatibility(
     model_id: &str,
     request: &ServeModelRequest,
     context: &ServingValidationContext,
+    provider_registry: &ProviderRegistry,
 ) -> Vec<ModelServeError> {
     let Some(format) = context.primary_artifact_format else {
         return vec![ModelServeError::non_critical(
@@ -575,8 +587,7 @@ fn validate_provider_artifact_compatibility(
         .for_profile(request.config.profile_id.clone())
         .for_provider(request.config.provider)];
     };
-    let registry = ProviderRegistry::builtin();
-    let Some(behavior) = registry.get(request.config.provider) else {
+    let Some(behavior) = provider_registry.get(request.config.provider) else {
         return vec![ModelServeError::non_critical(
             ModelServeErrorCode::UnsupportedProvider,
             "selected provider is not registered",
@@ -780,6 +791,7 @@ mod tests {
         ModelServeErrorSeverity, ModelServingConfig, RuntimeDeviceMode, RuntimeProfileId,
         ServedModelLoadState,
     };
+    use crate::providers::ProviderBehavior;
 
     fn request() -> ServeModelRequest {
         ServeModelRequest {
@@ -814,6 +826,13 @@ mod tests {
             }),
             served_models: Vec::new(),
         }
+    }
+
+    fn validate(
+        request: &ServeModelRequest,
+        context: &ServingValidationContext,
+    ) -> ModelServeValidationResponse {
+        validate_model_serving_request(request, context, &ProviderRegistry::builtin())
     }
 
     fn loaded_status(
@@ -1043,11 +1062,26 @@ mod tests {
 
     #[test]
     fn validation_accepts_existing_gguf_on_running_profile() {
-        let response = validate_model_serving_request(&request(), &valid_context());
+        let response = validate(&request(), &valid_context());
 
         assert!(response.success);
         assert!(response.valid);
         assert!(response.errors.is_empty());
+    }
+
+    #[test]
+    fn serving_service_validation_uses_composed_provider_registry() {
+        let service = ServingService::with_provider_registry(ProviderRegistry::from_behaviors([
+            ProviderBehavior::llama_cpp(),
+        ]));
+        let response = service.validate_request(&request(), &valid_context());
+
+        assert!(response.success);
+        assert!(!response.valid);
+        assert_eq!(
+            response.errors[0].code,
+            ModelServeErrorCode::UnsupportedProvider
+        );
     }
 
     #[test]
@@ -1066,7 +1100,7 @@ mod tests {
             tensor_split: None,
         });
 
-        let response = validate_model_serving_request(&request(), &context);
+        let response = validate(&request(), &context);
 
         assert!(response.success);
         assert!(!response.valid);
@@ -1097,7 +1131,7 @@ mod tests {
         request.config.tensor_split = Some(vec![1.0, 2.0]);
         request.config.context_size = Some(4096);
 
-        let response = validate_model_serving_request(&request, &valid_context());
+        let response = validate(&request, &valid_context());
 
         assert!(!response.valid);
         assert!(response
@@ -1126,7 +1160,7 @@ mod tests {
             tensor_split: None,
         });
 
-        let response = validate_model_serving_request(&request, &context);
+        let response = validate(&request, &context);
 
         assert!(response.valid);
     }
@@ -1152,7 +1186,7 @@ mod tests {
             tensor_split: Some(vec![1.0, 1.0]),
         });
 
-        let response = validate_model_serving_request(&request, &context);
+        let response = validate(&request, &context);
 
         assert!(response.valid);
     }
@@ -1176,7 +1210,7 @@ mod tests {
             tensor_split: None,
         });
 
-        let response = validate_model_serving_request(&request, &context);
+        let response = validate(&request, &context);
 
         assert!(response.valid);
     }
@@ -1203,7 +1237,7 @@ mod tests {
             tensor_split: Some(vec![1.0, 1.0]),
         });
 
-        let response = validate_model_serving_request(&request, &context);
+        let response = validate(&request, &context);
 
         assert!(!response.valid);
         assert!(response
@@ -1240,7 +1274,7 @@ mod tests {
             tensor_split: None,
         });
 
-        let response = validate_model_serving_request(&request, &context);
+        let response = validate(&request, &context);
 
         assert!(response.valid);
     }
@@ -1268,7 +1302,7 @@ mod tests {
         loaded.context_size = Some(4096);
         context.served_models = vec![loaded];
 
-        let response = validate_model_serving_request(&request, &context);
+        let response = validate(&request, &context);
 
         assert!(!response.valid);
         assert!(response.errors.iter().any(|error| {
@@ -1301,7 +1335,7 @@ mod tests {
             Some("shared.alias"),
         )];
 
-        let response = validate_model_serving_request(&request, &context);
+        let response = validate(&request, &context);
 
         assert!(!response.valid);
         assert!(response
@@ -1317,7 +1351,7 @@ mod tests {
         request.config.profile_id = RuntimeProfileId::parse("llama-gpu").unwrap();
         request.config.model_alias = Some("Bad Alias".to_string());
 
-        let response = validate_model_serving_request(&request, &valid_context());
+        let response = validate(&request, &valid_context());
 
         assert!(!response.valid);
         assert!(response
@@ -1351,7 +1385,7 @@ mod tests {
             Some("example-cpu"),
         )];
 
-        let response = validate_model_serving_request(&request, &context);
+        let response = validate(&request, &context);
 
         assert!(response.valid);
     }

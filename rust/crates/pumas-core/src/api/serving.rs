@@ -87,9 +87,7 @@ impl PumasApi {
                 .served_models,
         };
 
-        Ok(crate::serving::ServingService::validate_request(
-            &request, &context,
-        ))
+        Ok(primary.serving_service.validate_request(&request, &context))
     }
 
     pub async fn record_served_model(

@@ -131,6 +131,13 @@ Update during implementation:
   root. OpenAI-compatible proxy handlers now reuse the `AppState` client with an
   explicit 120 second timeout instead of constructing a new client per request.
   Endpoint-specific body/timeout policies are still pending.
+- 2026-05-11: Added typed gateway endpoint policies for chat completions,
+  completions, and embeddings. The proxy handler now accepts raw bytes, applies
+  endpoint-specific body ceilings before JSON parsing/provider forwarding,
+  returns a Pumas-shaped HTTP 413 error response when exceeded, and
+  applies the endpoint request timeout to the forwarded request. The explicit
+  per-endpoint body ceilings preserve the existing 32 MiB gateway limit until a
+  narrower ONNX sidecar endpoint contract lands.
 
 ## Commit Cadence Notes
 
@@ -258,6 +265,8 @@ changes remain.
   forwarding OpenAI-compatible requests.
 - OpenAI-compatible gateway proxying now uses a shared timeout-bound HTTP
   client owned by RPC server state.
+- Gateway proxy routes now have explicit endpoint-specific body and timeout
+  policies before provider forwarding.
 
 ### Deviations
 
@@ -305,6 +314,10 @@ changes remain.
   rust/crates/pumas-rpc/Cargo.toml gateway_http_client`, `cargo test
   --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt
   --manifest-path rust/Cargo.toml --all -- --check`.
+- Gateway endpoint policy slice verified with `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml openai_gateway`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

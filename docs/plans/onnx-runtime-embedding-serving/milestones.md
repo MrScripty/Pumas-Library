@@ -100,7 +100,7 @@ provider and widens the blast radius.
       `/v1/chat/completions`, `/v1/completions`, and `/v1/embeddings`. ONNX
       must not receive chat/completion traffic unless a later plan adds that
       capability.
-- [ ] Add endpoint-specific request body and timeout policy for gateway routes.
+- [x] Add endpoint-specific request body and timeout policy for gateway routes.
       `/v1/embeddings` must have an explicit limit and error shape rather than
       inheriting a broad global proxy limit by accident.
 - [ ] Add typed model compatibility values for executable artifact format and
@@ -177,6 +177,11 @@ embeddings-only support without inheriting chat/completion routing.
 Gateway proxying now uses a shared timeout-bound HTTP client owned by the RPC
 server composition root instead of constructing a client for each forwarded
 request. Endpoint-specific body/timeout policy remains pending.
+Gateway proxying now parses raw request bodies through typed endpoint policy,
+rejects oversized bodies with a Pumas-shaped HTTP 413 response before provider
+forwarding, and applies an explicit per-request timeout. The current
+per-endpoint body ceilings preserve the existing 32 MiB gateway limit until the
+ONNX sidecar supplies a narrower endpoint contract.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

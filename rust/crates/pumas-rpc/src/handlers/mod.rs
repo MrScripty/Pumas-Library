@@ -41,10 +41,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::broadcast;
 use tracing::{debug, error, warn};
 
 const MODEL_LIBRARY_UPDATE_STREAM_LIMIT: usize = 250;
+const OPENAI_CHAT_COMPLETIONS_BODY_BYTES: usize = 32 * 1024 * 1024;
+const OPENAI_COMPLETIONS_BODY_BYTES: usize = 32 * 1024 * 1024;
+const OPENAI_EMBEDDINGS_BODY_BYTES: usize = 32 * 1024 * 1024;
+const OPENAI_GATEWAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub(crate) use shared::{
     detect_sandbox_environment, extract_safetensors_header, get_bool_param, get_i64_param,
@@ -160,14 +165,34 @@ pub async fn handle_openai_models(State(state): State<Arc<AppState>>) -> impl In
 pub async fn handle_openai_proxy(
     State(state): State<Arc<AppState>>,
     path: axum::extract::OriginalUri,
-    Json(mut body): Json<Value>,
+    body_bytes: Bytes,
 ) -> Response {
     let request_path = path.path();
-    let Some(gateway_endpoint) = openai_gateway_endpoint_for_path(request_path) else {
+    let Some(policy) = openai_gateway_policy_for_path(request_path) else {
         return openai_error_response(
             StatusCode::NOT_FOUND,
             format!("unsupported OpenAI-compatible endpoint: {request_path}"),
         );
+    };
+
+    if body_bytes.len() > policy.max_request_body_bytes {
+        return openai_error_response(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!(
+                "{request_path} request body exceeds {} bytes",
+                policy.max_request_body_bytes
+            ),
+        );
+    }
+
+    let mut body: Value = match serde_json::from_slice(&body_bytes) {
+        Ok(body) => body,
+        Err(error) => {
+            return openai_error_response(
+                StatusCode::BAD_REQUEST,
+                format!("request body must be valid JSON: {error}"),
+            );
+        }
     };
 
     let Some(requested_model) = body.get("model").and_then(Value::as_str) else {
@@ -194,7 +219,7 @@ pub async fn handle_openai_proxy(
     };
 
     let registry = ProviderRegistry::builtin();
-    if !provider_supports_openai_gateway_endpoint(served.provider, gateway_endpoint, &registry) {
+    if !provider_supports_openai_gateway_endpoint(served.provider, policy.endpoint, &registry) {
         return openai_error_response_with_code(
             StatusCode::BAD_REQUEST,
             ModelServeErrorCode::EndpointUnavailable,
@@ -223,6 +248,7 @@ pub async fn handle_openai_proxy(
     match state
         .gateway_http_client
         .post(target_url)
+        .timeout(policy.request_timeout)
         .json(&body)
         .send()
         .await
@@ -232,12 +258,35 @@ pub async fn handle_openai_proxy(
     }
 }
 
-fn openai_gateway_endpoint_for_path(path: &str) -> Option<OpenAiGatewayEndpoint> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OpenAiGatewayEndpointPolicy {
+    endpoint: OpenAiGatewayEndpoint,
+    max_request_body_bytes: usize,
+    request_timeout: Duration,
+}
+
+fn openai_gateway_policy_for_path(path: &str) -> Option<OpenAiGatewayEndpointPolicy> {
     match path {
-        "/v1/models" => Some(OpenAiGatewayEndpoint::Models),
-        "/v1/chat/completions" => Some(OpenAiGatewayEndpoint::ChatCompletions),
-        "/v1/completions" => Some(OpenAiGatewayEndpoint::Completions),
-        "/v1/embeddings" => Some(OpenAiGatewayEndpoint::Embeddings),
+        "/v1/models" => Some(OpenAiGatewayEndpointPolicy {
+            endpoint: OpenAiGatewayEndpoint::Models,
+            max_request_body_bytes: 0,
+            request_timeout: OPENAI_GATEWAY_REQUEST_TIMEOUT,
+        }),
+        "/v1/chat/completions" => Some(OpenAiGatewayEndpointPolicy {
+            endpoint: OpenAiGatewayEndpoint::ChatCompletions,
+            max_request_body_bytes: OPENAI_CHAT_COMPLETIONS_BODY_BYTES,
+            request_timeout: OPENAI_GATEWAY_REQUEST_TIMEOUT,
+        }),
+        "/v1/completions" => Some(OpenAiGatewayEndpointPolicy {
+            endpoint: OpenAiGatewayEndpoint::Completions,
+            max_request_body_bytes: OPENAI_COMPLETIONS_BODY_BYTES,
+            request_timeout: OPENAI_GATEWAY_REQUEST_TIMEOUT,
+        }),
+        "/v1/embeddings" => Some(OpenAiGatewayEndpointPolicy {
+            endpoint: OpenAiGatewayEndpoint::Embeddings,
+            max_request_body_bytes: OPENAI_EMBEDDINGS_BODY_BYTES,
+            request_timeout: OPENAI_GATEWAY_REQUEST_TIMEOUT,
+        }),
         _ => None,
     }
 }
@@ -513,20 +562,30 @@ mod openai_gateway_tests {
     }
 
     #[test]
-    fn openai_gateway_endpoint_for_path_maps_proxy_routes() {
+    fn openai_gateway_policy_for_path_maps_proxy_routes() {
         assert_eq!(
-            openai_gateway_endpoint_for_path("/v1/chat/completions"),
+            openai_gateway_policy_for_path("/v1/chat/completions").map(|policy| policy.endpoint),
             Some(OpenAiGatewayEndpoint::ChatCompletions)
         );
         assert_eq!(
-            openai_gateway_endpoint_for_path("/v1/completions"),
+            openai_gateway_policy_for_path("/v1/completions").map(|policy| policy.endpoint),
             Some(OpenAiGatewayEndpoint::Completions)
         );
         assert_eq!(
-            openai_gateway_endpoint_for_path("/v1/embeddings"),
+            openai_gateway_policy_for_path("/v1/embeddings").map(|policy| policy.endpoint),
             Some(OpenAiGatewayEndpoint::Embeddings)
         );
-        assert_eq!(openai_gateway_endpoint_for_path("/v1/audio"), None);
+        assert_eq!(openai_gateway_policy_for_path("/v1/audio"), None);
+    }
+
+    #[test]
+    fn openai_gateway_policy_for_path_has_explicit_limits() {
+        let embeddings = openai_gateway_policy_for_path("/v1/embeddings").unwrap();
+        assert_eq!(
+            embeddings.max_request_body_bytes,
+            OPENAI_EMBEDDINGS_BODY_BYTES
+        );
+        assert_eq!(embeddings.request_timeout, OPENAI_GATEWAY_REQUEST_TIMEOUT);
     }
 
     #[test]

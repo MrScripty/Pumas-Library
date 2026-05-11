@@ -327,12 +327,13 @@ Update during implementation:
   runtime-profile README now documents this persistence boundary. This reduces
   `runtime_profiles.rs` before ONNX route assignment while preserving the
   schema-2 provider-scoped route contract.
-- 2026-05-11: Extracted the llama.cpp compatible-model row renderer into
-  `frontend/src/components/app-panels/sections/LlamaCppModelRow.tsx`. The row
-  owns profile selection, placement/failed/load badges, quick serve/options,
-  link, and star controls; `LlamaCppModelLibrarySection.tsx` keeps route
-  persistence and serving orchestration. The section is now below the
-  large-component threshold, and the sections README records the boundary.
+- 2026-05-11: Extracted the llama.cpp compatible-model list and row renderers
+  into `frontend/src/components/app-panels/sections/LlamaCppModelLibraryList.tsx`
+  and `frontend/src/components/app-panels/sections/LlamaCppModelRow.tsx`.
+  Quick-serve config/error helpers now live in `llamaCppQuickServe.ts`, while
+  `LlamaCppModelLibrarySection.tsx` keeps route persistence and serving
+  orchestration. The section, list, and row are all below the component-size
+  threshold, and the sections README records the boundaries.
 
 ## Commit Cadence Notes
 
@@ -525,9 +526,9 @@ changes remain.
   instead of provider-id/provider-mode dispatch for llama.cpp prep.
 - Runtime-profile route config initialization, legacy route migration, and
   route validation now live in `runtime_profiles/route_config.rs`.
-- llama.cpp compatible-model row rendering now lives in
-  `LlamaCppModelRow.tsx`, leaving the section below the large-component
-  threshold before ONNX adds a sibling model row.
+- llama.cpp compatible-model list and row rendering now live in
+  `LlamaCppModelLibraryList.tsx` and `LlamaCppModelRow.tsx`, leaving each
+  component below the size threshold before ONNX adds sibling UI.
 
 ### Deviations
 

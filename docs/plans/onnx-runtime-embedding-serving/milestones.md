@@ -319,12 +319,14 @@ and route validation now live in
 `rust/crates/pumas-core/src/runtime_profiles/route_config.rs`. The runtime
 profile README documents the persistence boundary, and provider-scoped route
 migration remains verified through the public runtime profile service tests.
-The llama.cpp compatible-model row renderer has been extracted into
-`frontend/src/components/app-panels/sections/LlamaCppModelRow.tsx`, reducing
+The llama.cpp compatible-model list and row renderers have been extracted into
+`frontend/src/components/app-panels/sections/LlamaCppModelLibraryList.tsx` and
+`frontend/src/components/app-panels/sections/LlamaCppModelRow.tsx`, and
+quick-serve helpers now live in `llamaCppQuickServe.ts`. This reduces
 `LlamaCppModelLibrarySection.tsx` below the large-component threshold while
-leaving route persistence and quick-serve orchestration in the section. The
-sections README now documents the row boundary so ONNX can add a sibling row
-without expanding the llama.cpp section.
+leaving route persistence and serving orchestration in the section. The
+sections README documents these boundaries so ONNX can add sibling list/row
+work without expanding the llama.cpp section.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

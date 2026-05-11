@@ -13,6 +13,7 @@ Composable section components used by app panels to render status, selectors, de
 | `OllamaRegisteredModels.test.tsx` | Rendering and interaction coverage for registered Ollama model state, actions, disabled controls, and size formatting. |
 | `OllamaModelSection.tsx` | Ollama library/registered model controls; refreshes from running-state changes, local operations, and runtime-profile update events rather than owning a polling interval. |
 | `LlamaCppModelLibrarySection.tsx` | Focused llama.cpp local model library panel that lists compatible GGUF models, saves per-row llama.cpp profile routes, and opens serving with the selected route without entering the generic remote-download model manager state machine. |
+| `LlamaCppModelLibraryList.tsx` | Presentational llama.cpp compatible-model list shell with search, empty states, route errors, and per-row action wiring. |
 | `LlamaCppModelRow.tsx` | Presentational llama.cpp compatible-model row with route profile selection, loaded/failed placement badges, quick serve, options, link, and star controls. |
 | `RuntimeProfileSettingsSection.tsx` | Backend-confirmed runtime profile settings section for Ollama and llama.cpp profile lifecycle. |
 | `RuntimeProfileSettingsEditor.tsx` | Runtime profile editor shell that composes field and action subcomponents. |
@@ -27,6 +28,7 @@ Composable section components used by app panels to render status, selectors, de
 | `TorchActiveSlots.test.tsx` | Rendering and interaction coverage for active Torch slot badges, memory summaries, unload controls, and size formatting. |
 | `torchModelSlotFormatting.ts` | Shared display formatter for Torch model and device memory sizes. |
 | `llamaCppLibraryViewModels.ts` | Pure llama.cpp library compatibility, served-instance identity, route, status, and placement-label derivation helpers. |
+| `llamaCppQuickServe.ts` | llama.cpp quick-serve config, duplicate-alias escalation, and error formatting helpers. |
 | `TorchServerConfigSection.tsx` | Torch server configuration controls. |
 | `index.ts` | Section exports for panel composition. |
 

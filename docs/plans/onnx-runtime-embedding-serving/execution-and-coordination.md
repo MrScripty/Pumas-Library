@@ -278,6 +278,12 @@ Update during implementation:
   check now uses selected-provider descriptors instead of a hard-coded GGUF
   branch. ONNX UI/provider entries remain deferred to the ONNX app identity
   milestone.
+- 2026-05-11: Extracted managed runtime-profile launch-spec derivation into
+  `rust/crates/pumas-core/src/runtime_profiles/launch_specs.rs`. The extracted
+  module owns implicit port allocation, runtime directory derivation, existing
+  provider launch args/env vars, and provider-behavior launch target projection.
+  This reduces `runtime_profiles.rs` before ONNX launch wiring; route
+  persistence/migration and frontend provider row decomposition remain open.
 
 ## Commit Cadence Notes
 
@@ -451,6 +457,8 @@ changes remain.
 - Frontend provider descriptors now centralize existing provider labels, modes,
   device modes, executable-format compatibility, and serve-dialog capability
   flags.
+- Managed runtime-profile launch-spec derivation now lives in
+  `runtime_profiles/launch_specs.rs`.
 
 ### Deviations
 
@@ -591,6 +599,10 @@ changes remain.
   check:types` and `npm run -w frontend test:run --
   runtimeProviderDescriptors llamaCppLibraryViewModels
   LlamaCppModelLibrarySection RuntimeProfileSettingsSection ModelServeDialog`.
+- Runtime-profile launch-spec extraction slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`, `cargo
+  test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo
+  fmt --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

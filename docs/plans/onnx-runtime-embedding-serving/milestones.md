@@ -280,6 +280,11 @@ llama.cpp compatible model rows, provider-scoped route mutations, and serve
 dialog compatibility checks consume descriptor data for existing Ollama and
 llama.cpp providers. ONNX frontend panel wiring remains deferred until the ONNX
 provider/app identity milestones.
+Managed launch-spec derivation has been extracted from the oversized
+`runtime_profiles.rs` into `runtime_profiles/launch_specs.rs`. This covers the
+runtime launch-strategy portion of the large-file split task; route
+persistence/migration and frontend provider row decomposition remain open under
+that task.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

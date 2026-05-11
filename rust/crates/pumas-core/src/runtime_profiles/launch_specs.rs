@@ -8,14 +8,12 @@ use crate::models::{
     RuntimeDeviceMode, RuntimeDeviceSettings, RuntimeEndpointUrl, RuntimeManagementMode,
     RuntimePort, RuntimeProfileConfig, RuntimeProfileId, RuntimeProviderId, RuntimeProviderMode,
 };
-use crate::providers::ProviderRegistry;
+use crate::providers::{ProviderBehavior, ProviderRegistry};
 use crate::{PumasError, Result};
 
 use super::{RuntimeProfileLaunchSpec, RuntimeProfileLaunchStrategy, RuntimeProfilesConfigFile};
 
 const IMPLICIT_RUNTIME_PORT_SPAN: u16 = 10_000;
-const OLLAMA_RUNTIME_BASE_PORT: u16 = 11_434;
-const LLAMA_CPP_RUNTIME_BASE_PORT: u16 = 18_080;
 
 pub(super) fn derive_managed_profile_launch_specs(
     launcher_root: &Path,
@@ -32,6 +30,12 @@ pub(super) fn derive_managed_profile_launch_specs(
 
     let mut specs = Vec::with_capacity(profiles.len());
     for profile in profiles {
+        let behavior =
+            provider_registry
+                .get(profile.provider)
+                .ok_or_else(|| PumasError::InvalidParams {
+                    message: "runtime profile provider is not registered".to_string(),
+                })?;
         let port = match profile.port {
             Some(port) => {
                 if let Some(existing_profile_id) = used_ports.get(&port.value()) {
@@ -60,7 +64,7 @@ pub(super) fn derive_managed_profile_launch_specs(
                     used_ports.insert(port.value(), profile.profile_id.clone());
                     port
                 }
-                None => allocate_implicit_runtime_port(profile, &mut used_ports)?,
+                None => allocate_implicit_runtime_port(profile, behavior, &mut used_ports)?,
             },
         };
         let endpoint_url = match &profile.endpoint_url {
@@ -70,14 +74,8 @@ pub(super) fn derive_managed_profile_launch_specs(
         let runtime_dir = launcher_root
             .join("launcher-data")
             .join("runtime-profiles")
-            .join(provider_path_segment(profile.provider))
+            .join(&behavior.managed_runtime_path_segment)
             .join(profile.profile_id.as_str());
-        let behavior =
-            provider_registry
-                .get(profile.provider)
-                .ok_or_else(|| PumasError::InvalidParams {
-                    message: "runtime profile provider is not registered".to_string(),
-                })?;
 
         specs.push(RuntimeProfileLaunchSpec {
             profile_id: profile.profile_id.clone(),
@@ -100,9 +98,10 @@ pub(super) fn derive_managed_profile_launch_specs(
 
 fn allocate_implicit_runtime_port(
     profile: &RuntimeProfileConfig,
+    behavior: &ProviderBehavior,
     used_ports: &mut HashMap<u16, RuntimeProfileId>,
 ) -> Result<RuntimePort> {
-    let base_port = provider_base_port(profile.provider);
+    let base_port = behavior.managed_runtime_base_port;
     let start_offset = implicit_port_offset(profile.profile_id.as_str());
     for step in 0..IMPLICIT_RUNTIME_PORT_SPAN {
         let offset =
@@ -275,19 +274,5 @@ fn apply_device_visibility_env(
             }
         }
         RuntimeDeviceMode::Auto | RuntimeDeviceMode::Hybrid => {}
-    }
-}
-
-fn provider_base_port(provider: RuntimeProviderId) -> u16 {
-    match provider {
-        RuntimeProviderId::Ollama => OLLAMA_RUNTIME_BASE_PORT,
-        RuntimeProviderId::LlamaCpp => LLAMA_CPP_RUNTIME_BASE_PORT,
-    }
-}
-
-fn provider_path_segment(provider: RuntimeProviderId) -> &'static str {
-    match provider {
-        RuntimeProviderId::Ollama => "ollama",
-        RuntimeProviderId::LlamaCpp => "llama-cpp",
     }
 }

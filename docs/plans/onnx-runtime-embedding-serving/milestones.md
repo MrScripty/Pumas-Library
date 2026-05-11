@@ -300,6 +300,11 @@ extracted into `rust/crates/pumas-core/src/serving/gateway_alias.rs`, and the
 serving README now documents alias policy ownership. This keeps alias boundary
 rules out of the serving service entrypoint before ONNX adds embedding-serving
 routes.
+Provider behavior now owns managed runtime path segments and implicit base
+ports, so launch-spec derivation no longer maps provider ids to launch layout
+for those values. Existing provider-specific env/arg construction remains in
+the launch-spec module and must move or be isolated before ONNX sidecar launch
+is wired.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

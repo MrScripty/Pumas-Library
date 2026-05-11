@@ -123,6 +123,8 @@ pub struct ProviderBehavior {
     pub openai_endpoints: Vec<OpenAiGatewayEndpoint>,
     pub launch_kinds: Vec<ProviderLaunchKind>,
     pub managed_launch_strategies: Vec<ProviderManagedLaunchStrategy>,
+    pub managed_runtime_path_segment: String,
+    pub managed_runtime_base_port: u16,
     pub provider_model_id_policy: ProviderModelIdPolicy,
     pub gateway_alias_policy: ProviderGatewayAliasPolicy,
     pub serving_adapter_kind: ProviderServingAdapterKind,
@@ -166,6 +168,8 @@ impl ProviderBehavior {
                     ProviderBinaryLaunchTarget::OllamaServe,
                 ),
             }],
+            managed_runtime_path_segment: "ollama".to_string(),
+            managed_runtime_base_port: 11_434,
             provider_model_id_policy: ProviderModelIdPolicy::GatewayAlias,
             gateway_alias_policy: ProviderGatewayAliasPolicy::OllamaModelName,
             serving_adapter_kind: ProviderServingAdapterKind::OllamaProviderApi,
@@ -221,6 +225,8 @@ impl ProviderBehavior {
                     ),
                 },
             ],
+            managed_runtime_path_segment: "llama-cpp".to_string(),
+            managed_runtime_base_port: 18_080,
             provider_model_id_policy: ProviderModelIdPolicy::LibraryModelId,
             gateway_alias_policy: ProviderGatewayAliasPolicy::LibraryModelId,
             serving_adapter_kind: ProviderServingAdapterKind::LlamaCppRuntime,
@@ -366,6 +372,8 @@ mod tests {
             behavior.serving_adapter_kind,
             ProviderServingAdapterKind::OllamaProviderApi
         );
+        assert_eq!(behavior.managed_runtime_path_segment, "ollama");
+        assert_eq!(behavior.managed_runtime_base_port, 11_434);
         assert!(behavior.supports_artifact_format(ExecutableArtifactFormat::Gguf));
         assert!(behavior.supports_managed_profiles);
         assert!(behavior.supports_external_profiles);
@@ -397,6 +405,8 @@ mod tests {
             behavior.unload_behavior,
             ProviderUnloadBehavior::RouterPreset
         );
+        assert_eq!(behavior.managed_runtime_path_segment, "llama-cpp");
+        assert_eq!(behavior.managed_runtime_base_port, 18_080);
         assert!(behavior.supports_model_catalog);
         assert!(behavior.supports_dedicated_model_processes);
     }
@@ -423,6 +433,8 @@ mod tests {
             serialized["managed_launch_strategies"][0]["target"]["value"],
             "llama_cpp_router"
         );
+        assert_eq!(serialized["managed_runtime_path_segment"], "llama-cpp");
+        assert_eq!(serialized["managed_runtime_base_port"], 18_080);
         assert_eq!(serialized["provider_model_id_policy"], "library_model_id");
         assert_eq!(serialized["gateway_alias_policy"], "library_model_id");
         assert_eq!(serialized["serving_adapter_kind"], "llama_cpp_runtime");

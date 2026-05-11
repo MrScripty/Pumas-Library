@@ -301,6 +301,11 @@ Update during implementation:
   README module table/design notes. Effective alias derivation remains exported
   through the serving module, but validation orchestration no longer owns alias
   character, path-segment, or duplicate-alias policy directly.
+- 2026-05-11: Moved managed runtime path segments and implicit base ports into
+  `ProviderBehavior`, and updated launch-spec derivation to consume those
+  provider-owned values. Existing provider-specific env/arg construction still
+  remains in launch-spec derivation and is recorded as a remaining Milestone 0
+  cleanup before ONNX sidecar launch wiring.
 
 ## Commit Cadence Notes
 
@@ -483,6 +488,8 @@ changes remain.
   `serving/placement.rs` module instead of the serving service entrypoint.
 - Core serving gateway alias validation and effective-alias derivation now live
   in a focused `serving/gateway_alias.rs` module.
+- Provider behavior now owns managed runtime path segments and implicit base
+  ports consumed by runtime-profile launch-spec derivation.
 
 ### Deviations
 
@@ -641,6 +648,10 @@ changes remain.
 - Core serving gateway alias extraction slice verified with `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml serving` and `cargo fmt
   --manifest-path rust/Cargo.toml --all -- --check`.
+- Provider-owned managed runtime layout slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml providers`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`, and
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

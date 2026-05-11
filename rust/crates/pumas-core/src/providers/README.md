@@ -38,7 +38,8 @@ provider endpoint capabilities before forwarding through a shared gateway HTTP
 client. Serving alias defaulting consumes the provider gateway-alias policy.
 Serving load dispatch consumes the provider serving adapter kind. Runtime
 profile launch-spec derivation consumes managed launch strategies declared by
-provider behavior.
+provider behavior, including provider-owned runtime directory segments and
+implicit managed base ports.
 Later slices migrate frontend bridge contracts onto this registry.
 
 ## Alternatives Rejected
@@ -64,6 +65,9 @@ Later slices migrate frontend bridge contracts onto this registry.
   policy, not from transport-layer provider matches.
 - Managed runtime profile launch targets are declared per provider mode by
   provider behavior, then projected into runtime-profile launch specs.
+- Managed runtime profile path segments and implicit base ports are declared by
+  provider behavior so launch-spec derivation does not infer launch layout from
+  provider ids.
 - Executable artifact formats are parsed into `ExecutableArtifactFormat` at
   boundaries before serving validation consumes them.
 
@@ -108,6 +112,9 @@ assert!(behavior.supports_openai_endpoint(
   model-id policy to a library model id and optional gateway alias.
 - `ProviderBehavior::managed_launch_target` returns the provider-owned managed
   launch target for a validated provider mode.
+- `managed_runtime_path_segment` and `managed_runtime_base_port` are consumed
+  by launch-spec derivation for managed runtime directories and implicit port
+  allocation.
 - `ExecutableArtifactFormat::from_path` is the shared boundary parser for
   local executable model artifact paths.
 - `ProviderBehavior::supports_management_mode` is the shared policy check for
@@ -117,8 +124,8 @@ assert!(behavior.supports_openai_endpoint(
 
 - Stable producer fields are provider id, provider modes, device modes, local
   artifact formats, serving tasks, OpenAI endpoints, launch strategies,
-  provider model-id policy, gateway alias policy, serving adapter kind, and
-  unload behavior.
+  managed runtime layout, provider model-id policy, gateway alias policy,
+  serving adapter kind, and unload behavior.
 - Enum values serialize with snake_case when they cross a boundary.
 - Adding ONNX Runtime requires adding one provider behavior entry and matching
   contract tests before consumers depend on it.

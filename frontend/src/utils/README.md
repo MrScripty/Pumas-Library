@@ -9,7 +9,7 @@ Utility functions for formatting, logging, drag math, network status helpers, an
 | `logger.ts` | Frontend logging helper wrapper. |
 | `formatters.ts` | Generic formatting helpers. |
 | `appVersionState.ts` | Version state helper functions. |
-| `runtimeProviderDescriptors.ts` | Frontend runtime-provider descriptors for labels, profile modes, device modes, model compatibility, and serve-dialog capability flags. |
+| `runtimeProviderDescriptors.ts` | Frontend runtime-provider descriptors for labels, profile modes, device modes, model compatibility, default placement values, and serve-dialog capability flags. |
 | `dragAnimations.ts` | Drag animation helper utilities. |
 | `networkStatusMonitor.ts` | Connectivity/status monitor helpers. |
 

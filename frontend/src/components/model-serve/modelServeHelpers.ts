@@ -10,8 +10,6 @@ import {
   isModelCompatibleWithProvider,
 } from '../../utils/runtimeProviderDescriptors';
 
-export const DEFAULT_LLAMA_CPP_CONTEXT_SIZE = '4096';
-
 export const DEVICE_OPTIONS: Array<{ value: RuntimeDeviceMode; label: string }> = [
   { value: 'auto', label: 'Auto' },
   { value: 'cpu', label: 'CPU' },
@@ -45,11 +43,7 @@ export function formatServeError(error: ModelServeError | null): string | null {
   return error.message || error.code.replace(/_/g, ' ');
 }
 
-export function isGgufModel(model: ModelInfo): boolean {
-  return isModelCompatibleWithProvider(model, 'llama_cpp');
-}
-
-export function isDedicatedLlamaCppProfile(profile: RuntimeProfileConfig | undefined): boolean {
+export function profileUsesDedicatedPlacement(profile: RuntimeProfileConfig | undefined): boolean {
   if (!profile) {
     return false;
   }
@@ -59,11 +53,7 @@ export function isDedicatedLlamaCppProfile(profile: RuntimeProfileConfig | undef
   );
 }
 
-export function isLlamaCppProfile(profile: RuntimeProfileConfig | undefined): boolean {
-  return profile?.provider === 'llama_cpp';
-}
-
-export function isManagedLlamaCppProfile(profile: RuntimeProfileConfig | undefined): boolean {
+export function profileCanLaunchOnServe(profile: RuntimeProfileConfig | undefined): boolean {
   return Boolean(
     profile &&
       getRuntimeProviderDescriptor(profile.provider).canLaunchOnServe &&
@@ -71,11 +61,15 @@ export function isManagedLlamaCppProfile(profile: RuntimeProfileConfig | undefin
   );
 }
 
+export function defaultContextSizeForProfile(profile: RuntimeProfileConfig | undefined): string {
+  return profile ? (getRuntimeProviderDescriptor(profile.provider).defaultContextSize ?? '') : '';
+}
+
 export function getPlacementControls(
   profile: RuntimeProfileConfig | undefined,
   deviceMode: RuntimeDeviceMode
 ): ModelServeControls {
-  const supportsModelPlacement = isDedicatedLlamaCppProfile(profile);
+  const supportsModelPlacement = profileUsesDedicatedPlacement(profile);
   const canUseGpuPlacement = supportsModelPlacement && deviceMode !== 'cpu';
   const supportsContextSize = profile
     ? getRuntimeProviderDescriptor(profile.provider).supportsContextSize
@@ -100,7 +94,7 @@ export function getProfileStateBlockReason(
     return null;
   }
 
-  const canLaunchOnServe = isManagedLlamaCppProfile(profile);
+  const canLaunchOnServe = profileCanLaunchOnServe(profile);
   const isAvailable = status?.state === 'running' || status?.state === 'external';
 
   return canLaunchOnServe || isAvailable

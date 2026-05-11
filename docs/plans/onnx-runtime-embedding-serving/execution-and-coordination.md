@@ -283,6 +283,10 @@ Update during implementation:
   check now uses selected-provider descriptors instead of a hard-coded GGUF
   branch. ONNX UI/provider entries remain deferred to the ONNX app identity
   milestone.
+- 2026-05-11: Moved serve-dialog default context size and launch-on-serve
+  initial profile fallback onto runtime provider descriptors. Current llama.cpp
+  behavior is preserved because it remains the only existing descriptor with
+  launch-on-serve support and a default context size.
 - 2026-05-11: Extracted managed runtime-profile launch-spec derivation into
   `rust/crates/pumas-core/src/runtime_profiles/launch_specs.rs`. The extracted
   module owns implicit port allocation, runtime directory derivation, existing
@@ -525,6 +529,8 @@ changes remain.
 - Frontend provider descriptors now centralize existing provider labels, modes,
   device modes, executable-format compatibility, and serve-dialog capability
   flags.
+- Serve-dialog provider defaults and launch-on-serve profile fallback now read
+  from frontend provider descriptors instead of hard-coded llama.cpp checks.
 - Managed runtime-profile launch-spec derivation now lives in
   `runtime_profiles/launch_specs.rs`.
 - Backend provider-path verification now covers composed-registry launch-spec
@@ -695,6 +701,10 @@ changes remain.
   check:types` and `npm run -w frontend test:run --
   runtimeProviderDescriptors llamaCppLibraryViewModels
   LlamaCppModelLibrarySection RuntimeProfileSettingsSection ModelServeDialog`.
+- Frontend serve-dialog descriptor cleanup slice verified with `npm run -w
+  frontend check:types` and `npm run -w frontend test:run --
+  runtimeProviderDescriptors ModelServeDialog LlamaCppModelLibrarySection
+  llamaCppLibraryViewModels`.
 - Runtime-profile launch-spec extraction slice verified with `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`, `cargo
   test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo

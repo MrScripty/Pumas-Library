@@ -1,7 +1,7 @@
 import type { RuntimeProfileConfig } from '../../../types/api-runtime-profiles';
 import type { ModelServeError, ModelServingConfig } from '../../../types/api-serving';
 import {
-  DEFAULT_LLAMA_CPP_CONTEXT_SIZE,
+  defaultContextSizeForProfile,
   getPlacementControls,
 } from '../../model-serve/modelServeHelpers';
 import type { LlamaCppModelRowViewModel } from './llamaCppLibraryViewModels';
@@ -40,7 +40,7 @@ export function buildQuickServeConfig(profile: RuntimeProfileConfig): ModelServi
         : null,
     gpu_layers: controls.showGpuLayers ? profile.device.gpu_layers ?? null : null,
     tensor_split: controls.showTensorSplit ? profile.device.tensor_split ?? null : null,
-    context_size: Number(DEFAULT_LLAMA_CPP_CONTEXT_SIZE),
+    context_size: Number(defaultContextSizeForProfile(profile)),
     keep_loaded: true,
     model_alias: null,
   };

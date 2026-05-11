@@ -285,6 +285,11 @@ llama.cpp compatible model rows, provider-scoped route mutations, and serve
 dialog compatibility checks consume descriptor data for existing Ollama and
 llama.cpp providers. ONNX frontend panel wiring remains deferred until the ONNX
 provider/app identity milestones.
+Serve-dialog default context size and launch-on-serve initial profile fallback
+now consume runtime provider descriptors instead of hard-coded llama.cpp checks.
+Current llama.cpp behavior is preserved because llama.cpp is the only existing
+provider descriptor that declares launch-on-serve support and a default context
+size.
 Managed launch-spec derivation has been extracted from the oversized
 `runtime_profiles.rs` into `runtime_profiles/launch_specs.rs`. This covers the
 runtime launch-strategy portion of the large-file split task; route

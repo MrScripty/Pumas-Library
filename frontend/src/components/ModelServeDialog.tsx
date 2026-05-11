@@ -8,16 +8,18 @@ import { ModelServeDialogContent } from './model-serve/ModelServeDialogContent';
 import {
   buildModelServingConfig,
   buildServeBlockReason,
-  DEFAULT_LLAMA_CPP_CONTEXT_SIZE,
+  defaultContextSizeForProfile,
   getPlacementControls,
   getProfileStateBlockReason,
-  isGgufModel,
-  isManagedLlamaCppProfile,
-  isLlamaCppProfile,
+  profileCanLaunchOnServe,
   type ModelServeFormState,
 } from './model-serve/modelServeHelpers';
 import { useDialogFocusTrap } from './model-serve/useDialogFocusTrap';
 import { useModelServingActions } from './model-serve/useModelServingActions';
+import {
+  getRuntimeProviderDescriptor,
+  isModelCompatibleWithProvider,
+} from '../utils/runtimeProviderDescriptors';
 
 interface ModelServeDialogProps {
   model: ModelInfo;
@@ -130,7 +132,7 @@ export function ModelServeDialog({
     setDeviceId(selectedProfile.device.device_id ?? '');
     setGpuLayers(selectedProfile.device.gpu_layers?.toString() ?? '');
     setTensorSplit(selectedProfile.device.tensor_split?.join(',') ?? '');
-    setContextSize(isLlamaCppProfile(selectedProfile) ? DEFAULT_LLAMA_CPP_CONTEXT_SIZE : '');
+    setContextSize(defaultContextSizeForProfile(selectedProfile));
   }, [selectedProfile]);
 
   useEffect(() => {
@@ -248,23 +250,24 @@ function selectInitialServeProfile({
     return explicitProfile;
   }
 
-  if (isGgufModel(model)) {
-    const runningLlamaProfile = profiles.find((profile) => {
-      if (profile.provider !== 'llama_cpp') {
-        return false;
-      }
+  const launchOnServeProfiles = profiles.filter((profile) => {
+    const descriptor = getRuntimeProviderDescriptor(profile.provider);
+    return descriptor.canLaunchOnServe && isModelCompatibleWithProvider(model, profile.provider);
+  });
+  if (launchOnServeProfiles.length > 0) {
+    const runningLaunchOnServeProfile = launchOnServeProfiles.find((profile) => {
       const status = statuses.find((candidate) => candidate.profile_id === profile.profile_id);
       return status?.state === 'running' || status?.state === 'external';
     });
-    if (runningLlamaProfile) {
-      return runningLlamaProfile;
+    if (runningLaunchOnServeProfile) {
+      return runningLaunchOnServeProfile;
     }
 
-    const launchableManagedLlamaProfile = profiles.find((profile) =>
-      isManagedLlamaCppProfile(profile)
+    const launchableManagedProfile = launchOnServeProfiles.find((profile) =>
+      profileCanLaunchOnServe(profile)
     );
-    if (launchableManagedLlamaProfile) {
-      return launchableManagedLlamaProfile;
+    if (launchableManagedProfile) {
+      return launchableManagedProfile;
     }
   }
 

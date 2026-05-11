@@ -29,12 +29,14 @@ describe('runtime provider descriptors', () => {
       profileModes: ['ollama_serve'],
       supportsGpuLayers: false,
       supportsContextSize: false,
+      defaultContextSize: null,
     });
     expect(getRuntimeProviderDescriptor('llama_cpp')).toMatchObject({
       profileModes: ['llama_cpp_router', 'llama_cpp_dedicated'],
       dedicatedPlacementModes: ['llama_cpp_dedicated'],
       supportsGpuLayers: true,
       supportsContextSize: true,
+      defaultContextSize: '4096',
     });
   });
 

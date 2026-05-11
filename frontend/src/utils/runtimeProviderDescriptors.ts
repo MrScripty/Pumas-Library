@@ -15,6 +15,7 @@ export interface RuntimeProviderDescriptor {
   supportsGpuLayers: boolean;
   supportsTensorSplit: boolean;
   supportsContextSize: boolean;
+  defaultContextSize: string | null;
   canLaunchOnServe: boolean;
 }
 
@@ -29,6 +30,7 @@ export const runtimeProviderDescriptors: Record<RuntimeProviderId, RuntimeProvid
     supportsGpuLayers: false,
     supportsTensorSplit: false,
     supportsContextSize: false,
+    defaultContextSize: null,
     canLaunchOnServe: false,
   },
   llama_cpp: {
@@ -41,6 +43,7 @@ export const runtimeProviderDescriptors: Record<RuntimeProviderId, RuntimeProvid
     supportsGpuLayers: true,
     supportsTensorSplit: true,
     supportsContextSize: true,
+    defaultContextSize: '4096',
     canLaunchOnServe: true,
   },
 };

@@ -23,6 +23,9 @@ profile selection, placement controls, and serving actions into one oversized co
 - Provider-specific callers may filter the runtime profile list before the form
   renders. llama.cpp row serving uses this so a selected llama.cpp route cannot
   drift into Ollama or another provider.
+- Provider-specific defaults, launch-on-serve profile fallback, and placement
+  control visibility are derived from runtime provider descriptors rather than
+  hard-coded provider checks in the dialog.
 - The form asks for a gateway alias when the same model is already served
   through another profile. Backend validation remains authoritative for alias
   syntax, uniqueness, and ambiguous gateway routing.

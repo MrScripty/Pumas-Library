@@ -187,6 +187,11 @@ Update during implementation:
   provider compatibility check consumes provider behavior. Touched Ollama
   serving and dedicated llama.cpp launch paths now use the same provider-owned
   `ExecutableArtifactFormat::from_path` parser.
+- 2026-05-11: Updated `rust/crates/pumas-rpc/src/handlers/README.md` for the
+  extracted OpenAI gateway and serving adapter modules. Existing provider README
+  coverage now includes the executable artifact parser. No new source
+  directories were introduced for launch strategy, route migration, or frontend
+  provider descriptors in this slice.
 
 ## Commit Cadence Notes
 
@@ -330,6 +335,8 @@ changes remain.
   modules. Existing-provider serving adapter extraction is complete.
 - Serving artifact compatibility now uses typed `ExecutableArtifactFormat`
   values from the API boundary through shared serving validation.
+- Handler README traceability now covers the extracted gateway and serving
+  adapter modules.
 
 ### Deviations
 
@@ -413,10 +420,12 @@ changes remain.
   rust/crates/pumas-core/Cargo.toml serving`, `cargo test --manifest-path
   rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt --manifest-path
   rust/Cargo.toml --all -- --check`.
+- Handler README traceability slice is documentation-only; reviewed the updated
+  module table and design notes against the extracted files.
 
 ### Traceability Links
 
-- Module README updated: pending.
+- Module README updated: `rust/crates/pumas-rpc/src/handlers/README.md`.
 - Module README updated: `rust/crates/pumas-core/src/providers/README.md`.
 - ADR added/updated: `docs/adr/0001-onnx-runtime-provider-model.md`.
 - PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: pending.

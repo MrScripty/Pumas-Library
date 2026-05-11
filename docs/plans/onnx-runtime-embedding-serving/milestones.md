@@ -121,7 +121,7 @@ provider and widens the blast radius.
       ONNX branches: runtime provider behavior, route persistence/migration,
       serving provider adapters, gateway proxy helper, runtime launch strategy,
       and frontend provider row/view-model components.
-- [ ] Add or update README files for new provider, gateway, launch-strategy,
+- [x] Add or update README files for new provider, gateway, launch-strategy,
       route-migration, serving-adapter, or frontend provider-descriptor
       directories. Required sections must contain concrete rationale or an
       explicit `None` with reason and revisit trigger.
@@ -210,6 +210,11 @@ from the primary model file path instead of a raw extension string. The shared
 provider artifact compatibility check consumes that typed value, and touched
 Ollama serving and dedicated llama.cpp launch paths use the same provider-owned
 artifact parser.
+The existing `handlers/README.md` now documents the extracted OpenAI gateway
+and serving adapter modules. The provider README documents the provider
+behavior contract and executable artifact parser. No new source directories
+were added for launch strategy, route migration, or frontend descriptors in
+this slice.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

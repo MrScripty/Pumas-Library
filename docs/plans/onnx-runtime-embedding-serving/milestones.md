@@ -164,6 +164,11 @@ parameters, frontend bridge types, llama.cpp route helpers, endpoint lookup,
 auto-load lookup, and one-way persisted config migration. Next slice is moving
 serving dispatch toward provider adapters. `unserve_model` no longer has the
 non-llama.cpp-implies-Ollama fallback; full adapter extraction remains pending.
+Serving and gateway request model-id rewriting now consume provider behavior
+policy instead of transport-layer Ollama/llama.cpp matches. This completes the
+model-id rewriting portion of provider behavior migration; alias defaulting,
+full serving adapter extraction, endpoint capability checks, reusable provider
+clients, and launch strategy selection remain pending.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

@@ -113,6 +113,13 @@ Update during implementation:
   Unload now no-ops when no served instance exists and dispatches from the
   backend-recorded served provider for Ollama and llama.cpp. Full serving
   adapter extraction remains pending.
+- 2026-05-11: Moved provider-side request model-id rewriting into
+  `ProviderBehavior::provider_request_model_id`. The OpenAI gateway and
+  llama.cpp router load path now ask the built-in provider registry for
+  model-id policy instead of matching Ollama versus llama.cpp in transport
+  handlers. This is the first thin serving/gateway slice toward provider
+  adapters; alias defaulting, endpoint capability checks, shared clients, and
+  full load/unload adapter extraction remain pending.
 
 ## Commit Cadence Notes
 
@@ -234,6 +241,8 @@ changes remain.
   provider behavior.
 - `unserve_model` unload selection now uses recorded served provider instead of
   falling back to Ollama for every non-llama.cpp status.
+- Serving and gateway provider-side request model ids now derive from provider
+  behavior policy.
 
 ### Deviations
 
@@ -266,6 +275,11 @@ changes remain.
 - Provider-based unload dispatch slice verified with `cargo test
   --manifest-path rust/crates/pumas-rpc/Cargo.toml serving` and Rust
   formatting.
+- Provider request model-id policy slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml providers`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`, and
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

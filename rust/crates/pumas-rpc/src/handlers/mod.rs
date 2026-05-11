@@ -33,9 +33,10 @@ use futures::{
 };
 use pumas_library::models::{
     ModelDownloadUpdateNotification, ModelLibraryUpdateNotification, ModelServeErrorCode,
-    RuntimeProfileUpdateFeed, RuntimeProviderId, ServedModelLoadState, ServedModelStatus,
-    ServingStatusSnapshot, ServingStatusUpdateFeed, StatusTelemetryUpdateNotification,
+    RuntimeProfileUpdateFeed, ServedModelLoadState, ServedModelStatus, ServingStatusSnapshot,
+    ServingStatusUpdateFeed, StatusTelemetryUpdateNotification,
 };
+use pumas_library::ProviderRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::convert::Infallible;
@@ -220,13 +221,13 @@ fn openai_model_entry(model: ServedModelStatus) -> Value {
 }
 
 fn provider_request_model_id(model: &ServedModelStatus) -> String {
-    match model.provider {
-        RuntimeProviderId::LlamaCpp => model.model_id.clone(),
-        RuntimeProviderId::Ollama => model
-            .model_alias
-            .clone()
-            .unwrap_or_else(|| model.model_id.clone()),
-    }
+    ProviderRegistry::builtin()
+        .get(model.provider)
+        .map(|behavior| {
+            behavior
+                .provider_request_model_id(model.model_id.as_str(), model.model_alias.as_deref())
+        })
+        .unwrap_or_else(|| model.model_id.clone())
 }
 
 fn openai_model_id(model: &ServedModelStatus) -> &str {

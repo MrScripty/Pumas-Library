@@ -9,6 +9,7 @@ use pumas_library::models::{
     ServedModelStatus, UnserveModelRequest, UnserveModelResponse,
 };
 use pumas_library::runtime_profiles::RuntimeProfileLaunchOverrides;
+use pumas_library::ProviderRegistry;
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
@@ -448,7 +449,7 @@ async fn serve_llama_cpp_router_model(
     }
 
     let gateway_alias = effective_gateway_alias_from_config(&request);
-    let router_model_id = llama_cpp_router_provider_model_id(&request);
+    let router_model_id = provider_request_model_id(&request);
     if let Err(message) = llama_cpp_router_load_model(endpoint.as_str(), &router_model_id).await {
         warn!("llama.cpp router model load failed: {}", message);
         return non_critical_failure_response(
@@ -643,8 +644,15 @@ fn llama_cpp_router_model_unload_url(endpoint: &str) -> String {
     format!("{}/models/unload", endpoint.trim_end_matches('/'))
 }
 
-fn llama_cpp_router_provider_model_id(request: &ServeModelRequest) -> String {
-    request.model_id.trim().to_string()
+fn provider_request_model_id(request: &ServeModelRequest) -> String {
+    let library_model_id = request.model_id.trim();
+    ProviderRegistry::builtin()
+        .get(request.config.provider)
+        .map(|behavior| {
+            behavior
+                .provider_request_model_id(library_model_id, request.config.model_alias.as_deref())
+        })
+        .unwrap_or_else(|| library_model_id.to_string())
 }
 
 async fn active_llama_cpp_runtime(
@@ -1201,7 +1209,7 @@ mod tests {
     }
 
     #[test]
-    fn llama_cpp_router_provider_model_id_uses_catalog_model_id_not_gateway_alias() {
+    fn provider_request_model_id_uses_provider_behavior_policy() {
         let request = ServeModelRequest {
             model_id: "llm/qwen/model-gguf".to_string(),
             config: pumas_library::models::ModelServingConfig {
@@ -1217,10 +1225,24 @@ mod tests {
             },
         };
 
-        assert_eq!(
-            llama_cpp_router_provider_model_id(&request),
-            "llm/qwen/model-gguf"
-        );
+        assert_eq!(provider_request_model_id(&request), "llm/qwen/model-gguf");
+
+        let ollama_request = ServeModelRequest {
+            model_id: "llm/qwen/model-gguf".to_string(),
+            config: pumas_library::models::ModelServingConfig {
+                provider: RuntimeProviderId::Ollama,
+                profile_id: RuntimeProfileId::parse("ollama-default").unwrap(),
+                device_mode: RuntimeDeviceMode::Gpu,
+                device_id: None,
+                gpu_layers: None,
+                tensor_split: None,
+                context_size: Some(8192),
+                keep_loaded: true,
+                model_alias: Some("qwen-gpu".to_string()),
+            },
+        };
+
+        assert_eq!(provider_request_model_id(&ollama_request), "qwen-gpu");
     }
 
     #[test]

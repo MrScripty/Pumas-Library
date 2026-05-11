@@ -32,9 +32,10 @@ match blocks.
 
 Start with a typed provider behavior registry for existing Ollama and llama.cpp
 providers. Runtime profile validation consumes the registry for provider-mode
-and managed/external support checks. Later slices migrate serving adapters,
-launcher strategies, gateway proxying, and frontend bridge contracts onto this
-registry.
+and managed/external support checks. Serving and gateway request model-id
+rewriting now consume the provider model-id policy. Later slices migrate full
+serving adapters, launcher strategies, gateway capability checks, and frontend
+bridge contracts onto this registry.
 
 ## Alternatives Rejected
 
@@ -52,6 +53,8 @@ registry.
 - OpenAI-compatible endpoint support is explicit per provider.
 - Local executable artifact compatibility is separate from gateway endpoint
   support.
+- Provider-side request model ids are derived from the declared model-id
+  policy, not from transport-layer provider matches.
 
 ## Revisit Triggers
 
@@ -90,6 +93,8 @@ assert!(behavior.supports_openai_endpoint(
   error or a re-plan trigger.
 - Capability lists are deterministic for built-in providers.
 - Registry values are immutable after construction in this slice.
+- `ProviderBehavior::provider_request_model_id` applies the provider's
+  model-id policy to a library model id and optional gateway alias.
 
 ## Structured Producer Contract
 

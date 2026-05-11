@@ -169,6 +169,19 @@ impl ProviderBehavior {
     pub fn supports_serving_task(&self, task: ServingTask) -> bool {
         self.serving_tasks.contains(&task)
     }
+
+    pub fn provider_request_model_id(
+        &self,
+        library_model_id: &str,
+        gateway_alias: Option<&str>,
+    ) -> String {
+        match self.provider_model_id_policy {
+            ProviderModelIdPolicy::GatewayAlias => gateway_alias
+                .map(str::to_string)
+                .unwrap_or_else(|| library_model_id.to_string()),
+            ProviderModelIdPolicy::LibraryModelId => library_model_id.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -279,5 +292,24 @@ mod tests {
         assert_eq!(serialized["openai_endpoints"][3], "embeddings");
         assert_eq!(serialized["provider_model_id_policy"], "library_model_id");
         assert_eq!(serialized["unload_behavior"], "router_preset");
+    }
+
+    #[test]
+    fn provider_request_model_id_uses_declared_model_id_policy() {
+        let ollama = ProviderBehavior::ollama();
+        assert_eq!(
+            ollama.provider_request_model_id("library/model.gguf", Some("gateway-alias")),
+            "gateway-alias"
+        );
+        assert_eq!(
+            ollama.provider_request_model_id("library/model.gguf", None),
+            "library/model.gguf"
+        );
+
+        let llama_cpp = ProviderBehavior::llama_cpp();
+        assert_eq!(
+            llama_cpp.provider_request_model_id("library/model.gguf", Some("gateway-alias")),
+            "library/model.gguf"
+        );
     }
 }

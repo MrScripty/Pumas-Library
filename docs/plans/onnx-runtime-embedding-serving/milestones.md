@@ -310,6 +310,10 @@ Serving validation now consumes provider-owned launch-on-serve support for
 stopped managed profiles instead of hard-coding llama.cpp as the only accepted
 provider path. Existing Ollama remains rejected for stopped managed serving
 requests, while llama.cpp router/dedicated behavior is preserved.
+Runtime-profile lifecycle launch preparation now branches on
+`RuntimeProfileLaunchStrategy` for llama.cpp router/dedicated prep instead of
+checking provider id plus provider mode. ONNX Python sidecar preparation remains
+explicitly unwired until the managed sidecar lifecycle slice.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

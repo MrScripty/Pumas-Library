@@ -5,7 +5,7 @@ use super::state::PrimaryState;
 use crate::error::PumasError;
 use crate::models::{
     LaunchResponse, RuntimeDeviceMode, RuntimeDeviceSettings, RuntimeLifecycleState,
-    RuntimeProfileId, RuntimeProfileStatus, RuntimeProviderId, RuntimeProviderMode,
+    RuntimeProfileId, RuntimeProfileStatus,
 };
 use crate::process::{BinaryLaunchConfig, ProcessLauncher};
 use crate::providers::ExecutableArtifactFormat;
@@ -167,12 +167,10 @@ async fn prepare_runtime_profile_launch_spec(
     model_id: Option<&str>,
     overrides: Option<&RuntimeProfileLaunchOverrides>,
 ) -> std::result::Result<RuntimeProfileLaunchSpec, PumasError> {
-    if launch_spec.provider != RuntimeProviderId::LlamaCpp {
-        return Ok(launch_spec);
-    }
-
-    match launch_spec.provider_mode {
-        RuntimeProviderMode::LlamaCppRouter => {
+    match launch_spec.launch_strategy {
+        RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::LlamaCppRouter,
+        ) => {
             let catalog = generate_llama_cpp_router_catalog(primary.model_library.clone()).await?;
             async_fs::create_dir_all(&launch_spec.runtime_dir)
                 .await
@@ -187,7 +185,9 @@ async fn prepare_runtime_profile_launch_spec(
                 apply_llama_cpp_launch_overrides(&mut launch_spec, overrides);
             }
         }
-        RuntimeProviderMode::LlamaCppDedicated => {
+        RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::LlamaCppDedicated,
+        ) => {
             let Some(model_id) = model_id else {
                 return Err(PumasError::InvalidParams {
                     message: "model_id is required to launch a dedicated llama.cpp profile"
@@ -216,7 +216,11 @@ async fn prepare_runtime_profile_launch_spec(
                 apply_llama_cpp_launch_overrides(&mut launch_spec, overrides);
             }
         }
-        RuntimeProviderMode::OllamaServe => {}
+        RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::OllamaServe,
+        )
+        | RuntimeProfileLaunchStrategy::PythonSidecar(_)
+        | RuntimeProfileLaunchStrategy::ExternalOnly => {}
     }
 
     Ok(launch_spec)
@@ -353,7 +357,7 @@ fn append_llama_cpp_model_arg(args: &[String], model_path: &Path) -> Vec<String>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{RuntimeEndpointUrl, RuntimePort};
+    use crate::models::{RuntimeEndpointUrl, RuntimePort, RuntimeProviderId, RuntimeProviderMode};
     use std::collections::HashMap;
     use std::path::PathBuf;
 

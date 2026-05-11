@@ -334,6 +334,12 @@ Update during implementation:
   `LlamaCppModelLibrarySection.tsx` keeps route persistence and serving
   orchestration. The section, list, and row are all below the component-size
   threshold, and the sections README records the boundaries.
+- 2026-05-11: Closed the Milestone 0 large-file split checklist item. The named
+  ONNX prerequisite split targets now have focused delegates: provider behavior,
+  route config migration, serving adapters, gateway proxy helpers, runtime
+  launch strategy/spec derivation, and frontend provider row/view-model
+  components. Large unrelated legacy files remain outside this plan's ONNX
+  write surface.
 
 ## Commit Cadence Notes
 
@@ -529,6 +535,8 @@ changes remain.
 - llama.cpp compatible-model list and row rendering now live in
   `LlamaCppModelLibraryList.tsx` and `LlamaCppModelRow.tsx`, leaving each
   component below the size threshold before ONNX adds sibling UI.
+- Milestone 0 large-file split work is complete for the named ONNX provider
+  prerequisite surfaces.
 
 ### Deviations
 
@@ -707,6 +715,9 @@ changes remain.
 - Frontend llama.cpp row extraction slice verified with `npm run -w frontend
   check:types` and `npm run -w frontend test:run --
   LlamaCppModelLibrarySection llamaCppLibraryViewModels`.
+- Large-file split status closure is documentation-only; evidence is the
+  committed module extraction history and the focused verification recorded for
+  each split slice.
 
 ### Traceability Links
 

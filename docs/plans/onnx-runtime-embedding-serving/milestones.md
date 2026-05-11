@@ -117,7 +117,7 @@ provider and widens the blast radius.
       model lists, route mutations, and serve dialog selection. Move
       llama.cpp-specific route-row behavior behind provider-specific view models
       that feed shared route primitives.
-- [ ] Split already-large files through narrow delegating modules before adding
+- [x] Split already-large files through narrow delegating modules before adding
       ONNX branches: runtime provider behavior, route persistence/migration,
       serving provider adapters, gateway proxy helper, runtime launch strategy,
       and frontend provider row/view-model components.
@@ -327,6 +327,11 @@ quick-serve helpers now live in `llamaCppQuickServe.ts`. This reduces
 leaving route persistence and serving orchestration in the section. The
 sections README documents these boundaries so ONNX can add sibling list/row
 work without expanding the llama.cpp section.
+The named large-file split work is complete for the ONNX provider-model
+prerequisite: runtime provider behavior, route config migration, serving
+adapters, gateway proxy helpers, runtime launch strategy/spec derivation, and
+frontend provider row/view-model components now have focused delegate modules.
+Large unrelated legacy files remain outside this plan's ONNX write surface.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

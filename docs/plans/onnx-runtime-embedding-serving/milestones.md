@@ -366,7 +366,7 @@ Runtime execution.
 **Tasks:**
 - [x] Create a focused Rust ONNX provider/session module or crate with README
       contract sections before expanding internals.
-- [ ] Keep ONNX session manager construction at the Rust composition root.
+- [x] Keep ONNX session manager construction at the Rust composition root.
       Serving/gateway handlers may receive traits/handles, but must not create
       ONNX sessions, tokenizer state, or global managers ad hoc.
 - [x] Define validated Rust request/session types for model path, model id,
@@ -396,8 +396,9 @@ Runtime execution.
 **Status:** In progress. The first Rust ONNX skeleton slice added
 `rust/crates/pumas-core/src/onnx_runtime/` with README coverage, validated
 contract types, a fake backend, a bounded `OnnxSessionManager`, and focused
-unit tests. Composition-root wiring, gateway OpenAI-compatible errors, and
-full shutdown/cancellation ordering remain open for later M1/M3/M5 slices.
+unit tests. RPC `AppState` now owns the bounded ONNX session manager for fake
+serving. Gateway OpenAI-compatible errors and full shutdown/cancellation
+ordering remain open for later M1/M3/M5 slices.
 
 ### Milestone 2: ONNX Embedding Execution
 
@@ -571,14 +572,14 @@ state.
       the wrong provider when no ONNX route exists.
 - [ ] Return a clear validation error when an ONNX model has no saved route and
       no explicit ONNX profile selection.
-- [ ] Add ONNX provider adapter calls from `serve_model` to the Rust ONNX
+- [x] Add ONNX provider adapter calls from `serve_model` to the Rust ONNX
       session manager.
 - [ ] Move existing Ollama and llama.cpp serving paths behind provider serving
       adapters before adding ONNX load/unload so the RPC handler only performs
       boundary parsing, validation orchestration, and response shaping.
 - [ ] Confirm the Rust ONNX provider status/list includes the model before
       recording loaded status.
-- [ ] Add unload support through the Rust ONNX session manager and served
+- [x] Add unload support through the Rust ONNX session manager and served
       status removal.
 - [ ] Make load and unload idempotent where possible: duplicate load returns
       the existing loaded state, duplicate unload returns an unchanged snapshot,
@@ -604,9 +605,11 @@ state.
 **Status:** In progress. Serving validation accepts ONNX requests only when the
 selected ONNX profile is running and the primary executable artifact is `.onnx`.
 Provider behavior drives ONNX artifact compatibility, and ONNX rejects
-llama.cpp-specific placement overrides with non-critical domain errors. Actual
-load/unload calls still return explicit not-yet-wired responses until the
-session-manager adapter slice lands.
+llama.cpp-specific placement overrides with non-critical domain errors. The RPC
+serving boundary now loads/unloads ONNX through the Rust fake session manager
+and records/removes backend served status. Real ONNX Runtime execution,
+duplicate load/unload idempotency, session status reconciliation before record,
+and gateway embedding routing remain open.
 
 ### Milestone 5: Pumas Gateway Routing
 

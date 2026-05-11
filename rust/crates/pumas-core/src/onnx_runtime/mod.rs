@@ -42,11 +42,21 @@ impl OnnxModelId {
         }
         if !trimmed
             .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '/'))
         {
             return Err(OnnxRuntimeError::validation(
                 "model_id",
-                "model id may only contain ASCII letters, numbers, '.', '-', or '_'",
+                "model id may only contain ASCII letters, numbers, '.', '-', '_', or '/'",
+            ));
+        }
+        if trimmed.starts_with('/')
+            || trimmed
+                .split('/')
+                .any(|segment| segment.is_empty() || matches!(segment, "." | ".."))
+        {
+            return Err(OnnxRuntimeError::validation(
+                "model_id",
+                "model id path segments must be non-empty and may not be '.' or '..'",
             ));
         }
         Ok(Self(trimmed.to_string()))
@@ -566,7 +576,7 @@ mod tests {
     #[test]
     fn embedding_request_validates_model_id_and_shape() {
         let err =
-            OnnxEmbeddingRequest::parse("bad/id", vec!["hello".to_string()], None).unwrap_err();
+            OnnxEmbeddingRequest::parse("../bad", vec!["hello".to_string()], None).unwrap_err();
         assert_eq!(err.field.as_deref(), Some("model_id"));
 
         let err = OnnxEmbeddingRequest::parse("model", Vec::new(), None).unwrap_err();
@@ -575,6 +585,15 @@ mod tests {
         let err =
             OnnxEmbeddingRequest::parse("model", vec!["hello".to_string()], Some(0)).unwrap_err();
         assert_eq!(err.field.as_deref(), Some("dimensions"));
+    }
+
+    #[test]
+    fn model_id_accepts_library_style_segments_without_path_traversal() {
+        let model_id = OnnxModelId::parse("embedding/nomic/model-v1.5").unwrap();
+        assert_eq!(model_id.as_str(), "embedding/nomic/model-v1.5");
+
+        let err = OnnxModelId::parse("embedding//model").unwrap_err();
+        assert_eq!(err.field.as_deref(), Some("model_id"));
     }
 
     #[test]

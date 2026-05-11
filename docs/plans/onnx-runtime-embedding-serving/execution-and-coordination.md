@@ -402,6 +402,18 @@ Update during implementation:
   passed: `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
   `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml serving`, and
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`.
+- 2026-05-11: Wired the fake ONNX serving adapter through RPC `serve_model` and
+  `unserve_model`. `AppState` now owns a bounded Rust ONNX session manager,
+  `serving_onnx.rs` resolves validated `.onnx` primary artifacts under the
+  model library root, loads/unloads through the fake session manager, and
+  records/removes backend served status for `onnx_runtime`. `OnnxModelId` now
+  accepts slash-delimited Pumas library model ids while rejecting empty,
+  absolute, and traversal-style segments. Real ONNX Runtime execution,
+  duplicate load idempotency, status reconciliation before record, and gateway
+  embedding dispatch remain open. Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, and
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`.
 
 ## Commit Cadence Notes
 
@@ -625,6 +637,9 @@ changes remain.
 - Serving validation is in progress for ONNX: `.onnx` artifacts and running
   ONNX profiles validate through provider behavior, while unsupported artifacts
   and per-load placement overrides fail before provider execution.
+- Fake ONNX serving adapter is in progress: RPC serving can load/unload ONNX
+  served status through the Rust fake session manager, with real ONNX Runtime
+  inference and gateway embedding dispatch still pending.
 
 ### Deviations
 

@@ -14,6 +14,7 @@ mod serving_llama_cpp;
 mod serving_llama_cpp_router;
 mod serving_llama_cpp_shared;
 mod serving_ollama;
+mod serving_onnx;
 mod shared;
 mod shortcuts;
 mod status;

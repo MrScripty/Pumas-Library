@@ -14,7 +14,9 @@ use axum::{
     Router,
 };
 use pumas_app_manager::{CustomNodesManager, SizeCalculator, VersionManager};
-use pumas_library::{PluginLoader, ProviderRegistry, PumasApi};
+use pumas_library::{
+    FakeOnnxEmbeddingBackend, OnnxSessionManager, PluginLoader, ProviderRegistry, PumasApi,
+};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -32,6 +34,7 @@ const MAX_IN_FLIGHT_RPC_REQUESTS: usize = 64;
 const MAX_REQUEST_BODY_BYTES: usize = 32 * 1024 * 1024;
 const GATEWAY_PROXY_TIMEOUT: Duration = Duration::from_secs(120);
 const PROVIDER_HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const ONNX_MAX_CONCURRENT_OPERATIONS: usize = 4;
 
 /// Application state shared across handlers.
 pub struct AppState {
@@ -55,6 +58,8 @@ pub struct AppState {
     pub llama_cpp_router_client: LlamaCppRouterClient,
     /// Shared Ollama client factory for provider serving and app operations.
     pub ollama_client_factory: OllamaClientFactory,
+    /// Shared ONNX Runtime session manager for in-process embedding serving.
+    pub onnx_session_manager: OnnxSessionManager<FakeOnnxEmbeddingBackend>,
 }
 
 /// Owned handle for the running HTTP server task.
@@ -119,6 +124,11 @@ pub async fn start_server(
     let gateway_http_client = build_gateway_http_client()?;
     let provider_http_client = build_provider_http_client()?;
     let ollama_client_factory = build_ollama_client_factory()?;
+    let onnx_session_manager = OnnxSessionManager::new(
+        FakeOnnxEmbeddingBackend::new(),
+        ONNX_MAX_CONCURRENT_OPERATIONS,
+    )
+    .map_err(|err| anyhow::anyhow!("failed to build ONNX session manager: {err}"))?;
     let provider_registry = ProviderRegistry::builtin();
     let state = Arc::new(AppState {
         api,
@@ -131,6 +141,7 @@ pub async fn start_server(
         provider_registry,
         llama_cpp_router_client: LlamaCppRouterClient::new(provider_http_client),
         ollama_client_factory,
+        onnx_session_manager,
     });
 
     // Configure CORS for local development and packaged renderer diagnostics.

@@ -4,7 +4,9 @@ use std::{collections::HashMap, path::Path};
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{RuntimeDeviceMode, RuntimeProviderId, RuntimeProviderMode};
+use crate::models::{
+    RuntimeDeviceMode, RuntimeManagementMode, RuntimeProviderId, RuntimeProviderMode,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -50,6 +52,7 @@ pub enum OpenAiGatewayEndpoint {
 #[serde(rename_all = "snake_case")]
 pub enum ProviderLaunchKind {
     BinaryProcess,
+    PythonSidecar,
     ExternalOnly,
 }
 
@@ -196,6 +199,22 @@ impl ProviderBehavior {
         self.serving_tasks.contains(&task)
     }
 
+    pub fn supports_launch_kind(&self, launch_kind: ProviderLaunchKind) -> bool {
+        self.launch_kinds.contains(&launch_kind)
+    }
+
+    pub fn supports_management_mode(&self, management_mode: RuntimeManagementMode) -> bool {
+        match management_mode {
+            RuntimeManagementMode::Managed => {
+                self.supports_launch_kind(ProviderLaunchKind::BinaryProcess)
+                    || self.supports_launch_kind(ProviderLaunchKind::PythonSidecar)
+            }
+            RuntimeManagementMode::External => {
+                self.supports_launch_kind(ProviderLaunchKind::ExternalOnly)
+            }
+        }
+    }
+
     pub fn provider_request_model_id(
         &self,
         library_model_id: &str,
@@ -332,6 +351,7 @@ mod tests {
         assert_eq!(serialized["provider_modes"][0], "llama_cpp_router");
         assert_eq!(serialized["local_artifact_formats"][0], "gguf");
         assert_eq!(serialized["openai_endpoints"][3], "embeddings");
+        assert_eq!(serialized["launch_kinds"][0], "binary_process");
         assert_eq!(serialized["provider_model_id_policy"], "library_model_id");
         assert_eq!(serialized["gateway_alias_policy"], "library_model_id");
         assert_eq!(serialized["serving_adapter_kind"], "llama_cpp_runtime");
@@ -371,5 +391,19 @@ mod tests {
             ExecutableArtifactFormat::from_path(Path::new("/models")),
             None
         );
+    }
+
+    #[test]
+    fn provider_management_modes_derive_from_launch_kinds() {
+        let mut behavior = ProviderBehavior::ollama();
+        behavior.launch_kinds = vec![ProviderLaunchKind::ExternalOnly];
+
+        assert!(!behavior.supports_management_mode(RuntimeManagementMode::Managed));
+        assert!(behavior.supports_management_mode(RuntimeManagementMode::External));
+
+        behavior.launch_kinds = vec![ProviderLaunchKind::PythonSidecar];
+
+        assert!(behavior.supports_management_mode(RuntimeManagementMode::Managed));
+        assert!(!behavior.supports_management_mode(RuntimeManagementMode::External));
     }
 }

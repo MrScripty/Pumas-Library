@@ -198,6 +198,12 @@ Update during implementation:
   parser as serving validation instead of checking raw `.gguf` extensions in
   place. ONNX-specific model-library projections remain deferred to ONNX
   implementation slices.
+- 2026-05-11: Made runtime-profile management-mode validation consume provider
+  launch kinds. `ProviderBehavior::supports_management_mode` now maps
+  `binary_process` and the reserved `python_sidecar` kind to managed profiles,
+  and `external_only` to external profiles. This is the launch-strategy contract
+  slice only; process launch still needs the later binary/Python sidecar
+  abstraction before ONNX managed launch is wired.
 
 ## Commit Cadence Notes
 
@@ -345,6 +351,8 @@ changes remain.
   adapter modules.
 - llama.cpp router catalog compatibility projection now uses typed executable
   artifact values.
+- Runtime-profile managed/external validation now derives from provider launch
+  kinds, including the reserved Python sidecar kind.
 
 ### Deviations
 
@@ -432,6 +440,10 @@ changes remain.
   module table and design notes against the extracted files.
 - Router catalog compatibility projection slice verified with `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles` and
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Launch-kind validation contract slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml providers`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`, and
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links

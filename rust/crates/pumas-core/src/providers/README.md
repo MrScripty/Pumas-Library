@@ -53,6 +53,9 @@ provider clients, and frontend bridge contracts onto this registry.
 - Every built-in provider id has exactly one registry entry.
 - Provider modes are declared by provider behavior before profile validation
   consumes them.
+- Runtime profile management-mode support is derived from provider launch kinds:
+  `binary_process` and `python_sidecar` support managed profiles, and
+  `external_only` supports external profiles.
 - OpenAI-compatible endpoint support is explicit per provider.
 - Local executable artifact compatibility is separate from gateway endpoint
   support.
@@ -102,6 +105,8 @@ assert!(behavior.supports_openai_endpoint(
   model-id policy to a library model id and optional gateway alias.
 - `ExecutableArtifactFormat::from_path` is the shared boundary parser for
   local executable model artifact paths.
+- `ProviderBehavior::supports_management_mode` is the shared policy check for
+  runtime-profile managed/external support.
 
 ## Structured Producer Contract
 

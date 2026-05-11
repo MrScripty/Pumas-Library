@@ -219,6 +219,10 @@ llama.cpp router catalog projection now uses an isolated executable-artifact
 projection helper backed by `ExecutableArtifactFormat::from_path` instead of a
 raw GGUF extension check. ONNX-specific model-library projections remain
 isolated to later ONNX slices.
+Runtime-profile management-mode validation now consumes provider launch kinds
+through `ProviderBehavior::supports_management_mode`. The provider contract has
+a `python_sidecar` launch kind for the future ONNX managed sidecar path, but
+the process-launch abstraction itself remains pending.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

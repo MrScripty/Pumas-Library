@@ -1423,19 +1423,13 @@ fn validate_profile_provider_behavior(
         });
     }
 
-    match profile.management_mode {
-        RuntimeManagementMode::Managed if !behavior.supports_managed_profiles => {
-            Err(PumasError::InvalidParams {
-                message: "runtime profile provider does not support managed profiles".to_string(),
-            })
-        }
-        RuntimeManagementMode::External if !behavior.supports_external_profiles => {
-            Err(PumasError::InvalidParams {
-                message: "runtime profile provider does not support external profiles".to_string(),
-            })
-        }
-        _ => Ok(()),
+    if !behavior.supports_management_mode(profile.management_mode) {
+        return Err(PumasError::InvalidParams {
+            message: "runtime profile provider does not support management mode".to_string(),
+        });
     }
+
+    Ok(())
 }
 
 fn validate_model_route(route: &ModelRuntimeRoute) -> Result<()> {

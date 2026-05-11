@@ -83,7 +83,7 @@ provider and widens the blast radius.
 - [ ] Parse raw route, endpoint, alias, provider, mode, and placement inputs
       into validated boundary types once. Internal route/serving/profile code
       must consume validated types rather than re-validating strings.
-- [ ] Refactor serving artifact validation so supported formats are derived
+- [x] Refactor serving artifact validation so supported formats are derived
       from provider behavior instead of the current unconditional GGUF check.
 - [ ] Refactor `serve_model` and `unserve_model` dispatch so load/unload paths
       are selected by provider without a non-llama.cpp-implies-Ollama fallback.
@@ -162,7 +162,7 @@ Runtime profile capability DTOs now project from provider behavior values.
 Runtime profile routes are now provider-scoped across Rust DTOs, RPC/Electron
 parameters, frontend bridge types, llama.cpp route helpers, endpoint lookup,
 auto-load lookup, and one-way persisted config migration. Next slice is moving
-serving artifact validation onto provider compatibility.
+serving dispatch toward provider adapters.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

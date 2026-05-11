@@ -105,6 +105,10 @@ Update during implementation:
   schema version is now `2`; legacy schema `1` routes are rewritten when the
   referenced profile makes the provider unambiguous, and ambiguous legacy routes
   are dropped during the one-way cleanup.
+- 2026-05-11: Moved serving artifact validation from an unconditional GGUF check
+  to provider behavior compatibility. Existing Ollama and llama.cpp serving
+  behavior still accepts GGUF, while unknown artifact extensions now fail
+  through the provider compatibility path that ONNX can extend later.
 
 ## Commit Cadence Notes
 
@@ -222,6 +226,8 @@ changes remain.
 - Runtime profile capability DTOs now project from provider behavior values.
 - Provider-scoped runtime route contracts and runtime-profile config migration
   completed for existing providers.
+- Serving artifact format validation now derives supported formats from
+  provider behavior.
 
 ### Deviations
 
@@ -249,6 +255,8 @@ changes remain.
   the runtime route contract serialization test, pumas-rpc runtime profile
   build/test filter, frontend typecheck, Electron type validation, and focused
   frontend route/serve dialog tests.
+- Provider artifact compatibility slice verified with focused provider and
+  serving tests plus Rust formatting.
 
 ### Traceability Links
 

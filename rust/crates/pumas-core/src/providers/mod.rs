@@ -12,6 +12,16 @@ pub enum ExecutableArtifactFormat {
     Gguf,
 }
 
+impl ExecutableArtifactFormat {
+    pub fn from_extension(extension: &str) -> Option<Self> {
+        if extension.eq_ignore_ascii_case("gguf") {
+            Some(Self::Gguf)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ServingTask {
@@ -80,7 +90,7 @@ impl ProviderBehavior {
                 RuntimeDeviceMode::Gpu,
                 RuntimeDeviceMode::Hybrid,
             ],
-            local_artifact_formats: Vec::new(),
+            local_artifact_formats: vec![ExecutableArtifactFormat::Gguf],
             serving_tasks: vec![
                 ServingTask::Chat,
                 ServingTask::Completion,
@@ -231,7 +241,7 @@ mod tests {
             behavior.provider_model_id_policy,
             ProviderModelIdPolicy::GatewayAlias
         );
-        assert!(behavior.local_artifact_formats.is_empty());
+        assert!(behavior.supports_artifact_format(ExecutableArtifactFormat::Gguf));
         assert!(behavior.supports_managed_profiles);
         assert!(behavior.supports_external_profiles);
     }

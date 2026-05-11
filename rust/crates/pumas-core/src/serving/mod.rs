@@ -13,6 +13,7 @@ use crate::models::{
     ServingEndpointStatus, ServingStatusEvent, ServingStatusEventKind, ServingStatusResponse,
     ServingStatusSnapshot, ServingStatusUpdateFeed, ServingStatusUpdateFeedResponse,
 };
+use crate::providers::{ExecutableArtifactFormat, ProviderRegistry};
 
 const SERVING_STATUS_UPDATE_CHANNEL_CAPACITY: usize = 64;
 const MAX_GATEWAY_ALIAS_LEN: usize = 128;
@@ -382,27 +383,9 @@ pub fn validate_model_serving_request(
     }
 
     if context.model_exists {
-        match context.primary_artifact_extension.as_deref() {
-            Some("gguf") => {}
-            Some(_) => errors.push(
-                ModelServeError::non_critical(
-                    ModelServeErrorCode::InvalidFormat,
-                    "selected provider requires a GGUF model artifact",
-                )
-                .for_model(model_id)
-                .for_profile(request.config.profile_id.clone())
-                .for_provider(request.config.provider),
-            ),
-            None => errors.push(
-                ModelServeError::non_critical(
-                    ModelServeErrorCode::ModelNotExecutable,
-                    "model has no executable primary artifact",
-                )
-                .for_model(model_id)
-                .for_profile(request.config.profile_id.clone())
-                .for_provider(request.config.provider),
-            ),
-        }
+        errors.extend(validate_provider_artifact_compatibility(
+            model_id, request, context,
+        ));
     }
 
     ModelServeValidationResponse::from_errors(errors)
@@ -566,6 +549,52 @@ fn same_requested_served_instance(
         && status.profile_id == request.config.profile_id
         && gateway_alias_key(served_status_effective_gateway_alias(status)).as_deref()
             == Some(effective_alias_key)
+}
+
+fn validate_provider_artifact_compatibility(
+    model_id: &str,
+    request: &ServeModelRequest,
+    context: &ServingValidationContext,
+) -> Vec<ModelServeError> {
+    let Some(extension) = context.primary_artifact_extension.as_deref() else {
+        return vec![ModelServeError::non_critical(
+            ModelServeErrorCode::ModelNotExecutable,
+            "model has no executable primary artifact",
+        )
+        .for_model(model_id)
+        .for_profile(request.config.profile_id.clone())
+        .for_provider(request.config.provider)];
+    };
+    let Some(format) = ExecutableArtifactFormat::from_extension(extension) else {
+        return vec![ModelServeError::non_critical(
+            ModelServeErrorCode::InvalidFormat,
+            "selected provider does not support this model artifact format",
+        )
+        .for_model(model_id)
+        .for_profile(request.config.profile_id.clone())
+        .for_provider(request.config.provider)];
+    };
+    let registry = ProviderRegistry::builtin();
+    let Some(behavior) = registry.get(request.config.provider) else {
+        return vec![ModelServeError::non_critical(
+            ModelServeErrorCode::UnsupportedProvider,
+            "selected provider is not registered",
+        )
+        .for_model(model_id)
+        .for_profile(request.config.profile_id.clone())
+        .for_provider(request.config.provider)];
+    };
+    if behavior.supports_artifact_format(format) {
+        return Vec::new();
+    }
+
+    vec![ModelServeError::non_critical(
+        ModelServeErrorCode::InvalidFormat,
+        "selected provider does not support this model artifact format",
+    )
+    .for_model(model_id)
+    .for_profile(request.config.profile_id.clone())
+    .for_provider(request.config.provider)]
 }
 
 fn profile_accepts_serving_operation(profile: &ServingValidationProfile) -> bool {

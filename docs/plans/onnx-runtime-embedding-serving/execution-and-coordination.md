@@ -270,6 +270,14 @@ Update during implementation:
   provider contract serialization tests cover the new launch target wire shape.
   ONNX sidecar process launch remains deferred to the managed ONNX lifecycle
   slice.
+- 2026-05-11: Added frontend runtime provider descriptors in
+  `frontend/src/utils/runtimeProviderDescriptors.ts`. Runtime profile settings
+  now consume descriptor-owned provider labels, modes, and device modes;
+  llama.cpp model-row compatibility and route mutations read the descriptor for
+  provider identity and executable formats; and the serve dialog compatibility
+  check now uses selected-provider descriptors instead of a hard-coded GGUF
+  branch. ONNX UI/provider entries remain deferred to the ONNX app identity
+  milestone.
 
 ## Commit Cadence Notes
 
@@ -440,6 +448,9 @@ changes remain.
   lifecycle launch-config construction for existing managed providers.
 - Provider behavior now owns per-mode managed launch targets consumed by
   runtime-profile launch-spec derivation.
+- Frontend provider descriptors now centralize existing provider labels, modes,
+  device modes, executable-format compatibility, and serve-dialog capability
+  flags.
 
 ### Deviations
 
@@ -576,11 +587,16 @@ changes remain.
   test --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`,
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Frontend provider descriptor slice verified with `npm run -w frontend
+  check:types` and `npm run -w frontend test:run --
+  runtimeProviderDescriptors llamaCppLibraryViewModels
+  LlamaCppModelLibrarySection RuntimeProfileSettingsSection ModelServeDialog`.
 
 ### Traceability Links
 
 - Module README updated: `rust/crates/pumas-rpc/src/handlers/README.md`.
 - Module README updated: `rust/crates/pumas-core/src/providers/README.md`.
 - Module README added: `rust/crates/pumas-core/src/runtime_profiles/README.md`.
+- Module README updated: `frontend/src/utils/README.md`.
 - ADR added/updated: `docs/adr/0001-onnx-runtime-provider-model.md`.
 - PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: pending.

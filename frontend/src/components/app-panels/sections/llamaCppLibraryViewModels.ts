@@ -5,6 +5,11 @@ import type {
 } from '../../../types/api-runtime-profiles';
 import type { ServedModelStatus } from '../../../types/api-serving';
 import type { ModelCategory, ModelInfo } from '../../../types/apps';
+import {
+  filterProviderCompatibleModelGroups,
+  getRuntimeProviderDescriptor,
+  isModelCompatibleWithProvider,
+} from '../../../utils/runtimeProviderDescriptors';
 
 export type LlamaCppModelTypeLabel = 'Chat' | 'Embedding' | 'Reranker' | 'Model';
 export type LlamaCppRouteState = 'unrouted' | 'routed' | 'missing_profile';
@@ -46,37 +51,18 @@ export interface BuildLlamaCppModelRowsInput {
   servedStatuses: ServedModelStatus[];
 }
 
+const LLAMA_CPP_PROVIDER = getRuntimeProviderDescriptor('llama_cpp').id;
+
 function normalized(value: string | undefined | null): string {
   return value?.trim().toLowerCase() ?? '';
 }
 
-function hasGgufArtifact(model: ModelInfo): boolean {
-  const artifactNames = [
-    model.path,
-    model.selectedArtifactId,
-    model.downloadArtifactId,
-    model.downloadSelectedArtifactId,
-    ...(model.selectedArtifactFiles ?? []),
-  ];
-
-  return artifactNames.some((artifactName) => normalized(artifactName).endsWith('.gguf'));
-}
-
 export function isLlamaCppCompatibleModel(model: ModelInfo): boolean {
-  return (
-    model.primaryFormat === 'gguf' ||
-    normalized(model.format) === 'gguf' ||
-    hasGgufArtifact(model)
-  );
+  return isModelCompatibleWithProvider(model, LLAMA_CPP_PROVIDER);
 }
 
 export function filterLlamaCppCompatibleModelGroups(modelGroups: ModelCategory[]): ModelCategory[] {
-  return modelGroups
-    .map((group) => ({
-      ...group,
-      models: group.models.filter(isLlamaCppCompatibleModel),
-    }))
-    .filter((group) => group.models.length > 0);
+  return filterProviderCompatibleModelGroups(modelGroups, LLAMA_CPP_PROVIDER);
 }
 
 export function getLlamaCppModelTypeLabel(model: ModelInfo): LlamaCppModelTypeLabel {
@@ -119,7 +105,7 @@ export function deriveLlamaCppServedState(
   const servedStatusesByModelId = new Map<string, ServedModelStatus[]>();
   const servedStatusByInstanceKey = new Map<string, ServedModelStatus>();
 
-  for (const status of servedStatuses.filter((status) => status.provider === 'llama_cpp')) {
+  for (const status of servedStatuses.filter((status) => status.provider === LLAMA_CPP_PROVIDER)) {
     const modelStatuses = servedStatusesByModelId.get(status.model_id);
     if (modelStatuses) {
       modelStatuses.push(status);
@@ -210,12 +196,12 @@ export function buildLlamaCppModelRows({
   const compatibleGroups = filterLlamaCppCompatibleModelGroups(modelGroups);
   const profileById = new Map(
     profiles
-      .filter((profile) => profile.provider === 'llama_cpp')
+      .filter((profile) => profile.provider === LLAMA_CPP_PROVIDER)
       .map((profile) => [profile.profile_id, profile])
   );
   const routeByModelId = new Map(
     routes
-      .filter((route) => route.provider === 'llama_cpp')
+      .filter((route) => route.provider === LLAMA_CPP_PROVIDER)
       .map((route) => [route.model_id, route])
   );
   const servedState = deriveLlamaCppServedState(servedStatuses);

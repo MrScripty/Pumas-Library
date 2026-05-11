@@ -4,6 +4,12 @@ import type {
   RuntimeProviderId,
   RuntimeProviderMode,
 } from '../../../types/api-runtime-profiles';
+import {
+  deviceModeLabel,
+  modeLabel,
+  providerLabel,
+  runtimeProviderDescriptors,
+} from '../../../utils/runtimeProviderDescriptors';
 
 export type RuntimeProfileDraft = {
   profile_id: string;
@@ -20,44 +26,16 @@ export type RuntimeProfileDraft = {
 };
 
 export const providerModes: Record<RuntimeProviderId, RuntimeProviderMode[]> = {
-  ollama: ['ollama_serve'],
-  llama_cpp: ['llama_cpp_router', 'llama_cpp_dedicated'],
+  ollama: runtimeProviderDescriptors.ollama.profileModes,
+  llama_cpp: runtimeProviderDescriptors.llama_cpp.profileModes,
 };
 
 export const providerDeviceModes: Record<RuntimeProviderId, RuntimeDeviceMode[]> = {
-  ollama: ['auto', 'cpu', 'gpu', 'hybrid'],
-  llama_cpp: ['auto', 'cpu', 'gpu', 'specific_device'],
+  ollama: runtimeProviderDescriptors.ollama.deviceModes,
+  llama_cpp: runtimeProviderDescriptors.llama_cpp.deviceModes,
 };
 
-export function providerLabel(provider: RuntimeProviderId): string {
-  return provider === 'llama_cpp' ? 'llama.cpp' : 'Ollama';
-}
-
-export function modeLabel(mode: RuntimeProviderMode): string {
-  switch (mode) {
-    case 'ollama_serve':
-      return 'Serve';
-    case 'llama_cpp_router':
-      return 'Router';
-    case 'llama_cpp_dedicated':
-      return 'Dedicated';
-  }
-}
-
-export function deviceModeLabel(mode: RuntimeDeviceMode): string {
-  switch (mode) {
-    case 'auto':
-      return 'Auto';
-    case 'cpu':
-      return 'CPU';
-    case 'gpu':
-      return 'GPU';
-    case 'hybrid':
-      return 'Hybrid';
-    case 'specific_device':
-      return 'Specific device';
-  }
-}
+export { deviceModeLabel, modeLabel, providerLabel };
 
 export type RuntimeProfileDraftUpdater = <Key extends keyof RuntimeProfileDraft>(
   key: Key,

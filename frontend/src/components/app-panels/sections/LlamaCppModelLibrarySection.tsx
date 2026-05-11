@@ -9,6 +9,7 @@ import type {
   ServedModelStatus,
 } from '../../../types/api-serving';
 import type { RuntimeProfileConfig } from '../../../types/api-runtime-profiles';
+import { getRuntimeProviderDescriptor } from '../../../utils/runtimeProviderDescriptors';
 import { IconButton, ListItem, ListItemContent } from '../../ui';
 import { LocalModelMetadataSummary } from '../../LocalModelMetadataSummary';
 import { LocalModelNameButton } from '../../LocalModelNameButton';
@@ -28,6 +29,8 @@ import {
   getLlamaCppPlacementLabel,
   type LlamaCppModelRowViewModel,
 } from './llamaCppLibraryViewModels';
+
+const LLAMA_CPP_PROVIDER = getRuntimeProviderDescriptor('llama_cpp').id;
 
 interface ServingTarget {
   row: LlamaCppModelRowViewModel;
@@ -343,7 +346,7 @@ export function LlamaCppModelLibrarySection({
   const [savingRouteModelId, setSavingRouteModelId] = useState<string | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const providerProfiles = profiles.filter((profile) => profile.provider === 'llama_cpp');
+  const providerProfiles = profiles.filter((profile) => profile.provider === LLAMA_CPP_PROVIDER);
   const rows = buildLlamaCppModelRows({
     modelGroups,
     profiles,
@@ -369,13 +372,13 @@ export function LlamaCppModelLibrarySection({
     try {
       if (profileId) {
         await saveModelRuntimeRoute({
-          provider: 'llama_cpp',
+          provider: LLAMA_CPP_PROVIDER,
           modelId,
           profileId,
           autoLoad: true,
         });
       } else {
-        await clearModelRuntimeRoute('llama_cpp', modelId);
+        await clearModelRuntimeRoute(LLAMA_CPP_PROVIDER, modelId);
       }
       await refreshRuntimeProfiles();
       return true;

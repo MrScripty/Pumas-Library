@@ -5,6 +5,10 @@ import type {
 } from '../../types/api-runtime-profiles';
 import type { ModelInfo } from '../../types/apps';
 import type { ModelServeError, ModelServingConfig } from '../../types/api-serving';
+import {
+  getRuntimeProviderDescriptor,
+  isModelCompatibleWithProvider,
+} from '../../utils/runtimeProviderDescriptors';
 
 export const DEFAULT_LLAMA_CPP_CONTEXT_SIZE = '4096';
 
@@ -42,11 +46,17 @@ export function formatServeError(error: ModelServeError | null): string | null {
 }
 
 export function isGgufModel(model: ModelInfo): boolean {
-  return model.primaryFormat === 'gguf' || model.format?.toLowerCase() === 'gguf';
+  return isModelCompatibleWithProvider(model, 'llama_cpp');
 }
 
 export function isDedicatedLlamaCppProfile(profile: RuntimeProfileConfig | undefined): boolean {
-  return profile?.provider === 'llama_cpp' && profile.provider_mode === 'llama_cpp_dedicated';
+  if (!profile) {
+    return false;
+  }
+
+  return getRuntimeProviderDescriptor(profile.provider).dedicatedPlacementModes.includes(
+    profile.provider_mode
+  );
 }
 
 export function isLlamaCppProfile(profile: RuntimeProfileConfig | undefined): boolean {
@@ -54,7 +64,11 @@ export function isLlamaCppProfile(profile: RuntimeProfileConfig | undefined): bo
 }
 
 export function isManagedLlamaCppProfile(profile: RuntimeProfileConfig | undefined): boolean {
-  return isLlamaCppProfile(profile) && profile?.management_mode === 'managed';
+  return Boolean(
+    profile &&
+      getRuntimeProviderDescriptor(profile.provider).canLaunchOnServe &&
+      profile.management_mode === 'managed'
+  );
 }
 
 export function getPlacementControls(
@@ -63,7 +77,9 @@ export function getPlacementControls(
 ): ModelServeControls {
   const supportsModelPlacement = isDedicatedLlamaCppProfile(profile);
   const canUseGpuPlacement = supportsModelPlacement && deviceMode !== 'cpu';
-  const supportsContextSize = isLlamaCppProfile(profile);
+  const supportsContextSize = profile
+    ? getRuntimeProviderDescriptor(profile.provider).supportsContextSize
+    : false;
 
   return {
     showDeviceControls: supportsModelPlacement,
@@ -122,7 +138,15 @@ export function buildServeBlockReason({
   if (profileStateBlockReason) {
     return profileStateBlockReason;
   }
-  return isGgufModel(model) ? null : 'Only GGUF models can be served locally in this flow.';
+  if (isModelCompatibleWithProvider(model, selectedProfile.provider)) {
+    return null;
+  }
+
+  const descriptor = getRuntimeProviderDescriptor(selectedProfile.provider);
+  const formats = descriptor.compatibleExecutableFormats
+    .map((format) => format.toUpperCase())
+    .join('/');
+  return `Only ${formats} models can be served with the selected provider.`;
 }
 
 export function buildModelServingConfig({

@@ -139,7 +139,7 @@ describe('ModelServeDialog', () => {
     );
 
     expect(
-      screen.getByText('Cannot serve yet: Only GGUF models can be served locally in this flow.')
+      screen.getByText('Cannot serve yet: Only GGUF models can be served with the selected provider.')
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Start serving' })).toBeEnabled();
   });

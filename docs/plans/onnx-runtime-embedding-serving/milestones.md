@@ -113,7 +113,7 @@ provider and widens the blast radius.
 - [x] Add a typed managed launch strategy abstraction for binary process,
       Python sidecar, and external-only profiles. Use it for existing Ollama and
       llama.cpp launch behavior before adding ONNX managed launch behavior.
-- [ ] Add frontend provider descriptors consumed by profile settings, compatible
+- [x] Add frontend provider descriptors consumed by profile settings, compatible
       model lists, route mutations, and serve dialog selection. Move
       llama.cpp-specific route-row behavior behind provider-specific view models
       that feed shared route primitives.
@@ -274,6 +274,12 @@ consumes the composed provider registry for launch targets, so existing Ollama
 and llama.cpp launch mapping no longer lives in a runtime-profile provider
 match. This closes the managed-launch portion of the provider behavior contract;
 ONNX sidecar process launch still remains a later provider lifecycle slice.
+Frontend runtime provider descriptors now live in
+`frontend/src/utils/runtimeProviderDescriptors.ts`. Runtime profile settings,
+llama.cpp compatible model rows, provider-scoped route mutations, and serve
+dialog compatibility checks consume descriptor data for existing Ollama and
+llama.cpp providers. ONNX frontend panel wiring remains deferred until the ONNX
+provider/app identity milestones.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

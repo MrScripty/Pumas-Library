@@ -2,9 +2,9 @@ import type {
   RuntimeProfileConfig,
   RuntimeProviderId,
 } from '../../../types/api-runtime-profiles';
+import { getRuntimeProviderDescriptor } from '../../../utils/runtimeProviderDescriptors';
 import {
   providerLabel,
-  providerModes,
   type RuntimeProfileDraft,
 } from './RuntimeProfileSettingsShared';
 
@@ -25,10 +25,12 @@ export function profileToDraft(profile: RuntimeProfileConfig): RuntimeProfileDra
 }
 
 export function newProfileDraft(provider: RuntimeProviderId): RuntimeProfileDraft {
+  const descriptor = getRuntimeProviderDescriptor(provider);
+
   return {
     profile_id: `runtime-${Date.now()}`,
     provider,
-    provider_mode: providerModes[provider][0] ?? 'ollama_serve',
+    provider_mode: descriptor.profileModes[0] ?? 'ollama_serve',
     management_mode: 'managed',
     name: `New ${providerLabel(provider)} Profile`,
     enabled: true,
@@ -41,9 +43,10 @@ export function newProfileDraft(provider: RuntimeProviderId): RuntimeProfileDraf
 }
 
 export function draftToProfile(draft: RuntimeProfileDraft): RuntimeProfileConfig {
+  const descriptor = getRuntimeProviderDescriptor(draft.provider);
   const keepsDeviceId = draft.device_mode === 'gpu' || draft.device_mode === 'specific_device';
   const keepsGpuLayers =
-    draft.provider === 'llama_cpp' &&
+    descriptor.supportsGpuLayers &&
     (draft.device_mode === 'gpu' ||
       draft.device_mode === 'hybrid' ||
       draft.device_mode === 'specific_device');

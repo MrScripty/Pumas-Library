@@ -93,6 +93,11 @@ Update during implementation:
   existing Ollama and llama.cpp adapters for provider-specific validation. The
   registry is still not used by serving adapters, gateway routing, or launcher
   strategy selection.
+- 2026-05-11: Moved runtime profile capability DTO construction onto provider
+  behavior projection for existing providers. This keeps the current
+  `RuntimeProviderCapabilities` shape stable while removing the duplicate
+  hard-coded provider mode/device lists from runtime profile capability
+  constructors.
 
 ## Commit Cadence Notes
 
@@ -207,6 +212,7 @@ changes remain.
   `rust/crates/pumas-core/src/providers/`.
 - Runtime-profile validation now consumes provider behavior for provider mode
   and management-mode support.
+- Runtime profile capability DTOs now project from provider behavior values.
 
 ### Deviations
 
@@ -228,6 +234,8 @@ changes remain.
   rust/Cargo.toml --all -- --check`.
 - Runtime-profile provider-registry validation slice verified with the focused
   runtime profile tests recorded for that slice.
+- Runtime profile capability projection slice verified with the focused runtime
+  profile tests recorded for that slice.
 
 ### Traceability Links
 

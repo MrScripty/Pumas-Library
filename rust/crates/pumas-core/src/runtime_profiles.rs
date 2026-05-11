@@ -18,7 +18,7 @@ use crate::models::{
     RuntimeProfilesConfigFile, RuntimeProfilesSnapshot, RuntimeProfilesSnapshotResponse,
     RuntimeProviderId, RuntimeProviderMode,
 };
-use crate::providers::ProviderRegistry;
+use crate::providers::{ProviderBehavior, ProviderRegistry};
 use crate::{PumasError, Result};
 use tokio::sync::broadcast;
 
@@ -41,41 +41,24 @@ pub struct RuntimeProviderCapabilities {
 }
 
 impl RuntimeProviderCapabilities {
-    pub fn ollama() -> Self {
+    pub fn from_behavior(behavior: &ProviderBehavior) -> Self {
         Self {
-            provider: RuntimeProviderId::Ollama,
-            provider_modes: vec![RuntimeProviderMode::OllamaServe],
-            device_modes: vec![
-                RuntimeDeviceMode::Auto,
-                RuntimeDeviceMode::Cpu,
-                RuntimeDeviceMode::Gpu,
-                RuntimeDeviceMode::Hybrid,
-            ],
-            supports_managed_profiles: true,
-            supports_external_profiles: true,
-            supports_model_catalog: false,
-            supports_dedicated_model_processes: false,
+            provider: behavior.provider,
+            provider_modes: behavior.provider_modes.clone(),
+            device_modes: behavior.device_modes.clone(),
+            supports_managed_profiles: behavior.supports_managed_profiles,
+            supports_external_profiles: behavior.supports_external_profiles,
+            supports_model_catalog: behavior.supports_model_catalog,
+            supports_dedicated_model_processes: behavior.supports_dedicated_model_processes,
         }
     }
 
+    pub fn ollama() -> Self {
+        Self::from_behavior(&ProviderBehavior::ollama())
+    }
+
     pub fn llama_cpp() -> Self {
-        Self {
-            provider: RuntimeProviderId::LlamaCpp,
-            provider_modes: vec![
-                RuntimeProviderMode::LlamaCppRouter,
-                RuntimeProviderMode::LlamaCppDedicated,
-            ],
-            device_modes: vec![
-                RuntimeDeviceMode::Auto,
-                RuntimeDeviceMode::Cpu,
-                RuntimeDeviceMode::Gpu,
-                RuntimeDeviceMode::SpecificDevice,
-            ],
-            supports_managed_profiles: true,
-            supports_external_profiles: true,
-            supports_model_catalog: true,
-            supports_dedicated_model_processes: true,
-        }
+        Self::from_behavior(&ProviderBehavior::llama_cpp())
     }
 }
 
@@ -1399,6 +1382,21 @@ mod tests {
             .provider_modes
             .contains(&RuntimeProviderMode::LlamaCppDedicated));
         assert!(llama_cpp.supports_dedicated_model_processes);
+    }
+
+    #[test]
+    fn provider_capabilities_project_from_provider_behavior() {
+        let registry = ProviderRegistry::builtin();
+        let behavior = registry.get(RuntimeProviderId::LlamaCpp).unwrap();
+        let capabilities = RuntimeProviderCapabilities::from_behavior(behavior);
+
+        assert_eq!(capabilities.provider, behavior.provider);
+        assert_eq!(capabilities.provider_modes, behavior.provider_modes);
+        assert_eq!(capabilities.device_modes, behavior.device_modes);
+        assert_eq!(
+            capabilities.supports_dedicated_model_processes,
+            behavior.supports_dedicated_model_processes
+        );
     }
 
     #[tokio::test]

@@ -158,8 +158,8 @@ contracts and built-in registry values now exist in
 `rust/crates/pumas-core/src/providers/`, with tests for Ollama and llama.cpp.
 Runtime-profile validation now consumes the registry for provider-mode and
 managed/external support checks without changing user-visible profile behavior.
-Next slice is moving runtime profile capabilities snapshots onto provider
-behavior values.
+Runtime profile capability DTOs now project from provider behavior values. Next
+slice is introducing provider-scoped route identity contracts.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

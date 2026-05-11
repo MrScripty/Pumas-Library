@@ -9,7 +9,7 @@ use pumas_library::models::{
     ServedModelStatus, UnserveModelRequest, UnserveModelResponse,
 };
 use pumas_library::runtime_profiles::RuntimeProfileLaunchOverrides;
-use pumas_library::ProviderRegistry;
+use pumas_library::{ProviderGatewayAliasPolicy, ProviderRegistry};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
@@ -1070,8 +1070,12 @@ async fn request_with_effective_gateway_alias(
         return Ok(request);
     }
 
-    let model_alias = match request.config.provider {
-        RuntimeProviderId::Ollama => {
+    let registry = ProviderRegistry::builtin();
+    let model_alias = match registry
+        .get(request.config.provider)
+        .map(|behavior| behavior.gateway_alias_policy)
+    {
+        Some(ProviderGatewayAliasPolicy::OllamaModelName) => {
             let model = state.api.get_model(model_id).await?;
             let display = model
                 .as_ref()
@@ -1079,7 +1083,7 @@ async fn request_with_effective_gateway_alias(
                 .unwrap_or_else(|| derive_fallback_model_alias(model_id));
             pumas_app_manager::derive_ollama_name(&display)
         }
-        RuntimeProviderId::LlamaCpp => model_id.to_string(),
+        Some(ProviderGatewayAliasPolicy::LibraryModelId) | None => model_id.to_string(),
     };
     request.config.model_alias = Some(model_alias);
     Ok(request)

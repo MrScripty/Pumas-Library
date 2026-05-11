@@ -144,6 +144,12 @@ Update during implementation:
   accepts provider; and frontend unload calls send the provider from
   backend-owned served status. This keeps same-model-id served instances
   deterministic before ONNX adds another provider.
+- 2026-05-11: Added gateway alias defaulting policy to `ProviderBehavior` and
+  moved serving request alias defaulting onto that policy. Ollama still derives
+  provider-safe Ollama model names from model display names, and llama.cpp still
+  defaults the gateway alias to the library model id. Full serving adapter
+  extraction, launch strategy selection, and unload behavior consumption remain
+  pending.
 
 ## Commit Cadence Notes
 
@@ -275,6 +281,7 @@ changes remain.
   policies before provider forwarding.
 - Served-model replace/find/unload identity is provider-scoped, and frontend
   unload requests send the served provider.
+- Serving alias defaulting now derives from provider behavior policy.
 
 ### Deviations
 
@@ -331,6 +338,10 @@ changes remain.
   --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, `npm run -w
   frontend check:types`, `npm run -w frontend test:run -- useModelServingActions`,
   and `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Provider alias policy slice verified with `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml providers`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

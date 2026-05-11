@@ -187,6 +187,11 @@ unloading served models. `UnserveModelRequest` accepts an optional provider
 field, frontend unload calls send the backend-recorded provider, and serving
 state tests cover two providers serving the same model/profile/alias without
 cross-provider unload.
+Serving alias defaulting now consumes provider behavior policy instead of
+matching directly on `RuntimeProviderId`: Ollama keeps generated Ollama model
+names and llama.cpp keeps the library model id. Managed launch strategy,
+provider-specific unload behavior consumption, and full serving adapter
+extraction remain pending.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

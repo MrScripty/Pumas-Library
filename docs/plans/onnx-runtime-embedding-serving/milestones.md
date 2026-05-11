@@ -106,7 +106,7 @@ provider and widens the blast radius.
 - [x] Add typed model compatibility values for executable artifact format and
       serving task. Replace GGUF-only and raw extension checks in shared serving
       paths with provider compatibility checks.
-- [ ] Extract model-library executable-format/provider-compatibility projection
+- [x] Extract model-library executable-format/provider-compatibility projection
       helpers out of the large library implementation path where possible.
       Updates to custom ONNX runtime projections and generic ONNX embedding
       compatibility must be isolated and separately tested.
@@ -215,6 +215,10 @@ and serving adapter modules. The provider README documents the provider
 behavior contract and executable artifact parser. No new source directories
 were added for launch strategy, route migration, or frontend descriptors in
 this slice.
+llama.cpp router catalog projection now uses an isolated executable-artifact
+projection helper backed by `ExecutableArtifactFormat::from_path` instead of a
+raw GGUF extension check. ONNX-specific model-library projections remain
+isolated to later ONNX slices.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

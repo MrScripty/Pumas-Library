@@ -18,7 +18,7 @@ use crate::models::{
     RuntimeProfilesConfigFile, RuntimeProfilesSnapshot, RuntimeProfilesSnapshotResponse,
     RuntimeProviderId, RuntimeProviderMode, RUNTIME_PROFILES_SCHEMA_VERSION,
 };
-use crate::providers::{ProviderBehavior, ProviderRegistry};
+use crate::providers::{ExecutableArtifactFormat, ProviderBehavior, ProviderRegistry};
 use crate::{PumasError, Result};
 use serde_json::Value;
 use tokio::sync::broadcast;
@@ -127,13 +127,8 @@ fn llama_cpp_router_catalog_entry_for_record(
     library: &ModelLibrary,
     record: &ModelRecord,
 ) -> Option<LlamaCppRouterCatalogEntry> {
-    let model_path = library.get_primary_model_file(&record.id)?;
-    if model_path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| !extension.eq_ignore_ascii_case("gguf"))
-        .unwrap_or(true)
-    {
+    let (format, model_path) = executable_artifact_for_record(library, record)?;
+    if format != ExecutableArtifactFormat::Gguf {
         return None;
     }
 
@@ -143,6 +138,15 @@ fn llama_cpp_router_catalog_entry_for_record(
         model_type: record.model_type.clone(),
         model_path,
     })
+}
+
+fn executable_artifact_for_record(
+    library: &ModelLibrary,
+    record: &ModelRecord,
+) -> Option<(ExecutableArtifactFormat, PathBuf)> {
+    let model_path = library.get_primary_model_file(&record.id)?;
+    let format = ExecutableArtifactFormat::from_path(&model_path)?;
+    Some((format, model_path))
 }
 
 fn build_llama_cpp_router_preset_ini(entries: &[LlamaCppRouterCatalogEntry]) -> String {

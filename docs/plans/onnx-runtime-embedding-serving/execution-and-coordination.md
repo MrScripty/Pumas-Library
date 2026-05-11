@@ -192,6 +192,12 @@ Update during implementation:
   coverage now includes the executable artifact parser. No new source
   directories were introduced for launch strategy, route migration, or frontend
   provider descriptors in this slice.
+- 2026-05-11: Extracted the llama.cpp router catalog's executable artifact
+  projection into a small helper that returns `ExecutableArtifactFormat` plus
+  path. Router catalog generation now consumes the same provider-owned artifact
+  parser as serving validation instead of checking raw `.gguf` extensions in
+  place. ONNX-specific model-library projections remain deferred to ONNX
+  implementation slices.
 
 ## Commit Cadence Notes
 
@@ -337,6 +343,8 @@ changes remain.
   values from the API boundary through shared serving validation.
 - Handler README traceability now covers the extracted gateway and serving
   adapter modules.
+- llama.cpp router catalog compatibility projection now uses typed executable
+  artifact values.
 
 ### Deviations
 
@@ -422,6 +430,9 @@ changes remain.
   rust/Cargo.toml --all -- --check`.
 - Handler README traceability slice is documentation-only; reviewed the updated
   module table and design notes against the extracted files.
+- Router catalog compatibility projection slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles` and
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

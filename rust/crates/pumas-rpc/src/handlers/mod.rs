@@ -6,6 +6,7 @@ mod links;
 mod models;
 mod ollama;
 mod openai_gateway;
+mod openai_gateway_onnx;
 mod plugins;
 mod process;
 mod runtime_profiles;

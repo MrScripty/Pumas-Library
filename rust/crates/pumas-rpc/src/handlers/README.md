@@ -21,6 +21,7 @@ Domain-specific JSON-RPC handlers that parse request params, call API services, 
 | `serving_llama_cpp_shared.rs` | Shared llama.cpp serving compatibility and runtime-version helpers. |
 | `serving_onnx.rs` | ONNX Runtime serving adapter entry points backed by the Rust ONNX session manager. |
 | `openai_gateway.rs` | OpenAI-compatible gateway model listing, routing, proxy, and response helpers. |
+| `openai_gateway_onnx.rs` | ONNX Runtime in-process `/v1/embeddings` gateway adapter and payload mapping. |
 | `process.rs` | Legacy singleton process launch/stop and filesystem/window process handlers. |
 | `torch.rs` | Torch server status, slot, and configuration handlers. |
 | `versions.rs` | Re-export surface for version handlers. |

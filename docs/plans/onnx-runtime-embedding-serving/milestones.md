@@ -381,7 +381,7 @@ Runtime execution.
 - [ ] Define shutdown ordering: stop accepting new load/inference work, cancel
       or drain queued work with bounded timeout, unload sessions, and report
       cleanup failures through logs/status.
-- [ ] Return OpenAI-compatible error bodies from the Pumas gateway for ONNX
+- [x] Return OpenAI-compatible error bodies from the Pumas gateway for ONNX
       embedding failures.
 
 **Verification:**
@@ -397,8 +397,9 @@ Runtime execution.
 `rust/crates/pumas-core/src/onnx_runtime/` with README coverage, validated
 contract types, a fake backend, a bounded `OnnxSessionManager`, and focused
 unit tests. RPC `AppState` now owns the bounded ONNX session manager for fake
-serving. Gateway OpenAI-compatible errors and full shutdown/cancellation
-ordering remain open for later M1/M3/M5 slices.
+serving. The gateway ONNX adapter now maps validation, not-loaded, and backend
+failures into bounded OpenAI-compatible error bodies. Full shutdown/cancellation
+ordering remains open for a later lifecycle slice.
 
 ### Milestone 2: ONNX Embedding Execution
 
@@ -617,23 +618,23 @@ and gateway embedding routing remain open.
 existing Pumas `/v1` gateway.
 
 **Tasks:**
-- [ ] Update gateway provider routing for `onnx_runtime`.
-- [ ] Ensure provider request model id uses the Rust ONNX session model
+- [x] Update gateway provider routing for `onnx_runtime`.
+- [x] Ensure provider request model id uses the Rust ONNX session model
       name/alias needed by `/v1/embeddings`.
-- [ ] Move provider request model-id rewriting out of the gateway helper and
+- [x] Move provider request model-id rewriting out of the gateway helper and
       into provider behavior. The gateway should not match on individual
       providers to decide how to rewrite `model`.
-- [ ] Route `/v1/embeddings` to the Rust ONNX gateway adapter with bounded
+- [x] Route `/v1/embeddings` to the Rust ONNX gateway adapter with bounded
       request body behavior preserved.
-- [ ] Validate OpenAI-compatible request JSON at the gateway boundary before
+- [x] Validate OpenAI-compatible request JSON at the gateway boundary before
       dispatch, including model field shape, endpoint support, body limit, and
       provider capability.
 - [ ] Add endpoint-specific body-limit tests so `/v1/embeddings` rejects
       oversized embedding payloads before entering ONNX Runtime.
-- [ ] Use provider endpoint capabilities to keep `/v1/chat/completions` and
+- [x] Use provider endpoint capabilities to keep `/v1/chat/completions` and
       `/v1/completions` unavailable for ONNX embedding-only models unless a
       future provider capability says otherwise.
-- [ ] Reuse the shared gateway HTTP client from Milestone 0.
+- [x] Reuse the shared gateway HTTP client from Milestone 0.
 - [ ] Ensure gateway request handling uses bounded body reads, connection
       limits/timeouts, and no per-request client construction.
 - [ ] Preserve timeout and error mapping semantics so provider failures return
@@ -657,7 +658,24 @@ existing Pumas `/v1` gateway.
 - Manual curl:
   `POST /v1/embeddings` returns OpenAI-compatible embedding JSON.
 
-**Status:** Not started.
+**Status:** In progress. The first M5 slice adds
+`rust/crates/pumas-rpc/src/handlers/openai_gateway_onnx.rs` as the in-process
+ONNX `/v1/embeddings` gateway adapter. The generic gateway still performs body
+limit, JSON, model lookup, and provider capability checks first; ONNX requests
+then map the gateway model to the served library model id, validate string or
+string-array embedding input plus optional dimensions, reject unsupported
+`encoding_format`, execute through the bounded Rust ONNX session manager, and
+return OpenAI-compatible embedding JSON. Ollama and llama.cpp proxy behavior is
+unchanged. Existing shared gateway tests were extracted to
+`openai_gateway_tests.rs` so `openai_gateway.rs` remains below the 500-line
+standards threshold. Focused verification passed:
+`cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+`cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`,
+and `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`.
+Remaining M5 work includes real facade acceptance tests, explicit oversized
+body handler tests, timeout/cancellation semantics, request
+correlation/logging, unknown-model/provider pass-through coverage, and manual
+curl evidence after frontend/serve workflow is available.
 
 ### Milestone 6: Frontend Integration
 

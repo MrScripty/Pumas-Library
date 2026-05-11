@@ -414,6 +414,20 @@ Update during implementation:
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
   `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, and
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`.
+- 2026-05-11: Started Milestone 5 gateway routing for ONNX Runtime. Added the
+  focused `openai_gateway_onnx.rs` adapter so served `onnx_runtime` models with
+  no provider HTTP endpoint execute `/v1/embeddings` through the bounded Rust
+  ONNX session manager instead of the proxy path. The adapter validates
+  OpenAI-compatible string/string-array input, optional dimensions, and float
+  encoding, returns OpenAI-compatible embedding JSON, and maps ONNX validation,
+  not-loaded, and backend failures into bounded gateway error bodies. Existing
+  gateway tests were moved to `openai_gateway_tests.rs` so the shared gateway
+  module stays below the 500-line standards threshold after adding the ONNX
+  dispatch point. No Python sidecar or new dependency was introduced, and no
+  new re-plan trigger was found. Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`,
+  and `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`.
 
 ## Commit Cadence Notes
 

@@ -84,6 +84,7 @@ describe('useModelServingActions', () => {
 
     expect(unserveModelMock).toHaveBeenCalledWith({
       model_id: 'models/chat',
+      provider: 'llama_cpp',
       profile_id: 'llama-gpu',
       model_alias: 'chat-gpu',
     });

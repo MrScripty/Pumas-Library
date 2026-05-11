@@ -120,25 +120,27 @@ impl PumasApi {
     pub async fn record_unserved_model(
         &self,
         model_id: &str,
+        provider: Option<crate::models::RuntimeProviderId>,
         profile_id: Option<&RuntimeProfileId>,
         model_alias: Option<&str>,
     ) -> Result<ServingStatusSnapshot> {
         Ok(self
             .primary()
             .serving_service
-            .record_unloaded_model(model_id, profile_id, model_alias)
+            .record_unloaded_model(model_id, provider, profile_id, model_alias)
             .await)
     }
 
     pub async fn find_served_model(
         &self,
         model_id: &str,
+        provider: Option<crate::models::RuntimeProviderId>,
         profile_id: Option<&RuntimeProfileId>,
     ) -> Result<Option<ServedModelStatus>> {
         Ok(self
             .primary()
             .serving_service
-            .find_served_model(model_id, profile_id)
+            .find_served_model(model_id, provider, profile_id)
             .await)
     }
 }

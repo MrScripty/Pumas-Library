@@ -138,6 +138,12 @@ Update during implementation:
   applies the endpoint request timeout to the forwarded request. The explicit
   per-endpoint body ceilings preserve the existing 32 MiB gateway limit until a
   narrower ONNX sidecar endpoint contract lands.
+- 2026-05-11: Added provider to served-instance unload identity. Backend
+  serving state now compares provider when replacing, finding, and unloading
+  served models; unload events carry the provider; `UnserveModelRequest`
+  accepts provider; and frontend unload calls send the provider from
+  backend-owned served status. This keeps same-model-id served instances
+  deterministic before ONNX adds another provider.
 
 ## Commit Cadence Notes
 
@@ -267,6 +273,8 @@ changes remain.
   client owned by RPC server state.
 - Gateway proxy routes now have explicit endpoint-specific body and timeout
   policies before provider forwarding.
+- Served-model replace/find/unload identity is provider-scoped, and frontend
+  unload requests send the served provider.
 
 ### Deviations
 
@@ -318,6 +326,11 @@ changes remain.
   rust/crates/pumas-rpc/Cargo.toml openai_gateway`, `cargo test --manifest-path
   rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt --manifest-path
   rust/Cargo.toml --all -- --check`.
+- Provider-scoped served-instance unload slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml serving`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, `npm run -w
+  frontend check:types`, `npm run -w frontend test:run -- useModelServingActions`,
+  and `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

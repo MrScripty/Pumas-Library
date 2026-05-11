@@ -124,6 +124,7 @@ impl ServingService {
     pub async fn record_unloaded_model(
         &self,
         model_id: &str,
+        provider: Option<RuntimeProviderId>,
         profile_id: Option<&RuntimeProfileId>,
         model_alias: Option<&str>,
     ) -> ServingStatusSnapshot {
@@ -131,6 +132,11 @@ impl ServingService {
         snapshot.served_models.retain(|status| {
             if status.model_id != model_id {
                 return true;
+            }
+            if let Some(provider) = provider {
+                if status.provider != provider {
+                    return true;
+                }
             }
             if let Some(profile_id) = profile_id {
                 if &status.profile_id != profile_id {
@@ -154,7 +160,7 @@ impl ServingService {
             ServingStatusEventKind::ModelUnloaded,
             Some(model_id.to_string()),
             profile_id.cloned(),
-            None,
+            provider,
         );
         self.publish_event(event);
         snapshot.clone()
@@ -208,6 +214,7 @@ impl ServingService {
     pub async fn find_served_model(
         &self,
         model_id: &str,
+        provider: Option<RuntimeProviderId>,
         profile_id: Option<&RuntimeProfileId>,
     ) -> Option<ServedModelStatus> {
         self.snapshot
@@ -217,6 +224,7 @@ impl ServingService {
             .iter()
             .find(|status| {
                 status.model_id == model_id
+                    && provider.is_none_or(|provider| status.provider == provider)
                     && profile_id.is_none_or(|profile_id| &status.profile_id == profile_id)
             })
             .cloned()
@@ -250,6 +258,7 @@ impl ServingService {
 
 fn same_served_model(left: &ServedModelStatus, right: &ServedModelStatus) -> bool {
     left.model_id == right.model_id
+        && left.provider == right.provider
         && left.profile_id == right.profile_id
         && left.model_alias == right.model_alias
 }
@@ -546,6 +555,7 @@ fn same_requested_served_instance(
     status: &ServedModelStatus,
 ) -> bool {
     status.model_id == model_id
+        && status.provider == request.config.provider
         && status.profile_id == request.config.profile_id
         && gateway_alias_key(served_status_effective_gateway_alias(status)).as_deref()
             == Some(effective_alias_key)
@@ -893,7 +903,11 @@ mod tests {
             .is_empty());
         assert_eq!(
             service
-                .find_served_model("models/example", Some(&status.profile_id))
+                .find_served_model(
+                    "models/example",
+                    Some(status.provider),
+                    Some(&status.profile_id),
+                )
                 .await
                 .as_ref()
                 .and_then(|status| status.model_alias.as_deref()),
@@ -901,7 +915,12 @@ mod tests {
         );
 
         let unloaded = service
-            .record_unloaded_model("models/example", Some(&status.profile_id), Some("example"))
+            .record_unloaded_model(
+                "models/example",
+                Some(status.provider),
+                Some(&status.profile_id),
+                Some("example"),
+            )
             .await;
 
         assert!(unloaded.served_models.is_empty());
@@ -922,6 +941,51 @@ mod tests {
                 .feed
                 .snapshot_required
         );
+    }
+
+    #[tokio::test]
+    async fn serving_service_unloads_only_matching_provider_instance() {
+        let service = ServingService::new();
+        let mut llama = loaded_status("models/shared", "shared-profile", Some("shared"));
+        llama.provider = RuntimeProviderId::LlamaCpp;
+        let mut ollama = loaded_status("models/shared", "shared-profile", Some("shared"));
+        ollama.provider = RuntimeProviderId::Ollama;
+        let profile_id = llama.profile_id.clone();
+
+        service.record_loaded_model(llama).await;
+        let loaded = service.record_loaded_model(ollama).await;
+        assert_eq!(loaded.served_models.len(), 2);
+
+        let unloaded = service
+            .record_unloaded_model(
+                "models/shared",
+                Some(RuntimeProviderId::Ollama),
+                Some(&profile_id),
+                Some("shared"),
+            )
+            .await;
+
+        assert_eq!(unloaded.served_models.len(), 1);
+        assert_eq!(
+            unloaded.served_models[0].provider,
+            RuntimeProviderId::LlamaCpp
+        );
+        assert!(service
+            .find_served_model(
+                "models/shared",
+                Some(RuntimeProviderId::Ollama),
+                Some(&profile_id),
+            )
+            .await
+            .is_none());
+        assert!(service
+            .find_served_model(
+                "models/shared",
+                Some(RuntimeProviderId::LlamaCpp),
+                Some(&profile_id),
+            )
+            .await
+            .is_some());
     }
 
     #[tokio::test]

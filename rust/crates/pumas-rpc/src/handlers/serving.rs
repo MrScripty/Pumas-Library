@@ -99,6 +99,7 @@ pub async fn unserve_model(state: &AppState, params: &Value) -> pumas_library::R
         .api
         .find_served_model(
             &command.request.model_id,
+            command.request.provider,
             command.request.profile_id.as_ref(),
         )
         .await?;
@@ -174,6 +175,7 @@ async fn unserve_ollama_model(
         .api
         .record_unserved_model(
             &request.model_id,
+            Some(RuntimeProviderId::Ollama),
             Some(&profile_id),
             Some(model_alias.as_str()),
         )
@@ -819,6 +821,7 @@ async fn unserve_llama_cpp_model(
             .api
             .record_unserved_model(
                 &request.model_id,
+                Some(RuntimeProviderId::LlamaCpp),
                 Some(&profile_id),
                 Some(model_alias.as_str()),
             )
@@ -854,6 +857,7 @@ async fn unserve_llama_cpp_model(
         .api
         .record_unserved_model(
             &request.model_id,
+            Some(RuntimeProviderId::LlamaCpp),
             Some(&profile_id),
             Some(model_alias.as_str()),
         )

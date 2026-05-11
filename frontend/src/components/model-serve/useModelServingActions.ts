@@ -209,6 +209,7 @@ export function useModelServingActions(
     try {
       const response = await api.unserve_model({
         model_id: servedStatus.model_id,
+        provider: servedStatus.provider,
         profile_id: servedStatus.profile_id,
         model_alias: servedStatus.model_alias ?? null,
       });

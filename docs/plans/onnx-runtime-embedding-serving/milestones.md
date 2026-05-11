@@ -90,7 +90,7 @@ provider and widens the blast radius.
 - [ ] Introduce provider serving adapters for Ollama and llama.cpp before adding
       the ONNX adapter. The RPC handler should keep only boundary parsing,
       validation orchestration, and response shaping.
-- [ ] Add provider to served-instance lookup/unload identity where ambiguity is
+- [x] Add provider to served-instance lookup/unload identity where ambiguity is
       possible. Add tests where the same model id is served by more than one
       provider/profile and unload/gateway lookup remains deterministic.
 - [x] Add gateway endpoint capability checks before proxying `/v1/*` requests.
@@ -182,6 +182,11 @@ rejects oversized bodies with a Pumas-shaped HTTP 413 response before provider
 forwarding, and applies an explicit per-request timeout. The current
 per-endpoint body ceilings preserve the existing 32 MiB gateway limit until the
 ONNX sidecar supplies a narrower endpoint contract.
+Served-instance identity now includes provider when recording, finding, and
+unloading served models. `UnserveModelRequest` accepts an optional provider
+field, frontend unload calls send the backend-recorded provider, and serving
+state tests cover two providers serving the same model/profile/alias without
+cross-provider unload.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

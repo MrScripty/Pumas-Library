@@ -59,6 +59,7 @@ export interface ServeModelRequest {
 
 export interface UnserveModelRequest {
   model_id: string;
+  provider?: RuntimeProviderId | null;
   profile_id?: string | null;
   model_alias?: string | null;
 }

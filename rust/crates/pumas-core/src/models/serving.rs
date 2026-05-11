@@ -214,6 +214,8 @@ pub struct ServeModelRequest {
 pub struct UnserveModelRequest {
     pub model_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<RuntimeProviderId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<RuntimeProfileId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_alias: Option<String>,
@@ -472,6 +474,22 @@ mod tests {
         assert_eq!(encoded["config"]["tensor_split"], json!([1.0, 2.0]));
         assert_eq!(encoded["config"]["context_size"], json!(4096));
         assert_eq!(encoded["config"]["keep_loaded"], json!(true));
+    }
+
+    #[test]
+    fn unserve_contract_serializes_provider_scoped_identity() {
+        let request = UnserveModelRequest {
+            model_id: "models/example".to_string(),
+            provider: Some(RuntimeProviderId::LlamaCpp),
+            profile_id: Some(RuntimeProfileId::parse("llama-router").unwrap()),
+            model_alias: Some("local-model".to_string()),
+        };
+        let encoded = serde_json::to_value(&request).unwrap();
+
+        assert_eq!(encoded["model_id"], json!("models/example"));
+        assert_eq!(encoded["provider"], json!("llama_cpp"));
+        assert_eq!(encoded["profile_id"], json!("llama-router"));
+        assert_eq!(encoded["model_alias"], json!("local-model"));
     }
 
     #[test]

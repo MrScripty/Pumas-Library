@@ -359,6 +359,18 @@ Update during implementation:
   contracts, risks, milestones, and ADR language to target an in-process Rust
   ONNX provider/session manager. Candidate binding is `ort`, pending focused
   Rust dependency review and native-library packaging decision.
+- 2026-05-11: Started Milestone 1 with a Rust-only ONNX provider/session
+  skeleton in `rust/crates/pumas-core/src/onnx_runtime/`. The slice adds
+  validated model-id, model-path, load, embedding request, execution-provider,
+  status, response, and typed error contracts; a fake backend for load, unload,
+  list/status, and deterministic embeddings; a semaphore-bound session manager;
+  README traceability; and unit tests for root escape, extension validation,
+  payload validation, fake backend ordering, unloaded embedding rejection, and
+  unload cleanup. Real ONNX Runtime dependencies, composition-root wiring,
+  gateway error bodies, and full cancellation/shutdown ordering remain open.
+  Verification passed: `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, and
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`.
 
 ## Commit Cadence Notes
 
@@ -569,6 +581,10 @@ changes remain.
   execution moves into Rust dependency review/execution slices, and the aborted
   uncommitted Python sidecar files were removed before this documentation
   update.
+- Rust ONNX Milestone 1 skeleton is in progress: `pumas-core` now owns
+  validated ONNX provider/session contracts, a fake embedding backend, bounded
+  session manager, README, and focused tests. Composition-root integration,
+  gateway error shaping, and full shutdown/cancellation ordering remain open.
 
 ### Deviations
 

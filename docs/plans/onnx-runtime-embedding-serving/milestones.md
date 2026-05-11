@@ -364,19 +364,19 @@ embedding request/response contracts and a fake backend before wiring real ONNX
 Runtime execution.
 
 **Tasks:**
-- [ ] Create a focused Rust ONNX provider/session module or crate with README
+- [x] Create a focused Rust ONNX provider/session module or crate with README
       contract sections before expanding internals.
 - [ ] Keep ONNX session manager construction at the Rust composition root.
       Serving/gateway handlers may receive traits/handles, but must not create
       ONNX sessions, tokenizer state, or global managers ad hoc.
-- [ ] Define validated Rust request/session types for model path, model id,
+- [x] Define validated Rust request/session types for model path, model id,
       embedding input, dimensions, batch size, token limit, and execution
       provider options.
-- [ ] Implement a session abstraction that can be unit-tested with a fake ONNX
+- [x] Implement a session abstraction that can be unit-tested with a fake ONNX
       backend before real ONNX Runtime integration.
-- [ ] Implement fake load, unload, status/list, and embedding execution through
+- [x] Implement fake load, unload, status/list, and embedding execution through
       the same Rust provider adapter shape the real ONNX backend will use.
-- [ ] Add bounded inference concurrency so ONNX Runtime threading and Rust async
+- [x] Add bounded inference concurrency so ONNX Runtime threading and Rust async
       request handling cannot create unbounded work under embedding load.
 - [ ] Define shutdown ordering: stop accepting new load/inference work, cancel
       or drain queued work with bounded timeout, unload sessions, and report
@@ -389,11 +389,15 @@ Runtime execution.
 - `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`
 - `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`
 - Tests cover invalid path/root escape, invalid model id, invalid payload
-  shape, request-size limits, fake backend ordering, and shutdown cleanup.
+  shape, request-size limits, fake backend ordering, and session unload cleanup.
 - Tests use isolated temp roots and no shared mutable process-global state
   unless explicitly serialized.
 
-**Status:** Not started.
+**Status:** In progress. The first Rust ONNX skeleton slice added
+`rust/crates/pumas-core/src/onnx_runtime/` with README coverage, validated
+contract types, a fake backend, a bounded `OnnxSessionManager`, and focused
+unit tests. Composition-root wiring, gateway OpenAI-compatible errors, and
+full shutdown/cancellation ordering remain open for later M1/M3/M5 slices.
 
 ### Milestone 2: ONNX Embedding Execution
 

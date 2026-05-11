@@ -43,6 +43,7 @@ pub mod metadata;
 pub mod model_library;
 pub mod models;
 pub mod network;
+pub mod onnx_runtime;
 pub mod platform;
 pub mod plugins;
 pub mod process;
@@ -71,6 +72,12 @@ pub use model_library::{
 pub use models::{
     BundleComponentManifestEntry, BundleComponentState, BundleFormat, CommitInfo,
     EmbeddedMetadataResponse, LibraryModelMetadataResponse,
+};
+pub use onnx_runtime::{
+    FakeOnnxEmbeddingBackend, OnnxEmbedding, OnnxEmbeddingBackend, OnnxEmbeddingRequest,
+    OnnxEmbeddingResponse, OnnxEmbeddingUsage, OnnxExecutionProvider, OnnxLoadOptions,
+    OnnxLoadRequest, OnnxModelId, OnnxModelPath, OnnxRuntimeError, OnnxRuntimeErrorCode,
+    OnnxSessionManager, OnnxSessionState, OnnxSessionStatus,
 };
 pub use plugins::{PluginConfig, PluginLoader};
 pub use process::{ProcessInfo, ProcessManager};

@@ -120,6 +120,13 @@ Update during implementation:
   handlers. This is the first thin serving/gateway slice toward provider
   adapters; alias defaulting, endpoint capability checks, shared clients, and
   full load/unload adapter extraction remain pending.
+- 2026-05-11: Added gateway endpoint capability enforcement before proxying.
+  Gateway proxy requests now map the requested `/v1/*` path to
+  `OpenAiGatewayEndpoint` and verify the served model's provider behavior
+  declares support before forwarding the request. Built-in Ollama and llama.cpp
+  behavior is unchanged because both providers currently declare support for the
+  routed endpoints. Shared gateway HTTP client and endpoint-specific body/timeout
+  policy remain pending.
 
 ## Commit Cadence Notes
 
@@ -243,6 +250,8 @@ changes remain.
   falling back to Ollama for every non-llama.cpp status.
 - Serving and gateway provider-side request model ids now derive from provider
   behavior policy.
+- Gateway proxying now checks typed provider endpoint capabilities before
+  forwarding OpenAI-compatible requests.
 
 ### Deviations
 
@@ -280,6 +289,11 @@ changes remain.
   --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, `cargo test
   --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`, and
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Gateway endpoint capability slice verified with `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml providers`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml openai_gateway`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

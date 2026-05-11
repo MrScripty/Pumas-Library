@@ -93,10 +93,10 @@ provider and widens the blast radius.
 - [ ] Add provider to served-instance lookup/unload identity where ambiguity is
       possible. Add tests where the same model id is served by more than one
       provider/profile and unload/gateway lookup remains deterministic.
-- [ ] Add gateway endpoint capability checks before proxying `/v1/*` requests.
+- [x] Add gateway endpoint capability checks before proxying `/v1/*` requests.
 - [ ] Add a shared gateway HTTP client with explicit timeouts instead of
       constructing a new client per proxied request.
-- [ ] Add a typed gateway endpoint capability model for `/v1/models`,
+- [x] Add a typed gateway endpoint capability model for `/v1/models`,
       `/v1/chat/completions`, `/v1/completions`, and `/v1/embeddings`. ONNX
       must not receive chat/completion traffic unless a later plan adds that
       capability.
@@ -169,6 +169,11 @@ policy instead of transport-layer Ollama/llama.cpp matches. This completes the
 model-id rewriting portion of provider behavior migration; alias defaulting,
 full serving adapter extraction, endpoint capability checks, reusable provider
 clients, and launch strategy selection remain pending.
+Gateway proxy routes now map `/v1/*` paths to typed `OpenAiGatewayEndpoint`
+values and reject unsupported provider/endpoint combinations before proxying.
+The current built-in Ollama and llama.cpp behavior remains unchanged because
+both declare support for the currently routed endpoints; ONNX can register
+embeddings-only support without inheriting chat/completion routing.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

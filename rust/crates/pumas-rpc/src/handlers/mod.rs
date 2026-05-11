@@ -36,7 +36,7 @@ use pumas_library::models::{
     RuntimeProfileUpdateFeed, ServedModelLoadState, ServedModelStatus, ServingStatusSnapshot,
     ServingStatusUpdateFeed, StatusTelemetryUpdateNotification,
 };
-use pumas_library::ProviderRegistry;
+use pumas_library::{OpenAiGatewayEndpoint, ProviderRegistry};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::convert::Infallible;
@@ -162,6 +162,14 @@ pub async fn handle_openai_proxy(
     path: axum::extract::OriginalUri,
     Json(mut body): Json<Value>,
 ) -> Response {
+    let request_path = path.path();
+    let Some(gateway_endpoint) = openai_gateway_endpoint_for_path(request_path) else {
+        return openai_error_response(
+            StatusCode::NOT_FOUND,
+            format!("unsupported OpenAI-compatible endpoint: {request_path}"),
+        );
+    };
+
     let Some(requested_model) = body.get("model").and_then(Value::as_str) else {
         return openai_error_response(
             StatusCode::BAD_REQUEST,
@@ -184,6 +192,18 @@ pub async fn handle_openai_proxy(
             return openai_error_response(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
         }
     };
+
+    let registry = ProviderRegistry::builtin();
+    if !provider_supports_openai_gateway_endpoint(served.provider, gateway_endpoint, &registry) {
+        return openai_error_response_with_code(
+            StatusCode::BAD_REQUEST,
+            ModelServeErrorCode::EndpointUnavailable,
+            format!(
+                "provider {:?} does not support {request_path}",
+                served.provider
+            ),
+        );
+    }
 
     let Some(endpoint) = served.endpoint_url.as_ref() else {
         return openai_error_response(
@@ -209,6 +229,26 @@ pub async fn handle_openai_proxy(
         Ok(response) => proxy_response(response).await,
         Err(error) => openai_error_response(StatusCode::BAD_GATEWAY, error.to_string()),
     }
+}
+
+fn openai_gateway_endpoint_for_path(path: &str) -> Option<OpenAiGatewayEndpoint> {
+    match path {
+        "/v1/models" => Some(OpenAiGatewayEndpoint::Models),
+        "/v1/chat/completions" => Some(OpenAiGatewayEndpoint::ChatCompletions),
+        "/v1/completions" => Some(OpenAiGatewayEndpoint::Completions),
+        "/v1/embeddings" => Some(OpenAiGatewayEndpoint::Embeddings),
+        _ => None,
+    }
+}
+
+fn provider_supports_openai_gateway_endpoint(
+    provider: pumas_library::models::RuntimeProviderId,
+    endpoint: OpenAiGatewayEndpoint,
+    registry: &ProviderRegistry,
+) -> bool {
+    registry
+        .get(provider)
+        .is_some_and(|behavior| behavior.supports_openai_endpoint(endpoint))
 }
 
 fn openai_model_entry(model: ServedModelStatus) -> Value {
@@ -368,6 +408,7 @@ mod openai_gateway_tests {
         RuntimeDeviceMode, RuntimeProfileId, RuntimeProviderId, ServedModelLoadState,
         ServingEndpointStatus, ServingStatusSnapshot,
     };
+    use pumas_library::ProviderBehavior;
 
     fn loaded_status(
         model_id: &str,
@@ -468,6 +509,44 @@ mod openai_gateway_tests {
         let mut ollama = loaded_status("models/example", "ollama-default", Some("example-gpu"));
         ollama.provider = RuntimeProviderId::Ollama;
         assert_eq!(provider_request_model_id(&ollama), "example-gpu");
+    }
+
+    #[test]
+    fn openai_gateway_endpoint_for_path_maps_proxy_routes() {
+        assert_eq!(
+            openai_gateway_endpoint_for_path("/v1/chat/completions"),
+            Some(OpenAiGatewayEndpoint::ChatCompletions)
+        );
+        assert_eq!(
+            openai_gateway_endpoint_for_path("/v1/completions"),
+            Some(OpenAiGatewayEndpoint::Completions)
+        );
+        assert_eq!(
+            openai_gateway_endpoint_for_path("/v1/embeddings"),
+            Some(OpenAiGatewayEndpoint::Embeddings)
+        );
+        assert_eq!(openai_gateway_endpoint_for_path("/v1/audio"), None);
+    }
+
+    #[test]
+    fn provider_endpoint_capability_comes_from_registry_behavior() {
+        let mut behavior = ProviderBehavior::ollama();
+        behavior.openai_endpoints = vec![
+            OpenAiGatewayEndpoint::Models,
+            OpenAiGatewayEndpoint::Embeddings,
+        ];
+        let registry = ProviderRegistry::from_behaviors([behavior]);
+
+        assert!(provider_supports_openai_gateway_endpoint(
+            RuntimeProviderId::Ollama,
+            OpenAiGatewayEndpoint::Embeddings,
+            &registry
+        ));
+        assert!(!provider_supports_openai_gateway_endpoint(
+            RuntimeProviderId::Ollama,
+            OpenAiGatewayEndpoint::ChatCompletions,
+            &registry
+        ));
     }
 }
 

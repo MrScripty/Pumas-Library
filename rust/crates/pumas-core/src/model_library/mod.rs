@@ -46,6 +46,7 @@ mod task_signature;
 mod types;
 mod watcher;
 
+pub(crate) use artifact_identity::versioned_architecture_family_from_text;
 pub use artifact_identity::{
     apply_download_artifact_metadata, infer_architecture_family_for_download,
     normalize_architecture_family, normalize_artifact_path_slug, ArtifactSelectionKind,

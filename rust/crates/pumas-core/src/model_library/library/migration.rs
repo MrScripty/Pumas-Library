@@ -131,6 +131,188 @@ async fn cleanup_empty_parent_dirs_after_move_async(source_dir: PathBuf, library
     .await;
 }
 
+fn resolve_migration_architecture_family(
+    metadata: Option<&ModelMetadata>,
+    metadata_json: &Value,
+    marker_hints: Option<&DownloadMarkerHints>,
+    file_type_info: Option<&ModelTypeInfo>,
+    current_family: &str,
+) -> String {
+    let mut versioned_candidates: Vec<String> = Vec::new();
+
+    if let Some(metadata) = metadata {
+        versioned_candidates.extend(metadata.repo_id.iter().cloned());
+        versioned_candidates.extend(metadata.official_name.iter().cloned());
+        versioned_candidates.extend(metadata.cleaned_name.iter().cloned());
+        push_artifact_family_candidate(
+            &mut versioned_candidates,
+            metadata.selected_artifact_id.as_deref(),
+        );
+        versioned_candidates.extend(metadata.config_model_type.iter().cloned());
+        if let Some(files) = metadata.selected_artifact_files.as_ref() {
+            versioned_candidates.extend(files.iter().cloned());
+        }
+        if let Some(files) = metadata.expected_files.as_ref() {
+            versioned_candidates.extend(files.iter().cloned());
+        }
+    }
+
+    versioned_candidates.extend(string_field(metadata_json, "repo_id"));
+    versioned_candidates.extend(string_field(metadata_json, "official_name"));
+    versioned_candidates.extend(string_field(metadata_json, "cleaned_name"));
+    let metadata_json_selected_artifact_id = string_field(metadata_json, "selected_artifact_id");
+    push_artifact_family_candidate(
+        &mut versioned_candidates,
+        metadata_json_selected_artifact_id.as_deref(),
+    );
+    versioned_candidates.extend(string_field(metadata_json, "config_model_type"));
+    if let Some(files) = string_array_field(metadata_json, "selected_artifact_files") {
+        versioned_candidates.extend(files);
+    }
+    if let Some(files) = string_array_field(metadata_json, "expected_files") {
+        versioned_candidates.extend(files);
+    }
+
+    if let Some(marker_hints) = marker_hints {
+        push_artifact_family_candidate(
+            &mut versioned_candidates,
+            marker_hints.selected_artifact_id.as_deref(),
+        );
+        if let Some(files) = marker_hints.selected_artifact_files.as_ref() {
+            versioned_candidates.extend(files.iter().cloned());
+        }
+    }
+
+    if let Some(config_family) =
+        migration_config_model_type_family(metadata, metadata_json, marker_hints)
+    {
+        return config_family;
+    }
+
+    for candidate in &versioned_candidates {
+        if let Some(family) = versioned_architecture_family_from_text(candidate) {
+            if can_disambiguate_legacy_compact_family(current_family, &family) {
+                return disambiguate_legacy_compact_family(current_family, &family);
+            }
+        }
+    }
+
+    let explicit_architecture_family = metadata
+        .and_then(|value| value.architecture_family.clone())
+        .or_else(|| string_field(metadata_json, "architecture_family"));
+
+    let resolved_family = explicit_architecture_family
+        .or_else(|| {
+            file_type_info
+                .and_then(|ti| ti.family.as_ref())
+                .map(|f| f.as_str().to_string())
+        })
+        .unwrap_or_else(|| current_family.to_string());
+    normalize_architecture_family(&resolved_family)
+}
+
+fn migration_config_model_type_family(
+    metadata: Option<&ModelMetadata>,
+    metadata_json: &Value,
+    _marker_hints: Option<&DownloadMarkerHints>,
+) -> Option<String> {
+    if let Some(config_model_type) = metadata.and_then(|value| value.config_model_type.as_deref()) {
+        return Some(normalize_architecture_family(config_model_type));
+    }
+    if let Some(config_model_type) = string_field(metadata_json, "config_model_type") {
+        return Some(normalize_architecture_family(&config_model_type));
+    }
+    None
+}
+
+fn push_artifact_family_candidate(
+    candidates: &mut Vec<String>,
+    selected_artifact_id: Option<&str>,
+) {
+    let Some(selected_artifact_id) = selected_artifact_id else {
+        return;
+    };
+    let repo_slug = selected_artifact_id
+        .split_once("__")
+        .map(|(repo_slug, _)| repo_slug)
+        .unwrap_or(selected_artifact_id);
+    let model_slug = repo_slug
+        .split_once("--")
+        .map(|(_, model_slug)| model_slug)
+        .unwrap_or(repo_slug);
+    if !model_slug.trim().is_empty() {
+        candidates.push(model_slug.to_string());
+    }
+}
+
+fn can_disambiguate_legacy_compact_family(current_family: &str, candidate_family: &str) -> bool {
+    let Some((current_stem, _suffix)) = compact_version_family_parts(current_family) else {
+        return false;
+    };
+    let Some(candidate_stem) = versioned_family_stem(candidate_family) else {
+        return false;
+    };
+    current_stem == candidate_stem
+}
+
+fn disambiguate_legacy_compact_family(current_family: &str, candidate_family: &str) -> String {
+    let normalized_candidate = normalize_architecture_family(candidate_family);
+    let Some((_stem, suffix)) = compact_version_family_parts(current_family) else {
+        return normalized_candidate;
+    };
+    if suffix.is_empty() || normalized_candidate.ends_with(&format!("_{suffix}")) {
+        normalized_candidate
+    } else {
+        format!("{normalized_candidate}_{suffix}")
+    }
+}
+
+fn compact_version_family_parts(value: &str) -> Option<(String, String)> {
+    let normalized = normalize_name(value);
+    let mut chars = normalized.chars().peekable();
+    let mut stem = String::new();
+    while let Some(ch) = chars.peek().copied() {
+        if ch.is_ascii_digit() {
+            break;
+        }
+        stem.push(ch);
+        chars.next();
+    }
+
+    let mut digits = String::new();
+    while let Some(ch) = chars.peek().copied() {
+        if !ch.is_ascii_digit() {
+            break;
+        }
+        digits.push(ch);
+        chars.next();
+    }
+    if stem.is_empty() || digits.len() < 2 {
+        return None;
+    }
+    let suffix = chars.collect::<String>();
+    Some((
+        stem.trim_matches(['-', '_']).to_string(),
+        suffix.trim_matches(['-', '_']).to_string(),
+    ))
+}
+
+fn versioned_family_stem(value: &str) -> Option<String> {
+    let normalized = normalize_architecture_family(value);
+    let mut stem = String::new();
+    for ch in normalized.chars() {
+        if ch.is_ascii_digit() {
+            break;
+        }
+        stem.push(ch);
+    }
+    if stem.is_empty() {
+        None
+    } else {
+        Some(stem.trim_matches(['-', '_']).to_string())
+    }
+}
+
 impl ModelLibrary {
     /// Generate a non-mutating migration dry-run report for metadata v2 cutover.
     ///
@@ -944,19 +1126,13 @@ impl ModelLibrary {
                     .as_ref()
                     .and_then(|marker| marker.upstream_revision.clone())
             });
-        let explicit_architecture_family = metadata
-            .as_ref()
-            .and_then(|value| value.architecture_family.clone())
-            .or_else(|| string_field(metadata_json, "architecture_family"));
-        let resolved_family = explicit_architecture_family
-            .or_else(|| {
-                file_type_info
-                    .as_ref()
-                    .and_then(|ti| ti.family.as_ref())
-                    .map(|f| f.as_str().to_string())
-            })
-            .unwrap_or_else(|| current_family.clone());
-        let resolved_family = normalize_architecture_family(&resolved_family);
+        let resolved_family = resolve_migration_architecture_family(
+            metadata.as_ref(),
+            metadata_json,
+            marker_hints.as_ref(),
+            file_type_info.as_ref(),
+            &current_family,
+        );
         let (target_dir, target_model_id) =
             if let Some(selected_artifact_id) = selected_artifact_id.as_deref() {
                 (

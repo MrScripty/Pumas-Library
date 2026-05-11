@@ -39,8 +39,9 @@ use crate::model_library::types::{
 use crate::model_library::{
     normalize_architecture_family, normalize_artifact_path_slug, normalize_recommended_backend,
     normalize_review_reasons, normalize_task_signature, push_review_reason,
-    resolve_model_type_with_rules, validate_metadata_v2_with_index, LinkRegistry,
-    ModelTypeResolution, SelectedArtifactIdentity, TaskNormalizationStatus,
+    resolve_model_type_with_rules, validate_metadata_v2_with_index,
+    versioned_architecture_family_from_text, LinkRegistry, ModelTypeResolution,
+    SelectedArtifactIdentity, TaskNormalizationStatus,
 };
 use crate::models::{
     AssetValidationState, CustomCodeFacts, ModelExecutionDescriptor,
@@ -9174,6 +9175,8 @@ mod tests {
         let source_dir = library.build_model_path("llm", "llama", "exec-move");
         std::fs::create_dir_all(&source_dir).unwrap();
         write_min_safetensors(&source_dir.join("model.safetensors"));
+        std::fs::create_dir_all(source_dir.join("nested/assets")).unwrap();
+        std::fs::write(source_dir.join("nested/assets/adapter.json"), b"adapter").unwrap();
         std::fs::write(
             source_dir.join("config.json"),
             r#"{"architectures":["UNet2DConditionModel"]}"#,
@@ -9204,7 +9207,17 @@ mod tests {
 
         let moved_dir = library.build_model_path("diffusion", "llama", "exec-move");
         assert!(moved_dir.exists());
+        assert!(moved_dir.join("model.safetensors").is_file());
+        assert!(moved_dir.join("config.json").is_file());
+        assert!(moved_dir.join("nested/assets/adapter.json").is_file());
         assert!(!source_dir.exists());
+        let moved_record = library.index().get("diffusion/llama/exec-move").unwrap();
+        assert!(moved_record.is_some());
+        assert!(library
+            .index()
+            .get("llm/llama/exec-move")
+            .unwrap()
+            .is_none());
         assert!(!temp_dir.path().join(MIGRATION_CHECKPOINT_FILENAME).exists());
 
         let json_report_path = PathBuf::from(report.machine_readable_report_path.unwrap());
@@ -9491,6 +9504,283 @@ mod tests {
             .findings
             .iter()
             .any(|finding| finding == "legacy_compact_family_token"));
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_prefers_versioned_repo_family_over_legacy_compact_metadata(
+    ) {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("vlm", "arch35", "arch3_6-example-artifact-gguf");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("Arch3.6-Example-IQ4_XS.gguf"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("vlm/arch35/arch3_6-example-artifact-gguf".to_string()),
+            family: Some("arch35".to_string()),
+            architecture_family: Some("arch35".to_string()),
+            model_type: Some("vlm".to_string()),
+            cleaned_name: Some("arch3_6-example-artifact-gguf".to_string()),
+            repo_id: Some("ExampleOrg/Arch3.6-Example-Artifact-GGUF".to_string()),
+            expected_files: Some(vec!["Arch3.6-Example-IQ4_XS.gguf".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        let row = report
+            .items
+            .iter()
+            .find(|item| item.model_id == "vlm/arch35/arch3_6-example-artifact-gguf")
+            .unwrap();
+
+        assert_eq!(row.action, "move");
+        assert_eq!(row.resolved_family.as_deref(), Some("arch3_6"));
+        assert!(row
+            .target_model_id
+            .as_deref()
+            .is_some_and(|model_id| model_id.contains("/arch3_6/")));
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_keeps_transformers_config_family_over_product_name() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "publisher", "arch3_6-product-artifact");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(
+            model_dir.join("config.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "model_type": "arch3_5",
+                "architectures": ["Arch3_5ForConditionalGeneration"]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+
+        let artifact_id = "publisher--arch3_6-product-artifact__files_448f569c86c8";
+        let metadata = ModelMetadata {
+            model_id: Some("llm/publisher/arch3_6-product-artifact".to_string()),
+            family: Some("publisher".to_string()),
+            architecture_family: Some("arch3_5".to_string()),
+            config_model_type: Some("arch3_5".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("arch3_6-product-artifact".to_string()),
+            repo_id: Some("Publisher/Arch3.6-Product-Artifact".to_string()),
+            selected_artifact_id: Some(artifact_id.to_string()),
+            selected_artifact_files: Some(vec!["model.safetensors".to_string()]),
+            expected_files: Some(vec!["model.safetensors".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        let row = report
+            .items
+            .iter()
+            .find(|item| item.model_id == "llm/publisher/arch3_6-product-artifact")
+            .unwrap();
+
+        assert_eq!(row.action, "move");
+        assert_eq!(row.resolved_family.as_deref(), Some("arch3_5"));
+        assert!(row.target_model_id.as_deref().is_some_and(|model_id| {
+            model_id.contains("/arch3_5/") && model_id.ends_with(artifact_id)
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_does_not_move_from_marker_only_config_family() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("vision", "publisher", "arch3-product");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(
+            model_dir.join(".pumas_download"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "family": "publisher",
+                "model_type": "vision",
+                "repo_id": "Publisher/Arch3-Product",
+                "official_name": "Arch3-Product",
+                "huggingface_evidence": {
+                    "config_model_type": "arch3",
+                    "architectures": ["Arch3ForVisionTask"],
+                    "pipeline_tag": "image-classification",
+                    "repo_id": "Publisher/Arch3-Product"
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("vision/publisher/arch3-product".to_string()),
+            family: Some("publisher".to_string()),
+            model_type: Some("vision".to_string()),
+            cleaned_name: Some("arch3-product".to_string()),
+            official_name: Some("Arch3-Product".to_string()),
+            repo_id: Some("Publisher/Arch3-Product".to_string()),
+            expected_files: Some(vec!["model.safetensors".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        let row = report
+            .items
+            .iter()
+            .find(|item| item.model_id == "vision/publisher/arch3-product")
+            .unwrap();
+
+        assert_eq!(row.action, "keep");
+        assert_eq!(row.resolved_family.as_deref(), Some("publisher"));
+        assert_eq!(
+            row.target_model_id.as_deref(),
+            Some("vision/publisher/arch3-product")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_ignores_versioned_product_name_as_family() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("audio", "vendor", "product-suite-0_8");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("product_suite_v0_8.onnx"), b"onnx").unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("audio/vendor/product-suite-0_8".to_string()),
+            family: Some("vendor".to_string()),
+            model_type: Some("audio".to_string()),
+            cleaned_name: Some("product-suite-0_8".to_string()),
+            official_name: Some("product-suite-0.8".to_string()),
+            repo_id: Some("Vendor/product-suite-0.8".to_string()),
+            expected_files: Some(vec!["product_suite_v0_8.onnx".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        let row = report
+            .items
+            .iter()
+            .find(|item| item.model_id == "audio/vendor/product-suite-0_8")
+            .unwrap();
+
+        assert_eq!(row.action, "keep");
+        assert_eq!(row.resolved_family.as_deref(), Some("vendor"));
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_ignores_quant_token_as_family() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("reranker", "arch3", "ranker-arch3-artifact");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("Ranker-Arch3.Q4_0.gguf"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("reranker/arch3/ranker-arch3-artifact".to_string()),
+            family: Some("arch3".to_string()),
+            model_type: Some("reranker".to_string()),
+            cleaned_name: Some("ranker-arch3-artifact".to_string()),
+            official_name: Some("Ranker-Arch3-GGUF".to_string()),
+            repo_id: Some("QuantFactory/Ranker-Arch3-GGUF".to_string()),
+            expected_files: Some(vec!["Ranker-Arch3.Q4_0.gguf".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        let row = report
+            .items
+            .iter()
+            .find(|item| item.model_id == "reranker/arch3/ranker-arch3-artifact")
+            .unwrap();
+
+        assert_eq!(row.action, "keep");
+        assert_eq!(row.resolved_family.as_deref(), Some("arch3"));
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_preserves_compact_family_suffix() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("vlm", "arch35moe", "arch3_6-example-gguf");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("Arch3.6-Example-Q4_K_M.gguf"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("vlm/arch35moe/arch3_6-example-gguf".to_string()),
+            family: Some("arch35moe".to_string()),
+            model_type: Some("vlm".to_string()),
+            cleaned_name: Some("arch3_6-example-gguf".to_string()),
+            official_name: Some("Arch3.6-Example-GGUF".to_string()),
+            repo_id: Some("Owner/Arch3.6-Example-GGUF".to_string()),
+            expected_files: Some(vec!["Arch3.6-Example-Q4_K_M.gguf".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        let row = report
+            .items
+            .iter()
+            .find(|item| item.model_id == "vlm/arch35moe/arch3_6-example-gguf")
+            .unwrap();
+
+        assert_eq!(row.action, "move");
+        assert_eq!(row.resolved_family.as_deref(), Some("arch3_6_moe"));
+        assert!(row
+            .target_model_id
+            .as_deref()
+            .is_some_and(|model_id| model_id.contains("/arch3_6_moe/")));
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_uses_transformers_config_model_type_for_moe_family() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("vlm", "arch35moe", "arch3_5-example-gguf");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(
+            model_dir.join("config.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "model_type": "arch3_5_moe",
+                "architectures": ["Arch3_5MoeForConditionalGeneration"]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        write_min_safetensors(&model_dir.join("Arch3.5-Example-UD-IQ4_XS.gguf"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("vlm/arch35moe/arch3_5-example-gguf".to_string()),
+            family: Some("arch35moe".to_string()),
+            config_model_type: Some("arch3_5_moe".to_string()),
+            model_type: Some("vlm".to_string()),
+            cleaned_name: Some("arch3_5-example-gguf".to_string()),
+            official_name: Some("Arch3.5-Example-GGUF".to_string()),
+            repo_id: Some("Owner/Arch3.5-Example-GGUF".to_string()),
+            expected_files: Some(vec!["Arch3.5-Example-UD-IQ4_XS.gguf".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        let row = report
+            .items
+            .iter()
+            .find(|item| item.model_id == "vlm/arch35moe/arch3_5-example-gguf")
+            .unwrap();
+
+        assert_eq!(row.action, "move");
+        assert_eq!(row.resolved_family.as_deref(), Some("arch3_5_moe"));
+        assert!(row
+            .target_model_id
+            .as_deref()
+            .is_some_and(|model_id| model_id.contains("/arch3_5_moe/")));
     }
 
     #[tokio::test]

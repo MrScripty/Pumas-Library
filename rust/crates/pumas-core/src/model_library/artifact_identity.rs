@@ -148,6 +148,11 @@ pub fn normalize_architecture_family(value: &str) -> String {
     normalize_compact_version_token(&normalized)
 }
 
+/// Extract a normalized versioned family token from model/repository text.
+pub(crate) fn versioned_architecture_family_from_text(value: &str) -> Option<String> {
+    extract_versioned_family(value)
+}
+
 /// Normalize a selected-artifact id for path/model-id use while preserving
 /// artifact identity separators.
 pub fn normalize_artifact_path_slug(value: &str) -> String {

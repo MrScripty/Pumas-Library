@@ -180,6 +180,13 @@ Update during implementation:
   This completes the existing-provider serving adapter extraction without
   mixing in ONNX behavior or the later launch-strategy abstraction. The new
   serving modules are below the 500-line standards threshold.
+- 2026-05-11: Moved serving artifact compatibility to a typed boundary value.
+  `PumasApi::validate_model_serving_config` now parses the primary model file
+  path into `ExecutableArtifactFormat` once, `ServingValidationContext`
+  carries the typed format instead of a raw extension string, and the shared
+  provider compatibility check consumes provider behavior. Touched Ollama
+  serving and dedicated llama.cpp launch paths now use the same provider-owned
+  `ExecutableArtifactFormat::from_path` parser.
 
 ## Commit Cadence Notes
 
@@ -321,6 +328,8 @@ changes remain.
   `handlers/serving_ollama.rs` adapter module.
 - llama.cpp serving now lives in focused adapter, router, and shared helper
   modules. Existing-provider serving adapter extraction is complete.
+- Serving artifact compatibility now uses typed `ExecutableArtifactFormat`
+  values from the API boundary through shared serving validation.
 
 ### Deviations
 
@@ -399,6 +408,11 @@ changes remain.
 - llama.cpp serving adapter extraction slice verified with `cargo test
   --manifest-path rust/crates/pumas-rpc/Cargo.toml serving` and `cargo fmt
   --manifest-path rust/Cargo.toml --all -- --check`.
+- Typed model compatibility slice verified with `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml providers`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml serving`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

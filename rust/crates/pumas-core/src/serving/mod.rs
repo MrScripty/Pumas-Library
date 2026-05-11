@@ -33,7 +33,7 @@ pub struct ServingValidationProfile {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServingValidationContext {
     pub model_exists: bool,
-    pub primary_artifact_extension: Option<String>,
+    pub primary_artifact_format: Option<ExecutableArtifactFormat>,
     pub profile: Option<ServingValidationProfile>,
     pub served_models: Vec<ServedModelStatus>,
 }
@@ -566,19 +566,10 @@ fn validate_provider_artifact_compatibility(
     request: &ServeModelRequest,
     context: &ServingValidationContext,
 ) -> Vec<ModelServeError> {
-    let Some(extension) = context.primary_artifact_extension.as_deref() else {
+    let Some(format) = context.primary_artifact_format else {
         return vec![ModelServeError::non_critical(
             ModelServeErrorCode::ModelNotExecutable,
             "model has no executable primary artifact",
-        )
-        .for_model(model_id)
-        .for_profile(request.config.profile_id.clone())
-        .for_provider(request.config.provider)];
-    };
-    let Some(format) = ExecutableArtifactFormat::from_extension(extension) else {
-        return vec![ModelServeError::non_critical(
-            ModelServeErrorCode::InvalidFormat,
-            "selected provider does not support this model artifact format",
         )
         .for_model(model_id)
         .for_profile(request.config.profile_id.clone())
@@ -810,7 +801,7 @@ mod tests {
     fn valid_context() -> ServingValidationContext {
         ServingValidationContext {
             model_exists: true,
-            primary_artifact_extension: Some("gguf".to_string()),
+            primary_artifact_format: Some(ExecutableArtifactFormat::Gguf),
             profile: Some(ServingValidationProfile {
                 provider: RuntimeProviderId::Ollama,
                 provider_mode: RuntimeProviderMode::OllamaServe,
@@ -1063,7 +1054,7 @@ mod tests {
     fn validation_returns_non_critical_domain_errors() {
         let mut context = valid_context();
         context.model_exists = false;
-        context.primary_artifact_extension = None;
+        context.primary_artifact_format = None;
         context.profile = Some(ServingValidationProfile {
             provider: RuntimeProviderId::LlamaCpp,
             provider_mode: RuntimeProviderMode::LlamaCppRouter,

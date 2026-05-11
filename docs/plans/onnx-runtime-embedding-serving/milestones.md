@@ -103,7 +103,7 @@ provider and widens the blast radius.
 - [x] Add endpoint-specific request body and timeout policy for gateway routes.
       `/v1/embeddings` must have an explicit limit and error shape rather than
       inheriting a broad global proxy limit by accident.
-- [ ] Add typed model compatibility values for executable artifact format and
+- [x] Add typed model compatibility values for executable artifact format and
       serving task. Replace GGUF-only and raw extension checks in shared serving
       paths with provider compatibility checks.
 - [ ] Extract model-library executable-format/provider-compatibility projection
@@ -205,6 +205,11 @@ have also been extracted into focused modules. The serving handler now owns the
 JSON-RPC boundary, validation orchestration, provider behavior dispatch, and
 shared response shaping. Launch strategy extraction remains a separate open
 task.
+Serving validation now receives a typed `ExecutableArtifactFormat` parsed once
+from the primary model file path instead of a raw extension string. The shared
+provider artifact compatibility check consumes that typed value, and touched
+Ollama serving and dedicated llama.cpp launch paths use the same provider-owned
+artifact parser.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

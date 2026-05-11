@@ -8,6 +8,7 @@ use crate::models::{
     RuntimeProfileId, RuntimeProfileStatus, RuntimeProviderId, RuntimeProviderMode,
 };
 use crate::process::{BinaryLaunchConfig, ProcessLauncher};
+use crate::providers::ExecutableArtifactFormat;
 use crate::runtime_profiles::{
     generate_llama_cpp_router_catalog, RuntimeProfileLaunchOverrides, RuntimeProfileLaunchSpec,
 };
@@ -188,11 +189,8 @@ async fn prepare_runtime_profile_launch_spec(
                 .ok_or_else(|| PumasError::ModelNotFound {
                     model_id: model_id.to_string(),
                 })?;
-            if model_path
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .map(|extension| !extension.eq_ignore_ascii_case("gguf"))
-                .unwrap_or(true)
+            if ExecutableArtifactFormat::from_path(&model_path)
+                != Some(ExecutableArtifactFormat::Gguf)
             {
                 return Err(PumasError::InvalidParams {
                     message: format!(

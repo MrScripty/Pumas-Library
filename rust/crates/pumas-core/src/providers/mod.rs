@@ -1,6 +1,6 @@
 //! Runtime provider behavior contracts and built-in provider registry.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +19,12 @@ impl ExecutableArtifactFormat {
         } else {
             None
         }
+    }
+
+    pub fn from_path(path: &Path) -> Option<Self> {
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .and_then(Self::from_extension)
     }
 }
 
@@ -348,6 +354,22 @@ mod tests {
         assert_eq!(
             llama_cpp.provider_request_model_id("library/model.gguf", Some("gateway-alias")),
             "library/model.gguf"
+        );
+    }
+
+    #[test]
+    fn executable_artifact_format_parses_supported_paths_once() {
+        assert_eq!(
+            ExecutableArtifactFormat::from_path(Path::new("/models/example.GGUF")),
+            Some(ExecutableArtifactFormat::Gguf)
+        );
+        assert_eq!(
+            ExecutableArtifactFormat::from_path(Path::new("/models/example.onnx")),
+            None
+        );
+        assert_eq!(
+            ExecutableArtifactFormat::from_path(Path::new("/models")),
+            None
         );
     }
 }

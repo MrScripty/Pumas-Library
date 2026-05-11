@@ -7,6 +7,7 @@ use pumas_library::models::{
     ServeModelResponse, ServedModelLoadState, ServedModelStatus, UnserveModelRequest,
     UnserveModelResponse,
 };
+use pumas_library::ExecutableArtifactFormat;
 use serde_json::Value;
 use tracing::warn;
 
@@ -223,11 +224,7 @@ async fn resolve_ollama_model_inputs(
     let Some(gguf_path) = primary_file else {
         return Ok(None);
     };
-    let is_gguf = gguf_path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("gguf"));
-    if !is_gguf {
+    if ExecutableArtifactFormat::from_path(&gguf_path) != Some(ExecutableArtifactFormat::Gguf) {
         return Ok(None);
     }
 

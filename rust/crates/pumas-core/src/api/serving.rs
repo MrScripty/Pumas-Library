@@ -5,6 +5,7 @@ use crate::models::{
     ServeModelRequest, ServedModelStatus, ServingStatusResponse, ServingStatusSnapshot,
     ServingStatusUpdateFeed, ServingStatusUpdateFeedResponse,
 };
+use crate::providers::ExecutableArtifactFormat;
 use crate::serving::{ServingValidationContext, ServingValidationProfile};
 use crate::{PumasApi, Result};
 
@@ -41,15 +42,11 @@ impl PumasApi {
         } else {
             primary.model_library.get_model(model_id).await?
         };
-        let primary_artifact_extension = if model.is_some() {
+        let primary_artifact_format = if model.is_some() {
             primary
                 .model_library
                 .get_primary_model_file(model_id)
-                .and_then(|path| {
-                    path.extension()
-                        .and_then(|ext| ext.to_str())
-                        .map(|ext| ext.to_lowercase())
-                })
+                .and_then(|path| ExecutableArtifactFormat::from_path(&path))
         } else {
             None
         };
@@ -80,7 +77,7 @@ impl PumasApi {
 
         let context = ServingValidationContext {
             model_exists: model.is_some(),
-            primary_artifact_extension,
+            primary_artifact_format,
             profile,
             served_models: primary
                 .serving_service

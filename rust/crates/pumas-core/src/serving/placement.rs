@@ -111,7 +111,7 @@ fn validate_profile_only_placement(
         errors.push(unsupported_placement(
             model_id,
             request,
-            "Ollama per-model device mode is not supported; choose a runtime profile with matching device placement or use Auto",
+            "selected provider does not support per-model device mode changes through this serving path; choose a runtime profile with matching device placement or use Auto",
         ));
     }
 
@@ -120,7 +120,7 @@ fn validate_profile_only_placement(
             errors.push(unsupported_placement(
                 model_id,
                 request,
-                "Ollama per-model device IDs are not supported; choose a runtime profile for that device",
+                "selected provider does not support per-model device IDs through this serving path; choose a runtime profile for that device",
             ));
         }
     }
@@ -129,7 +129,7 @@ fn validate_profile_only_placement(
         errors.push(unsupported_placement(
             model_id,
             request,
-            "Ollama does not support per-model GPU layer settings through this serving path",
+            "selected provider does not support per-model GPU layer settings through this serving path",
         ));
     }
 
@@ -137,7 +137,7 @@ fn validate_profile_only_placement(
         errors.push(unsupported_placement(
             model_id,
             request,
-            "Ollama does not support per-model tensor split settings through this serving path",
+            "selected provider does not support per-model tensor split settings through this serving path",
         ));
     }
 
@@ -145,7 +145,7 @@ fn validate_profile_only_placement(
         errors.push(unsupported_placement(
             model_id,
             request,
-            "Ollama context size is not applied by this serving path yet",
+            "selected provider does not support per-model context size through this serving path",
         ));
     }
 

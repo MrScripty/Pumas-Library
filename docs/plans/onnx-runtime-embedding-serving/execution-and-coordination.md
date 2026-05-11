@@ -392,6 +392,16 @@ Update during implementation:
   controls, and runtime profile settings exhaustively consume the descriptor
   maps. Verification passed: `npm run -w frontend check:types` and
   `npm run -w frontend test:run -- runtimeProviderDescriptors`.
+- 2026-05-11: Started Milestone 4 serving validation for ONNX. Core serving
+  validation now accepts ONNX Runtime requests for running ONNX profiles when
+  the model's primary executable artifact is `.onnx`, rejects unsupported
+  artifacts through provider-owned compatibility, and rejects ONNX per-load
+  `gpu_layers`/llama.cpp-style placement controls with generic provider
+  messages instead of Ollama-specific wording. Load/unload remain explicitly
+  unwired in RPC until the ONNX session-manager adapter slice. Verification
+  passed: `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml serving`, and
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`.
 
 ## Commit Cadence Notes
 
@@ -612,6 +622,9 @@ changes remain.
   serving adapter slice connects the session manager.
 - Frontend runtime-provider contracts are synced for ONNX provider ids, modes,
   labels, CPU-only device options, `.onnx` compatibility, and descriptor tests.
+- Serving validation is in progress for ONNX: `.onnx` artifacts and running
+  ONNX profiles validate through provider behavior, while unsupported artifacts
+  and per-load placement overrides fail before provider execution.
 
 ### Deviations
 

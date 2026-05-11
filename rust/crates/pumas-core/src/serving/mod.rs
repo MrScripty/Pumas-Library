@@ -530,6 +530,31 @@ mod tests {
         }
     }
 
+    fn onnx_request() -> ServeModelRequest {
+        let mut request = request();
+        request.config.provider = RuntimeProviderId::OnnxRuntime;
+        request.config.profile_id = RuntimeProfileId::parse("onnx-default").unwrap();
+        request
+    }
+
+    fn onnx_context() -> ServingValidationContext {
+        ServingValidationContext {
+            model_exists: true,
+            primary_artifact_format: Some(ExecutableArtifactFormat::Onnx),
+            profile: Some(ServingValidationProfile {
+                provider: RuntimeProviderId::OnnxRuntime,
+                provider_mode: RuntimeProviderMode::OnnxServe,
+                management_mode: RuntimeManagementMode::Managed,
+                state: RuntimeLifecycleState::Running,
+                device_mode: RuntimeDeviceMode::Auto,
+                device_id: None,
+                gpu_layers: None,
+                tensor_split: None,
+            }),
+            served_models: Vec::new(),
+        }
+    }
+
     fn validate(
         request: &ServeModelRequest,
         context: &ServingValidationContext,
@@ -773,6 +798,38 @@ mod tests {
         assert!(response.success);
         assert!(response.valid);
         assert!(response.errors.is_empty());
+    }
+
+    #[test]
+    fn validation_accepts_onnx_artifact_on_running_onnx_profile() {
+        let response = validate(&onnx_request(), &onnx_context());
+
+        assert!(response.success);
+        assert!(response.valid);
+        assert!(response.errors.is_empty());
+    }
+
+    #[test]
+    fn validation_rejects_onnx_profile_for_unsupported_artifact_and_placement() {
+        let mut request = onnx_request();
+        request.config.gpu_layers = Some(8);
+        let mut context = onnx_context();
+        context.primary_artifact_format = Some(ExecutableArtifactFormat::Gguf);
+
+        let response = validate(&request, &context);
+
+        assert!(response.success);
+        assert!(!response.valid);
+        assert!(response
+            .errors
+            .iter()
+            .any(|error| error.code == ModelServeErrorCode::InvalidFormat));
+        assert!(response.errors.iter().any(|error| {
+            error.code == ModelServeErrorCode::UnsupportedPlacement
+                && error
+                    .message
+                    .contains("selected provider does not support per-model GPU layer")
+        }));
     }
 
     #[test]

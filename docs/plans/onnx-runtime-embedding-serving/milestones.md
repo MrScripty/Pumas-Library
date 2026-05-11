@@ -542,14 +542,14 @@ coverage remain open.
 state.
 
 **Tasks:**
-- [ ] Extend serving validation so ONNX Runtime profiles accept primary `.onnx`
+- [x] Extend serving validation so ONNX Runtime profiles accept primary `.onnx`
       embedding artifacts.
-- [ ] Use provider behavior to decide whether a `.onnx` artifact is compatible
+- [x] Use provider behavior to decide whether a `.onnx` artifact is compatible
       with generic embedding serving; do not infer that every ONNX/custom ONNX
       app artifact belongs to the ONNX Runtime embedding provider.
-- [ ] Reject non-ONNX artifacts and unsupported model types with non-critical
+- [x] Reject non-ONNX artifacts and unsupported model types with non-critical
       domain errors.
-- [ ] Validate ONNX placement through provider capabilities: reject llama.cpp
+- [x] Validate ONNX placement through provider capabilities: reject llama.cpp
       specific `gpu_layers`, `tensor_split`, and `context_size` controls unless
       ONNX gains an explicit equivalent later.
 - [ ] Use the provider-side model id policy from Milestone 0 so gateway aliases
@@ -601,7 +601,12 @@ state.
   leakage.
 - Rust ONNX load/unload smoke test against a real or fixture ONNX embedding model.
 
-**Status:** Not started.
+**Status:** In progress. Serving validation accepts ONNX requests only when the
+selected ONNX profile is running and the primary executable artifact is `.onnx`.
+Provider behavior drives ONNX artifact compatibility, and ONNX rejects
+llama.cpp-specific placement overrides with non-critical domain errors. Actual
+load/unload calls still return explicit not-yet-wired responses until the
+session-manager adapter slice lands.
 
 ### Milestone 5: Pumas Gateway Routing
 

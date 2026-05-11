@@ -15,7 +15,7 @@ embedding models through the existing OpenAI-compatible `/v1` gateway. Current
 runtime profile, serving, gateway, launcher, and frontend paths are shaped
 around Ollama and llama.cpp. Adding ONNX as another branch would preserve the
 existing two-provider assumptions and make route identity, endpoint capability,
-and sidecar lifecycle behavior harder to reason about.
+and ONNX runtime/session lifecycle behavior harder to reason about.
 
 This ADR records the Milestone 0 provider-model decision required by
 `docs/plans/onnx-runtime-embedding-serving/`.
@@ -34,8 +34,8 @@ The provider model separates these contracts:
   provider-side model id policy, launch-on-serve behavior, and unload behavior.
 - Runtime profile: persisted managed or external runtime configuration for one
   provider.
-- Launch strategy: binary process, Python sidecar, or external-only lifecycle
-  plan selected by provider behavior.
+- Launch/runtime strategy: binary process, in-process Rust runtime, or
+  external-only lifecycle plan selected by provider behavior.
 - Model route: provider-scoped saved route keyed by `(provider, model_id)`.
 - Served instance: backend-owned loaded model status with enough provider
   identity to disambiguate the same model id served by multiple providers.
@@ -58,13 +58,13 @@ before ONNX serving is accepted.
 | System | Current Owner | ONNX Treatment |
 | ------ | ------------- | -------------- |
 | App/plugin registry | Plugin JSON, Rust `AppId`, RPC version-manager composition, frontend app registry | Refactor or update as one app identity slice. ONNX extends this only after drift tests or a descriptor owner exists. |
-| Version/process management | `pumas-app-manager`, `pumas-rpc` composition, `pumas-core` process helpers | Refactor launch strategy first. ONNX uses Python sidecar launch behavior, not Ollama/llama.cpp binary constructors. |
+| Version/process management | `pumas-app-manager`, `pumas-rpc` composition, `pumas-core` process helpers | Refactor launch/runtime strategy first. ONNX uses an in-process Rust ONNX Runtime session manager, not Ollama/llama.cpp binary constructors or a Python sidecar. |
 | Runtime profiles | `pumas-core` runtime profile service and DTOs | Refactor to provider behavior and provider-scoped routes before ONNX routes. |
 | Model library | `pumas-core` model library and frontend projection helpers | Extend executable format/compatibility helpers; keep generic ONNX embedding compatibility separate from custom ONNX app metadata. |
 | Serving state | `pumas-core` serving contracts and `pumas-rpc` serving handler | Refactor to provider serving adapters and provider-aware served identity before ONNX load/unload. |
 | OpenAI gateway | `pumas-rpc` gateway handlers and Axum routes | Refactor endpoint capability checks, shared HTTP client, body limits, and provider model-id rewriting before ONNX gateway routing. |
 | Frontend runtime/profile UI | Frontend app panels, runtime profile sections, route rows, serve dialog | Refactor to provider descriptors and provider-scoped route helpers before ONNX panel and route assignment. |
-| Torch sidecar | `torch-server/` and Torch-specific process/client integration | Use as sidecar API reference only. It is not the runtime-profile provider architecture. |
+| Torch sidecar | `torch-server/` and Torch-specific process/client integration | Keep as unrelated Torch architecture. It is not the ONNX Runtime implementation target. |
 
 ## App And Runtime Descriptor Strategy
 
@@ -113,7 +113,7 @@ The first complete public-contract acceptance path is:
 2. Save a provider-scoped route for an ONNX-compatible model.
 3. Call `serve_model` without an explicit profile and resolve the saved ONNX
    route.
-4. Load through a fake or fixture ONNX sidecar adapter.
+4. Load through a fake or fixture Rust ONNX provider adapter.
 5. Record backend-owned `ServedModelStatus`.
 6. Confirm `GET /v1/models` lists the public alias.
 7. Confirm `POST /v1/embeddings` proxies through the Pumas gateway.
@@ -159,12 +159,15 @@ targets include:
 - Keep model-only runtime routes: rejected because the same model id can be
   served by multiple providers, and ONNX missing-route behavior must not fall
   back to a llama.cpp or default profile.
-- Expose the raw ONNX sidecar as the supported external app contract: rejected
-  because Pumas owns aliases, served state, future auth policy, and the existing
-  `/v1` facade.
+- Add a Python ONNX sidecar: rejected because ONNX Runtime can be hosted through
+  Rust bindings, and adding a second Python sidecar would expand packaging,
+  process lifecycle, and cross-language contracts without a clear need.
+- Expose a raw ONNX provider endpoint as the supported external app contract:
+  rejected because Pumas owns aliases, served state, future auth policy, and the
+  existing `/v1` facade.
 - Copy the Torch sidecar integration path as-is: rejected because Torch is app
-  specific and does not provide the runtime-profile provider contract, bounded
-  ONNX inference queue, or ONNX shutdown semantics required here.
+  specific and does not provide the runtime-profile provider contract or Rust
+  ONNX session lifecycle required here.
 
 ## Invariants
 
@@ -176,8 +179,8 @@ targets include:
 - Gateway endpoint capability checks happen before proxying.
 - Generic ONNX embedding compatibility remains separate from custom ONNX app
   metadata.
-- ONNX dependencies remain sidecar-local unless another owner demonstrably
-  executes them.
+- ONNX dependencies remain owned by the Rust crate/module that executes ONNX
+  Runtime.
 
 ## Revisit Triggers
 

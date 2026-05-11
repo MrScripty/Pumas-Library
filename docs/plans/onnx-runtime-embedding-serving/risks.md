@@ -4,24 +4,24 @@
 
 | Risk | Impact | Mitigation |
 | ---- | ------ | ---------- |
-| ONNX model output names vary across exports. | High | Add sidecar model introspection and explicit error messages; start with config-driven output selection or robust first floating tensor fallback covered by tests. |
+| ONNX model output names vary across exports. | High | Add Rust session/model introspection and explicit error messages; start with config-driven output selection or robust first floating tensor fallback covered by tests. |
 | Pooling differs from the model's expected embedding recipe. | High | Implement mean pooling, layer norm, truncation, and L2 normalization as explicit strategy code; document model-specific assumptions and add numerical-shape tests. |
 | Nomic input prefixes are silently omitted by callers. | Medium | Do not mutate inputs automatically; document required prefixes and optionally expose warning metadata later. |
 | Pumas gateway assumes only Ollama/llama.cpp providers. | High | Add provider enum exhaustiveness tests and gateway routing tests for ONNX Runtime. |
 | Frontend treats ONNX profiles as llama.cpp-compatible because both expose `/v1`. | Medium | Add a distinct provider id, plugin page, labels, and type tests. |
-| Sidecar path validation allows arbitrary ONNX file access. | High | Reuse centralized path/root validation similar to `torch-server/validation.py`; validate at API boundary before loading. |
-| ONNX Runtime dependency choice breaks packaged builds. | Medium | Keep dependencies sidecar-local, document CPU/GPU package choice, and validate release build packaging. |
+| ONNX model path validation allows arbitrary ONNX file access. | High | Add centralized Rust path/root validation; validate at API/provider boundary before loading. |
+| ONNX Runtime Rust dependency choice breaks packaged builds. | Medium | Keep dependencies owned by the Rust ONNX provider crate/module, document CPU/GPU package choice, and validate release build packaging. |
 | Large embedding batches exhaust memory. | Medium | Add request size, item count, token length, and batch size limits with explicit 4xx errors. |
 | Gateway exposes LAN access accidentally. | High | Preserve loopback defaults and existing RPC bind guard; LAN access requires explicit config/auth. |
-| Serving status claims loaded before sidecar load actually succeeds. | High | Record served status only after `/api/load` succeeds and `/v1/models` confirms the model is available. |
+| Serving status claims loaded before ONNX session load actually succeeds. | High | Record served status only after the Rust ONNX provider loads the session and reports the model as available. |
 | Provider-specific logic spreads across match blocks. | High | Add a provider capability/behavior boundary before ONNX serving is wired. Route validation, launch, unload, gateway model id, and endpoint support through that boundary. |
 | `unserve_model` treats every non-llama.cpp model as Ollama. | High | Refactor unload dispatch by actual served provider before adding ONNX unload support. |
 | Frontend plugin JSON does not render runtime profiles for unknown apps. | Medium | Either add ONNX to the explicit app-panel renderer or extend the generic panel to render `runtime_profiles` sections. |
 | Gateway creates a new HTTP client for each proxied request. | Medium | Add a shared client with timeouts before expecting high-throughput embedding callers. |
-| Sidecar inference work creates unbounded CPU/GPU pressure. | High | Bound concurrent inference, queue capacity, batch size, token length, and ONNX Runtime threading. Emit clear 4xx/429 style errors when limits are exceeded. |
-| Cross-language contracts drift between Rust, TypeScript, plugin JSON, and Python sidecar payloads. | High | Update producer and consumer contracts in the same logical slice and add serialization/round-trip tests for each boundary. |
-| Dependency additions leak into root or unrelated sidecars. | Medium | Keep ONNX dependencies sidecar-local and verify package-local install/test commands work from the owning boundary. |
-| Platform-specific sidecar launch behavior breaks Windows or macOS paths. | Medium | Use platform path APIs, existing launcher/process abstractions, and platform-specific tests or documented best-effort smoke checks. |
+| ONNX inference work creates unbounded CPU/GPU pressure. | High | Bound concurrent inference, queue capacity, batch size, token length, and ONNX Runtime threading. Emit clear 4xx/429 style errors when limits are exceeded. |
+| Cross-language contracts drift between Rust, TypeScript, plugin JSON, and gateway payloads. | High | Update producer and consumer contracts in the same logical slice and add serialization/round-trip tests for each boundary. |
+| Dependency additions leak into root or unrelated sidecars. | Medium | Keep ONNX dependencies owned by the Rust execution crate/module and verify focused Rust build/test commands from the owning boundary. |
+| Platform-specific ONNX Runtime native-library behavior breaks Windows or macOS paths. | Medium | Use platform path APIs, Rust dependency packaging checks, and platform-specific tests or documented best-effort smoke checks. |
 | ONNX app icon or panel is registered only in plugin metadata and never appears in the hard-coded frontend app registry. | High | Update the frontend app registry, managed-app state decoration, selected-version state, and app-panel renderer alongside plugin metadata. |
 | ONNX model/profile route assignment reuses the global model route contract incorrectly. | High | Replace the route contract with provider-scoped routes keyed by provider and model id. Remove the old route shape after one-way migration/cleanup. |
 | ONNX-compatible models appear in llama.cpp-only model lists or vice versa. | Medium | Add provider-specific compatibility helpers and tests for `.onnx` and `.gguf` model lists. |
@@ -32,5 +32,5 @@
 | Read-heavy runtime profile flows become a performance bottleneck after ONNX UI/status polling. | Medium | Separate config initialization/migration writes from snapshot/route reads and avoid serializing read-only endpoint resolution behind a write lock once config is initialized. |
 | App identity is updated in plugin metadata but not Rust/renderer composition roots. | High | Treat plugin manifest, Rust `AppId`/version-manager registration, frontend app registry, selected-version hooks, and panel renderer as one contract slice unless a descriptor-driven composition root replaces the hard-coded lists. |
 | Provider adapters still construct clients inside request handlers. | Medium | Build reusable provider clients at the provider registry composition root, inject them into adapters, and verify timeouts/error mapping without per-request client creation. |
-| Torch sidecar patterns are copied without ONNX-specific concurrency and lifecycle controls. | Medium | Use Torch sidecar structure only as a reference; ONNX must add bounded inference, shutdown ordering, cancellation/stale-load behavior, and runtime-profile lifecycle integration before exposure through the gateway. |
+| Torch sidecar patterns are copied into ONNX unnecessarily. | Medium | Do not introduce a Python ONNX sidecar. ONNX must use a Rust provider/session manager with bounded inference, shutdown ordering, cancellation/stale-load behavior, and runtime-profile lifecycle integration before exposure through the gateway. |
 | Gateway endpoint limits remain global and too broad for embeddings. | Medium | Add endpoint-specific request size/capability policy so embedding traffic gets bounded independently of chat/completion routes. |

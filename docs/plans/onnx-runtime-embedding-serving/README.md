@@ -38,8 +38,8 @@ requirements change.
 - Provider-scoped route identity replaces one-route-per-model semantics.
 - Generic ONNX embedding compatibility remains separate from custom ONNX app
   metadata such as KittentTS.
-- ONNX dependencies remain sidecar-local unless another owner demonstrably
-  executes them.
+- ONNX dependencies remain owned by the Rust module/crate that executes ONNX
+  Runtime.
 
 ## Usage
 

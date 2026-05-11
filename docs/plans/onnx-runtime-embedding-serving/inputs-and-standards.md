@@ -7,8 +7,8 @@
 Pumas can already expose served llama.cpp GGUF embedding models through the
 OpenAI-compatible `/v1/embeddings` gateway, but ONNX embedding models are only
 recognized as model-library artifacts. There is no first-class ONNX Runtime
-provider, no ONNX sidecar endpoint, and no serving workflow that records ONNX
-models as backend-owned served instances.
+provider, no Rust ONNX Runtime execution adapter, and no serving workflow that
+records ONNX models as backend-owned served instances.
 
 The specific user need is to serve an ONNX `nomic-embed-text-v1.5` model so
 Emily and other external apps can use it through a stable local endpoint.
@@ -42,10 +42,8 @@ Emily and other external apps can use it through a stable local endpoint.
 
 - Backend-owned served state remains authoritative. Frontend may hold form
   drafts only.
-- Boundary validation must happen at sidecar and RPC boundaries before file,
-  network, or process operations.
-- The sidecar must default to loopback binding and keep LAN exposure behind
-  explicit policy and auth.
+- Boundary validation must happen at Rust API/RPC/gateway boundaries before
+  file, native-runtime, or model-load operations.
 - The Pumas `/v1` gateway remains the external application facade.
 - Public external access remains facade-first: external apps use the Pumas
   `/v1` gateway, not raw provider endpoints, unless a separate plan explicitly
@@ -56,8 +54,8 @@ Emily and other external apps can use it through a stable local endpoint.
   carrying legacy compatibility paths.
 - Runtime profile lifecycle must identify who starts work, who stops it, how
   health is checked, and how stale PID/status state is handled.
-- Dependency additions must be owned by the ONNX sidecar, not leaked into
-  unrelated Python sidecars.
+- Dependency additions must be owned by the Rust ONNX provider crate/module,
+  not leaked into unrelated runtime paths or root manifests for convenience.
 - Gateway routing must check provider endpoint capabilities before proxying an
   OpenAI-compatible path.
 - Gateway alias and provider-side loaded model id must be modeled separately
@@ -69,7 +67,7 @@ Emily and other external apps can use it through a stable local endpoint.
   while this plan is being refined.
 - Contract changes must be defined and reviewed before implementation slices
   depend on them. Rust DTOs, TypeScript bridge types, plugin metadata, persisted
-  JSON shape, and sidecar HTTP payloads must be updated in the same logical
+  JSON shape, and ONNX provider payloads must be updated in the same logical
   slice when they describe one boundary.
 - Blocking filesystem, process, dependency-install, and model-load work must
   stay out of async request paths unless isolated through the existing
@@ -85,21 +83,21 @@ Emily and other external apps can use it through a stable local endpoint.
   adapter modules. Transport handlers and React components may consume provider
   capabilities, but must not duplicate provider rules.
 - **Contracts:** Treat runtime-profile JSON, plugin manifests, served-model
-  snapshots, RPC payloads, OpenAI-compatible HTTP payloads, and sidecar control
-  payloads as executable boundary contracts with runtime validation and
+  snapshots, RPC payloads, OpenAI-compatible HTTP payloads, and Rust ONNX
+  provider contracts as executable boundaries with runtime validation and
   serialization tests.
-- **Security:** Validate request payload shape, model ids, aliases, endpoint
-  URLs, paths, ports, batch sizes, token counts, vector dimensions, and bind
-  hosts at the process/API boundary. Canonicalize model paths against approved
-  roots before any sidecar load.
+- **Security:** Validate request payload shape, model ids, aliases, paths,
+  batch sizes, token counts, vector dimensions, and execution-provider settings
+  at the API/provider boundary. Canonicalize model paths against approved roots
+  before any ONNX Runtime session load.
 - **Concurrency:** Every background task, process lifecycle operation,
   inference queue, and polling/subscription owner must have explicit ownership,
   bounded capacity, cancellation/shutdown behavior, and test coverage for
   cleanup or stale-response handling.
 - **Dependencies:** ONNX Runtime, tokenizer, and numerical dependencies belong
-  only to `onnx-server/` unless another owner demonstrably executes them.
-  Dependency additions must document why in-house code is not appropriate,
-  license/maintenance status, transitive cost, and CPU/GPU package strategy.
+  to the Rust crate/module that owns ONNX execution. Dependency additions must
+  document why in-house code is not appropriate, license/maintenance status,
+  transitive cost, and CPU/GPU package strategy.
 - **Frontend:** Frontend state remains transient; served state and runtime
   profile state remain backend-owned. New controls must use semantic elements,
   accessible labels, event-driven updates where available, and deterministic
@@ -107,13 +105,13 @@ Emily and other external apps can use it through a stable local endpoint.
 - **Cross-platform:** Use path APIs and platform abstractions for executable,
   venv, script, PID/log, and model paths. Do not hardcode separators or scatter
   platform checks through handlers or UI code.
-- **Release:** Release validation must cover packaged sidecar dependencies,
-  managed state isolation, launcher-compatible build/smoke paths, dependency
-  audit evidence, and user-visible changelog/release notes when the feature
-  ships.
+- **Release:** Release validation must cover packaged ONNX Runtime native
+  libraries, managed state isolation, launcher-compatible build/smoke paths,
+  dependency audit evidence, and user-visible changelog/release notes when the
+  feature ships.
 - **Documentation:** New source directories with non-obvious purpose, especially
-  `onnx-server/`, must include README contract sections for API consumers,
-  structured producers, lifecycle, errors, and compatibility.
+  Rust ONNX provider/session modules, must include README contract sections for
+  API consumers, structured producers, lifecycle, errors, and compatibility.
 
 ### Standards Compliance Gates
 
@@ -125,25 +123,25 @@ PR notes.
 | ------------- | ---- |
 | Plan execution | Confirm dirty implementation files are resolved, committed, stashed, or explicitly allowed before code implementation begins. Commit each verified logical slice before starting the next slice. |
 | Architecture | Provider rules live in core/domain provider behavior or narrow adapters. RPC handlers, gateway handlers, React components, and plugin metadata consume capabilities only; they must not encode provider policy. |
-| Composition roots | Concrete provider registry entries, serving adapters, gateway HTTP clients, process launch strategies, and sidecar model-manager implementations are wired by lifecycle/composition owners, not created inside business-policy functions or UI components. |
-| Contracts | Rust DTOs, TypeScript bridge types, persisted JSON, plugin manifests, gateway payloads, and sidecar HTTP payloads change together for each boundary slice. Runtime validation and serialization/round-trip tests are required before consumers depend on new shapes. |
+| Composition roots | Concrete provider registry entries, serving adapters, gateway HTTP clients, process/runtime launch strategies, and ONNX session managers are wired by lifecycle/composition owners, not created inside business-policy functions or UI components. |
+| Contracts | Rust DTOs, TypeScript bridge types, persisted JSON, plugin manifests, gateway payloads, and ONNX provider contracts change together for each boundary slice. Runtime validation and serialization/round-trip tests are required before consumers depend on new shapes. |
 | Executable contracts | Multi-producer or multi-consumer boundary schemas live in a dedicated contract/schema owner or documented facade module. Defaults, enum semantics, normalization, ordering, and compatibility rules are tested, not inferred from TypeScript interfaces alone. |
 | Security | Raw IPC/HTTP/config payloads parse once into validated types at boundaries. Internal provider code must not accept unchecked raw paths, URLs, ports, aliases, dimensions, batch sizes, or model ids when a validated domain type can carry the invariant. |
 | Rust API | Use `Result` with structured errors for recoverable production failures. Do not add `unwrap()` or `expect()` to production request, lifecycle, or background-service paths. Use newtypes/enums for expensive route, provider, endpoint, lifecycle, and placement invariants. |
 | Rust async | Keep pure validation, policy, and routing logic synchronous. Async code is limited to I/O shells. Every spawned task has an owner, tracked handle, cancellation path, shutdown behavior, and panic/cancellation observation. |
 | Concurrency | Queues, inference work, lifecycle restarts, gateway requests, and frontend polling/subscriptions have bounded capacity, stale-response handling, and deterministic cleanup tests. |
-| Dependencies | ONNX dependencies are declared at the narrowest owner (`onnx-server/`) and pinned through that owner’s lock strategy. Root/workspace manifests must not carry ONNX-only runtime dependencies for convenience. Package-local lint/test/install commands must succeed from the sidecar owner without relying on unrelated root dependencies. |
+| Dependencies | ONNX dependencies are declared at the narrowest Rust owner and pinned through that owner’s lock strategy. Root/workspace manifests must not carry ONNX-only runtime dependencies unless the workspace crate owns execution. Focused Rust checks must prove the owner builds/tests without relying on unrelated runtime paths. |
 | Testing | The first implementation slice includes a failing-first vertical acceptance test through the real gateway path before broad horizontal expansion. Integration tests isolate temp roots, ports, persisted profile files, process state, and environment variables, and affected integration suites are run with normal parallelism plus at least one repeat pass before merge. |
 | Frontend | Backend-owned served state and runtime profile state are never optimistically mutated. Interactive controls use semantic elements, accessible names, keyboard coverage, and role/name selectors in tests. |
 | Documentation | New or materially changed source directories update README contract sections. Provider capability and provider-scoped route architecture gets an ADR before merge. Placeholder README content is not acceptable. |
 | Cross-platform | Path, executable, venv, PID/log, and native-library handling use platform abstractions and path APIs. Tests or smoke notes cover paths with spaces and canonical path identity where containment is security-sensitive. |
-| Launcher/release | `launcher.sh --install`, build, and release-smoke paths account for ONNX sidecar dependencies with idempotent checks and isolated verification state. Release notes/changelog, dependency audit, license review, and package-size impact are recorded for the user-visible feature. |
+| Launcher/release | `launcher.sh --install`, build, and release-smoke paths account for ONNX Runtime native-library packaging with idempotent checks and isolated verification state. Release notes/changelog, dependency audit, license review, and package-size impact are recorded for the user-visible feature. |
 
 ### Assumptions
 
 - The first ONNX serving use case is text embeddings.
 - ONNX embedding packages include, or can be imported with, tokenizer files
-  needed by `transformers` tokenization.
+  usable from Rust tokenization libraries.
 - `nomic-embed-text-v1.5` uses 768-dimensional embeddings by default and may
   support Matryoshka truncation through caller-selected `dimensions`.
 - Callers provide task-prefixed input when required by the model family.
@@ -159,7 +157,8 @@ PR notes.
 
 ### Dependencies
 
-- New `onnx-server/` Python sidecar.
+- Rust ONNX Runtime provider/session module or crate.
+- Selected Rust ONNX Runtime binding, pending dependency review.
 - `launcher-data/plugins/onnx-runtime.json`.
 - `rust/crates/pumas-core/src/models/runtime_profile.rs`.
 - `rust/crates/pumas-core/src/runtime_profiles.rs`.
@@ -213,8 +212,9 @@ PR notes.
 - Provider capabilities declare which OpenAI-compatible paths each provider can
   serve. ONNX Runtime starts with embeddings only.
 - Served model state must retain enough information to map a public gateway
-  alias to the provider-side model id used by the ONNX sidecar.
-- ONNX sidecar exposes OpenAI-compatible embedding responses.
+  alias to the provider-side model id used by the Rust ONNX session manager.
+- The Pumas gateway exposes OpenAI-compatible embedding responses for ONNX
+  through an in-process provider gateway adapter.
 
 ### Affected Persisted Artifacts
 
@@ -222,8 +222,8 @@ PR notes.
   with provider-scoped routes and may contain ONNX Runtime profiles/routes after
   users configure them. Old global routes are migrated or discarded in a
   one-way cleanup step; the persisted file is rewritten in the new shape.
-- ONNX sidecar profile runtime directories may contain PID files, logs, and
-  sidecar-local config.
+- ONNX runtime profile state is backend-owned and may contain provider/runtime
+  settings, but no Python sidecar PID/log/config directory is introduced.
 - Model-library records must classify `.onnx` as a first-class local executable
   format. Any existing metadata paths that only recognize `gguf` or
   `safetensors` are replaced in the same slice instead of leaving ONNX as an
@@ -231,14 +231,16 @@ PR notes.
 
 ### Process And Lifecycle Ownership
 
-- Pumas runtime profile service owns starting, stopping, health checking, and
-  status publication for managed ONNX Runtime sidecars.
-- The ONNX sidecar owns loaded model sessions and unload cleanup inside its
-  process.
+- Pumas runtime profile service owns managed ONNX Runtime profile state,
+  health/status publication, and shutdown coordination for in-process ONNX
+  sessions.
+- The Rust ONNX provider/session manager owns loaded sessions, inference
+  concurrency, and unload cleanup inside the Pumas process.
 - Pumas serving owns the durable route/default profile config and in-memory
   served-model status.
 - Pumas gateway owns external request routing and error shaping.
 - Frontend owns only transient form drafts and displays backend-confirmed
   snapshots/events.
-- Managed ONNX profiles must use unique PID/log paths and ports. Restart must
-  stop the old sidecar or mark stale state before starting a replacement.
+- Managed ONNX profiles must use isolated backend-owned session state. Restart
+  must reuse healthy in-process state or deterministically mark stale state
+  before replacing it.

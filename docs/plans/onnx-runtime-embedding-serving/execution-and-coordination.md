@@ -137,7 +137,7 @@ Update during implementation:
   returns a Pumas-shaped HTTP 413 error response when exceeded, and
   applies the endpoint request timeout to the forwarded request. The explicit
   per-endpoint body ceilings preserve the existing 32 MiB gateway limit until a
-  narrower ONNX sidecar endpoint contract lands.
+  narrower Rust ONNX provider endpoint contract lands.
 - 2026-05-11: Added provider to served-instance unload identity. Backend
   serving state now compares provider when replacing, finding, and unloading
   served models; unload events carry the provider; `UnserveModelRequest`
@@ -200,10 +200,10 @@ Update during implementation:
   implementation slices.
 - 2026-05-11: Made runtime-profile management-mode validation consume provider
   launch kinds. `ProviderBehavior::supports_management_mode` now maps
-  `binary_process` and the reserved `python_sidecar` kind to managed profiles,
+  `binary_process` and the then-reserved sidecar launch kind to managed profiles,
   and `external_only` to external profiles. This is the launch-strategy contract
-  slice only; process launch still needs the later binary/Python sidecar
-  abstraction before ONNX managed launch is wired.
+  slice only; ONNX managed launch now needs the Rust in-process runtime strategy
+  recorded by the 2026-05-11 re-plan.
 - 2026-05-11: Reconciled Milestone 0 registry usage after the launch-kind
   validation slice. The built-in provider registry is now consumed by
   runtime-profile validation/capability projection, serving adapter selection,
@@ -258,17 +258,17 @@ Update during implementation:
 - 2026-05-11: Added the typed runtime-profile launch strategy abstraction under
   `rust/crates/pumas-core/src/runtime_profiles/`. Managed Ollama and llama.cpp
   launch specs now carry `RuntimeProfileLaunchStrategy::BinaryProcess(...)`,
-  external profiles map to `ExternalOnly`, and the enum reserves the
-  `PythonSidecar` path for the ONNX managed sidecar slice. Runtime lifecycle
-  launch-config construction now consumes the typed strategy instead of
-  matching provider ids directly. Added the directory README required for the
-  new launch-strategy module.
+  external profiles map to `ExternalOnly`, and the previously reserved sidecar
+  path is superseded for ONNX by the Rust in-process runtime strategy recorded
+  by the re-plan. Runtime lifecycle launch-config construction now consumes the
+  typed strategy instead of matching provider ids directly. Added the directory
+  README required for the new launch-strategy module.
 - 2026-05-11: Moved managed launch target selection into provider behavior.
   `ProviderBehavior` now declares per-mode `ProviderManagedLaunchStrategy`
   values, runtime-profile launch-spec derivation consumes the composed provider
   registry to project those targets into `RuntimeProfileLaunchStrategy`, and
   provider contract serialization tests cover the new launch target wire shape.
-  ONNX sidecar process launch remains deferred to the managed ONNX lifecycle
+  ONNX in-process runtime wiring remains deferred to the managed ONNX lifecycle
   slice.
 - 2026-05-11: Moved runtime-profile launch version-manager selection onto
   provider behavior. `ProviderBehavior` now declares the managed runtime app id
@@ -319,12 +319,12 @@ Update during implementation:
   `ProviderBehavior`, and updated launch-spec derivation to consume those
   provider-owned values. Existing provider-specific env/arg construction still
   remains in launch-spec derivation and is recorded as a remaining Milestone 0
-  cleanup before ONNX sidecar launch wiring.
+  cleanup before ONNX in-process runtime wiring.
 - 2026-05-11: Updated managed launch-spec env/arg derivation to consume
   `RuntimeProfileLaunchStrategy` instead of matching directly on provider ids.
-  Existing Ollama and llama.cpp launch output remains unchanged; Python sidecar
-  env/args now fail explicitly until the ONNX lifecycle slice implements that
-  launch target.
+  Existing Ollama and llama.cpp launch output remains unchanged; non-binary
+  runtime strategies fail explicitly until a provider lifecycle slice
+  implements that target.
 - 2026-05-11: Added provider-owned launch-on-serve support and moved stopped
   managed profile acceptance in serving validation onto `ProviderBehavior`.
   Existing Ollama remains rejected for stopped managed serve requests, and
@@ -332,9 +332,8 @@ Update during implementation:
   provider contract.
 - 2026-05-11: Updated runtime-profile lifecycle launch preparation to consume
   `RuntimeProfileLaunchStrategy` for llama.cpp router/dedicated preset/model
-  prep instead of matching on provider id plus provider mode. ONNX Python
-  sidecar launch preparation remains explicitly unwired until the managed
-  sidecar lifecycle slice.
+  prep instead of matching on provider id plus provider mode. ONNX in-process
+  runtime preparation remains unwired until the Rust ONNX lifecycle slice.
 - 2026-05-11: Extracted runtime-profile route config initialization, one-way
   legacy route migration, and model-route validation into
   `rust/crates/pumas-core/src/runtime_profiles/route_config.rs`. The
@@ -354,10 +353,16 @@ Update during implementation:
   launch strategy/spec derivation, and frontend provider row/view-model
   components. Large unrelated legacy files remain outside this plan's ONNX
   write surface.
+- 2026-05-11: Re-plan trigger accepted: ONNX Runtime will be hosted through
+  Rust ONNX Runtime bindings rather than a Python sidecar. Removed the aborted
+  uncommitted `onnx-server/` skeleton from the worktree and updated plan
+  contracts, risks, milestones, and ADR language to target an in-process Rust
+  ONNX provider/session manager. Candidate binding is `ort`, pending focused
+  Rust dependency review and native-library packaging decision.
 
 ## Commit Cadence Notes
 
-- Commit the sidecar skeleton and tests as the first verified slice.
+- Commit the Rust ONNX provider skeleton and tests as the first verified slice.
 - Commit Rust provider/profile contracts separately from frontend UI when
   feasible.
 - Commit gateway routing with Rust tests before release validation.
@@ -376,9 +381,9 @@ integration files unless one explicit owner is assigned for the current wave.
 
 | Owner/Agent | Primary Write Set | Allowed Adjacent Write Set | Forbidden/Shared Files | Output Contract | Handoff Checkpoint |
 | ----------- | ----------------- | -------------------------- | ---------------------- | --------------- | ------------------ |
-| Sidecar worker | `onnx-server/` | Sidecar README and sidecar-local dependency manifest/lock files | Rust DTOs, frontend types, root/workspace dependency manifests unless explicitly assigned | Python sidecar, validation, fake and real-session tests, README | Sidecar tests pass, dependency ownership evidence recorded, endpoint contract documented. |
-| Rust worker | `rust/crates/pumas-core/`, `rust/crates/pumas-rpc/` | `launcher-data/plugins/onnx-runtime.json`, Rust docs/README updates when assigned | Frontend components, Python sidecar internals, lockfiles not owned by Rust slice | Provider contracts, route migration/cleanup, serving, gateway tests | Rust focused tests pass, serialization/migration evidence recorded, no old route shape active. |
-| Frontend worker | `frontend/src/` | Electron bridge/types only when required by the frozen contract | Rust DTOs, sidecar internals, plugin metadata unless explicitly assigned | ONNX app icon/panel/profile/model-route UI and tests | Typecheck/build/focused frontend tests pass, no optimistic backend-owned state introduced. |
+| Rust ONNX worker | `rust/crates/pumas-core/`, `rust/crates/pumas-rpc/` ONNX provider/session modules | Rust README updates and dependency manifest/lockfile changes when assigned | Frontend components, plugin metadata unless explicitly assigned | Rust ONNX provider/session boundary, fake and real-session tests, gateway adapter contracts | Rust focused tests pass, dependency ownership evidence recorded, endpoint contract documented. |
+| Rust contract worker | `rust/crates/pumas-core/`, `rust/crates/pumas-rpc/` | `launcher-data/plugins/onnx-runtime.json`, Rust docs/README updates when assigned | Frontend components, ONNX execution internals unless explicitly assigned | Provider contracts, route migration/cleanup, serving, gateway tests | Rust focused tests pass, serialization/migration evidence recorded, no old route shape active. |
+| Frontend worker | `frontend/src/` | Electron bridge/types only when required by the frozen contract | Rust DTOs, ONNX execution internals, plugin metadata unless explicitly assigned | ONNX app icon/panel/profile/model-route UI and tests | Typecheck/build/focused frontend tests pass, no optimistic backend-owned state introduced. |
 | Integration owner | Plan, ADR, cross-layer docs, release notes, shared schema/manifest files | Coordination reports and final verification notes | None; this owner serializes cross-cutting edits | Contract sync, docs, release evidence, final verification | Full vertical acceptance path passes and worker outputs match assigned write sets. |
 
 Worker reports must be written under this plan directory if workers are used:
@@ -394,7 +399,8 @@ changes remain.
 - The available ONNX model package does not include enough tokenizer/config
   files for local tokenization.
 - `nomic-embed-text-v1.5` ONNX exports require model-specific custom ops or
-  output handling that cannot be represented by a generic embedding sidecar.
+  output handling that cannot be represented by a generic Rust embedding
+  provider.
 - ONNX Runtime GPU packaging differs enough by platform to require separate CPU
   and GPU plugin/runtime profiles.
 - The Pumas gateway cannot safely route embedding-only providers without the new
@@ -420,8 +426,9 @@ changes remain.
   gateway composition root without a broader RPC server state refactor.
 - Provider-scoped model routes reveal a broader route/default-profile redesign
   is required before ONNX route assignment can be implemented cleanly.
-- Dependency evaluation finds ONNX Runtime packaging, transitive dependency
-  cost, license, or CPU/GPU split is not acceptable for sidecar-local ownership.
+- Dependency evaluation finds ONNX Runtime Rust packaging, transitive
+  dependency cost, license, or CPU/GPU split is not acceptable for Rust
+  ownership.
 - Required lifecycle/concurrency guarantees require a broader process manager
   refactor than this feature can safely include.
 - Cross-platform launch or path handling cannot be expressed through existing
@@ -445,11 +452,11 @@ changes remain.
   policy in one place.
 - Recommendation 3: Keep the first slice embedding-only. Add reranking or other
   ONNX tasks later behind explicit provider capability flags.
-- Recommendation 4: Do Milestone 0 before sidecar integration. It reduces the
+- Recommendation 4: Do Milestone 0 before ONNX execution integration. It reduces the
   risk that ONNX support cements current Ollama-vs-llama.cpp assumptions.
-- Recommendation 5: Keep the first complete vertical slice managed-sidecar
-  first because the expected UX is setup, profile save, model route assignment,
-  and serving from the ONNX app panel.
+- Recommendation 5: Keep the first complete vertical slice managed in-process
+  runtime first because the expected UX is setup, profile save, model route
+  assignment, and serving from the ONNX app panel.
 - Recommendation 6: Treat the ONNX model library panel as a provider-specific
   sibling of `LlamaCppModelLibrarySection`, not as a generic `ModelManager`
   variant. The user workflow is route/profile assignment plus serving, which is
@@ -502,7 +509,7 @@ changes remain.
 - llama.cpp router catalog compatibility projection now uses typed executable
   artifact values.
 - Runtime-profile managed/external validation now derives from provider launch
-  kinds, including the reserved Python sidecar kind.
+  kinds, including the previously reserved sidecar kind now superseded for ONNX.
 - Backend provider registry usage across existing runtime profiles, serving,
   gateway, compatibility, and launch-kind validation is complete.
 - RPC gateway and serving handlers now consume the provider registry from
@@ -557,6 +564,11 @@ changes remain.
   component below the size threshold before ONNX adds sibling UI.
 - Milestone 0 large-file split work is complete for the named ONNX provider
   prerequisite surfaces.
+- Rust ONNX re-plan is complete: the future Python sidecar milestone is
+  replaced by a Rust ONNX provider/session skeleton, real ONNX Runtime
+  execution moves into Rust dependency review/execution slices, and the aborted
+  uncommitted Python sidecar files were removed before this documentation
+  update.
 
 ### Deviations
 

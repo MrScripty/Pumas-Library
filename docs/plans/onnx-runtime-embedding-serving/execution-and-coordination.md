@@ -109,6 +109,10 @@ Update during implementation:
   to provider behavior compatibility. Existing Ollama and llama.cpp serving
   behavior still accepts GGUF, while unknown artifact extensions now fail
   through the provider compatibility path that ONNX can extend later.
+- 2026-05-11: Removed the `unserve_model` non-llama.cpp-implies-Ollama fallback.
+  Unload now no-ops when no served instance exists and dispatches from the
+  backend-recorded served provider for Ollama and llama.cpp. Full serving
+  adapter extraction remains pending.
 
 ## Commit Cadence Notes
 
@@ -228,6 +232,8 @@ changes remain.
   completed for existing providers.
 - Serving artifact format validation now derives supported formats from
   provider behavior.
+- `unserve_model` unload selection now uses recorded served provider instead of
+  falling back to Ollama for every non-llama.cpp status.
 
 ### Deviations
 
@@ -257,6 +263,9 @@ changes remain.
   frontend route/serve dialog tests.
 - Provider artifact compatibility slice verified with focused provider and
   serving tests plus Rust formatting.
+- Provider-based unload dispatch slice verified with `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml serving` and Rust
+  formatting.
 
 ### Traceability Links
 

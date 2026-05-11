@@ -162,7 +162,8 @@ Runtime profile capability DTOs now project from provider behavior values.
 Runtime profile routes are now provider-scoped across Rust DTOs, RPC/Electron
 parameters, frontend bridge types, llama.cpp route helpers, endpoint lookup,
 auto-load lookup, and one-way persisted config migration. Next slice is moving
-serving dispatch toward provider adapters.
+serving dispatch toward provider adapters. `unserve_model` no longer has the
+non-llama.cpp-implies-Ollama fallback; full adapter extraction remains pending.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

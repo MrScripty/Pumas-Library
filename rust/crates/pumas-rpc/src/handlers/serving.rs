@@ -101,12 +101,7 @@ pub async fn unserve_model(state: &AppState, params: &Value) -> pumas_library::R
             command.request.profile_id.as_ref(),
         )
         .await?;
-    let profile_id = command
-        .request
-        .profile_id
-        .clone()
-        .or_else(|| served.as_ref().map(|status| status.profile_id.clone()));
-    let Some(profile_id) = profile_id else {
+    let Some(served_status) = served else {
         return Ok(serde_json::to_value(UnserveModelResponse {
             success: true,
             error: None,
@@ -114,29 +109,39 @@ pub async fn unserve_model(state: &AppState, params: &Value) -> pumas_library::R
             snapshot: Some(state.api.get_serving_status().await?.snapshot),
         })?);
     };
+    let profile_id = command
+        .request
+        .profile_id
+        .clone()
+        .unwrap_or_else(|| served_status.profile_id.clone());
     let model_alias = command
         .request
         .model_alias
         .clone()
-        .or_else(|| {
-            served
-                .as_ref()
-                .and_then(|status| status.model_alias.clone())
-        })
+        .or_else(|| served_status.model_alias.clone())
         .unwrap_or_else(|| derive_fallback_model_alias(&command.request.model_id));
 
-    if served
-        .as_ref()
-        .is_some_and(|status| status.provider == RuntimeProviderId::LlamaCpp)
-    {
-        return unserve_llama_cpp_model(state, command.request, profile_id, model_alias).await;
+    match served_status.provider {
+        RuntimeProviderId::Ollama => {
+            unserve_ollama_model(state, command.request, profile_id, model_alias).await
+        }
+        RuntimeProviderId::LlamaCpp => {
+            unserve_llama_cpp_model(state, command.request, profile_id, model_alias).await
+        }
     }
+}
 
+async fn unserve_ollama_model(
+    state: &AppState,
+    request: UnserveModelRequest,
+    profile_id: RuntimeProfileId,
+    model_alias: String,
+) -> pumas_library::Result<Value> {
     let endpoint = match state
         .api
         .resolve_model_runtime_profile_endpoint_for_operation(
             RuntimeProviderId::Ollama,
-            &command.request.model_id,
+            &request.model_id,
             Some(profile_id.clone()),
         )
         .await
@@ -167,7 +172,7 @@ pub async fn unserve_model(state: &AppState, params: &Value) -> pumas_library::R
     let snapshot = state
         .api
         .record_unserved_model(
-            &command.request.model_id,
+            &request.model_id,
             Some(&profile_id),
             Some(model_alias.as_str()),
         )

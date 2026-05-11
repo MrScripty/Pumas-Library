@@ -18,6 +18,7 @@ use crate::models::{
     RuntimeProfilesConfigFile, RuntimeProfilesSnapshot, RuntimeProfilesSnapshotResponse,
     RuntimeProviderId, RuntimeProviderMode,
 };
+use crate::providers::ProviderRegistry;
 use crate::{PumasError, Result};
 use tokio::sync::broadcast;
 
@@ -1321,6 +1322,8 @@ async fn validate_profile_config(profile: &RuntimeProfileConfig) -> Result<()> {
         });
     }
 
+    validate_profile_provider_behavior(profile, &ProviderRegistry::builtin())?;
+
     match profile.provider {
         RuntimeProviderId::Ollama => OllamaRuntimeProviderAdapter.validate_profile(profile).await,
         RuntimeProviderId::LlamaCpp => {
@@ -1328,6 +1331,37 @@ async fn validate_profile_config(profile: &RuntimeProfileConfig) -> Result<()> {
                 .validate_profile(profile)
                 .await
         }
+    }
+}
+
+fn validate_profile_provider_behavior(
+    profile: &RuntimeProfileConfig,
+    registry: &ProviderRegistry,
+) -> Result<()> {
+    let Some(behavior) = registry.get(profile.provider) else {
+        return Err(PumasError::InvalidParams {
+            message: "runtime profile provider is not registered".to_string(),
+        });
+    };
+
+    if !behavior.supports_mode(profile.provider_mode) {
+        return Err(PumasError::InvalidParams {
+            message: "runtime profile provider does not support provider_mode".to_string(),
+        });
+    }
+
+    match profile.management_mode {
+        RuntimeManagementMode::Managed if !behavior.supports_managed_profiles => {
+            Err(PumasError::InvalidParams {
+                message: "runtime profile provider does not support managed profiles".to_string(),
+            })
+        }
+        RuntimeManagementMode::External if !behavior.supports_external_profiles => {
+            Err(PumasError::InvalidParams {
+                message: "runtime profile provider does not support external profiles".to_string(),
+            })
+        }
+        _ => Ok(()),
     }
 }
 
@@ -1432,6 +1466,28 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("endpoint_url"));
+    }
+
+    #[tokio::test]
+    async fn validate_profile_config_accepts_builtin_provider_behavior() {
+        validate_profile_config(&RuntimeProfileConfig::default_ollama())
+            .await
+            .unwrap();
+        validate_profile_config(&managed_llama_cpp_profile("llama-router"))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn validate_profile_config_rejects_mode_before_provider_adapter() {
+        let mut profile = RuntimeProfileConfig::default_ollama();
+        profile.provider_mode = RuntimeProviderMode::LlamaCppRouter;
+
+        let error = validate_profile_config(&profile).await.unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("provider does not support provider_mode"));
     }
 
     #[test]

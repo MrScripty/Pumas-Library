@@ -156,8 +156,10 @@ Provider-model documentation setup is complete in
 `docs/adr/0001-onnx-runtime-provider-model.md`. Backend provider behavior
 contracts and built-in registry values now exist in
 `rust/crates/pumas-core/src/providers/`, with tests for Ollama and llama.cpp.
-Next slice is integrating the registry into runtime-profile validation without
-changing user-visible profile behavior.
+Runtime-profile validation now consumes the registry for provider-mode and
+managed/external support checks without changing user-visible profile behavior.
+Next slice is moving runtime profile capabilities snapshots onto provider
+behavior values.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

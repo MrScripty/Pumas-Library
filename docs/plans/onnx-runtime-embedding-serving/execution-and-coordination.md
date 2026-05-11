@@ -88,6 +88,11 @@ Update during implementation:
   endpoints, launch kinds, model-id policy, and unload behavior. This slice does
   not yet route runtime-profile validation, serving, gateway, or launcher code
   through the registry; that is the next slice.
+- 2026-05-11: Integrated the provider registry into runtime-profile validation
+  for provider-mode and managed/external support checks while preserving the
+  existing Ollama and llama.cpp adapters for provider-specific validation. The
+  registry is still not used by serving adapters, gateway routing, or launcher
+  strategy selection.
 
 ## Commit Cadence Notes
 
@@ -200,6 +205,8 @@ changes remain.
   `docs/adr/0001-onnx-runtime-provider-model.md`.
 - Backend provider behavior contract and built-in provider registry added under
   `rust/crates/pumas-core/src/providers/`.
+- Runtime-profile validation now consumes provider behavior for provider mode
+  and management-mode support.
 
 ### Deviations
 
@@ -219,6 +226,8 @@ changes remain.
 - Provider registry slice verified with `cargo test --manifest-path
   rust/crates/pumas-core/Cargo.toml providers` and `cargo fmt --manifest-path
   rust/Cargo.toml --all -- --check`.
+- Runtime-profile provider-registry validation slice verified with the focused
+  runtime profile tests recorded for that slice.
 
 ### Traceability Links
 

@@ -31,8 +31,10 @@ match blocks.
 ## Decision
 
 Start with a typed provider behavior registry for existing Ollama and llama.cpp
-providers. Later slices migrate runtime profiles, serving adapters, launcher
-strategies, gateway proxying, and frontend bridge contracts onto this registry.
+providers. Runtime profile validation consumes the registry for provider-mode
+and managed/external support checks. Later slices migrate serving adapters,
+launcher strategies, gateway proxying, and frontend bridge contracts onto this
+registry.
 
 ## Alternatives Rejected
 

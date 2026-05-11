@@ -34,9 +34,10 @@ Start with a typed provider behavior registry for existing Ollama and llama.cpp
 providers. Runtime profile validation consumes the registry for provider-mode
 and managed/external support checks. Serving and gateway request model-id
 rewriting now consume the provider model-id policy, and gateway proxying checks
-provider endpoint capabilities before forwarding. Later slices migrate full
-serving adapters, launcher strategies, shared gateway clients, and frontend
-bridge contracts onto this registry.
+provider endpoint capabilities before forwarding through a shared gateway HTTP
+client. Later slices migrate full serving adapters, launcher strategies,
+endpoint-specific gateway policies, and frontend bridge contracts onto this
+registry.
 
 ## Alternatives Rejected
 

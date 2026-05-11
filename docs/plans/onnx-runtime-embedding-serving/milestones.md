@@ -94,7 +94,7 @@ provider and widens the blast radius.
       possible. Add tests where the same model id is served by more than one
       provider/profile and unload/gateway lookup remains deterministic.
 - [x] Add gateway endpoint capability checks before proxying `/v1/*` requests.
-- [ ] Add a shared gateway HTTP client with explicit timeouts instead of
+- [x] Add a shared gateway HTTP client with explicit timeouts instead of
       constructing a new client per proxied request.
 - [x] Add a typed gateway endpoint capability model for `/v1/models`,
       `/v1/chat/completions`, `/v1/completions`, and `/v1/embeddings`. ONNX
@@ -174,6 +174,9 @@ values and reject unsupported provider/endpoint combinations before proxying.
 The current built-in Ollama and llama.cpp behavior remains unchanged because
 both declare support for the currently routed endpoints; ONNX can register
 embeddings-only support without inheriting chat/completion routing.
+Gateway proxying now uses a shared timeout-bound HTTP client owned by the RPC
+server composition root instead of constructing a client for each forwarded
+request. Endpoint-specific body/timeout policy remains pending.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

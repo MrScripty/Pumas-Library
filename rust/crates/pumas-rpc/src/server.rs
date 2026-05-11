@@ -18,6 +18,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::{
     sync::{Mutex, RwLock},
     task::JoinHandle,
@@ -28,6 +29,7 @@ use tracing::{error, info, warn};
 
 const MAX_IN_FLIGHT_RPC_REQUESTS: usize = 64;
 const MAX_REQUEST_BODY_BYTES: usize = 32 * 1024 * 1024;
+const GATEWAY_PROXY_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Application state shared across handlers.
 pub struct AppState {
@@ -43,6 +45,8 @@ pub struct AppState {
     pub shortcut_manager: Arc<RwLock<Option<ShortcutManager>>>,
     /// Plugin configuration loader
     pub plugin_loader: Arc<PluginLoader>,
+    /// Shared HTTP client for OpenAI-compatible gateway proxying.
+    pub gateway_http_client: reqwest::Client,
 }
 
 /// Owned handle for the running HTTP server task.
@@ -104,6 +108,7 @@ pub async fn start_server(
         }
     };
 
+    let gateway_http_client = build_gateway_http_client()?;
     let state = Arc::new(AppState {
         api,
         version_managers: Arc::new(RwLock::new(version_managers)),
@@ -111,6 +116,7 @@ pub async fn start_server(
         size_calculator: Arc::new(Mutex::new(size_calculator)),
         shortcut_manager: Arc::new(RwLock::new(shortcut_manager)),
         plugin_loader: Arc::new(plugin_loader),
+        gateway_http_client,
     });
 
     // Configure CORS for local development and packaged renderer diagnostics.
@@ -177,6 +183,12 @@ pub async fn start_server(
         addr: actual_addr,
         task: Some(task),
     })
+}
+
+fn build_gateway_http_client() -> anyhow::Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .timeout(GATEWAY_PROXY_TIMEOUT)
+        .build()?)
 }
 
 fn is_allowed_cors_origin(origin: &HeaderValue) -> bool {
@@ -285,5 +297,10 @@ mod tests {
             let header = HeaderValue::from_str(origin).unwrap();
             assert!(!is_allowed_cors_origin(&header), "{origin}");
         }
+    }
+
+    #[test]
+    fn gateway_http_client_builds_with_configured_policy() {
+        build_gateway_http_client().unwrap();
     }
 }

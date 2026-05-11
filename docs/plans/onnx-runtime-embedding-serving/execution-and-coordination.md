@@ -127,6 +127,10 @@ Update during implementation:
   behavior is unchanged because both providers currently declare support for the
   routed endpoints. Shared gateway HTTP client and endpoint-specific body/timeout
   policy remain pending.
+- 2026-05-11: Added a shared gateway HTTP client to the RPC server composition
+  root. OpenAI-compatible proxy handlers now reuse the `AppState` client with an
+  explicit 120 second timeout instead of constructing a new client per request.
+  Endpoint-specific body/timeout policies are still pending.
 
 ## Commit Cadence Notes
 
@@ -252,6 +256,8 @@ changes remain.
   behavior policy.
 - Gateway proxying now checks typed provider endpoint capabilities before
   forwarding OpenAI-compatible requests.
+- OpenAI-compatible gateway proxying now uses a shared timeout-bound HTTP
+  client owned by RPC server state.
 
 ### Deviations
 
@@ -294,6 +300,11 @@ changes remain.
   rust/crates/pumas-rpc/Cargo.toml openai_gateway`, `cargo test --manifest-path
   rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt --manifest-path
   rust/Cargo.toml --all -- --check`.
+- Shared gateway HTTP client slice verified with `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml openai_gateway`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml gateway_http_client`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

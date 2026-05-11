@@ -220,7 +220,8 @@ pub async fn handle_openai_proxy(
     }
 
     let target_url = format!("{}{}", endpoint.as_str().trim_end_matches('/'), path.path());
-    match reqwest::Client::new()
+    match state
+        .gateway_http_client
         .post(target_url)
         .json(&body)
         .send()

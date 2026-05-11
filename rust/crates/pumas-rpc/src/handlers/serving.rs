@@ -9,7 +9,7 @@ use pumas_library::models::{
     ServedModelStatus, UnserveModelRequest, UnserveModelResponse,
 };
 use pumas_library::runtime_profiles::RuntimeProfileLaunchOverrides;
-use pumas_library::{ProviderGatewayAliasPolicy, ProviderRegistry};
+use pumas_library::{ProviderGatewayAliasPolicy, ProviderRegistry, ProviderUnloadBehavior};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
@@ -123,13 +123,23 @@ pub async fn unserve_model(state: &AppState, params: &Value) -> pumas_library::R
         .or_else(|| served_status.model_alias.clone())
         .unwrap_or_else(|| derive_fallback_model_alias(&command.request.model_id));
 
-    match served_status.provider {
-        RuntimeProviderId::Ollama => {
+    let registry = ProviderRegistry::builtin();
+    match registry
+        .get(served_status.provider)
+        .map(|behavior| behavior.unload_behavior)
+    {
+        Some(ProviderUnloadBehavior::ProviderApi) => {
             unserve_ollama_model(state, command.request, profile_id, model_alias).await
         }
-        RuntimeProviderId::LlamaCpp => {
+        Some(ProviderUnloadBehavior::RouterPreset) => {
             unserve_llama_cpp_model(state, command.request, profile_id, model_alias).await
         }
+        None => Ok(serde_json::to_value(UnserveModelResponse {
+            success: true,
+            error: Some("served model provider is not registered".to_string()),
+            unloaded: false,
+            snapshot: Some(state.api.get_serving_status().await?.snapshot),
+        })?),
     }
 }
 

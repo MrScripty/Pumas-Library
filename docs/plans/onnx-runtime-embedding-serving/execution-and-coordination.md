@@ -150,6 +150,11 @@ Update during implementation:
   defaults the gateway alias to the library model id. Full serving adapter
   extraction, launch strategy selection, and unload behavior consumption remain
   pending.
+- 2026-05-11: Moved `unserve_model` provider dispatch onto
+  `ProviderBehavior::unload_behavior`. The handler still calls the existing
+  Ollama and llama.cpp unload routines, but the extension point is now provider
+  behavior rather than a direct provider-id match. Load dispatch and full
+  serving adapter extraction remain pending.
 
 ## Commit Cadence Notes
 
@@ -282,6 +287,7 @@ changes remain.
 - Served-model replace/find/unload identity is provider-scoped, and frontend
   unload requests send the served provider.
 - Serving alias defaulting now derives from provider behavior policy.
+- `unserve_model` dispatch now derives from provider unload behavior policy.
 
 ### Deviations
 
@@ -342,6 +348,10 @@ changes remain.
   rust/crates/pumas-core/Cargo.toml providers`, `cargo test --manifest-path
   rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt --manifest-path
   rust/Cargo.toml --all -- --check`.
+- Provider unload behavior dispatch slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml providers`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

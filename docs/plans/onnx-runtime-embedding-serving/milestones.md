@@ -192,6 +192,9 @@ matching directly on `RuntimeProviderId`: Ollama keeps generated Ollama model
 names and llama.cpp keeps the library model id. Managed launch strategy,
 provider-specific unload behavior consumption, and full serving adapter
 extraction remain pending.
+`unserve_model` dispatch now consumes provider behavior unload policy instead
+of matching directly on the served provider id. Load dispatch still needs full
+provider serving adapter extraction before ONNX load/unload can be wired.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

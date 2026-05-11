@@ -20,6 +20,7 @@ This directory holds implementation plans for cross-module changes that need exp
 | `workspace-tooling-dependency-ownership-refactor-plan.md` | Plan for removing the root `jsdom` pin by making frontend test tooling resolve from its owning workspace without relying on incidental npm hoisting. |
 | `local-runtime-profiles-and-ollama-version-manager/plan.md` | Plan for stabilizing the Ollama version-manager UI, backend-owned local runtime profiles for Ollama and llama.cpp, and the next user-directed model-serving workflow from model rows/modals with explicit device placement and non-critical load errors. |
 | `llamacpp-compatible-library-profile-serving/plan.md` | Plan for making the llama.cpp app page's lower model library show only llama.cpp-compatible models, select per-model runtime profiles from rows, and display CPU/GPU/iGPU/Hybrid serving placement tags. |
+| `onnx-runtime-embedding-serving/plan.md` | Plan for adding first-class ONNX Runtime embedding serving, including an ONNX sidecar, typed runtime provider contracts, Pumas `/v1/embeddings` gateway routing, frontend profile support, and external app documentation. |
 
 ## Problem
 Large model-library changes touch persisted metadata, reconciliation, runtime resolution, and UI/API contracts at the same time. Without a written plan, it is easy to create competing paths for import, validation, or execution that weaken reliability.

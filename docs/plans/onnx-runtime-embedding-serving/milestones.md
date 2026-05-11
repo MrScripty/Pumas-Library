@@ -676,6 +676,14 @@ Remaining M5 work includes real facade acceptance tests, explicit oversized
 body handler tests, timeout/cancellation semantics, request
 correlation/logging, unknown-model/provider pass-through coverage, and manual
 curl evidence after frontend/serve workflow is available.
+The follow-up handler-contract slice added direct gateway handler tests for the
+ONNX public `/v1/embeddings` path: a served and loaded ONNX model returns
+OpenAI-compatible embedding JSON through the in-process adapter, ONNX rejects
+`/v1/chat/completions` through provider endpoint capabilities, and an ONNX
+served status without a loaded session maps to a bounded OpenAI-compatible
+`model_not_found` error. Verification passed:
+`cargo fmt --manifest-path rust/Cargo.toml --all -- --check` and
+`cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`.
 
 ### Milestone 6: Frontend Integration
 

@@ -428,6 +428,17 @@ Update during implementation:
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`,
   and `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`.
+- 2026-05-11: Added the M5 handler-contract test slice for ONNX gateway
+  routing. `openai_gateway_tests.rs` now builds an isolated `AppState`, records
+  a served ONNX model, loads the fake ONNX session where needed, and calls the
+  OpenAI gateway handler for `/v1/embeddings` and `/v1/chat/completions`. The
+  tests prove the public gateway handler returns OpenAI-compatible embedding
+  JSON for a loaded ONNX session, rejects chat/completion routing for the
+  embedding-only ONNX provider through endpoint capabilities, and maps an ONNX
+  not-loaded backend failure to a bounded `model_not_found` error body.
+  Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` and
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`.
 
 ## Commit Cadence Notes
 

@@ -1,9 +1,23 @@
 use super::*;
+use crate::provider_clients::{LlamaCppRouterClient, OllamaClientFactory};
+use crate::server::AppState;
+use axum::body::{to_bytes, Bytes};
+use axum::extract::{OriginalUri, State};
+use axum::http::StatusCode;
+use pumas_app_manager::{CustomNodesManager, SizeCalculator};
 use pumas_library::models::{
     RuntimeDeviceMode, RuntimeProfileId, RuntimeProviderId, ServedModelLoadState,
     ServingEndpointStatus, ServingStatusSnapshot,
 };
-use pumas_library::ProviderBehavior;
+use pumas_library::{
+    FakeOnnxEmbeddingBackend, OnnxLoadOptions, OnnxLoadRequest, OnnxSessionManager, PluginLoader,
+    ProviderBehavior, PumasApi,
+};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tempfile::TempDir;
+use tokio::sync::{Mutex, RwLock};
 
 fn loaded_status(model_id: &str, profile_id: &str, model_alias: Option<&str>) -> ServedModelStatus {
     ServedModelStatus {
@@ -33,6 +47,92 @@ fn snapshot(served_models: Vec<ServedModelStatus>) -> ServingStatusSnapshot {
         served_models,
         last_errors: Vec::new(),
     }
+}
+
+async fn gateway_test_state() -> (TempDir, Arc<AppState>) {
+    let temp_dir = TempDir::new().unwrap();
+    let launcher_root = temp_dir.path().to_path_buf();
+    let api = PumasApi::builder(&launcher_root)
+        .auto_create_dirs(true)
+        .with_hf_client(false)
+        .with_process_manager(false)
+        .build()
+        .await
+        .unwrap();
+    let plugin_loader = PluginLoader::new_async(launcher_root.join("launcher-data/plugins"))
+        .await
+        .unwrap();
+    let onnx_session_manager = OnnxSessionManager::new(FakeOnnxEmbeddingBackend::new(), 2).unwrap();
+    let state = Arc::new(AppState {
+        api,
+        version_managers: Arc::new(RwLock::new(HashMap::new())),
+        custom_nodes_manager: Arc::new(CustomNodesManager::new(
+            launcher_root.join("comfyui-versions"),
+        )),
+        size_calculator: Arc::new(Mutex::new(
+            SizeCalculator::new_with_cache(launcher_root.join("launcher-data/cache")).await,
+        )),
+        shortcut_manager: Arc::new(RwLock::new(None)),
+        plugin_loader: Arc::new(plugin_loader),
+        gateway_http_client: reqwest::Client::new(),
+        provider_registry: ProviderRegistry::builtin(),
+        llama_cpp_router_client: LlamaCppRouterClient::new(reqwest::Client::new()),
+        ollama_client_factory: OllamaClientFactory::new(
+            pumas_app_manager::OllamaHttpClients::new().unwrap(),
+        ),
+        onnx_session_manager,
+    });
+    (temp_dir, state)
+}
+
+async fn record_onnx_served_model(state: &AppState) {
+    state
+        .api
+        .record_served_model(ServedModelStatus {
+            model_id: "embeddings/nomic".to_string(),
+            model_alias: Some("nomic".to_string()),
+            provider: RuntimeProviderId::OnnxRuntime,
+            profile_id: RuntimeProfileId::parse("onnx-cpu").unwrap(),
+            load_state: ServedModelLoadState::Loaded,
+            device_mode: RuntimeDeviceMode::Cpu,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
+            context_size: Some(4),
+            keep_loaded: true,
+            endpoint_url: None,
+            memory_bytes: None,
+            loaded_at: None,
+            last_error: None,
+        })
+        .await
+        .unwrap();
+}
+
+async fn load_onnx_session(temp_dir: &TempDir, state: &AppState) {
+    let model_root = temp_dir.path().join("onnx-fixture");
+    std::fs::create_dir_all(&model_root).unwrap();
+    std::fs::write(model_root.join("model.onnx"), b"fake").unwrap();
+    let request = OnnxLoadRequest::parse(
+        &model_root,
+        "model.onnx",
+        "embeddings/nomic",
+        OnnxLoadOptions::cpu(4).unwrap(),
+    )
+    .unwrap();
+    state.onnx_session_manager.load(request).await.unwrap();
+}
+
+async fn openai_proxy_json(state: Arc<AppState>, path: &str, body: Value) -> (StatusCode, Value) {
+    let response = handle_openai_proxy(
+        State(state),
+        OriginalUri(path.parse().unwrap()),
+        Bytes::from(body.to_string()),
+    )
+    .await;
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), 1_048_576).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap())
 }
 
 #[test]
@@ -152,4 +252,84 @@ fn provider_endpoint_capability_comes_from_registry_behavior() {
         OpenAiGatewayEndpoint::ChatCompletions,
         &registry
     ));
+}
+
+#[tokio::test]
+async fn openai_proxy_routes_onnx_embeddings_in_process() {
+    let (temp_dir, state) = gateway_test_state().await;
+    load_onnx_session(&temp_dir, &state).await;
+    record_onnx_served_model(&state).await;
+
+    let (status, body) = openai_proxy_json(
+        state,
+        "/v1/embeddings",
+        json!({
+            "model": "nomic",
+            "input": ["search_document: hello world"],
+            "dimensions": 4
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.get("object").and_then(Value::as_str), Some("list"));
+    assert_eq!(body.get("model").and_then(Value::as_str), Some("nomic"));
+    assert_eq!(
+        body.pointer("/data/0/object").and_then(Value::as_str),
+        Some("embedding")
+    );
+    assert_eq!(
+        body.pointer("/data/0/embedding")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(4)
+    );
+    assert_eq!(
+        body.pointer("/usage/total_tokens").and_then(Value::as_u64),
+        Some(3)
+    );
+}
+
+#[tokio::test]
+async fn openai_proxy_rejects_chat_for_onnx_embedding_provider() {
+    let (_temp_dir, state) = gateway_test_state().await;
+    record_onnx_served_model(&state).await;
+
+    let (status, body) = openai_proxy_json(
+        state,
+        "/v1/chat/completions",
+        json!({
+            "model": "nomic",
+            "messages": []
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body.pointer("/error/code").and_then(Value::as_str),
+        Some("endpoint_unavailable")
+    );
+}
+
+#[tokio::test]
+async fn openai_proxy_maps_onnx_not_loaded_to_openai_error() {
+    let (_temp_dir, state) = gateway_test_state().await;
+    record_onnx_served_model(&state).await;
+
+    let (status, body) = openai_proxy_json(
+        state,
+        "/v1/embeddings",
+        json!({
+            "model": "nomic",
+            "input": "search_document: hello"
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        body.pointer("/error/code").and_then(Value::as_str),
+        Some("model_not_found")
+    );
 }

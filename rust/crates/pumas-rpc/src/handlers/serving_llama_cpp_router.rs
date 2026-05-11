@@ -14,7 +14,6 @@ use pumas_library::models::{
 };
 use pumas_library::runtime_profiles::RuntimeProfileLaunchOverrides;
 use serde_json::Value;
-use std::time::Duration;
 use tracing::warn;
 
 pub(super) async fn serve_llama_cpp_router_model(
@@ -91,7 +90,10 @@ pub(super) async fn serve_llama_cpp_router_model(
         )
         .await
         .is_err();
-    let endpoint_unreachable = !llama_cpp_router_endpoint_ready(endpoint.as_str()).await;
+    let endpoint_unreachable = !state
+        .llama_cpp_router_client
+        .endpoint_ready(endpoint.as_str())
+        .await;
     let should_restart_for_profile_settings = !profile_not_running
         && !endpoint_unreachable
         && llama_cpp_router_should_restart_for_launch_settings(state, &request, &profile).await?;
@@ -120,7 +122,11 @@ pub(super) async fn serve_llama_cpp_router_model(
         if let Some(error) = launch_llama_cpp_router_profile(state, &request, &profile).await? {
             return non_critical_failure_response(state, error).await;
         }
-        if !llama_cpp_router_endpoint_ready(endpoint.as_str()).await {
+        if !state
+            .llama_cpp_router_client
+            .endpoint_ready(endpoint.as_str())
+            .await
+        {
             return non_critical_failure_response(
                 state,
                 serving_error(
@@ -135,7 +141,11 @@ pub(super) async fn serve_llama_cpp_router_model(
 
     let gateway_alias = effective_gateway_alias_from_config(&request);
     let router_model_id = provider_request_model_id(&request, &state.provider_registry);
-    if let Err(message) = llama_cpp_router_load_model(endpoint.as_str(), &router_model_id).await {
+    if let Err(message) = state
+        .llama_cpp_router_client
+        .load_model(endpoint.as_str(), &router_model_id)
+        .await
+    {
         warn!("llama.cpp router model load failed: {}", message);
         return non_critical_failure_response(
             state,
@@ -205,7 +215,11 @@ pub(super) async fn unserve_llama_cpp_router_model(
         }
     };
     let router_model_id = request_model_id.trim();
-    if let Err(message) = llama_cpp_router_unload_model(endpoint.as_str(), router_model_id).await {
+    if let Err(message) = state
+        .llama_cpp_router_client
+        .unload_model(endpoint.as_str(), router_model_id)
+        .await
+    {
         warn!("llama.cpp router model unload failed: {}", message);
         return Ok(Some(serde_json::to_value(
             pumas_library::models::UnserveModelResponse {
@@ -315,82 +329,6 @@ async fn launch_llama_cpp_router_profile(
     }
 }
 
-async fn llama_cpp_router_endpoint_ready(endpoint: &str) -> bool {
-    let url = llama_cpp_router_models_url(endpoint);
-    let Ok(client) = reqwest::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-    else {
-        return false;
-    };
-    client
-        .get(url)
-        .send()
-        .await
-        .map(|response| response.status().is_success())
-        .unwrap_or(false)
-}
-
-fn llama_cpp_router_models_url(endpoint: &str) -> String {
-    format!("{}/v1/models", endpoint.trim_end_matches('/'))
-}
-
-async fn llama_cpp_router_load_model(endpoint: &str, model_alias: &str) -> Result<(), String> {
-    let url = llama_cpp_router_model_load_url(endpoint);
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(180))
-        .build()
-        .map_err(|err| format!("failed to build llama.cpp router client: {err}"))?;
-    let response = client
-        .post(url)
-        .json(&serde_json::json!({ "model": model_alias }))
-        .send()
-        .await
-        .map_err(|err| format!("failed to load model through llama.cpp router: {err}"))?;
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    if status.is_success() || body.contains("model is already running") {
-        return Ok(());
-    }
-    Err(if body.trim().is_empty() {
-        format!("llama.cpp router failed to load model with HTTP status {status}")
-    } else {
-        format!("llama.cpp router failed to load model with HTTP status {status}: {body}")
-    })
-}
-
-fn llama_cpp_router_model_load_url(endpoint: &str) -> String {
-    format!("{}/models/load", endpoint.trim_end_matches('/'))
-}
-
-async fn llama_cpp_router_unload_model(endpoint: &str, model_alias: &str) -> Result<(), String> {
-    let url = llama_cpp_router_model_unload_url(endpoint);
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .build()
-        .map_err(|err| format!("failed to build llama.cpp router client: {err}"))?;
-    let response = client
-        .post(url)
-        .json(&serde_json::json!({ "model": model_alias }))
-        .send()
-        .await
-        .map_err(|err| format!("failed to unload model through llama.cpp router: {err}"))?;
-    let status = response.status();
-    let body = response.text().await.unwrap_or_default();
-    if status.is_success() || body.contains("model is not running") {
-        return Ok(());
-    }
-    Err(if body.trim().is_empty() {
-        format!("llama.cpp router failed to unload model with HTTP status {status}")
-    } else {
-        format!("llama.cpp router failed to unload model with HTTP status {status}: {body}")
-    })
-}
-
-fn llama_cpp_router_model_unload_url(endpoint: &str) -> String {
-    format!("{}/models/unload", endpoint.trim_end_matches('/'))
-}
-
 fn llama_cpp_router_launch_overrides(
     request: &ServeModelRequest,
     profile: &RuntimeProfileConfig,
@@ -405,42 +343,6 @@ fn llama_cpp_router_launch_overrides(
 mod tests {
     use super::*;
     use pumas_library::models::{ModelServingConfig, RuntimeProfileId};
-
-    #[test]
-    fn llama_cpp_router_models_url_normalizes_trailing_slash() {
-        assert_eq!(
-            llama_cpp_router_models_url("http://127.0.0.1:20617/"),
-            "http://127.0.0.1:20617/v1/models"
-        );
-        assert_eq!(
-            llama_cpp_router_models_url("http://127.0.0.1:20617"),
-            "http://127.0.0.1:20617/v1/models"
-        );
-    }
-
-    #[test]
-    fn llama_cpp_router_model_load_url_normalizes_trailing_slash() {
-        assert_eq!(
-            llama_cpp_router_model_load_url("http://127.0.0.1:20617/"),
-            "http://127.0.0.1:20617/models/load"
-        );
-        assert_eq!(
-            llama_cpp_router_model_load_url("http://127.0.0.1:20617"),
-            "http://127.0.0.1:20617/models/load"
-        );
-    }
-
-    #[test]
-    fn llama_cpp_router_model_unload_url_normalizes_trailing_slash() {
-        assert_eq!(
-            llama_cpp_router_model_unload_url("http://127.0.0.1:20617/"),
-            "http://127.0.0.1:20617/models/unload"
-        );
-        assert_eq!(
-            llama_cpp_router_model_unload_url("http://127.0.0.1:20617"),
-            "http://127.0.0.1:20617/models/unload"
-        );
-    }
 
     #[test]
     fn llama_cpp_router_profile_restart_detects_explicit_device_settings() {

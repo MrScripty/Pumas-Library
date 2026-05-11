@@ -244,6 +244,11 @@ services. Service-level default constructors no longer construct built-in
 registries in production code. This closes the provider-registry composition
 root task for existing core services; reusable provider clients and managed
 launch strategy remain open under their separate tasks.
+Reusable provider-client work has started with llama.cpp router serving:
+`LlamaCppRouterClient` is owned by RPC `AppState` and the router serving
+adapter consumes it for readiness/load/unload requests with explicit operation
+timeouts. The provider-client milestone task remains open because Ollama
+serving/app handlers still construct `OllamaClient` inside request handling.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

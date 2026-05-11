@@ -229,6 +229,14 @@ Update during implementation:
   services, and service-level default constructors no longer construct built-in
   registries in production code. Reusable provider clients and the managed
   launch-strategy abstraction remain separate open tasks.
+- 2026-05-11: Started the reusable provider-client slice by extracting
+  llama.cpp router serving HTTP operations into a reusable
+  `LlamaCppRouterClient` owned by RPC `AppState`. The serving adapter now
+  consumes the state-owned client and per-operation timeout policy instead of
+  building `reqwest::Client` values inside request handling. Remaining direct
+  provider-client construction is still present in Ollama serving/app handlers
+  and must be handled in a separate slice before the provider-client task is
+  complete.
 
 ## Commit Cadence Notes
 
@@ -386,6 +394,8 @@ changes remain.
 - Core runtime-profile validation now consumes the registry owned by
   `RuntimeProfileService`, and the primary API builder owns registry
   composition for core services.
+- llama.cpp router serving HTTP operations now consume a reusable
+  composition-root-owned provider client.
 
 ### Deviations
 
@@ -491,6 +501,10 @@ changes remain.
   `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml serving`,
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- llama.cpp router provider-client slice verified with `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml provider_clients`, `cargo
+  test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo
+  fmt --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links
 

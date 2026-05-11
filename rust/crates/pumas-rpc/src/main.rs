@@ -4,6 +4,7 @@
 //! for communication with the Electron main process.
 
 mod handlers;
+mod provider_clients;
 mod server;
 mod shortcut;
 mod wrapper;

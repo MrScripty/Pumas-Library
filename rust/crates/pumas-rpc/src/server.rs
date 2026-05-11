@@ -5,6 +5,7 @@ use crate::handlers::{
     handle_openai_models, handle_openai_proxy, handle_rpc, handle_runtime_profile_update_events,
     handle_serving_status_update_events, handle_status_telemetry_update_events,
 };
+use crate::provider_clients::LlamaCppRouterClient;
 use crate::shortcut::ShortcutManager;
 use axum::{
     extract::DefaultBodyLimit,
@@ -30,6 +31,7 @@ use tracing::{error, info, warn};
 const MAX_IN_FLIGHT_RPC_REQUESTS: usize = 64;
 const MAX_REQUEST_BODY_BYTES: usize = 32 * 1024 * 1024;
 const GATEWAY_PROXY_TIMEOUT: Duration = Duration::from_secs(120);
+const PROVIDER_HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Application state shared across handlers.
 pub struct AppState {
@@ -49,6 +51,8 @@ pub struct AppState {
     pub gateway_http_client: reqwest::Client,
     /// Runtime provider behavior registry for RPC boundary routing.
     pub provider_registry: ProviderRegistry,
+    /// Shared llama.cpp router client for provider serving operations.
+    pub llama_cpp_router_client: LlamaCppRouterClient,
 }
 
 /// Owned handle for the running HTTP server task.
@@ -111,6 +115,7 @@ pub async fn start_server(
     };
 
     let gateway_http_client = build_gateway_http_client()?;
+    let provider_http_client = build_provider_http_client()?;
     let provider_registry = ProviderRegistry::builtin();
     let state = Arc::new(AppState {
         api,
@@ -121,6 +126,7 @@ pub async fn start_server(
         plugin_loader: Arc::new(plugin_loader),
         gateway_http_client,
         provider_registry,
+        llama_cpp_router_client: LlamaCppRouterClient::new(provider_http_client),
     });
 
     // Configure CORS for local development and packaged renderer diagnostics.
@@ -192,6 +198,13 @@ pub async fn start_server(
 fn build_gateway_http_client() -> anyhow::Result<reqwest::Client> {
     Ok(reqwest::Client::builder()
         .timeout(GATEWAY_PROXY_TIMEOUT)
+        .build()?)
+}
+
+fn build_provider_http_client() -> anyhow::Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .connect_timeout(PROVIDER_HTTP_CONNECT_TIMEOUT)
+        .user_agent("pumas-library")
         .build()?)
 }
 

@@ -75,6 +75,12 @@ Update during implementation:
   `2c6dea94` before ONNX implementation resumed. Focused verification for that
   pre-existing dirty slice passed: model-library migration dry-run tests and
   Rust workspace formatting via `rust/Cargo.toml`.
+- 2026-05-11: Completed the first ONNX Milestone 0 documentation slice. Added
+  ADR 0001 for the provider model, existing shared-system treatment,
+  app/runtime descriptor strategy, provider capability and route ownership,
+  first vertical acceptance path, and decomposition review. Next implementation
+  slice is the first backend provider behavior/registry contract test and
+  implementation.
 
 ## Commit Cadence Notes
 
@@ -183,6 +189,8 @@ changes remain.
 - Initial implementation hygiene check completed. Pre-existing dirty
   model-library implementation files were committed separately before ONNX
   implementation resumed.
+- Provider-model documentation setup completed in
+  `docs/adr/0001-onnx-runtime-provider-model.md`.
 
 ### Deviations
 
@@ -197,12 +205,11 @@ changes remain.
 
 - Pre-existing model-library dirty slice verified before commit with focused
   migration dry-run tests and Rust workspace formatting. ONNX plan verification
-  has not started yet.
+  for the documentation slice is limited to link/file existence and pre-commit
+  Markdown hygiene.
 
 ### Traceability Links
 
 - Module README updated: pending.
-- ADR added/updated: pending. Provider-scoped routes and provider behavior
-  replace existing runtime-provider architecture enough to warrant a durable
-  decision record during implementation.
+- ADR added/updated: `docs/adr/0001-onnx-runtime-provider-model.md`.
 - PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: pending.

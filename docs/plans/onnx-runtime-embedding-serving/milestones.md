@@ -9,28 +9,28 @@ into an explicit provider model before ONNX adds a third runtime-profile
 provider and widens the blast radius.
 
 **Tasks:**
-- [ ] Confirm worktree hygiene before implementation starts. Resolve, commit,
+- [x] Confirm worktree hygiene before implementation starts. Resolve, commit,
       stash, or explicitly allow dirty implementation files before editing code.
-- [ ] Document the existing shared systems in the implementation ADR: app/plugin
+- [x] Document the existing shared systems in the implementation ADR: app/plugin
       registry, version/process management, runtime profiles, model library,
       serving state, OpenAI gateway, and frontend runtime/profile UI. For each
       system, mark whether ONNX extends it, refactors it, or only uses it as a
       sidecar reference.
-- [ ] Decide the app/runtime descriptor strategy before ONNX app wiring:
+- [x] Decide the app/runtime descriptor strategy before ONNX app wiring:
       update the existing hard-coded Rust/frontend/plugin identity lists in one
       contract slice, or replace them with a validated descriptor-driven
       composition root. Document why the chosen path is simpler and how drift is
       tested.
-- [ ] Finalize the contract ownership matrix before coding against new provider
+- [x] Finalize the contract ownership matrix before coding against new provider
       shapes. Every changed boundary contract must name its owner, runtime
       validator/decoder, producer tests, consumer tests, and persisted-artifact
       compatibility policy.
-- [ ] Add a decomposition review for touched files that exceed standards
+- [x] Add a decomposition review for touched files that exceed standards
       thresholds: files over 500 lines, UI components over 250 lines, or
       modules/services with more than one clear responsibility. Split new ONNX
       work into focused modules instead of expanding large mixed-responsibility
       files.
-- [ ] Define the first vertical acceptance path before broad implementation:
+- [x] Define the first vertical acceptance path before broad implementation:
       managed ONNX profile -> provider-scoped route -> serve request -> gateway
       `/v1/models` and `/v1/embeddings` against a fake or fixture sidecar. Add
       the failing-first acceptance test at the earliest slice where the public
@@ -58,7 +58,7 @@ provider and widens the blast radius.
       gateway endpoint capability, model compatibility, and frontend provider
       descriptor. Do not use one enum or helper as a hidden proxy for multiple
       concepts.
-- [ ] Document capability ownership and route-contract replacement in an ADR
+- [x] Document capability ownership and route-contract replacement in an ADR
       before implementation branches depend on the new architecture.
 - [ ] Replace provider-specific dispatch match blocks and non-provider fallbacks
       with provider behavior calls. The old Ollama-vs-llama.cpp branching style
@@ -152,8 +152,9 @@ provider and widens the blast radius.
 
 **Status:** In progress. Initial worktree hygiene found dirty model-library
 implementation files, which were committed before ONNX implementation resumed.
-First confirmed slice is Milestone 0 worktree hygiene and provider-model
-documentation setup.
+Provider-model documentation setup is complete in
+`docs/adr/0001-onnx-runtime-provider-model.md`. Next slice is the first backend
+provider behavior/registry contract test and implementation slice.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

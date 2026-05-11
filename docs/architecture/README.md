@@ -6,6 +6,7 @@ Current architecture references for the Rust/Electron implementation.
 
 - `SYSTEM_ARCHITECTURE.md` - End-to-end system layout, runtime boundaries, and process/data flow.
 - `MODEL_LIBRARY_ARCHITECTURE.md` - Model library internals, indexing/mapping pipeline, and dependency requirement contract.
+- `../adr/` - Durable architecture decisions that explain cross-layer contract choices and rejected alternatives.
 
 ## Scope
 

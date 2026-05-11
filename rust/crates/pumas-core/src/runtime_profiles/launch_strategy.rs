@@ -2,8 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{
-    RuntimeManagementMode, RuntimeProfileConfig, RuntimeProviderId, RuntimeProviderMode,
+use crate::models::{RuntimeManagementMode, RuntimeProfileConfig};
+use crate::providers::{
+    ProviderBehavior, ProviderBinaryLaunchTarget, ProviderManagedLaunchTarget,
+    ProviderPythonSidecarTarget,
 };
 use crate::{PumasError, Result};
 
@@ -30,33 +32,57 @@ pub enum RuntimeProfileLaunchStrategy {
 }
 
 impl RuntimeProfileLaunchStrategy {
-    pub fn for_profile(profile: &RuntimeProfileConfig) -> Result<Self> {
+    pub fn for_profile(
+        profile: &RuntimeProfileConfig,
+        behavior: &ProviderBehavior,
+    ) -> Result<Self> {
+        if behavior.provider != profile.provider {
+            return Err(PumasError::InvalidParams {
+                message: "runtime profile launch strategy provider mismatch".to_string(),
+            });
+        }
+
         if profile.management_mode == RuntimeManagementMode::External {
             return Ok(Self::ExternalOnly);
         }
 
-        match profile.provider {
-            RuntimeProviderId::Ollama => match profile.provider_mode {
-                RuntimeProviderMode::OllamaServe => Ok(Self::BinaryProcess(
-                    RuntimeProfileBinaryLaunchKind::OllamaServe,
-                )),
-                RuntimeProviderMode::LlamaCppRouter | RuntimeProviderMode::LlamaCppDedicated => {
-                    Err(PumasError::InvalidParams {
-                        message: "Ollama runtime profile cannot use llama.cpp modes".to_string(),
-                    })
-                }
-            },
-            RuntimeProviderId::LlamaCpp => match profile.provider_mode {
-                RuntimeProviderMode::LlamaCppRouter => Ok(Self::BinaryProcess(
-                    RuntimeProfileBinaryLaunchKind::LlamaCppRouter,
-                )),
-                RuntimeProviderMode::LlamaCppDedicated => Ok(Self::BinaryProcess(
-                    RuntimeProfileBinaryLaunchKind::LlamaCppDedicated,
-                )),
-                RuntimeProviderMode::OllamaServe => Err(PumasError::InvalidParams {
-                    message: "llama.cpp runtime profile cannot use ollama_serve mode".to_string(),
-                }),
-            },
+        behavior
+            .managed_launch_target(profile.provider_mode)
+            .map(Self::from)
+            .ok_or_else(|| PumasError::InvalidParams {
+                message: "runtime profile provider mode does not declare a managed launch strategy"
+                    .to_string(),
+            })
+    }
+}
+
+impl From<ProviderManagedLaunchTarget> for RuntimeProfileLaunchStrategy {
+    fn from(target: ProviderManagedLaunchTarget) -> Self {
+        match target {
+            ProviderManagedLaunchTarget::BinaryProcess(target) => {
+                Self::BinaryProcess(target.into())
+            }
+            ProviderManagedLaunchTarget::PythonSidecar(target) => {
+                Self::PythonSidecar(target.into())
+            }
+        }
+    }
+}
+
+impl From<ProviderBinaryLaunchTarget> for RuntimeProfileBinaryLaunchKind {
+    fn from(target: ProviderBinaryLaunchTarget) -> Self {
+        match target {
+            ProviderBinaryLaunchTarget::OllamaServe => Self::OllamaServe,
+            ProviderBinaryLaunchTarget::LlamaCppRouter => Self::LlamaCppRouter,
+            ProviderBinaryLaunchTarget::LlamaCppDedicated => Self::LlamaCppDedicated,
+        }
+    }
+}
+
+impl From<ProviderPythonSidecarTarget> for RuntimeProfilePythonSidecarKind {
+    fn from(target: ProviderPythonSidecarTarget) -> Self {
+        match target {
+            ProviderPythonSidecarTarget::OnnxRuntime => Self::OnnxRuntime,
         }
     }
 }
@@ -64,12 +90,16 @@ impl RuntimeProfileLaunchStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{RuntimeProviderId, RuntimeProviderMode};
 
     #[test]
     fn launch_strategy_maps_existing_managed_profiles_to_binary_processes() {
         assert_eq!(
-            RuntimeProfileLaunchStrategy::for_profile(&RuntimeProfileConfig::default_ollama())
-                .unwrap(),
+            RuntimeProfileLaunchStrategy::for_profile(
+                &RuntimeProfileConfig::default_ollama(),
+                &ProviderBehavior::ollama()
+            )
+            .unwrap(),
             RuntimeProfileLaunchStrategy::BinaryProcess(
                 RuntimeProfileBinaryLaunchKind::OllamaServe
             )
@@ -79,7 +109,8 @@ mod tests {
         profile.provider = RuntimeProviderId::LlamaCpp;
         profile.provider_mode = RuntimeProviderMode::LlamaCppRouter;
         assert_eq!(
-            RuntimeProfileLaunchStrategy::for_profile(&profile).unwrap(),
+            RuntimeProfileLaunchStrategy::for_profile(&profile, &ProviderBehavior::llama_cpp())
+                .unwrap(),
             RuntimeProfileLaunchStrategy::BinaryProcess(
                 RuntimeProfileBinaryLaunchKind::LlamaCppRouter
             )
@@ -87,7 +118,8 @@ mod tests {
 
         profile.provider_mode = RuntimeProviderMode::LlamaCppDedicated;
         assert_eq!(
-            RuntimeProfileLaunchStrategy::for_profile(&profile).unwrap(),
+            RuntimeProfileLaunchStrategy::for_profile(&profile, &ProviderBehavior::llama_cpp())
+                .unwrap(),
             RuntimeProfileLaunchStrategy::BinaryProcess(
                 RuntimeProfileBinaryLaunchKind::LlamaCppDedicated
             )
@@ -100,8 +132,23 @@ mod tests {
         profile.management_mode = RuntimeManagementMode::External;
 
         assert_eq!(
-            RuntimeProfileLaunchStrategy::for_profile(&profile).unwrap(),
+            RuntimeProfileLaunchStrategy::for_profile(&profile, &ProviderBehavior::ollama())
+                .unwrap(),
             RuntimeProfileLaunchStrategy::ExternalOnly
         );
+    }
+
+    #[test]
+    fn launch_strategy_rejects_missing_provider_mapping() {
+        let mut behavior = ProviderBehavior::ollama();
+        behavior.managed_launch_strategies.clear();
+
+        assert!(matches!(
+            RuntimeProfileLaunchStrategy::for_profile(
+                &RuntimeProfileConfig::default_ollama(),
+                &behavior
+            ),
+            Err(PumasError::InvalidParams { .. })
+        ));
     }
 }

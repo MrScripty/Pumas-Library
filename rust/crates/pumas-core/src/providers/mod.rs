@@ -58,6 +58,34 @@ pub enum ProviderLaunchKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum ProviderBinaryLaunchTarget {
+    OllamaServe,
+    LlamaCppRouter,
+    LlamaCppDedicated,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderPythonSidecarTarget {
+    OnnxRuntime,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "value")]
+pub enum ProviderManagedLaunchTarget {
+    BinaryProcess(ProviderBinaryLaunchTarget),
+    PythonSidecar(ProviderPythonSidecarTarget),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ProviderManagedLaunchStrategy {
+    pub provider_mode: RuntimeProviderMode,
+    pub target: ProviderManagedLaunchTarget,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProviderModelIdPolicy {
     GatewayAlias,
     LibraryModelId,
@@ -94,6 +122,7 @@ pub struct ProviderBehavior {
     pub serving_tasks: Vec<ServingTask>,
     pub openai_endpoints: Vec<OpenAiGatewayEndpoint>,
     pub launch_kinds: Vec<ProviderLaunchKind>,
+    pub managed_launch_strategies: Vec<ProviderManagedLaunchStrategy>,
     pub provider_model_id_policy: ProviderModelIdPolicy,
     pub gateway_alias_policy: ProviderGatewayAliasPolicy,
     pub serving_adapter_kind: ProviderServingAdapterKind,
@@ -131,6 +160,12 @@ impl ProviderBehavior {
                 ProviderLaunchKind::BinaryProcess,
                 ProviderLaunchKind::ExternalOnly,
             ],
+            managed_launch_strategies: vec![ProviderManagedLaunchStrategy {
+                provider_mode: RuntimeProviderMode::OllamaServe,
+                target: ProviderManagedLaunchTarget::BinaryProcess(
+                    ProviderBinaryLaunchTarget::OllamaServe,
+                ),
+            }],
             provider_model_id_policy: ProviderModelIdPolicy::GatewayAlias,
             gateway_alias_policy: ProviderGatewayAliasPolicy::OllamaModelName,
             serving_adapter_kind: ProviderServingAdapterKind::OllamaProviderApi,
@@ -171,6 +206,20 @@ impl ProviderBehavior {
             launch_kinds: vec![
                 ProviderLaunchKind::BinaryProcess,
                 ProviderLaunchKind::ExternalOnly,
+            ],
+            managed_launch_strategies: vec![
+                ProviderManagedLaunchStrategy {
+                    provider_mode: RuntimeProviderMode::LlamaCppRouter,
+                    target: ProviderManagedLaunchTarget::BinaryProcess(
+                        ProviderBinaryLaunchTarget::LlamaCppRouter,
+                    ),
+                },
+                ProviderManagedLaunchStrategy {
+                    provider_mode: RuntimeProviderMode::LlamaCppDedicated,
+                    target: ProviderManagedLaunchTarget::BinaryProcess(
+                        ProviderBinaryLaunchTarget::LlamaCppDedicated,
+                    ),
+                },
             ],
             provider_model_id_policy: ProviderModelIdPolicy::LibraryModelId,
             gateway_alias_policy: ProviderGatewayAliasPolicy::LibraryModelId,
@@ -213,6 +262,16 @@ impl ProviderBehavior {
                 self.supports_launch_kind(ProviderLaunchKind::ExternalOnly)
             }
         }
+    }
+
+    pub fn managed_launch_target(
+        &self,
+        provider_mode: RuntimeProviderMode,
+    ) -> Option<ProviderManagedLaunchTarget> {
+        self.managed_launch_strategies
+            .iter()
+            .find(|strategy| strategy.provider_mode == provider_mode)
+            .map(|strategy| strategy.target)
     }
 
     pub fn provider_request_model_id(
@@ -352,6 +411,18 @@ mod tests {
         assert_eq!(serialized["local_artifact_formats"][0], "gguf");
         assert_eq!(serialized["openai_endpoints"][3], "embeddings");
         assert_eq!(serialized["launch_kinds"][0], "binary_process");
+        assert_eq!(
+            serialized["managed_launch_strategies"][0]["provider_mode"],
+            "llama_cpp_router"
+        );
+        assert_eq!(
+            serialized["managed_launch_strategies"][0]["target"]["kind"],
+            "binary_process"
+        );
+        assert_eq!(
+            serialized["managed_launch_strategies"][0]["target"]["value"],
+            "llama_cpp_router"
+        );
         assert_eq!(serialized["provider_model_id_policy"], "library_model_id");
         assert_eq!(serialized["gateway_alias_policy"], "library_model_id");
         assert_eq!(serialized["serving_adapter_kind"], "llama_cpp_runtime");
@@ -405,5 +476,34 @@ mod tests {
 
         assert!(behavior.supports_management_mode(RuntimeManagementMode::Managed));
         assert!(!behavior.supports_management_mode(RuntimeManagementMode::External));
+    }
+
+    #[test]
+    fn provider_managed_launch_target_maps_existing_modes() {
+        let ollama = ProviderBehavior::ollama();
+        assert_eq!(
+            ollama.managed_launch_target(RuntimeProviderMode::OllamaServe),
+            Some(ProviderManagedLaunchTarget::BinaryProcess(
+                ProviderBinaryLaunchTarget::OllamaServe
+            ))
+        );
+
+        let llama_cpp = ProviderBehavior::llama_cpp();
+        assert_eq!(
+            llama_cpp.managed_launch_target(RuntimeProviderMode::LlamaCppRouter),
+            Some(ProviderManagedLaunchTarget::BinaryProcess(
+                ProviderBinaryLaunchTarget::LlamaCppRouter
+            ))
+        );
+        assert_eq!(
+            llama_cpp.managed_launch_target(RuntimeProviderMode::LlamaCppDedicated),
+            Some(ProviderManagedLaunchTarget::BinaryProcess(
+                ProviderBinaryLaunchTarget::LlamaCppDedicated
+            ))
+        );
+        assert_eq!(
+            llama_cpp.managed_launch_target(RuntimeProviderMode::OllamaServe),
+            None
+        );
     }
 }

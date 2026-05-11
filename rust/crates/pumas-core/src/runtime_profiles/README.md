@@ -13,8 +13,8 @@ callers.
 
 ## API Consumers
 
-- `runtime_profiles.rs` derives `RuntimeProfileLaunchStrategy` values for
-  managed launch specs.
+- `runtime_profiles.rs` projects provider behavior launch targets into
+  `RuntimeProfileLaunchStrategy` values for managed launch specs.
 - `api/state_runtime_profiles.rs` consumes the typed strategy when converting a
   launch spec into a concrete process launch config.
 

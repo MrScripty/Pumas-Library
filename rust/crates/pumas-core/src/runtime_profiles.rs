@@ -498,12 +498,13 @@ impl RuntimeProfileService {
         let config_path = self.config_path.clone();
         let write_lock = self.write_lock.clone();
         let launcher_root = self.launcher_root.clone();
+        let provider_registry = self.provider_registry.clone();
         tokio::task::spawn_blocking(move || {
             let _guard = write_lock.write().map_err(|_| {
                 PumasError::Other("Failed to acquire runtime profile config lock".to_string())
             })?;
             let config = load_or_initialize_config(&config_path)?;
-            derive_managed_profile_launch_specs(&launcher_root, &config)
+            derive_managed_profile_launch_specs(&launcher_root, &config, &provider_registry)
         })
         .await
         .map_err(|err| {
@@ -561,6 +562,7 @@ impl RuntimeProfileService {
         validate_profile_config(&profile, &self.provider_registry, &self.provider_adapters).await?;
         let profile_id = profile.profile_id.clone();
         let launcher_root = self.launcher_root.clone();
+        let provider_registry = self.provider_registry.clone();
         self.mutate_config(move |config| {
             if let Some(existing) = config
                 .profiles
@@ -571,7 +573,7 @@ impl RuntimeProfileService {
             } else {
                 config.profiles.push(profile);
             }
-            derive_managed_profile_launch_specs(&launcher_root, config)?;
+            derive_managed_profile_launch_specs(&launcher_root, config, &provider_registry)?;
             Ok(RuntimeProfileMutationResponse::success(Some(profile_id)))
         })
         .await
@@ -683,6 +685,7 @@ impl RuntimeProfileService {
         let config_path = self.config_path.clone();
         let write_lock = self.write_lock.clone();
         let launcher_root = self.launcher_root.clone();
+        let provider_registry = self.provider_registry.clone();
         tokio::task::spawn_blocking(move || {
             let _guard = write_lock.write().map_err(|_| {
                 PumasError::Other("Failed to acquire runtime profile config lock".to_string())
@@ -693,7 +696,13 @@ impl RuntimeProfileService {
                 .ok_or_else(|| PumasError::InvalidParams {
                     message: "runtime profile id is required".to_string(),
                 })?;
-            resolve_config_profile_endpoint(&launcher_root, &config, provider, selected_profile_id)
+            resolve_config_profile_endpoint(
+                &launcher_root,
+                &config,
+                &provider_registry,
+                provider,
+                selected_profile_id,
+            )
         })
         .await
         .map_err(|err| {
@@ -744,6 +753,7 @@ impl RuntimeProfileService {
         let config_path = self.config_path.clone();
         let write_lock = self.write_lock.clone();
         let launcher_root = self.launcher_root.clone();
+        let provider_registry = self.provider_registry.clone();
         tokio::task::spawn_blocking(move || {
             let _guard = write_lock.write().map_err(|_| {
                 PumasError::Other("Failed to acquire runtime profile config lock".to_string())
@@ -761,7 +771,13 @@ impl RuntimeProfileService {
                 .ok_or_else(|| PumasError::InvalidParams {
                     message: "runtime profile id is required".to_string(),
                 })?;
-            resolve_config_profile_endpoint(&launcher_root, &config, provider, routed_profile_id)
+            resolve_config_profile_endpoint(
+                &launcher_root,
+                &config,
+                &provider_registry,
+                provider,
+                routed_profile_id,
+            )
         })
         .await
         .map_err(|err| {
@@ -1024,6 +1040,7 @@ impl RuntimeProfileEventJournal {
 fn derive_managed_profile_launch_specs(
     launcher_root: &Path,
     config: &RuntimeProfilesConfigFile,
+    provider_registry: &ProviderRegistry,
 ) -> Result<Vec<RuntimeProfileLaunchSpec>> {
     let mut used_ports: HashMap<u16, RuntimeProfileId> = HashMap::new();
     let mut profiles = config
@@ -1075,12 +1092,18 @@ fn derive_managed_profile_launch_specs(
             .join("runtime-profiles")
             .join(provider_path_segment(profile.provider))
             .join(profile.profile_id.as_str());
+        let behavior =
+            provider_registry
+                .get(profile.provider)
+                .ok_or_else(|| PumasError::InvalidParams {
+                    message: "runtime profile provider is not registered".to_string(),
+                })?;
 
         specs.push(RuntimeProfileLaunchSpec {
             profile_id: profile.profile_id.clone(),
             provider: profile.provider,
             provider_mode: profile.provider_mode,
-            launch_strategy: RuntimeProfileLaunchStrategy::for_profile(profile)?,
+            launch_strategy: RuntimeProfileLaunchStrategy::for_profile(profile, behavior)?,
             endpoint_url: endpoint_url.clone(),
             port,
             extra_args: profile_runtime_extra_args(launcher_root, profile, &endpoint_url, port)?,
@@ -1098,6 +1121,7 @@ fn derive_managed_profile_launch_specs(
 fn resolve_config_profile_endpoint(
     launcher_root: &Path,
     config: &RuntimeProfilesConfigFile,
+    provider_registry: &ProviderRegistry,
     provider: RuntimeProviderId,
     profile_id: RuntimeProfileId,
 ) -> Result<ResolvedRuntimeProfileEndpoint> {
@@ -1120,7 +1144,7 @@ fn resolve_config_profile_endpoint(
     let endpoint_url = match &profile.endpoint_url {
         Some(endpoint_url) => endpoint_url.clone(),
         None if profile.management_mode == RuntimeManagementMode::Managed => {
-            derive_managed_profile_launch_specs(launcher_root, config)?
+            derive_managed_profile_launch_specs(launcher_root, config, provider_registry)?
                 .into_iter()
                 .find(|spec| spec.profile_id == profile_id)
                 .map(|spec| spec.endpoint_url)

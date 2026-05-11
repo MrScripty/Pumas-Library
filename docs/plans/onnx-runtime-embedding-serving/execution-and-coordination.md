@@ -263,6 +263,13 @@ Update during implementation:
   launch-config construction now consumes the typed strategy instead of
   matching provider ids directly. Added the directory README required for the
   new launch-strategy module.
+- 2026-05-11: Moved managed launch target selection into provider behavior.
+  `ProviderBehavior` now declares per-mode `ProviderManagedLaunchStrategy`
+  values, runtime-profile launch-spec derivation consumes the composed provider
+  registry to project those targets into `RuntimeProfileLaunchStrategy`, and
+  provider contract serialization tests cover the new launch target wire shape.
+  ONNX sidecar process launch remains deferred to the managed ONNX lifecycle
+  slice.
 
 ## Commit Cadence Notes
 
@@ -431,6 +438,8 @@ changes remain.
   runtime provider adapters instead of a direct provider match.
 - Runtime-profile launch specs now carry a typed launch strategy consumed by
   lifecycle launch-config construction for existing managed providers.
+- Provider behavior now owns per-mode managed launch targets consumed by
+  runtime-profile launch-spec derivation.
 
 ### Deviations
 
@@ -557,6 +566,12 @@ changes remain.
   test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo
   fmt --manifest-path rust/Cargo.toml --all -- --check`.
 - Runtime-profile launch strategy slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml launch_strategy`, `cargo
+  test --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`,
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`.
+- Provider-owned managed launch target slice verified with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml providers`, `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml launch_strategy`, `cargo
   test --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`,
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and

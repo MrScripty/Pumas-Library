@@ -49,7 +49,7 @@ provider and widens the blast radius.
 - [x] Build reusable provider HTTP clients and gateway clients at composition
       roots with explicit timeout/body/error policy. Provider serving adapters
       consume those clients; request handlers must not build clients directly.
-- [ ] Include alias defaulting, served-instance identity, route identity,
+- [x] Include alias defaulting, served-instance identity, route identity,
       endpoint support, request model-id rewriting, managed launch strategy, and
       provider-specific unload behavior in the provider behavior contract so
       serving/gateway handlers do not need provider matches.
@@ -268,6 +268,12 @@ lifecycle launch config construction consumes that strategy instead of matching
 provider ids directly. `PythonSidecar(OnnxRuntime)` is represented for the
 future ONNX managed sidecar path; actual ONNX sidecar launch/shutdown wiring
 remains open in the ONNX provider milestones.
+Managed launch target selection now lives in `ProviderBehavior` as per-mode
+`ProviderManagedLaunchStrategy` entries. Runtime-profile launch-spec derivation
+consumes the composed provider registry for launch targets, so existing Ollama
+and llama.cpp launch mapping no longer lives in a runtime-profile provider
+match. This closes the managed-launch portion of the provider behavior contract;
+ONNX sidecar process launch still remains a later provider lifecycle slice.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

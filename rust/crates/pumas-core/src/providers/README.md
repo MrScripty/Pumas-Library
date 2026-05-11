@@ -36,9 +36,10 @@ and managed/external support checks. Serving and gateway request model-id
 rewriting now consume the provider model-id policy, and gateway proxying checks
 provider endpoint capabilities before forwarding through a shared gateway HTTP
 client. Serving alias defaulting consumes the provider gateway-alias policy.
-Serving load dispatch consumes the provider serving adapter kind.
-Later slices migrate full serving adapters, launcher strategies, serving-side
-provider clients, and frontend bridge contracts onto this registry.
+Serving load dispatch consumes the provider serving adapter kind. Runtime
+profile launch-spec derivation consumes managed launch strategies declared by
+provider behavior.
+Later slices migrate frontend bridge contracts onto this registry.
 
 ## Alternatives Rejected
 
@@ -61,6 +62,8 @@ provider clients, and frontend bridge contracts onto this registry.
   support.
 - Provider-side request model ids are derived from the declared model-id
   policy, not from transport-layer provider matches.
+- Managed runtime profile launch targets are declared per provider mode by
+  provider behavior, then projected into runtime-profile launch specs.
 - Executable artifact formats are parsed into `ExecutableArtifactFormat` at
   boundaries before serving validation consumes them.
 
@@ -103,6 +106,8 @@ assert!(behavior.supports_openai_endpoint(
 - Registry values are immutable after construction in this slice.
 - `ProviderBehavior::provider_request_model_id` applies the provider's
   model-id policy to a library model id and optional gateway alias.
+- `ProviderBehavior::managed_launch_target` returns the provider-owned managed
+  launch target for a validated provider mode.
 - `ExecutableArtifactFormat::from_path` is the shared boundary parser for
   local executable model artifact paths.
 - `ProviderBehavior::supports_management_mode` is the shared policy check for

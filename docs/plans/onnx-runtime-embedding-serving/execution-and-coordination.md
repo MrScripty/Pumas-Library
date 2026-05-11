@@ -167,6 +167,12 @@ Update during implementation:
   is unchanged. During extraction, removed duplicate gateway sort/return lines
   found in the moved code; behavior is covered by the existing gateway lookup
   and endpoint-policy tests.
+- 2026-05-11: Extracted the Ollama serving load/unload implementation into
+  `rust/crates/pumas-rpc/src/handlers/serving_ollama.rs`. The JSON-RPC serving
+  handler now imports Ollama adapter entry points while retaining boundary
+  parsing, validation orchestration, non-critical response shaping, and provider
+  behavior dispatch. llama.cpp adapter extraction remains pending and must stay
+  separate from launch-strategy redesign.
 
 ## Commit Cadence Notes
 
@@ -304,6 +310,9 @@ changes remain.
 - OpenAI-compatible gateway handlers and proxy helpers now live in a focused
   `handlers/openai_gateway.rs` module instead of the oversized RPC handlers
   module.
+- Ollama serving load/unload now lives in a focused
+  `handlers/serving_ollama.rs` adapter module; llama.cpp serving extraction
+  remains pending.
 
 ### Deviations
 
@@ -375,6 +384,9 @@ changes remain.
 - Gateway helper extraction slice verified with `cargo test --manifest-path
   rust/crates/pumas-rpc/Cargo.toml openai_gateway`, `cargo test
   --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`.
+- Ollama serving adapter extraction slice verified with `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml serving` and `cargo fmt
   --manifest-path rust/Cargo.toml --all -- --check`.
 
 ### Traceability Links

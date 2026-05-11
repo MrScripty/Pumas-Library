@@ -10,6 +10,7 @@ mod plugins;
 mod process;
 mod runtime_profiles;
 mod serving;
+mod serving_ollama;
 mod shared;
 mod shortcuts;
 mod status;

@@ -204,6 +204,10 @@ the oversized RPC handlers module into a focused gateway module while preserving
 the public route exports. The broader large-file split task remains open for
 route migration, serving adapters, launch strategy, and frontend provider row
 work.
+Ollama serving load/unload has been extracted into a focused adapter module.
+The provider serving adapter task remains open until llama.cpp serving is also
+extracted and the handler owns only boundary parsing, validation orchestration,
+provider behavior dispatch, and response shaping.
 
 ### Milestone 1: ONNX Sidecar Skeleton
 

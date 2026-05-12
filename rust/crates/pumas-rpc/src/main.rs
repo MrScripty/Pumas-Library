@@ -15,13 +15,15 @@ use pumas_app_manager::{CustomNodesManager, SizeCalculator, VersionManager};
 use pumas_library::{AppId, PluginLoader};
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::runtime::Builder;
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 const RPC_WORKER_THREADS: usize = 4;
 const RPC_MAX_BLOCKING_THREADS: usize = 16;
+const VERSION_MANAGED_APPS: &[AppId] =
+    &[AppId::ComfyUI, AppId::Ollama, AppId::Torch, AppId::LlamaCpp];
 
 #[derive(Parser, Debug)]
 #[command(name = "pumas-rpc")]
@@ -112,53 +114,7 @@ async fn run(args: Args) -> Result<()> {
         .build()
         .await?;
 
-    // Initialize version managers for all supported apps
-    let mut version_managers: HashMap<String, VersionManager> = HashMap::new();
-
-    // ComfyUI version manager
-    match VersionManager::new(&launcher_root, AppId::ComfyUI).await {
-        Ok(mgr) => {
-            info!("ComfyUI version manager initialized successfully");
-            version_managers.insert("comfyui".to_string(), mgr);
-        }
-        Err(e) => {
-            warn!("Failed to initialize ComfyUI version manager: {}", e);
-        }
-    }
-
-    // Ollama version manager
-    match VersionManager::new(&launcher_root, AppId::Ollama).await {
-        Ok(mgr) => {
-            info!("Ollama version manager initialized successfully");
-            version_managers.insert("ollama".to_string(), mgr);
-        }
-        Err(e) => {
-            warn!("Failed to initialize Ollama version manager: {}", e);
-        }
-    }
-
-    // Torch version manager
-    match VersionManager::new(&launcher_root, AppId::Torch).await {
-        Ok(mgr) => {
-            info!("Torch version manager initialized successfully");
-            version_managers.insert("torch".to_string(), mgr);
-        }
-        Err(e) => {
-            warn!("Failed to initialize Torch version manager: {}", e);
-        }
-    }
-
-    // llama.cpp version manager
-    match VersionManager::new(&launcher_root, AppId::LlamaCpp).await {
-        Ok(mgr) => {
-            info!("llama.cpp version manager initialized successfully");
-            version_managers.insert("llama-cpp".to_string(), mgr);
-        }
-        Err(e) => {
-            warn!("Failed to initialize llama.cpp version manager: {}", e);
-        }
-    }
-
+    let version_managers = initialize_version_managers(&launcher_root).await;
     info!("Initialized {} version manager(s)", version_managers.len());
 
     // Initialize custom nodes manager
@@ -217,6 +173,24 @@ async fn run(args: Args) -> Result<()> {
     Ok(())
 }
 
+async fn initialize_version_managers(launcher_root: &Path) -> HashMap<String, VersionManager> {
+    let mut version_managers = HashMap::new();
+
+    for app_id in VERSION_MANAGED_APPS {
+        match VersionManager::new(launcher_root, *app_id).await {
+            Ok(manager) => {
+                info!("{app_id} version manager initialized successfully");
+                version_managers.insert(app_id.as_str().to_string(), manager);
+            }
+            Err(error) => {
+                warn!("Failed to initialize {app_id} version manager: {error}");
+            }
+        }
+    }
+
+    version_managers
+}
+
 fn validate_rpc_host(host: &str, allow_lan: bool) -> Result<()> {
     let ip_addr: IpAddr = host
         .parse()
@@ -233,7 +207,8 @@ fn validate_rpc_host(host: &str, allow_lan: bool) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_rpc_host;
+    use super::{validate_rpc_host, VERSION_MANAGED_APPS};
+    use pumas_library::AppId;
 
     #[test]
     fn rpc_host_validation_allows_loopback_without_lan_flag() {
@@ -250,5 +225,11 @@ mod tests {
     #[test]
     fn rpc_host_validation_allows_non_loopback_with_lan_flag() {
         assert!(validate_rpc_host("0.0.0.0", true).is_ok());
+    }
+
+    #[test]
+    fn version_managed_apps_exclude_in_process_onnx_runtime() {
+        assert!(!VERSION_MANAGED_APPS.contains(&AppId::OnnxRuntime));
+        assert!(VERSION_MANAGED_APPS.iter().all(AppId::has_version_manager));
     }
 }

@@ -38,6 +38,8 @@ export function AppPanelRenderer({
       return <OllamaPanel {...ollama} />;
     case 'llama-cpp':
       return <LlamaCppPanel {...llamaCpp} />;
+    case 'onnx-runtime':
+      return <DefaultAppPanel {...fallback} />;
     case 'torch':
       return <TorchPanel {...torch} />;
     default:

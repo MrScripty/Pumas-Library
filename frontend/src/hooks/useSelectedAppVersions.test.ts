@@ -91,4 +91,15 @@ describe('useSelectedAppVersions', () => {
     expect(result.current.comfyInstalledVersions).toEqual(['comfyui-installed']);
     expect(result.current.appVersions.installedVersions).toEqual([]);
   });
+
+  it('does not query a version manager for in-process ONNX Runtime', () => {
+    const { result } = renderHook(() => useSelectedAppVersions('onnx-runtime'));
+
+    expect(useVersionsMock).toHaveBeenCalledTimes(4);
+    expect(useVersionsMock).not.toHaveBeenCalledWith(expect.objectContaining({
+      appId: 'onnx-runtime',
+    }));
+    expect(result.current.appVersions.isSupported).toBe(false);
+    expect(result.current.appVersions.installedVersions).toEqual([]);
+  });
 });

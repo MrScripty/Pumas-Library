@@ -62,6 +62,7 @@ impl ProcessManagerFactory {
                 // Docker support can be added later
                 return None;
             }
+            InstallationType::InProcess => return None,
         };
 
         // Cache the manager
@@ -74,7 +75,7 @@ impl ProcessManagerFactory {
 
     /// Check if a manager exists for the given app.
     pub fn has_manager(&self, app_id: &str) -> bool {
-        self.plugin_loader.exists(app_id)
+        self.get_manager(app_id).is_some()
     }
 
     /// Get the plugin loader.
@@ -488,5 +489,27 @@ mod tests {
         let manager = BinaryProcessManager::new(temp.path().to_path_buf(), plugin);
         let path = manager.version_path("v1.0.0");
         assert!(path.ends_with("test-app-versions/v1.0.0"));
+    }
+
+    #[test]
+    fn in_process_plugins_do_not_create_process_managers() {
+        let temp = TempDir::new().unwrap();
+        let plugins_dir = temp.path().join("plugins");
+        std::fs::create_dir_all(&plugins_dir).unwrap();
+        std::fs::write(
+            plugins_dir.join("onnx-runtime.json"),
+            r#"{
+              "id": "onnx-runtime",
+              "displayName": "ONNX Runtime",
+              "installationType": "in-process"
+            }"#,
+        )
+        .unwrap();
+
+        let loader = Arc::new(PluginLoader::new(&plugins_dir).unwrap());
+        let factory = ProcessManagerFactory::new(temp.path().to_path_buf(), loader);
+
+        assert!(factory.get_manager("onnx-runtime").is_none());
+        assert!(!factory.has_manager("onnx-runtime"));
     }
 }

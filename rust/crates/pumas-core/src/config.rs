@@ -167,6 +167,7 @@ pub enum AppId {
     KritaDiffusion,
     LlamaCpp,
     Torch,
+    OnnxRuntime,
 }
 
 impl AppId {
@@ -180,7 +181,16 @@ impl AppId {
             AppId::KritaDiffusion => "kritadiffusion",
             AppId::LlamaCpp => "llama-cpp",
             AppId::Torch => "torch",
+            AppId::OnnxRuntime => "onnx-runtime",
         }
+    }
+
+    /// Return whether this app is managed by the GitHub-backed version manager.
+    ///
+    /// ONNX Runtime is provided by the Rust backend in-process and is configured
+    /// through runtime profiles, not a separately installed app version.
+    pub fn has_version_manager(&self) -> bool {
+        !matches!(self, AppId::OnnxRuntime)
     }
 
     /// Return the GitHub `owner/repo` path for this app's upstream repository.
@@ -193,6 +203,7 @@ impl AppId {
             AppId::KritaDiffusion => "Acly/krita-ai-diffusion",
             AppId::LlamaCpp => "ggml-org/llama.cpp",
             AppId::Torch => "pytorch/pytorch",
+            AppId::OnnxRuntime => "",
         }
     }
 
@@ -206,6 +217,7 @@ impl AppId {
             AppId::KritaDiffusion => "kritadiffusion-versions",
             AppId::LlamaCpp => "llama-cpp-versions",
             AppId::Torch => "torch-versions",
+            AppId::OnnxRuntime => "onnx-runtime",
         }
     }
 
@@ -216,6 +228,7 @@ impl AppId {
             AppId::Ollama => 11434,
             AppId::LlamaCpp => 18080,
             AppId::Torch => 8400,
+            AppId::OnnxRuntime => 0,
             _ => 0, // No default port
         }
     }
@@ -227,6 +240,7 @@ impl AppId {
             AppId::Ollama => "http://127.0.0.1:11434",
             AppId::LlamaCpp => "http://127.0.0.1:18080",
             AppId::Torch => "http://127.0.0.1:8400",
+            AppId::OnnxRuntime => "",
             _ => "",
         }
     }
@@ -242,6 +256,7 @@ impl AppId {
             "kritadiffusion" => Some(AppId::KritaDiffusion),
             "llama-cpp" | "llamacpp" | "llama.cpp" => Some(AppId::LlamaCpp),
             "torch" => Some(AppId::Torch),
+            "onnx-runtime" | "onnxruntime" | "onnx_runtime" => Some(AppId::OnnxRuntime),
             _ => None,
         }
     }
@@ -267,11 +282,20 @@ mod tests {
             AppId::KritaDiffusion,
             AppId::LlamaCpp,
             AppId::Torch,
+            AppId::OnnxRuntime,
         ] {
             let s = app_id.as_str();
             let parsed = AppId::from_str(s).expect("Should parse");
             assert_eq!(app_id, parsed);
         }
+    }
+
+    #[test]
+    fn onnx_runtime_is_in_process_without_version_manager() {
+        assert!(!AppId::OnnxRuntime.has_version_manager());
+        assert_eq!(AppId::OnnxRuntime.github_repo(), "");
+        assert_eq!(AppId::OnnxRuntime.default_port(), 0);
+        assert_eq!(AppId::OnnxRuntime.default_base_url(), "");
     }
 
     #[test]

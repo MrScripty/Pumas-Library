@@ -131,6 +131,15 @@ impl VersionManager {
     pub async fn new(launcher_root: impl Into<PathBuf>, app_id: AppId) -> Result<Self> {
         let launcher_root = launcher_root.into();
 
+        if !app_id.has_version_manager() {
+            return Err(PumasError::Config {
+                message: format!(
+                    "{} is provided in-process and does not use the version manager",
+                    app_id
+                ),
+            });
+        }
+
         if !path_exists(&launcher_root).await? {
             return Err(PumasError::Config {
                 message: format!("Launcher root does not exist: {}", launcher_root.display()),
@@ -671,6 +680,23 @@ mod tests {
     async fn test_manager_creation() {
         let (manager, _temp) = create_test_manager().await;
         assert!(manager.versions_dir().ends_with("comfyui-versions"));
+    }
+
+    #[tokio::test]
+    async fn onnx_runtime_is_rejected_by_version_manager() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let error = match VersionManager::new(temp_dir.path(), AppId::OnnxRuntime).await {
+            Ok(_) => panic!("ONNX Runtime should not create a version manager"),
+            Err(error) => error,
+        };
+
+        assert!(
+            error
+                .to_string()
+                .contains("does not use the version manager"),
+            "{error}"
+        );
     }
 
     #[tokio::test]

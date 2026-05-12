@@ -536,10 +536,10 @@ Ollama or llama.cpp profiles.
 - [x] Add `launcher-data/plugins/onnx-runtime.json`.
 - [x] Add `RuntimeProviderId::OnnxRuntime` and
       `RuntimeProviderMode::OnnxServe`.
-- [ ] Add ONNX Runtime to the frontend app registry with a sidebar icon,
+- [x] Add ONNX Runtime to the frontend app registry with a sidebar icon,
       display name, description, default connection URL/port, and status
       defaults.
-- [ ] Update Rust `AppId`, version-manager registration, plugin metadata,
+- [x] Update Rust `AppId`, version-manager registration, plugin metadata,
       frontend app registry, selected-version hooks, managed-app decoration,
       app-shell panel props, and panel renderer in one app identity slice unless
       Milestone 0 replaced them with a descriptor-driven composition root.
@@ -607,9 +607,13 @@ runtime provider types/descriptors now include `onnx_runtime` and `onnx_serve`
 with focused descriptor tests and typecheck coverage. Plugin metadata now
 includes `onnx-runtime` with an explicit `in-process` installation type,
 `.onnx` compatibility, runtime-profile/model-library panel declarations, no
-version-manager capability, and Rust/TypeScript plugin schema support. Frontend
-app state, Rust `AppId`/version-manager alignment, ONNX runtime profile
-lifecycle, and full schema/fixture coverage remain open.
+version-manager capability, and Rust/TypeScript plugin schema support. The app
+identity slice now registers `AppId::OnnxRuntime`, prevents ONNX Runtime from
+creating a `VersionManager` or process manager, adds the frontend sidebar app
+entry, keeps selected-version hooks from querying an ONNX version manager, and
+routes the app shell through the explicit fallback panel until the dedicated
+ONNX panel lands in Milestone 6. ONNX runtime profile lifecycle, backend-derived
+icon/session state, and full schema/fixture coverage remain open.
 
 ### Milestone 4: Serving Validation And Load/Unload
 

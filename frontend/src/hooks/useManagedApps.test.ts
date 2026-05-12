@@ -121,4 +121,41 @@ describe('decorateManagedApps', () => {
     expect(llamaCpp?.status).toBe('running');
     expect(llamaCpp?.iconState).toBe('running');
   });
+
+  it('keeps in-process ONNX Runtime out of version-managed decoration', () => {
+    const decorated = decorateManagedApps(DEFAULT_APPS, {
+      comfyui: {
+        isRunning: true,
+        isStarting: false,
+        isStopping: false,
+        launchError: null,
+        installedVersions: ['v1'],
+      },
+      ollama: {
+        isRunning: true,
+        isStarting: false,
+        isStopping: false,
+        launchError: null,
+        installedVersions: ['v1'],
+      },
+      llamaCpp: {
+        isRunning: true,
+        isStarting: false,
+        isStopping: false,
+        launchError: null,
+        installedVersions: ['v1'],
+      },
+      torch: {
+        isRunning: true,
+        isStarting: false,
+        isStopping: false,
+        launchError: null,
+        installedVersions: ['v1'],
+      },
+    });
+
+    const onnxRuntime = decorated.find((app) => app.id === 'onnx-runtime');
+    expect(onnxRuntime?.status).toBe('idle');
+    expect(onnxRuntime?.iconState).toBe('offline');
+  });
 });

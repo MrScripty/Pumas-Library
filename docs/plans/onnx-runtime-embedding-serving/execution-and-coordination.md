@@ -814,6 +814,30 @@ Update during implementation:
   Verification passed: `cargo fmt --manifest-path rust/Cargo.toml --all
   -- --check`, `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml
   plugins`, and `npm run -w frontend check:types`.
+- 2026-05-12: Completed the M3 ONNX app identity alignment slice. Rust
+  `AppId` now includes `OnnxRuntime` with an explicit `has_version_manager =
+  false` contract, the RPC composition root initializes version managers from a
+  fixed version-managed app list that excludes ONNX Runtime, and
+  `VersionManager::new` rejects in-process apps instead of creating dummy
+  install state. Focused verification found a hidden contract gap where
+  `ProcessManagerFactory` did not handle `InstallationType::InProcess`; the
+  factory now returns no process manager for in-process plugins and
+  `has_manager` reflects actual process-manager availability rather than plugin
+  existence. The frontend app registry now includes `onnx-runtime` with no
+  connection URL, selected-version hooks do not query a version manager for it,
+  managed-app decoration leaves its default offline app state untouched until
+  backend-owned profile/session state lands, and the app-panel renderer has an
+  explicit ONNX fallback route pending the dedicated Milestone 6 panel.
+  Verification passed: `cargo fmt --manifest-path rust/Cargo.toml --all
+  -- --check`, `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml
+  config`, `cargo test --manifest-path rust/crates/pumas-app-manager/Cargo.toml
+  onnx_runtime`, `cargo test --manifest-path
+  rust/crates/pumas-app-manager/Cargo.toml
+  in_process_plugins_do_not_create_process_managers`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml
+  version_managed_apps_exclude_in_process_onnx_runtime`, `npm run -w frontend
+  check:types`, and `npm run -w frontend test:run -- apps
+  useSelectedAppVersions useManagedApps`.
 
 ## Commit Cadence Notes
 
@@ -1314,6 +1338,16 @@ changes remain.
   real_backend_embeds_optional_real_fixture -- --nocapture`, and file-size
   evidence: `real_backend.rs` 124 lines, RPC `server.rs` 344 lines,
   `openai_gateway_tests.rs` 422 lines, `serving_onnx_tests.rs` 161 lines.
+- ONNX app identity alignment verified with `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml config`, `cargo test --manifest-path
+  rust/crates/pumas-app-manager/Cargo.toml onnx_runtime`, `cargo test
+  --manifest-path rust/crates/pumas-app-manager/Cargo.toml
+  in_process_plugins_do_not_create_process_managers`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml
+  version_managed_apps_exclude_in_process_onnx_runtime`, `npm run -w frontend
+  check:types`, and `npm run -w frontend test:run -- apps
+  useSelectedAppVersions useManagedApps`.
 
 ### Traceability Links
 

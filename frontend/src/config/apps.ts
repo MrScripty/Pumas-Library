@@ -53,6 +53,17 @@ export const DEFAULT_APPS: AppConfig[] = [
     linked: false,
   },
   {
+    id: 'onnx-runtime',
+    name: 'onnx-runtime',
+    displayName: 'ONNX Runtime',
+    icon: Cpu,
+    status: 'idle',
+    iconState: 'offline',
+    description: 'In-process embedding runtime for ONNX models',
+    starred: false,
+    linked: false,
+  },
+  {
     id: 'torch',
     name: 'torch',
     displayName: 'Torch',

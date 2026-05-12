@@ -125,8 +125,66 @@ numeric dependencies.
 - `cargo audit --version`: unavailable in this environment (`cargo-audit` is
   not installed). Security advisory audit remains open before release.
 
+## Dependency Tree And License Evidence
+
+Focused reverse dependency checks show the selected ONNX dependencies are owned
+by `pumas-core`/`pumas-library` only:
+
+- `ort v2.0.0-rc.12 -> pumas-library`
+- `tokenizers v0.23.1 -> pumas-library`
+- `half v2.7.1 -> pumas-library` and `half -> ort -> pumas-library`
+- `ndarray v0.17.2 -> ort -> pumas-library`
+
+The focused normal dependency tree for these additions includes the expected
+ONNX/tokenizer/numeric support crates: `ort`, `ort-sys`, `tokenizers`, `half`,
+`ndarray`, `matrixmultiply`, `onig`, `onig_sys`, `regex`, `regex-automata`,
+`regex-syntax`, `esaxx-rs`, `native-tls`, `base64`, `portable-atomic`, and
+`zerocopy`. No GPU execution-provider crates or features are enabled in the
+current manifest slice.
+
+`cargo info` license metadata checked on 2026-05-12:
+
+| Crate | Version | License | Rust Version |
+| ----- | ------- | ------- | ------------ |
+| `ort` | `2.0.0-rc.12` | `MIT OR Apache-2.0` | `1.88` |
+| `tokenizers` | `0.23.1` | `Apache-2.0` | not declared by `cargo info` |
+| `half` | `2.7.1` | `MIT OR Apache-2.0` | `1.81` |
+| `ndarray` | `0.17.2` | `MIT OR Apache-2.0` | `1.64` |
+
+## Package Size Evidence
+
+Local registry source checkout sizes observed on 2026-05-12:
+
+| Package Source | Size |
+| -------------- | ---- |
+| `ort-2.0.0-rc.12` | `868K` |
+| `ort-sys-2.0.0-rc.12` | `380K` |
+| `tokenizers-0.23.1` | `1.3M` |
+| `half-2.7.1` | `428K` |
+| `ndarray-0.17.2` | `1.4M` |
+
+Local debug build script directories for `ort-sys` were observed at `6.8M` to
+`9.2M` for active fingerprints. No `libonnxruntime*` shared library was found
+under `rust/target` by a local `find` check after focused test runs, so final
+packaged native-library size still must be validated by the release/launcher
+smoke path that builds the distributable artifact. That release validation
+remains a Milestone 8 gate.
+
+## Security Audit Evidence
+
+`cargo audit` is not installed in this environment:
+
+```text
+error: no such command: `audit`
+```
+
+This records the attempted audit check for the implementation slice, but it is
+not a substitute for release security validation. A successful advisory audit
+or an approved release-time alternative remains required before shipping.
+
 ## Sources Checked
 
 - `cargo info ort@2.0.0-rc.12`, crates.io/docs.rs metadata.
 - `cargo info tokenizers@0.23.1`, crates.io/docs.rs metadata.
+- `cargo info half@2.7.1`, crates.io/docs.rs metadata.
 - `cargo info ndarray@0.17.2`, crates.io/docs.rs metadata.

@@ -419,7 +419,7 @@ post-processing semantics.
 - [x] Pin dependencies through the owning Rust manifest/lock strategy used by
       the repo, and verify focused Rust build/test commands do not depend on
       unrelated runtime paths.
-- [ ] Record dependency tree, license, security-audit, and package-size impact.
+- [x] Record dependency tree, license, security-audit, and package-size impact.
       If ONNX Runtime introduces separate CPU/GPU packages, document the chosen
       default and the re-plan trigger for GPU support.
 - [x] Load tokenizer from a validated model directory in Rust.
@@ -466,8 +466,11 @@ explicit `std`/`ndarray`/`tracing`/`download-binaries`/`copy-dylibs`/
 `tls-native`/`api-24` features, and `tokenizers` `0.23.1` with only `onig`.
 `ndarray` is present transitively through `ort`, not as a direct dependency.
 Focused `cargo check`, `cargo test ... onnx`, and dependency-tree checks passed.
-Security audit tooling is not installed in this environment, and native-library
-packaging, license/package-size review, and real ONNX execution remain open.
+Dependency tree, license, package-size, and attempted security-audit evidence
+is recorded in `dependency-review.md`; `cargo-audit` is not installed in this
+environment, so a successful advisory audit or approved release-time
+alternative remains a release gate. Native-library packaging validation remains
+open for Milestone 8's release/launcher smoke.
 The tokenizer slice added `OnnxTokenizer`, which resolves a sibling
 `tokenizer.json` from a validated ONNX model path, verifies it stays under the
 configured model root, tokenizes ordered embedding inputs, returns `i64`

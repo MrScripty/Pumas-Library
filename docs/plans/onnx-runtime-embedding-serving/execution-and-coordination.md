@@ -785,6 +785,23 @@ Update during implementation:
   rust/crates/pumas-core/Cargo.toml real_backend_embeds_optional_real_fixture
   -- --nocapture`, and `cargo test --manifest-path
   rust/crates/pumas-rpc/Cargo.toml onnx`.
+- 2026-05-12: Completed the M2 dependency evidence update in
+  `dependency-review.md`. The review now records focused reverse dependency
+  trees for `ort`, `tokenizers`, `half`, and transitive `ndarray`, license/Rust
+  version metadata from `cargo info`, local registry source checkout sizes,
+  observed `ort-sys` debug build-script directory sizes, and the CPU-first
+  package strategy with no GPU execution-provider features enabled. `cargo
+  audit --version` still fails because `cargo-audit` is not installed, so the
+  attempted audit is recorded and a successful advisory audit or approved
+  release-time alternative remains a release gate. Verification/evidence
+  commands run: `cargo tree --manifest-path rust/crates/pumas-core/Cargo.toml
+  -i ort`, `cargo tree --manifest-path rust/crates/pumas-core/Cargo.toml -i
+  tokenizers`, `cargo tree --manifest-path rust/crates/pumas-core/Cargo.toml
+  -i half`, `cargo tree --manifest-path rust/crates/pumas-core/Cargo.toml -i
+  ndarray`, `cargo info ort@2.0.0-rc.12`, `cargo info tokenizers@0.23.1`,
+  `cargo info half@2.7.1`, `cargo info ndarray@0.17.2`, local `du` checks for
+  source/build directories, and a local `find` check for copied
+  `libonnxruntime*` artifacts under `rust/target`.
 
 ## Commit Cadence Notes
 

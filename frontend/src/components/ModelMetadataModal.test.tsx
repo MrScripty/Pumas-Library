@@ -90,7 +90,7 @@ describe('ModelMetadataModal', () => {
 
     expect(resolveModelPackageFactsMock).toHaveBeenCalledWith('model-1');
     expect(await screen.findByText('Package Facts Contract Version')).toBeInTheDocument();
-    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.getByText('2')).toBeInTheDocument();
     expect(screen.getByText('Artifact')).toBeInTheDocument();
   });
 });

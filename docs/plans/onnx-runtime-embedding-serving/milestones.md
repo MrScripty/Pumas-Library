@@ -955,7 +955,7 @@ keeping backend-owned state authoritative.
   selection, alias requirement updates from serving-status subscriptions, and
   absence of fallback to llama.cpp/default profiles.
 
-**Status:** In progress. Earlier slices added the ONNX Runtime app shell,
+**Status:** Complete. Earlier slices added the ONNX Runtime app shell,
 runtime-profile settings, provider descriptors, app identity drift tests,
 serve-dialog provider filtering, and initial ONNX-compatible model filtering.
 The latest frontend slice replaced the generic model manager inside the ONNX
@@ -979,6 +979,8 @@ it saves, clears, and opens serve options through the selected profile's
 provider-scoped route. ONNX route-control tests use named role/label selectors
 and keyboard activation for the Save action; the new controls use native
 buttons, labels, and icon-button accessible names without direct DOM mutation.
+Milestone verification passed with the full frontend test suite, frontend
+typecheck, and frontend production build.
 
 ### Milestone 7: Documentation And External App Contract
 

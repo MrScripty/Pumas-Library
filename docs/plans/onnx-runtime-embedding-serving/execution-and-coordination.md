@@ -1458,6 +1458,15 @@ changes remain.
   chosen profile provider, clears only that provider's route, and opens serve
   options with the selected provider filter. Tests cover named role/label
   selectors and keyboard activation for ONNX route saving.
+- Milestone 6 full frontend verification passed with `npm run -w frontend
+  test:run`, `npm run -w frontend check:types`, and `npm run -w frontend
+  build`. The first full-suite run found a stale
+  `ModelMetadataModal.test.tsx` expectation: the mocked package facts contract
+  version was `2` while the assertion still expected `1`. The test expectation
+  was corrected and `npm run -w frontend test:run -- ModelMetadataModal`
+  passed before the full suite was rerun successfully. The full-suite run still
+  prints jsdom's known `Window.scrollTo()` not-implemented message, but all
+  tests pass.
 
 ### Traceability Links
 

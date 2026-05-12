@@ -1045,25 +1045,25 @@ shape-only curl examples.
 **Goal:** Validate the full cross-layer feature in the packaged launcher path.
 
 **Tasks:**
-- [ ] Run focused Rust and frontend checks from prior milestones.
-- [ ] Run focused Rust dependency/build checks from the ONNX execution owner,
+- [x] Run focused Rust and frontend checks from prior milestones.
+- [x] Run focused Rust dependency/build checks from the ONNX execution owner,
       not only from root convenience scripts.
-- [ ] Build the release app.
-- [ ] Launch the app and serve an ONNX embedding model through an ONNX Runtime
+- [x] Build the release app.
+- [x] Launch the app and serve an ONNX embedding model through an ONNX Runtime
       profile.
-- [ ] Verify external gateway calls from a separate process.
-- [ ] Verify unload removes the model from `/v1/models`.
-- [ ] Verify launcher-compatible install/build/release-smoke paths package or
+- [x] Verify external gateway calls from a separate process.
+- [x] Verify unload removes the model from `/v1/models`.
+- [x] Verify launcher-compatible install/build/release-smoke paths package or
       locate ONNX Runtime native dependencies without mutating normal user
       state.
-- [ ] Record dependency audit, license review, package size/transitive cost,
+- [x] Record dependency audit, license review, package size/transitive cost,
       and CPU/GPU packaging decision.
-- [ ] Record release artifact impact, checksum/SBOM expectations, and whether
+- [x] Record release artifact impact, checksum/SBOM expectations, and whether
       ONNX Runtime native libraries change installer/package size or platform
       support.
-- [ ] Update changelog or release notes for the user-visible ONNX serving
+- [x] Update changelog or release notes for the user-visible ONNX serving
       feature.
-- [ ] Record results in Execution Notes and Completion Summary.
+- [x] Record results in Execution Notes and Completion Summary.
 
 **Verification:**
 - `bash launcher.sh --build-release`
@@ -1071,4 +1071,20 @@ shape-only curl examples.
 - Release app smoke: ONNX model loaded, `/v1/models` lists alias,
   `/v1/embeddings` returns expected dimension, unload removes alias.
 
-**Status:** Not started.
+**Status:** Complete. Focused Rust/frontend checks, owning-crate dependency
+checks, release build, release smoke, and an isolated live ONNX Runtime gateway
+smoke passed on 2026-05-12. The live smoke used a copied `/tmp` launcher root
+with the local Nomic ONNX embedding package, launched an `onnx_runtime` /
+`onnx_serve` profile, served the model with alias `onnx-smoke-nomic`, verified
+`/v1/models`, verified `/v1/embeddings` returned a 768-dimensional embedding,
+unloaded the model, and verified `/v1/models` returned an empty list. The first
+live attempt exposed a launch-path defect: in-process ONNX profiles were routed
+through version-manager lookup and reported `ONNX Runtime session manager not
+initialized`. The fix treats provider-declared in-process runtimes as hosted by
+the RPC composition root and records the profile as running without a binary
+version manager. Release packaging remains CPU-first through `ort`'s
+download/copy native binary strategy; GPU execution-provider packaging is not
+enabled in this milestone. `cargo audit` is still unavailable in this
+environment, so a successful advisory audit or release-time approved
+alternative remains the only open release governance item outside this plan's
+local verification evidence.

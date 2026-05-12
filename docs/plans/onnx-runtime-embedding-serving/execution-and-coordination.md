@@ -1104,12 +1104,18 @@ changes remain.
   serving adapter slice connects the session manager.
 - Frontend runtime-provider contracts are synced for ONNX provider ids, modes,
   labels, CPU-only device options, `.onnx` compatibility, and descriptor tests.
-- Serving validation is in progress for ONNX: `.onnx` artifacts and running
-  ONNX profiles validate through provider behavior, while unsupported artifacts
-  and per-load placement overrides fail before provider execution.
-- Fake ONNX serving adapter is in progress: RPC serving can load/unload ONNX
-  served status through the Rust fake session manager, with real ONNX Runtime
-  inference and gateway embedding dispatch still pending.
+- Serving validation is complete for ONNX: `.onnx` artifacts and running ONNX
+  profiles validate through provider behavior, while unsupported artifacts and
+  per-load placement overrides fail before provider execution.
+- ONNX Runtime serving is complete through the Rust provider path: RPC serving
+  loads/unloads real ONNX Runtime sessions, gateway embeddings route through
+  the in-process session manager, and unsupported chat/completion endpoints are
+  rejected by provider capability checks.
+- ONNX Runtime release validation is complete. In-process ONNX profiles launch
+  without a version manager, the release app builds and passes the bounded
+  release smoke, and a release RPC server loaded, served, embedded through, and
+  unloaded the local Nomic ONNX embedding package through the public Pumas
+  `/v1` gateway.
 
 ### Deviations
 
@@ -1492,6 +1498,57 @@ changes remain.
   and the existing validation tooling: Rust plugin schema tests, TypeScript
   plugin schema types, runtime-profile contract fixtures, and route migration
   tests.
+- Milestone 8 release validation completed. Focused checks passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`, `cargo
+  check --manifest-path rust/crates/pumas-core/Cargo.toml`, `cargo check
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml`, `npm run -w frontend
+  test:run -- OnnxRuntimeModelLibrarySection onnxRuntimeLibraryViewModels
+  OnnxRuntimePanel ModelServeDialog useModelServingActions
+  ModelRuntimeRouteEditor`, `npm run -w frontend check:types`, and `npm run -w
+  frontend build`. Reverse dependency checks confirmed `ort` and `tokenizers`
+  are pulled only by `pumas-library`, `half` is pulled by `pumas-library` and
+  through `ort`, and `ndarray` is only transitive through `ort`.
+- Milestone 8 release launcher checks passed after rebuilding the release
+  binary: `bash launcher.sh --build-release` and `bash launcher.sh
+  --release-smoke`. The release smoke loaded the ONNX Runtime plugin in the
+  packaged startup path. The known transient renderer stream messages during
+  bounded startup shutdown did not fail the release smoke.
+- Milestone 8 live gateway smoke used an isolated `/tmp/pumas-onnx-smoke`
+  launcher root with copied plugin metadata and the local
+  `nomic-ai--nomic-embed-text-v1_5` ONNX package, plus
+  `PUMAS_REGISTRY_DB_PATH=/tmp/pumas-onnx-smoke/config/registry.db`, so normal
+  user launcher metadata was not mutated. The first sandboxed server attempt
+  failed with a loopback bind permission error; rerunning the local release RPC
+  server outside the sandbox allowed the smoke to proceed.
+- Milestone 8 live gateway smoke found and fixed an in-process launch defect:
+  `launch_runtime_profile` for `onnx_runtime` initially returned `ONNX Runtime
+  session manager not initialized` because the RPC handler required a version
+  manager for every managed provider. The fix bypasses version-manager lookup
+  for provider-declared in-process runtimes and records the profile as running
+  through the runtime-profile lifecycle service. Regression coverage:
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml
+  launch_in_process_onnx_profile_does_not_require_version_manager`.
+- Milestone 8 live gateway smoke then passed through public contracts:
+  `launch_runtime_profile` returned `{"ready":true,"success":true}`;
+  `serve_model` loaded
+  `embedding/nomic_bert/nomic-ai--nomic-embed-text-v1_5__files_0a032b7277be`
+  with alias `onnx-smoke-nomic`; `GET /v1/models` listed
+  `onnx-smoke-nomic`; `POST /v1/embeddings` from a separate `curl` process
+  returned an OpenAI-compatible embedding response with `model =
+  onnx-smoke-nomic`, one embedding item, and `usage.total_tokens = 9`; ONNX
+  Runtime logs reported `embedding_dimensions=768`; `unserve_model` returned
+  `unloaded=true`; and `GET /v1/models` returned `{"data":[],"object":"list"}`.
+- Milestone 8 dependency/release evidence uses the existing Rust dependency
+  review for license and package-size details. CPU-only ONNX Runtime packaging
+  remains the shipping decision for this slice via `ort` with
+  `download-binaries` and `copy-dylibs`; GPU execution-provider packages are
+  not enabled. `cargo audit --version` still reports `error: no such command:
+  audit`, so advisory audit completion remains a release-governance follow-up
+  outside the local verification completed here.
 
 ### Traceability Links
 

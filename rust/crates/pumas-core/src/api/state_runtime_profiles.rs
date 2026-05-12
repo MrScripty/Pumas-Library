@@ -38,6 +38,13 @@ pub(super) async fn launch_runtime_profile(
         prepare_runtime_profile_launch_spec(primary, spec, model_id.as_deref(), overrides.as_ref())
             .await?;
 
+    if matches!(
+        spec.launch_strategy,
+        RuntimeProfileLaunchStrategy::InProcessRuntime(_)
+    ) {
+        return launch_in_process_runtime_profile(primary, profile_id, spec).await;
+    }
+
     primary
         .runtime_profile_service
         .record_profile_lifecycle_status(RuntimeProfileStatus {
@@ -96,6 +103,30 @@ pub(super) async fn launch_runtime_profile(
             .log_path
             .map(|path| path.to_string_lossy().to_string()),
         ready: Some(launch_result.ready),
+    })
+}
+
+async fn launch_in_process_runtime_profile(
+    primary: &PrimaryState,
+    profile_id: RuntimeProfileId,
+    spec: RuntimeProfileLaunchSpec,
+) -> std::result::Result<LaunchResponse, PumasError> {
+    primary
+        .runtime_profile_service
+        .record_profile_lifecycle_status(RuntimeProfileStatus {
+            profile_id,
+            state: RuntimeLifecycleState::Running,
+            endpoint_url: Some(spec.endpoint_url),
+            pid: None,
+            log_path: None,
+            last_error: None,
+        })?;
+
+    Ok(LaunchResponse {
+        success: true,
+        error: None,
+        log_path: None,
+        ready: Some(true),
     })
 }
 

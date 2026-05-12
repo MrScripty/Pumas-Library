@@ -182,6 +182,29 @@ This records the attempted audit check for the implementation slice, but it is
 not a substitute for release security validation. A successful advisory audit
 or an approved release-time alternative remains required before shipping.
 
+## Milestone 8 Release Evidence
+
+- `bash launcher.sh --build-release`: passed after ONNX Runtime integration;
+  release `pumas-rpc` size observed locally at `51M`.
+- `bash launcher.sh --release-smoke`: passed and loaded the ONNX Runtime plugin
+  in the packaged startup path.
+- Isolated release RPC smoke with
+  `PUMAS_REGISTRY_DB_PATH=/tmp/pumas-onnx-smoke/config/registry.db` loaded the
+  local Nomic ONNX embedding package through the Rust ONNX Runtime provider,
+  listed alias `onnx-smoke-nomic` in `/v1/models`, returned a 768-dimensional
+  OpenAI-compatible embedding through `/v1/embeddings`, unloaded the model, and
+  verified `/v1/models` returned an empty list.
+- `ldd rust/target/release/pumas-rpc` did not show a direct
+  `libonnxruntime` link, matching the current `ort` dynamic runtime loading
+  strategy. No `libonnxruntime*` artifact was found under `rust/target` after
+  the release build by the local target-file scan. The live release smoke still
+  initialized ONNX Runtime successfully, so installer/SBOM tooling must account
+  for `ort`'s runtime binary acquisition/copy behavior rather than only static
+  release target contents.
+- CPU-only packaging remains the selected release strategy for this slice. GPU
+  execution-provider packages remain disabled and require a separate packaging
+  plan.
+
 ## Sources Checked
 
 - `cargo info ort@2.0.0-rc.12`, crates.io/docs.rs metadata.

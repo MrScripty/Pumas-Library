@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Added first-class Rust ONNX Runtime embedding serving through managed
+  `onnx_runtime` profiles and the Pumas `/v1` gateway, including packaged
+  release smoke coverage for loading, embedding, and unloading a local ONNX
+  model without a Python sidecar.
+
 ### Changed
 
 - Bumped the package-facts contract to version 2 with structured Diffusers, image-family, GGUF, value-source, and inspection-manifest DTOs for image-generation planning.

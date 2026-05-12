@@ -1419,6 +1419,16 @@ changes remain.
   composition, and README/plan updates. Quick serve, serving options, and
   backend-confirmed loaded-state rendering remain open for later Milestone 6
   slices.
+- ONNX Runtime quick serve and serving options verified with `npm run -w
+  frontend test:run -- OnnxRuntimeModelLibrarySection
+  onnxRuntimeLibraryViewModels OnnxRuntimePanel`, `npm run -w frontend
+  check:types`, and file-size evidence:
+  `OnnxRuntimeModelLibrarySection.tsx` 214 lines,
+  `OnnxRuntimeModelLibraryList.tsx` 133 lines,
+  `OnnxRuntimeModelRow.tsx` 185 lines, and `onnxRuntimeQuickServe.ts` 28
+  lines. This slice added ONNX quick-serve config helpers, persisted draft
+  routes before quick serve/options, and opened `ModelServeDialog` with the
+  saved ONNX profile and `onnx_runtime` provider filter.
 
 ### Traceability Links
 

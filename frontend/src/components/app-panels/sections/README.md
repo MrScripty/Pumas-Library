@@ -16,7 +16,8 @@ Composable section components used by app panels to render status, selectors, de
 | `LlamaCppModelLibraryList.tsx` | Presentational llama.cpp compatible-model list shell with search, empty states, route errors, and per-row action wiring. |
 | `LlamaCppModelRow.tsx` | Presentational llama.cpp compatible-model row with route profile selection, loaded/failed placement badges, quick serve, options, link, and star controls. |
 | `OnnxRuntimeModelLibrarySection.tsx` | Focused ONNX Runtime local model library panel that lists compatible `.onnx` models and saves or clears per-row ONNX Runtime profile routes through provider-scoped route APIs. |
-| `OnnxRuntimeModelRow.tsx` | Presentational ONNX Runtime compatible-model row with route profile selection, missing-profile badge, link, and star controls. |
+| `OnnxRuntimeModelLibraryList.tsx` | Presentational ONNX Runtime compatible-model list shell with search, empty states, route errors, and per-row action wiring. |
+| `OnnxRuntimeModelRow.tsx` | Presentational ONNX Runtime compatible-model row with route profile selection, missing-profile badge, quick serve, options, link, and star controls. |
 | `RuntimeProfileSettingsSection.tsx` | Backend-confirmed runtime profile settings section for Ollama and llama.cpp profile lifecycle. |
 | `RuntimeProfileSettingsEditor.tsx` | Runtime profile editor shell that composes field and action subcomponents. |
 | `RuntimeProfileSettingsFields.tsx` | Runtime profile identity, endpoint, mode, and device setting fields. |
@@ -32,6 +33,7 @@ Composable section components used by app panels to render status, selectors, de
 | `llamaCppLibraryViewModels.ts` | Pure llama.cpp library compatibility, served-instance identity, route, status, and placement-label derivation helpers. |
 | `llamaCppQuickServe.ts` | llama.cpp quick-serve config, duplicate-alias escalation, and error formatting helpers. |
 | `onnxRuntimeLibraryViewModels.ts` | Pure ONNX Runtime library compatibility and provider-scoped route/profile derivation helpers. |
+| `onnxRuntimeQuickServe.ts` | ONNX Runtime quick-serve config and error formatting helpers. |
 | `TorchServerConfigSection.tsx` | Torch server configuration controls. |
 | `index.ts` | Section exports for panel composition. |
 

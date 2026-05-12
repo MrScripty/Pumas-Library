@@ -1,19 +1,28 @@
 import { useState } from 'react';
-import { Search } from 'lucide-react';
+import { getElectronAPI } from '../../../api/adapter';
 import { useRuntimeProfiles } from '../../../hooks/useRuntimeProfiles';
+import type { RuntimeProfileConfig } from '../../../types/api-runtime-profiles';
 import type { ModelCategory } from '../../../types/apps';
 import { ModelMetadataModal } from '../../ModelMetadataModal';
+import { ModelServeDialog } from '../../ModelServeDialog';
 import {
   clearModelRuntimeRoute,
   saveModelRuntimeRoute,
 } from '../../model-serve/runtimeRouteMutations';
+import { serveModelWithValidation } from '../../model-serve/useModelServingActions';
 import {
   buildOnnxRuntimeModelRows,
   type OnnxRuntimeModelRowViewModel,
 } from './onnxRuntimeLibraryViewModels';
-import { OnnxRuntimeModelRow } from './OnnxRuntimeModelRow';
+import { OnnxRuntimeModelLibraryList } from './OnnxRuntimeModelLibraryList';
+import { buildOnnxQuickServeConfig, formatOnnxQuickServeError } from './onnxRuntimeQuickServe';
 
 const ONNX_RUNTIME_PROVIDER = 'onnx_runtime';
+
+interface ServingTarget {
+  row: OnnxRuntimeModelRowViewModel;
+  profileId: string;
+}
 
 export interface OnnxRuntimeModelLibrarySectionProps {
   excludedModels: Set<string>;
@@ -21,21 +30,6 @@ export interface OnnxRuntimeModelLibrarySectionProps {
   starredModels: Set<string>;
   onToggleLink: (modelId: string) => void;
   onToggleStar: (modelId: string) => void;
-}
-
-function filterRows(
-  rows: OnnxRuntimeModelRowViewModel[],
-  searchQuery: string
-): OnnxRuntimeModelRowViewModel[] {
-  const normalizedSearchQuery = searchQuery.trim().toLowerCase();
-  if (!normalizedSearchQuery) {
-    return rows;
-  }
-
-  return rows.filter((row) =>
-    [row.model.name, row.model.id, row.model.category].join(' ').toLowerCase()
-      .includes(normalizedSearchQuery)
-  );
 }
 
 export function OnnxRuntimeModelLibrarySection({
@@ -50,14 +44,19 @@ export function OnnxRuntimeModelLibrarySection({
     modelId: string;
     modelName: string;
   } | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [servingTarget, setServingTarget] = useState<ServingTarget | null>(null);
+  const [quickServeModelId, setQuickServeModelId] = useState<string | null>(null);
+  const [quickServeFeedback, setQuickServeFeedback] = useState<{
+    kind: 'error' | 'success';
+    message: string;
+    modelId: string;
+  } | null>(null);
   const [savingRouteModelId, setSavingRouteModelId] = useState<string | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
   const providerProfiles = profiles.filter((profile) => profile.provider === ONNX_RUNTIME_PROVIDER);
   const rows = buildOnnxRuntimeModelRows({ modelGroups, profiles, routes });
-  const filteredRows = filterRows(rows, searchQuery);
 
-  const handleSaveRoute = async (modelId: string, profileId: string) => {
+  const persistRouteSelection = async (modelId: string, profileId: string): Promise<boolean> => {
     setSavingRouteModelId(modelId);
     setRouteError(null);
     try {
@@ -72,72 +71,137 @@ export function OnnxRuntimeModelLibrarySection({
         await clearModelRuntimeRoute(ONNX_RUNTIME_PROVIDER, modelId);
       }
       await refreshRuntimeProfiles();
+      return true;
     } catch (caught) {
       setRouteError(caught instanceof Error ? caught.message : 'Failed to save runtime route');
+      return false;
     } finally {
       setSavingRouteModelId(null);
     }
   };
 
+  const handleSaveRoute = async (modelId: string, profileId: string) => {
+    await persistRouteSelection(modelId, profileId);
+  };
+
+  const handleOpenServeOptions = async (
+    row: OnnxRuntimeModelRowViewModel,
+    profile: RuntimeProfileConfig,
+    shouldPersistRoute: boolean
+  ) => {
+    if (shouldPersistRoute) {
+      const saved = await persistRouteSelection(row.model.id, profile.profile_id);
+      if (!saved) {
+        return;
+      }
+    }
+    setServingTarget({ row, profileId: profile.profile_id });
+  };
+
+  const handleQuickServe = async (
+    row: OnnxRuntimeModelRowViewModel,
+    profile: RuntimeProfileConfig,
+    shouldPersistRoute: boolean
+  ) => {
+    if (shouldPersistRoute) {
+      const saved = await persistRouteSelection(row.model.id, profile.profile_id);
+      if (!saved) {
+        return;
+      }
+    }
+
+    const api = getElectronAPI();
+    if (!api?.validate_model_serving_config || !api.serve_model) {
+      setQuickServeFeedback({
+        kind: 'error',
+        message: 'Serving API is not available in this app session.',
+        modelId: row.model.id,
+      });
+      return;
+    }
+
+    setQuickServeModelId(row.model.id);
+    setQuickServeFeedback(null);
+    try {
+      const result = await serveModelWithValidation({
+        api,
+        config: buildOnnxQuickServeConfig(profile),
+        modelId: row.model.id,
+      });
+
+      if (result.kind === 'loaded') {
+        setQuickServeFeedback({
+          kind: 'success',
+          message: 'Loaded',
+          modelId: row.model.id,
+        });
+        return;
+      }
+      if (result.kind === 'validation_failed' || result.kind === 'load_failed') {
+        setQuickServeFeedback({
+          kind: 'error',
+          message: formatOnnxQuickServeError(result.error),
+          modelId: row.model.id,
+        });
+        return;
+      }
+      setQuickServeFeedback({
+        kind: 'error',
+        message: result.message,
+        modelId: row.model.id,
+      });
+    } catch (caught) {
+      setQuickServeFeedback({
+        kind: 'error',
+        message: caught instanceof Error ? caught.message : 'Serving request failed',
+        modelId: row.model.id,
+      });
+    } finally {
+      setQuickServeModelId(null);
+    }
+  };
+
+  if (servingTarget) {
+    return (
+      <section className="min-h-0 flex-1 overflow-hidden bg-[hsl(var(--launcher-bg-tertiary)/0.2)]">
+        <ModelServeDialog
+          model={servingTarget.row.model}
+          displayMode="page"
+          initialProfileId={servingTarget.profileId}
+          providerFilter={ONNX_RUNTIME_PROVIDER}
+          onBack={() => setServingTarget(null)}
+          onClose={() => setServingTarget(null)}
+        />
+      </section>
+    );
+  }
+
   return (
     <section className="min-h-0 flex-1 overflow-hidden bg-[hsl(var(--launcher-bg-tertiary)/0.2)]">
-      <div className="flex h-full flex-col">
-        <div className="flex shrink-0 items-center justify-between border-b border-[hsl(var(--border-subtle))] px-4 py-3">
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-[hsl(var(--text-primary))]">
-              ONNX Runtime Library
-            </h2>
-            <div className="text-xs text-[hsl(var(--text-muted))]">
-              {rows.length} compatible local model{rows.length === 1 ? '' : 's'}
-            </div>
-          </div>
-          <label className="relative min-w-44 max-w-64 flex-1">
-            <span className="sr-only">Search ONNX Runtime models</span>
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[hsl(var(--text-muted))]" />
-            <input
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search models"
-              className="h-8 w-full rounded border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface-high))] pl-7 pr-2 text-xs text-[hsl(var(--text-primary))] placeholder:text-[hsl(var(--text-muted))]"
-            />
-          </label>
-        </div>
-        {routeError && (
-          <div className="mx-4 mt-3 rounded border border-[hsl(var(--accent-error)/0.35)] bg-[hsl(var(--accent-error)/0.12)] px-3 py-2 text-xs text-[hsl(var(--accent-error))]">
-            {routeError}
-          </div>
-        )}
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          {rows.length === 0 ? (
-            <div className="rounded border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface-low)/0.18)] px-4 py-6 text-sm text-[hsl(var(--text-muted))]">
-              No local ONNX models are available for ONNX Runtime.
-            </div>
-          ) : filteredRows.length === 0 ? (
-            <div className="rounded border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface-low)/0.18)] px-4 py-6 text-sm text-[hsl(var(--text-muted))]">
-              No compatible ONNX Runtime models match the current search.
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              {filteredRows.map((row) => (
-                <OnnxRuntimeModelRow
-                  key={row.model.id}
-                  excludedModels={excludedModels}
-                  isSavingRoute={savingRouteModelId === row.model.id}
-                  providerProfiles={providerProfiles}
-                  row={row}
-                  starredModels={starredModels}
-                  onOpenMetadata={(modelId, modelName) => {
-                    setMetadataModal({ modelId, modelName });
-                  }}
-                  onSaveRoute={handleSaveRoute}
-                  onToggleLink={onToggleLink}
-                  onToggleStar={onToggleStar}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+      <OnnxRuntimeModelLibraryList
+        excludedModels={excludedModels}
+        providerProfiles={providerProfiles}
+        quickServeFeedback={quickServeFeedback}
+        quickServeModelId={quickServeModelId}
+        routeError={routeError}
+        rows={rows}
+        savingRouteModelId={savingRouteModelId}
+        starredModels={starredModels}
+        onOpenMetadata={(modelId, modelName) => {
+          setMetadataModal({ modelId, modelName });
+        }}
+        onOpenServeOptions={(selectedRow, profile, shouldPersistRoute) => {
+          void handleOpenServeOptions(selectedRow, profile, shouldPersistRoute);
+        }}
+        onQuickServe={(selectedRow, profile, shouldPersistRoute) => {
+          void handleQuickServe(selectedRow, profile, shouldPersistRoute);
+        }}
+        onSaveRoute={(modelId, profileId) => {
+          void handleSaveRoute(modelId, profileId);
+        }}
+        onToggleLink={onToggleLink}
+        onToggleStar={onToggleStar}
+      />
       {metadataModal && (
         <ModelMetadataModal
           modelId={metadataModal.modelId}

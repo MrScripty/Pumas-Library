@@ -907,7 +907,7 @@ keeping backend-owned state authoritative.
 - [ ] Replace one-shot serving-status reads in serve-dialog alias/loaded-state
       logic with the existing serving-status subscription hook, or document why
       a one-shot read is a non-authoritative validation aid only.
-- [ ] Add ONNX quick-serve and serving-options actions that use the saved ONNX
+- [x] Add ONNX quick-serve and serving-options actions that use the saved ONNX
       route/profile by default and persist draft route changes before serving.
 - [x] Update runtime profile settings controls for `onnx_runtime` and
       `onnx_serve`.
@@ -966,8 +966,10 @@ missing profiles, and save or clear ONNX Runtime routes through the
 provider-scoped route mutation APIs. Focused tests cover ONNX-compatible
 filtering, provider-scoped route state, ONNX-only profile options, save/clear
 route mutations, local search, and panel composition. Quick serve, serving
-options, serving-status subscription/loaded-state display, and broader
-accessibility/keyboard coverage remain open.
+options, and draft-route persistence-before-serving are now implemented with
+provider-scoped ONNX profiles and focused tests. Serving-status
+subscription/loaded-state display and broader accessibility/keyboard coverage
+remain open.
 
 ### Milestone 7: Documentation And External App Contract
 

@@ -13,7 +13,10 @@ const {
   getElectronAPIMock,
   refreshRuntimeProfilesMock,
   runtimeProfileState,
+  serveDialogMock,
+  serveModelMock,
   setModelRuntimeRouteMock,
+  validateModelServingConfigMock,
 } = vi.hoisted(() => ({
   clearModelRuntimeRouteMock: vi.fn(),
   getElectronAPIMock: vi.fn(),
@@ -22,7 +25,10 @@ const {
     profiles: [] as RuntimeProfileConfig[],
     routes: [] as ModelRuntimeRoute[],
   },
+  serveDialogMock: vi.fn(),
+  serveModelMock: vi.fn(),
   setModelRuntimeRouteMock: vi.fn(),
+  validateModelServingConfigMock: vi.fn(),
 }));
 
 vi.mock('../../../api/adapter', () => ({
@@ -45,6 +51,13 @@ vi.mock('../../../hooks/useRuntimeProfiles', () => ({
 
 vi.mock('../../ModelMetadataModal', () => ({
   ModelMetadataModal: () => null,
+}));
+
+vi.mock('../../ModelServeDialog', () => ({
+  ModelServeDialog: (props: unknown) => {
+    serveDialogMock(props);
+    return <div>Serve page</div>;
+  },
 }));
 
 function renderSection(modelGroups: ModelCategory[]) {
@@ -73,9 +86,23 @@ describe('OnnxRuntimeModelLibrarySection', () => {
       success: true,
       snapshot_required: true,
     });
+    validateModelServingConfigMock.mockResolvedValue({
+      success: true,
+      valid: true,
+      errors: [],
+      warnings: [],
+    });
+    serveModelMock.mockResolvedValue({
+      success: true,
+      loaded: true,
+      loaded_models_unchanged: false,
+      status: null,
+    });
     getElectronAPIMock.mockReturnValue({
       set_model_runtime_route: setModelRuntimeRouteMock,
       clear_model_runtime_route: clearModelRuntimeRouteMock,
+      validate_model_serving_config: validateModelServingConfigMock,
+      serve_model: serveModelMock,
     });
   });
 
@@ -263,5 +290,177 @@ describe('OnnxRuntimeModelLibrarySection', () => {
       expect(clearModelRuntimeRouteMock).toHaveBeenCalledWith('onnx_runtime', 'models/nomic');
     });
     expect(refreshRuntimeProfilesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('quick serves with the saved ONNX Runtime profile route', async () => {
+    const user = userEvent.setup();
+    runtimeProfileState.profiles = [
+      {
+        profile_id: 'onnx-cpu',
+        provider: 'onnx_runtime',
+        provider_mode: 'onnx_serve',
+        management_mode: 'managed',
+        name: 'ONNX CPU',
+        enabled: true,
+        device: { mode: 'cpu' },
+        scheduler: { auto_load: false },
+      },
+    ];
+    runtimeProfileState.routes = [
+      {
+        provider: 'onnx_runtime',
+        model_id: 'models/nomic',
+        profile_id: 'onnx-cpu',
+        auto_load: true,
+      },
+    ];
+
+    renderSection([
+      {
+        category: 'Embedding',
+        models: [
+          {
+            id: 'models/nomic',
+            name: 'Nomic ONNX',
+            category: 'Embedding',
+            primaryFormat: 'onnx',
+          },
+        ],
+      },
+    ]);
+
+    await user.click(
+      screen.getByRole('button', { name: 'Quick serve with selected ONNX Runtime profile' })
+    );
+
+    await waitFor(() => {
+      expect(validateModelServingConfigMock).toHaveBeenCalledWith({
+        model_id: 'models/nomic',
+        config: expect.objectContaining({
+          provider: 'onnx_runtime',
+          profile_id: 'onnx-cpu',
+          device_mode: 'cpu',
+          keep_loaded: true,
+          model_alias: null,
+        }),
+      });
+    });
+    expect(serveModelMock).toHaveBeenCalledWith({
+      model_id: 'models/nomic',
+      config: expect.objectContaining({
+        profile_id: 'onnx-cpu',
+      }),
+    });
+    expect(screen.getByText('Loaded')).toBeInTheDocument();
+    expect(serveDialogMock).not.toHaveBeenCalled();
+  });
+
+  it('saves a newly selected ONNX Runtime profile before quick serving', async () => {
+    const user = userEvent.setup();
+    runtimeProfileState.profiles = [
+      {
+        profile_id: 'onnx-cpu',
+        provider: 'onnx_runtime',
+        provider_mode: 'onnx_serve',
+        management_mode: 'managed',
+        name: 'ONNX CPU',
+        enabled: true,
+        device: { mode: 'cpu' },
+        scheduler: { auto_load: false },
+      },
+    ];
+
+    renderSection([
+      {
+        category: 'Embedding',
+        models: [
+          {
+            id: 'models/nomic',
+            name: 'Nomic ONNX',
+            category: 'Embedding',
+            primaryFormat: 'onnx',
+          },
+        ],
+      },
+    ]);
+
+    await user.selectOptions(
+      screen.getByLabelText('ONNX Runtime profile for Nomic ONNX'),
+      'onnx-cpu'
+    );
+    await user.click(
+      screen.getByRole('button', { name: 'Quick serve with selected ONNX Runtime profile' })
+    );
+
+    await waitFor(() => {
+      expect(setModelRuntimeRouteMock).toHaveBeenCalledWith({
+        provider: 'onnx_runtime',
+        model_id: 'models/nomic',
+        profile_id: 'onnx-cpu',
+        auto_load: true,
+      });
+    });
+    expect(validateModelServingConfigMock).toHaveBeenCalledWith({
+      model_id: 'models/nomic',
+      config: expect.objectContaining({
+        provider: 'onnx_runtime',
+        profile_id: 'onnx-cpu',
+        device_mode: 'cpu',
+      }),
+    });
+    expect(serveModelMock).toHaveBeenCalledWith({
+      model_id: 'models/nomic',
+      config: expect.objectContaining({
+        profile_id: 'onnx-cpu',
+      }),
+    });
+  });
+
+  it('opens the serve page with the saved ONNX Runtime profile for serving options', async () => {
+    const user = userEvent.setup();
+    runtimeProfileState.profiles = [
+      {
+        profile_id: 'onnx-cpu',
+        provider: 'onnx_runtime',
+        provider_mode: 'onnx_serve',
+        management_mode: 'managed',
+        name: 'ONNX CPU',
+        enabled: true,
+        device: { mode: 'cpu' },
+        scheduler: { auto_load: false },
+      },
+    ];
+    runtimeProfileState.routes = [
+      {
+        provider: 'onnx_runtime',
+        model_id: 'models/nomic',
+        profile_id: 'onnx-cpu',
+        auto_load: true,
+      },
+    ];
+
+    renderSection([
+      {
+        category: 'Embedding',
+        models: [
+          {
+            id: 'models/nomic',
+            name: 'Nomic ONNX',
+            category: 'Embedding',
+            primaryFormat: 'onnx',
+          },
+        ],
+      },
+    ]);
+
+    await user.click(screen.getByRole('button', { name: 'Serving options' }));
+
+    expect(screen.getByText('Serve page')).toBeInTheDocument();
+    expect(serveDialogMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialProfileId: 'onnx-cpu',
+        providerFilter: 'onnx_runtime',
+      })
+    );
   });
 });

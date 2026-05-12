@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link2, Save, Star } from 'lucide-react';
+import { Link2, Play, Save, SlidersHorizontal, Star } from 'lucide-react';
 import type { RuntimeProfileConfig } from '../../../types/api-runtime-profiles';
 import { LocalModelMetadataSummary } from '../../LocalModelMetadataSummary';
 import { LocalModelNameButton } from '../../LocalModelNameButton';
@@ -8,11 +8,26 @@ import type { OnnxRuntimeModelRowViewModel } from './onnxRuntimeLibraryViewModel
 
 interface OnnxRuntimeModelRowProps {
   excludedModels: Set<string>;
+  isQuickServing: boolean;
   isSavingRoute: boolean;
   providerProfiles: RuntimeProfileConfig[];
+  quickServeFeedback: {
+    kind: 'error' | 'success';
+    message: string;
+  } | null;
   row: OnnxRuntimeModelRowViewModel;
   starredModels: Set<string>;
   onOpenMetadata: (modelId: string, modelName: string) => void;
+  onOpenServeOptions: (
+    row: OnnxRuntimeModelRowViewModel,
+    profile: RuntimeProfileConfig,
+    shouldPersistRoute: boolean
+  ) => void;
+  onQuickServe: (
+    row: OnnxRuntimeModelRowViewModel,
+    profile: RuntimeProfileConfig,
+    shouldPersistRoute: boolean
+  ) => void;
   onSaveRoute: (modelId: string, profileId: string) => void;
   onToggleLink: (modelId: string) => void;
   onToggleStar: (modelId: string) => void;
@@ -27,11 +42,15 @@ function routeLabel(row: OnnxRuntimeModelRowViewModel): string {
 
 export function OnnxRuntimeModelRow({
   excludedModels,
+  isQuickServing,
   isSavingRoute,
   providerProfiles,
+  quickServeFeedback,
   row,
   starredModels,
   onOpenMetadata,
+  onOpenServeOptions,
+  onQuickServe,
   onSaveRoute,
   onToggleLink,
   onToggleStar,
@@ -41,6 +60,7 @@ export function OnnxRuntimeModelRow({
   const isExcluded = excludedModels.has(row.model.id);
   const [draftProfileId, setDraftProfileId] = useState(row.route?.profile_id ?? '');
   const hasDraftChange = draftProfileId !== (row.route?.profile_id ?? '');
+  const draftProfile = providerProfiles.find((profile) => profile.profile_id === draftProfileId);
 
   useEffect(() => {
     setDraftProfileId(row.route?.profile_id ?? '');
@@ -85,6 +105,17 @@ export function OnnxRuntimeModelRow({
               hasDependencies={row.model.hasDependencies}
               dependencyCount={row.model.dependencyCount}
             />
+            {quickServeFeedback && (
+              <div
+                className={
+                  quickServeFeedback.kind === 'error'
+                    ? 'mt-1 text-xs text-[hsl(var(--accent-error))]'
+                    : 'mt-1 text-xs text-[hsl(var(--accent-success))]'
+                }
+              >
+                {quickServeFeedback.message}
+              </div>
+            )}
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pt-0.5">
@@ -113,6 +144,32 @@ export function OnnxRuntimeModelRow({
             tooltip="Save ONNX Runtime route"
             onClick={() => onSaveRoute(row.model.id, draftProfileId)}
             disabled={!hasDraftChange || isSavingRoute}
+            size="sm"
+          />
+          <IconButton
+            icon={<Play />}
+            tooltip={
+              isQuickServing
+                ? 'Starting ONNX Runtime serving'
+                : 'Quick serve with selected ONNX Runtime profile'
+            }
+            onClick={() => {
+              if (draftProfile) {
+                onQuickServe(row, draftProfile, hasDraftChange);
+              }
+            }}
+            disabled={!draftProfile || isQuickServing || isSavingRoute}
+            size="sm"
+          />
+          <IconButton
+            icon={<SlidersHorizontal />}
+            tooltip="Serving options"
+            onClick={() => {
+              if (draftProfile) {
+                onOpenServeOptions(row, draftProfile, hasDraftChange);
+              }
+            }}
+            disabled={!draftProfile || isSavingRoute}
             size="sm"
           />
           <IconButton

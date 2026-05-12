@@ -494,7 +494,11 @@ containment validation. Model config discovery uses the same package-root
 search for `config.json`; real session loading now defaults source embedding
 dimensions from matching `hidden_size`/`n_embd` metadata and rejects explicit
 load dimensions that conflict with that metadata. Real ONNX output tensor
-selection remains open for the inference slice.
+selection remains open for the inference slice. An opt-in real fixture smoke
+test now loads the local Nomic package through ONNX Runtime when
+`PUMAS_ONNX_REAL_MODEL_ROOT` is supplied, validating the package-root metadata,
+768-dimensional config, expected input names, and at least one output name
+without making normal focused tests depend on the large model file.
 
 ### Milestone 3: Plugin And Runtime Profile Contracts
 

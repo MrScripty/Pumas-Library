@@ -1,5 +1,5 @@
 use super::*;
-use std::time::Duration;
+use std::{path::PathBuf, time::Duration};
 
 fn model_fixture() -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
@@ -261,6 +261,37 @@ fn real_session_loader_uses_validated_model_directory_contract() {
 
     assert_eq!(err.code, OnnxRuntimeErrorCode::Backend);
     assert!(err.message.contains("model load failed"));
+}
+
+#[test]
+fn real_session_loader_smokes_optional_real_fixture() {
+    let Some(root) = std::env::var_os("PUMAS_ONNX_REAL_MODEL_ROOT") else {
+        return;
+    };
+    let model_path = std::env::var_os("PUMAS_ONNX_REAL_MODEL_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("onnx/model_fp16.onnx"));
+    let request = OnnxLoadRequest::parse(
+        PathBuf::from(root),
+        model_path,
+        "nomic-embed-text-v1.5",
+        OnnxLoadOptions::default(),
+    )
+    .unwrap();
+
+    let session = OnnxRuntimeSession::load(request).unwrap();
+
+    assert_eq!(session.status().embedding_dimensions, 768);
+    assert_eq!(session.model_config().embedding_dimensions(), 768);
+    assert!(session
+        .input_names()
+        .iter()
+        .any(|name| name.as_str() == "input_ids"));
+    assert!(session
+        .input_names()
+        .iter()
+        .any(|name| name.as_str() == "attention_mask"));
+    assert!(!session.output_names().is_empty());
 }
 
 #[tokio::test]

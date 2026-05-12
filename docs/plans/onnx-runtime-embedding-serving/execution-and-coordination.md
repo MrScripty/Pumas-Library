@@ -668,6 +668,19 @@ Update during implementation:
   rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence: `mod.rs` 376
   lines, `config.rs` 75 lines, `package.rs` 55 lines, `real.rs` 131 lines,
   `tokenizer.rs` 110 lines, `tests.rs` 361 lines.
+- 2026-05-12: Added an opt-in real fixture smoke for
+  `OnnxRuntimeSession::load`. The normal focused suite skips the fixture unless
+  `PUMAS_ONNX_REAL_MODEL_ROOT` is supplied; the local Nomic package smoke was
+  run with absolute root
+  `/media/jeremy/OrangeCream/Linux Software/repos/owned/ai-systems/Pumas-Library/shared-resources/models/embedding/nomic_bert/nomic-ai--nomic-embed-text-v1_5__files_0a032b7277be`
+  and `PUMAS_ONNX_REAL_MODEL_PATH=onnx/model_fp16.onnx`, validating 768
+  dimensions, `input_ids`, `attention_mask`, and non-empty outputs. Verification
+  passed: `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml
+  real_session_loader_smokes_optional_real_fixture -- --nocapture` with the
+  env vars above, and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml
+  onnx`. File-size evidence: `mod.rs` 376 lines, `tests.rs` 392 lines.
 
 ## Commit Cadence Notes
 
@@ -1126,6 +1139,14 @@ changes remain.
   rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence:
   `onnx_runtime/mod.rs` 376 lines, `config.rs` 75 lines, `package.rs` 55 lines,
   `real.rs` 131 lines, `tokenizer.rs` 110 lines, `tests.rs` 361 lines.
+- ONNX real fixture session-loader smoke verified with `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml
+  real_session_loader_smokes_optional_real_fixture -- --nocapture` using the
+  local Nomic model package env vars recorded above, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence:
+  `onnx_runtime/mod.rs` 376 lines, `tests.rs` 392 lines.
 
 ### Traceability Links
 

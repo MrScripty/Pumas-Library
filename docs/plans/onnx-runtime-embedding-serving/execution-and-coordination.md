@@ -565,6 +565,15 @@ Update during implementation:
   rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
   rust/crates/pumas-core/Cargo.toml onnx`, and `cargo test --manifest-path
   rust/crates/pumas-rpc/Cargo.toml onnx`.
+- 2026-05-12: Started M2 dependency review without changing manifests or the
+  lockfile. Added `dependency-review.md` with provisional Rust-owned candidates:
+  `ort` `2.0.0-rc.12` for ONNX Runtime CPU execution, `tokenizers` `0.23.1`
+  for local tokenizer JSON loading, and `ndarray` `0.17.2` only if direct
+  post-processing ownership requires it beyond `ort` value handling or checked
+  `Vec<f32>` code. The review records in-house alternatives, package strategy,
+  native-library/release risks, and the verification required before a manifest
+  slice may add dependencies. Verification is documentation/source review only;
+  no build command was needed because no code or manifest files changed.
 
 ## Commit Cadence Notes
 

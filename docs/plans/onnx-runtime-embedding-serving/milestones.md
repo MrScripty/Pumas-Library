@@ -412,7 +412,7 @@ post-processing semantics.
 - [ ] Add Rust ONNX Runtime/tokenizer/numeric dependencies to the owning Rust
       crate/module only after a dependency review. Candidate ONNX Runtime Rust
       binding: `ort`, pending version/native-library strategy decision.
-- [ ] Record dependency justification for selected Rust ONNX Runtime,
+- [x] Record dependency justification for selected Rust ONNX Runtime,
       tokenizer, and numerical crates: in-house alternative,
       maintenance/license, transitive cost, CPU/GPU package choice, and Rust
       owner.
@@ -457,7 +457,12 @@ post-processing semantics.
 - Resource-limit tests prove oversized batches/tokens/dimensions fail before
   unbounded allocation.
 
-**Status:** Not started.
+**Status:** In progress. Dependency review is recorded in
+`dependency-review.md` with provisional CPU-first Rust candidates: `ort`
+`2.0.0-rc.12`, `tokenizers` `0.23.1`, and `ndarray` `0.17.2` only if direct
+post-processing ownership requires it. No manifest or lockfile changes have
+been made yet; native-library packaging, dependency tree/audit/license/package
+size, and real ONNX execution remain open.
 
 ### Milestone 3: Plugin And Runtime Profile Contracts
 

@@ -21,6 +21,7 @@ OpenAI-compatible Pumas `/v1` gateway.
 | [risks.md](risks.md) | Full risk table and mitigations. |
 | [milestones.md](milestones.md) | Detailed milestone tasks, verification checks, and status fields. |
 | [execution-and-coordination.md](execution-and-coordination.md) | Execution notes, commit cadence, optional parallel worker plan, re-plan triggers, recommendations, and completion-summary template. |
+| [dependency-review.md](dependency-review.md) | Rust ONNX Runtime, tokenizer, and numeric dependency review before manifest/lockfile changes. |
 
 ## Decision
 

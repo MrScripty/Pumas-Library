@@ -897,7 +897,7 @@ keeping backend-owned state authoritative.
 - [x] Add per-row ONNX profile selection and save controls using the existing
       backend runtime route APIs after they are replaced with provider-scoped
       route APIs.
-- [ ] Remove frontend helpers that assume a route is keyed only by model id.
+- [x] Remove frontend helpers that assume a route is keyed only by model id.
       ONNX and llama.cpp model rows must both read and write provider-scoped
       routes.
 - [x] Update `ModelServeDialog` initial profile selection so it consults
@@ -919,17 +919,17 @@ keeping backend-owned state authoritative.
 - [x] Keep runtime profile and serving state backend-owned. Do not add
       optimistic loaded/unloaded UI state; render only confirmed snapshots or
       explicitly transient form/submission state.
-- [ ] Use semantic controls, associated labels, accessible names for icon
+- [x] Use semantic controls, associated labels, accessible names for icon
       buttons, focus management for dialogs, and keyboard interaction tests for
       any new interactive controls.
-- [ ] Use `button` for actions, `label`/`aria-label` for controls, decorative
+- [x] Use `button` for actions, `label`/`aria-label` for controls, decorative
       icons marked `aria-hidden`, and no generic clickable elements unless the
       required ARIA and keyboard behavior is implemented.
 - [x] Prefer existing runtime/serving event subscriptions. Any new polling must
       document why events are not feasible and include deterministic cleanup
       tests.
-- [ ] Add accessible controls and tests using semantic selectors.
-- [ ] Avoid direct DOM mutation for normal rendering. If any direct DOM access is
+- [x] Add accessible controls and tests using semantic selectors.
+- [x] Avoid direct DOM mutation for normal rendering. If any direct DOM access is
       unavoidable, isolate it behind a small owner with teardown and focused
       tests.
 
@@ -973,7 +973,12 @@ backend-confirmed loaded/failed state and serving endpoint mode without adding
 optimistic loaded/unloaded state. The serve dialog no longer performs one-shot
 serving-status reads for alias and loaded-state logic; it consumes the existing
 serving-status subscription hook and passes served-model snapshots into serving
-actions. Broader accessibility/keyboard coverage remains open.
+actions.
+The generic metadata route editor no longer collapses saved routes by model id:
+it saves, clears, and opens serve options through the selected profile's
+provider-scoped route. ONNX route-control tests use named role/label selectors
+and keyboard activation for the Save action; the new controls use native
+buttons, labels, and icon-button accessible names without direct DOM mutation.
 
 ### Milestone 7: Documentation And External App Contract
 

@@ -1450,6 +1450,14 @@ changes remain.
   During verification, an introduced unstable default served-model array caused
   a render loop in the hook test; the hook now uses a stable empty array
   sentinel and the test uses a stable served-model fixture.
+- Frontend provider-scoped route cleanup and accessibility coverage verified
+  with `npm run -w frontend test:run -- ModelRuntimeRouteEditor
+  OnnxRuntimeModelLibrarySection onnxRuntimeLibraryViewModels ModelServeDialog
+  useModelServingActions` and `npm run -w frontend check:types`. The metadata
+  route editor now selects saved routes by `(provider, model_id)` through the
+  chosen profile provider, clears only that provider's route, and opens serve
+  options with the selected provider filter. Tests cover named role/label
+  selectors and keyboard activation for ONNX route saving.
 
 ### Traceability Links
 

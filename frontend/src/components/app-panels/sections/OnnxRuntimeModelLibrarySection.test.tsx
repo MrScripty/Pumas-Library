@@ -238,7 +238,8 @@ describe('OnnxRuntimeModelLibrarySection', () => {
 
     const profileSelect = screen.getByLabelText('ONNX Runtime profile for Nomic ONNX');
     await user.selectOptions(profileSelect, 'onnx-cpu');
-    await user.click(screen.getByRole('button', { name: 'Save ONNX Runtime route' }));
+    screen.getByRole('button', { name: 'Save ONNX Runtime route' }).focus();
+    await user.keyboard('{Enter}');
 
     await waitFor(() => {
       expect(setModelRuntimeRouteMock).toHaveBeenCalledWith({

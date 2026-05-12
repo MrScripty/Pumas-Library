@@ -37,26 +37,36 @@ export function ModelRuntimeRouteEditor({
     error,
     refreshRuntimeProfiles,
   } = useRuntimeProfiles();
-  const currentRoute = useMemo(
-    () => {
-      const modelRoutes = routes.filter((route) => route.model_id === modelId);
-      return modelRoutes.length === 1 ? modelRoutes[0] : null;
-    },
-    [modelId, routes]
-  );
   const [profileId, setProfileId] = useState<string>('');
   const [autoLoad, setAutoLoad] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'route' | 'serve'>('route');
 
-  useEffect(() => {
-    setProfileId(currentRoute?.profile_id ?? '');
-    setAutoLoad(currentRoute?.auto_load ?? true);
-  }, [currentRoute]);
-
   const selectedProfile = profiles.find((profile) => profile.profile_id === profileId) ?? null;
+  const selectedRoute = useMemo(
+    () =>
+      selectedProfile
+        ? routes.find(
+            (route) => route.model_id === modelId && route.provider === selectedProfile.provider
+          ) ?? null
+        : null,
+    [modelId, routes, selectedProfile]
+  );
   const selectedStatus = statuses.find((status) => status.profile_id === profileId) ?? null;
+
+  useEffect(() => {
+    if (profileId && profiles.some((profile) => profile.profile_id === profileId)) {
+      return;
+    }
+
+    const modelRoutes = routes.filter((route) => route.model_id === modelId);
+    setProfileId(modelRoutes.length === 1 ? modelRoutes[0]?.profile_id ?? '' : '');
+  }, [modelId, profileId, profiles, routes]);
+
+  useEffect(() => {
+    setAutoLoad(selectedRoute?.auto_load ?? true);
+  }, [selectedRoute?.auto_load]);
 
   if (viewMode === 'serve') {
     return (
@@ -69,6 +79,7 @@ export function ModelRuntimeRouteEditor({
         }}
         displayMode="page"
         initialProfileId={profileId || null}
+        providerFilter={selectedProfile?.provider}
         onBack={() => setViewMode('route')}
         onClose={() => setViewMode('route')}
       />
@@ -79,14 +90,13 @@ export function ModelRuntimeRouteEditor({
     setIsSaving(true);
     setSaveError(null);
     try {
-      const routeProvider = selectedProfile?.provider ?? currentRoute?.provider;
-      if (!routeProvider) {
+      if (!selectedProfile) {
         throw new Error('Select a runtime profile before saving route');
       }
       await saveModelRuntimeRoute({
-        provider: routeProvider,
+        provider: selectedProfile.provider,
         modelId,
-        profileId: profileId || null,
+        profileId: selectedProfile.profile_id,
         autoLoad,
       });
       await refreshRuntimeProfiles();
@@ -101,10 +111,13 @@ export function ModelRuntimeRouteEditor({
     setIsSaving(true);
     setSaveError(null);
     try {
-      if (!currentRoute) {
-        throw new Error('No runtime route is saved for this model');
+      if (!selectedProfile) {
+        throw new Error('Select a runtime profile before clearing route');
       }
-      await clearModelRuntimeRoute(currentRoute.provider, modelId);
+      if (!selectedRoute) {
+        throw new Error('No runtime route is saved for this provider and model');
+      }
+      await clearModelRuntimeRoute(selectedProfile.provider, modelId);
       await refreshRuntimeProfiles();
     } catch (caught) {
       setSaveError(caught instanceof Error ? caught.message : 'Failed to clear runtime route');
@@ -123,7 +136,7 @@ export function ModelRuntimeRouteEditor({
             onChange={(event) => setProfileId(event.target.value)}
             className="w-full px-2 py-1.5 rounded bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] text-[hsl(var(--text-primary))]"
           >
-            <option value="">Default profile</option>
+            <option value="">Select profile</option>
             {profiles.map((profile) => (
               <option key={profile.profile_id} value={profile.profile_id}>
                 {profile.name}
@@ -184,7 +197,7 @@ export function ModelRuntimeRouteEditor({
         <button
           type="button"
           onClick={() => void handleClear()}
-          disabled={isSaving || !currentRoute}
+          disabled={isSaving || !selectedRoute}
           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-[hsl(var(--border-default))] text-xs text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] disabled:opacity-50"
         >
           <RotateCcw className="w-3.5 h-3.5" />

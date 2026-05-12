@@ -5,12 +5,14 @@ import type {
   ModelServeValidationResponse,
   ServeModelRequest,
   ServeModelResponse,
+  ServedModelStatus,
 } from '../types/api-serving';
 import { ModelServeDialog } from './ModelServeDialog';
 
-const { getElectronAPIMock, useRuntimeProfilesMock } = vi.hoisted(() => ({
+const { getElectronAPIMock, useRuntimeProfilesMock, useServingStatusMock } = vi.hoisted(() => ({
   getElectronAPIMock: vi.fn(),
   useRuntimeProfilesMock: vi.fn(),
+  useServingStatusMock: vi.fn(),
 }));
 
 vi.mock('../api/adapter', () => ({
@@ -19,6 +21,10 @@ vi.mock('../api/adapter', () => ({
 
 vi.mock('../hooks/useRuntimeProfiles', () => ({
   useRuntimeProfiles: useRuntimeProfilesMock,
+}));
+
+vi.mock('../hooks/useServingStatus', () => ({
+  useServingStatus: useServingStatusMock,
 }));
 
 describe('ModelServeDialog', () => {
@@ -92,6 +98,14 @@ describe('ModelServeDialog', () => {
       isLoading: false,
       error: null,
       refreshRuntimeProfiles: vi.fn(),
+    });
+    useServingStatusMock.mockReturnValue({
+      snapshot: null,
+      servedModels: [],
+      endpoint: null,
+      cursor: null,
+      error: null,
+      refreshServingStatus: vi.fn(),
     });
     getElectronAPIMock.mockReturnValue({
       get_serving_status: vi.fn().mockResolvedValue({
@@ -504,6 +518,17 @@ describe('ModelServeDialog', () => {
   });
 
   it('requires a unique alias when the same model is served on another profile', async () => {
+    const servedModels: ServedModelStatus[] = [
+      {
+        model_id: 'model-duplicate',
+        model_alias: 'duplicate-cpu',
+        provider: 'llama_cpp',
+        profile_id: 'cpu-llama',
+        load_state: 'loaded',
+        device_mode: 'cpu',
+        keep_loaded: true,
+      },
+    ];
     const validateModelServingConfig = vi.fn<
       (_request: ServeModelRequest) => Promise<ModelServeValidationResponse>
     >().mockResolvedValue({
@@ -522,27 +547,16 @@ describe('ModelServeDialog', () => {
         snapshot: null,
       });
     getElectronAPIMock.mockReturnValue({
-      get_serving_status: vi.fn().mockResolvedValue({
-        success: true,
-        snapshot: {
-          cursor: 'serving:1',
-          endpoint: { endpoint_mode: 'pumas_gateway', model_count: 1 },
-          served_models: [
-            {
-              model_id: 'model-duplicate',
-              model_alias: 'duplicate-cpu',
-              provider: 'llama_cpp',
-              profile_id: 'cpu-llama',
-              load_state: 'loaded',
-              device_mode: 'cpu',
-              keep_loaded: true,
-            },
-          ],
-          last_errors: [],
-        },
-      }),
       validate_model_serving_config: validateModelServingConfig,
       serve_model: serveModel,
+    });
+    useServingStatusMock.mockReturnValue({
+      snapshot: null,
+      servedModels,
+      endpoint: { endpoint_mode: 'pumas_gateway', model_count: 1 },
+      cursor: 'serving:1',
+      error: null,
+      refreshServingStatus: vi.fn(),
     });
 
     render(

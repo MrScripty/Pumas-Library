@@ -904,7 +904,7 @@ keeping backend-owned state authoritative.
       provider-scoped routes and provider/format compatibility. It must not
       fall back from ONNX to a llama.cpp/default profile when an ONNX route is
       missing.
-- [ ] Replace one-shot serving-status reads in serve-dialog alias/loaded-state
+- [x] Replace one-shot serving-status reads in serve-dialog alias/loaded-state
       logic with the existing serving-status subscription hook, or document why
       a one-shot read is a non-authoritative validation aid only.
 - [x] Add ONNX quick-serve and serving-options actions that use the saved ONNX
@@ -925,7 +925,7 @@ keeping backend-owned state authoritative.
 - [ ] Use `button` for actions, `label`/`aria-label` for controls, decorative
       icons marked `aria-hidden`, and no generic clickable elements unless the
       required ARIA and keyboard behavior is implemented.
-- [ ] Prefer existing runtime/serving event subscriptions. Any new polling must
+- [x] Prefer existing runtime/serving event subscriptions. Any new polling must
       document why events are not feasible and include deterministic cleanup
       tests.
 - [ ] Add accessible controls and tests using semantic selectors.
@@ -970,8 +970,10 @@ options, and draft-route persistence-before-serving are now implemented with
 provider-scoped ONNX profiles and focused tests. Serving-status
 subscription state from the app shell now flows into ONNX rows, which display
 backend-confirmed loaded/failed state and serving endpoint mode without adding
-optimistic loaded/unloaded state. Broader accessibility/keyboard coverage and
-the serve-dialog one-shot status cleanup remain open.
+optimistic loaded/unloaded state. The serve dialog no longer performs one-shot
+serving-status reads for alias and loaded-state logic; it consumes the existing
+serving-status subscription hook and passes served-model snapshots into serving
+actions. Broader accessibility/keyboard coverage remains open.
 
 ### Milestone 7: Documentation And External App Contract
 

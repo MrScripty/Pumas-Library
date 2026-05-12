@@ -14,6 +14,7 @@ const PROVIDER_LOAD_FAILED_ERROR = {
   severity: 'non_critical',
   message: 'The runtime did not report the model as loaded.',
 } as const;
+const EMPTY_SERVED_MODELS: ServedModelStatus[] = [];
 
 function getValidationErrorFallback(modelId: string, profileId: string): ModelServeError {
   return {
@@ -116,7 +117,8 @@ function matchesServingTarget(
 
 export function useModelServingActions(
   modelId: string,
-  target: ModelServingActionTarget = {}
+  target: ModelServingActionTarget = {},
+  servedModels: ServedModelStatus[] = EMPTY_SERVED_MODELS
 ) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -124,29 +126,14 @@ export function useModelServingActions(
   const [servedStatus, setServedStatus] = useState<ServedModelStatus | null>(null);
 
   useEffect(() => {
-    const api = getElectronAPI();
-    if (!api?.get_serving_status) {
-      return;
+    const status = servedModels.find((servedModel) =>
+      matchesServingTarget(servedModel, modelId, target)
+    );
+    setServedStatus(status ?? null);
+    if (status) {
+      setMessage(`Loaded on ${status.profile_id}`);
     }
-
-    let isActive = true;
-    void api.get_serving_status().then((response) => {
-      if (!isActive || !response.success) {
-        return;
-      }
-      const status = response.snapshot.served_models.find((servedModel) =>
-        matchesServingTarget(servedModel, modelId, target)
-      );
-      setServedStatus(status ?? null);
-      if (status) {
-        setMessage(`Loaded on ${status.profile_id}`);
-      }
-    });
-
-    return () => {
-      isActive = false;
-    };
-  }, [modelId, target.modelAlias, target.profileId]);
+  }, [modelId, servedModels, target.modelAlias, target.profileId]);
 
   const serveModel = useCallback(
     async (config: ModelServingConfig | null) => {

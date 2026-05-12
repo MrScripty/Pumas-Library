@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRuntimeProfiles } from '../hooks/useRuntimeProfiles';
+import { useServingStatus } from '../hooks/useServingStatus';
 import type { RuntimeDeviceMode, RuntimeProviderId } from '../types/api-runtime-profiles';
 import type { ModelInfo } from '../types/apps';
-import type { ServedModelStatus } from '../types/api-serving';
-import { getElectronAPI } from '../api/adapter';
 import { ModelServeDialogContent } from './model-serve/ModelServeDialogContent';
 import {
   buildModelServingConfig,
@@ -39,6 +38,7 @@ export function ModelServeDialog({
   onClose,
 }: ModelServeDialogProps) {
   const runtimeProfiles = useRuntimeProfiles();
+  const servingStatus = useServingStatus();
   const servingProfiles = useMemo(
     () =>
       providerFilter
@@ -54,11 +54,10 @@ export function ModelServeDialog({
   const [contextSize, setContextSize] = useState('');
   const [keepLoaded, setKeepLoaded] = useState(true);
   const [modelAlias, setModelAlias] = useState('');
-  const [servedModels, setServedModels] = useState<ServedModelStatus[]>([]);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const profileSelectRef = useRef<HTMLSelectElement | null>(null);
   const isDialogMode = displayMode === 'dialog';
-  const servingActions = useModelServingActions(model.id, { profileId });
+  const servingActions = useModelServingActions(model.id, { profileId }, servingStatus.servedModels);
 
   useDialogFocusTrap({
     dialogRef,
@@ -102,7 +101,7 @@ export function ModelServeDialog({
   const selectedProfile = servingProfiles.find((profile) => profile.profile_id === profileId);
   const selectedStatus =
     runtimeProfiles.statuses.find((status) => status.profile_id === profileId) ?? null;
-  const aliasRequired = servedModels.some(
+  const aliasRequired = servingStatus.servedModels.some(
     (servedModel) =>
       servedModel.model_id === model.id &&
       servedModel.load_state !== 'failed' &&
@@ -134,23 +133,6 @@ export function ModelServeDialog({
     setTensorSplit(selectedProfile.device.tensor_split?.join(',') ?? '');
     setContextSize(defaultContextSizeForProfile(selectedProfile));
   }, [selectedProfile]);
-
-  useEffect(() => {
-    const electronAPI = getElectronAPI();
-    if (!electronAPI?.get_serving_status) {
-      return;
-    }
-
-    let isActive = true;
-    void electronAPI.get_serving_status().then((response) => {
-      if (isActive && response.success) {
-        setServedModels(response.snapshot.served_models);
-      }
-    });
-    return () => {
-      isActive = false;
-    };
-  }, []);
 
   const formState: ModelServeFormState = {
     deviceMode,

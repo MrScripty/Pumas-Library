@@ -1442,6 +1442,14 @@ changes remain.
   backend-confirmed statuses, disables quick serve only when the selected
   profile is already loaded in the backend snapshot, and avoids optimistic
   loaded/unloaded state.
+- Serve-dialog serving-status subscription refactor verified with `npm run -w
+  frontend test:run -- ModelServeDialog useModelServingActions` and `npm run
+  -w frontend check:types`. This slice removed the dialog's one-shot
+  `get_serving_status` reads for alias/loaded-state logic and feeds
+  `useModelServingActions` from the existing `useServingStatus` subscription.
+  During verification, an introduced unstable default served-model array caused
+  a render loop in the hook test; the hook now uses a stable empty array
+  sentinel and the test uses a stable served-model fixture.
 
 ### Traceability Links
 

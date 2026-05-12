@@ -463,6 +463,15 @@ Update during implementation:
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and
   `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml serving`.
+- 2026-05-12: Moved ONNX serving session model-id selection onto provider
+  behavior. `serving_onnx.rs` now asks the composed provider registry for the
+  ONNX provider-side request model id before loading the Rust session, so an
+  explicit gateway alias cannot become the ONNX session name accidentally.
+  Focused RPC serving coverage proves the built-in ONNX policy keeps the
+  library model id when a public alias is present. Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml serving`.
 
 ## Commit Cadence Notes
 

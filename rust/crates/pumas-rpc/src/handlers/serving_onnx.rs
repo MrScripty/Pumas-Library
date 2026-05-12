@@ -9,7 +9,9 @@ use pumas_library::models::{
     ServeModelResponse, ServedModelLoadState, ServedModelStatus, UnserveModelRequest,
     UnserveModelResponse,
 };
-use pumas_library::{ExecutableArtifactFormat, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId};
+use pumas_library::{
+    ExecutableArtifactFormat, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId, ProviderRegistry,
+};
 use serde_json::Value;
 use tracing::warn;
 
@@ -29,10 +31,11 @@ pub(super) async fn serve_onnx_model(
         .await;
     };
     let library_root = state.api.model_library().library_root().to_path_buf();
+    let provider_model_id = onnx_provider_request_model_id(&request, &state.provider_registry);
     let load_request = match OnnxLoadRequest::parse(
         library_root,
         &onnx_path,
-        &request.model_id,
+        provider_model_id.as_str(),
         OnnxLoadOptions::default(),
     ) {
         Ok(load_request) => load_request,
@@ -209,4 +212,47 @@ async fn confirm_onnx_session_loaded(
         "ONNX model '{}' was absent from session list after load",
         model_id.as_str()
     ))
+}
+
+fn onnx_provider_request_model_id(
+    request: &ServeModelRequest,
+    registry: &ProviderRegistry,
+) -> String {
+    let library_model_id = request.model_id.trim();
+    registry
+        .get(RuntimeProviderId::OnnxRuntime)
+        .map(|behavior| {
+            behavior
+                .provider_request_model_id(library_model_id, request.config.model_alias.as_deref())
+        })
+        .unwrap_or_else(|| library_model_id.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pumas_library::models::{ModelServingConfig, RuntimeDeviceMode};
+
+    #[test]
+    fn onnx_provider_request_model_id_uses_provider_behavior_policy() {
+        let request = ServeModelRequest {
+            model_id: "embeddings/nomic/model".to_string(),
+            config: ModelServingConfig {
+                provider: RuntimeProviderId::OnnxRuntime,
+                profile_id: RuntimeProfileId::parse("onnx-cpu").unwrap(),
+                device_mode: RuntimeDeviceMode::Cpu,
+                device_id: None,
+                gpu_layers: None,
+                tensor_split: None,
+                context_size: None,
+                keep_loaded: true,
+                model_alias: Some("public-nomic".to_string()),
+            },
+        };
+
+        assert_eq!(
+            onnx_provider_request_model_id(&request, &ProviderRegistry::builtin()),
+            "embeddings/nomic/model"
+        );
+    }
 }

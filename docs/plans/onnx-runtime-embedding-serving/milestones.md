@@ -554,7 +554,7 @@ state.
 - [x] Validate ONNX placement through provider capabilities: reject llama.cpp
       specific `gpu_layers`, `tensor_split`, and `context_size` controls unless
       ONNX gains an explicit equivalent later.
-- [ ] Use the provider-side model id policy from Milestone 0 so gateway aliases
+- [x] Use the provider-side model id policy from Milestone 0 so gateway aliases
       are not overloaded as ONNX session names accidentally.
 - [ ] Parse raw serving requests into validated boundary types before provider
       adapters consume them. Internal load/unload code should not re-validate
@@ -610,9 +610,11 @@ llama.cpp-specific placement overrides with non-critical domain errors. The RPC
 serving boundary now loads/unloads ONNX through the Rust fake session manager
 and records/removes backend served status. The ONNX serving adapter now
 confirms the Rust session manager lists the loaded model before recording
-backend served status. Real ONNX Runtime execution, duplicate load/unload
-idempotency, and route/profile fallback cleanup remain open. Gateway embedding
-routing has started under Milestone 5.
+backend served status. ONNX session model ids now come from provider behavior
+instead of the gateway alias, with focused RPC serving coverage proving an
+explicit alias is not used as the ONNX session name. Real ONNX Runtime
+execution, duplicate load/unload idempotency, and route/profile fallback
+cleanup remain open. Gateway embedding routing has started under Milestone 5.
 
 ### Milestone 5: Pumas Gateway Routing
 

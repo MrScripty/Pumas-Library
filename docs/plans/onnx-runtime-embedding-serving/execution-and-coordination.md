@@ -877,6 +877,13 @@ Update during implementation:
   app-shell ONNX panel props. Renderer selection remains covered by the focused
   `AppPanelRenderer` ONNX test. Verification passed: `npm run -w frontend
   check:types` and `npm run -w frontend test:run -- apps AppPanelRenderer`.
+- 2026-05-12: Reconciled already-implemented ONNX serve-dialog selection and
+  provider-compatibility behavior against Milestone 6. Focused tests verify
+  `ModelServeDialog` honors provider-scoped ONNX routes, does not fall back to
+  the default or llama.cpp profile when an ONNX route is missing, and uses
+  provider compatibility descriptors for ONNX/GGUF blocking messages.
+  Verification passed: `npm run -w frontend test:run -- ModelServeDialog
+  modelServeHelpers`.
 
 ## Commit Cadence Notes
 
@@ -1402,6 +1409,8 @@ changes remain.
 - ONNX frontend hard-coded registry drift test verified with `npm run -w
   frontend check:types` and `npm run -w frontend test:run -- apps
   AppPanelRenderer`.
+- ONNX serve-dialog route/filter behavior verified with `npm run -w frontend
+  test:run -- ModelServeDialog modelServeHelpers`.
 
 ### Traceability Links
 

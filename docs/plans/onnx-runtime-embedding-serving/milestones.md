@@ -629,7 +629,10 @@ hard-coded frontend registry decision is backed by drift tests that read the
 checked-in ONNX plugin id and verify frontend registry, selected-version,
 managed-decoration, app-shell props, and renderer coverage remain aligned. Saved
 route selection, quick serve, serving-option actions, and backend-confirmed
-loaded-state rendering remain open.
+loaded-state rendering remain open. Focused serve-dialog verification confirms
+saved ONNX routes are honored, missing ONNX routes do not fall back to
+default/llama.cpp profiles, and provider compatibility helpers produce
+format-specific blocking messages instead of GGUF-only checks.
 
 ### Milestone 4: Serving Validation And Load/Unload
 
@@ -895,7 +898,7 @@ keeping backend-owned state authoritative.
 - [ ] Remove frontend helpers that assume a route is keyed only by model id.
       ONNX and llama.cpp model rows must both read and write provider-scoped
       routes.
-- [ ] Update `ModelServeDialog` initial profile selection so it consults
+- [x] Update `ModelServeDialog` initial profile selection so it consults
       provider-scoped routes and provider/format compatibility. It must not
       fall back from ONNX to a llama.cpp/default profile when an ONNX route is
       missing.
@@ -906,8 +909,8 @@ keeping backend-owned state authoritative.
       route/profile by default and persist draft route changes before serving.
 - [x] Update runtime profile settings controls for `onnx_runtime` and
       `onnx_serve`.
-- [ ] Update serve dialog filters and labels for ONNX embedding serving.
-- [ ] Replace GGUF-only serve-dialog checks with provider/format compatibility
+- [x] Update serve dialog filters and labels for ONNX embedding serving.
+- [x] Replace GGUF-only serve-dialog checks with provider/format compatibility
       helpers that can handle ONNX without regressing llama.cpp behavior.
 - [ ] Display backend-confirmed loaded state and endpoint mode from serving
       snapshots/events.

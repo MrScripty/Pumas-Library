@@ -560,10 +560,10 @@ Ollama or llama.cpp profiles.
       where the old shape is wrong for ONNX.
 - [x] Update Rust and TypeScript contracts in the same logical slice and verify
       serde/JSON casing for every new enum value and field.
-- [ ] Add or update executable schema/fixture tests for runtime profile
+- [x] Add or update executable schema/fixture tests for runtime profile
       snapshots, provider capabilities, route mutations, and plugin metadata
       before frontend or RPC consumers depend on the new fields.
-- [ ] Update runtime profile validation, default profile creation policy,
+- [x] Update runtime profile validation, default profile creation policy,
       endpoint resolution, status snapshots, and provider-mode compatibility
       rules.
 - [ ] Add managed runtime specs for ONNX in-process lifecycle, status/health
@@ -582,7 +582,7 @@ Ollama or llama.cpp profiles.
       process or platform abstractions. Do not inline OS checks in handlers or
       UI components.
 - [ ] Update frontend runtime profile types and provider-mode option maps.
-- [ ] Add contract tests for serialization and provider-mode compatibility.
+- [x] Add contract tests for serialization and provider-mode compatibility.
 
 **Verification:**
 - `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profile`
@@ -613,7 +613,11 @@ creating a `VersionManager` or process manager, adds the frontend sidebar app
 entry, keeps selected-version hooks from querying an ONNX version manager, and
 routes the app shell through the explicit fallback panel until the dedicated
 ONNX panel lands in Milestone 6. ONNX runtime profile lifecycle, backend-derived
-icon/session state, and full schema/fixture coverage remain open.
+icon/session state, and full schema/fixture coverage remain open. The runtime
+profile contract slice now registers an ONNX Runtime provider adapter, validates
+managed `onnx_runtime`/`onnx_serve` profiles through the composed provider
+registry/adapter path, rejects external or wrong-mode ONNX profiles, and adds
+runtime-profile snapshot plus ONNX provider-capability fixture coverage.
 
 ### Milestone 4: Serving Validation And Load/Unload
 

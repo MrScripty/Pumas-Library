@@ -838,6 +838,20 @@ Update during implementation:
   version_managed_apps_exclude_in_process_onnx_runtime`, `npm run -w frontend
   check:types`, and `npm run -w frontend test:run -- apps
   useSelectedAppVersions useManagedApps`.
+- 2026-05-12: Completed the M3 ONNX runtime-profile adapter and fixture
+  contract slice. Focused tests showed the provider behavior existed but the
+  runtime-profile adapter set still only contained Ollama and llama.cpp, so
+  managed ONNX profiles could not pass the composed validation path. Added
+  `OnnxRuntimeProviderAdapter`, registered it in `RuntimeProviderAdapters`, and
+  validated only managed `onnx_runtime`/`onnx_serve` in-process profiles. Added
+  a lightweight runtime-profile snapshot fixture for an ONNX route/status and
+  an ONNX provider-capability serialization test so Rust enum casing and
+  capability flags stay stable for frontend/RPC consumers. Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`, `cargo
+  test --manifest-path rust/crates/pumas-core/Cargo.toml --test
+  runtime_profile_contract_fixtures`, and `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml provider_capabilities`.
 
 ## Commit Cadence Notes
 
@@ -1348,6 +1362,12 @@ changes remain.
   version_managed_apps_exclude_in_process_onnx_runtime`, `npm run -w frontend
   check:types`, and `npm run -w frontend test:run -- apps
   useSelectedAppVersions useManagedApps`.
+- ONNX runtime-profile adapter/fixture contracts verified with `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml runtime_profiles`, `cargo
+  test --manifest-path rust/crates/pumas-core/Cargo.toml --test
+  runtime_profile_contract_fixtures`, and `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml provider_capabilities`.
 
 ### Traceability Links
 

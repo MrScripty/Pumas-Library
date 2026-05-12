@@ -1,0 +1,35 @@
+{
+  "schema_version": 2,
+  "cursor": "runtime-profiles:42",
+  "profiles": [
+    {
+      "profile_id": "onnx-runtime-default",
+      "provider": "onnx_runtime",
+      "provider_mode": "onnx_serve",
+      "management_mode": "managed",
+      "name": "ONNX Runtime",
+      "enabled": true,
+      "device": {
+        "mode": "cpu"
+      },
+      "scheduler": {
+        "auto_load": true
+      }
+    }
+  ],
+  "routes": [
+    {
+      "provider": "onnx_runtime",
+      "model_id": "nomic-embed-text-v1.5",
+      "profile_id": "onnx-runtime-default",
+      "auto_load": true
+    }
+  ],
+  "statuses": [
+    {
+      "profile_id": "onnx-runtime-default",
+      "state": "stopped"
+    }
+  ],
+  "default_profile_id": "onnx-runtime-default"
+}

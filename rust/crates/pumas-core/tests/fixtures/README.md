@@ -13,6 +13,8 @@ Tests should load fixtures read-only and copy them into temporary directories be
 
 - `dependency_requirements/`: versioned dependency-resolution contract fixtures.
 - `package_facts/`: versioned model package-facts contract fixtures.
+- `runtime_profiles/`: runtime-profile snapshot and provider-capability
+  contract fixtures.
 
 ## Non-Goals
 Large runtime model artifacts are out of scope. Reason: fixtures must remain lightweight for source control and CI. Revisit trigger: add artifact download fixtures behind an explicit integration-test gate.

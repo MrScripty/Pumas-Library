@@ -90,6 +90,7 @@ impl RuntimeProviderAdapters {
         Self::from_adapters(vec![
             Arc::new(OllamaRuntimeProviderAdapter) as Arc<dyn RuntimeProviderAdapter>,
             Arc::new(LlamaCppRuntimeProviderAdapter) as Arc<dyn RuntimeProviderAdapter>,
+            Arc::new(OnnxRuntimeProviderAdapter) as Arc<dyn RuntimeProviderAdapter>,
         ])
     }
 
@@ -302,6 +303,38 @@ impl RuntimeProviderAdapter for LlamaCppRuntimeProviderAdapter {
         {
             return Err(PumasError::InvalidParams {
                 message: "external llama.cpp profiles require endpoint_url".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+pub struct OnnxRuntimeProviderAdapter;
+
+#[async_trait]
+impl RuntimeProviderAdapter for OnnxRuntimeProviderAdapter {
+    fn provider(&self) -> RuntimeProviderId {
+        RuntimeProviderId::OnnxRuntime
+    }
+
+    fn capabilities(&self) -> RuntimeProviderCapabilities {
+        RuntimeProviderCapabilities::from_behavior(&ProviderBehavior::onnx_runtime())
+    }
+
+    async fn validate_profile(&self, profile: &RuntimeProfileConfig) -> Result<()> {
+        if profile.provider != RuntimeProviderId::OnnxRuntime {
+            return Err(PumasError::InvalidParams {
+                message: "ONNX Runtime adapter received a non-ONNX Runtime profile".to_string(),
+            });
+        }
+        if profile.provider_mode != RuntimeProviderMode::OnnxServe {
+            return Err(PumasError::InvalidParams {
+                message: "ONNX Runtime profiles must use provider_mode=onnx_serve".to_string(),
+            });
+        }
+        if profile.management_mode != RuntimeManagementMode::Managed {
+            return Err(PumasError::InvalidParams {
+                message: "ONNX Runtime profiles must use managed in-process lifecycle".to_string(),
             });
         }
         Ok(())
@@ -1249,6 +1282,24 @@ mod tests {
         }
     }
 
+    fn managed_onnx_runtime_profile(profile_id: &str) -> RuntimeProfileConfig {
+        RuntimeProfileConfig {
+            profile_id: RuntimeProfileId::parse(profile_id).unwrap(),
+            provider: RuntimeProviderId::OnnxRuntime,
+            provider_mode: RuntimeProviderMode::OnnxServe,
+            management_mode: RuntimeManagementMode::Managed,
+            name: "ONNX Runtime".to_string(),
+            enabled: true,
+            endpoint_url: None,
+            port: None,
+            device: RuntimeDeviceSettings {
+                mode: RuntimeDeviceMode::Cpu,
+                ..RuntimeDeviceSettings::default()
+            },
+            scheduler: RuntimeSchedulerSettings::default(),
+        }
+    }
+
     async fn validate_builtin_profile_config(profile: &RuntimeProfileConfig) -> Result<()> {
         validate_profile_config(
             profile,
@@ -1307,11 +1358,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn onnx_runtime_provider_adapter_accepts_managed_in_process_profile() {
+        OnnxRuntimeProviderAdapter
+            .validate_profile(&managed_onnx_runtime_profile("onnx-managed"))
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn onnx_runtime_provider_adapter_rejects_external_or_wrong_modes() {
+        let mut profile = managed_onnx_runtime_profile("onnx-invalid");
+        profile.provider_mode = RuntimeProviderMode::LlamaCppRouter;
+        let wrong_mode = OnnxRuntimeProviderAdapter.validate_profile(&profile).await;
+        assert!(wrong_mode
+            .unwrap_err()
+            .to_string()
+            .contains("provider_mode=onnx_serve"));
+
+        profile.provider_mode = RuntimeProviderMode::OnnxServe;
+        profile.management_mode = RuntimeManagementMode::External;
+        let external = OnnxRuntimeProviderAdapter.validate_profile(&profile).await;
+        assert!(external
+            .unwrap_err()
+            .to_string()
+            .contains("managed in-process"));
+    }
+
+    #[tokio::test]
     async fn validate_profile_config_accepts_builtin_provider_behavior() {
         validate_builtin_profile_config(&RuntimeProfileConfig::default_ollama())
             .await
             .unwrap();
         validate_builtin_profile_config(&managed_llama_cpp_profile("llama-router"))
+            .await
+            .unwrap();
+        validate_builtin_profile_config(&managed_onnx_runtime_profile("onnx-managed"))
             .await
             .unwrap();
     }

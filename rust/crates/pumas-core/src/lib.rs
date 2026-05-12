@@ -92,7 +92,8 @@ pub use providers::{
     ProviderUnloadBehavior, ServingTask,
 };
 pub use runtime_profiles::{
-    OllamaRuntimeProviderAdapter, RuntimeProviderAdapter, RuntimeProviderCapabilities,
+    OllamaRuntimeProviderAdapter, OnnxRuntimeProviderAdapter, RuntimeProviderAdapter,
+    RuntimeProviderCapabilities,
 };
 pub use system::{
     check_brave, check_git, check_setproctitle, GpuInfo, GpuMonitor, ProcessResources,

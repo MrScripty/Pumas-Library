@@ -646,6 +646,16 @@ Update during implementation:
   `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`,
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and
   file-size evidence: `mod.rs` 372 lines, `manager.rs` 136 lines.
+- 2026-05-12: Discovered the local Nomic embedding ONNX package stores
+  `onnx/model_fp16.onnx` below a package root that contains `tokenizer.json`
+  and `config.json`. The tokenizer contract now searches from the ONNX file
+  directory up through the validated model root for `tokenizer.json`, still
+  canonicalizing and rejecting root escapes before parsing. Verification
+  passed: `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`,
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and
+  file-size evidence: `mod.rs` 372 lines, `tokenizer.rs` 156 lines,
+  `tests.rs` 293 lines.
 
 ## Commit Cadence Notes
 
@@ -1092,6 +1102,12 @@ changes remain.
   rust/crates/pumas-core/Cargo.toml onnx`, `cargo test --manifest-path
   rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence:
   `onnx_runtime/mod.rs` 372 lines, `manager.rs` 136 lines.
+- ONNX package-root tokenizer discovery verified with `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size
+  evidence: `onnx_runtime/mod.rs` 372 lines, `tokenizer.rs` 156 lines,
+  `tests.rs` 293 lines.
 
 ### Traceability Links
 

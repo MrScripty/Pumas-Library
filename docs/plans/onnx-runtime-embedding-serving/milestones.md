@@ -487,7 +487,10 @@ truncation-before-normalization, layer normalization, invalid dimensions, and
 shape mismatch rejection. The module-size guard slice extracted the backend
 trait and bounded session manager into `onnx_runtime/manager.rs`, reducing
 `onnx_runtime/mod.rs` from 498 to 372 lines before real inference wiring. Real
-ONNX output tensor selection remains open for the inference slice.
+ONNX output tensor selection remains open for the inference slice. Tokenizer
+discovery now supports package-root `tokenizer.json` files for ONNX graphs in
+nested directories such as `onnx/model_fp16.onnx`, while preserving root
+containment validation.
 
 ### Milestone 3: Plugin And Runtime Profile Contracts
 

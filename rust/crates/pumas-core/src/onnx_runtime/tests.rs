@@ -13,6 +13,14 @@ fn model_fixture_with_tokenizer() -> tempfile::TempDir {
     temp
 }
 
+fn nested_model_fixture_with_tokenizer_at_root() -> tempfile::TempDir {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join("onnx")).unwrap();
+    std::fs::write(temp.path().join("onnx").join("model.onnx"), b"fake").unwrap();
+    std::fs::write(temp.path().join("tokenizer.json"), tokenizer_fixture_json()).unwrap();
+    temp
+}
+
 fn tokenizer_fixture_json() -> &'static str {
     r#"{
   "version": "1.0",
@@ -123,7 +131,23 @@ fn tokenizer_loads_from_model_directory_and_tokenizes_batch() {
 }
 
 #[test]
-fn tokenizer_requires_sibling_tokenizer_json_under_model_root() {
+fn tokenizer_loads_from_model_package_root_for_nested_onnx_file() {
+    let fixture = nested_model_fixture_with_tokenizer_at_root();
+    let model_path = OnnxModelPath::parse(fixture.path(), "onnx/model.onnx").unwrap();
+    let tokenizer = OnnxTokenizer::from_model_path(&model_path).unwrap();
+
+    assert_eq!(
+        tokenizer.tokenizer_path(),
+        fixture
+            .path()
+            .join("tokenizer.json")
+            .canonicalize()
+            .unwrap()
+    );
+}
+
+#[test]
+fn tokenizer_requires_tokenizer_json_under_model_root() {
     let fixture = model_fixture();
     let model_path = OnnxModelPath::parse(fixture.path(), "model.onnx").unwrap();
 

@@ -16,7 +16,7 @@ Runtime execution is wired into serving.
 | `manager.rs` | Bounded session-manager wrapper and backend trait used by fake and real execution backends. |
 | `postprocess.rs` | Pure embedding post-processing for pooling, optional layer norm, truncation, and L2 normalization. |
 | `real.rs` | Real ONNX Runtime session loader boundary backed by the Rust `ort` crate. |
-| `tokenizer.rs` | Rust tokenizer loader/tokenization contract for sibling `tokenizer.json` files. |
+| `tokenizer.rs` | Rust tokenizer loader/tokenization contract for model-package `tokenizer.json` files. |
 | `tests.rs` | Focused ONNX contract, fake backend, and session-manager tests. |
 
 ## Problem
@@ -51,8 +51,8 @@ cannot interleave with cleanup.
 
 - Model ids are validated separately from filesystem paths.
 - Load requests carry a validated `.onnx` file under an allowed root.
-- Tokenizer loading resolves a sibling `tokenizer.json` under the same allowed
-  root and rejects root escapes before parsing.
+- Tokenizer loading searches from the `.onnx` file directory up to the allowed
+  model root for `tokenizer.json`, then rejects root escapes before parsing.
 - Embedding input must be non-empty and bounded before backend execution.
 - Tokenized input must be non-empty and bounded before tensor construction.
 - Dimensions are positive and capped before backend execution.

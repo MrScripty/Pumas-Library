@@ -1411,6 +1411,14 @@ changes remain.
   AppPanelRenderer`.
 - ONNX serve-dialog route/filter behavior verified with `npm run -w frontend
   test:run -- ModelServeDialog modelServeHelpers`.
+- ONNX Runtime model route rows verified with `npm run -w frontend test:run --
+  OnnxRuntimeModelLibrarySection onnxRuntimeLibraryViewModels OnnxRuntimePanel`
+  and `npm run -w frontend check:types`. This slice added provider-scoped ONNX
+  row view models, a dedicated ONNX Runtime model library section, save/clear
+  route controls, a split row component below local size thresholds, panel
+  composition, and README/plan updates. Quick serve, serving options, and
+  backend-confirmed loaded-state rendering remain open for later Milestone 6
+  slices.
 
 ### Traceability Links
 
@@ -1422,5 +1430,6 @@ changes remain.
 - Module README updated: `frontend/src/utils/README.md`.
 - Module README updated:
   `frontend/src/components/app-panels/sections/README.md`.
+- Module README updated: `frontend/src/components/app-panels/README.md`.
 - ADR added/updated: `docs/adr/0001-onnx-runtime-provider-model.md`.
 - PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: pending.

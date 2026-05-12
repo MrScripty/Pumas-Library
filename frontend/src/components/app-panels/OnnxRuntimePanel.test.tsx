@@ -3,12 +3,12 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ModelManagerProps } from '../ModelManager';
 import { OnnxRuntimePanel } from './OnnxRuntimePanel';
 
-const modelManagerMock = vi.hoisted(() => vi.fn());
+const onnxRuntimeModelLibrarySectionMock = vi.hoisted(() => vi.fn());
 
-vi.mock('../ModelManager', () => ({
-  ModelManager: (props: ModelManagerProps) => {
-    modelManagerMock(props);
-    return <div>model-manager</div>;
+vi.mock('./sections/OnnxRuntimeModelLibrarySection', () => ({
+  OnnxRuntimeModelLibrarySection: (props: unknown) => {
+    onnxRuntimeModelLibrarySectionMock(props);
+    return <div>onnx-runtime-library</div>;
   },
 }));
 
@@ -19,7 +19,7 @@ vi.mock('./sections/RuntimeProfileSettingsSection', () => ({
 }));
 
 describe('OnnxRuntimePanel', () => {
-  it('renders ONNX profile settings and filters model groups to ONNX artifacts', () => {
+  it('renders ONNX profile settings and delegates model groups to the ONNX library section', () => {
     const modelManagerProps: ModelManagerProps = {
       excludedModels: new Set(),
       modelGroups: [
@@ -41,17 +41,14 @@ describe('OnnxRuntimePanel', () => {
     render(<OnnxRuntimePanel modelManagerProps={modelManagerProps} />);
 
     expect(screen.getByText('profiles-onnx_runtime')).toBeInTheDocument();
-    expect(modelManagerMock).toHaveBeenCalledWith(
+    expect(screen.getByText('onnx-runtime-library')).toBeInTheDocument();
+    expect(onnxRuntimeModelLibrarySectionMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        modelGroups: [
-          {
-            category: 'embeddings',
-            models: [
-              expect.objectContaining({ id: 'onnx-primary' }),
-              expect.objectContaining({ id: 'onnx-path' }),
-            ],
-          },
-        ],
+        modelGroups: modelManagerProps.modelGroups,
+        excludedModels: modelManagerProps.excludedModels,
+        starredModels: modelManagerProps.starredModels,
+        onToggleLink: modelManagerProps.onToggleLink,
+        onToggleStar: modelManagerProps.onToggleStar,
       })
     );
   });

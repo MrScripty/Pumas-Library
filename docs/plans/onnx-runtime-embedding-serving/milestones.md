@@ -673,7 +673,7 @@ state.
 - [x] Resolve the effective ONNX serving profile from the saved runtime route
       when the serve dialog does not provide an explicit profile. Explicit
       profile choices still override the saved route for that request.
-- [ ] Apply the same saved-route profile selection to the ONNX model row when
+- [x] Apply the same saved-route profile selection to the ONNX model row when
       the ONNX panel/model list lands in Milestone 6.
 - [x] Resolve serve-dialog saved routes by `(provider, model_id)`, not by model
       id alone, and avoid default-profile fallback for ONNX when no ONNX route
@@ -739,6 +739,8 @@ back to the global default profile; ONNX disables that fallback while Ollama and
 llama.cpp preserve their existing behavior. ONNX load now explicitly unloads
 the session if post-load status confirmation or served-state recording fails,
 reducing stale session/state divergence for recoverable workflow failures.
+The ONNX Runtime model row now applies the same saved-route profile selection
+through the frontend provider-scoped view model.
 Earlier committed M4 prerequisite slices extracted Ollama and llama.cpp serving
 into provider adapter modules and kept their existing public serving outcomes
 covered by focused core/RPC serving tests while removing legacy dispatch
@@ -892,7 +894,7 @@ keeping backend-owned state authoritative.
       case.
 - [x] Show `.onnx` compatible models for ONNX Runtime without adding ONNX rows
       to llama.cpp-only views.
-- [ ] Add per-row ONNX profile selection and save controls using the existing
+- [x] Add per-row ONNX profile selection and save controls using the existing
       backend runtime route APIs after they are replaced with provider-scoped
       route APIs.
 - [ ] Remove frontend helpers that assume a route is keyed only by model id.
@@ -953,7 +955,19 @@ keeping backend-owned state authoritative.
   selection, alias requirement updates from serving-status subscriptions, and
   absence of fallback to llama.cpp/default profiles.
 
-**Status:** Not started.
+**Status:** In progress. Earlier slices added the ONNX Runtime app shell,
+runtime-profile settings, provider descriptors, app identity drift tests,
+serve-dialog provider filtering, and initial ONNX-compatible model filtering.
+The latest frontend slice replaced the generic model manager inside the ONNX
+panel with a dedicated ONNX Runtime model library section. ONNX rows now use a
+provider-scoped view model, show only `.onnx` compatible local artifacts, expose
+semantic search/profile/save/link/star controls, read saved ONNX routes, mark
+missing profiles, and save or clear ONNX Runtime routes through the
+provider-scoped route mutation APIs. Focused tests cover ONNX-compatible
+filtering, provider-scoped route state, ONNX-only profile options, save/clear
+route mutations, local search, and panel composition. Quick serve, serving
+options, serving-status subscription/loaded-state display, and broader
+accessibility/keyboard coverage remain open.
 
 ### Milestone 7: Documentation And External App Contract
 

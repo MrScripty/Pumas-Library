@@ -5,26 +5,29 @@
 Own the Rust ONNX Runtime provider/session boundary for embedding serving.
 This module validates ONNX model paths, model ids, embedding request shape,
 execution-provider options, and session lifecycle requests before real ONNX
-Runtime dependencies are introduced.
+Runtime execution is wired into serving.
 
 ## Contents
 
 | File | Description |
 | ---- | ----------- |
-| `mod.rs` | ONNX provider/session contracts, fake embedding backend, session manager, validation, and tests. |
+| `mod.rs` | ONNX provider/session contracts, session manager, and shared validation. |
+| `fake.rs` | Deterministic fake embedding backend used by serving/gateway slices until real ONNX execution is wired. |
+| `tests.rs` | Focused ONNX contract, fake backend, and session-manager tests. |
 
 ## Problem
 
 ONNX embedding serving needs a Rust-owned execution boundary that can be tested
-without adding native ONNX Runtime packages or Python sidecars. Serving and
-gateway code should depend on validated contracts and a session handle instead
-of constructing ONNX sessions or tokenizer state ad hoc.
+without Python sidecars or ad hoc session construction. Serving and gateway code
+should depend on validated contracts and a session handle instead of
+constructing ONNX sessions or tokenizer state ad hoc.
 
 ## Constraints
 
 - Pumas `/v1` remains the external facade.
 - ONNX model paths are resolved under a caller-provided root before load.
-- Real ONNX Runtime dependencies are added only after dependency review.
+- Real ONNX Runtime dependencies are added only after dependency review and stay
+  owned by the Rust crate/module that performs execution.
 - Session manager construction belongs at a Rust composition root.
 - Backend implementations must honor bounded inference/lifecycle concurrency.
 - Shutdown must stop new load/inference/list/unload work, wait only for a
@@ -60,10 +63,11 @@ cannot interleave with cleanup.
 
 ## Dependencies
 
-**Internal:** `crate::error`, Rust standard library, `tokio`, `async-trait`.
+**Internal:** Rust standard library, `tokio`, `async-trait`.
 
-**External:** None in this slice. Candidate ONNX Runtime binding is reviewed in
-the execution dependency slice.
+**External:** Real execution dependencies are declared in the owning Rust
+manifest after dependency review. The fake backend does not load native ONNX
+Runtime libraries.
 
 ## API Consumer Contract
 

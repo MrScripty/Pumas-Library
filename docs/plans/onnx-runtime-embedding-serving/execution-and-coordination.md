@@ -594,6 +594,14 @@ Update during implementation:
   --manifest-path rust/crates/pumas-core/Cargo.toml -i ndarray`. `cargo audit`
   is unavailable because `cargo-audit` is not installed; advisory audit remains
   open before release.
+- 2026-05-12: Added an ONNX Runtime module-size guard before continuing M2
+  execution work. The existing fake backend and unit tests moved out of
+  `onnx_runtime/mod.rs` into focused `fake.rs` and `tests.rs` modules, reducing
+  the ONNX contract entrypoint below the 500-line standards threshold before
+  tokenizer/session loading code is added. Verification passed: `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, and file-size
+  evidence: `mod.rs` 489 lines, `fake.rs` 116 lines, `tests.rs` 158 lines.
 
 ## Commit Cadence Notes
 
@@ -1013,6 +1021,10 @@ changes remain.
 - Large-file split status closure is documentation-only; evidence is the
   committed module extraction history and the focused verification recorded for
   each split slice.
+- ONNX Runtime module-size guard verified with `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, and file-size evidence:
+  `onnx_runtime/mod.rs` 489 lines, `fake.rs` 116 lines, `tests.rs` 158 lines.
 
 ### Traceability Links
 
@@ -1020,6 +1032,7 @@ changes remain.
 - Module README updated: `rust/crates/pumas-core/src/providers/README.md`.
 - Module README added: `rust/crates/pumas-core/src/runtime_profiles/README.md`.
 - Module README updated: `rust/crates/pumas-core/src/serving/README.md`.
+- Module README updated: `rust/crates/pumas-core/src/onnx_runtime/README.md`.
 - Module README updated: `frontend/src/utils/README.md`.
 - Module README updated:
   `frontend/src/components/app-panels/sections/README.md`.

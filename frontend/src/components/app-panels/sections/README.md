@@ -17,7 +17,7 @@ Composable section components used by app panels to render status, selectors, de
 | `LlamaCppModelRow.tsx` | Presentational llama.cpp compatible-model row with route profile selection, loaded/failed placement badges, quick serve, options, link, and star controls. |
 | `OnnxRuntimeModelLibrarySection.tsx` | Focused ONNX Runtime local model library panel that lists compatible `.onnx` models and saves or clears per-row ONNX Runtime profile routes through provider-scoped route APIs. |
 | `OnnxRuntimeModelLibraryList.tsx` | Presentational ONNX Runtime compatible-model list shell with search, empty states, route errors, and per-row action wiring. |
-| `OnnxRuntimeModelRow.tsx` | Presentational ONNX Runtime compatible-model row with route profile selection, missing-profile badge, quick serve, options, link, and star controls. |
+| `OnnxRuntimeModelRow.tsx` | Presentational ONNX Runtime compatible-model row with route profile selection, backend-confirmed loaded/failed badges, missing-profile badge, quick serve, options, link, and star controls. |
 | `RuntimeProfileSettingsSection.tsx` | Backend-confirmed runtime profile settings section for Ollama and llama.cpp profile lifecycle. |
 | `RuntimeProfileSettingsEditor.tsx` | Runtime profile editor shell that composes field and action subcomponents. |
 | `RuntimeProfileSettingsFields.tsx` | Runtime profile identity, endpoint, mode, and device setting fields. |

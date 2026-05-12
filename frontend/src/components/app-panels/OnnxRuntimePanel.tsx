@@ -13,6 +13,8 @@ export function OnnxRuntimePanel({ modelManagerProps }: OnnxRuntimePanelProps) {
       <OnnxRuntimeModelLibrarySection
         excludedModels={modelManagerProps.excludedModels}
         modelGroups={modelManagerProps.modelGroups}
+        servingEndpoint={modelManagerProps.servingEndpoint}
+        servedModels={modelManagerProps.servedModels}
         starredModels={modelManagerProps.starredModels}
         onToggleLink={modelManagerProps.onToggleLink}
         onToggleStar={modelManagerProps.onToggleStar}

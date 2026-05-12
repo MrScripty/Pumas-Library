@@ -1429,6 +1429,19 @@ changes remain.
   lines. This slice added ONNX quick-serve config helpers, persisted draft
   routes before quick serve/options, and opened `ModelServeDialog` with the
   saved ONNX profile and `onnx_runtime` provider filter.
+- ONNX Runtime backend-confirmed loaded state verified with `npm run -w
+  frontend test:run -- OnnxRuntimeModelLibrarySection
+  onnxRuntimeLibraryViewModels OnnxRuntimePanel AppShellState`, `npm run -w
+  frontend check:types`, and file-size evidence:
+  `OnnxRuntimeModelLibrarySection.tsx` 225 lines,
+  `OnnxRuntimeModelLibraryList.tsx` 154 lines,
+  `OnnxRuntimeModelRow.tsx` 214 lines, and
+  `onnxRuntimeLibraryViewModels.ts` 85 lines. This slice threads the existing
+  serving-status subscription snapshot endpoint and served-model list through
+  model manager props into ONNX rows, renders loaded/failed badges from
+  backend-confirmed statuses, disables quick serve only when the selected
+  profile is already loaded in the backend snapshot, and avoids optimistic
+  loaded/unloaded state.
 
 ### Traceability Links
 

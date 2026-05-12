@@ -7,7 +7,7 @@
 
 import React, { useMemo } from 'react';
 import type { ModelCategory, RemoteModelInfo } from '../types/apps';
-import type { ServedModelStatus } from '../types/api-serving';
+import type { ServedModelStatus, ServingEndpointStatus } from '../types/api-serving';
 import { useDownloadCompletionRefresh } from '../hooks/useDownloadCompletionRefresh';
 import { useExistingLibraryChooser } from '../hooks/useExistingLibraryChooser';
 import { useHfAuthPrompt } from '../hooks/useHfAuthPrompt';
@@ -42,6 +42,7 @@ export interface ModelManagerProps {
   onToggleLink: (modelId: string) => void;
   selectedAppId: string | null;
   servedModels?: ServedModelStatus[];
+  servingEndpoint?: ServingEndpointStatus | null;
   onAddModels?: () => void;
   onOpenModelsRoot?: () => void;
   /** Callback when models are imported to refresh the list */

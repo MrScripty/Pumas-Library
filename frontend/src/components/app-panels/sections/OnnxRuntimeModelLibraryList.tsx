@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Search } from 'lucide-react';
 import type { RuntimeProfileConfig } from '../../../types/api-runtime-profiles';
+import type { ServingEndpointStatus } from '../../../types/api-serving';
 import { OnnxRuntimeModelRow } from './OnnxRuntimeModelRow';
 import type { OnnxRuntimeModelRowViewModel } from './onnxRuntimeLibraryViewModels';
 
@@ -16,6 +17,7 @@ export interface OnnxRuntimeModelLibraryListProps {
   routeError: string | null;
   rows: OnnxRuntimeModelRowViewModel[];
   savingRouteModelId: string | null;
+  servingEndpoint: ServingEndpointStatus | null;
   starredModels: Set<string>;
   onOpenMetadata: (modelId: string, modelName: string) => void;
   onOpenServeOptions: (
@@ -48,6 +50,22 @@ function filterRows(
   );
 }
 
+function endpointModeLabel(endpoint: ServingEndpointStatus | null): string | null {
+  if (!endpoint) {
+    return null;
+  }
+
+  switch (endpoint.endpoint_mode) {
+    case 'pumas_gateway':
+      return 'Pumas gateway';
+    case 'provider_endpoint':
+      return 'Provider endpoint';
+    case 'not_configured':
+      return 'Not configured';
+  }
+  return null;
+}
+
 export function OnnxRuntimeModelLibraryList({
   excludedModels,
   providerProfiles,
@@ -56,6 +74,7 @@ export function OnnxRuntimeModelLibraryList({
   routeError,
   rows,
   savingRouteModelId,
+  servingEndpoint,
   starredModels,
   onOpenMetadata,
   onOpenServeOptions,
@@ -66,6 +85,7 @@ export function OnnxRuntimeModelLibraryList({
 }: OnnxRuntimeModelLibraryListProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const filteredRows = filterRows(rows, searchQuery);
+  const endpointLabel = endpointModeLabel(servingEndpoint);
 
   return (
     <div className="flex h-full flex-col">
@@ -76,6 +96,7 @@ export function OnnxRuntimeModelLibraryList({
           </h2>
           <div className="text-xs text-[hsl(var(--text-muted))]">
             {rows.length} compatible local model{rows.length === 1 ? '' : 's'}
+            {endpointLabel ? ` - ${endpointLabel}` : ''}
           </div>
         </div>
         <label className="relative min-w-44 max-w-64 flex-1">

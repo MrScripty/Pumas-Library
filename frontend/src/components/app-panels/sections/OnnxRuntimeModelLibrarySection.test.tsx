@@ -6,6 +6,7 @@ import type {
   ModelRuntimeRoute,
   RuntimeProfileConfig,
 } from '../../../types/api-runtime-profiles';
+import type { ServedModelStatus, ServingEndpointStatus } from '../../../types/api-serving';
 import { OnnxRuntimeModelLibrarySection } from './OnnxRuntimeModelLibrarySection';
 
 const {
@@ -60,11 +61,17 @@ vi.mock('../../ModelServeDialog', () => ({
   },
 }));
 
-function renderSection(modelGroups: ModelCategory[]) {
+function renderSection(
+  modelGroups: ModelCategory[],
+  servedModels: ServedModelStatus[] = [],
+  servingEndpoint: ServingEndpointStatus | null = null
+) {
   return render(
     <OnnxRuntimeModelLibrarySection
       excludedModels={new Set()}
       modelGroups={modelGroups}
+      servingEndpoint={servingEndpoint}
+      servedModels={servedModels}
       starredModels={new Set()}
       onToggleLink={vi.fn()}
       onToggleStar={vi.fn()}
@@ -462,5 +469,70 @@ describe('OnnxRuntimeModelLibrarySection', () => {
         providerFilter: 'onnx_runtime',
       })
     );
+  });
+
+  it('shows backend-confirmed ONNX loaded state from served model snapshots', () => {
+    runtimeProfileState.profiles = [
+      {
+        profile_id: 'onnx-cpu',
+        provider: 'onnx_runtime',
+        provider_mode: 'onnx_serve',
+        management_mode: 'managed',
+        name: 'ONNX CPU',
+        enabled: true,
+        device: { mode: 'cpu' },
+        scheduler: { auto_load: false },
+      },
+    ];
+    runtimeProfileState.routes = [
+      {
+        provider: 'onnx_runtime',
+        model_id: 'models/nomic',
+        profile_id: 'onnx-cpu',
+        auto_load: true,
+      },
+    ];
+
+    renderSection(
+      [
+        {
+          category: 'Embedding',
+          models: [
+            {
+              id: 'models/nomic',
+              name: 'Nomic ONNX',
+              category: 'Embedding',
+              primaryFormat: 'onnx',
+            },
+          ],
+        },
+      ],
+      [
+        {
+          model_id: 'models/nomic',
+          model_alias: 'nomic',
+          provider: 'onnx_runtime',
+          profile_id: 'onnx-cpu',
+          load_state: 'loaded',
+          device_mode: 'cpu',
+          keep_loaded: true,
+          endpoint_url: 'http://127.0.0.1:3456/v1',
+        },
+      ],
+      {
+        endpoint_mode: 'pumas_gateway',
+        endpoint_url: 'http://127.0.0.1:3456/v1',
+        model_count: 1,
+      }
+    );
+
+    expect(screen.getByText('1 compatible local model - Pumas gateway')).toBeInTheDocument();
+    expect(screen.getByText('Loaded 1')).toHaveAttribute(
+      'title',
+      'http://127.0.0.1:3456/v1'
+    );
+    expect(
+      screen.getByRole('button', { name: 'Already loaded on selected profile' })
+    ).toBeDisabled();
   });
 });

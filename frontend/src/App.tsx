@@ -275,6 +275,7 @@ export default function App() {
     onModelsImported: fetchModels,
     activeVersion: appVersions.activeVersion,
     onChooseExistingLibrary: chooseLibraryRoot,
+    servingEndpoint: servingStatus.endpoint,
     servedModels: servingStatus.servedModels,
   });
   const panels = buildAppShellPanels({

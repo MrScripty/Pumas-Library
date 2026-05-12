@@ -914,9 +914,9 @@ keeping backend-owned state authoritative.
 - [x] Update serve dialog filters and labels for ONNX embedding serving.
 - [x] Replace GGUF-only serve-dialog checks with provider/format compatibility
       helpers that can handle ONNX without regressing llama.cpp behavior.
-- [ ] Display backend-confirmed loaded state and endpoint mode from serving
+- [x] Display backend-confirmed loaded state and endpoint mode from serving
       snapshots/events.
-- [ ] Keep runtime profile and serving state backend-owned. Do not add
+- [x] Keep runtime profile and serving state backend-owned. Do not add
       optimistic loaded/unloaded UI state; render only confirmed snapshots or
       explicitly transient form/submission state.
 - [ ] Use semantic controls, associated labels, accessible names for icon
@@ -968,8 +968,10 @@ filtering, provider-scoped route state, ONNX-only profile options, save/clear
 route mutations, local search, and panel composition. Quick serve, serving
 options, and draft-route persistence-before-serving are now implemented with
 provider-scoped ONNX profiles and focused tests. Serving-status
-subscription/loaded-state display and broader accessibility/keyboard coverage
-remain open.
+subscription state from the app shell now flows into ONNX rows, which display
+backend-confirmed loaded/failed state and serving endpoint mode without adding
+optimistic loaded/unloaded state. Broader accessibility/keyboard coverage and
+the serve-dialog one-shot status cleanup remain open.
 
 ### Milestone 7: Documentation And External App Contract
 

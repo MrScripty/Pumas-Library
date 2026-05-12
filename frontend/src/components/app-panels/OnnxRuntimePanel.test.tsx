@@ -35,6 +35,21 @@ describe('OnnxRuntimePanel', () => {
       onToggleLink: vi.fn(),
       onToggleStar: vi.fn(),
       selectedAppId: 'onnx-runtime',
+      servingEndpoint: {
+        endpoint_mode: 'pumas_gateway',
+        endpoint_url: 'http://127.0.0.1:3456/v1',
+        model_count: 1,
+      },
+      servedModels: [
+        {
+          model_id: 'onnx-primary',
+          provider: 'onnx_runtime',
+          profile_id: 'onnx-cpu',
+          load_state: 'loaded',
+          device_mode: 'cpu',
+          keep_loaded: true,
+        },
+      ],
       starredModels: new Set(),
     };
 
@@ -46,6 +61,8 @@ describe('OnnxRuntimePanel', () => {
       expect.objectContaining({
         modelGroups: modelManagerProps.modelGroups,
         excludedModels: modelManagerProps.excludedModels,
+        servingEndpoint: modelManagerProps.servingEndpoint,
+        servedModels: modelManagerProps.servedModels,
         starredModels: modelManagerProps.starredModels,
         onToggleLink: modelManagerProps.onToggleLink,
         onToggleStar: modelManagerProps.onToggleStar,

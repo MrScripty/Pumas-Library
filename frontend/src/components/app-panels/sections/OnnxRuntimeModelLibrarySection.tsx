@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { getElectronAPI } from '../../../api/adapter';
 import { useRuntimeProfiles } from '../../../hooks/useRuntimeProfiles';
 import type { RuntimeProfileConfig } from '../../../types/api-runtime-profiles';
+import type { ServedModelStatus, ServingEndpointStatus } from '../../../types/api-serving';
 import type { ModelCategory } from '../../../types/apps';
 import { ModelMetadataModal } from '../../ModelMetadataModal';
 import { ModelServeDialog } from '../../ModelServeDialog';
@@ -27,6 +28,8 @@ interface ServingTarget {
 export interface OnnxRuntimeModelLibrarySectionProps {
   excludedModels: Set<string>;
   modelGroups: ModelCategory[];
+  servingEndpoint?: ServingEndpointStatus | null;
+  servedModels?: ServedModelStatus[];
   starredModels: Set<string>;
   onToggleLink: (modelId: string) => void;
   onToggleStar: (modelId: string) => void;
@@ -35,6 +38,8 @@ export interface OnnxRuntimeModelLibrarySectionProps {
 export function OnnxRuntimeModelLibrarySection({
   excludedModels,
   modelGroups,
+  servingEndpoint = null,
+  servedModels = [],
   starredModels,
   onToggleLink,
   onToggleStar,
@@ -54,7 +59,12 @@ export function OnnxRuntimeModelLibrarySection({
   const [savingRouteModelId, setSavingRouteModelId] = useState<string | null>(null);
   const [routeError, setRouteError] = useState<string | null>(null);
   const providerProfiles = profiles.filter((profile) => profile.provider === ONNX_RUNTIME_PROVIDER);
-  const rows = buildOnnxRuntimeModelRows({ modelGroups, profiles, routes });
+  const rows = buildOnnxRuntimeModelRows({
+    modelGroups,
+    profiles,
+    routes,
+    servedStatuses: servedModels,
+  });
 
   const persistRouteSelection = async (modelId: string, profileId: string): Promise<boolean> => {
     setSavingRouteModelId(modelId);
@@ -186,6 +196,7 @@ export function OnnxRuntimeModelLibrarySection({
         routeError={routeError}
         rows={rows}
         savingRouteModelId={savingRouteModelId}
+        servingEndpoint={servingEndpoint}
         starredModels={starredModels}
         onOpenMetadata={(modelId, modelName) => {
           setMetadataModal({ modelId, modelName });

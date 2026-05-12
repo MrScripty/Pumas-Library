@@ -4,7 +4,7 @@ import type { ModelManagerProps } from './ModelManager';
 import type { useManagedApps } from '../hooks/useManagedApps';
 import type { LauncherUpdateState } from '../hooks/useLauncherUpdates';
 import type { AppConfig, ModelCategory, SystemResources } from '../types/apps';
-import type { ServedModelStatus } from '../types/api-serving';
+import type { ServedModelStatus, ServingEndpointStatus } from '../types/api-serving';
 import type { StatusResponse } from '../types/api-system';
 
 type AppShellProps = ComponentProps<typeof AppShell>;
@@ -53,6 +53,7 @@ interface BuildModelManagerPropsOptions {
   excludedModels: Set<string>;
   modelGroups: ModelCategory[];
   selectedAppId: string | null;
+  servingEndpoint?: ServingEndpointStatus | null;
   servedModels?: ServedModelStatus[];
   starredModels: Set<string>;
   onAddModels: () => void;
@@ -180,6 +181,7 @@ export function buildModelManagerProps({
   excludedModels,
   modelGroups,
   selectedAppId,
+  servingEndpoint = null,
   servedModels = [],
   starredModels,
   onAddModels,
@@ -196,6 +198,7 @@ export function buildModelManagerProps({
     onToggleStar,
     onToggleLink,
     selectedAppId,
+    servingEndpoint,
     servedModels,
     onAddModels,
     onOpenModelsRoot,

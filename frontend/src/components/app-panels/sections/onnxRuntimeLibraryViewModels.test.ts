@@ -3,6 +3,7 @@ import type {
   ModelRuntimeRoute,
   RuntimeProfileConfig,
 } from '../../../types/api-runtime-profiles';
+import type { ServedModelStatus } from '../../../types/api-serving';
 import type { ModelCategory, ModelInfo } from '../../../types/apps';
 import { buildOnnxRuntimeModelRows } from './onnxRuntimeLibraryViewModels';
 
@@ -42,6 +43,19 @@ function route(overrides: Partial<ModelRuntimeRoute> = {}): ModelRuntimeRoute {
   };
 }
 
+function servedStatus(overrides: Partial<ServedModelStatus> = {}): ServedModelStatus {
+  return {
+    model_id: 'models/embedding.onnx',
+    model_alias: 'embedding',
+    provider: 'onnx_runtime',
+    profile_id: 'onnx-cpu',
+    load_state: 'loaded',
+    device_mode: 'cpu',
+    keep_loaded: true,
+    ...overrides,
+  };
+}
+
 describe('ONNX Runtime library view models', () => {
   it('keeps ONNX-compatible models and removes incompatible groups', () => {
     const groups: ModelCategory[] = [
@@ -60,7 +74,12 @@ describe('ONNX Runtime library view models', () => {
       },
     ];
 
-    const rows = buildOnnxRuntimeModelRows({ modelGroups: groups, profiles: [], routes: [] });
+    const rows = buildOnnxRuntimeModelRows({
+      modelGroups: groups,
+      profiles: [],
+      routes: [],
+      servedStatuses: [],
+    });
 
     expect(rows.map((row) => row.model.id)).toEqual(['primary', 'format', 'artifact']);
   });
@@ -88,6 +107,7 @@ describe('ONNX Runtime library view models', () => {
           profile_id: 'llama-cpu',
         }),
       ],
+      servedStatuses: [],
     });
 
     expect(rows).toHaveLength(1);
@@ -106,10 +126,37 @@ describe('ONNX Runtime library view models', () => {
       ],
       profiles: [profile()],
       routes: [route({ profile_id: 'deleted-profile' })],
+      servedStatuses: [],
     });
 
     expect(rows).toHaveLength(1);
     expect(rows[0]?.routeState).toBe('missing_profile');
     expect(rows[0]?.selectedProfile).toBeNull();
+  });
+
+  it('keeps backend-confirmed ONNX served state separate from other providers', () => {
+    const rows = buildOnnxRuntimeModelRows({
+      modelGroups: [
+        {
+          category: 'embeddings',
+          models: [model()],
+        },
+      ],
+      profiles: [profile()],
+      routes: [route()],
+      servedStatuses: [
+        servedStatus({ endpoint_url: 'http://127.0.0.1:3456/v1' }),
+        servedStatus({
+          provider: 'llama_cpp',
+          profile_id: 'llama-cpu',
+          model_alias: 'llama',
+        }),
+      ],
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.selectedServedStatus?.provider).toBe('onnx_runtime');
+    expect(rows[0]?.selectedServedStatus?.endpoint_url).toBe('http://127.0.0.1:3456/v1');
+    expect(rows[0]?.servedStatuses).toHaveLength(1);
   });
 });

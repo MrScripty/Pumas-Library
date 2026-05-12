@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link2, Play, Save, SlidersHorizontal, Star } from 'lucide-react';
 import type { RuntimeProfileConfig } from '../../../types/api-runtime-profiles';
+import type { ServedModelStatus } from '../../../types/api-serving';
 import { LocalModelMetadataSummary } from '../../LocalModelMetadataSummary';
 import { LocalModelNameButton } from '../../LocalModelNameButton';
 import { IconButton, ListItem, ListItemContent } from '../../ui';
@@ -61,6 +62,16 @@ export function OnnxRuntimeModelRow({
   const [draftProfileId, setDraftProfileId] = useState(row.route?.profile_id ?? '');
   const hasDraftChange = draftProfileId !== (row.route?.profile_id ?? '');
   const draftProfile = providerProfiles.find((profile) => profile.profile_id === draftProfileId);
+  const loadedStatuses = row.servedStatuses.filter(
+    (status: ServedModelStatus) => status.load_state === 'loaded'
+  );
+  const failedStatus =
+    row.selectedServedStatus?.load_state === 'failed'
+      ? row.selectedServedStatus
+      : row.servedStatuses.find((status) => status.load_state === 'failed') ?? null;
+  const isDraftProfileLoaded = row.servedStatuses.some(
+    (status) => status.profile_id === draftProfileId && status.load_state === 'loaded'
+  );
 
   useEffect(() => {
     setDraftProfileId(row.route?.profile_id ?? '');
@@ -95,6 +106,22 @@ export function OnnxRuntimeModelRow({
               {row.routeState === 'missing_profile' && (
                 <span className="rounded bg-[hsl(var(--accent-error)/0.14)] px-1.5 py-0.5 text-[10px] font-medium uppercase text-[hsl(var(--accent-error))]">
                   Missing profile
+                </span>
+              )}
+              {loadedStatuses.length > 0 && (
+                <span
+                  className="rounded bg-[hsl(var(--accent-success)/0.14)] px-1.5 py-0.5 text-[10px] font-medium uppercase text-[hsl(var(--accent-success))]"
+                  title={loadedStatuses[0]?.endpoint_url ?? undefined}
+                >
+                  Loaded {loadedStatuses.length}
+                </span>
+              )}
+              {failedStatus && (
+                <span
+                  className="rounded bg-[hsl(var(--accent-error)/0.14)] px-1.5 py-0.5 text-[10px] font-medium uppercase text-[hsl(var(--accent-error))]"
+                  title={failedStatus.last_error?.message ?? undefined}
+                >
+                  Failed
                 </span>
               )}
             </div>
@@ -149,16 +176,18 @@ export function OnnxRuntimeModelRow({
           <IconButton
             icon={<Play />}
             tooltip={
-              isQuickServing
-                ? 'Starting ONNX Runtime serving'
-                : 'Quick serve with selected ONNX Runtime profile'
+              isDraftProfileLoaded
+                ? 'Already loaded on selected profile'
+                : isQuickServing
+                  ? 'Starting ONNX Runtime serving'
+                  : 'Quick serve with selected ONNX Runtime profile'
             }
             onClick={() => {
               if (draftProfile) {
                 onQuickServe(row, draftProfile, hasDraftChange);
               }
             }}
-            disabled={!draftProfile || isQuickServing || isSavingRoute}
+            disabled={!draftProfile || isQuickServing || isSavingRoute || isDraftProfileLoaded}
             size="sm"
           />
           <IconButton

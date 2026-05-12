@@ -17,6 +17,7 @@ export interface RuntimeProviderDescriptor {
   supportsContextSize: boolean;
   defaultContextSize: string | null;
   canLaunchOnServe: boolean;
+  requiresSavedRouteForImplicitServe: boolean;
 }
 
 export const runtimeProviderDescriptors: Record<RuntimeProviderId, RuntimeProviderDescriptor> = {
@@ -32,6 +33,7 @@ export const runtimeProviderDescriptors: Record<RuntimeProviderId, RuntimeProvid
     supportsContextSize: false,
     defaultContextSize: null,
     canLaunchOnServe: false,
+    requiresSavedRouteForImplicitServe: false,
   },
   llama_cpp: {
     id: 'llama_cpp',
@@ -45,6 +47,7 @@ export const runtimeProviderDescriptors: Record<RuntimeProviderId, RuntimeProvid
     supportsContextSize: true,
     defaultContextSize: '4096',
     canLaunchOnServe: true,
+    requiresSavedRouteForImplicitServe: false,
   },
   onnx_runtime: {
     id: 'onnx_runtime',
@@ -58,6 +61,7 @@ export const runtimeProviderDescriptors: Record<RuntimeProviderId, RuntimeProvid
     supportsContextSize: false,
     defaultContextSize: null,
     canLaunchOnServe: false,
+    requiresSavedRouteForImplicitServe: true,
   },
 };
 

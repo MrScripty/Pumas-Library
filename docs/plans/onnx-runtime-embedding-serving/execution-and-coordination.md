@@ -508,6 +508,18 @@ Update during implementation:
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving_onnx`,
   and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`.
+- 2026-05-12: Added serve-dialog ONNX route/profile selection. Runtime provider
+  descriptors now declare whether implicit serving requires a saved route;
+  ONNX Runtime requires one, while Ollama and llama.cpp keep their existing
+  fallback behavior. The serve dialog still honors explicit profile choices,
+  resolves saved routes by `(provider, model_id)`, selects the saved ONNX
+  profile when present, and leaves the target unselected with a clear
+  validation message when an ONNX-filtered serve dialog has no saved route.
+  ONNX model-row selection remains deferred to the Milestone 6 ONNX panel
+  slice, and backend/core default-profile fallback cleanup remains tracked as a
+  separate M4 follow-up. Verification passed: `npm run -w frontend
+  check:types` and `npm run -w frontend test:run -- ModelServeDialog
+  runtimeProviderDescriptors`.
 
 ## Commit Cadence Notes
 

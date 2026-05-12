@@ -249,6 +249,12 @@ function selectInitialServeProfile({
   if (explicitProfile) {
     return explicitProfile;
   }
+  if (
+    providerFilter &&
+    getRuntimeProviderDescriptor(providerFilter).requiresSavedRouteForImplicitServe
+  ) {
+    return undefined;
+  }
 
   const launchOnServeProfiles = profiles.filter((profile) => {
     const descriptor = getRuntimeProviderDescriptor(profile.provider);

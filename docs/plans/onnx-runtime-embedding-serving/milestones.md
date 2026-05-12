@@ -571,14 +571,18 @@ state.
       cancellations are observable without reading ONNX Runtime internals.
       ONNX runtime-profile restart is not yet an active workflow; the lifecycle
       slice must instrument it when introduced.
-- [ ] Resolve the effective ONNX serving profile from the saved runtime route
-      when a model row or serve dialog does not provide an explicit profile.
-      Explicit profile choices must override the saved route for that request.
-- [ ] Resolve saved routes by `(provider, model_id)`, not by model id alone.
-      Remove any default-profile fallback that would silently serve ONNX with
-      the wrong provider when no ONNX route exists.
-- [ ] Return a clear validation error when an ONNX model has no saved route and
-      no explicit ONNX profile selection.
+- [x] Resolve the effective ONNX serving profile from the saved runtime route
+      when the serve dialog does not provide an explicit profile. Explicit
+      profile choices still override the saved route for that request.
+- [ ] Apply the same saved-route profile selection to the ONNX model row when
+      the ONNX panel/model list lands in Milestone 6.
+- [x] Resolve serve-dialog saved routes by `(provider, model_id)`, not by model
+      id alone, and avoid default-profile fallback for ONNX when no ONNX route
+      exists.
+- [ ] Remove default-profile fallback from any remaining backend/core ONNX model
+      endpoint operation path that can silently select the wrong provider.
+- [x] Return a clear serve-dialog validation message when an ONNX model has no
+      saved route and no explicit ONNX profile selection.
 - [x] Add ONNX provider adapter calls from `serve_model` to the Rust ONNX
       session manager.
 - [ ] Move existing Ollama and llama.cpp serving paths behind provider serving
@@ -628,7 +632,10 @@ payloads, secrets, or embedding inputs. ONNX serving load/unload request
 handling now parses executable artifact paths, provider-side model ids, gateway
 aliases, and unload identities into validated local boundary values before
 calling the ONNX session manager or served-state reconciliation helpers.
-Gateway embedding routing has started under Milestone 5.
+The serve dialog now uses provider-scoped saved routes for ONNX profile
+selection, preserves explicit profile overrides, and refuses to fall back to the
+default/first profile for ONNX when no saved route exists. Gateway embedding
+routing has started under Milestone 5.
 
 ### Milestone 5: Pumas Gateway Routing
 

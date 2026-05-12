@@ -246,6 +246,133 @@ describe('ModelServeDialog', () => {
     expect(screen.getByText('Ready to serve Model Four with Emily Llama.')).toBeInTheDocument();
   });
 
+  it('uses a saved ONNX route when opening the ONNX-filtered serve dialog', () => {
+    const onnxProfile = {
+      profile_id: 'onnx-cpu',
+      provider: 'onnx_runtime' as const,
+      provider_mode: 'onnx_serve' as const,
+      management_mode: 'managed' as const,
+      name: 'ONNX CPU',
+      enabled: true,
+      endpoint_url: null,
+      port: null,
+      device: { mode: 'cpu' as const },
+      scheduler: { auto_load: true },
+    };
+    useRuntimeProfilesMock.mockReturnValue({
+      snapshot: {
+        ...snapshot,
+        profiles: [...snapshot.profiles, onnxProfile],
+        routes: [
+          {
+            provider: 'onnx_runtime',
+            model_id: 'embeddings/nomic/model',
+            profile_id: 'onnx-cpu',
+            auto_load: true,
+          },
+        ],
+        statuses: [
+          {
+            profile_id: 'onnx-cpu',
+            state: 'running',
+            endpoint_url: null,
+            pid: null,
+            log_path: null,
+            last_error: null,
+          },
+        ],
+      },
+      profiles: [...snapshot.profiles, onnxProfile],
+      routes: [
+        {
+          provider: 'onnx_runtime',
+          model_id: 'embeddings/nomic/model',
+          profile_id: 'onnx-cpu',
+          auto_load: true,
+        },
+      ],
+      statuses: [
+        {
+          profile_id: 'onnx-cpu',
+          state: 'running',
+          endpoint_url: null,
+          pid: null,
+          log_path: null,
+          last_error: null,
+        },
+      ],
+      defaultProfileId: snapshot.default_profile_id,
+      cursor: snapshot.cursor,
+      isLoading: false,
+      error: null,
+      refreshRuntimeProfiles: vi.fn(),
+    });
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'embeddings/nomic/model',
+          name: 'Nomic ONNX',
+          category: 'local',
+          format: 'onnx',
+        }}
+        providerFilter="onnx_runtime"
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('combobox', { name: /runtime target/i })).toHaveValue('onnx-cpu');
+    expect(screen.getByText('Ready to serve Nomic ONNX with ONNX CPU.')).toBeInTheDocument();
+  });
+
+  it('does not fall back to the first ONNX profile when no ONNX route is saved', () => {
+    const onnxProfile = {
+      profile_id: 'onnx-cpu',
+      provider: 'onnx_runtime' as const,
+      provider_mode: 'onnx_serve' as const,
+      management_mode: 'managed' as const,
+      name: 'ONNX CPU',
+      enabled: true,
+      endpoint_url: null,
+      port: null,
+      device: { mode: 'cpu' as const },
+      scheduler: { auto_load: true },
+    };
+    useRuntimeProfilesMock.mockReturnValue({
+      snapshot: {
+        ...snapshot,
+        profiles: [...snapshot.profiles, onnxProfile],
+      },
+      profiles: [...snapshot.profiles, onnxProfile],
+      routes: [],
+      statuses: [],
+      defaultProfileId: snapshot.default_profile_id,
+      cursor: snapshot.cursor,
+      isLoading: false,
+      error: null,
+      refreshRuntimeProfiles: vi.fn(),
+    });
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'embeddings/nomic/model',
+          name: 'Nomic ONNX',
+          category: 'local',
+          format: 'onnx',
+        }}
+        providerFilter="onnx_runtime"
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(
+      screen.getByText('Cannot serve yet: Select a runtime target before serving.')
+    ).toBeInTheDocument();
+    expect(screen.getByText('Provider')).toBeInTheDocument();
+    expect(screen.getAllByText('none').length).toBeGreaterThan(0);
+  });
+
   it('calls serve_model when start serving is clicked', async () => {
     const validateModelServingConfig = vi.fn<
       (_request: ServeModelRequest) => Promise<ModelServeValidationResponse>

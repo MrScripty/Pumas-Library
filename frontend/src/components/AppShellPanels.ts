@@ -82,6 +82,9 @@ export function buildAppShellPanels({
       connectionUrl,
       modelManagerProps,
     },
+    onnxRuntime: {
+      modelManagerProps,
+    },
     torch: {
       ...sharedVersionProps,
       connectionUrl,

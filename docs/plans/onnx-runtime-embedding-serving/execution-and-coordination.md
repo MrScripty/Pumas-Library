@@ -860,6 +860,16 @@ Update during implementation:
   compatibility tests cover ONNX primary-format matching. Verification passed:
   `npm run -w frontend check:types` and `npm run -w frontend test:run --
   runtimeProviderDescriptors RuntimeProfileSettingsSection`.
+- 2026-05-12: Completed the first ONNX app panel slice. `OnnxRuntimePanel`
+  renders `RuntimeProfileSettingsSection` scoped to `onnx_runtime` and an
+  ONNX-filtered model library using the shared provider compatibility helper,
+  so GGUF-only models do not appear in the ONNX app view. `AppPanelRenderer`
+  now routes `onnx-runtime` to the real panel instead of the default
+  coming-soon fallback, and app-shell panel props include the ONNX panel input.
+  Route assignment, quick serve, serve-options controls, and backend-confirmed
+  loaded-state rendering remain separate frontend slices. Verification passed:
+  `npm run -w frontend check:types` and `npm run -w frontend test:run --
+  AppPanelRenderer OnnxRuntimePanel AppShellPanels runtimeProviderDescriptors`.
 
 ## Commit Cadence Notes
 
@@ -1379,6 +1389,9 @@ changes remain.
 - Frontend ONNX runtime-profile controls verified with `npm run -w frontend
   check:types` and `npm run -w frontend test:run -- runtimeProviderDescriptors
   RuntimeProfileSettingsSection`.
+- First ONNX app panel verified with `npm run -w frontend check:types` and
+  `npm run -w frontend test:run -- AppPanelRenderer OnnxRuntimePanel
+  AppShellPanels runtimeProviderDescriptors`.
 
 ### Traceability Links
 

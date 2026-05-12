@@ -621,6 +621,12 @@ runtime-profile snapshot plus ONNX provider-capability fixture coverage.
 Frontend runtime-profile descriptors now include provider-owned management modes,
 so ONNX Runtime settings expose `onnx_serve` with managed-only lifecycle, and
 shared `ModelInfo.primaryFormat` includes `onnx` as a typed executable format.
+The first ONNX app panel now renders runtime-profile settings scoped to
+`onnx_runtime` plus an ONNX-compatible model library view filtered through the
+shared provider compatibility helper, and `AppPanelRenderer` routes
+`onnx-runtime` to that panel instead of the default coming-soon fallback. Saved
+route selection, quick serve, serving-option actions, and backend-confirmed
+loaded-state rendering remain open.
 
 ### Milestone 4: Serving Validation And Load/Unload
 
@@ -849,9 +855,9 @@ manager, ONNX-compatible model list, route assignment, and serve actions while
 keeping backend-owned state authoritative.
 
 **Tasks:**
-- [ ] Add ONNX Runtime to `AppPanelRenderer` so selecting the ONNX app icon
+- [x] Add ONNX Runtime to `AppPanelRenderer` so selecting the ONNX app icon
       opens a real ONNX app panel rather than the default coming-soon panel.
-- [ ] Decide whether the hard-coded app registry remains acceptable for ONNX.
+- [x] Decide whether the hard-coded app registry remains acceptable for ONNX.
       If it remains, update every hard-coded registry/decorator/renderer state
       path in the same slice. If a descriptor approach is cleaner, replace the
       registry rather than adding another partial special case.
@@ -859,26 +865,26 @@ keeping backend-owned state authoritative.
       that fails when an app exists in plugin metadata/Rust app identity but is
       missing selected-version state, managed decoration, app-shell props, or
       renderer selection.
-- [ ] Keep new ONNX panel/components under standards thresholds where practical
+- [x] Keep new ONNX panel/components under standards thresholds where practical
       and split view-model, route mutation, and rendering responsibilities
       before components become multi-responsibility.
-- [ ] Keep provider descriptors and view models as data/policy translation
+- [x] Keep provider descriptors and view models as data/policy translation
       layers. React components render declared capabilities and dispatch actions;
       they must not encode provider compatibility, route identity, endpoint
       support, or launch policy directly.
-- [ ] Compose the ONNX panel with connection/version/status affordances that
+- [x] Compose the ONNX panel with connection/version/status affordances that
       match the selected lifecycle slice, `RuntimeProfileSettingsSection`
       scoped to `onnx_runtime`, and an ONNX-compatible model library section
       below the profile settings.
-- [ ] Build ONNX-compatible model view-model helpers that filter `.onnx`
+- [x] Build ONNX-compatible model view-model helpers that filter `.onnx`
       artifacts and exclude GGUF-only llama.cpp rows.
-- [ ] Create shared executable-format/provider-compatibility helpers consumed
+- [x] Create shared executable-format/provider-compatibility helpers consumed
       by ONNX rows, llama.cpp rows, and the serve dialog. Do not duplicate
       extension checks in each component.
 - [x] Update shared `ModelInfo` format typing and model-library view models so
       ONNX is a first-class executable format, not an unchecked string special
       case.
-- [ ] Show `.onnx` compatible models for ONNX Runtime without adding ONNX rows
+- [x] Show `.onnx` compatible models for ONNX Runtime without adding ONNX rows
       to llama.cpp-only views.
 - [ ] Add per-row ONNX profile selection and save controls using the existing
       backend runtime route APIs after they are replaced with provider-scoped

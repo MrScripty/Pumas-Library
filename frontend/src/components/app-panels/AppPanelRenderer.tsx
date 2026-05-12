@@ -1,6 +1,7 @@
 import { ComfyUIPanel, type ComfyUIPanelProps } from './ComfyUIPanel';
 import { DefaultAppPanel, type DefaultAppPanelProps } from './DefaultAppPanel';
 import { LlamaCppPanel, type LlamaCppPanelProps } from './LlamaCppPanel';
+import { OnnxRuntimePanel, type OnnxRuntimePanelProps } from './OnnxRuntimePanel';
 import { OllamaPanel, type OllamaPanelProps } from './OllamaPanel';
 import { TorchPanel, type TorchPanelProps } from './TorchPanel';
 import { ModelManager } from '../ModelManager';
@@ -9,6 +10,7 @@ interface AppPanelRendererProps {
   selectedAppId: string | null;
   comfyUI: ComfyUIPanelProps;
   llamaCpp: LlamaCppPanelProps;
+  onnxRuntime: OnnxRuntimePanelProps;
   ollama: OllamaPanelProps;
   torch: TorchPanelProps;
   fallback: DefaultAppPanelProps;
@@ -18,6 +20,7 @@ export function AppPanelRenderer({
   selectedAppId,
   comfyUI,
   llamaCpp,
+  onnxRuntime,
   ollama,
   torch,
   fallback,
@@ -39,7 +42,7 @@ export function AppPanelRenderer({
     case 'llama-cpp':
       return <LlamaCppPanel {...llamaCpp} />;
     case 'onnx-runtime':
-      return <DefaultAppPanel {...fallback} />;
+      return <OnnxRuntimePanel {...onnxRuntime} />;
     case 'torch':
       return <TorchPanel {...torch} />;
     default:

@@ -50,6 +50,7 @@ describe('buildAppShellPanels', () => {
     expect(panels.ollama.connectionUrl).toBe('http://localhost:11434');
     expect(panels.ollama.isOllamaRunning).toBe(true);
     expect(panels.llamaCpp.connectionUrl).toBe('http://localhost:11434');
+    expect(panels.onnxRuntime.modelManagerProps).toBe(modelManagerProps);
     expect(panels.torch.modelGroups).toBe(modelGroups);
     expect(panels.fallback.modelManagerProps).toBe(modelManagerProps);
   });

@@ -1,0 +1,28 @@
+{
+  "id": "onnx-runtime",
+  "displayName": "ONNX Runtime",
+  "description": "In-process Rust ONNX Runtime embedding provider",
+  "icon": "cpu",
+  "installationType": "in-process",
+
+  "capabilities": {
+    "hasVersionManagement": false,
+    "supportsShortcuts": false,
+    "hasDependencies": false,
+    "hasConnectionUrl": false,
+    "hasModelLibrary": true,
+    "hasStats": false
+  },
+
+  "modelCompatibility": {
+    "supportedFormats": ["onnx"]
+  },
+
+  "panelLayout": [
+    {"type": "runtime_profiles", "config": {"provider": "onnx_runtime"}},
+    {"type": "model_library", "config": {"filter": "onnx"}}
+  ],
+
+  "sidebarPriority": 22,
+  "enabledByDefault": true
+}

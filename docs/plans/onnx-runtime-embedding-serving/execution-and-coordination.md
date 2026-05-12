@@ -802,6 +802,18 @@ Update during implementation:
   `cargo info half@2.7.1`, `cargo info ndarray@0.17.2`, local `du` checks for
   source/build directories, and a local `find` check for copied
   `libonnxruntime*` artifacts under `rust/target`.
+- 2026-05-12: Started the M3 ONNX app/plugin identity contract with an
+  in-process plugin manifest slice. `launcher-data/plugins/onnx-runtime.json`
+  now declares ONNX Runtime as an enabled in-process runtime with no version
+  manager, no connection URL, `.onnx` model compatibility, and runtime-profile
+  plus ONNX model-library panel declarations. Rust and TypeScript plugin schema
+  types now accept `installationType: "in-process"`, and Rust plugin schema
+  tests parse both a minimal in-process fixture and the checked-in ONNX
+  manifest. Frontend app registry/panel wiring, Rust `AppId`/version-manager
+  alignment, and ONNX runtime-profile lifecycle remain separate M3/M6 slices.
+  Verification passed: `cargo fmt --manifest-path rust/Cargo.toml --all
+  -- --check`, `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml
+  plugins`, and `npm run -w frontend check:types`.
 
 ## Commit Cadence Notes
 

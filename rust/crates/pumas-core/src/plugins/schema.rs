@@ -11,6 +11,8 @@ use std::collections::HashMap;
 pub enum InstallationType {
     /// Standalone binary download (Ollama, etc.)
     Binary,
+    /// Runtime is provided in-process by Pumas and has no version manager.
+    InProcess,
     /// Python virtual environment (ComfyUI, etc.)
     PythonVenv,
     /// Docker container
@@ -234,6 +236,7 @@ impl PluginConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     fn test_deserialize_plugin() {
@@ -326,5 +329,57 @@ mod tests {
         assert!(config.supports_format("GGUF"));
         assert!(config.supports_format("safetensors"));
         assert!(!config.supports_format("onnx"));
+    }
+
+    #[test]
+    fn test_deserialize_in_process_plugin() {
+        let json = r#"{
+            "id": "onnx-runtime",
+            "displayName": "ONNX Runtime",
+            "description": "In-process Rust ONNX Runtime embedding provider",
+            "installationType": "in-process",
+            "capabilities": {
+                "hasVersionManagement": false,
+                "hasConnectionUrl": false,
+                "hasModelLibrary": true
+            },
+            "modelCompatibility": {
+                "supportedFormats": ["onnx"]
+            },
+            "panelLayout": [
+                {"type": "runtime_profiles", "config": {"provider": "onnx_runtime"}},
+                {"type": "model_library", "config": {"filter": "onnx"}}
+            ],
+            "sidebarPriority": 22
+        }"#;
+
+        let config: PluginConfig = serde_json::from_str(json).unwrap();
+
+        assert_eq!(config.id, "onnx-runtime");
+        assert_eq!(config.installation_type, InstallationType::InProcess);
+        assert!(!config.capabilities.has_version_management);
+        assert!(!config.capabilities.has_connection_url);
+        assert!(config.capabilities.has_model_library);
+        assert!(config.supports_format("onnx"));
+    }
+
+    #[test]
+    fn onnx_runtime_manifest_matches_in_process_contract() {
+        let manifest_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .join("launcher-data/plugins/onnx-runtime.json");
+        let json = std::fs::read_to_string(manifest_path).unwrap();
+        let config: PluginConfig = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(config.id, "onnx-runtime");
+        assert_eq!(config.display_name, "ONNX Runtime");
+        assert_eq!(config.installation_type, InstallationType::InProcess);
+        assert!(!config.capabilities.has_version_management);
+        assert!(!config.capabilities.has_connection_url);
+        assert!(config.supports_format("onnx"));
+        assert!(config
+            .panel_layout
+            .iter()
+            .any(|section| section.section_type == "runtime_profiles"));
     }
 }

@@ -6,7 +6,7 @@
  */
 
 /** How the app is installed and managed */
-export type InstallationType = 'binary' | 'python-venv' | 'docker';
+export type InstallationType = 'binary' | 'in-process' | 'python-venv' | 'docker';
 
 /** App capabilities that affect available features */
 export interface AppCapabilities {

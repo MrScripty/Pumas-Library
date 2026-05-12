@@ -13,7 +13,7 @@ export interface PluginConfigResponse {
   description: string;
   icon?: string;
   githubRepo?: string;
-  installationType: 'binary' | 'python-venv' | 'docker';
+  installationType: 'binary' | 'in-process' | 'python-venv' | 'docker';
   capabilities: {
     hasVersionManagement: boolean;
     supportsShortcuts: boolean;

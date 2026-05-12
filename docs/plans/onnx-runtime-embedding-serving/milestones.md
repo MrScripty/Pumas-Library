@@ -533,7 +533,7 @@ non-zero token usage without calling raw ONNX provider internals.
 Ollama or llama.cpp profiles.
 
 **Tasks:**
-- [ ] Add `launcher-data/plugins/onnx-runtime.json`.
+- [x] Add `launcher-data/plugins/onnx-runtime.json`.
 - [x] Add `RuntimeProviderId::OnnxRuntime` and
       `RuntimeProviderMode::OnnxServe`.
 - [ ] Add ONNX Runtime to the frontend app registry with a sidebar icon,
@@ -604,9 +604,12 @@ Ollama or llama.cpp profiles.
 `.onnx` executable artifact support, an embedding-only ONNX provider behavior,
 an `in_process_runtime` managed launch target, and contract tests. Frontend
 runtime provider types/descriptors now include `onnx_runtime` and `onnx_serve`
-with focused descriptor tests and typecheck coverage. Plugin/app identity,
-frontend app state, ONNX runtime profile lifecycle, and full schema/fixture
-coverage remain open.
+with focused descriptor tests and typecheck coverage. Plugin metadata now
+includes `onnx-runtime` with an explicit `in-process` installation type,
+`.onnx` compatibility, runtime-profile/model-library panel declarations, no
+version-manager capability, and Rust/TypeScript plugin schema support. Frontend
+app state, Rust `AppId`/version-manager alignment, ONNX runtime profile
+lifecycle, and full schema/fixture coverage remain open.
 
 ### Milestone 4: Serving Validation And Load/Unload
 

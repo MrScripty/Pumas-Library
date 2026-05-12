@@ -9,6 +9,12 @@ Each manifest must describe one plugin by stable identifier, display name, execu
 ## Consumer Contract
 Consumers must parse manifests as structured data and reject missing required fields instead of applying ad hoc defaults.
 
+`installationType: "in-process"` means the runtime is supplied by Pumas itself
+and must not be routed through binary, Python, Docker, or version-manager
+installation flows. ONNX Runtime uses this shape because embedding sessions are
+owned by the Rust process and exposed through backend runtime profiles plus the
+Pumas `/v1` gateway.
+
 ## Validation Contract
 Manifest validation should run in launcher or app-manager tests before manifests are packaged for release.
 

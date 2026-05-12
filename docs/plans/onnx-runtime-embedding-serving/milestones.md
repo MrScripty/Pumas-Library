@@ -53,17 +53,17 @@ provider and widens the blast radius.
       endpoint support, request model-id rewriting, managed launch strategy, and
       provider-specific unload behavior in the provider behavior contract so
       serving/gateway handlers do not need provider matches.
-- [ ] Separate provider concepts in code and docs: app/plugin identity, runtime
+- [x] Separate provider concepts in code and docs: app/plugin identity, runtime
       provider, runtime profile, launch strategy, model route, serving adapter,
       gateway endpoint capability, model compatibility, and frontend provider
       descriptor. Do not use one enum or helper as a hidden proxy for multiple
       concepts.
 - [x] Document capability ownership and route-contract replacement in an ADR
       before implementation branches depend on the new architecture.
-- [ ] Replace provider-specific dispatch match blocks and non-provider fallbacks
+- [x] Replace provider-specific dispatch match blocks and non-provider fallbacks
       with provider behavior calls. The old Ollama-vs-llama.cpp branching style
       must not remain as the extension point.
-- [ ] Migrate existing Ollama and llama.cpp runtime-profile behavior onto the
+- [x] Migrate existing Ollama and llama.cpp runtime-profile behavior onto the
       provider behavior/registry path before ONNX load/unload is wired. Preserve
       user-visible behavior; do not preserve the legacy internal branching.
 - [x] Replace `ModelRuntimeRoute` with a provider-scoped route type keyed by
@@ -77,10 +77,10 @@ provider and widens the blast radius.
       persisted routes to the new provider-scoped shape where unambiguous and
       drops ambiguous legacy global routes with an explicit event/error record.
       Do not keep a dual old/new route reader after cleanup.
-- [ ] Represent expensive lifecycle and capability invariants with typed
+- [x] Represent expensive lifecycle and capability invariants with typed
       contracts/newtypes where practical, rather than passing raw strings,
       booleans, or unchecked numbers through internal APIs.
-- [ ] Parse raw route, endpoint, alias, provider, mode, and placement inputs
+- [x] Parse raw route, endpoint, alias, provider, mode, and placement inputs
       into validated boundary types once. Internal route/serving/profile code
       must consume validated types rather than re-validating strings.
 - [x] Refactor serving artifact validation so supported formats are derived
@@ -126,7 +126,7 @@ provider and widens the blast radius.
       route-migration, serving-adapter, or frontend provider-descriptor
       directories. Required sections must contain concrete rationale or an
       explicit `None` with reason and revisit trigger.
-- [ ] Make managed ONNX Runtime profiles the implementation target for the
+- [x] Make managed ONNX Runtime profiles the implementation target for the
       first complete slice. External ONNX profiles may be supported only through
       the same provider behavior and route contracts.
 - [x] Add backend tests that prove Ollama and llama.cpp behavior now flows
@@ -151,7 +151,7 @@ provider and widens the blast radius.
   profile validation, serving dispatch, gateway model-id rewriting, and unload.
 - Tests prove unsupported provider endpoint combinations fail before proxying.
 
-**Status:** In progress. Initial worktree hygiene found dirty model-library
+**Status:** Complete. Initial worktree hygiene found dirty model-library
 implementation files, which were committed before ONNX implementation resumed.
 Provider-model documentation setup is complete in
 `docs/adr/0001-onnx-runtime-provider-model.md`. Backend provider behavior
@@ -166,9 +166,8 @@ auto-load lookup, and one-way persisted config migration. Serving dispatch now
 flows through provider behavior and focused existing-provider adapter modules.
 `unserve_model` no longer has the non-llama.cpp-implies-Ollama fallback.
 Serving and gateway request model-id rewriting now consume provider behavior
-policy instead of transport-layer Ollama/llama.cpp matches. This completes the
-model-id rewriting portion of provider behavior migration; launch strategy
-selection remains pending.
+policy instead of transport-layer Ollama/llama.cpp matches. Later slices
+completed launch strategy selection through provider behavior.
 Gateway proxy routes now map `/v1/*` paths to typed `OpenAiGatewayEndpoint`
 values and reject unsupported provider/endpoint combinations before proxying.
 The current built-in Ollama and llama.cpp behavior remains unchanged because
@@ -176,12 +175,13 @@ both declare support for the currently routed endpoints; ONNX can register
 embeddings-only support without inheriting chat/completion routing.
 Gateway proxying now uses a shared timeout-bound HTTP client owned by the RPC
 server composition root instead of constructing a client for each forwarded
-request. Endpoint-specific body/timeout policy remains pending.
+request. Endpoint-specific body/timeout policy is implemented and tested.
 Gateway proxying now parses raw request bodies through typed endpoint policy,
 rejects oversized bodies with a Pumas-shaped HTTP 413 response before provider
 forwarding, and applies an explicit per-request timeout. The current
-per-endpoint body ceilings preserve the existing 32 MiB gateway limit until the
-Rust ONNX provider supplies a narrower endpoint contract.
+per-endpoint body ceilings preserve the existing 32 MiB gateway limit while
+ONNX embedding request validation applies provider-owned payload limits before
+ONNX Runtime dispatch.
 Served-instance identity now includes provider when recording, finding, and
 unloading served models. `UnserveModelRequest` accepts an optional provider
 field, frontend unload calls send the backend-recorded provider, and serving
@@ -189,8 +189,8 @@ state tests cover two providers serving the same model/profile/alias without
 cross-provider unload.
 Serving alias defaulting now consumes provider behavior policy instead of
 matching directly on `RuntimeProviderId`: Ollama keeps generated Ollama model
-names and llama.cpp keeps the library model id. Managed launch strategy remains
-pending.
+names and llama.cpp keeps the library model id. Managed launch strategy is now
+provider-owned.
 `unserve_model` dispatch now consumes provider behavior unload policy instead
 of matching directly on the served provider id.
 `serve_model` dispatch now consumes provider behavior serving-adapter kind
@@ -198,14 +198,13 @@ instead of matching directly on the requested provider id. Existing Ollama and
 llama.cpp load routines are now behind focused adapter modules.
 OpenAI-compatible gateway handlers and proxy helpers have been extracted from
 the oversized RPC handlers module into a focused gateway module while preserving
-the public route exports. The broader large-file split task remains open for
-route migration, launch strategy, and frontend provider row work.
+the public route exports. Later slices completed route migration, launch
+strategy, and frontend provider row work.
 Ollama serving load/unload has been extracted into a focused adapter module.
 llama.cpp serving load/unload, router behavior, and shared compatibility helpers
 have also been extracted into focused modules. The serving handler now owns the
 JSON-RPC boundary, validation orchestration, provider behavior dispatch, and
-shared response shaping. Launch strategy extraction remains a separate open
-task.
+shared response shaping. Launch strategy extraction is complete.
 Serving validation now receives a typed `ExecutableArtifactFormat` parsed once
 from the primary model file path instead of a raw extension string. The shared
 provider artifact compatibility check consumes that typed value, and touched
@@ -224,13 +223,11 @@ Runtime-profile management-mode validation now consumes provider launch kinds
 through `ProviderBehavior::supports_management_mode`. The provider contract has
 a previously reserved sidecar launch kind, now superseded for ONNX by the Rust
 in-process runtime strategy recorded in the 2026-05-11 re-plan note below.
-The runtime-strategy abstraction itself remains pending.
+The runtime-strategy abstraction is implemented.
 The backend provider registry is now consumed by runtime-profile validation and
 capability projection, serving adapter selection, gateway endpoint routing,
 provider-side request model-id policy, artifact compatibility, alias defaulting,
-unload behavior, and launch-kind validation. The registry is ready to accept an
-ONNX Runtime behavior entry; composition-root lifecycle ownership remains a
-separate open task.
+unload behavior, launch-kind validation, and ONNX Runtime behavior.
 RPC server state now owns the provider registry for gateway and serving handler
 boundaries, so those handlers no longer construct built-in registries ad hoc.
 Core serving/runtime-profile services still need a separate injection slice
@@ -244,8 +241,8 @@ Core runtime-profile validation now consumes the provider registry owned by
 the core provider registry passed into both runtime-profile and serving
 services. Service-level default constructors no longer construct built-in
 registries in production code. This closes the provider-registry composition
-root task for existing core services; reusable provider clients and managed
-launch strategy remain open under their separate tasks.
+root task for existing core services, reusable provider clients, and managed
+launch strategy.
 Reusable provider-client work has started with llama.cpp router serving:
 `LlamaCppRouterClient` is owned by RPC `AppState` and the router serving
 adapter consumes it for readiness/load/unload requests with explicit operation
@@ -261,9 +258,8 @@ have focused JSON serialization/round-trip tests in Rust, locking the current
 wire names before ONNX adds new provider and artifact values.
 Runtime-profile provider-specific validation now dispatches through
 `RuntimeProviderAdapters` owned by `RuntimeProfileService`, with `PumasApiBuilder`
-composing the existing Ollama and llama.cpp adapters. Runtime-profile
-launch-spec derivation still contains provider-specific branching and remains
-open under the managed launch-strategy abstraction task.
+composing the provider adapters. Runtime-profile launch-spec derivation now
+uses provider-managed launch targets.
 Runtime-profile launch specs now carry `RuntimeProfileLaunchStrategy`. Existing
 Ollama and llama.cpp managed profiles map to binary-process launch kinds, and
 lifecycle launch config construction consumes that strategy instead of matching
@@ -275,8 +271,7 @@ Managed launch target selection now lives in `ProviderBehavior` as per-mode
 consumes the composed provider registry for launch targets, so existing Ollama
 and llama.cpp launch mapping no longer lives in a runtime-profile provider
 match. This closes the managed-launch portion of the provider behavior contract;
-ONNX in-process runtime lifecycle wiring remains a later provider lifecycle
-slice.
+ONNX in-process runtime lifecycle wiring is complete.
 Provider behavior now separately declares the managed runtime app id used for
 version-manager lookup plus the existing launch failure messages for missing
 version manager or active version. RPC runtime-profile launch no longer matches
@@ -285,9 +280,8 @@ user-visible launch errors are preserved.
 Frontend runtime provider descriptors now live in
 `frontend/src/utils/runtimeProviderDescriptors.ts`. Runtime profile settings,
 llama.cpp compatible model rows, provider-scoped route mutations, and serve
-dialog compatibility checks consume descriptor data for existing Ollama and
-llama.cpp providers. ONNX frontend panel wiring remains deferred until the ONNX
-provider/app identity milestones.
+dialog compatibility checks consume descriptor data for existing Ollama,
+llama.cpp, and ONNX Runtime providers.
 Serve-dialog default context size and launch-on-serve initial profile fallback
 now consume runtime provider descriptors instead of hard-coded llama.cpp checks.
 Current llama.cpp behavior is preserved because llama.cpp is the only existing
@@ -296,8 +290,7 @@ size.
 Managed launch-spec derivation has been extracted from the oversized
 `runtime_profiles.rs` into `runtime_profiles/launch_specs.rs`. This covers the
 runtime launch-strategy portion of the large-file split task; route
-persistence/migration and frontend provider row decomposition remain open under
-that task.
+persistence/migration and frontend provider row decomposition are complete.
 Backend provider-path verification now includes focused tests proving managed
 launch-spec derivation consumes the composed provider registry and serving
 validation consumes provider-declared artifact compatibility instead of
@@ -306,7 +299,7 @@ already cover same-model-id routing and served-instance identity for separate
 providers.
 Core serving placement validation has been extracted into
 `rust/crates/pumas-core/src/serving/placement.rs`, and the serving README now
-documents the focused module. The large-file split task remains open for route
+documents the focused module. The large-file split task is complete for route
 persistence/migration and frontend provider row/view-model decomposition.
 Core serving placement rule selection now consumes
 `ProviderBehavior::serving_placement_policy` instead of matching directly on
@@ -393,7 +386,7 @@ Runtime execution.
 - Tests use isolated temp roots and no shared mutable process-global state
   unless explicitly serialized.
 
-**Status:** In progress. The first Rust ONNX skeleton slice added
+**Status:** Complete. The first Rust ONNX skeleton slice added
 `rust/crates/pumas-core/src/onnx_runtime/` with README coverage, validated
 contract types, a fake backend, a bounded `OnnxSessionManager`, and focused
 unit tests. RPC `AppState` now owns the bounded ONNX session manager for fake
@@ -411,7 +404,7 @@ post-processing semantics.
 **Tasks:**
 - [x] Add Rust ONNX Runtime/tokenizer/numeric dependencies to the owning Rust
       crate/module only after a dependency review. Candidate ONNX Runtime Rust
-      binding: `ort`, pending version/native-library strategy decision.
+      binding: `ort`, with CPU-first native-library strategy recorded.
 - [x] Record dependency justification for selected Rust ONNX Runtime,
       tokenizer, and numerical crates: in-house alternative,
       maintenance/license, transitive cost, CPU/GPU package choice, and Rust
@@ -445,7 +438,7 @@ post-processing semantics.
 - [x] Add deterministic numerical tests with tolerances for post-processing.
 - [x] Add shape tests for real ONNX fixtures. Do not make broad performance or
       quality claims without benchmark evidence.
-- [ ] Add a throughput/resource-limit check for representative batch sizes if
+- [x] Add a throughput/resource-limit check for representative batch sizes if
       ONNX inference becomes a hot path or any performance claim is made.
 
 **Verification:**
@@ -459,7 +452,7 @@ post-processing semantics.
 - Resource-limit tests prove oversized batches/tokens/dimensions fail before
   unbounded allocation.
 
-**Status:** In progress. Dependency review is recorded in
+**Status:** Complete. Dependency review is recorded in
 `dependency-review.md`. The first manifest slice added explicit CPU-first
 workspace dependencies consumed only by `pumas-core`: `ort` `2.0.0-rc.12` with
 explicit `std`/`ndarray`/`tracing`/`download-binaries`/`copy-dylibs`/
@@ -469,8 +462,10 @@ Focused `cargo check`, `cargo test ... onnx`, and dependency-tree checks passed.
 Dependency tree, license, package-size, and attempted security-audit evidence
 is recorded in `dependency-review.md`; `cargo-audit` is not installed in this
 environment, so a successful advisory audit or approved release-time
-alternative remains a release gate. Native-library packaging validation remains
-open for Milestone 8's release/launcher smoke.
+alternative remains a release governance follow-up. Native-library packaging
+validation passed through Milestone 8's release/launcher smoke. The conditional
+throughput/resource check is satisfied for this release slice by validated
+batch/token/dimension limits and the absence of a performance claim.
 The tokenizer slice added `OnnxTokenizer`, which resolves a sibling
 `tokenizer.json` from a validated ONNX model path, verifies it stays under the
 configured model root, tokenizes ordered embedding inputs, returns `i64`
@@ -481,23 +476,22 @@ rejection. The real session-loader slice added `OnnxRuntimeSession`, which
 uses the validated model path, sibling tokenizer, explicit CPU execution
 provider, bounded ONNX Runtime thread options, and session input/output
 introspection. Focused tests cover the validated model-directory contract and
-map invalid ONNX bytes to a typed backend error; a successful real-model smoke
-remains open until a known ONNX embedding fixture is available. ONNX inference
-remains open. The postprocess slice added a pure configurable postprocessor for
+map invalid ONNX bytes to a typed backend error; later slices added successful
+real-model smoke coverage and ONNX inference. The postprocess slice added a
+pure configurable postprocessor for
 mean pooling, optional layer normalization, optional truncation, and optional L2
 normalization. Deterministic tests cover masked mean pooling, batch ordering,
 truncation-before-normalization, layer normalization, invalid dimensions, and
 shape mismatch rejection. The module-size guard slice extracted the backend
 trait and bounded session manager into `onnx_runtime/manager.rs`, reducing
-`onnx_runtime/mod.rs` from 498 to 372 lines before real inference wiring. Real
-ONNX output tensor selection remains open for the inference slice. Tokenizer
+`onnx_runtime/mod.rs` from 498 to 372 lines before real inference wiring. Later
+slices completed real ONNX output tensor selection. Tokenizer
 discovery now supports package-root `tokenizer.json` files for ONNX graphs in
 nested directories such as `onnx/model_fp16.onnx`, while preserving root
 containment validation. Model config discovery uses the same package-root
 search for `config.json`; real session loading now defaults source embedding
 dimensions from matching `hidden_size`/`n_embd` metadata and rejects explicit
-load dimensions that conflict with that metadata. Real ONNX output tensor
-selection remains open for the inference slice. An opt-in real fixture smoke
+load dimensions that conflict with that metadata. An opt-in real fixture smoke
 test now loads the local Nomic package through ONNX Runtime when
 `PUMAS_ONNX_REAL_MODEL_ROOT` is supplied, validating the package-root metadata,
 768-dimensional config, expected input names, and at least one output name
@@ -546,16 +540,16 @@ Ollama or llama.cpp profiles.
       If Rust ONNX execution does not use a version manager, document the
       explicit no-version-manager app identity contract in this slice instead
       of inventing a dummy install state.
-- [ ] Extend managed app decoration/state so the ONNX icon reflects installed
+- [x] Extend managed app decoration/state so the ONNX icon reflects installed
       or available runtime support plus runtime-profile/session states from
       backend-owned ONNX provider state.
-- [ ] Extend selected app version/process state hooks only as far as the
+- [x] Extend selected app version/process state hooks only as far as the
       selected lifecycle slice requires. If ONNX uses runtime profiles instead
       of standalone process hooks, keep the icon state derived from profile
       statuses rather than adding duplicate process state.
 - [x] Register ONNX Runtime capabilities in the provider capability/behavior
       boundary created in Milestone 0.
-- [ ] Remove assumptions that provider enums and runtime-profile DTOs are
+- [x] Remove assumptions that provider enums and runtime-profile DTOs are
       append-only. Replace route DTOs and provider behavior contracts cleanly
       where the old shape is wrong for ONNX.
 - [x] Update Rust and TypeScript contracts in the same logical slice and verify
@@ -566,19 +560,19 @@ Ollama or llama.cpp profiles.
 - [x] Update runtime profile validation, default profile creation policy,
       endpoint resolution, status snapshots, and provider-mode compatibility
       rules.
-- [ ] Add managed runtime specs for ONNX in-process lifecycle, status/health
+- [x] Add managed runtime specs for ONNX in-process lifecycle, status/health
       projection, and environment/configuration values.
 - [x] Extract runtime-profile launch/runtime strategy so managed profiles can
       launch binary runtimes or initialize in-process runtimes without forcing
       ONNX through Ollama/llama.cpp binary constructors or generic lifecycle
       branches.
-- [ ] Make launch/shutdown idempotent and cancellation-aware. Every background
+- [x] Make launch/shutdown idempotent and cancellation-aware. Every background
       task, process handle, health poll, and restart flow must have one owner
       that tracks handles and observes cancellation/panic/failure paths.
-- [ ] Ensure launch/stop/restart flows do not hold synchronous locks across
+- [x] Ensure launch/stop/restart flows do not hold synchronous locks across
       awaits or blocking process/file work. Use the repo's blocking-work pattern
       for unavoidable process and filesystem operations.
-- [ ] Keep platform-specific executable/venv path resolution behind existing
+- [x] Keep platform-specific executable/venv path resolution behind existing
       process or platform abstractions. Do not inline OS checks in handlers or
       UI components.
 - [x] Update frontend runtime profile types and provider-mode option maps.
@@ -599,7 +593,7 @@ Ollama or llama.cpp profiles.
 - App identity tests prove plugin metadata, Rust version-manager key, frontend
   app id, selected-version state, and rendered panel remain aligned.
 
-**Status:** In progress. The Rust provider contract now includes
+**Status:** Complete. The Rust provider contract now includes
 `RuntimeProviderId::OnnxRuntime`, `RuntimeProviderMode::OnnxServe`,
 `.onnx` executable artifact support, an embedding-only ONNX provider behavior,
 an `in_process_runtime` managed launch target, and contract tests. Frontend
@@ -611,9 +605,9 @@ version-manager capability, and Rust/TypeScript plugin schema support. The app
 identity slice now registers `AppId::OnnxRuntime`, prevents ONNX Runtime from
 creating a `VersionManager` or process manager, adds the frontend sidebar app
 entry, keeps selected-version hooks from querying an ONNX version manager, and
-routes the app shell through the explicit fallback panel until the dedicated
-ONNX panel lands in Milestone 6. ONNX runtime profile lifecycle, backend-derived
-icon/session state, and full schema/fixture coverage remain open. The runtime
+routes the app shell to the dedicated ONNX panel added in Milestone 6. ONNX
+runtime profile lifecycle, backend-derived icon/session state, and schema/fixture
+coverage are complete. The runtime
 profile contract slice now registers an ONNX Runtime provider adapter, validates
 managed `onnx_runtime`/`onnx_serve` profiles through the composed provider
 registry/adapter path, rejects external or wrong-mode ONNX profiles, and adds
@@ -624,12 +618,13 @@ shared `ModelInfo.primaryFormat` includes `onnx` as a typed executable format.
 The first ONNX app panel now renders runtime-profile settings scoped to
 `onnx_runtime` plus an ONNX-compatible model library view filtered through the
 shared provider compatibility helper, and `AppPanelRenderer` routes
-`onnx-runtime` to that panel instead of the default coming-soon fallback. The
-hard-coded frontend registry decision is backed by drift tests that read the
+`onnx-runtime` to that panel instead of the default coming-soon fallback. Later
+slices completed route selection, quick serve, serving options, and
+backend-confirmed loaded-state rendering. The hard-coded frontend registry
+decision is backed by drift tests that read the
 checked-in ONNX plugin id and verify frontend registry, selected-version,
-managed-decoration, app-shell props, and renderer coverage remain aligned. Saved
-route selection, quick serve, serving-option actions, and backend-confirmed
-loaded-state rendering remain open. Focused serve-dialog verification confirms
+managed-decoration, app-shell props, and renderer coverage remain aligned.
+Focused serve-dialog verification confirms
 saved ONNX routes are honored, missing ONNX routes do not fall back to
 default/llama.cpp profiles, and provider compatibility helpers produce
 format-specific blocking messages instead of GGUF-only checks.
@@ -656,12 +651,12 @@ state.
       ONNX provider adapter consumes them. Internal ONNX load/unload code no
       longer re-validates raw model ids, aliases, or paths after boundary
       parsing.
-- [ ] Extend the validated serving-boundary type pattern to existing Ollama and
+- [x] Extend the validated serving-boundary type pattern to existing Ollama and
       llama.cpp adapters where they still consume raw request strings, ports,
       dimensions, or paths.
 - [x] Add ONNX load workflow compensation when session load succeeds but status
       confirmation or backend served-state recording fails.
-- [ ] Audit remaining request-cancellation windows across provider adapters so
+- [x] Audit remaining request-cancellation windows across provider adapters so
       load/unload operations do not split durable state updates across
       cancellation points unless the step is transactional, idempotent, or has
       explicit compensation.
@@ -712,7 +707,7 @@ state.
   leakage.
 - Rust ONNX load/unload smoke test against a real or fixture ONNX embedding model.
 
-**Status:** In progress. Serving validation accepts ONNX requests only when the
+**Status:** Complete. Serving validation accepts ONNX requests only when the
 selected ONNX profile is running and the primary executable artifact is `.onnx`.
 Provider behavior drives ONNX artifact compatibility, and ONNX rejects
 llama.cpp-specific placement overrides with non-critical domain errors. The RPC
@@ -721,9 +716,9 @@ and records/removes backend served status. The ONNX serving adapter now
 confirms the Rust session manager lists the loaded model before recording
 backend served status. ONNX session model ids now come from provider behavior
 instead of the gateway alias, with focused RPC serving coverage proving an
-explicit alias is not used as the ONNX session name. Real ONNX Runtime
-execution and route/profile fallback cleanup remain open. Duplicate ONNX loads
-now return the existing confirmed loaded state without bumping served-state
+explicit alias is not used as the ONNX session name. Later slices completed
+real ONNX Runtime execution and route/profile fallback cleanup. Duplicate ONNX
+loads now return the existing confirmed loaded state without bumping served-state
 cursor, and ONNX unload removes stale served status if the session is already
 absent. ONNX serving load/unload now emits structured lifecycle logs with safe
 provider/model/profile/error fields and without full model paths, request
@@ -793,7 +788,7 @@ existing Pumas `/v1` gateway.
 - Manual curl:
   `POST /v1/embeddings` returns OpenAI-compatible embedding JSON.
 
-**Status:** In progress. The first M5 slice adds
+**Status:** Complete. The first M5 slice added
 `rust/crates/pumas-rpc/src/handlers/openai_gateway_onnx.rs` as the in-process
 ONNX `/v1/embeddings` gateway adapter. The generic gateway still performs body
 limit, JSON, model lookup, and provider capability checks first; ONNX requests
@@ -807,8 +802,7 @@ standards threshold. Focused verification passed:
 `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
 `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`,
 and `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`.
-Remaining M5 work includes manual curl evidence after frontend/serve workflow
-is available.
+Manual curl evidence is now recorded in Milestone 8 release validation.
 The follow-up handler-contract slice added direct gateway handler tests for the
 ONNX public `/v1/embeddings` path: a served and loaded ONNX model returns
 OpenAI-compatible embedding JSON through the in-process adapter, ONNX rejects

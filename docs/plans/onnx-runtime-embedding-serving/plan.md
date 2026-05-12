@@ -342,10 +342,22 @@ The full trigger list is in
 
 ### Completed
 
-- Milestone 0 provider-model refactor is in progress with multiple verified
-  slices committed.
+- Milestones 0 through 8 are complete and verified.
+- Provider-model refactor completed with provider behavior, provider-scoped
+  runtime routes, provider-scoped served identity, serving adapters, gateway
+  endpoint capabilities, provider-owned launch strategies, and frontend
+  provider descriptors.
 - 2026-05-11 re-plan accepted: ONNX Runtime execution targets Rust bindings and
   an in-process Rust provider/session manager, not a Python sidecar.
+- Rust ONNX Runtime execution completed through the `ort` binding in the
+  `pumas-core` owner, with tokenizer loading, bounded session management, real
+  inference, post-processing, and OpenAI-compatible gateway routing.
+- Frontend ONNX Runtime app integration completed with runtime profile
+  settings, ONNX-compatible model rows, provider-scoped route controls, quick
+  serve/options actions, and backend-confirmed loaded-state rendering.
+- Release validation completed on 2026-05-12 with focused Rust/frontend checks,
+  release build, release smoke, and an isolated public `/v1` gateway smoke that
+  loaded, embedded through, and unloaded the local Nomic ONNX embedding model.
 
 ### Deviations
 
@@ -354,11 +366,17 @@ The full trigger list is in
 
 ### Follow-Ups
 
-- None recorded.
+- `cargo audit` is not installed in this environment. A successful advisory
+  audit or approved release-time alternative remains required before shipping.
+- GPU execution-provider packaging is intentionally out of scope for this
+  CPU-first ONNX Runtime release slice.
 
 ### Verification Summary
 
-- Plan split completed; no implementation verification has run.
+- Focused Rust verification, frontend verification, release build/smoke, and
+  live gateway evidence are recorded in
+  [execution-and-coordination.md](execution-and-coordination.md) and
+  [milestones.md](milestones.md).
 
 ### Traceability Links
 

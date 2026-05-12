@@ -1094,14 +1094,13 @@ changes remain.
   execution moves into Rust dependency review/execution slices, and the aborted
   uncommitted Python sidecar files were removed before this documentation
   update.
-- Rust ONNX Milestone 1 skeleton is in progress: `pumas-core` now owns
+- Rust ONNX Milestone 1 skeleton is complete: `pumas-core` now owns
   validated ONNX provider/session contracts, a fake embedding backend, bounded
-  session manager, README, and focused tests. Composition-root integration,
-  gateway error shaping, and full shutdown/cancellation ordering remain open.
-- Rust ONNX provider-contract work is in progress: core provider/runtime-profile
-  enums and behavior now model ONNX as an embedding-only in-process runtime,
-  and RPC serving has explicit non-critical ONNX not-yet-wired paths until the
-  serving adapter slice connects the session manager.
+  session manager, README, composition-root integration, gateway error shaping,
+  shutdown ordering, and focused tests.
+- Rust ONNX provider-contract work is complete: core provider/runtime-profile
+  enums and behavior model ONNX as an embedding-only in-process runtime, and
+  RPC serving connects the session manager through the provider adapter path.
 - Frontend runtime-provider contracts are synced for ONNX provider ids, modes,
   labels, CPU-only device options, `.onnx` compatibility, and descriptor tests.
 - Serving validation is complete for ONNX: `.onnx` artifacts and running ONNX
@@ -1562,4 +1561,6 @@ changes remain.
   `frontend/src/components/app-panels/sections/README.md`.
 - Module README updated: `frontend/src/components/app-panels/README.md`.
 - ADR added/updated: `docs/adr/0001-onnx-runtime-provider-model.md`.
-- PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: pending.
+- PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: not applicable
+  for this local branch slice; plan evidence and commit messages carry the
+  required verification details.

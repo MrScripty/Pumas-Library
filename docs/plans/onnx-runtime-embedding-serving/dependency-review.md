@@ -13,7 +13,7 @@ Use Rust-owned dependencies in `pumas-core`, the crate that owns
 
 | Need | Candidate | Version Observed | Decision |
 | ---- | --------- | ---------------- | -------- |
-| ONNX Runtime binding | `ort` | `2.0.0-rc.12` | Provisional CPU-first candidate. Add only after a manifest slice that verifies native-library packaging and lockfile impact. |
+| ONNX Runtime binding | `ort` | `2.0.0-rc.12` | Provisional CPU-first candidate. Add only after a manifest slice that verifies Rust toolchain compatibility, native-library packaging, and lockfile impact. |
 | Tokenizer loading/execution | `tokenizers` | `0.23.1` | Provisional local-tokenizer candidate. Use local files only; do not enable HTTP/Hub download features in the first implementation. |
 | Tensor/numeric helper | `ndarray` | `0.17.2` | Prefer the `ort` ndarray integration initially. Add a direct dependency only if post-processing code needs owned array operations not available through `ort` values or checked `Vec<f32>` code. |
 
@@ -41,19 +41,29 @@ numeric dependencies.
 - First supported ONNX Runtime package target is CPU execution.
 - GPU execution-provider features such as CUDA, DirectML, CoreML, TensorRT,
   ROCm, OpenVINO, or XNNPACK are not enabled in the first dependency slice.
+- `ort` 2.0.0-rc.12 reports `rust-version = 1.88`; the manifest slice must
+  verify the repository toolchain before adding it.
+- `ort` default features are `std`, `ndarray`, `tracing`, `download-binaries`,
+  `tls-native`, `copy-dylibs`, and `api-24`. The manifest slice must make an
+  explicit default-features decision instead of accepting those implicitly.
 - Native ONNX Runtime binary handling must be validated in launcher/release
   smoke before Milestone 8 can close.
 - `tokenizers` must load local tokenizer files from the validated model
   directory. HTTP/Hub download features remain disabled for the first slice.
+- `tokenizers` default features are `progressbar`, `onig`, and `esaxx_fast`.
+  The manifest slice should prefer a narrower local-inference feature set when
+  fixtures confirm it works.
+- `ndarray` default feature is `std`; do not enable BLAS, Rayon, serde, or
+  approximation features unless a later post-processing slice needs them.
 
 ## Risks And Re-Plan Triggers
 
-- `ort` 2.x is currently an RC release. If packaging, API instability, or
-  native-library behavior blocks release validation, re-plan before adding more
-  execution code.
-- `ort` default features include native binary download/copy behavior. The
-  manifest slice must decide whether to keep those defaults, use dynamic
-  loading, or vendor binaries through launcher packaging.
+- `ort` 2.x is currently an RC release and requires Rust 1.88. If the repo
+  toolchain, packaging, API stability, or native-library behavior blocks release
+  validation, re-plan before adding more execution code.
+- `ort` default features include native binary download/copy behavior plus
+  native TLS. The manifest slice must decide whether to keep those defaults,
+  use dynamic loading, or vendor binaries through launcher packaging.
 - `tokenizers` feature selection may introduce native regex dependencies. If
   local tokenizer JSON fixtures require features that complicate packaging,
   record the transitive dependency and release impact before enabling them.
@@ -71,6 +81,6 @@ numeric dependencies.
 
 ## Sources Checked
 
-- `ort` docs.rs crate page and feature flags, observed as `2.0.0-rc.12`.
-- `tokenizers` docs.rs crate page and feature flags, observed as `0.23.1`.
-- `ndarray` docs.rs crate page and feature flags, observed as `0.17.2`.
+- `cargo info ort@2.0.0-rc.12`, crates.io/docs.rs metadata.
+- `cargo info tokenizers@0.23.1`, crates.io/docs.rs metadata.
+- `cargo info ndarray@0.17.2`, crates.io/docs.rs metadata.

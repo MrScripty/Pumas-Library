@@ -574,6 +574,11 @@ Update during implementation:
   native-library/release risks, and the verification required before a manifest
   slice may add dependencies. Verification is documentation/source review only;
   no build command was needed because no code or manifest files changed.
+- 2026-05-12: Confirmed dependency metadata with `cargo info` for `ort`
+  `2.0.0-rc.12`, `tokenizers` `0.23.1`, and `ndarray` `0.17.2`. The review now
+  records `ort`'s Rust 1.88 requirement and default native binary/TLS features,
+  `tokenizers` default `onig`/`progressbar`/`esaxx_fast` features, and the
+  narrower manifest decisions required before lockfile changes.
 
 ## Commit Cadence Notes
 

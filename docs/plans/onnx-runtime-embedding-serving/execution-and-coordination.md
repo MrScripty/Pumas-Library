@@ -1475,6 +1475,14 @@ changes remain.
   clients at the Pumas `/v1` gateway instead of provider internals. The examples
   are documented as payload shapes because no live served ONNX model was running
   during this documentation slice.
+- Milestone 7 README coverage continued in
+  `rust/crates/pumas-core/src/onnx_runtime/README.md` and
+  `rust/crates/pumas-core/src/runtime_profiles/README.md`. The ONNX runtime
+  README now documents lifecycle ownership, gateway behavior, limits, and
+  troubleshooting for the current Rust fake/real backend plus bounded session
+  manager. The runtime-profile support README now reflects that ONNX Runtime is
+  an in-process managed profile whose loaded sessions are owned by the RPC
+  session-manager composition root, not by runtime-profile persisted state.
 
 ### Traceability Links
 

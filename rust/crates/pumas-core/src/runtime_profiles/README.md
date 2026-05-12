@@ -43,8 +43,10 @@ ambiguous legacy routes are dropped.
 
 Existing managed Ollama and llama.cpp profiles map to binary process
 strategies. The ONNX Runtime provider maps to an in-process runtime strategy;
-session-manager construction and lifecycle ownership are wired in later ONNX
-slices.
+the RPC composition root owns the ONNX session manager, while runtime profiles
+own validated provider/mode/device configuration and route persistence.
+Runtime-profile lifecycle state remains separate from loaded ONNX model
+sessions reported by serving status.
 
 ## Errors
 
@@ -61,5 +63,6 @@ not reintroduce a dual old/new route reader.
 
 ## Revisit Trigger
 
-Revisit this README when ONNX Runtime session-manager lifecycle, shutdown
-ownership, or additional launch kinds are added.
+Revisit this README when ONNX Runtime gains GPU execution-provider profile
+options, additional launch kinds, or persisted lifecycle fields beyond the
+current in-process managed profile contract.

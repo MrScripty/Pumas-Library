@@ -990,9 +990,9 @@ clients.
 **Tasks:**
 - [x] Update `docs/contracts/desktop-rpc-methods.md` with ONNX Runtime gateway
       behavior.
-- [ ] Add README coverage for Rust ONNX provider/session modules with lifecycle,
+- [x] Add README coverage for Rust ONNX provider/session modules with lifecycle,
       endpoint/gateway behavior, limits, and troubleshooting.
-- [ ] Update relevant runtime/profile README files if new provider modules are
+- [x] Update relevant runtime/profile README files if new provider modules are
       added.
 - [ ] Add or update an ADR if provider capabilities become a durable runtime
       provider registry or materially change the runtime architecture.
@@ -1026,6 +1026,12 @@ provider-owned ONNX session model identity, shape-only `/v1/models` and
 should target the Pumas `/v1` gateway instead of raw ONNX Runtime internals.
 README/ADR traceability, manifest/persisted-artifact docs, and release-facing
 documentation remain open.
+The ONNX runtime README now reflects the current fake/real backend split,
+session-manager lifecycle, gateway behavior, validation/concurrency limits, and
+troubleshooting paths. The runtime-profile support README now describes ONNX as
+an in-process managed profile whose session manager is owned by the RPC
+composition root while runtime profiles own provider/mode/device configuration
+and route persistence.
 
 ### Milestone 8: Release Validation
 

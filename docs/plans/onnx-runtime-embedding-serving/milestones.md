@@ -423,7 +423,7 @@ post-processing semantics.
       If ONNX Runtime introduces separate CPU/GPU packages, document the chosen
       default and the re-plan trigger for GPU support.
 - [x] Load tokenizer from a validated model directory in Rust.
-- [ ] Load ONNX session from a validated model directory in Rust.
+- [x] Load ONNX session from a validated model directory in Rust.
 - [ ] Keep ONNX Runtime native-library/provider selection explicit in Rust
       configuration or startup logs so CPU/GPU package behavior is observable
       and does not silently vary by platform.
@@ -473,7 +473,13 @@ configured model root, tokenizes ordered embedding inputs, returns `i64`
 input-id and attention-mask rows, and rejects empty or oversized tokenized
 inputs before tensor construction. Focused ONNX tests cover successful
 tokenizer load/tokenization, missing tokenizer files, and token-limit
-rejection. ONNX session loading and inference remain open.
+rejection. The real session-loader slice added `OnnxRuntimeSession`, which
+uses the validated model path, sibling tokenizer, explicit CPU execution
+provider, bounded ONNX Runtime thread options, and session input/output
+introspection. Focused tests cover the validated model-directory contract and
+map invalid ONNX bytes to a typed backend error; a successful real-model smoke
+remains open until a known ONNX embedding fixture is available. ONNX inference
+remains open.
 
 ### Milestone 3: Plugin And Runtime Profile Contracts
 

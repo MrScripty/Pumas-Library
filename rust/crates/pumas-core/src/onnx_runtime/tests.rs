@@ -150,6 +150,26 @@ fn tokenizer_rejects_inputs_over_token_limit() {
     assert!(err.message.contains("tokens"));
 }
 
+#[test]
+fn real_session_loader_uses_validated_model_directory_contract() {
+    let fixture = model_fixture_with_tokenizer();
+    let request = OnnxLoadRequest::parse(
+        fixture.path(),
+        "model.onnx",
+        "nomic-embed-text-v1.5",
+        OnnxLoadOptions::default(),
+    )
+    .unwrap();
+
+    let err = match OnnxRuntimeSession::load(request) {
+        Ok(_) => panic!("fake ONNX bytes must not load as a real ONNX Runtime session"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.code, OnnxRuntimeErrorCode::Backend);
+    assert!(err.message.contains("model load failed"));
+}
+
 #[tokio::test]
 async fn fake_backend_loads_embeds_lists_and_unloads() {
     let fixture = model_fixture();

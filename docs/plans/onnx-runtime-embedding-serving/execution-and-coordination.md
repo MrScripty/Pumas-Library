@@ -613,6 +613,19 @@ Update during implementation:
   --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, `cargo test
   --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size
   evidence: `mod.rs` 491 lines, `tokenizer.rs` 128 lines, `tests.rs` 248 lines.
+- 2026-05-12: Added the M2 real ONNX session-loader boundary. `OnnxRuntimeSession`
+  now combines a validated load request, sibling tokenizer loading, explicit
+  CPU execution-provider setup, bounded ONNX Runtime session thread options,
+  and input/output name introspection without yet running inference or changing
+  serving/gateway behavior. Focused tests cover the validated model-directory
+  contract and typed backend failure for invalid ONNX bytes. A successful
+  real-model smoke remains open until a known ONNX embedding fixture is
+  available. Verification passed: `cargo fmt --manifest-path rust/Cargo.toml
+  --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence: `mod.rs`
+  493 lines, `real.rs` 104 lines, `tokenizer.rs` 128 lines, `tests.rs` 268
+  lines.
 
 ## Commit Cadence Notes
 
@@ -1042,6 +1055,12 @@ changes remain.
   --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence:
   `onnx_runtime/mod.rs` 491 lines, `tokenizer.rs` 128 lines, `tests.rs` 248
   lines.
+- ONNX real session-loader boundary verified with `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence:
+  `onnx_runtime/mod.rs` 493 lines, `real.rs` 104 lines, `tokenizer.rs` 128
+  lines, `tests.rs` 268 lines.
 
 ### Traceability Links
 

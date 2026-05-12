@@ -64,6 +64,7 @@ futures = { workspace = true }
 async-trait = { workspace = true }
 
 # ONNX Runtime embedding execution
+half = { workspace = true }
 ort = { workspace = true }
 tokenizers = { workspace = true }
 

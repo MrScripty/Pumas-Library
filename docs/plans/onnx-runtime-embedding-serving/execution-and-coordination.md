@@ -681,6 +681,17 @@ Update during implementation:
   real_session_loader_smokes_optional_real_fixture -- --nocapture` with the
   env vars above, and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml
   onnx`. File-size evidence: `mod.rs` 376 lines, `tests.rs` 392 lines.
+- 2026-05-12: Added the FP16 extraction dependency slice before real inference.
+  The selected local Nomic ONNX fixture is `model_fp16.onnx`, and `ort`
+  requires its `half` feature to extract `f16`/`bf16` output tensors. Workspace
+  dependencies now enable `ort/half` and add direct `half` `2.7.1` consumption
+  only in `pumas-core`, the Rust ONNX execution owner. Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`, `cargo check
+  --manifest-path rust/crates/pumas-core/Cargo.toml`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and `cargo tree
+  --manifest-path rust/crates/pumas-core/Cargo.toml -i half`. `cargo audit`
+  remains unavailable in this environment.
 
 ## Commit Cadence Notes
 
@@ -1147,6 +1158,12 @@ changes remain.
   local Nomic model package env vars recorded above, `cargo test --manifest-path
   rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence:
   `onnx_runtime/mod.rs` 376 lines, `tests.rs` 392 lines.
+- ONNX FP16 dependency slice verified with `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo check --manifest-path
+  rust/crates/pumas-core/Cargo.toml`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml onnx`, and `cargo tree --manifest-path
+  rust/crates/pumas-core/Cargo.toml -i half`.
 
 ### Traceability Links
 

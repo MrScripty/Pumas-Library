@@ -15,6 +15,7 @@ Use Rust-owned dependencies in `pumas-core`, the crate that owns
 | ---- | --------- | ---------------- | -------- |
 | ONNX Runtime binding | `ort` | `2.0.0-rc.12` | Provisional CPU-first candidate. Add only after a manifest slice that verifies Rust toolchain compatibility, native-library packaging, and lockfile impact. |
 | Tokenizer loading/execution | `tokenizers` | `0.23.1` | Provisional local-tokenizer candidate. Use local files only; do not enable HTTP/Hub download features in the first implementation. |
+| FP16/BF16 tensor extraction | `half` | `2.7.1` | Required for Rust extraction of ONNX Runtime `f16` outputs from FP16 embedding exports through `ort`'s `half` feature. |
 | Tensor/numeric helper | `ndarray` | `0.17.2` | Prefer the `ort` ndarray integration initially. Add a direct dependency only if post-processing code needs owned array operations not available through `ort` values or checked `Vec<f32>` code. |
 
 ## Manifest Slice
@@ -22,12 +23,15 @@ Use Rust-owned dependencies in `pumas-core`, the crate that owns
 The first manifest slice added:
 
 ```toml
-ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "tracing", "download-binaries", "copy-dylibs", "tls-native", "api-24"] }
+half = "2.7.1"
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "tracing", "download-binaries", "copy-dylibs", "tls-native", "api-24", "half"] }
 tokenizers = { version = "0.23.1", default-features = false, features = ["onig"] }
 ```
 
 These dependencies are declared in the workspace and consumed only by
-`pumas-core`. `ndarray` is intentionally not a direct dependency; it is present
+`pumas-core`. `half` is enabled because the local Nomic ONNX fixture is the
+FP16 export and `ort` exposes f16/bf16 tensor element extraction through this
+feature. `ndarray` is intentionally not a direct dependency; it is present
 through `ort`.
 
 ## Justification
@@ -43,6 +47,11 @@ implementation used by Hugging Face tokenizer JSON files and supports loading
 local tokenizer assets. In-house tokenization would be model-family specific
 and would make Nomic/Hugging Face tokenizer compatibility a separate parsing
 project.
+
+`half` is the narrow numeric support dependency for FP16/BF16 tensor extraction.
+In-house bit conversion would add avoidable correctness risk around IEEE 754
+half-precision conversion, NaN/Inf handling, and ONNX Runtime output casting.
+It is added only to the Rust crate that owns ONNX execution.
 
 `ndarray` is not selected as a direct first dependency. The `ort` default
 feature set already includes ndarray integration, and the initial postprocess
@@ -63,6 +72,8 @@ numeric dependencies.
   smoke before Milestone 8 can close.
 - `tokenizers` must load local tokenizer files from the validated model
   directory. HTTP/Hub download features remain disabled for the first slice.
+- `half` is enabled only for tensor extraction from real ONNX Runtime outputs;
+  it does not change the CPU execution-provider package strategy.
 - `tokenizers` default features are `progressbar`, `onig`, and `esaxx_fast`.
   The manifest slice uses only `onig` so local tokenizer JSON regex support is
   available without HTTP/Hub, progress bar, or `esaxx_fast` training-oriented
@@ -83,6 +94,8 @@ numeric dependencies.
   record the transitive dependency and release impact before enabling them.
 - Direct `ndarray` usage must be justified by post-processing complexity, not
   added by default.
+- If FP16 extraction introduces unacceptable package, audit, or release impact,
+  re-plan before supporting FP16 ONNX exports through real inference.
 
 ## Verification To Run In Manifest Slice
 
@@ -90,6 +103,7 @@ numeric dependencies.
 - `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`
 - `cargo tree --manifest-path rust/crates/pumas-core/Cargo.toml -i ort`
 - `cargo tree --manifest-path rust/crates/pumas-core/Cargo.toml -i tokenizers`
+- `cargo tree --manifest-path rust/crates/pumas-core/Cargo.toml -i half`
 - Repository audit/license/package-size checks required by the dependency and
   release standards.
 
@@ -105,6 +119,9 @@ numeric dependencies.
   tokenizers`: `tokenizers` is pulled only by `pumas-library`.
 - `cargo tree --manifest-path rust/crates/pumas-core/Cargo.toml -i ndarray`:
   `ndarray` is pulled through `ort`, then `pumas-library`.
+- `cargo tree --manifest-path rust/crates/pumas-core/Cargo.toml -i half`:
+  `half` is pulled directly by `pumas-library` and through `ort`, then
+  `pumas-library`.
 - `cargo audit --version`: unavailable in this environment (`cargo-audit` is
   not installed). Security advisory audit remains open before release.
 

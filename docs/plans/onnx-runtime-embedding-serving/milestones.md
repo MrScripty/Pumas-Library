@@ -428,22 +428,22 @@ post-processing semantics.
       configuration or startup logs so CPU/GPU package behavior is observable
       and does not silently vary by platform.
 - [x] Tokenize string or string-array `input`.
-- [ ] Run ONNX Runtime inference with bounded batch size and token length.
+- [x] Run ONNX Runtime inference with bounded batch size and token length.
 - [x] Implement a configurable embedding postprocess strategy covering pooling,
       optional layer normalization, optional Matryoshka truncation, and optional
       L2 normalization.
-- [ ] Apply output tensor selection to real ONNX outputs during inference.
-- [ ] Default conservatively from model metadata/config when possible and fail
+- [x] Apply output tensor selection to real ONNX outputs during inference.
+- [x] Default conservatively from model metadata/config when possible and fail
       with explicit configuration errors when the output contract is ambiguous.
-- [ ] Support optional `dimensions` only when the loaded model/postprocess
+- [x] Support optional `dimensions` only when the loaded model/postprocess
       strategy can produce a compatible vector length.
-- [ ] Use checked arithmetic before tensor allocation, vector truncation, or
+- [x] Use checked arithmetic before tensor allocation, vector truncation, or
       response-size calculations derived from request payloads.
-- [ ] Return one embedding row per input item.
-- [ ] Add tests for response shape, vector dimensions, batch ordering, and
+- [x] Return one embedding row per input item.
+- [x] Add tests for response shape, vector dimensions, batch ordering, and
       rejected invalid dimensions.
 - [x] Add deterministic numerical tests with tolerances for post-processing.
-- [ ] Add shape tests for real ONNX fixtures. Do not make broad performance or
+- [x] Add shape tests for real ONNX fixtures. Do not make broad performance or
       quality claims without benchmark evidence.
 - [ ] Add a throughput/resource-limit check for representative batch sizes if
       ONNX inference becomes a hot path or any performance claim is made.
@@ -502,6 +502,14 @@ without making normal focused tests depend on the large model file.
 FP16 tensor extraction support is now explicitly planned through `ort`'s `half`
 feature plus a direct `half` dependency owned by `pumas-core`, because the local
 Nomic ONNX fixture is the FP16 export.
+The real backend slice added `RealOnnxEmbeddingBackend` and real
+`OnnxRuntimeSession::embed` execution. It pads tokenized input into
+`input_ids`, `attention_mask`, and optional `token_type_ids`, runs ONNX Runtime,
+selects either a named output or first floating tensor, extracts `f32`/`f16`/
+`bf16` hidden states with checked shape/value counts, applies the existing
+postprocessor, and returns one embedding row per input. The opt-in local Nomic
+FP16 smoke verifies two ordered inputs, 256-dimensional Matryoshka truncation,
+finite values, and non-zero token usage through actual ONNX Runtime inference.
 
 ### Milestone 3: Plugin And Runtime Profile Contracts
 

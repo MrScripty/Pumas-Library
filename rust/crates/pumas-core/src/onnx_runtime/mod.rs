@@ -17,6 +17,7 @@ mod manager;
 mod package;
 mod postprocess;
 mod real;
+mod real_backend;
 mod tokenizer;
 
 pub use config::OnnxModelConfig;
@@ -27,6 +28,7 @@ pub use postprocess::{
     OnnxOutputTensorSelection,
 };
 pub use real::OnnxRuntimeSession;
+pub use real_backend::RealOnnxEmbeddingBackend;
 pub use tokenizer::{OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer};
 
 const MAX_MODEL_ID_LEN: usize = 128;

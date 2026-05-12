@@ -18,6 +18,7 @@ Runtime execution is wired into serving.
 | `package.rs` | Shared model-package file discovery under the validated ONNX model root. |
 | `postprocess.rs` | Pure embedding post-processing for pooling, optional layer norm, truncation, and L2 normalization. |
 | `real.rs` | Real ONNX Runtime session loader boundary backed by the Rust `ort` crate. |
+| `real_backend.rs` | Real ONNX backend that stores loaded sessions and runs tokenization, ONNX inference, and post-processing. |
 | `tokenizer.rs` | Rust tokenizer loader/tokenization contract for model-package `tokenizer.json` files. |
 | `tests.rs` | Focused ONNX contract, fake backend, and session-manager tests. |
 
@@ -62,6 +63,11 @@ cannot interleave with cleanup.
 - Dimensions are positive and capped before backend execution.
 - Real session loading uses the validated ONNX model path and explicit CPU
   execution-provider session options.
+- Real inference pads tokenized inputs into bounded `input_ids`,
+  `attention_mask`, and optional `token_type_ids` tensors before executing ONNX
+  Runtime.
+- Real output extraction accepts `f32`, `f16`, or `bf16` hidden-state tensors
+  with shape `[batch, tokens, dimensions]`.
 - Post-processing returns one embedding row per input row and rejects shape or
   dimension mismatches before truncation/normalization.
 - Unload removes backend-owned session state.

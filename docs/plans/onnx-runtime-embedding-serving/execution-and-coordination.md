@@ -692,6 +692,25 @@ Update during implementation:
   --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and `cargo tree
   --manifest-path rust/crates/pumas-core/Cargo.toml -i half`. `cargo audit`
   remains unavailable in this environment.
+- 2026-05-12: Added the first real ONNX inference backend slice.
+  `RealOnnxEmbeddingBackend` now owns loaded `OnnxRuntimeSession` values behind
+  the existing bounded session-manager contract. `OnnxRuntimeSession::embed`
+  tokenizes requests, pads `input_ids` and `attention_mask`, supplies optional
+  `token_type_ids` when the graph declares that input, runs ONNX Runtime,
+  selects a named output or first floating tensor, extracts `f32`/`f16`/`bf16`
+  hidden states with checked shape/value counts, applies the existing mean-pool
+  postprocessor, and returns one embedding row per input. The opt-in local
+  Nomic FP16 smoke produced two ordered 256-dimensional finite embeddings from
+  real ONNX Runtime inference. Verification passed: `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, `PUMAS_ONNX_REAL_MODEL_ROOT=<absolute
+  local Nomic package> PUMAS_ONNX_REAL_MODEL_PATH=onnx/model_fp16.onnx cargo
+  test --manifest-path rust/crates/pumas-core/Cargo.toml
+  real_backend_embeds_optional_real_fixture -- --nocapture`, and `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`. File-size evidence:
+  `mod.rs` 378 lines, `real.rs` 452 lines, `real_backend.rs` 71 lines,
+  `tests.rs` 435 lines. New risk recorded: split `real.rs` before adding more
+  real-inference responsibilities.
 
 ## Commit Cadence Notes
 
@@ -1164,6 +1183,15 @@ changes remain.
   rust/crates/pumas-core/Cargo.toml onnx`, `cargo test --manifest-path
   rust/crates/pumas-rpc/Cargo.toml onnx`, and `cargo tree --manifest-path
   rust/crates/pumas-core/Cargo.toml -i half`.
+- ONNX real inference backend verified with `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, `PUMAS_ONNX_REAL_MODEL_ROOT=<absolute
+  local Nomic package> PUMAS_ONNX_REAL_MODEL_PATH=onnx/model_fp16.onnx cargo
+  test --manifest-path rust/crates/pumas-core/Cargo.toml
+  real_backend_embeds_optional_real_fixture -- --nocapture`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size
+  evidence: `onnx_runtime/mod.rs` 378 lines, `real.rs` 452 lines,
+  `real_backend.rs` 71 lines, `tests.rs` 435 lines.
 
 ### Traceability Links
 

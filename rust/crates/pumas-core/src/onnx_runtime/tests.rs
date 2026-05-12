@@ -41,6 +41,22 @@ fn config_fixture_json(hidden_size: usize, n_embd: usize) -> String {
     )
 }
 
+fn optional_real_fixture_load_request() -> Option<OnnxLoadRequest> {
+    let root = std::env::var_os("PUMAS_ONNX_REAL_MODEL_ROOT")?;
+    let model_path = std::env::var_os("PUMAS_ONNX_REAL_MODEL_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("onnx/model_fp16.onnx"));
+    Some(
+        OnnxLoadRequest::parse(
+            PathBuf::from(root),
+            model_path,
+            "nomic-embed-text-v1.5",
+            OnnxLoadOptions::default(),
+        )
+        .unwrap(),
+    )
+}
+
 fn tokenizer_fixture_json() -> &'static str {
     r#"{
   "version": "1.0",
@@ -265,19 +281,9 @@ fn real_session_loader_uses_validated_model_directory_contract() {
 
 #[test]
 fn real_session_loader_smokes_optional_real_fixture() {
-    let Some(root) = std::env::var_os("PUMAS_ONNX_REAL_MODEL_ROOT") else {
+    let Some(request) = optional_real_fixture_load_request() else {
         return;
     };
-    let model_path = std::env::var_os("PUMAS_ONNX_REAL_MODEL_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("onnx/model_fp16.onnx"));
-    let request = OnnxLoadRequest::parse(
-        PathBuf::from(root),
-        model_path,
-        "nomic-embed-text-v1.5",
-        OnnxLoadOptions::default(),
-    )
-    .unwrap();
 
     let session = OnnxRuntimeSession::load(request).unwrap();
 
@@ -292,6 +298,43 @@ fn real_session_loader_smokes_optional_real_fixture() {
         .iter()
         .any(|name| name.as_str() == "attention_mask"));
     assert!(!session.output_names().is_empty());
+}
+
+#[tokio::test]
+async fn real_backend_embeds_optional_real_fixture() {
+    let Some(request) = optional_real_fixture_load_request() else {
+        return;
+    };
+    let manager = OnnxSessionManager::new(RealOnnxEmbeddingBackend::new(), 1).unwrap();
+    manager.load(request).await.unwrap();
+
+    let response = manager
+        .embed(
+            OnnxEmbeddingRequest::parse(
+                "nomic-embed-text-v1.5",
+                vec![
+                    "search_query: hello world".to_string(),
+                    "search_document: hello world".to_string(),
+                ],
+                Some(256),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.model, "nomic-embed-text-v1.5");
+    assert_eq!(response.data.len(), 2);
+    assert_eq!(response.data[0].index, 0);
+    assert_eq!(response.data[1].index, 1);
+    assert_eq!(response.data[0].embedding.len(), 256);
+    assert_eq!(response.data[1].embedding.len(), 256);
+    assert!(response
+        .data
+        .iter()
+        .flat_map(|item| &item.embedding)
+        .all(|value| value.is_finite()));
+    assert!(response.usage.total_tokens > 0);
 }
 
 #[tokio::test]

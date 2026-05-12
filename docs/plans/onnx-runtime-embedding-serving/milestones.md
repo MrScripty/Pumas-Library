@@ -624,7 +624,10 @@ shared `ModelInfo.primaryFormat` includes `onnx` as a typed executable format.
 The first ONNX app panel now renders runtime-profile settings scoped to
 `onnx_runtime` plus an ONNX-compatible model library view filtered through the
 shared provider compatibility helper, and `AppPanelRenderer` routes
-`onnx-runtime` to that panel instead of the default coming-soon fallback. Saved
+`onnx-runtime` to that panel instead of the default coming-soon fallback. The
+hard-coded frontend registry decision is backed by drift tests that read the
+checked-in ONNX plugin id and verify frontend registry, selected-version,
+managed-decoration, app-shell props, and renderer coverage remain aligned. Saved
 route selection, quick serve, serving-option actions, and backend-confirmed
 loaded-state rendering remain open.
 
@@ -861,7 +864,7 @@ keeping backend-owned state authoritative.
       If it remains, update every hard-coded registry/decorator/renderer state
       path in the same slice. If a descriptor approach is cleaner, replace the
       registry rather than adding another partial special case.
-- [ ] If the hard-coded frontend app registry remains, add a focused drift test
+- [x] If the hard-coded frontend app registry remains, add a focused drift test
       that fails when an app exists in plugin metadata/Rust app identity but is
       missing selected-version state, managed decoration, app-shell props, or
       renderer selection.

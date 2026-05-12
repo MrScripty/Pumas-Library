@@ -870,6 +870,13 @@ Update during implementation:
   loaded-state rendering remain separate frontend slices. Verification passed:
   `npm run -w frontend check:types` and `npm run -w frontend test:run --
   AppPanelRenderer OnnxRuntimePanel AppShellPanels runtimeProviderDescriptors`.
+- 2026-05-12: Added the hard-coded frontend app registry drift test for ONNX
+  Runtime. The test reads `launcher-data/plugins/onnx-runtime.json` and verifies
+  the checked-in plugin id remains represented in `DEFAULT_APPS`, unsupported by
+  selected-version state, preserved by managed-app decoration, and wired through
+  app-shell ONNX panel props. Renderer selection remains covered by the focused
+  `AppPanelRenderer` ONNX test. Verification passed: `npm run -w frontend
+  check:types` and `npm run -w frontend test:run -- apps AppPanelRenderer`.
 
 ## Commit Cadence Notes
 
@@ -1392,6 +1399,9 @@ changes remain.
 - First ONNX app panel verified with `npm run -w frontend check:types` and
   `npm run -w frontend test:run -- AppPanelRenderer OnnxRuntimePanel
   AppShellPanels runtimeProviderDescriptors`.
+- ONNX frontend hard-coded registry drift test verified with `npm run -w
+  frontend check:types` and `npm run -w frontend test:run -- apps
+  AppPanelRenderer`.
 
 ### Traceability Links
 

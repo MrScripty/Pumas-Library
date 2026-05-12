@@ -41,6 +41,10 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
 - The RPC server exposes a local OpenAI-compatible serving gateway at
   `/v1/models`, `/v1/chat/completions`, `/v1/completions`, and `/v1/embeddings`.
 - `/v1/models` is backed by `ServingStatusSnapshot.served_models`.
+- ONNX Runtime served models are first-class gateway entries with
+  `provider = onnx_runtime`. They may be listed through `/v1/models` and may
+  receive `/v1/embeddings` traffic only; chat and completion requests are
+  rejected by provider endpoint-capability checks before proxying.
 - When one or more models are loaded, aggregate serving status reports
   `endpoint_mode = pumas_gateway`; each `ServedModelStatus.endpoint_url`
   remains the provider endpoint used internally by the gateway.
@@ -53,8 +57,34 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
   `ServedModelStatus`.
 - If a provider-facing alias exists, the forwarded `model` field is rewritten
   to that alias.
+- For ONNX Runtime, the provider-facing model id is backend-owned session
+  identity derived from the loaded ONNX model, not a user-authored gateway
+  alias. External clients should send the alias reported by `/v1/models`.
 - The gateway is available only on the RPC server bind address. The binary
   already rejects non-loopback binds unless `--allow-lan` is supplied.
+
+### Gateway Examples
+
+The examples below are payload shapes. Replace the port and `model` value with
+the active Pumas gateway URL and model id/alias returned by `/v1/models`.
+
+List served models:
+
+```sh
+curl -s http://127.0.0.1:3456/v1/models
+```
+
+Request an ONNX Runtime embedding:
+
+```sh
+curl -s http://127.0.0.1:3456/v1/embeddings \
+  -H 'content-type: application/json' \
+  -d '{"model":"nomic-embed-text","input":["search_document: example text"]}'
+```
+
+Normal external-app configuration should point at the Pumas gateway base URL,
+for example `http://127.0.0.1:3456/v1`, rather than an internal ONNX Runtime
+session or provider implementation detail.
 
 ## Local Runtime Profile Rules
 - `profile_id` is the canonical internal address for local runtime operations.
@@ -90,6 +120,10 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
   runtime profile selected by the user. llama.cpp requests may load through a
   managed dedicated server or through a managed router profile, depending on
   the saved profile mode.
+- `serve_model` also wires ONNX Runtime orchestration for managed
+  `onnx_runtime` / `onnx_serve` profiles. ONNX serving requires an explicit
+  ONNX profile selection or provider-scoped saved route; it does not fall back
+  to the global default profile.
 - Same-model multi-profile serving requires distinct gateway aliases. Frontend
   prompts are usability aids; backend validation owns duplicate-alias rejection
   and gateway ambiguity errors.

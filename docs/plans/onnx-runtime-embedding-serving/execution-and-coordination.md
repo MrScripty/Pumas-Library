@@ -1467,6 +1467,14 @@ changes remain.
   passed before the full suite was rerun successfully. The full-suite run still
   prints jsdom's known `Window.scrollTo()` not-implemented message, but all
   tests pass.
+- Milestone 7 external contract documentation started with
+  `docs/contracts/desktop-rpc-methods.md`. The desktop RPC contract now records
+  ONNX Runtime as an embeddings-only gateway provider, clarifies that external
+  clients should use aliases from `/v1/models`, includes shape-only curl
+  examples for `/v1/models` and `/v1/embeddings`, and points Emily-style
+  clients at the Pumas `/v1` gateway instead of provider internals. The examples
+  are documented as payload shapes because no live served ONNX model was running
+  during this documentation slice.
 
 ### Traceability Links
 

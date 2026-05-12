@@ -988,7 +988,7 @@ typecheck, and frontend production build.
 clients.
 
 **Tasks:**
-- [ ] Update `docs/contracts/desktop-rpc-methods.md` with ONNX Runtime gateway
+- [x] Update `docs/contracts/desktop-rpc-methods.md` with ONNX Runtime gateway
       behavior.
 - [ ] Add README coverage for Rust ONNX provider/session modules with lifecycle,
       endpoint/gateway behavior, limits, and troubleshooting.
@@ -1004,8 +1004,8 @@ clients.
 - [ ] Add or update persisted-artifact validation tooling if runtime-profile
       JSON, plugin manifests, or example payloads gain schema-backed shapes that
       can drift.
-- [ ] Add external app examples for `/v1/models` and `/v1/embeddings`.
-- [ ] Add Emily config guidance that points at the Pumas gateway, not the raw
+- [x] Add external app examples for `/v1/models` and `/v1/embeddings`.
+- [x] Add Emily config guidance that points at the Pumas gateway, not the raw
       provider internals, for normal usage.
 
 **Verification:**
@@ -1019,7 +1019,13 @@ clients.
 - Example curl commands are validated against a local served model or clearly
   marked as shape examples when no model is available.
 
-**Status:** Not started.
+**Status:** In progress. `docs/contracts/desktop-rpc-methods.md` now documents
+ONNX Runtime gateway behavior, embeddings-only provider endpoint capability,
+provider-owned ONNX session model identity, shape-only `/v1/models` and
+`/v1/embeddings` curl examples, and guidance that Emily or other external apps
+should target the Pumas `/v1` gateway instead of raw ONNX Runtime internals.
+README/ADR traceability, manifest/persisted-artifact docs, and release-facing
+documentation remain open.
 
 ### Milestone 8: Release Validation
 

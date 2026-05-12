@@ -19,10 +19,15 @@ use serde::{Deserialize, Serialize};
 use tokio::{sync::Semaphore, time::timeout};
 
 mod fake;
+mod postprocess;
 mod real;
 mod tokenizer;
 
 pub use fake::FakeOnnxEmbeddingBackend;
+pub use postprocess::{
+    OnnxEmbeddingPooling, OnnxEmbeddingPostprocessConfig, OnnxEmbeddingPostprocessor,
+    OnnxOutputTensorSelection,
+};
 pub use real::OnnxRuntimeSession;
 pub use tokenizer::{OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer};
 

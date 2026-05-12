@@ -626,6 +626,17 @@ Update during implementation:
   rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence: `mod.rs`
   493 lines, `real.rs` 104 lines, `tokenizer.rs` 128 lines, `tests.rs` 268
   lines.
+- 2026-05-12: Added the M2 pure embedding postprocess strategy. The new
+  postprocess module covers masked mean pooling, optional layer normalization,
+  optional Matryoshka truncation, optional L2 normalization, checked response
+  size calculation, one output row per tokenized input row, and deterministic
+  tolerance-based numerical tests. Real ONNX output tensor selection remains
+  open until inference consumes actual session outputs. Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size
+  evidence: `mod.rs` 498 lines, `postprocess.rs` 275 lines, `real.rs` 104
+  lines, `tokenizer.rs` 128 lines, `tests.rs` 268 lines.
 
 ## Commit Cadence Notes
 
@@ -1061,6 +1072,12 @@ changes remain.
   rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence:
   `onnx_runtime/mod.rs` 493 lines, `real.rs` 104 lines, `tokenizer.rs` 128
   lines, `tests.rs` 268 lines.
+- ONNX postprocess strategy verified with `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence:
+  `onnx_runtime/mod.rs` 498 lines, `postprocess.rs` 275 lines, `real.rs` 104
+  lines, `tokenizer.rs` 128 lines, `tests.rs` 268 lines.
 
 ### Traceability Links
 

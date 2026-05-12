@@ -13,6 +13,7 @@ Runtime execution is wired into serving.
 | ---- | ----------- |
 | `mod.rs` | ONNX provider/session contracts, session manager, and shared validation. |
 | `fake.rs` | Deterministic fake embedding backend used by serving/gateway slices until real ONNX execution is wired. |
+| `postprocess.rs` | Pure embedding post-processing for pooling, optional layer norm, truncation, and L2 normalization. |
 | `real.rs` | Real ONNX Runtime session loader boundary backed by the Rust `ort` crate. |
 | `tokenizer.rs` | Rust tokenizer loader/tokenization contract for sibling `tokenizer.json` files. |
 | `tests.rs` | Focused ONNX contract, fake backend, and session-manager tests. |
@@ -56,6 +57,8 @@ cannot interleave with cleanup.
 - Dimensions are positive and capped before backend execution.
 - Real session loading uses the validated ONNX model path and explicit CPU
   execution-provider session options.
+- Post-processing returns one embedding row per input row and rejects shape or
+  dimension mismatches before truncation/normalization.
 - Unload removes backend-owned session state.
 - After shutdown begins, new session-manager operations fail with a typed
   backend error instead of entering the provider backend.

@@ -429,9 +429,10 @@ post-processing semantics.
       and does not silently vary by platform.
 - [x] Tokenize string or string-array `input`.
 - [ ] Run ONNX Runtime inference with bounded batch size and token length.
-- [ ] Implement a configurable embedding postprocess strategy covering output
-      tensor selection, pooling, optional layer normalization, optional
-      Matryoshka truncation, and optional L2 normalization.
+- [x] Implement a configurable embedding postprocess strategy covering pooling,
+      optional layer normalization, optional Matryoshka truncation, and optional
+      L2 normalization.
+- [ ] Apply output tensor selection to real ONNX outputs during inference.
 - [ ] Default conservatively from model metadata/config when possible and fail
       with explicit configuration errors when the output contract is ambiguous.
 - [ ] Support optional `dimensions` only when the loaded model/postprocess
@@ -441,9 +442,9 @@ post-processing semantics.
 - [ ] Return one embedding row per input item.
 - [ ] Add tests for response shape, vector dimensions, batch ordering, and
       rejected invalid dimensions.
-- [ ] Add deterministic numerical tests with tolerances for fake/session-backed
-      post-processing and shape tests for real ONNX fixtures. Do not make
-      broad performance or quality claims without benchmark evidence.
+- [x] Add deterministic numerical tests with tolerances for post-processing.
+- [ ] Add shape tests for real ONNX fixtures. Do not make broad performance or
+      quality claims without benchmark evidence.
 - [ ] Add a throughput/resource-limit check for representative batch sizes if
       ONNX inference becomes a hot path or any performance claim is made.
 
@@ -479,7 +480,12 @@ provider, bounded ONNX Runtime thread options, and session input/output
 introspection. Focused tests cover the validated model-directory contract and
 map invalid ONNX bytes to a typed backend error; a successful real-model smoke
 remains open until a known ONNX embedding fixture is available. ONNX inference
-remains open.
+remains open. The postprocess slice added a pure configurable postprocessor for
+mean pooling, optional layer normalization, optional truncation, and optional L2
+normalization. Deterministic tests cover masked mean pooling, batch ordering,
+truncation-before-normalization, layer normalization, invalid dimensions, and
+shape mismatch rejection. Real ONNX output tensor selection remains open for
+the inference slice.
 
 ### Milestone 3: Plugin And Runtime Profile Contracts
 

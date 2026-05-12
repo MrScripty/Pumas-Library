@@ -433,3 +433,8 @@ fn session_manager_requires_positive_concurrency_limit() {
 
     assert_eq!(err.field.as_deref(), Some("max_concurrent_operations"));
 }
+
+#[test]
+fn execution_provider_has_stable_log_label() {
+    assert_eq!(OnnxExecutionProvider::Cpu.as_str(), "cpu");
+}

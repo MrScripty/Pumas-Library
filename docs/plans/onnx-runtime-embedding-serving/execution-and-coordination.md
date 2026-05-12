@@ -772,6 +772,19 @@ Update during implementation:
   sleep. Verification passed: `cargo fmt --manifest-path rust/Cargo.toml --all
   -- --check` and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml
   openai_gateway`.
+- 2026-05-12: Completed the M2 ONNX Runtime provider/native-library
+  observability slice. Real ONNX session startup now logs the selected
+  execution provider (`cpu`), native library strategy
+  (`ort-download-binaries-copy-dylibs-cpu`), graph optimization level,
+  ONNX Runtime thread counts, public model id, and loaded input/output counts
+  without logging full model paths or embedding request text. Verification
+  passed: `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`,
+  `PUMAS_ONNX_REAL_MODEL_ROOT=<absolute local Nomic package>
+  PUMAS_ONNX_REAL_MODEL_PATH=onnx/model_fp16.onnx cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml real_backend_embeds_optional_real_fixture
+  -- --nocapture`, and `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml onnx`.
 
 ## Commit Cadence Notes
 

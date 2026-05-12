@@ -157,6 +157,14 @@ pub enum OnnxExecutionProvider {
     Cpu,
 }
 
+impl OnnxExecutionProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cpu => "cpu",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct OnnxLoadOptions {

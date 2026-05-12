@@ -424,7 +424,7 @@ post-processing semantics.
       default and the re-plan trigger for GPU support.
 - [x] Load tokenizer from a validated model directory in Rust.
 - [x] Load ONNX session from a validated model directory in Rust.
-- [ ] Keep ONNX Runtime native-library/provider selection explicit in Rust
+- [x] Keep ONNX Runtime native-library/provider selection explicit in Rust
       configuration or startup logs so CPU/GPU package behavior is observable
       and does not silently vary by platform.
 - [x] Tokenize string or string-array `input`.
@@ -516,6 +516,9 @@ before the serving integration slice.
 RPC composition now uses the real backend in production through
 `OnnxEmbeddingBackendKind::real()`, while focused RPC tests explicitly inject
 the fake backend variant to preserve deterministic gateway/serving assertions.
+Real ONNX session startup now logs the selected execution provider, native
+library strategy, graph optimization level, thread counts, model id, and
+loaded input/output counts without logging full model paths or request text.
 The public gateway smoke now exercises the real Rust ONNX backend through
 `/v1/embeddings` with the local Nomic FP16 fixture and verifies HTTP 200,
 OpenAI-compatible response shape, 256-dimensional finite embeddings, and

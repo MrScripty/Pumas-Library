@@ -6,6 +6,7 @@ use ort::{
     session::{builder::GraphOptimizationLevel, Session},
     value::TensorRef,
 };
+use tracing::info;
 
 use super::{
     output::extract_hidden_states, tensors::TokenTensors, OnnxEmbedding,
@@ -14,6 +15,11 @@ use super::{
     OnnxLoadRequest, OnnxModelConfig, OnnxModelId, OnnxRuntimeError, OnnxSessionState,
     OnnxSessionStatus, OnnxTokenizer,
 };
+
+const ORT_NATIVE_LIBRARY_STRATEGY: &str = "ort-download-binaries-copy-dylibs-cpu";
+const ONNX_RUNTIME_GRAPH_OPTIMIZATION: GraphOptimizationLevel = GraphOptimizationLevel::Level3;
+const ONNX_RUNTIME_INTRA_THREADS: usize = 1;
+const ONNX_RUNTIME_INTER_THREADS: usize = 1;
 
 #[derive(Debug)]
 pub struct OnnxRuntimeSession {
@@ -33,6 +39,16 @@ impl OnnxRuntimeSession {
         let tokenizer = OnnxTokenizer::from_model_path(&request.model_path)?;
         let model_config = OnnxModelConfig::from_model_path(&request.model_path)?;
         let embedding_dimensions = resolve_embedding_dimensions(&request.options, &model_config)?;
+        info!(
+            provider = "onnx_runtime",
+            model_id = %request.model_id.as_str(),
+            execution_provider = %request.options.execution_provider.as_str(),
+            native_library_strategy = ORT_NATIVE_LIBRARY_STRATEGY,
+            graph_optimization = "level3",
+            intra_threads = ONNX_RUNTIME_INTRA_THREADS,
+            inter_threads = ONNX_RUNTIME_INTER_THREADS,
+            "initializing ONNX Runtime embedding session"
+        );
         let mut builder = Session::builder()
             .map_err(|_| OnnxRuntimeError::backend("ONNX Runtime session builder failed"))?;
         builder = match request.options.execution_provider {
@@ -47,16 +63,26 @@ impl OnnxRuntimeSession {
         let session = builder
             .commit_from_file(request.model_path.path())
             .map_err(|_| OnnxRuntimeError::backend("ONNX Runtime model load failed"))?;
-        let input_names = session
+        let input_names: Vec<String> = session
             .inputs()
             .iter()
             .map(|input| input.name().to_string())
             .collect();
-        let output_names = session
+        let output_names: Vec<String> = session
             .outputs()
             .iter()
             .map(|output| output.name().to_string())
             .collect();
+        info!(
+            provider = "onnx_runtime",
+            model_id = %request.model_id.as_str(),
+            execution_provider = %request.options.execution_provider.as_str(),
+            native_library_strategy = ORT_NATIVE_LIBRARY_STRATEGY,
+            input_count = input_names.len(),
+            output_count = output_names.len(),
+            embedding_dimensions,
+            "loaded ONNX Runtime embedding session"
+        );
 
         Ok(Self {
             model_id: request.model_id,
@@ -208,12 +234,12 @@ fn apply_session_options(
     _options: &OnnxLoadOptions,
 ) -> Result<ort::session::builder::SessionBuilder, OnnxRuntimeError> {
     let builder = builder
-        .with_optimization_level(GraphOptimizationLevel::Level3)
+        .with_optimization_level(ONNX_RUNTIME_GRAPH_OPTIMIZATION)
         .map_err(|_| OnnxRuntimeError::backend("ONNX Runtime optimization setup failed"))?;
     let builder = builder
-        .with_intra_threads(1)
+        .with_intra_threads(ONNX_RUNTIME_INTRA_THREADS)
         .map_err(|_| OnnxRuntimeError::backend("ONNX Runtime intra-thread setup failed"))?;
     builder
-        .with_inter_threads(1)
+        .with_inter_threads(ONNX_RUNTIME_INTER_THREADS)
         .map_err(|_| OnnxRuntimeError::backend("ONNX Runtime inter-thread setup failed"))
 }

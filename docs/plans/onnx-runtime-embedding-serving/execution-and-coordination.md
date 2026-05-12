@@ -602,6 +602,17 @@ Update during implementation:
   --manifest-path rust/Cargo.toml --all -- --check`, `cargo test
   --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, and file-size
   evidence: `mod.rs` 489 lines, `fake.rs` 116 lines, `tests.rs` 158 lines.
+- 2026-05-12: Added the M2 tokenizer loading/tokenization slice. `OnnxTokenizer`
+  now resolves `tokenizer.json` next to the already validated `.onnx` model
+  file, canonicalizes it under the configured model root before parsing it with
+  the Rust `tokenizers` crate, and returns ordered `i64` input-id and
+  attention-mask rows for bounded embedding inputs. Tokenization rejects empty
+  and over-limit tokenized inputs before tensor construction and uses checked
+  accumulation for total token counts. Verification passed: `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size
+  evidence: `mod.rs` 491 lines, `tokenizer.rs` 128 lines, `tests.rs` 248 lines.
 
 ## Commit Cadence Notes
 
@@ -1025,6 +1036,12 @@ changes remain.
   rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
   rust/crates/pumas-core/Cargo.toml onnx`, and file-size evidence:
   `onnx_runtime/mod.rs` 489 lines, `fake.rs` 116 lines, `tests.rs` 158 lines.
+- ONNX tokenizer loading/tokenization slice verified with `cargo fmt
+  --manifest-path rust/Cargo.toml --all -- --check`, `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence:
+  `onnx_runtime/mod.rs` 491 lines, `tokenizer.rs` 128 lines, `tests.rs` 248
+  lines.
 
 ### Traceability Links
 

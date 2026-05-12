@@ -6,6 +6,34 @@ fn model_fixture() -> tempfile::TempDir {
     temp
 }
 
+fn model_fixture_with_tokenizer() -> tempfile::TempDir {
+    let temp = model_fixture();
+    std::fs::write(temp.path().join("tokenizer.json"), tokenizer_fixture_json()).unwrap();
+    temp
+}
+
+fn tokenizer_fixture_json() -> &'static str {
+    r#"{
+  "version": "1.0",
+  "truncation": null,
+  "padding": null,
+  "added_tokens": [],
+  "normalizer": null,
+  "pre_tokenizer": { "type": "WhitespaceSplit" },
+  "post_processor": null,
+  "decoder": null,
+  "model": {
+    "type": "WordLevel",
+    "vocab": {
+      "[UNK]": 0,
+      "hello": 1,
+      "world": 2
+    },
+    "unk_token": "[UNK]"
+  }
+}"#
+}
+
 #[test]
 fn model_path_rejects_root_escape() {
     let root = tempfile::tempdir().unwrap();
@@ -58,6 +86,68 @@ fn embedding_request_rejects_oversized_payloads() {
     let too_many_chars = vec!["x".repeat(MAX_EMBEDDING_INPUT_CHARS + 1)];
     let err = OnnxEmbeddingRequest::parse("model", too_many_chars, None).unwrap_err();
     assert_eq!(err.field.as_deref(), Some("input"));
+}
+
+#[test]
+fn tokenizer_loads_from_model_directory_and_tokenizes_batch() {
+    let fixture = model_fixture_with_tokenizer();
+    let model_path = OnnxModelPath::parse(fixture.path(), "model.onnx").unwrap();
+    let tokenizer = OnnxTokenizer::from_model_path(&model_path).unwrap();
+
+    let batch = tokenizer
+        .tokenize_request(
+            &OnnxEmbeddingRequest::parse(
+                "nomic-embed-text-v1.5",
+                vec!["hello world".to_string(), "hello missing".to_string()],
+                None,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        tokenizer.tokenizer_path(),
+        fixture
+            .path()
+            .join("tokenizer.json")
+            .canonicalize()
+            .unwrap()
+    );
+    assert_eq!(batch.total_tokens, 4);
+    assert_eq!(batch.inputs.len(), 2);
+    assert_eq!(batch.inputs[0].input_ids, vec![1, 2]);
+    assert_eq!(batch.inputs[0].attention_mask, vec![1, 1]);
+    assert_eq!(batch.inputs[0].token_count, 2);
+    assert_eq!(batch.inputs[1].input_ids, vec![1, 0]);
+}
+
+#[test]
+fn tokenizer_requires_sibling_tokenizer_json_under_model_root() {
+    let fixture = model_fixture();
+    let model_path = OnnxModelPath::parse(fixture.path(), "model.onnx").unwrap();
+
+    let err = OnnxTokenizer::from_model_path(&model_path).unwrap_err();
+
+    assert_eq!(err.field.as_deref(), Some("tokenizer"));
+}
+
+#[test]
+fn tokenizer_rejects_inputs_over_token_limit() {
+    let fixture = model_fixture_with_tokenizer();
+    let model_path = OnnxModelPath::parse(fixture.path(), "model.onnx").unwrap();
+    let tokenizer = OnnxTokenizer::from_model_path(&model_path).unwrap();
+    let oversized = std::iter::repeat_n("hello", 8_193)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let err = tokenizer
+        .tokenize_request(
+            &OnnxEmbeddingRequest::parse("nomic-embed-text-v1.5", vec![oversized], None).unwrap(),
+        )
+        .unwrap_err();
+
+    assert_eq!(err.field.as_deref(), Some("input"));
+    assert!(err.message.contains("tokens"));
 }
 
 #[tokio::test]

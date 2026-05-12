@@ -77,7 +77,8 @@ pub use onnx_runtime::{
     FakeOnnxEmbeddingBackend, OnnxEmbedding, OnnxEmbeddingBackend, OnnxEmbeddingRequest,
     OnnxEmbeddingResponse, OnnxEmbeddingUsage, OnnxExecutionProvider, OnnxLoadOptions,
     OnnxLoadRequest, OnnxModelId, OnnxModelPath, OnnxRuntimeError, OnnxRuntimeErrorCode,
-    OnnxSessionManager, OnnxSessionState, OnnxSessionStatus,
+    OnnxSessionManager, OnnxSessionState, OnnxSessionStatus, OnnxTokenizedBatch,
+    OnnxTokenizedInput, OnnxTokenizer,
 };
 pub use plugins::{PluginConfig, PluginLoader};
 pub use process::{ProcessInfo, ProcessManager};

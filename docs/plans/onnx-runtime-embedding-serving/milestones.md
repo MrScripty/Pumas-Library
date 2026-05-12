@@ -422,11 +422,12 @@ post-processing semantics.
 - [ ] Record dependency tree, license, security-audit, and package-size impact.
       If ONNX Runtime introduces separate CPU/GPU packages, document the chosen
       default and the re-plan trigger for GPU support.
-- [ ] Load tokenizer and ONNX session from a validated model directory in Rust.
+- [x] Load tokenizer from a validated model directory in Rust.
+- [ ] Load ONNX session from a validated model directory in Rust.
 - [ ] Keep ONNX Runtime native-library/provider selection explicit in Rust
       configuration or startup logs so CPU/GPU package behavior is observable
       and does not silently vary by platform.
-- [ ] Tokenize string or string-array `input`.
+- [x] Tokenize string or string-array `input`.
 - [ ] Run ONNX Runtime inference with bounded batch size and token length.
 - [ ] Implement a configurable embedding postprocess strategy covering output
       tensor selection, pooling, optional layer normalization, optional
@@ -466,6 +467,13 @@ explicit `std`/`ndarray`/`tracing`/`download-binaries`/`copy-dylibs`/
 Focused `cargo check`, `cargo test ... onnx`, and dependency-tree checks passed.
 Security audit tooling is not installed in this environment, and native-library
 packaging, license/package-size review, and real ONNX execution remain open.
+The tokenizer slice added `OnnxTokenizer`, which resolves a sibling
+`tokenizer.json` from a validated ONNX model path, verifies it stays under the
+configured model root, tokenizes ordered embedding inputs, returns `i64`
+input-id and attention-mask rows, and rejects empty or oversized tokenized
+inputs before tensor construction. Focused ONNX tests cover successful
+tokenizer load/tokenization, missing tokenizer files, and token-limit
+rejection. ONNX session loading and inference remain open.
 
 ### Milestone 3: Plugin And Runtime Profile Contracts
 

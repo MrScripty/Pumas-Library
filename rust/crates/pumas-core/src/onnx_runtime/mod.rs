@@ -19,8 +19,10 @@ use serde::{Deserialize, Serialize};
 use tokio::{sync::Semaphore, time::timeout};
 
 mod fake;
+mod tokenizer;
 
 pub use fake::FakeOnnxEmbeddingBackend;
+pub use tokenizer::{OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer};
 
 const MAX_MODEL_ID_LEN: usize = 128;
 const MAX_EMBEDDING_INPUTS: usize = 128;

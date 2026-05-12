@@ -13,6 +13,7 @@ Runtime execution is wired into serving.
 | ---- | ----------- |
 | `mod.rs` | ONNX provider/session contracts, session manager, and shared validation. |
 | `fake.rs` | Deterministic fake embedding backend used by serving/gateway slices until real ONNX execution is wired. |
+| `tokenizer.rs` | Rust tokenizer loader/tokenization contract for sibling `tokenizer.json` files. |
 | `tests.rs` | Focused ONNX contract, fake backend, and session-manager tests. |
 
 ## Problem
@@ -47,7 +48,10 @@ cannot interleave with cleanup.
 
 - Model ids are validated separately from filesystem paths.
 - Load requests carry a validated `.onnx` file under an allowed root.
+- Tokenizer loading resolves a sibling `tokenizer.json` under the same allowed
+  root and rejects root escapes before parsing.
 - Embedding input must be non-empty and bounded before backend execution.
+- Tokenized input must be non-empty and bounded before tensor construction.
 - Dimensions are positive and capped before backend execution.
 - Unload removes backend-owned session state.
 - After shutdown begins, new session-manager operations fail with a typed

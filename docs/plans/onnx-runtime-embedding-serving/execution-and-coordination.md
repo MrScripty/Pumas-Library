@@ -579,6 +579,21 @@ Update during implementation:
   records `ort`'s Rust 1.88 requirement and default native binary/TLS features,
   `tokenizers` default `onig`/`progressbar`/`esaxx_fast` features, and the
   narrower manifest decisions required before lockfile changes.
+- 2026-05-12: Added the first M2 manifest/lockfile dependency slice. Workspace
+  dependencies now declare `ort` `2.0.0-rc.12` with explicit CPU-first default
+  equivalents (`std`, `ndarray`, `tracing`, `download-binaries`, `copy-dylibs`,
+  `tls-native`, `api-24`) and `tokenizers` `0.23.1` with only `onig`;
+  `pumas-core` is the only workspace crate that consumes them. `ndarray`
+  remains transitive through `ort` rather than direct. Verification passed:
+  `rustc --version` (`1.92.0`), `cargo check --manifest-path
+  rust/crates/pumas-core/Cargo.toml`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo tree --manifest-path
+  rust/crates/pumas-core/Cargo.toml -i ort`, `cargo tree --manifest-path
+  rust/crates/pumas-core/Cargo.toml -i tokenizers`, and `cargo tree
+  --manifest-path rust/crates/pumas-core/Cargo.toml -i ndarray`. `cargo audit`
+  is unavailable because `cargo-audit` is not installed; advisory audit remains
+  open before release.
 
 ## Commit Cadence Notes
 

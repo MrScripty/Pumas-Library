@@ -80,6 +80,10 @@ urlencoding = "2"
 futures = "0.3"
 async-trait = "0.1"
 
+# ONNX Runtime and tokenizer execution
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "tracing", "download-binaries", "copy-dylibs", "tls-native", "api-24"] }
+tokenizers = { version = "0.23.1", default-features = false, features = ["onig"] }
+
 # URL and path handling
 url = "2"
 

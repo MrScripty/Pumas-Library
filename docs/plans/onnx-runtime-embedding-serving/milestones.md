@@ -409,14 +409,14 @@ typed backend error.
 post-processing semantics.
 
 **Tasks:**
-- [ ] Add Rust ONNX Runtime/tokenizer/numeric dependencies to the owning Rust
+- [x] Add Rust ONNX Runtime/tokenizer/numeric dependencies to the owning Rust
       crate/module only after a dependency review. Candidate ONNX Runtime Rust
       binding: `ort`, pending version/native-library strategy decision.
 - [x] Record dependency justification for selected Rust ONNX Runtime,
       tokenizer, and numerical crates: in-house alternative,
       maintenance/license, transitive cost, CPU/GPU package choice, and Rust
       owner.
-- [ ] Pin dependencies through the owning Rust manifest/lock strategy used by
+- [x] Pin dependencies through the owning Rust manifest/lock strategy used by
       the repo, and verify focused Rust build/test commands do not depend on
       unrelated runtime paths.
 - [ ] Record dependency tree, license, security-audit, and package-size impact.
@@ -458,11 +458,14 @@ post-processing semantics.
   unbounded allocation.
 
 **Status:** In progress. Dependency review is recorded in
-`dependency-review.md` with provisional CPU-first Rust candidates: `ort`
-`2.0.0-rc.12`, `tokenizers` `0.23.1`, and `ndarray` `0.17.2` only if direct
-post-processing ownership requires it. No manifest or lockfile changes have
-been made yet; native-library packaging, dependency tree/audit/license/package
-size, and real ONNX execution remain open.
+`dependency-review.md`. The first manifest slice added explicit CPU-first
+workspace dependencies consumed only by `pumas-core`: `ort` `2.0.0-rc.12` with
+explicit `std`/`ndarray`/`tracing`/`download-binaries`/`copy-dylibs`/
+`tls-native`/`api-24` features, and `tokenizers` `0.23.1` with only `onig`.
+`ndarray` is present transitively through `ort`, not as a direct dependency.
+Focused `cargo check`, `cargo test ... onnx`, and dependency-tree checks passed.
+Security audit tooling is not installed in this environment, and native-library
+packaging, license/package-size review, and real ONNX execution remain open.
 
 ### Milestone 3: Plugin And Runtime Profile Contracts
 

@@ -17,6 +17,19 @@ Use Rust-owned dependencies in `pumas-core`, the crate that owns
 | Tokenizer loading/execution | `tokenizers` | `0.23.1` | Provisional local-tokenizer candidate. Use local files only; do not enable HTTP/Hub download features in the first implementation. |
 | Tensor/numeric helper | `ndarray` | `0.17.2` | Prefer the `ort` ndarray integration initially. Add a direct dependency only if post-processing code needs owned array operations not available through `ort` values or checked `Vec<f32>` code. |
 
+## Manifest Slice
+
+The first manifest slice added:
+
+```toml
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "tracing", "download-binaries", "copy-dylibs", "tls-native", "api-24"] }
+tokenizers = { version = "0.23.1", default-features = false, features = ["onig"] }
+```
+
+These dependencies are declared in the workspace and consumed only by
+`pumas-core`. `ndarray` is intentionally not a direct dependency; it is present
+through `ort`.
+
 ## Justification
 
 `ort` is the narrow Rust ONNX Runtime binding candidate because it exposes ONNX
@@ -51,8 +64,9 @@ numeric dependencies.
 - `tokenizers` must load local tokenizer files from the validated model
   directory. HTTP/Hub download features remain disabled for the first slice.
 - `tokenizers` default features are `progressbar`, `onig`, and `esaxx_fast`.
-  The manifest slice should prefer a narrower local-inference feature set when
-  fixtures confirm it works.
+  The manifest slice uses only `onig` so local tokenizer JSON regex support is
+  available without HTTP/Hub, progress bar, or `esaxx_fast` training-oriented
+  features.
 - `ndarray` default feature is `std`; do not enable BLAS, Rayon, serde, or
   approximation features unless a later post-processing slice needs them.
 
@@ -78,6 +92,21 @@ numeric dependencies.
 - `cargo tree --manifest-path rust/crates/pumas-core/Cargo.toml -i tokenizers`
 - Repository audit/license/package-size checks required by the dependency and
   release standards.
+
+## Manifest Slice Evidence
+
+- `rustc --version`: `rustc 1.92.0`, satisfying `ort`'s Rust 1.88 requirement.
+- `cargo check --manifest-path rust/crates/pumas-core/Cargo.toml`: passed.
+- `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`: passed.
+- `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`: passed.
+- `cargo tree --manifest-path rust/crates/pumas-core/Cargo.toml -i ort`: `ort`
+  is pulled only by `pumas-library`.
+- `cargo tree --manifest-path rust/crates/pumas-core/Cargo.toml -i
+  tokenizers`: `tokenizers` is pulled only by `pumas-library`.
+- `cargo tree --manifest-path rust/crates/pumas-core/Cargo.toml -i ndarray`:
+  `ndarray` is pulled through `ort`, then `pumas-library`.
+- `cargo audit --version`: unavailable in this environment (`cargo-audit` is
+  not installed). Security advisory audit remains open before release.
 
 ## Sources Checked
 

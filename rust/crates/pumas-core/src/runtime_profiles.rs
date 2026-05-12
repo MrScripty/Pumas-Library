@@ -760,6 +760,10 @@ impl RuntimeProfileService {
                 PumasError::Other("Failed to acquire runtime profile config lock".to_string())
             })?;
             let config = load_or_initialize_config(&config_path)?;
+            let supports_default_profile_fallback = provider_registry
+                .get(provider)
+                .map(|behavior| behavior.supports_default_profile_fallback)
+                .unwrap_or(false);
             let routed_profile_id = explicit_profile_id
                 .or_else(|| {
                     config
@@ -768,7 +772,11 @@ impl RuntimeProfileService {
                         .find(|route| route.provider == provider && route.model_id == model_id)
                         .and_then(|route| route.profile_id.clone())
                 })
-                .or_else(|| config.default_profile_id.clone())
+                .or_else(|| {
+                    supports_default_profile_fallback
+                        .then(|| config.default_profile_id.clone())
+                        .flatten()
+                })
                 .ok_or_else(|| PumasError::InvalidParams {
                     message: "runtime profile id is required".to_string(),
                 })?;
@@ -1528,6 +1536,26 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(explicit_endpoint.as_str(), "http://127.0.0.1:11434/");
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_does_not_default_onnx_model_endpoint_to_global_profile() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = runtime_profile_service(temp_dir.path());
+
+        let ollama_endpoint = service
+            .resolve_model_endpoint(RuntimeProviderId::Ollama, "unrouted/model", None)
+            .await
+            .unwrap();
+        assert_eq!(ollama_endpoint.as_str(), "http://127.0.0.1:11434/");
+
+        let onnx_error = service
+            .resolve_model_endpoint(RuntimeProviderId::OnnxRuntime, "unrouted/model", None)
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(onnx_error.contains("runtime profile id is required"));
     }
 
     #[tokio::test]

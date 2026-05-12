@@ -579,7 +579,7 @@ state.
 - [x] Resolve serve-dialog saved routes by `(provider, model_id)`, not by model
       id alone, and avoid default-profile fallback for ONNX when no ONNX route
       exists.
-- [ ] Remove default-profile fallback from any remaining backend/core ONNX model
+- [x] Remove default-profile fallback from any remaining backend/core ONNX model
       endpoint operation path that can silently select the wrong provider.
 - [x] Return a clear serve-dialog validation message when an ONNX model has no
       saved route and no explicit ONNX profile selection.
@@ -634,8 +634,11 @@ aliases, and unload identities into validated local boundary values before
 calling the ONNX session manager or served-state reconciliation helpers.
 The serve dialog now uses provider-scoped saved routes for ONNX profile
 selection, preserves explicit profile overrides, and refuses to fall back to the
-default/first profile for ONNX when no saved route exists. Gateway embedding
-routing has started under Milestone 5.
+default/first profile for ONNX when no saved route exists. Core model endpoint
+resolution now uses provider behavior to decide whether a provider may fall
+back to the global default profile; ONNX disables that fallback while Ollama and
+llama.cpp preserve their existing behavior. Gateway embedding routing has
+started under Milestone 5.
 
 ### Milestone 5: Pumas Gateway Routing
 

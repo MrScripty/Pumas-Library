@@ -148,6 +148,7 @@ pub struct ProviderBehavior {
     pub supports_model_catalog: bool,
     pub supports_dedicated_model_processes: bool,
     pub supports_launch_on_serve: bool,
+    pub supports_default_profile_fallback: bool,
 }
 
 impl ProviderBehavior {
@@ -199,6 +200,7 @@ impl ProviderBehavior {
             supports_model_catalog: false,
             supports_dedicated_model_processes: false,
             supports_launch_on_serve: false,
+            supports_default_profile_fallback: true,
         }
     }
 
@@ -262,6 +264,7 @@ impl ProviderBehavior {
             supports_model_catalog: true,
             supports_dedicated_model_processes: true,
             supports_launch_on_serve: true,
+            supports_default_profile_fallback: true,
         }
     }
 
@@ -300,6 +303,7 @@ impl ProviderBehavior {
             supports_model_catalog: true,
             supports_dedicated_model_processes: false,
             supports_launch_on_serve: false,
+            supports_default_profile_fallback: false,
         }
     }
 
@@ -547,6 +551,7 @@ mod tests {
         );
         assert!(behavior.supports_management_mode(RuntimeManagementMode::Managed));
         assert!(!behavior.supports_management_mode(RuntimeManagementMode::External));
+        assert!(!behavior.supports_default_profile_fallback);
     }
 
     #[test]
@@ -588,6 +593,7 @@ mod tests {
         assert_eq!(serialized["serving_placement_policy"], "llama_cpp_runtime");
         assert_eq!(serialized["unload_behavior"], "router_preset");
         assert_eq!(serialized["supports_launch_on_serve"], true);
+        assert_eq!(serialized["supports_default_profile_fallback"], true);
     }
 
     #[test]

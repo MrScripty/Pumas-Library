@@ -520,6 +520,22 @@ Update during implementation:
   separate M4 follow-up. Verification passed: `npm run -w frontend
   check:types` and `npm run -w frontend test:run -- ModelServeDialog
   runtimeProviderDescriptors`.
+- 2026-05-12: Removed backend/core model endpoint default-profile fallback for
+  ONNX Runtime. `ProviderBehavior` now declares whether model endpoint
+  resolution may fall back to the global default profile; Ollama and llama.cpp
+  preserve the existing fallback, while ONNX requires an explicit profile or a
+  provider-scoped saved route. A focused runtime-profile regression test proves
+  Ollama still resolves an unrouted model through the default endpoint and ONNX
+  returns `runtime profile id is required` instead of selecting the global
+  default. Verification passed: `cargo fmt --manifest-path rust/Cargo.toml
+  --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml
+  runtime_profile_service_does_not_default_onnx_model_endpoint_to_global_profile`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml
+  runtime_profiles`, `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml
+  providers`, `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml
+  serving`, and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml
+  serving`.
 
 ## Commit Cadence Notes
 

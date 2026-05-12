@@ -637,6 +637,15 @@ Update during implementation:
   --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size
   evidence: `mod.rs` 498 lines, `postprocess.rs` 275 lines, `real.rs` 104
   lines, `tokenizer.rs` 128 lines, `tests.rs` 268 lines.
+- 2026-05-12: Confirmed the next M2 slice before implementation: reduce the
+  ONNX Runtime entrypoint below the standards threshold before adding real
+  inference wiring. The session backend trait and bounded session manager moved
+  from `onnx_runtime/mod.rs` into focused `manager.rs`, keeping public exports
+  stable while freeing the entrypoint for later contract-only additions.
+  Verification passed: `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`,
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and
+  file-size evidence: `mod.rs` 372 lines, `manager.rs` 136 lines.
 
 ## Commit Cadence Notes
 
@@ -1078,6 +1087,11 @@ changes remain.
   rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence:
   `onnx_runtime/mod.rs` 498 lines, `postprocess.rs` 275 lines, `real.rs` 104
   lines, `tokenizer.rs` 128 lines, `tests.rs` 268 lines.
+- ONNX session-manager extraction verified with `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence:
+  `onnx_runtime/mod.rs` 372 lines, `manager.rs` 136 lines.
 
 ### Traceability Links
 

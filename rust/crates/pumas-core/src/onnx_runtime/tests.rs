@@ -1,4 +1,5 @@
 use super::*;
+use std::time::Duration;
 
 fn model_fixture() -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();

@@ -484,8 +484,10 @@ remains open. The postprocess slice added a pure configurable postprocessor for
 mean pooling, optional layer normalization, optional truncation, and optional L2
 normalization. Deterministic tests cover masked mean pooling, batch ordering,
 truncation-before-normalization, layer normalization, invalid dimensions, and
-shape mismatch rejection. Real ONNX output tensor selection remains open for
-the inference slice.
+shape mismatch rejection. The module-size guard slice extracted the backend
+trait and bounded session manager into `onnx_runtime/manager.rs`, reducing
+`onnx_runtime/mod.rs` from 498 to 372 lines before real inference wiring. Real
+ONNX output tensor selection remains open for the inference slice.
 
 ### Milestone 3: Plugin And Runtime Profile Contracts
 

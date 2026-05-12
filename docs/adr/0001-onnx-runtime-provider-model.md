@@ -140,6 +140,34 @@ targets include:
 | `rust/crates/pumas-core/src/process/launcher.rs` | 900+ lines | Introduce typed launch strategies instead of ONNX-specific launcher branches. |
 | Frontend llama.cpp model library section | 500+ lines in current section module | Extract provider route view models and shared route primitives before ONNX model rows. |
 
+## Implementation Traceability
+
+The provider model is now a durable runtime architecture boundary rather than
+only a planning constraint. Current traceability is:
+
+| Boundary | Implementation / Contract Trace |
+| -------- | ------------------------------- |
+| Provider behavior registry | `rust/crates/pumas-core/src/providers/` and `rust/crates/pumas-core/src/providers/README.md` |
+| Runtime-profile launch strategy and route persistence | `rust/crates/pumas-core/src/runtime_profiles/` and `rust/crates/pumas-core/src/runtime_profiles/README.md` |
+| Provider-scoped route migration | `runtime_profiles/route_config.rs`, runtime-profile schema version `2`, and `runtime_profile_contract_fixtures` tests |
+| Serving validation and provider-neutral aliases/placement | `rust/crates/pumas-core/src/serving/` and `rust/crates/pumas-core/src/serving/README.md` |
+| ONNX provider/session lifecycle | `rust/crates/pumas-core/src/onnx_runtime/` and `rust/crates/pumas-core/src/onnx_runtime/README.md` |
+| RPC gateway and serving adapters | `rust/crates/pumas-rpc/src/handlers/` and `rust/crates/pumas-rpc/src/handlers/README.md` |
+| Frontend provider descriptors and model rows | `frontend/src/utils/runtimeProviderDescriptors.ts`, `frontend/src/utils/README.md`, and `frontend/src/components/app-panels/sections/README.md` |
+| Desktop RPC and external app facade | `docs/contracts/desktop-rpc-methods.md` |
+| Plugin manifest semantics | `launcher-data/plugins/onnx-runtime.json`, Rust plugin schema tests, and TypeScript plugin schema types |
+
+The ONNX plugin manifest uses `installationType = "in-process"` to signal that
+it has no external version-manager process. The manifest may still declare
+model-library/runtime-profile panel capabilities and `.onnx` compatibility, but
+runtime lifecycle and served-model state are owned by backend runtime-profile
+and serving contracts, not by plugin process state.
+
+Runtime-profile persisted JSON uses schema version `2` for provider-scoped
+routes. Legacy model-only routes are rewritten only when the referenced profile
+identifies a unique provider; ambiguous legacy routes are dropped. The old route
+shape is not kept as an active reader.
+
 ## Consequences
 
 - ONNX work starts slower because provider-scoped routes, provider behavior, and

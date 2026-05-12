@@ -994,14 +994,14 @@ clients.
       endpoint/gateway behavior, limits, and troubleshooting.
 - [x] Update relevant runtime/profile README files if new provider modules are
       added.
-- [ ] Add or update an ADR if provider capabilities become a durable runtime
+- [x] Add or update an ADR if provider capabilities become a durable runtime
       provider registry or materially change the runtime architecture.
-- [ ] Add README or ADR traceability for every new extracted source directory
+- [x] Add README or ADR traceability for every new extracted source directory
       that owns provider behavior, route migration, launch strategies, gateway
       proxying, serving adapters, or frontend provider descriptors.
-- [ ] Document plugin manifest semantics and runtime-profile persisted JSON
+- [x] Document plugin manifest semantics and runtime-profile persisted JSON
       compatibility where structured producer contracts change.
-- [ ] Add or update persisted-artifact validation tooling if runtime-profile
+- [x] Add or update persisted-artifact validation tooling if runtime-profile
       JSON, plugin manifests, or example payloads gain schema-backed shapes that
       can drift.
 - [x] Add external app examples for `/v1/models` and `/v1/embeddings`.
@@ -1019,19 +1019,26 @@ clients.
 - Example curl commands are validated against a local served model or clearly
   marked as shape examples when no model is available.
 
-**Status:** In progress. `docs/contracts/desktop-rpc-methods.md` now documents
+**Status:** Complete. `docs/contracts/desktop-rpc-methods.md` now documents
 ONNX Runtime gateway behavior, embeddings-only provider endpoint capability,
 provider-owned ONNX session model identity, shape-only `/v1/models` and
 `/v1/embeddings` curl examples, and guidance that Emily or other external apps
 should target the Pumas `/v1` gateway instead of raw ONNX Runtime internals.
-README/ADR traceability, manifest/persisted-artifact docs, and release-facing
-documentation remain open.
 The ONNX runtime README now reflects the current fake/real backend split,
 session-manager lifecycle, gateway behavior, validation/concurrency limits, and
 troubleshooting paths. The runtime-profile support README now describes ONNX as
 an in-process managed profile whose session manager is owned by the RPC
 composition root while runtime profiles own provider/mode/device configuration
 and route persistence.
+ADR 0001 now includes implementation traceability for provider behavior,
+runtime-profile route migration, serving validation, ONNX session lifecycle,
+RPC handlers, frontend descriptors, desktop RPC docs, and plugin manifest
+semantics. It records `installationType = "in-process"` for the ONNX plugin and
+runtime-profile schema version `2` provider-scoped route compatibility. Existing
+Rust plugin schema tests, TypeScript plugin schema types, runtime-profile
+contract fixtures, and route migration tests are the validation tooling for
+these persisted/schema-backed artifacts; no additional tool was needed for the
+shape-only curl examples.
 
 ### Milestone 8: Release Validation
 

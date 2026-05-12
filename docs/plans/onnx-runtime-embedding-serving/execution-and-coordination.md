@@ -1483,6 +1483,15 @@ changes remain.
   manager. The runtime-profile support README now reflects that ONNX Runtime is
   an in-process managed profile whose loaded sessions are owned by the RPC
   session-manager composition root, not by runtime-profile persisted state.
+- Milestone 7 ADR/contract traceability completed in
+  `docs/adr/0001-onnx-runtime-provider-model.md`. The ADR now links the durable
+  provider registry, route migration, launch strategy, serving validation, ONNX
+  runtime/session lifecycle, RPC gateway/serving adapters, frontend provider
+  descriptors, desktop RPC contract, and ONNX plugin manifest semantics. It
+  also records provider-scoped runtime-profile schema version `2` compatibility
+  and the existing validation tooling: Rust plugin schema tests, TypeScript
+  plugin schema types, runtime-profile contract fixtures, and route migration
+  tests.
 
 ### Traceability Links
 

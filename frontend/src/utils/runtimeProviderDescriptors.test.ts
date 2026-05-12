@@ -42,6 +42,7 @@ describe('runtime provider descriptors', () => {
     });
     expect(getRuntimeProviderDescriptor('onnx_runtime')).toMatchObject({
       profileModes: ['onnx_serve'],
+      managementModes: ['managed'],
       deviceModes: ['auto', 'cpu'],
       compatibleExecutableFormats: ['onnx'],
       supportsGpuLayers: false,
@@ -75,6 +76,12 @@ describe('runtime provider descriptors', () => {
     expect(
       isModelCompatibleWithProvider(
         model({ id: 'onnx', path: '/models/model.onnx' }),
+        'onnx_runtime'
+      )
+    ).toBe(true);
+    expect(
+      isModelCompatibleWithProvider(
+        model({ id: 'onnx-primary', primaryFormat: 'onnx' }),
         'onnx_runtime'
       )
     ).toBe(true);

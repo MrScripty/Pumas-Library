@@ -581,7 +581,7 @@ Ollama or llama.cpp profiles.
 - [ ] Keep platform-specific executable/venv path resolution behind existing
       process or platform abstractions. Do not inline OS checks in handlers or
       UI components.
-- [ ] Update frontend runtime profile types and provider-mode option maps.
+- [x] Update frontend runtime profile types and provider-mode option maps.
 - [x] Add contract tests for serialization and provider-mode compatibility.
 
 **Verification:**
@@ -618,6 +618,9 @@ profile contract slice now registers an ONNX Runtime provider adapter, validates
 managed `onnx_runtime`/`onnx_serve` profiles through the composed provider
 registry/adapter path, rejects external or wrong-mode ONNX profiles, and adds
 runtime-profile snapshot plus ONNX provider-capability fixture coverage.
+Frontend runtime-profile descriptors now include provider-owned management modes,
+so ONNX Runtime settings expose `onnx_serve` with managed-only lifecycle, and
+shared `ModelInfo.primaryFormat` includes `onnx` as a typed executable format.
 
 ### Milestone 4: Serving Validation And Load/Unload
 
@@ -872,7 +875,7 @@ keeping backend-owned state authoritative.
 - [ ] Create shared executable-format/provider-compatibility helpers consumed
       by ONNX rows, llama.cpp rows, and the serve dialog. Do not duplicate
       extension checks in each component.
-- [ ] Update shared `ModelInfo` format typing and model-library view models so
+- [x] Update shared `ModelInfo` format typing and model-library view models so
       ONNX is a first-class executable format, not an unchecked string special
       case.
 - [ ] Show `.onnx` compatible models for ONNX Runtime without adding ONNX rows
@@ -892,7 +895,7 @@ keeping backend-owned state authoritative.
       a one-shot read is a non-authoritative validation aid only.
 - [ ] Add ONNX quick-serve and serving-options actions that use the saved ONNX
       route/profile by default and persist draft route changes before serving.
-- [ ] Update runtime profile settings controls for `onnx_runtime` and
+- [x] Update runtime profile settings controls for `onnx_runtime` and
       `onnx_serve`.
 - [ ] Update serve dialog filters and labels for ONNX embedding serving.
 - [ ] Replace GGUF-only serve-dialog checks with provider/format compatibility

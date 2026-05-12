@@ -8,6 +8,7 @@ import {
   modeLabel,
   providerDeviceModes,
   providerLabel,
+  providerManagementModes,
   providerModes,
   type RuntimeProfileDraft,
   type RuntimeProfileDraftUpdater,
@@ -27,6 +28,13 @@ function getDeviceModes(draft: RuntimeProfileDraft): RuntimeDeviceMode[] {
     : [...providerModesForDevice, draft.device_mode];
 }
 
+function getManagementModes(draft: RuntimeProfileDraft): RuntimeManagementMode[] {
+  const providerModesForManagement = providerManagementModes[draft.provider];
+  return providerModesForManagement.includes(draft.management_mode)
+    ? providerModesForManagement
+    : [...providerModesForManagement, draft.management_mode];
+}
+
 export function RuntimeProfileSettingsFields({
   draft,
   isExistingProfile,
@@ -34,6 +42,7 @@ export function RuntimeProfileSettingsFields({
   onUpdateDraft,
 }: RuntimeProfileSettingsFieldsProps) {
   const deviceModes = getDeviceModes(draft);
+  const managementModes = getManagementModes(draft);
   const showsDeviceId =
     draft.device_mode === 'gpu' || draft.device_mode === 'specific_device';
   const showsGpuLayers =
@@ -97,8 +106,11 @@ export function RuntimeProfileSettingsFields({
           }
           className="w-full px-2 py-1.5 rounded bg-[hsl(var(--launcher-bg-secondary))] border border-[hsl(var(--launcher-border)/0.3)] text-[hsl(var(--launcher-text-primary))]"
         >
-          <option value="managed">Managed</option>
-          <option value="external">External</option>
+          {managementModes.map((mode) => (
+            <option key={mode} value={mode}>
+              {mode === 'managed' ? 'Managed' : 'External'}
+            </option>
+          ))}
         </select>
       </label>
       <label className="space-y-1 text-xs text-[hsl(var(--launcher-text-muted))]">

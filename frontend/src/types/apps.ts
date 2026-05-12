@@ -53,7 +53,7 @@ export interface ModelInfo {
   hasIntegrityIssue?: boolean;
   integrityIssueMessage?: string;
   /** Format used for conversion actions when supported. */
-  primaryFormat?: 'gguf' | 'safetensors';
+  primaryFormat?: 'gguf' | 'safetensors' | 'onnx';
 }
 
 export interface ModelCategory {

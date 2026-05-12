@@ -31,6 +31,12 @@ export const providerModes: Record<RuntimeProviderId, RuntimeProviderMode[]> = {
   onnx_runtime: runtimeProviderDescriptors.onnx_runtime.profileModes,
 };
 
+export const providerManagementModes: Record<RuntimeProviderId, RuntimeManagementMode[]> = {
+  ollama: runtimeProviderDescriptors.ollama.managementModes,
+  llama_cpp: runtimeProviderDescriptors.llama_cpp.managementModes,
+  onnx_runtime: runtimeProviderDescriptors.onnx_runtime.managementModes,
+};
+
 export const providerDeviceModes: Record<RuntimeProviderId, RuntimeDeviceMode[]> = {
   ollama: runtimeProviderDescriptors.ollama.deviceModes,
   llama_cpp: runtimeProviderDescriptors.llama_cpp.deviceModes,

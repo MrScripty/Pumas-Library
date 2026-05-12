@@ -852,6 +852,14 @@ Update during implementation:
   test --manifest-path rust/crates/pumas-core/Cargo.toml --test
   runtime_profile_contract_fixtures`, and `cargo test --manifest-path
   rust/crates/pumas-core/Cargo.toml provider_capabilities`.
+- 2026-05-12: Completed the frontend ONNX runtime-profile controls and
+  executable-format slice. Runtime provider descriptors now own management-mode
+  options in addition to provider/device modes, and ONNX Runtime exposes only
+  managed lifecycle controls in `RuntimeProfileSettingsSection`. Shared
+  frontend model typing now includes `primaryFormat: "onnx"`, and descriptor
+  compatibility tests cover ONNX primary-format matching. Verification passed:
+  `npm run -w frontend check:types` and `npm run -w frontend test:run --
+  runtimeProviderDescriptors RuntimeProfileSettingsSection`.
 
 ## Commit Cadence Notes
 
@@ -1368,6 +1376,9 @@ changes remain.
   test --manifest-path rust/crates/pumas-core/Cargo.toml --test
   runtime_profile_contract_fixtures`, and `cargo test --manifest-path
   rust/crates/pumas-core/Cargo.toml provider_capabilities`.
+- Frontend ONNX runtime-profile controls verified with `npm run -w frontend
+  check:types` and `npm run -w frontend test:run -- runtimeProviderDescriptors
+  RuntimeProfileSettingsSection`.
 
 ### Traceability Links
 

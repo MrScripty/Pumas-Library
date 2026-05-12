@@ -62,11 +62,24 @@ describe('RuntimeProfileSettingsSection', () => {
         device: { mode: 'cpu' },
         scheduler: { auto_load: true },
       },
+      {
+        profile_id: 'onnx-runtime-default',
+        provider: 'onnx_runtime',
+        provider_mode: 'onnx_serve',
+        management_mode: 'managed',
+        name: 'ONNX Runtime Profile',
+        enabled: true,
+        endpoint_url: null,
+        port: null,
+        device: { mode: 'cpu' },
+        scheduler: { auto_load: true },
+      },
     ],
     routes: [],
     statuses: [
       { profile_id: 'ollama-default', state: 'stopped' },
       { profile_id: 'llama-router', state: 'stopped' },
+      { profile_id: 'onnx-runtime-default', state: 'stopped' },
     ],
     default_profile_id: 'ollama-default',
   };
@@ -192,6 +205,38 @@ describe('RuntimeProfileSettingsSection', () => {
       expect.objectContaining({
         provider: 'llama_cpp',
         provider_mode: 'llama_cpp_router',
+      })
+    );
+  });
+
+  it('scopes ONNX Runtime settings to managed onnx_serve profiles', async () => {
+    const user = userEvent.setup();
+
+    render(<RuntimeProfileSettingsSection provider="onnx_runtime" />);
+
+    expect(await screen.findByDisplayValue('ONNX Runtime Profile')).toBeInTheDocument();
+    expect(screen.queryByText('Ollama Default')).not.toBeInTheDocument();
+    expect(screen.getAllByText('ONNX Runtime').length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Mode')).toHaveValue('onnx_serve');
+    expect(screen.getByLabelText('Management')).toHaveValue('managed');
+    expect(screen.queryByRole('option', { name: 'External' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/gpu layers/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'New runtime profile' }));
+    expect(screen.getByDisplayValue('New ONNX Runtime Profile')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(upsertRuntimeProfileMock).toHaveBeenCalledTimes(1);
+    });
+    expect(upsertRuntimeProfileMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'onnx_runtime',
+        provider_mode: 'onnx_serve',
+        management_mode: 'managed',
+        endpoint_url: null,
+        port: null,
       })
     );
   });

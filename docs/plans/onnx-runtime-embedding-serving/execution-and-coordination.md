@@ -497,6 +497,17 @@ Update during implementation:
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving_onnx`,
   and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`.
+- 2026-05-12: Added ONNX serving boundary values for load and unload. The ONNX
+  adapter now resolves and validates the executable ONNX artifact path,
+  provider-side session model id, effective gateway alias, unload model id,
+  profile id, and unload alias once before provider-session calls or
+  served-state reconciliation helpers consume them. Existing Ollama and
+  llama.cpp adapters may still need the same pattern where they consume raw
+  request strings or ports; that follow-up is tracked separately in Milestone 4
+  instead of being hidden inside the ONNX slice. Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving_onnx`,
+  and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`.
 
 ## Commit Cadence Notes
 

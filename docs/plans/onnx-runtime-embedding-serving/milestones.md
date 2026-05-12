@@ -556,9 +556,13 @@ state.
       ONNX gains an explicit equivalent later.
 - [x] Use the provider-side model id policy from Milestone 0 so gateway aliases
       are not overloaded as ONNX session names accidentally.
-- [ ] Parse raw serving requests into validated boundary types before provider
-      adapters consume them. Internal load/unload code should not re-validate
-      raw strings, ports, dimensions, or paths.
+- [x] Parse raw ONNX serving requests into validated boundary types before the
+      ONNX provider adapter consumes them. Internal ONNX load/unload code no
+      longer re-validates raw model ids, aliases, or paths after boundary
+      parsing.
+- [ ] Extend the validated serving-boundary type pattern to existing Ollama and
+      llama.cpp adapters where they still consume raw request strings, ports,
+      dimensions, or paths.
 - [ ] Ensure load/unload operations do not split durable state updates across
       cancellation points unless the step is transactional, idempotent, or has
       explicit compensation.
@@ -620,8 +624,11 @@ now return the existing confirmed loaded state without bumping served-state
 cursor, and ONNX unload removes stale served status if the session is already
 absent. ONNX serving load/unload now emits structured lifecycle logs with safe
 provider/model/profile/error fields and without full model paths, request
-payloads, secrets, or embedding inputs. Gateway embedding routing has started
-under Milestone 5.
+payloads, secrets, or embedding inputs. ONNX serving load/unload request
+handling now parses executable artifact paths, provider-side model ids, gateway
+aliases, and unload identities into validated local boundary values before
+calling the ONNX session manager or served-state reconciliation helpers.
+Gateway embedding routing has started under Milestone 5.
 
 ### Milestone 5: Pumas Gateway Routing
 

@@ -10,58 +10,57 @@ use pumas_library::models::{
     UnserveModelResponse,
 };
 use pumas_library::{
-    ExecutableArtifactFormat, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId, ProviderRegistry,
+    ExecutableArtifactFormat, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId, OnnxRuntimeError,
+    ProviderRegistry,
 };
 use serde_json::Value;
 use tracing::{debug, info, warn};
+
+struct ValidatedOnnxServeRequest<'a> {
+    request: &'a ServeModelRequest,
+    load_request: OnnxLoadRequest,
+    gateway_alias: String,
+}
+
+enum OnnxServeBoundaryError {
+    NoExecutableArtifact,
+    InvalidLoadRequest(OnnxRuntimeError),
+}
+
+struct ValidatedOnnxUnserveRequest {
+    model_id: OnnxModelId,
+    profile_id: RuntimeProfileId,
+    model_alias: String,
+}
 
 pub(super) async fn serve_onnx_model(
     state: &AppState,
     request: ServeModelRequest,
 ) -> pumas_library::Result<Value> {
-    let Some(onnx_path) = resolve_onnx_model_path(state, &request).await? else {
-        warn!(
-            provider = "onnx_runtime",
-            model_id = %request.model_id,
-            profile_id = %request.config.profile_id.as_str(),
-            "ONNX serving request has no executable ONNX artifact"
-        );
-        return non_critical_failure_response(
-            state,
-            serving_error(
-                ModelServeErrorCode::ModelNotExecutable,
-                "model has no executable ONNX artifact",
-                &request,
-            ),
-        )
-        .await;
-    };
-    let library_root = state.api.model_library().library_root().to_path_buf();
-    let provider_model_id = onnx_provider_request_model_id(&request, &state.provider_registry);
-    if let Some(response) =
-        existing_loaded_onnx_response(state, &request, provider_model_id.as_str()).await?
-    {
-        debug!(
-            provider = "onnx_runtime",
-            model_id = %request.model_id,
-            provider_model_id = %provider_model_id,
-            profile_id = %request.config.profile_id.as_str(),
-            "ONNX serving request reused existing loaded session"
-        );
-        return Ok(serde_json::to_value(response)?);
-    }
-    let load_request = match OnnxLoadRequest::parse(
-        library_root,
-        &onnx_path,
-        provider_model_id.as_str(),
-        OnnxLoadOptions::default(),
-    ) {
-        Ok(load_request) => load_request,
-        Err(error) => {
+    let validated = match validate_onnx_serve_request(state, &request).await? {
+        Ok(validated) => validated,
+        Err(OnnxServeBoundaryError::NoExecutableArtifact) => {
             warn!(
                 provider = "onnx_runtime",
                 model_id = %request.model_id,
-                provider_model_id = %provider_model_id,
+                profile_id = %request.config.profile_id.as_str(),
+                "ONNX serving request has no executable ONNX artifact"
+            );
+            return non_critical_failure_response(
+                state,
+                serving_error(
+                    ModelServeErrorCode::ModelNotExecutable,
+                    "model has no executable ONNX artifact",
+                    &request,
+                ),
+            )
+            .await;
+        }
+        Err(OnnxServeBoundaryError::InvalidLoadRequest(error)) => {
+            warn!(
+                provider = "onnx_runtime",
+                model_id = %request.model_id,
+                provider_model_id = %onnx_provider_request_model_id(&request, &state.provider_registry),
                 profile_id = %request.config.profile_id.as_str(),
                 error_code = ?error.code,
                 error_field = ?error.field,
@@ -78,9 +77,25 @@ pub(super) async fn serve_onnx_model(
             .await;
         }
     };
+    if let Some(response) = existing_loaded_onnx_response(state, &validated).await? {
+        debug!(
+            provider = "onnx_runtime",
+            model_id = %request.model_id,
+            provider_model_id = %validated.load_request.model_id.as_str(),
+            profile_id = %request.config.profile_id.as_str(),
+            "ONNX serving request reused existing loaded session"
+        );
+        return Ok(serde_json::to_value(response)?);
+    }
 
-    let onnx_model_id = load_request.model_id.clone();
-    let session = match state.onnx_session_manager.load(load_request).await {
+    let onnx_model_id = validated.load_request.model_id.clone();
+    let provider_model_id = onnx_model_id.as_str().to_string();
+    let gateway_alias = validated.gateway_alias.clone();
+    let session = match state
+        .onnx_session_manager
+        .load(validated.load_request)
+        .await
+    {
         Ok(session) => session,
         Err(error) => {
             warn!(
@@ -124,7 +139,7 @@ pub(super) async fn serve_onnx_model(
 
     let status = ServedModelStatus {
         model_id: request.model_id.clone(),
-        model_alias: Some(effective_gateway_alias_from_config(&request)),
+        model_alias: Some(gateway_alias),
         provider: RuntimeProviderId::OnnxRuntime,
         profile_id: request.config.profile_id.clone(),
         load_state: ServedModelLoadState::Loaded,
@@ -167,8 +182,8 @@ pub(super) async fn unserve_onnx_model(
     profile_id: RuntimeProfileId,
     model_alias: String,
 ) -> pumas_library::Result<Value> {
-    let model_id = match OnnxModelId::parse(&request.model_id) {
-        Ok(model_id) => model_id,
+    let validated = match validate_onnx_unserve_request(&request, &profile_id, model_alias) {
+        Ok(validated) => validated,
         Err(error) => {
             warn!(
                 provider = "onnx_runtime",
@@ -187,13 +202,13 @@ pub(super) async fn unserve_onnx_model(
         }
     };
 
-    match state.onnx_session_manager.unload(&model_id).await {
+    match state.onnx_session_manager.unload(&validated.model_id).await {
         Ok(Some(_)) => {
             info!(
                 provider = "onnx_runtime",
                 model_id = %request.model_id,
-                profile_id = %profile_id.as_str(),
-                gateway_alias = %model_alias,
+                profile_id = %validated.profile_id.as_str(),
+                gateway_alias = %validated.model_alias,
                 "ONNX session unloaded"
             );
         }
@@ -201,8 +216,8 @@ pub(super) async fn unserve_onnx_model(
             warn!(
                 provider = "onnx_runtime",
                 model_id = %request.model_id,
-                profile_id = %profile_id.as_str(),
-                gateway_alias = %model_alias,
+                profile_id = %validated.profile_id.as_str(),
+                gateway_alias = %validated.model_alias,
                 "ONNX session was already absent; removing stale served status"
             );
             let snapshot = state
@@ -210,8 +225,8 @@ pub(super) async fn unserve_onnx_model(
                 .record_unserved_model(
                     &request.model_id,
                     Some(RuntimeProviderId::OnnxRuntime),
-                    Some(&profile_id),
-                    Some(model_alias.as_str()),
+                    Some(&validated.profile_id),
+                    Some(validated.model_alias.as_str()),
                 )
                 .await?;
             return Ok(serde_json::to_value(UnserveModelResponse {
@@ -225,8 +240,8 @@ pub(super) async fn unserve_onnx_model(
             warn!(
                 provider = "onnx_runtime",
                 model_id = %request.model_id,
-                profile_id = %profile_id.as_str(),
-                gateway_alias = %model_alias,
+                profile_id = %validated.profile_id.as_str(),
+                gateway_alias = %validated.model_alias,
                 error_code = ?error.code,
                 "ONNX session unload failed"
             );
@@ -244,8 +259,8 @@ pub(super) async fn unserve_onnx_model(
         .record_unserved_model(
             &request.model_id,
             Some(RuntimeProviderId::OnnxRuntime),
-            Some(&profile_id),
-            Some(model_alias.as_str()),
+            Some(&validated.profile_id),
+            Some(validated.model_alias.as_str()),
         )
         .await?;
     Ok(serde_json::to_value(UnserveModelResponse {
@@ -254,6 +269,43 @@ pub(super) async fn unserve_onnx_model(
         unloaded: true,
         snapshot: Some(snapshot),
     })?)
+}
+
+async fn validate_onnx_serve_request<'a>(
+    state: &AppState,
+    request: &'a ServeModelRequest,
+) -> pumas_library::Result<Result<ValidatedOnnxServeRequest<'a>, OnnxServeBoundaryError>> {
+    let Some(onnx_path) = resolve_onnx_model_path(state, request).await? else {
+        return Ok(Err(OnnxServeBoundaryError::NoExecutableArtifact));
+    };
+    let library_root = state.api.model_library().library_root().to_path_buf();
+    let provider_model_id = onnx_provider_request_model_id(request, &state.provider_registry);
+    let load_request = match OnnxLoadRequest::parse(
+        library_root,
+        &onnx_path,
+        provider_model_id.as_str(),
+        OnnxLoadOptions::default(),
+    ) {
+        Ok(load_request) => load_request,
+        Err(error) => return Ok(Err(OnnxServeBoundaryError::InvalidLoadRequest(error))),
+    };
+    Ok(Ok(ValidatedOnnxServeRequest {
+        request,
+        load_request,
+        gateway_alias: effective_gateway_alias_from_config(request),
+    }))
+}
+
+fn validate_onnx_unserve_request(
+    request: &UnserveModelRequest,
+    profile_id: &RuntimeProfileId,
+    model_alias: String,
+) -> Result<ValidatedOnnxUnserveRequest, OnnxRuntimeError> {
+    Ok(ValidatedOnnxUnserveRequest {
+        model_id: OnnxModelId::parse(&request.model_id)?,
+        profile_id: profile_id.clone(),
+        model_alias,
+    })
 }
 
 async fn resolve_onnx_model_path(
@@ -303,27 +355,22 @@ async fn confirm_onnx_session_loaded(
 
 async fn existing_loaded_onnx_response(
     state: &AppState,
-    request: &ServeModelRequest,
-    provider_model_id: &str,
+    validated: &ValidatedOnnxServeRequest<'_>,
 ) -> pumas_library::Result<Option<ServeModelResponse>> {
-    let Ok(provider_model_id) = OnnxModelId::parse(provider_model_id) else {
-        return Ok(None);
-    };
     let Some(status) = state
         .api
         .find_served_model(
-            &request.model_id,
+            &validated.request.model_id,
             Some(RuntimeProviderId::OnnxRuntime),
-            Some(&request.config.profile_id),
+            Some(&validated.request.config.profile_id),
         )
         .await?
     else {
         return Ok(None);
     };
     if status.load_state != ServedModelLoadState::Loaded
-        || status.model_alias.as_deref()
-            != Some(effective_gateway_alias_from_config(request).as_str())
-        || confirm_onnx_session_loaded(state, &provider_model_id)
+        || status.model_alias.as_deref() != Some(validated.gateway_alias.as_str())
+        || confirm_onnx_session_loaded(state, &validated.load_request.model_id)
             .await
             .is_err()
     {

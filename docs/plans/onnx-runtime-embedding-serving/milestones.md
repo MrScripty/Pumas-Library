@@ -563,7 +563,10 @@ state.
 - [ ] Extend the validated serving-boundary type pattern to existing Ollama and
       llama.cpp adapters where they still consume raw request strings, ports,
       dimensions, or paths.
-- [ ] Ensure load/unload operations do not split durable state updates across
+- [x] Add ONNX load workflow compensation when session load succeeds but status
+      confirmation or backend served-state recording fails.
+- [ ] Audit remaining request-cancellation windows across provider adapters so
+      load/unload operations do not split durable state updates across
       cancellation points unless the step is transactional, idempotent, or has
       explicit compensation.
 - [x] Instrument ONNX serving load/unload workflows with tracing spans or
@@ -637,8 +640,10 @@ selection, preserves explicit profile overrides, and refuses to fall back to the
 default/first profile for ONNX when no saved route exists. Core model endpoint
 resolution now uses provider behavior to decide whether a provider may fall
 back to the global default profile; ONNX disables that fallback while Ollama and
-llama.cpp preserve their existing behavior. Gateway embedding routing has
-started under Milestone 5.
+llama.cpp preserve their existing behavior. ONNX load now explicitly unloads
+the session if post-load status confirmation or served-state recording fails,
+reducing stale session/state divergence for recoverable workflow failures.
+Gateway embedding routing has started under Milestone 5.
 
 ### Milestone 5: Pumas Gateway Routing
 

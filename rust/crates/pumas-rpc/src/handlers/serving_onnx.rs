@@ -126,6 +126,14 @@ pub(super) async fn serve_onnx_model(
             error = %error,
             "ONNX session status confirmation failed"
         );
+        compensate_onnx_load_failure(
+            state,
+            &request,
+            &onnx_model_id,
+            provider_model_id.as_str(),
+            "status_confirmation_failed",
+        )
+        .await;
         return non_critical_failure_response(
             state,
             serving_error(
@@ -154,7 +162,28 @@ pub(super) async fn serve_onnx_model(
         loaded_at: None,
         last_error: None,
     };
-    let snapshot = state.api.record_served_model(status.clone()).await?;
+    let snapshot = match state.api.record_served_model(status.clone()).await {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            warn!(
+                provider = "onnx_runtime",
+                model_id = %request.model_id,
+                provider_model_id = %provider_model_id,
+                profile_id = %request.config.profile_id.as_str(),
+                error = %error,
+                "ONNX served-state record failed after session load"
+            );
+            compensate_onnx_load_failure(
+                state,
+                &request,
+                &onnx_model_id,
+                provider_model_id.as_str(),
+                "served_state_record_failed",
+            )
+            .await;
+            return Err(error);
+        }
+    };
     info!(
         provider = "onnx_runtime",
         model_id = %request.model_id,
@@ -174,6 +203,48 @@ pub(super) async fn serve_onnx_model(
         load_error: None,
         snapshot: Some(snapshot),
     })?)
+}
+
+async fn compensate_onnx_load_failure(
+    state: &AppState,
+    request: &ServeModelRequest,
+    model_id: &OnnxModelId,
+    provider_model_id: &str,
+    reason: &'static str,
+) {
+    match state.onnx_session_manager.unload(model_id).await {
+        Ok(Some(_)) => {
+            info!(
+                provider = "onnx_runtime",
+                model_id = %request.model_id,
+                provider_model_id,
+                profile_id = %request.config.profile_id.as_str(),
+                reason,
+                "ONNX session unloaded after load workflow failure"
+            );
+        }
+        Ok(None) => {
+            debug!(
+                provider = "onnx_runtime",
+                model_id = %request.model_id,
+                provider_model_id,
+                profile_id = %request.config.profile_id.as_str(),
+                reason,
+                "ONNX load workflow compensation found no loaded session"
+            );
+        }
+        Err(error) => {
+            warn!(
+                provider = "onnx_runtime",
+                model_id = %request.model_id,
+                provider_model_id,
+                profile_id = %request.config.profile_id.as_str(),
+                reason,
+                error_code = ?error.code,
+                "ONNX load workflow compensation failed"
+            );
+        }
+    }
 }
 
 pub(super) async fn unserve_onnx_model(

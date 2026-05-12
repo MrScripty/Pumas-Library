@@ -536,6 +536,16 @@ Update during implementation:
   providers`, `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml
   serving`, and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml
   serving`.
+- 2026-05-12: Added ONNX load workflow compensation for recoverable post-load
+  failures. If the ONNX session manager loads a session but status confirmation
+  fails, or if backend served-state recording fails after load, the serving
+  adapter now attempts to unload the session and logs the compensation outcome
+  with safe provider/model/profile/reason fields. This narrows stale
+  session/state divergence for normal error paths; a broader cancellation audit
+  across provider adapters remains tracked in Milestone 4. Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving_onnx`,
+  and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`.
 
 ## Commit Cadence Notes
 

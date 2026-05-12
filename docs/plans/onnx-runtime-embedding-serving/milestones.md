@@ -513,6 +513,9 @@ finite values, and non-zero token usage through actual ONNX Runtime inference.
 The follow-up no-behavior split moved tensor padding to `tensors.rs` and output
 selection/extraction to `output.rs`, reducing `real.rs` from 452 to 219 lines
 before the serving integration slice.
+RPC composition now uses the real backend in production through
+`OnnxEmbeddingBackendKind::real()`, while focused RPC tests explicitly inject
+the fake backend variant to preserve deterministic gateway/serving assertions.
 
 ### Milestone 3: Plugin And Runtime Profile Contracts
 

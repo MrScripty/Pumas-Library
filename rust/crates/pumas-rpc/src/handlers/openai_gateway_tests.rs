@@ -10,7 +10,7 @@ use pumas_library::models::{
     ServingEndpointStatus, ServingStatusSnapshot,
 };
 use pumas_library::{
-    FakeOnnxEmbeddingBackend, OnnxLoadOptions, OnnxLoadRequest, OnnxSessionManager, PluginLoader,
+    OnnxEmbeddingBackendKind, OnnxLoadOptions, OnnxLoadRequest, OnnxSessionManager, PluginLoader,
     ProviderBehavior, PumasApi,
 };
 use serde_json::{json, Value};
@@ -62,7 +62,8 @@ async fn gateway_test_state() -> (TempDir, Arc<AppState>) {
     let plugin_loader = PluginLoader::new_async(launcher_root.join("launcher-data/plugins"))
         .await
         .unwrap();
-    let onnx_session_manager = OnnxSessionManager::new(FakeOnnxEmbeddingBackend::new(), 2).unwrap();
+    let onnx_session_manager =
+        OnnxSessionManager::new(OnnxEmbeddingBackendKind::fake(), 2).unwrap();
     let state = Arc::new(AppState {
         api,
         version_managers: Arc::new(RwLock::new(HashMap::new())),

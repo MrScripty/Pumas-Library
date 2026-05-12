@@ -30,7 +30,7 @@ pub use postprocess::{
     OnnxOutputTensorSelection,
 };
 pub use real::OnnxRuntimeSession;
-pub use real_backend::RealOnnxEmbeddingBackend;
+pub use real_backend::{OnnxEmbeddingBackendKind, RealOnnxEmbeddingBackend};
 pub use tokenizer::{OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer};
 
 const MAX_MODEL_ID_LEN: usize = 128;

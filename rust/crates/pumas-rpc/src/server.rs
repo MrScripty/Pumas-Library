@@ -15,7 +15,7 @@ use axum::{
 };
 use pumas_app_manager::{CustomNodesManager, SizeCalculator, VersionManager};
 use pumas_library::{
-    FakeOnnxEmbeddingBackend, OnnxSessionManager, PluginLoader, ProviderRegistry, PumasApi,
+    OnnxEmbeddingBackendKind, OnnxSessionManager, PluginLoader, ProviderRegistry, PumasApi,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -59,7 +59,7 @@ pub struct AppState {
     /// Shared Ollama client factory for provider serving and app operations.
     pub ollama_client_factory: OllamaClientFactory,
     /// Shared ONNX Runtime session manager for in-process embedding serving.
-    pub onnx_session_manager: OnnxSessionManager<FakeOnnxEmbeddingBackend>,
+    pub onnx_session_manager: OnnxSessionManager<OnnxEmbeddingBackendKind>,
 }
 
 /// Owned handle for the running HTTP server task.
@@ -125,7 +125,7 @@ pub async fn start_server(
     let provider_http_client = build_provider_http_client()?;
     let ollama_client_factory = build_ollama_client_factory()?;
     let onnx_session_manager = OnnxSessionManager::new(
-        FakeOnnxEmbeddingBackend::new(),
+        OnnxEmbeddingBackendKind::real(),
         ONNX_MAX_CONCURRENT_OPERATIONS,
     )
     .map_err(|err| anyhow::anyhow!("failed to build ONNX session manager: {err}"))?;

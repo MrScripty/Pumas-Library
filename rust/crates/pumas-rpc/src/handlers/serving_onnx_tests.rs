@@ -2,7 +2,7 @@ use super::*;
 use crate::provider_clients::{LlamaCppRouterClient, OllamaClientFactory};
 use pumas_app_manager::{CustomNodesManager, SizeCalculator};
 use pumas_library::models::{ModelServingConfig, RuntimeDeviceMode};
-use pumas_library::{FakeOnnxEmbeddingBackend, OnnxSessionManager, PluginLoader, PumasApi};
+use pumas_library::{OnnxEmbeddingBackendKind, OnnxSessionManager, PluginLoader, PumasApi};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -21,7 +21,8 @@ async fn serving_test_state() -> (TempDir, AppState) {
     let plugin_loader = PluginLoader::new_async(launcher_root.join("launcher-data/plugins"))
         .await
         .unwrap();
-    let onnx_session_manager = OnnxSessionManager::new(FakeOnnxEmbeddingBackend::new(), 2).unwrap();
+    let onnx_session_manager =
+        OnnxSessionManager::new(OnnxEmbeddingBackendKind::fake(), 2).unwrap();
     (
         temp_dir,
         AppState {

@@ -3,9 +3,62 @@ use std::{collections::HashMap, sync::Mutex};
 use async_trait::async_trait;
 
 use super::{
-    OnnxEmbeddingBackend, OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxLoadRequest,
-    OnnxModelId, OnnxRuntimeError, OnnxRuntimeSession, OnnxSessionStatus,
+    FakeOnnxEmbeddingBackend, OnnxEmbeddingBackend, OnnxEmbeddingRequest, OnnxEmbeddingResponse,
+    OnnxLoadRequest, OnnxModelId, OnnxRuntimeError, OnnxRuntimeSession, OnnxSessionStatus,
 };
+
+#[derive(Debug)]
+pub enum OnnxEmbeddingBackendKind {
+    Fake(FakeOnnxEmbeddingBackend),
+    Real(RealOnnxEmbeddingBackend),
+}
+
+impl OnnxEmbeddingBackendKind {
+    pub fn fake() -> Self {
+        Self::Fake(FakeOnnxEmbeddingBackend::new())
+    }
+
+    pub fn real() -> Self {
+        Self::Real(RealOnnxEmbeddingBackend::new())
+    }
+}
+
+#[async_trait]
+impl OnnxEmbeddingBackend for OnnxEmbeddingBackendKind {
+    async fn load(&self, request: OnnxLoadRequest) -> Result<OnnxSessionStatus, OnnxRuntimeError> {
+        match self {
+            Self::Fake(backend) => backend.load(request).await,
+            Self::Real(backend) => backend.load(request).await,
+        }
+    }
+
+    async fn unload(
+        &self,
+        model_id: &OnnxModelId,
+    ) -> Result<Option<OnnxSessionStatus>, OnnxRuntimeError> {
+        match self {
+            Self::Fake(backend) => backend.unload(model_id).await,
+            Self::Real(backend) => backend.unload(model_id).await,
+        }
+    }
+
+    async fn list(&self) -> Result<Vec<OnnxSessionStatus>, OnnxRuntimeError> {
+        match self {
+            Self::Fake(backend) => backend.list().await,
+            Self::Real(backend) => backend.list().await,
+        }
+    }
+
+    async fn embed(
+        &self,
+        request: OnnxEmbeddingRequest,
+    ) -> Result<OnnxEmbeddingResponse, OnnxRuntimeError> {
+        match self {
+            Self::Fake(backend) => backend.embed(request).await,
+            Self::Real(backend) => backend.embed(request).await,
+        }
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct RealOnnxEmbeddingBackend {

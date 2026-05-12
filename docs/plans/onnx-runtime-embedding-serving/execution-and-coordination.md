@@ -725,6 +725,20 @@ Update during implementation:
   rust/crates/pumas-rpc/Cargo.toml onnx`. File-size evidence: `mod.rs` 380
   lines, `real.rs` 219 lines, `output.rs` 178 lines, `tensors.rs` 60 lines,
   `real_backend.rs` 71 lines, `tests.rs` 435 lines.
+- 2026-05-12: Wired the RPC composition root to the real Rust ONNX backend
+  without changing handler contracts. `OnnxEmbeddingBackendKind` now lives in
+  `pumas-core` and delegates to either fake or real backends; production RPC
+  state constructs `OnnxEmbeddingBackendKind::real()`, while focused RPC tests
+  explicitly construct `OnnxEmbeddingBackendKind::fake()` for deterministic
+  fake embedding behavior. Verification passed: `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml onnx`, and `PUMAS_ONNX_REAL_MODEL_ROOT=<absolute
+  local Nomic package> PUMAS_ONNX_REAL_MODEL_PATH=onnx/model_fp16.onnx cargo
+  test --manifest-path rust/crates/pumas-core/Cargo.toml
+  real_backend_embeds_optional_real_fixture -- --nocapture`. File-size
+  evidence: `real_backend.rs` 124 lines, RPC `server.rs` 344 lines,
+  `openai_gateway_tests.rs` 422 lines, `serving_onnx_tests.rs` 161 lines.
 
 ## Commit Cadence Notes
 
@@ -1216,6 +1230,15 @@ changes remain.
   evidence: `onnx_runtime/mod.rs` 380 lines, `real.rs` 219 lines,
   `output.rs` 178 lines, `tensors.rs` 60 lines, `real_backend.rs` 71 lines,
   `tests.rs` 435 lines.
+- ONNX RPC real-backend composition verified with `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml onnx`, `PUMAS_ONNX_REAL_MODEL_ROOT=<absolute
+  local Nomic package> PUMAS_ONNX_REAL_MODEL_PATH=onnx/model_fp16.onnx cargo
+  test --manifest-path rust/crates/pumas-core/Cargo.toml
+  real_backend_embeds_optional_real_fixture -- --nocapture`, and file-size
+  evidence: `real_backend.rs` 124 lines, RPC `server.rs` 344 lines,
+  `openai_gateway_tests.rs` 422 lines, `serving_onnx_tests.rs` 161 lines.
 
 ### Traceability Links
 

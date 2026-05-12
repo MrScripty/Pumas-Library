@@ -74,12 +74,13 @@ pub use models::{
     EmbeddedMetadataResponse, LibraryModelMetadataResponse,
 };
 pub use onnx_runtime::{
-    FakeOnnxEmbeddingBackend, OnnxEmbedding, OnnxEmbeddingBackend, OnnxEmbeddingPooling,
-    OnnxEmbeddingPostprocessConfig, OnnxEmbeddingPostprocessor, OnnxEmbeddingRequest,
-    OnnxEmbeddingResponse, OnnxEmbeddingUsage, OnnxExecutionProvider, OnnxLoadOptions,
-    OnnxLoadRequest, OnnxModelId, OnnxModelPath, OnnxOutputTensorSelection, OnnxRuntimeError,
-    OnnxRuntimeErrorCode, OnnxRuntimeSession, OnnxSessionManager, OnnxSessionState,
-    OnnxSessionStatus, OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer,
+    FakeOnnxEmbeddingBackend, OnnxEmbedding, OnnxEmbeddingBackend, OnnxEmbeddingBackendKind,
+    OnnxEmbeddingPooling, OnnxEmbeddingPostprocessConfig, OnnxEmbeddingPostprocessor,
+    OnnxEmbeddingRequest, OnnxEmbeddingResponse, OnnxEmbeddingUsage, OnnxExecutionProvider,
+    OnnxLoadOptions, OnnxLoadRequest, OnnxModelId, OnnxModelPath, OnnxOutputTensorSelection,
+    OnnxRuntimeError, OnnxRuntimeErrorCode, OnnxRuntimeSession, OnnxSessionManager,
+    OnnxSessionState, OnnxSessionStatus, OnnxTokenizedBatch, OnnxTokenizedInput, OnnxTokenizer,
+    RealOnnxEmbeddingBackend,
 };
 pub use plugins::{PluginConfig, PluginLoader};
 pub use process::{ProcessInfo, ProcessManager};

@@ -562,9 +562,11 @@ state.
 - [ ] Ensure load/unload operations do not split durable state updates across
       cancellation points unless the step is transactional, idempotent, or has
       explicit compensation.
-- [ ] Instrument load/unload/restart workflows with tracing spans or equivalent
-      structured logs at lifecycle owners so partial failures and cancellations
-      are observable without reading ONNX Runtime internals.
+- [x] Instrument ONNX serving load/unload workflows with tracing spans or
+      equivalent structured logs at lifecycle owners so partial failures and
+      cancellations are observable without reading ONNX Runtime internals.
+      ONNX runtime-profile restart is not yet an active workflow; the lifecycle
+      slice must instrument it when introduced.
 - [ ] Resolve the effective ONNX serving profile from the saved runtime route
       when a model row or serve dialog does not provide an explicit profile.
       Explicit profile choices must override the saved route for that request.
@@ -616,7 +618,10 @@ explicit alias is not used as the ONNX session name. Real ONNX Runtime
 execution and route/profile fallback cleanup remain open. Duplicate ONNX loads
 now return the existing confirmed loaded state without bumping served-state
 cursor, and ONNX unload removes stale served status if the session is already
-absent. Gateway embedding routing has started under Milestone 5.
+absent. ONNX serving load/unload now emits structured lifecycle logs with safe
+provider/model/profile/error fields and without full model paths, request
+payloads, secrets, or embedding inputs. Gateway embedding routing has started
+under Milestone 5.
 
 ### Milestone 5: Pumas Gateway Routing
 

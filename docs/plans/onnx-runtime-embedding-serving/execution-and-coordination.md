@@ -482,6 +482,21 @@ Update during implementation:
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and
   `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml serving`.
+- 2026-05-12: Added structured ONNX serving lifecycle logging for load,
+  duplicate-load reuse, load validation failure, load backend failure, load
+  status-confirmation failure, unload success, stale-session cleanup, and unload
+  failure. Logged fields are limited to provider id, public model id,
+  provider-side model id where applicable, profile id, gateway alias,
+  embedding dimensions, and structured error codes/fields; logs intentionally
+  omit full model paths, request payloads, secrets, and embedding input text.
+  The ONNX serving tests were extracted to `serving_onnx_tests.rs` so
+  `serving_onnx.rs` remains below the 500-line standards threshold after adding
+  observability. ONNX runtime-profile restart is not yet implemented; the
+  future lifecycle slice must instrument restart ownership when that workflow
+  exists. Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving_onnx`,
+  and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`.
 
 ## Commit Cadence Notes
 

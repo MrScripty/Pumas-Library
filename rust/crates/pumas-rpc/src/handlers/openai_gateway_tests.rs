@@ -6,16 +6,19 @@ use axum::extract::{OriginalUri, State};
 use axum::http::StatusCode;
 use pumas_app_manager::{CustomNodesManager, SizeCalculator};
 use pumas_library::models::{
-    RuntimeDeviceMode, RuntimeProfileId, RuntimeProviderId, ServedModelLoadState,
-    ServingEndpointStatus, ServingStatusSnapshot,
+    RuntimeDeviceMode, RuntimeEndpointUrl, RuntimeProfileId, RuntimeProviderId,
+    ServedModelLoadState, ServingEndpointStatus, ServingStatusSnapshot,
 };
 use pumas_library::{
     OnnxEmbeddingBackendKind, OnnxLoadOptions, OnnxLoadRequest, OnnxSessionManager, PluginLoader,
     ProviderBehavior,
 };
 use serde_json::{json, Value};
+use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tempfile::TempDir;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::sync::{Mutex, RwLock};
 
 fn loaded_status(model_id: &str, profile_id: &str, model_alias: Option<&str>) -> ServedModelStatus {
@@ -55,6 +58,13 @@ async fn gateway_test_state() -> (TempDir, Arc<AppState>) {
 async fn gateway_test_state_with_onnx_backend(
     onnx_backend: OnnxEmbeddingBackendKind,
 ) -> (TempDir, Arc<AppState>) {
+    gateway_test_state_with_clients(onnx_backend, reqwest::Client::new()).await
+}
+
+async fn gateway_test_state_with_clients(
+    onnx_backend: OnnxEmbeddingBackendKind,
+    gateway_http_client: reqwest::Client,
+) -> (TempDir, Arc<AppState>) {
     let temp_dir = TempDir::new().unwrap();
     let launcher_root = temp_dir.path().to_path_buf();
     let api = crate::handlers::test_support::build_test_api(&launcher_root).await;
@@ -73,7 +83,7 @@ async fn gateway_test_state_with_onnx_backend(
         )),
         shortcut_manager: Arc::new(RwLock::new(None)),
         plugin_loader: Arc::new(plugin_loader),
-        gateway_http_client: reqwest::Client::new(),
+        gateway_http_client,
         provider_registry: ProviderRegistry::builtin(),
         llama_cpp_router_client: LlamaCppRouterClient::new(reqwest::Client::new()),
         ollama_client_factory: OllamaClientFactory::new(
@@ -136,6 +146,60 @@ async fn load_onnx_session(temp_dir: &TempDir, state: &AppState) {
     )
     .unwrap();
     state.onnx_session_manager.load(request).await.unwrap();
+}
+
+async fn record_llama_served_model(state: &AppState, endpoint_url: &str) {
+    state
+        .api
+        .record_served_model(ServedModelStatus {
+            model_id: "models/llama".to_string(),
+            model_alias: Some("llama".to_string()),
+            provider: RuntimeProviderId::LlamaCpp,
+            profile_id: RuntimeProfileId::parse("llama-cpu").unwrap(),
+            load_state: ServedModelLoadState::Loaded,
+            device_mode: RuntimeDeviceMode::Cpu,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
+            context_size: Some(8),
+            keep_loaded: true,
+            endpoint_url: Some(RuntimeEndpointUrl::parse(endpoint_url).unwrap()),
+            memory_bytes: None,
+            loaded_at: None,
+            last_error: None,
+        })
+        .await
+        .unwrap();
+}
+
+async fn spawn_gateway_response_server(status: StatusCode, body: &'static str) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request_bytes = [0_u8; 1024];
+        let _ = socket.read(&mut request_bytes).await;
+        let reason = status.canonical_reason().unwrap_or("gateway response");
+        let response = format!(
+            "HTTP/1.1 {} {}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            status.as_u16(),
+            reason,
+            body.len(),
+            body
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+    });
+    format!("http://{addr}")
+}
+
+async fn spawn_hanging_gateway_server() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (_socket, _) = listener.accept().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(300)).await;
+    });
+    format!("http://{addr}")
 }
 
 async fn openai_proxy_json(state: Arc<AppState>, path: &str, body: Value) -> (StatusCode, Value) {
@@ -409,6 +473,84 @@ async fn openai_proxy_rejects_oversized_embedding_body_before_json() {
         .pointer("/error/message")
         .and_then(Value::as_str)
         .is_some_and(|message| message.contains("request body exceeds")));
+}
+
+#[tokio::test]
+async fn openai_proxy_rejects_malformed_json_before_provider_dispatch() {
+    let (_temp_dir, state) = gateway_test_state().await;
+
+    let (status, body) = openai_proxy_bytes(
+        state,
+        "/v1/embeddings",
+        Bytes::from_static(b"{\"model\":\"nomic\","),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .is_some_and(|message| message.contains("valid JSON")));
+}
+
+#[tokio::test]
+async fn openai_proxy_preserves_provider_error_status_and_body() {
+    let endpoint = spawn_gateway_response_server(
+        StatusCode::SERVICE_UNAVAILABLE,
+        r#"{"error":{"message":"provider unavailable","type":"provider_error"}}"#,
+    )
+    .await;
+    let (_temp_dir, state) = gateway_test_state().await;
+    record_llama_served_model(&state, endpoint.as_str()).await;
+
+    let (status, body) = openai_proxy_json(
+        state,
+        "/v1/embeddings",
+        json!({
+            "model": "llama",
+            "input": "hello"
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        body.pointer("/error/message").and_then(Value::as_str),
+        Some("provider unavailable")
+    );
+    assert_eq!(
+        body.pointer("/error/type").and_then(Value::as_str),
+        Some("provider_error")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn openai_proxy_maps_provider_timeout_to_bounded_gateway_error() {
+    let endpoint = spawn_hanging_gateway_server().await;
+    let (_temp_dir, state) = gateway_test_state().await;
+    record_llama_served_model(&state, endpoint.as_str()).await;
+
+    let request = tokio::spawn(openai_proxy_json(
+        state,
+        "/v1/embeddings",
+        json!({
+            "model": "llama",
+            "input": "hello"
+        }),
+    ));
+    tokio::task::yield_now().await;
+    tokio::time::advance(OPENAI_GATEWAY_REQUEST_TIMEOUT + Duration::from_secs(1)).await;
+    let (status, body) = request.await.unwrap();
+
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        body.pointer("/error/type").and_then(Value::as_str),
+        Some("pumas_error")
+    );
+    assert!(body
+        .pointer("/error/message")
+        .and_then(Value::as_str)
+        .is_some_and(|message| !message.is_empty()));
 }
 
 #[tokio::test]

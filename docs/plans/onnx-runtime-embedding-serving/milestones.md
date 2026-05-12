@@ -738,7 +738,7 @@ existing Pumas `/v1` gateway.
 - [x] Reuse the shared gateway HTTP client from Milestone 0.
 - [x] Ensure gateway request handling uses bounded body reads, connection
       limits/timeouts, and no per-request client construction.
-- [ ] Preserve timeout and error mapping semantics so provider failures return
+- [x] Preserve timeout and error mapping semantics so provider failures return
       bounded OpenAI-compatible error bodies and do not hang external callers.
 - [x] Add request correlation or structured logging at the gateway/provider
       boundary without logging embedding input text, tokens, secrets, or full
@@ -773,9 +773,8 @@ standards threshold. Focused verification passed:
 `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
 `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`,
 and `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`.
-Remaining M5 work includes timeout/cancellation semantics,
-provider-timeout coverage, and manual curl evidence after frontend/serve
-workflow is available.
+Remaining M5 work includes manual curl evidence after frontend/serve workflow
+is available.
 The follow-up handler-contract slice added direct gateway handler tests for the
 ONNX public `/v1/embeddings` path: a served and loaded ONNX model returns
 OpenAI-compatible embedding JSON through the in-process adapter, ONNX rejects
@@ -815,6 +814,13 @@ openai_proxy_smokes_real_onnx_embedding_fixture -- --nocapture`. The focused
 RPC gateway commands require permission to bind PumasApi's local loopback IPC
 listener in this sandbox; the sandboxed attempt failed with
 `Operation not permitted` before the test was rerun with that allowance.
+The timeout/error mapping slice added gateway handler tests for malformed JSON
+rejection before provider dispatch, upstream provider error status/body
+preservation, and provider timeout mapping to a bounded Pumas-shaped gateway
+error. The timeout test advances the existing 120-second endpoint policy with
+paused Tokio time instead of sleeping in real time. Verification passed:
+`cargo fmt --manifest-path rust/Cargo.toml --all -- --check` and
+`cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`.
 
 ### Milestone 6: Frontend Integration
 

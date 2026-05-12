@@ -763,6 +763,15 @@ Update during implementation:
   shared serialized isolated registry override pattern as gateway tests.
   Follow-up verification passed:
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`.
+- 2026-05-12: Completed the M5 gateway timeout/error mapping test slice.
+  Gateway handler coverage now proves malformed JSON is rejected before model
+  lookup/provider dispatch, upstream provider error status and JSON bodies are
+  preserved through the proxy response, and provider timeouts map to bounded
+  Pumas-shaped gateway errors. The timeout test uses paused Tokio time to
+  advance the existing 120-second gateway endpoint policy without a real-time
+  sleep. Verification passed: `cargo fmt --manifest-path rust/Cargo.toml --all
+  -- --check` and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml
+  openai_gateway`.
 
 ## Commit Cadence Notes
 

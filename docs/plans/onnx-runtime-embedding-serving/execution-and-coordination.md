@@ -556,6 +556,15 @@ Update during implementation:
   --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, so the milestone
   status now records those extraction and existing-provider preservation tasks
   as complete.
+- 2026-05-12: Completed the M1 ONNX session-manager shutdown-ordering slice.
+  `OnnxSessionManager::shutdown` now marks the manager closed, waits for all
+  operation permits with a caller-provided bounded timeout, unloads listed
+  sessions while holding those permits, and rejects later load/list/unload/embed
+  work with a typed backend error. The ONNX Runtime module README now documents
+  this lifecycle contract. Verification passed: `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, and `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml onnx`.
 
 ## Commit Cadence Notes
 

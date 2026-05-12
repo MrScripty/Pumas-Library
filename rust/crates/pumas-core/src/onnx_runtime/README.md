@@ -27,6 +27,8 @@ of constructing ONNX sessions or tokenizer state ad hoc.
 - Real ONNX Runtime dependencies are added only after dependency review.
 - Session manager construction belongs at a Rust composition root.
 - Backend implementations must honor bounded inference/lifecycle concurrency.
+- Shutdown must stop new load/inference/list/unload work, wait only for a
+  bounded drain window, unload known sessions, and report cleanup failures.
 
 ## Decision
 
@@ -34,7 +36,9 @@ Start with a fake backend and validated Rust contracts. The fake backend
 implements the same load, unload, list/status, and embedding API expected from
 the real ONNX backend. A small session manager wraps the backend with a
 semaphore so later real execution cannot accidentally bypass concurrency
-limits.
+limits. Shutdown closes the manager before draining all operation permits, then
+unloads sessions through the backend while holding those permits so new work
+cannot interleave with cleanup.
 
 ## Invariants
 
@@ -43,6 +47,8 @@ limits.
 - Embedding input must be non-empty and bounded before backend execution.
 - Dimensions are positive and capped before backend execution.
 - Unload removes backend-owned session state.
+- After shutdown begins, new session-manager operations fail with a typed
+  backend error instead of entering the provider backend.
 
 ## Revisit Triggers
 
@@ -65,5 +71,7 @@ the execution dependency slice.
   before calling the session manager.
 - Consumers receive stable session status, embedding response, and typed error
   values.
+- Consumers call `shutdown` from the lifecycle owner with a bounded timeout
+  before dropping the manager when they need deterministic cleanup.
 - Fake backend behavior is deterministic and exists only to validate the public
   ONNX provider/session contract before real ONNX Runtime execution lands.

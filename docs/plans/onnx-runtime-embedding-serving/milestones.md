@@ -378,7 +378,7 @@ Runtime execution.
       the same Rust provider adapter shape the real ONNX backend will use.
 - [x] Add bounded inference concurrency so ONNX Runtime threading and Rust async
       request handling cannot create unbounded work under embedding load.
-- [ ] Define shutdown ordering: stop accepting new load/inference work, cancel
+- [x] Define shutdown ordering: stop accepting new load/inference work, cancel
       or drain queued work with bounded timeout, unload sessions, and report
       cleanup failures through logs/status.
 - [x] Return OpenAI-compatible error bodies from the Pumas gateway for ONNX
@@ -398,8 +398,10 @@ Runtime execution.
 contract types, a fake backend, a bounded `OnnxSessionManager`, and focused
 unit tests. RPC `AppState` now owns the bounded ONNX session manager for fake
 serving. The gateway ONNX adapter now maps validation, not-loaded, and backend
-failures into bounded OpenAI-compatible error bodies. Full shutdown/cancellation
-ordering remains open for a later lifecycle slice.
+failures into bounded OpenAI-compatible error bodies. `OnnxSessionManager`
+shutdown now closes the manager to new work, drains operation permits with a
+bounded timeout, unloads known sessions, and rejects later operations with a
+typed backend error.
 
 ### Milestone 2: ONNX Embedding Execution
 

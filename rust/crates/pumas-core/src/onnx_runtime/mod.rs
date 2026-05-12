@@ -8,12 +8,16 @@ use std::{
     collections::HashMap,
     fmt,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
 };
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Semaphore;
+use tokio::{sync::Semaphore, time::timeout};
 
 const MAX_MODEL_ID_LEN: usize = 128;
 const MAX_EMBEDDING_INPUTS: usize = 128;
@@ -333,6 +337,8 @@ pub trait OnnxEmbeddingBackend: Send + Sync {
 pub struct OnnxSessionManager<B> {
     backend: B,
     semaphore: Arc<Semaphore>,
+    max_concurrent_operations: u32,
+    closed: AtomicBool,
 }
 
 impl<B> OnnxSessionManager<B>
@@ -346,9 +352,17 @@ where
                 "max concurrent operations must be greater than zero",
             ));
         }
+        let max_concurrent_operations = u32::try_from(max_concurrent_operations).map_err(|_| {
+            OnnxRuntimeError::validation(
+                "max_concurrent_operations",
+                "max concurrent operations exceeds supported semaphore permits",
+            )
+        })?;
         Ok(Self {
             backend,
-            semaphore: Arc::new(Semaphore::new(max_concurrent_operations)),
+            semaphore: Arc::new(Semaphore::new(max_concurrent_operations as usize)),
+            max_concurrent_operations,
+            closed: AtomicBool::new(false),
         })
     }
 
@@ -381,14 +395,48 @@ where
         self.backend.embed(request).await
     }
 
+    pub async fn shutdown(
+        &self,
+        drain_timeout: Duration,
+    ) -> Result<Vec<OnnxSessionStatus>, OnnxRuntimeError> {
+        self.closed.store(true, Ordering::SeqCst);
+        let permits = timeout(
+            drain_timeout,
+            self.semaphore
+                .clone()
+                .acquire_many_owned(self.max_concurrent_operations),
+        )
+        .await
+        .map_err(|_| OnnxRuntimeError::backend("ONNX session manager shutdown timed out"))?
+        .map_err(|_| OnnxRuntimeError::backend("ONNX session manager is closed"))?;
+
+        let sessions = self.backend.list().await?;
+        let mut unloaded = Vec::with_capacity(sessions.len());
+        for session in sessions {
+            if let Some(removed) = self.backend.unload(&session.model_id).await? {
+                unloaded.push(removed);
+            }
+        }
+        drop(permits);
+        Ok(unloaded)
+    }
+
     async fn operation_permit(
         &self,
     ) -> Result<tokio::sync::OwnedSemaphorePermit, OnnxRuntimeError> {
-        self.semaphore
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(OnnxRuntimeError::backend("ONNX session manager is closed"));
+        }
+        let permit = self
+            .semaphore
             .clone()
             .acquire_owned()
             .await
-            .map_err(|_| OnnxRuntimeError::backend("ONNX session manager is closed"))
+            .map_err(|_| OnnxRuntimeError::backend("ONNX session manager is closed"))?;
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(OnnxRuntimeError::backend("ONNX session manager is closed"));
+        }
+        Ok(permit)
     }
 }
 
@@ -660,6 +708,41 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err.code, OnnxRuntimeErrorCode::NotLoaded);
+    }
+
+    #[tokio::test]
+    async fn session_manager_shutdown_unloads_sessions_and_rejects_new_work() {
+        let fixture = model_fixture();
+        let manager = OnnxSessionManager::new(FakeOnnxEmbeddingBackend::new(), 2).unwrap();
+        let load = OnnxLoadRequest::parse(
+            fixture.path(),
+            "model.onnx",
+            "nomic-embed-text-v1.5",
+            OnnxLoadOptions::cpu(4).unwrap(),
+        )
+        .unwrap();
+        manager.load(load).await.unwrap();
+
+        let unloaded = manager.shutdown(Duration::from_secs(1)).await.unwrap();
+
+        assert_eq!(unloaded.len(), 1);
+        assert_eq!(unloaded[0].model_id.as_str(), "nomic-embed-text-v1.5");
+        let err = manager.list().await.unwrap_err();
+        assert_eq!(err.code, OnnxRuntimeErrorCode::Backend);
+        assert!(err.message.contains("closed"));
+        let err = manager
+            .embed(
+                OnnxEmbeddingRequest::parse(
+                    "nomic-embed-text-v1.5",
+                    vec!["hello world".to_string()],
+                    None,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, OnnxRuntimeErrorCode::Backend);
+        assert!(err.message.contains("closed"));
     }
 
     #[test]

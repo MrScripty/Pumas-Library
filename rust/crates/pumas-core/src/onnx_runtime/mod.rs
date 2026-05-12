@@ -11,12 +11,15 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+mod config;
 mod fake;
 mod manager;
+mod package;
 mod postprocess;
 mod real;
 mod tokenizer;
 
+pub use config::OnnxModelConfig;
 pub use fake::FakeOnnxEmbeddingBackend;
 pub use manager::{OnnxEmbeddingBackend, OnnxSessionManager};
 pub use postprocess::{
@@ -154,7 +157,8 @@ pub enum OnnxExecutionProvider {
 #[serde(rename_all = "snake_case")]
 pub struct OnnxLoadOptions {
     pub execution_provider: OnnxExecutionProvider,
-    pub embedding_dimensions: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_dimensions: Option<usize>,
 }
 
 impl OnnxLoadOptions {
@@ -162,7 +166,7 @@ impl OnnxLoadOptions {
         validate_dimensions(embedding_dimensions)?;
         Ok(Self {
             execution_provider: OnnxExecutionProvider::Cpu,
-            embedding_dimensions,
+            embedding_dimensions: Some(embedding_dimensions),
         })
     }
 }
@@ -171,7 +175,7 @@ impl Default for OnnxLoadOptions {
     fn default() -> Self {
         Self {
             execution_provider: OnnxExecutionProvider::Cpu,
-            embedding_dimensions: DEFAULT_FAKE_EMBEDDING_DIMENSIONS,
+            embedding_dimensions: None,
         }
     }
 }

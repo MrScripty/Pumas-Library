@@ -6,8 +6,8 @@ use ort::{
 };
 
 use super::{
-    OnnxExecutionProvider, OnnxLoadOptions, OnnxLoadRequest, OnnxModelId, OnnxRuntimeError,
-    OnnxSessionState, OnnxSessionStatus, OnnxTokenizer,
+    OnnxExecutionProvider, OnnxLoadOptions, OnnxLoadRequest, OnnxModelConfig, OnnxModelId,
+    OnnxRuntimeError, OnnxSessionState, OnnxSessionStatus, OnnxTokenizer,
 };
 
 pub struct OnnxRuntimeSession {
@@ -15,6 +15,7 @@ pub struct OnnxRuntimeSession {
     model_path: PathBuf,
     execution_provider: OnnxExecutionProvider,
     embedding_dimensions: usize,
+    model_config: OnnxModelConfig,
     tokenizer: OnnxTokenizer,
     input_names: Vec<String>,
     output_names: Vec<String>,
@@ -24,6 +25,8 @@ pub struct OnnxRuntimeSession {
 impl OnnxRuntimeSession {
     pub fn load(request: OnnxLoadRequest) -> Result<Self, OnnxRuntimeError> {
         let tokenizer = OnnxTokenizer::from_model_path(&request.model_path)?;
+        let model_config = OnnxModelConfig::from_model_path(&request.model_path)?;
+        let embedding_dimensions = resolve_embedding_dimensions(&request.options, &model_config)?;
         let mut builder = Session::builder()
             .map_err(|_| OnnxRuntimeError::backend("ONNX Runtime session builder failed"))?;
         builder = match request.options.execution_provider {
@@ -53,7 +56,8 @@ impl OnnxRuntimeSession {
             model_id: request.model_id,
             model_path: request.model_path.path().to_path_buf(),
             execution_provider: request.options.execution_provider,
-            embedding_dimensions: request.options.embedding_dimensions,
+            embedding_dimensions,
+            model_config,
             tokenizer,
             input_names,
             output_names,
@@ -75,6 +79,10 @@ impl OnnxRuntimeSession {
         &self.tokenizer
     }
 
+    pub fn model_config(&self) -> &OnnxModelConfig {
+        &self.model_config
+    }
+
     pub fn input_names(&self) -> &[String] {
         &self.input_names
     }
@@ -86,6 +94,25 @@ impl OnnxRuntimeSession {
     pub fn session(&self) -> &Session {
         &self.session
     }
+}
+
+fn resolve_embedding_dimensions(
+    options: &OnnxLoadOptions,
+    model_config: &OnnxModelConfig,
+) -> Result<usize, OnnxRuntimeError> {
+    let config_dimensions = model_config.embedding_dimensions();
+    let Some(requested_dimensions) = options.embedding_dimensions else {
+        return Ok(config_dimensions);
+    };
+    if requested_dimensions != config_dimensions {
+        return Err(OnnxRuntimeError::validation(
+            "embedding_dimensions",
+            format!(
+                "embedding dimensions must match config.json value {config_dimensions} for real ONNX sessions"
+            ),
+        ));
+    }
+    Ok(requested_dimensions)
 }
 
 fn apply_session_options(

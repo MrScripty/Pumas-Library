@@ -10,6 +10,11 @@ fn model_fixture() -> tempfile::TempDir {
 fn model_fixture_with_tokenizer() -> tempfile::TempDir {
     let temp = model_fixture();
     std::fs::write(temp.path().join("tokenizer.json"), tokenizer_fixture_json()).unwrap();
+    std::fs::write(
+        temp.path().join("config.json"),
+        config_fixture_json(768, 768),
+    )
+    .unwrap();
     temp
 }
 
@@ -18,7 +23,22 @@ fn nested_model_fixture_with_tokenizer_at_root() -> tempfile::TempDir {
     std::fs::create_dir(temp.path().join("onnx")).unwrap();
     std::fs::write(temp.path().join("onnx").join("model.onnx"), b"fake").unwrap();
     std::fs::write(temp.path().join("tokenizer.json"), tokenizer_fixture_json()).unwrap();
+    std::fs::write(
+        temp.path().join("config.json"),
+        config_fixture_json(768, 768),
+    )
+    .unwrap();
     temp
+}
+
+fn config_fixture_json(hidden_size: usize, n_embd: usize) -> String {
+    format!(
+        r#"{{
+  "hidden_size": {hidden_size},
+  "n_embd": {n_embd},
+  "model_type": "nomic_bert"
+}}"#
+    )
 }
 
 fn tokenizer_fixture_json() -> &'static str {
@@ -157,6 +177,35 @@ fn tokenizer_requires_tokenizer_json_under_model_root() {
 }
 
 #[test]
+fn model_config_loads_dimensions_from_package_root_for_nested_onnx_file() {
+    let fixture = nested_model_fixture_with_tokenizer_at_root();
+    let model_path = OnnxModelPath::parse(fixture.path(), "onnx/model.onnx").unwrap();
+    let model_config = OnnxModelConfig::from_model_path(&model_path).unwrap();
+
+    assert_eq!(model_config.embedding_dimensions(), 768);
+    assert_eq!(
+        model_config.config_path(),
+        fixture.path().join("config.json").canonicalize().unwrap()
+    );
+}
+
+#[test]
+fn model_config_rejects_conflicting_dimension_metadata() {
+    let fixture = nested_model_fixture_with_tokenizer_at_root();
+    std::fs::write(
+        fixture.path().join("config.json"),
+        config_fixture_json(768, 384),
+    )
+    .unwrap();
+    let model_path = OnnxModelPath::parse(fixture.path(), "onnx/model.onnx").unwrap();
+
+    let err = OnnxModelConfig::from_model_path(&model_path).unwrap_err();
+
+    assert_eq!(err.field.as_deref(), Some("config"));
+    assert!(err.message.contains("hidden_size"));
+}
+
+#[test]
 fn tokenizer_rejects_inputs_over_token_limit() {
     let fixture = model_fixture_with_tokenizer();
     let model_path = OnnxModelPath::parse(fixture.path(), "model.onnx").unwrap();
@@ -173,6 +222,25 @@ fn tokenizer_rejects_inputs_over_token_limit() {
 
     assert_eq!(err.field.as_deref(), Some("input"));
     assert!(err.message.contains("tokens"));
+}
+
+#[test]
+fn real_session_loader_rejects_explicit_dimensions_that_disagree_with_config() {
+    let fixture = model_fixture_with_tokenizer();
+    let request = OnnxLoadRequest::parse(
+        fixture.path(),
+        "model.onnx",
+        "nomic-embed-text-v1.5",
+        OnnxLoadOptions::cpu(384).unwrap(),
+    )
+    .unwrap();
+
+    let err = match OnnxRuntimeSession::load(request) {
+        Ok(_) => panic!("mismatched embedding dimensions must reject before session load"),
+        Err(err) => err,
+    };
+
+    assert_eq!(err.field.as_deref(), Some("embedding_dimensions"));
 }
 
 #[test]

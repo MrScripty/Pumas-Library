@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use super::{
     validate_dimensions, OnnxEmbedding, OnnxEmbeddingBackend, OnnxEmbeddingRequest,
     OnnxEmbeddingResponse, OnnxEmbeddingUsage, OnnxLoadRequest, OnnxModelId, OnnxRuntimeError,
-    OnnxSessionState, OnnxSessionStatus,
+    OnnxSessionState, OnnxSessionStatus, DEFAULT_FAKE_EMBEDDING_DIMENSIONS,
 };
 
 #[derive(Debug, Default)]
@@ -26,7 +26,10 @@ impl OnnxEmbeddingBackend for FakeOnnxEmbeddingBackend {
             model_id: request.model_id.clone(),
             model_path: request.model_path.path().to_path_buf(),
             execution_provider: request.options.execution_provider,
-            embedding_dimensions: request.options.embedding_dimensions,
+            embedding_dimensions: request
+                .options
+                .embedding_dimensions
+                .unwrap_or(DEFAULT_FAKE_EMBEDDING_DIMENSIONS),
             state: OnnxSessionState::Loaded,
         };
         let mut sessions = self

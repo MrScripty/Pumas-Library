@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use tokenizers::Tokenizer;
 
-use super::{OnnxEmbeddingRequest, OnnxModelPath, OnnxRuntimeError};
+use super::{package::resolve_package_file, OnnxEmbeddingRequest, OnnxModelPath, OnnxRuntimeError};
 
 const TOKENIZER_FILE_NAME: &str = "tokenizer.json";
 const MAX_EMBEDDING_TOKENS_PER_INPUT: usize = 8_192;
@@ -28,7 +28,7 @@ pub struct OnnxTokenizer {
 
 impl OnnxTokenizer {
     pub fn from_model_path(model_path: &OnnxModelPath) -> Result<Self, OnnxRuntimeError> {
-        let tokenizer_path = resolve_tokenizer_path(model_path)?;
+        let tokenizer_path = resolve_package_file(model_path, TOKENIZER_FILE_NAME, "tokenizer")?;
 
         let tokenizer = Tokenizer::from_file(&tokenizer_path).map_err(|_| {
             OnnxRuntimeError::validation("tokenizer", "tokenizer.json could not be loaded")
@@ -73,52 +73,6 @@ impl OnnxTokenizer {
             total_tokens,
         })
     }
-}
-
-fn resolve_tokenizer_path(model_path: &OnnxModelPath) -> Result<PathBuf, OnnxRuntimeError> {
-    let mut search_dir = model_path.path().parent().ok_or_else(|| {
-        OnnxRuntimeError::validation("path", "model path must have a parent directory")
-    })?;
-
-    loop {
-        let candidate = search_dir.join(TOKENIZER_FILE_NAME);
-        if candidate
-            .try_exists()
-            .map_err(|err| OnnxRuntimeError::path("tokenizer", "tokenizer.json is invalid", err))?
-        {
-            let tokenizer_path = candidate.canonicalize().map_err(|err| {
-                OnnxRuntimeError::path("tokenizer", "tokenizer.json is invalid", err)
-            })?;
-            if !tokenizer_path.starts_with(model_path.root()) {
-                return Err(OnnxRuntimeError::validation(
-                    "tokenizer",
-                    "tokenizer.json must stay inside the configured model root",
-                ));
-            }
-            if !tokenizer_path.is_file() {
-                return Err(OnnxRuntimeError::validation(
-                    "tokenizer",
-                    "tokenizer.json must be a file",
-                ));
-            }
-            return Ok(tokenizer_path);
-        }
-
-        if search_dir == model_path.root() {
-            break;
-        }
-        search_dir = search_dir.parent().ok_or_else(|| {
-            OnnxRuntimeError::validation(
-                "tokenizer",
-                "tokenizer.json must be in the model directory or an ancestor under the model root",
-            )
-        })?;
-    }
-
-    Err(OnnxRuntimeError::validation(
-        "tokenizer",
-        "tokenizer.json must be in the model directory or an ancestor under the model root",
-    ))
 }
 
 fn validate_token_count(token_count: usize) -> Result<(), OnnxRuntimeError> {

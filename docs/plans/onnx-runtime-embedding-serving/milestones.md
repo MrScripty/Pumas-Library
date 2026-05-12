@@ -490,7 +490,11 @@ trait and bounded session manager into `onnx_runtime/manager.rs`, reducing
 ONNX output tensor selection remains open for the inference slice. Tokenizer
 discovery now supports package-root `tokenizer.json` files for ONNX graphs in
 nested directories such as `onnx/model_fp16.onnx`, while preserving root
-containment validation.
+containment validation. Model config discovery uses the same package-root
+search for `config.json`; real session loading now defaults source embedding
+dimensions from matching `hidden_size`/`n_embd` metadata and rejects explicit
+load dimensions that conflict with that metadata. Real ONNX output tensor
+selection remains open for the inference slice.
 
 ### Milestone 3: Plugin And Runtime Profile Contracts
 

@@ -656,6 +656,18 @@ Update during implementation:
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and
   file-size evidence: `mod.rs` 372 lines, `tokenizer.rs` 156 lines,
   `tests.rs` 293 lines.
+- 2026-05-12: Added model-package config discovery for real ONNX session
+  loading. `OnnxModelConfig` reads `config.json` from the same validated
+  package scope as tokenizer discovery, derives source embedding dimensions
+  from agreeing `hidden_size`/`n_embd` values, and rejects missing, malformed,
+  or conflicting dimension metadata. `OnnxLoadOptions::default()` now delegates
+  dimensions to real model config, while the fake backend keeps its deterministic
+  8-dimensional fallback. Verification passed: `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence: `mod.rs` 376
+  lines, `config.rs` 75 lines, `package.rs` 55 lines, `real.rs` 131 lines,
+  `tokenizer.rs` 110 lines, `tests.rs` 361 lines.
 
 ## Commit Cadence Notes
 
@@ -1108,6 +1120,12 @@ changes remain.
   --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size
   evidence: `onnx_runtime/mod.rs` 372 lines, `tokenizer.rs` 156 lines,
   `tests.rs` 293 lines.
+- ONNX model config discovery verified with `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size evidence:
+  `onnx_runtime/mod.rs` 376 lines, `config.rs` 75 lines, `package.rs` 55 lines,
+  `real.rs` 131 lines, `tokenizer.rs` 110 lines, `tests.rs` 361 lines.
 
 ### Traceability Links
 

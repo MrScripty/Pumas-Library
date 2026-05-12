@@ -582,7 +582,7 @@ state.
       recording loaded status.
 - [x] Add unload support through the Rust ONNX session manager and served
       status removal.
-- [ ] Make load and unload idempotent where possible: duplicate load returns
+- [x] Make load and unload idempotent where possible: duplicate load returns
       the existing loaded state, duplicate unload returns an unchanged snapshot,
       and partial ONNX provider failures do not leave stale loaded status.
 - [ ] Preserve user-visible Ollama and llama.cpp outcomes through the new
@@ -613,8 +613,10 @@ confirms the Rust session manager lists the loaded model before recording
 backend served status. ONNX session model ids now come from provider behavior
 instead of the gateway alias, with focused RPC serving coverage proving an
 explicit alias is not used as the ONNX session name. Real ONNX Runtime
-execution, duplicate load/unload idempotency, and route/profile fallback
-cleanup remain open. Gateway embedding routing has started under Milestone 5.
+execution and route/profile fallback cleanup remain open. Duplicate ONNX loads
+now return the existing confirmed loaded state without bumping served-state
+cursor, and ONNX unload removes stale served status if the session is already
+absent. Gateway embedding routing has started under Milestone 5.
 
 ### Milestone 5: Pumas Gateway Routing
 

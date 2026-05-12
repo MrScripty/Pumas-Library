@@ -472,6 +472,16 @@ Update during implementation:
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and
   `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml serving`.
+- 2026-05-12: Added ONNX serving idempotency and stale-status cleanup.
+  Duplicate ONNX `serve_model` calls now confirm the provider session is still
+  listed and then return the existing loaded status with
+  `loaded_models_unchanged: true` without advancing the served-state cursor.
+  ONNX unload now removes backend served status even when the session manager
+  reports the model was already absent, preventing stale loaded status from
+  surviving partial provider cleanup. Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, and
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml serving`.
 
 ## Commit Cadence Notes
 

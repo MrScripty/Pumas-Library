@@ -546,6 +546,16 @@ Update during implementation:
   `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
   `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving_onnx`,
   and `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`.
+- 2026-05-12: Reconciled completed M4 existing-provider adapter work. Earlier
+  committed slices extracted Ollama and llama.cpp serving into
+  `serving_ollama.rs`, `serving_llama_cpp.rs`, `serving_llama_cpp_router.rs`,
+  and `serving_llama_cpp_shared.rs`, and moved load/unload dispatch through
+  provider behavior rather than legacy two-provider fallbacks. Current focused
+  verification for the surrounding M4 slices passed with `cargo test
+  --manifest-path rust/crates/pumas-core/Cargo.toml serving` and `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml serving`, so the milestone
+  status now records those extraction and existing-provider preservation tasks
+  as complete.
 
 ## Commit Cadence Notes
 

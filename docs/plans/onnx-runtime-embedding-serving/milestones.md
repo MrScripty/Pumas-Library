@@ -588,7 +588,7 @@ state.
       saved route and no explicit ONNX profile selection.
 - [x] Add ONNX provider adapter calls from `serve_model` to the Rust ONNX
       session manager.
-- [ ] Move existing Ollama and llama.cpp serving paths behind provider serving
+- [x] Move existing Ollama and llama.cpp serving paths behind provider serving
       adapters before adding ONNX load/unload so the RPC handler only performs
       boundary parsing, validation orchestration, and response shaping.
 - [x] Confirm the Rust ONNX provider status/list includes the model before
@@ -598,7 +598,7 @@ state.
 - [x] Make load and unload idempotent where possible: duplicate load returns
       the existing loaded state, duplicate unload returns an unchanged snapshot,
       and partial ONNX provider failures do not leave stale loaded status.
-- [ ] Preserve user-visible Ollama and llama.cpp outcomes through the new
+- [x] Preserve user-visible Ollama and llama.cpp outcomes through the new
       provider-scoped route and provider behavior paths. Do not preserve their
       legacy internal dispatch or global-route implementation.
 
@@ -643,6 +643,10 @@ back to the global default profile; ONNX disables that fallback while Ollama and
 llama.cpp preserve their existing behavior. ONNX load now explicitly unloads
 the session if post-load status confirmation or served-state recording fails,
 reducing stale session/state divergence for recoverable workflow failures.
+Earlier committed M4 prerequisite slices extracted Ollama and llama.cpp serving
+into provider adapter modules and kept their existing public serving outcomes
+covered by focused core/RPC serving tests while removing legacy dispatch
+fallbacks.
 Gateway embedding routing has started under Milestone 5.
 
 ### Milestone 5: Pumas Gateway Routing

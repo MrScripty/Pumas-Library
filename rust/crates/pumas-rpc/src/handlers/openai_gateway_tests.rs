@@ -11,11 +11,10 @@ use pumas_library::models::{
 };
 use pumas_library::{
     OnnxEmbeddingBackendKind, OnnxLoadOptions, OnnxLoadRequest, OnnxSessionManager, PluginLoader,
-    ProviderBehavior, PumasApi,
+    ProviderBehavior,
 };
 use serde_json::{json, Value};
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tempfile::TempDir;
 use tokio::sync::{Mutex, RwLock};
 
@@ -50,20 +49,19 @@ fn snapshot(served_models: Vec<ServedModelStatus>) -> ServingStatusSnapshot {
 }
 
 async fn gateway_test_state() -> (TempDir, Arc<AppState>) {
+    gateway_test_state_with_onnx_backend(OnnxEmbeddingBackendKind::fake()).await
+}
+
+async fn gateway_test_state_with_onnx_backend(
+    onnx_backend: OnnxEmbeddingBackendKind,
+) -> (TempDir, Arc<AppState>) {
     let temp_dir = TempDir::new().unwrap();
     let launcher_root = temp_dir.path().to_path_buf();
-    let api = PumasApi::builder(&launcher_root)
-        .auto_create_dirs(true)
-        .with_hf_client(false)
-        .with_process_manager(false)
-        .build()
-        .await
-        .unwrap();
+    let api = crate::handlers::test_support::build_test_api(&launcher_root).await;
     let plugin_loader = PluginLoader::new_async(launcher_root.join("launcher-data/plugins"))
         .await
         .unwrap();
-    let onnx_session_manager =
-        OnnxSessionManager::new(OnnxEmbeddingBackendKind::fake(), 2).unwrap();
+    let onnx_session_manager = OnnxSessionManager::new(onnx_backend, 2).unwrap();
     let state = Arc::new(AppState {
         api,
         version_managers: Arc::new(RwLock::new(HashMap::new())),
@@ -84,6 +82,22 @@ async fn gateway_test_state() -> (TempDir, Arc<AppState>) {
         onnx_session_manager,
     });
     (temp_dir, state)
+}
+
+fn optional_real_fixture_load_request(model_id: &str) -> Option<OnnxLoadRequest> {
+    let root = std::env::var_os("PUMAS_ONNX_REAL_MODEL_ROOT")?;
+    let model_path = std::env::var_os("PUMAS_ONNX_REAL_MODEL_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("onnx/model_fp16.onnx"));
+    Some(
+        OnnxLoadRequest::parse(
+            PathBuf::from(root),
+            model_path,
+            model_id,
+            OnnxLoadOptions::default(),
+        )
+        .unwrap(),
+    )
 }
 
 async fn record_onnx_served_model(state: &AppState) {
@@ -297,6 +311,46 @@ async fn openai_proxy_routes_onnx_embeddings_in_process() {
         body.pointer("/usage/total_tokens").and_then(Value::as_u64),
         Some(3)
     );
+}
+
+#[tokio::test]
+async fn openai_proxy_smokes_real_onnx_embedding_fixture() {
+    let Some(load_request) = optional_real_fixture_load_request("embeddings/nomic") else {
+        return;
+    };
+    let (_temp_dir, state) =
+        gateway_test_state_with_onnx_backend(OnnxEmbeddingBackendKind::real()).await;
+    state.onnx_session_manager.load(load_request).await.unwrap();
+    record_onnx_served_model(&state).await;
+
+    let (status, body) = openai_proxy_json(
+        state,
+        "/v1/embeddings",
+        json!({
+            "model": "nomic",
+            "input": ["search_query: hello world"],
+            "dimensions": 256
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.get("object").and_then(Value::as_str), Some("list"));
+    assert_eq!(body.get("model").and_then(Value::as_str), Some("nomic"));
+    let embedding = body
+        .pointer("/data/0/embedding")
+        .and_then(Value::as_array)
+        .unwrap();
+    assert_eq!(embedding.len(), 256);
+    assert!(embedding.iter().all(|value| {
+        value
+            .as_f64()
+            .is_some_and(|component| component.is_finite())
+    }));
+    assert!(body
+        .pointer("/usage/total_tokens")
+        .and_then(Value::as_u64)
+        .is_some_and(|tokens| tokens > 0));
 }
 
 #[tokio::test]

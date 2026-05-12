@@ -19,6 +19,8 @@ mod serving_onnx;
 mod shared;
 mod shortcuts;
 mod status;
+#[cfg(test)]
+mod test_support;
 mod torch;
 mod versions;
 

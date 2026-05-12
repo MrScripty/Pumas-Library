@@ -739,6 +739,30 @@ Update during implementation:
   real_backend_embeds_optional_real_fixture -- --nocapture`. File-size
   evidence: `real_backend.rs` 124 lines, RPC `server.rs` 344 lines,
   `openai_gateway_tests.rs` 422 lines, `serving_onnx_tests.rs` 161 lines.
+- 2026-05-12: Added the real Rust ONNX gateway facade smoke. The focused RPC
+  gateway test helper now serializes its test registry override and injects
+  either fake or real ONNX backends into isolated `AppState`. The opt-in
+  `openai_proxy_smokes_real_onnx_embedding_fixture` test loads the local Nomic
+  FP16 package through the real ONNX backend, records backend-owned served
+  status, calls the public `/v1/embeddings` gateway handler with the public
+  alias, and verifies HTTP 200, OpenAI-compatible JSON, 256 finite embedding
+  values, and non-zero token usage. Verification passed:
+  `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, and
+  `PUMAS_ONNX_REAL_MODEL_ROOT=<absolute local Nomic package>
+  PUMAS_ONNX_REAL_MODEL_PATH=onnx/model_fp16.onnx cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml
+  openai_proxy_smokes_real_onnx_embedding_fixture -- --nocapture`. The focused
+  RPC gateway commands require permission to bind PumasApi's local loopback IPC
+  listener in this sandbox; a sandboxed run failed with `Operation not
+  permitted` before the same test was rerun with that allowance. A broader
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx` run also
+  exposed existing `serving_onnx_tests` process-global registry leakage under
+  parallel execution (`database is locked`); that helper now uses the same
+  shared serialized isolated registry override pattern as gateway tests.
+  Follow-up verification passed:
+  `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`.
 
 ## Commit Cadence Notes
 

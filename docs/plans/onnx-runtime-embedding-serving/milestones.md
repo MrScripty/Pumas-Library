@@ -516,6 +516,10 @@ before the serving integration slice.
 RPC composition now uses the real backend in production through
 `OnnxEmbeddingBackendKind::real()`, while focused RPC tests explicitly inject
 the fake backend variant to preserve deterministic gateway/serving assertions.
+The public gateway smoke now exercises the real Rust ONNX backend through
+`/v1/embeddings` with the local Nomic FP16 fixture and verifies HTTP 200,
+OpenAI-compatible response shape, 256-dimensional finite embeddings, and
+non-zero token usage without calling raw ONNX provider internals.
 
 ### Milestone 3: Plugin And Runtime Profile Contracts
 
@@ -732,7 +736,7 @@ existing Pumas `/v1` gateway.
       `/v1/completions` unavailable for ONNX embedding-only models unless a
       future provider capability says otherwise.
 - [x] Reuse the shared gateway HTTP client from Milestone 0.
-- [ ] Ensure gateway request handling uses bounded body reads, connection
+- [x] Ensure gateway request handling uses bounded body reads, connection
       limits/timeouts, and no per-request client construction.
 - [ ] Preserve timeout and error mapping semantics so provider failures return
       bounded OpenAI-compatible error bodies and do not hang external callers.
@@ -769,9 +773,9 @@ standards threshold. Focused verification passed:
 `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
 `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`,
 and `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`.
-Remaining M5 work includes real facade acceptance tests, timeout/cancellation
-semantics, gateway shared-client/no-client-construction proof, provider-timeout
-coverage, and manual curl evidence after frontend/serve workflow is available.
+Remaining M5 work includes timeout/cancellation semantics,
+provider-timeout coverage, and manual curl evidence after frontend/serve
+workflow is available.
 The follow-up handler-contract slice added direct gateway handler tests for the
 ONNX public `/v1/embeddings` path: a served and loaded ONNX model returns
 OpenAI-compatible embedding JSON through the in-process adapter, ONNX rejects
@@ -794,6 +798,23 @@ model, profile id, input count, dimensions, and error code only. It does not
 log embedding input text, tokens, secrets, or model paths. Verification passed:
 `cargo fmt --manifest-path rust/Cargo.toml --all -- --check` and
 `cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`.
+The real gateway facade smoke added an opt-in test that injects the production
+real ONNX backend into isolated RPC state, loads the local Nomic package via
+`PUMAS_ONNX_REAL_MODEL_ROOT` and `PUMAS_ONNX_REAL_MODEL_PATH`, records the
+backend-owned served status, and calls the public `/v1/embeddings` gateway
+handler. It verifies HTTP 200, OpenAI-compatible JSON, the public gateway alias,
+256 finite embedding values, and non-zero token accounting. Focused
+verification passed:
+`cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+`cargo test --manifest-path rust/crates/pumas-rpc/Cargo.toml openai_gateway`,
+`cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`, and
+`PUMAS_ONNX_REAL_MODEL_ROOT=<absolute local Nomic package>
+PUMAS_ONNX_REAL_MODEL_PATH=onnx/model_fp16.onnx cargo test --manifest-path
+rust/crates/pumas-rpc/Cargo.toml
+openai_proxy_smokes_real_onnx_embedding_fixture -- --nocapture`. The focused
+RPC gateway commands require permission to bind PumasApi's local loopback IPC
+listener in this sandbox; the sandboxed attempt failed with
+`Operation not permitted` before the test was rerun with that allowance.
 
 ### Milestone 6: Frontend Integration
 

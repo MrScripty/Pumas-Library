@@ -15,10 +15,12 @@ Runtime execution is wired into serving.
 | `mod.rs` | ONNX provider/session contract types and shared validation. |
 | `fake.rs` | Deterministic fake embedding backend used by serving/gateway slices until real ONNX execution is wired. |
 | `manager.rs` | Bounded session-manager wrapper and backend trait used by fake and real execution backends. |
+| `output.rs` | Real ONNX output tensor selection, dtype extraction, and hidden-state shape validation. |
 | `package.rs` | Shared model-package file discovery under the validated ONNX model root. |
 | `postprocess.rs` | Pure embedding post-processing for pooling, optional layer norm, truncation, and L2 normalization. |
 | `real.rs` | Real ONNX Runtime session loader boundary backed by the Rust `ort` crate. |
 | `real_backend.rs` | Real ONNX backend that stores loaded sessions and runs tokenization, ONNX inference, and post-processing. |
+| `tensors.rs` | Tokenized-input padding into ONNX Runtime input tensor buffers. |
 | `tokenizer.rs` | Rust tokenizer loader/tokenization contract for model-package `tokenizer.json` files. |
 | `tests.rs` | Focused ONNX contract, fake backend, and session-manager tests. |
 

@@ -510,6 +510,9 @@ selects either a named output or first floating tensor, extracts `f32`/`f16`/
 postprocessor, and returns one embedding row per input. The opt-in local Nomic
 FP16 smoke verifies two ordered inputs, 256-dimensional Matryoshka truncation,
 finite values, and non-zero token usage through actual ONNX Runtime inference.
+The follow-up no-behavior split moved tensor padding to `tensors.rs` and output
+selection/extraction to `output.rs`, reducing `real.rs` from 452 to 219 lines
+before the serving integration slice.
 
 ### Milestone 3: Plugin And Runtime Profile Contracts
 

@@ -14,10 +14,12 @@ use serde::{Deserialize, Serialize};
 mod config;
 mod fake;
 mod manager;
+mod output;
 mod package;
 mod postprocess;
 mod real;
 mod real_backend;
+mod tensors;
 mod tokenizer;
 
 pub use config::OnnxModelConfig;

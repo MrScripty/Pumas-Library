@@ -711,6 +711,20 @@ Update during implementation:
   `mod.rs` 378 lines, `real.rs` 452 lines, `real_backend.rs` 71 lines,
   `tests.rs` 435 lines. New risk recorded: split `real.rs` before adding more
   real-inference responsibilities.
+- 2026-05-12: Completed the no-behavior real-inference module split required
+  by the standards risk above. Tokenized input padding moved to `tensors.rs`,
+  and output tensor selection/dtype extraction/shape conversion moved to
+  `output.rs`. `real.rs` now owns session load/run orchestration only and is
+  reduced from 452 to 219 lines before serving integration begins. Verification
+  passed: `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path rust/crates/pumas-core/Cargo.toml onnx`,
+  `PUMAS_ONNX_REAL_MODEL_ROOT=<absolute local Nomic package>
+  PUMAS_ONNX_REAL_MODEL_PATH=onnx/model_fp16.onnx cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml real_backend_embeds_optional_real_fixture
+  -- --nocapture`, and `cargo test --manifest-path
+  rust/crates/pumas-rpc/Cargo.toml onnx`. File-size evidence: `mod.rs` 380
+  lines, `real.rs` 219 lines, `output.rs` 178 lines, `tensors.rs` 60 lines,
+  `real_backend.rs` 71 lines, `tests.rs` 435 lines.
 
 ## Commit Cadence Notes
 
@@ -1192,6 +1206,16 @@ changes remain.
   --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size
   evidence: `onnx_runtime/mod.rs` 378 lines, `real.rs` 452 lines,
   `real_backend.rs` 71 lines, `tests.rs` 435 lines.
+- ONNX real-inference module split verified with `cargo fmt --manifest-path
+  rust/Cargo.toml --all -- --check`, `cargo test --manifest-path
+  rust/crates/pumas-core/Cargo.toml onnx`, `PUMAS_ONNX_REAL_MODEL_ROOT=<absolute
+  local Nomic package> PUMAS_ONNX_REAL_MODEL_PATH=onnx/model_fp16.onnx cargo
+  test --manifest-path rust/crates/pumas-core/Cargo.toml
+  real_backend_embeds_optional_real_fixture -- --nocapture`, `cargo test
+  --manifest-path rust/crates/pumas-rpc/Cargo.toml onnx`, and file-size
+  evidence: `onnx_runtime/mod.rs` 380 lines, `real.rs` 219 lines,
+  `output.rs` 178 lines, `tensors.rs` 60 lines, `real_backend.rs` 71 lines,
+  `tests.rs` 435 lines.
 
 ### Traceability Links
 

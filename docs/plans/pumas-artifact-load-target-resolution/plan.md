@@ -243,6 +243,9 @@ targets to workers.
   now rejects requests with no selected artifact identity, resolves a missing
   `selected_artifact_id` from a unique indexed `selected_artifact_path`, and
   reports typed diagnostics for missing or ambiguous path matches.
+- M2-003 closed: Pantograph review found a guarded production `unwrap()` in
+  selected-artifact path resolution. The resolver now expresses the zero,
+  one, and many match cases by matching iterator results directly.
 
 ## Risks And Mitigations
 | Risk | Mitigation |

@@ -144,12 +144,13 @@ fn selected_artifact_id_from_path(
         index.list_model_package_facts_cache(model_id, ModelPackageFactsCacheScope::Detail)?,
     );
 
-    match matches.len() {
-        0 => Ok(SelectedArtifactIdentity::PathNotIndexed),
-        1 => Ok(SelectedArtifactIdentity::Resolved(
-            matches.into_iter().next().unwrap(),
-        )),
-        _ => Ok(SelectedArtifactIdentity::AmbiguousPath),
+    let mut matches = matches.into_iter();
+    match (matches.next(), matches.next()) {
+        (None, _) => Ok(SelectedArtifactIdentity::PathNotIndexed),
+        (Some(selected_artifact_id), None) => {
+            Ok(SelectedArtifactIdentity::Resolved(selected_artifact_id))
+        }
+        (Some(_), Some(_)) => Ok(SelectedArtifactIdentity::AmbiguousPath),
     }
 }
 

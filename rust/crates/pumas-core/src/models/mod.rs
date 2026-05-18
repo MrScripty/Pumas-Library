@@ -5,6 +5,7 @@
 //! all layers of the application.
 
 mod api_response;
+mod artifact_load_target;
 mod custom_node;
 mod github;
 mod inference_defaults;
@@ -17,6 +18,7 @@ mod serving;
 mod version;
 
 pub use api_response::*;
+pub use artifact_load_target::*;
 pub use custom_node::*;
 pub use github::*;
 pub use inference_defaults::*;

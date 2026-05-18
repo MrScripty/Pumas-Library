@@ -1,0 +1,11 @@
+{
+  "artifact_state": "stale",
+  "entry_path_state": "stale",
+  "diagnostics": [
+    {
+      "code": "mode_not_allowed",
+      "field_path": "resolution_mode",
+      "message": "PumasReadOnlyLibrary cannot perform owner-fresh artifact resolution"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "model_ref": {
+    "model_ref_contract_version": 1,
+    "model_id": "image/stable-diffusion/tiny-sd",
+    "selected_artifact_id": "tiny-sd",
+    "selected_artifact_path": "image/stable-diffusion/tiny-sd"
+  },
+  "expected_artifact_kind": "diffusers_bundle",
+  "caller_observed_entry_path": "image/stable-diffusion/tiny-sd",
+  "caller_observed_package_facts_contract_version": 2,
+  "resolution_mode": "owner_fresh",
+  "consumer": {
+    "consumer_name": "pantograph",
+    "task_kind": "image_generation",
+    "runtime_family": "pytorch.diffusers"
+  }
+}

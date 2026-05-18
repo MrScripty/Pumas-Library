@@ -14,6 +14,7 @@ frontend, ensuring type-compatible serialization across all layers.
 | `api_response.rs` | `ApiResponse<T>` - Generic response wrapper with `success`/`error` fields and flattened data |
 | `responses.rs` | `BaseResponse` and concrete response types matching frontend TypeScript interfaces |
 | `model.rs` | Model-related types: `ModelData`, `HuggingFaceModel`, `ModelMetadata`, external-asset metadata fields, and download/import types |
+| `artifact_load_target.rs` | Selected-artifact load-target request/response DTOs, diagnostics, approved path shape, and resolver mode contract for Pantograph and runtime consumers |
 | `model_library_selector.rs` | Fast model-library selector snapshot DTOs with canonical model refs, selected artifact identity, entry-path state, artifact state, and detail freshness |
 | `package_facts.rs` | Versioned model package-fact DTOs for artifact, component, task, backend-hint, generation-default, and custom-code evidence |
 | `runtime_profile.rs` | Local runtime profile, provider settings, model-route, status, snapshot, and update-feed DTOs shared with RPC/Electron/frontend consumers. |
@@ -82,6 +83,12 @@ frontend, ensuring type-compatible serialization across all layers.
   selected artifact identity, entry path readiness, artifact readiness, and compact display facts.
   `indexed_path` is display/debug data only, and `entry_path` is executable only when both
   `entry_path_state` and `artifact_state` are `ready`.
+- `ResolveModelArtifactLoadTargetRequest` and
+  `ResolveModelArtifactLoadTargetResponse` are the exact selected-artifact
+  execution handoff contract. `PumasModelRef` is the authoritative selected
+  artifact reference; caller-observed package facts are stale-check inputs only.
+  `ReadOnlyIndexed` resolution is non-mutating, and read-only surfaces must
+  reject `OwnerFresh` with typed diagnostics instead of silently downgrading.
 - `RuntimeProfileConfig`, `ModelRuntimeRoute`, `RuntimeProfileStatus`, and
   `RuntimeProfileUpdateFeed` are the host-facing local runtime contract.
   Consumers should treat `profile_id` as the stable route key; raw endpoint
@@ -125,6 +132,28 @@ Required wire-shape rules:
 - `generation_defaults` are model-provided defaults from package files, not
   Pumas UI/runtime settings.
 - Omitted optional fields have serde defaults and are part of the contract.
+
+## Artifact Load-Target Producer Contract
+
+`ResolveModelArtifactLoadTargetResponse` is the canonical load-target response
+for consumers that need an executable local artifact path. Consumers should use
+`artifact_state`, `entry_path_state`, and typed diagnostics rather than parsing
+message text.
+
+Required wire-shape rules:
+
+- Field names and enum labels use snake_case as defined by
+  `artifact_load_target.rs`.
+- `target` is present only when both artifact and entry path states are
+  `ready`.
+- `local_load_path` is a Pumas-approved path and may point to library-owned
+  storage or a validated external-reference asset.
+- `storage_kind` and `validation_state` are part of the response contract so
+  consumers do not infer authority from path prefixes.
+- `content_fingerprint` is optional and may be omitted when it is not already
+  available from indexed/cache state.
+- `PumasArtifactLoadTargetResolutionMode` is enforced by the receiving surface;
+  unsupported modes must produce typed errors or diagnostics.
 
 `ResolvedModelPackageFactsSummary` is the canonical compact row shape for host
 list/search/cache population. It is derived from full package facts and carries

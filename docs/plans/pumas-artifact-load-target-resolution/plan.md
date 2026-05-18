@@ -124,17 +124,17 @@ remain intact and must not be repurposed as the new selected-artifact resolver.
 **Goal:** Add typed request/response contracts without resolver behavior.
 
 **Tasks:**
-- [ ] Add model DTOs and diagnostics using existing Pumas contracts.
-- [ ] Export the DTOs through the existing model module pattern.
-- [ ] Add serde fixture round-trip tests.
-- [ ] Update model contract documentation.
+- [x] Add model DTOs and diagnostics using existing Pumas contracts.
+- [x] Export the DTOs through the existing model module pattern.
+- [x] Add serde fixture round-trip tests.
+- [x] Update model contract documentation.
 
 **Verification:**
-- Targeted contract fixture tests.
-- `cargo fmt`.
-- `cargo check` or targeted crate tests for touched Rust crates.
+- `cargo fmt --manifest-path rust/Cargo.toml --all`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library --test artifact_load_target_contract_fixtures`
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
 
-**Status:** Pending
+**Status:** Complete
 
 ### Milestone 2: Read-Only Resolver Core
 **Goal:** Resolve exact selected artifacts from indexed/cache state without

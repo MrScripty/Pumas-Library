@@ -49,9 +49,10 @@ use crate::models::{
     ModelExecutionDescriptorBatchItem, ModelFactFamily, ModelLibraryChangeKind,
     ModelLibraryRefreshScope, ModelPackageFactsSummaryBatchItem, ModelPackageFactsSummaryResult,
     ModelPackageFactsSummarySnapshot, ModelPackageFactsSummaryStatus, ModelRefMigrationDiagnostic,
-    PackageArtifactKind, PumasModelRef, ResolveModelArtifactLoadTargetRequest,
-    ResolveModelArtifactLoadTargetResponse, ResolvedArtifactFacts, ResolvedModelPackageFacts,
-    ResolvedModelPackageFactsSummary, StorageKind, TaskEvidence, PACKAGE_FACTS_CONTRACT_VERSION,
+    PackageArtifactKind, PumasArtifactLoadTargetResolutionMode, PumasModelRef,
+    ResolveModelArtifactLoadTargetRequest, ResolveModelArtifactLoadTargetResponse,
+    ResolvedArtifactFacts, ResolvedModelPackageFacts, ResolvedModelPackageFactsSummary,
+    StorageKind, TaskEvidence, PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
@@ -2719,6 +2720,10 @@ impl ModelLibrary {
         &self,
         request: ResolveModelArtifactLoadTargetRequest,
     ) -> Result<ResolveModelArtifactLoadTargetResponse> {
+        if request.resolution_mode == PumasArtifactLoadTargetResolutionMode::OwnerFresh {
+            self.refresh_external_asset_state(&request.model_ref.model_id)
+                .await?;
+        }
         resolve_artifact_load_target_from_index(&self.index, request)
     }
 

@@ -120,6 +120,24 @@ mod tests {
         model_id: &str,
         selected_artifact_id: &str,
     ) -> ModelPackageFactsCacheRecord {
+        cache_summary_with(
+            root,
+            model_id,
+            selected_artifact_id,
+            PackageArtifactKind::Gguf,
+            StorageKind::LibraryOwned,
+            AssetValidationState::Valid,
+        )
+    }
+
+    fn cache_summary_with(
+        root: &Path,
+        model_id: &str,
+        selected_artifact_id: &str,
+        artifact_kind: PackageArtifactKind,
+        storage_kind: StorageKind,
+        validation_state: AssetValidationState,
+    ) -> ModelPackageFactsCacheRecord {
         let entry_path = root
             .join("pumas library")
             .join(model_id)
@@ -134,10 +152,10 @@ mod tests {
                 selected_artifact_path: Some(format!("{model_id}/{selected_artifact_id}")),
                 ..PumasModelRef::default()
             },
-            artifact_kind: PackageArtifactKind::Gguf,
+            artifact_kind,
             entry_path,
-            storage_kind: StorageKind::LibraryOwned,
-            validation_state: AssetValidationState::Valid,
+            storage_kind,
+            validation_state,
             task: TaskEvidence {
                 task_type_primary: Some("text_generation".to_string()),
                 ..TaskEvidence::default()
@@ -337,5 +355,205 @@ mod tests {
             response.diagnostics[0].code,
             PumasArtifactLoadTargetDiagnosticCode::ArtifactKindMismatch
         );
+    }
+
+    #[test]
+    fn read_only_library_reports_needs_detail_without_cached_facts() {
+        let temp = TempDir::new().unwrap();
+        let writer = ModelIndex::new(temp.path().join(DB_FILENAME)).unwrap();
+        let model_id = "llm/example/no-cache";
+        writer.upsert(&create_record(model_id)).unwrap();
+        drop(writer);
+
+        let read_only = PumasReadOnlyLibrary::open(temp.path()).unwrap();
+        let response = read_only
+            .resolve_model_artifact_load_target(artifact_request(
+                model_id,
+                Some("model-q4.gguf"),
+                PackageArtifactKind::Gguf,
+                PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+            ))
+            .unwrap();
+
+        assert!(!response.is_ready());
+        assert_eq!(response.artifact_state, ModelArtifactState::NeedsDetail);
+        assert_eq!(response.entry_path_state, ModelEntryPathState::NeedsDetail);
+        assert_eq!(
+            response.diagnostics[0].code,
+            PumasArtifactLoadTargetDiagnosticCode::ArtifactNeedsDetail
+        );
+    }
+
+    #[test]
+    fn read_only_library_reports_stale_cached_facts() {
+        let temp = TempDir::new().unwrap();
+        let writer = ModelIndex::new(temp.path().join(DB_FILENAME)).unwrap();
+        let model_id = "llm/example/stale-cache";
+        let artifact_id = "model-q4.gguf";
+        let mut cache = cache_summary(temp.path(), model_id, artifact_id);
+        cache.package_facts_contract_version = i64::from(PACKAGE_FACTS_CONTRACT_VERSION - 1);
+        writer.upsert(&create_record(model_id)).unwrap();
+        writer.upsert_model_package_facts_cache(&cache).unwrap();
+        drop(writer);
+
+        let read_only = PumasReadOnlyLibrary::open(temp.path()).unwrap();
+        let response = read_only
+            .resolve_model_artifact_load_target(artifact_request(
+                model_id,
+                Some(artifact_id),
+                PackageArtifactKind::Gguf,
+                PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+            ))
+            .unwrap();
+
+        assert!(!response.is_ready());
+        assert_eq!(response.artifact_state, ModelArtifactState::Stale);
+        assert_eq!(response.entry_path_state, ModelEntryPathState::Stale);
+        assert_eq!(
+            response.diagnostics[0].code,
+            PumasArtifactLoadTargetDiagnosticCode::StalePackageFacts
+        );
+    }
+
+    #[test]
+    fn read_only_library_reports_partial_and_invalid_cached_artifacts() {
+        let temp = TempDir::new().unwrap();
+        let writer = ModelIndex::new(temp.path().join(DB_FILENAME)).unwrap();
+        let partial_model_id = "llm/example/partial-cache";
+        let invalid_model_id = "llm/example/invalid-cache";
+        let artifact_id = "model-q4.gguf";
+        writer.upsert(&create_record(partial_model_id)).unwrap();
+        writer.upsert(&create_record(invalid_model_id)).unwrap();
+        writer
+            .upsert_model_package_facts_cache(&cache_summary_with(
+                temp.path(),
+                partial_model_id,
+                artifact_id,
+                PackageArtifactKind::Gguf,
+                StorageKind::LibraryOwned,
+                AssetValidationState::Degraded,
+            ))
+            .unwrap();
+        writer
+            .upsert_model_package_facts_cache(&cache_summary_with(
+                temp.path(),
+                invalid_model_id,
+                artifact_id,
+                PackageArtifactKind::Gguf,
+                StorageKind::LibraryOwned,
+                AssetValidationState::Invalid,
+            ))
+            .unwrap();
+        drop(writer);
+
+        let read_only = PumasReadOnlyLibrary::open(temp.path()).unwrap();
+        let partial = read_only
+            .resolve_model_artifact_load_target(artifact_request(
+                partial_model_id,
+                Some(artifact_id),
+                PackageArtifactKind::Gguf,
+                PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+            ))
+            .unwrap();
+        let invalid = read_only
+            .resolve_model_artifact_load_target(artifact_request(
+                invalid_model_id,
+                Some(artifact_id),
+                PackageArtifactKind::Gguf,
+                PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+            ))
+            .unwrap();
+
+        assert_eq!(partial.artifact_state, ModelArtifactState::Partial);
+        assert_eq!(partial.entry_path_state, ModelEntryPathState::Partial);
+        assert_eq!(
+            partial.diagnostics[0].code,
+            PumasArtifactLoadTargetDiagnosticCode::ArtifactPartial
+        );
+        assert_eq!(invalid.artifact_state, ModelArtifactState::Invalid);
+        assert_eq!(invalid.entry_path_state, ModelEntryPathState::Invalid);
+        assert_eq!(
+            invalid.diagnostics[0].code,
+            PumasArtifactLoadTargetDiagnosticCode::InvalidArtifact
+        );
+    }
+
+    #[test]
+    fn read_only_library_preserves_external_reference_target_state() {
+        let temp = TempDir::new().unwrap();
+        let writer = ModelIndex::new(temp.path().join(DB_FILENAME)).unwrap();
+        let model_id = "image/example/external-diffusers";
+        let artifact_id = "diffusers";
+        writer.upsert(&create_record(model_id)).unwrap();
+        writer
+            .upsert_model_package_facts_cache(&cache_summary_with(
+                temp.path(),
+                model_id,
+                artifact_id,
+                PackageArtifactKind::DiffusersBundle,
+                StorageKind::ExternalReference,
+                AssetValidationState::Valid,
+            ))
+            .unwrap();
+        drop(writer);
+
+        let read_only = PumasReadOnlyLibrary::open(temp.path()).unwrap();
+        let response = read_only
+            .resolve_model_artifact_load_target(artifact_request(
+                model_id,
+                Some(artifact_id),
+                PackageArtifactKind::DiffusersBundle,
+                PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+            ))
+            .unwrap();
+
+        assert!(response.is_ready());
+        let target = response.target.expect("external target should be ready");
+        assert_eq!(target.load_path_kind, PumasArtifactLoadPathKind::Directory);
+        assert_eq!(target.storage_kind, StorageKind::ExternalReference);
+        assert_eq!(target.validation_state, AssetValidationState::Valid);
+    }
+
+    #[test]
+    fn read_only_resolution_does_not_mutate_cached_facts() {
+        let temp = TempDir::new().unwrap();
+        let writer = ModelIndex::new(temp.path().join(DB_FILENAME)).unwrap();
+        let model_id = "llm/example/non-mutating";
+        let artifact_id = "model-q4.gguf";
+        writer.upsert(&create_record(model_id)).unwrap();
+        writer
+            .upsert_model_package_facts_cache(&cache_summary(temp.path(), model_id, artifact_id))
+            .unwrap();
+        let before = writer
+            .get_model_package_facts_cache(
+                model_id,
+                Some(artifact_id),
+                ModelPackageFactsCacheScope::Summary,
+            )
+            .unwrap();
+        drop(writer);
+
+        let read_only = PumasReadOnlyLibrary::open(temp.path()).unwrap();
+        let response = read_only
+            .resolve_model_artifact_load_target(artifact_request(
+                model_id,
+                Some(artifact_id),
+                PackageArtifactKind::Gguf,
+                PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+            ))
+            .unwrap();
+        assert!(response.is_ready());
+        drop(read_only);
+
+        let reader = ModelIndex::open_read_only(temp.path().join(DB_FILENAME)).unwrap();
+        let after = reader
+            .get_model_package_facts_cache(
+                model_id,
+                Some(artifact_id),
+                ModelPackageFactsCacheScope::Summary,
+            )
+            .unwrap();
+
+        assert_eq!(before, after);
     }
 }

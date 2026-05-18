@@ -165,10 +165,15 @@ fn response_from_artifact(
     let artifact_state = artifact_state(artifact.validation_state);
     let entry_path_state = entry_path_state(&artifact.entry_path, artifact_state);
     if entry_path_state != ModelEntryPathState::Ready {
+        let diagnostic = if artifact_state == ModelArtifactState::Invalid {
+            PumasArtifactLoadTargetDiagnosticCode::InvalidArtifact
+        } else {
+            diagnostic_for_entry_path_state(entry_path_state)
+        };
         return non_ready_response(
             artifact_state,
             entry_path_state,
-            diagnostic_for_entry_path_state(entry_path_state),
+            diagnostic,
             Some("target.local_load_path"),
             "selected artifact does not have a loadable local entry path",
         );

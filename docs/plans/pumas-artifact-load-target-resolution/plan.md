@@ -144,8 +144,8 @@ mutation.
 - [x] Add focused `model_library/artifact_load_target.rs` resolver module.
 - [x] Reuse or extract lower-level selected-artifact helpers without wrapping
   broad model-level APIs.
-- [x] Implement initial `ReadOnlyIndexed` behavior and typed unavailable diagnostics.
-- [ ] Add full non-mutation tests and core resolver state tests.
+- [x] Implement `ReadOnlyIndexed` behavior and typed unavailable diagnostics.
+- [x] Add full non-mutation tests and core resolver state tests.
 - [x] Update model-library documentation.
 
 **Verification:**
@@ -160,7 +160,7 @@ mutation.
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library read_only_library`
 - `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Milestone 3: Owner Freshness Surface
 **Goal:** Route owner-mode resolution through the same resolver core.
@@ -211,10 +211,9 @@ targets to workers.
 **Status:** Pending
 
 ## Issue Register
-- M2-001: Read-only resolver currently proves ready cache, kind mismatch, and
-  read-only mode rejection. Missing, partial, invalid, stale, needs-detail,
-  external-reference, and explicit non-mutation coverage still need to be added
-  before Milestone 2 can close.
+- M2-001 closed: Missing, partial, invalid, stale, needs-detail,
+  external-reference, and explicit non-mutation coverage were added before
+  closing Milestone 2.
 
 ## Risks And Mitigations
 | Risk | Mitigation |

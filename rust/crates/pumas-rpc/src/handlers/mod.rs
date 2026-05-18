@@ -812,6 +812,9 @@ async fn dispatch_method(
         "resolve_model_execution_descriptor" => {
             models::resolve_model_execution_descriptor(state, params).await
         }
+        "resolve_model_artifact_load_target" => {
+            models::resolve_model_artifact_load_target(state, params).await
+        }
         "resolve_model_package_facts" => models::resolve_model_package_facts(state, params).await,
         "list_model_library_updates_since" => {
             models::list_model_library_updates_since(state, params).await

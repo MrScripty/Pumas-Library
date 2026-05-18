@@ -6,7 +6,8 @@ use crate::models::{
     ModelExecutionDescriptorBatchItem, ModelInferenceSettingsBatchItem,
     ModelLibrarySelectorSnapshot, ModelLibrarySelectorSnapshotRequest,
     ModelLibraryUpdateNotification, ModelLibraryUpdateSubscription,
-    ModelPackageFactsSummaryBatchItem,
+    ModelPackageFactsSummaryBatchItem, ResolveModelArtifactLoadTargetRequest,
+    ResolveModelArtifactLoadTargetResponse,
 };
 use crate::registry::{InstanceEntry, InstanceStatus, LibraryRegistry, LocalInstanceTransportKind};
 use crate::{PumasError, Result};
@@ -69,6 +70,18 @@ impl PumasLocalClient {
     ) -> Result<ModelLibrarySelectorSnapshot> {
         self.call_owner_method(
             "model_library_selector_snapshot",
+            serde_json::json!({ "request": request }),
+        )
+        .await
+    }
+
+    /// Resolve a selected artifact load target in one transport request.
+    pub async fn resolve_model_artifact_load_target(
+        &self,
+        request: ResolveModelArtifactLoadTargetRequest,
+    ) -> Result<ResolveModelArtifactLoadTargetResponse> {
+        self.call_owner_method(
+            "resolve_model_artifact_load_target",
             serde_json::json!({ "request": request }),
         )
         .await
@@ -262,7 +275,12 @@ mod tests {
     use super::*;
     use crate::ipc::{IpcDispatch, IpcServer};
     use crate::model_library::ModelLibrary;
-    use crate::models::{ModelLibraryChangeKind, ModelLibrarySelectorSnapshot};
+    use crate::models::{
+        ModelArtifactState, ModelEntryPathState, ModelLibraryChangeKind,
+        ModelLibrarySelectorSnapshot, PumasArtifactConsumer, PumasArtifactLoadTargetDiagnosticCode,
+        PumasArtifactLoadTargetResolutionMode, PumasModelRef,
+        ResolveModelArtifactLoadTargetRequest, ResolveModelArtifactLoadTargetResponse,
+    };
     use async_trait::async_trait;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -292,6 +310,8 @@ mod tests {
     }
 
     struct BatchHydrationDispatch;
+
+    struct ArtifactLoadTargetDispatch;
 
     #[async_trait]
     impl IpcDispatch for BatchHydrationDispatch {
@@ -330,6 +350,34 @@ mod tests {
                     "unexpected IPC method: {method}"
                 ))),
             }
+        }
+    }
+
+    #[async_trait]
+    impl IpcDispatch for ArtifactLoadTargetDispatch {
+        async fn dispatch(
+            &self,
+            method: &str,
+            params: serde_json::Value,
+        ) -> std::result::Result<serde_json::Value, PumasError> {
+            assert_eq!(method, "resolve_model_artifact_load_target");
+            assert_eq!(params["connection_token"].as_str(), Some("token"));
+            let request: ResolveModelArtifactLoadTargetRequest =
+                serde_json::from_value(params["request"].clone())
+                    .expect("artifact target request should be forwarded");
+            assert_eq!(request.model_ref.model_id, "llm/local-client/model");
+            Ok(serde_json::to_value(
+                ResolveModelArtifactLoadTargetResponse {
+                    artifact_state: ModelArtifactState::Stale,
+                    entry_path_state: ModelEntryPathState::Stale,
+                    target: None,
+                    diagnostics: vec![crate::models::PumasArtifactLoadTargetDiagnostic {
+                        code: PumasArtifactLoadTargetDiagnosticCode::ModeNotAllowed,
+                        field_path: Some("resolution_mode".to_string()),
+                        message: "test diagnostic".to_string(),
+                    }],
+                },
+            )?)
         }
     }
 
@@ -468,6 +516,46 @@ mod tests {
         assert!(descriptors[0].error.is_some());
         assert_eq!(settings[0].model_id, "llm/batch/model");
         assert!(settings[0].error.is_some());
+    }
+
+    #[tokio::test]
+    async fn local_client_resolves_artifact_load_target_in_one_request() {
+        let Some(server) = IpcServer::start(Arc::new(ArtifactLoadTargetDispatch))
+            .await
+            .ok()
+        else {
+            eprintln!("Skipping local_client_resolves_artifact_load_target_in_one_request");
+            return;
+        };
+
+        let client = PumasLocalClient::connect(ready_instance(server.port))
+            .await
+            .unwrap();
+        let response = client
+            .resolve_model_artifact_load_target(ResolveModelArtifactLoadTargetRequest {
+                model_ref: PumasModelRef {
+                    model_id: "llm/local-client/model".to_string(),
+                    selected_artifact_id: Some("model-q4.gguf".to_string()),
+                    ..PumasModelRef::default()
+                },
+                expected_artifact_kind: None,
+                caller_observed_entry_path: None,
+                caller_observed_package_facts_contract_version: None,
+                resolution_mode: PumasArtifactLoadTargetResolutionMode::OwnerFresh,
+                consumer: PumasArtifactConsumer {
+                    consumer_name: "test".to_string(),
+                    task_kind: None,
+                    runtime_family: None,
+                },
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.artifact_state, ModelArtifactState::Stale);
+        assert_eq!(
+            response.diagnostics[0].code,
+            PumasArtifactLoadTargetDiagnosticCode::ModeNotAllowed
+        );
     }
 
     #[tokio::test]

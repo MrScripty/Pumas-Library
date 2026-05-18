@@ -21,7 +21,7 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
 | Local runtime profiles | `get_runtime_profiles_snapshot`, `list_runtime_profile_updates_since`, `upsert_runtime_profile`, `set_model_runtime_route`, `clear_model_runtime_route` | `rust/crates/pumas-rpc/src/handlers/runtime_profiles.rs` |
 | User-directed serving | `get_serving_status`, `list_serving_status_updates_since`, `validate_model_serving_config`, `serve_model`, `unserve_model` | `rust/crates/pumas-rpc/src/handlers/serving.rs` |
 | Version management | `get_available_versions`, `install_version`, `switch_version`, `get_installation_progress` | `rust/crates/pumas-rpc/src/handlers/versions/` |
-| Model library | `get_models`, `import_model`, `search_hf_models`, `get_library_model_metadata` | `rust/crates/pumas-rpc/src/handlers/models/` |
+| Model library | `get_models`, `import_model`, `search_hf_models`, `get_library_model_metadata`, `resolve_model_artifact_load_target` | `rust/crates/pumas-rpc/src/handlers/models/` |
 | Process control | `launch_comfyui`, `stop_comfyui`, `open_path`, `open_url` | `rust/crates/pumas-rpc/src/handlers/process.rs` |
 | App integrations | `ollama_list_models`, `ollama_list_models_for_profile`, `ollama_create_model_for_profile`, `ollama_load_model_for_profile`, `ollama_unload_model_for_profile`, `ollama_delete_model_for_profile`, `torch_list_slots`, `torch_configure` | `rust/crates/pumas-rpc/src/handlers/ollama.rs`, `torch.rs` |
 | Link and mapping | `get_link_health`, `preview_model_mapping`, `sync_with_resolutions` | `rust/crates/pumas-rpc/src/handlers/links.rs` |

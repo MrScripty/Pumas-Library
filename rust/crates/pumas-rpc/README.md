@@ -11,6 +11,10 @@ Handlers must parse renderer or network supplied payloads at the RPC boundary be
 
 The first typed-command pass covers model import/download and process open handlers. New handlers should prefer `handlers::parse_params` plus serde aliases for camelCase compatibility instead of ad hoc `serde_json::Value` extraction.
 
+Artifact load-target resolution is a transport adapter over the Pumas API. RPC
+handlers must deserialize the typed request and delegate; they must not infer
+library roots, scan model files, or repair selected artifact refs.
+
 The HTTP server accepts CORS requests only from loopback browser origins and only for `GET`/`POST` with `Content-Type`. External LAN or internet browser origins are not part of the supported trust boundary.
 
 The CLI host binding policy defaults to loopback-only addresses. Binding to a non-loopback IP now requires explicit `--allow-lan` opt-in at process startup.

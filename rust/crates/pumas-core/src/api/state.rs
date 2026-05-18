@@ -507,6 +507,25 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     .await?;
                 Ok(serde_json::to_value(descriptor)?)
             }
+            "resolve_model_artifact_load_target" => {
+                validate_local_client_connection_token(self, &params)?;
+                let request_value = params
+                    .get("request")
+                    .cloned()
+                    .unwrap_or_else(|| params.clone());
+                let request: crate::models::ResolveModelArtifactLoadTargetRequest =
+                    serde_json::from_value(request_value).map_err(|err| PumasError::Json {
+                        message: format!(
+                            "Invalid resolve_model_artifact_load_target request: {err}"
+                        ),
+                        source: Some(err),
+                    })?;
+                let response = self
+                    .model_library
+                    .resolve_model_artifact_load_target(request)
+                    .await?;
+                Ok(serde_json::to_value(response)?)
+            }
             "resolve_model_execution_descriptors_batch" => {
                 validate_local_client_connection_token(self, &params)?;
                 let model_ids = parse_model_ids_param(&params)?;

@@ -469,6 +469,17 @@ impl PumasApi {
             .await
     }
 
+    /// Resolve a selected model artifact into an approved runtime load target.
+    pub async fn resolve_model_artifact_load_target(
+        &self,
+        request: models::ResolveModelArtifactLoadTargetRequest,
+    ) -> Result<models::ResolveModelArtifactLoadTargetResponse> {
+        self.try_primary()?
+            .model_library
+            .resolve_model_artifact_load_target(request)
+            .await
+    }
+
     /// Resolve cheap execution descriptors for multiple models.
     pub async fn resolve_model_execution_descriptors_batch(
         &self,

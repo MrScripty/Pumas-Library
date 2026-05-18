@@ -185,18 +185,23 @@ mutation.
 **Goal:** Expose the resolver through typed thin adapters.
 
 **Tasks:**
-- [ ] Add Pumas API/state entry point.
-- [ ] Add RPC/IPC/local-client method if required by Pantograph's selected
+- [x] Add Pumas API/state entry point.
+- [x] Add RPC/IPC/local-client method if required by Pantograph's selected
   integration path.
-- [ ] Enforce allowed modes per surface, especially read-only rejection of
+- [x] Enforce allowed modes per surface, especially read-only rejection of
   `OwnerFresh`.
-- [ ] Update API/RPC/IPC documentation and tests.
+- [x] Update API/RPC/IPC documentation and tests.
 
 **Verification:**
 - Boundary tests reject malformed or disallowed mode payloads.
 - API/RPC/local-client tests for ready and non-ready responses.
 
-**Status:** Pending
+**Slice Verification:**
+- `cargo fmt --manifest-path rust/Cargo.toml --all`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library local_client_resolves_artifact_load_target_in_one_request`
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-library -p pumas-rpc`
+
+**Status:** Complete
 
 ### Milestone 5: Pantograph Integration
 **Goal:** Resolve load targets before worker dispatch and pass only approved

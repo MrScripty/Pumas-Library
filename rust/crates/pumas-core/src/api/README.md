@@ -102,6 +102,9 @@ println!("offline={}", net.is_offline);
 - `model_library_selector_snapshot` is a direct primary-only selector surface
   during the transition. It reads indexed SQLite/cache state and intentionally
   does not proxy through transparent IPC.
+- `resolve_model_artifact_load_target` resolves exact selected artifacts through
+  the model-library resolver core. It does not join library roots in the API
+  layer, regenerate package facts, or call broad execution-descriptor APIs.
 - Startup ordering is backend-owned: callers construct the API, then use methods; they do not manually start watcher or reconcile loops.
 - Read paths may trigger bounded on-demand reconcile when the backend marks the
   library dirty or runtime freshness is unknown.

@@ -91,6 +91,7 @@ export const RPC_METHOD_REGISTRY = {
     'get_embedded_metadata',
     'get_library_model_metadata',
     'resolve_model_execution_descriptor',
+    'resolve_model_artifact_load_target',
     'resolve_model_package_facts',
     'list_model_library_updates_since',
     'resolve_model_package_facts_summary',

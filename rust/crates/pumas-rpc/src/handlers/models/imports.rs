@@ -437,6 +437,26 @@ pub async fn resolve_model_execution_descriptor(
     Ok(serde_json::to_value(descriptor)?)
 }
 
+pub async fn resolve_model_artifact_load_target(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let request_value = params
+        .get("request")
+        .cloned()
+        .unwrap_or_else(|| params.clone());
+    let request: pumas_library::models::ResolveModelArtifactLoadTargetRequest =
+        serde_json::from_value(request_value).map_err(|err| pumas_library::PumasError::Json {
+            message: format!("Invalid resolve_model_artifact_load_target request: {err}"),
+            source: Some(err),
+        })?;
+    let response = state
+        .api
+        .resolve_model_artifact_load_target(request)
+        .await?;
+    Ok(serde_json::to_value(response)?)
+}
+
 pub async fn resolve_model_package_facts(
     state: &AppState,
     params: &Value,

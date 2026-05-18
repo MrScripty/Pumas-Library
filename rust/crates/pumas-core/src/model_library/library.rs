@@ -17,6 +17,7 @@ use crate::index::{
     ModelRecord, SearchResult,
 };
 use crate::metadata::{atomic_read_json, atomic_write_json};
+use crate::model_library::artifact_load_target::resolve_artifact_load_target_from_index;
 use crate::model_library::external_assets::{
     get_diffusers_bundle_lookup_hints, is_diffusers_bundle, is_external_reference,
     refresh_external_metadata_validation, MODEL_EXECUTION_CONTRACT_VERSION,
@@ -48,7 +49,8 @@ use crate::models::{
     ModelExecutionDescriptorBatchItem, ModelFactFamily, ModelLibraryChangeKind,
     ModelLibraryRefreshScope, ModelPackageFactsSummaryBatchItem, ModelPackageFactsSummaryResult,
     ModelPackageFactsSummarySnapshot, ModelPackageFactsSummaryStatus, ModelRefMigrationDiagnostic,
-    PackageArtifactKind, PumasModelRef, ResolvedArtifactFacts, ResolvedModelPackageFacts,
+    PackageArtifactKind, PumasModelRef, ResolveModelArtifactLoadTargetRequest,
+    ResolveModelArtifactLoadTargetResponse, ResolvedArtifactFacts, ResolvedModelPackageFacts,
     ResolvedModelPackageFactsSummary, StorageKind, TaskEvidence, PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use serde_json::Value;
@@ -2706,6 +2708,18 @@ impl ModelLibrary {
         request: crate::models::ModelLibrarySelectorSnapshotRequest,
     ) -> Result<crate::models::ModelLibrarySelectorSnapshot> {
         self.index.list_model_library_selector_snapshot(&request)
+    }
+
+    /// Resolve a selected artifact into an approved runtime load target.
+    ///
+    /// The first implementation reads indexed/cache state through the shared
+    /// resolver core. It does not regenerate package facts or call broader
+    /// model-level execution descriptor APIs.
+    pub async fn resolve_model_artifact_load_target(
+        &self,
+        request: ResolveModelArtifactLoadTargetRequest,
+    ) -> Result<ResolveModelArtifactLoadTargetResponse> {
+        resolve_artifact_load_target_from_index(&self.index, request)
     }
 
     /// List model-library update events after a producer cursor.

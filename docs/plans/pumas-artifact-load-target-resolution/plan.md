@@ -166,8 +166,8 @@ mutation.
 **Goal:** Route owner-mode resolution through the same resolver core.
 
 **Tasks:**
-- [ ] Add `ModelLibrary` owner-fresh entry point.
-- [ ] Allow owner freshness only through owner-owned surfaces.
+- [x] Add `ModelLibrary` owner-fresh entry point.
+- [x] Allow owner freshness only through owner-owned surfaces.
 - [ ] Prove owner-fresh and read-only behavior diverge only by explicit mode.
 
 **Verification:**
@@ -175,7 +175,11 @@ mutation.
   `ReadOnlyIndexed` does not.
 - Tests showing no full package-facts regeneration or fingerprint computation.
 
-**Status:** Pending
+**Slice Verification:**
+- `cargo fmt --manifest-path rust/Cargo.toml --all`
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+
+**Status:** In Progress
 
 ### Milestone 4: API, RPC, And Local Client Surfaces
 **Goal:** Expose the resolver through typed thin adapters.
@@ -214,6 +218,11 @@ targets to workers.
 - M2-001 closed: Missing, partial, invalid, stale, needs-detail,
   external-reference, and explicit non-mutation coverage were added before
   closing Milestone 2.
+- M3-001: `ModelLibrary::resolve_model_artifact_load_target` now exposes the
+  owner surface through the shared resolver core, but active owner freshness
+  work is not implemented yet. Resolve before closing Milestone 3 by either
+  adding explicit freshness behavior and tests or recording that owner-fresh is
+  currently an indexed/cache-only owner request.
 
 ## Risks And Mitigations
 | Risk | Mitigation |

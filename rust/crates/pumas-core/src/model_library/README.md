@@ -138,8 +138,13 @@ Provide a single backend-owned model registry that can import, classify, validat
 - Selector rows are safe list references. `indexed_path` is display/debug data,
   and `entry_path` is executable only when entry and artifact state are both
   `ready`.
+- Artifact load-target resolution is exact selected-artifact resolution. The
+  read-only path resolves only from indexed/cache package-facts state and does
+  not call broad package-facts, execution-descriptor, or primary-file APIs.
 - Read-only consumers use `PumasReadOnlyLibrary` for snapshot-style access when
-  they do not own the local Pumas instance lifecycle.
+  they do not own the local Pumas instance lifecycle. `PumasReadOnlyLibrary`
+  rejects `OwnerFresh` load-target requests with typed diagnostics instead of
+  downgrading or mutating state.
 
 ## Structured Producer Contract
 

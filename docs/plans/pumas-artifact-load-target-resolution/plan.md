@@ -141,12 +141,12 @@ remain intact and must not be repurposed as the new selected-artifact resolver.
 mutation.
 
 **Tasks:**
-- [ ] Add focused `model_library/artifact_load_target.rs` resolver module.
-- [ ] Reuse or extract lower-level selected-artifact helpers without wrapping
+- [x] Add focused `model_library/artifact_load_target.rs` resolver module.
+- [x] Reuse or extract lower-level selected-artifact helpers without wrapping
   broad model-level APIs.
-- [ ] Implement `ReadOnlyIndexed` behavior and typed unavailable diagnostics.
-- [ ] Add non-mutation tests and core resolver state tests.
-- [ ] Update model-library documentation.
+- [x] Implement initial `ReadOnlyIndexed` behavior and typed unavailable diagnostics.
+- [ ] Add full non-mutation tests and core resolver state tests.
+- [x] Update model-library documentation.
 
 **Verification:**
 - Resolver tests for ready, missing, partial, invalid, stale, needs-detail,
@@ -155,7 +155,12 @@ mutation.
 - Read-only non-mutation test.
 - `cargo fmt`, targeted tests, and `cargo check`.
 
-**Status:** Pending
+**Slice Verification:**
+- `cargo fmt --manifest-path rust/Cargo.toml --all`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library read_only_library`
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+
+**Status:** In Progress
 
 ### Milestone 3: Owner Freshness Surface
 **Goal:** Route owner-mode resolution through the same resolver core.
@@ -206,7 +211,10 @@ targets to workers.
 **Status:** Pending
 
 ## Issue Register
-- None currently open.
+- M2-001: Read-only resolver currently proves ready cache, kind mismatch, and
+  read-only mode rejection. Missing, partial, invalid, stale, needs-detail,
+  external-reference, and explicit non-mutation coverage still need to be added
+  before Milestone 2 can close.
 
 ## Risks And Mitigations
 | Risk | Mitigation |

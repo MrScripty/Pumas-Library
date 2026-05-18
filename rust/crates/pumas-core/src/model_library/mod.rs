@@ -22,6 +22,7 @@
 //! ```
 
 mod artifact_identity;
+mod artifact_load_target;
 mod dependencies;
 pub(crate) mod dependency_pins;
 mod directory_import;

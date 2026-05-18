@@ -1,8 +1,9 @@
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::index::{
-    classify_package_facts_cache_record, ModelIndex, ModelPackageFactsCacheRowState,
-    ModelPackageFactsCacheScope,
+    classify_package_facts_cache_record, ModelIndex, ModelPackageFactsCacheRecord,
+    ModelPackageFactsCacheRowState, ModelPackageFactsCacheScope,
 };
 use crate::models::{
     ModelArtifactState, ModelEntryPathState, PackageArtifactKind, PumasArtifactLoadPathKind,
@@ -39,17 +40,53 @@ pub(crate) fn resolve_artifact_load_target_from_index(
         ));
     }
 
-    let selected_artifact_id =
-        normalized_selected_artifact_id(request.model_ref.selected_artifact_id.as_deref());
+    let selected_artifact_path =
+        normalized_non_empty(request.model_ref.selected_artifact_path.as_deref());
+    let selected_artifact_id = match normalized_selected_artifact_id(
+        request.model_ref.selected_artifact_id.as_deref(),
+    ) {
+        Some(selected_artifact_id) => selected_artifact_id.to_string(),
+        None => {
+            let identity = selected_artifact_id_from_path(
+                index,
+                &request.model_ref.model_id,
+                selected_artifact_path,
+            )?;
+            match identity {
+                SelectedArtifactIdentity::Resolved(selected_artifact_id) => selected_artifact_id,
+                SelectedArtifactIdentity::MissingIdentity => {
+                    return Ok(missing_selected_artifact_response(
+                        "model_ref.selected_artifact_id",
+                        "model_ref must identify one selected artifact before load-target resolution",
+                    ));
+                }
+                SelectedArtifactIdentity::PathNotIndexed => {
+                    return Ok(non_ready_response(
+                        ModelArtifactState::Missing,
+                        ModelEntryPathState::Missing,
+                        PumasArtifactLoadTargetDiagnosticCode::ArtifactMissing,
+                        Some("model_ref.selected_artifact_path"),
+                        "selected artifact path is not present in indexed package facts",
+                    ));
+                }
+                SelectedArtifactIdentity::AmbiguousPath => {
+                    return Ok(missing_selected_artifact_response(
+                        "model_ref.selected_artifact_path",
+                        "selected artifact path matches multiple indexed artifacts",
+                    ));
+                }
+            }
+        }
+    };
 
     let summary_record = index.get_model_package_facts_cache(
         &request.model_ref.model_id,
-        selected_artifact_id,
+        Some(&selected_artifact_id),
         ModelPackageFactsCacheScope::Summary,
     )?;
     let (summary_state, summary) = classify_package_facts_cache_record::<
         ResolvedModelPackageFactsSummary,
-    >(selected_artifact_id, None, summary_record.as_ref());
+    >(Some(&selected_artifact_id), None, summary_record.as_ref());
     if let Some(summary) = summary {
         return Ok(response_from_summary(&request, summary));
     }
@@ -59,11 +96,11 @@ pub(crate) fn resolve_artifact_load_target_from_index(
 
     let detail_record = index.get_model_package_facts_cache(
         &request.model_ref.model_id,
-        selected_artifact_id,
+        Some(&selected_artifact_id),
         ModelPackageFactsCacheScope::Detail,
     )?;
     let (detail_state, facts) = classify_package_facts_cache_record::<ResolvedModelPackageFacts>(
-        selected_artifact_id,
+        Some(&selected_artifact_id),
         None,
         detail_record.as_ref(),
     );
@@ -79,6 +116,95 @@ pub(crate) fn resolve_artifact_load_target_from_index(
     Ok(response_from_cache_state(detail_state))
 }
 
+enum SelectedArtifactIdentity {
+    Resolved(String),
+    MissingIdentity,
+    PathNotIndexed,
+    AmbiguousPath,
+}
+
+fn selected_artifact_id_from_path(
+    index: &ModelIndex,
+    model_id: &str,
+    selected_artifact_path: Option<&str>,
+) -> Result<SelectedArtifactIdentity> {
+    let Some(selected_artifact_path) = selected_artifact_path else {
+        return Ok(SelectedArtifactIdentity::MissingIdentity);
+    };
+
+    let mut matches = BTreeSet::new();
+    collect_matching_selected_artifact_ids(
+        &mut matches,
+        selected_artifact_path,
+        index.list_model_package_facts_cache(model_id, ModelPackageFactsCacheScope::Summary)?,
+    );
+    collect_matching_selected_artifact_ids(
+        &mut matches,
+        selected_artifact_path,
+        index.list_model_package_facts_cache(model_id, ModelPackageFactsCacheScope::Detail)?,
+    );
+
+    match matches.len() {
+        0 => Ok(SelectedArtifactIdentity::PathNotIndexed),
+        1 => Ok(SelectedArtifactIdentity::Resolved(
+            matches.into_iter().next().unwrap(),
+        )),
+        _ => Ok(SelectedArtifactIdentity::AmbiguousPath),
+    }
+}
+
+fn collect_matching_selected_artifact_ids(
+    matches: &mut BTreeSet<String>,
+    selected_artifact_path: &str,
+    records: Vec<ModelPackageFactsCacheRecord>,
+) {
+    for record in records {
+        if let Some((record_path, selected_artifact_id)) =
+            selected_artifact_identity_from_cache_record(&record)
+        {
+            if record_path == selected_artifact_path {
+                matches.insert(selected_artifact_id);
+            }
+        }
+    }
+}
+
+fn selected_artifact_identity_from_cache_record(
+    record: &ModelPackageFactsCacheRecord,
+) -> Option<(String, String)> {
+    match record.cache_scope {
+        ModelPackageFactsCacheScope::Summary => {
+            let summary =
+                serde_json::from_str::<ResolvedModelPackageFactsSummary>(&record.facts_json)
+                    .ok()?;
+            selected_artifact_identity_from_model_ref(
+                record.selected_artifact_id.as_str(),
+                summary.model_ref,
+            )
+        }
+        ModelPackageFactsCacheScope::Detail => {
+            let facts =
+                serde_json::from_str::<ResolvedModelPackageFacts>(&record.facts_json).ok()?;
+            selected_artifact_identity_from_model_ref(
+                record.selected_artifact_id.as_str(),
+                facts.model_ref,
+            )
+        }
+    }
+}
+
+fn selected_artifact_identity_from_model_ref(
+    row_selected_artifact_id: &str,
+    model_ref: crate::models::PumasModelRef,
+) -> Option<(String, String)> {
+    let selected_artifact_path =
+        normalized_non_empty(model_ref.selected_artifact_path.as_deref())?.to_string();
+    let selected_artifact_id = normalized_selected_artifact_id(Some(row_selected_artifact_id))
+        .or_else(|| normalized_selected_artifact_id(model_ref.selected_artifact_id.as_deref()))?
+        .to_string();
+    Some((selected_artifact_path, selected_artifact_id))
+}
+
 pub(crate) fn mode_not_allowed_response() -> ResolveModelArtifactLoadTargetResponse {
     non_ready_response(
         ModelArtifactState::Stale,
@@ -86,6 +212,16 @@ pub(crate) fn mode_not_allowed_response() -> ResolveModelArtifactLoadTargetRespo
         PumasArtifactLoadTargetDiagnosticCode::ModeNotAllowed,
         Some("resolution_mode"),
         "PumasReadOnlyLibrary cannot perform owner-fresh artifact resolution",
+    )
+}
+
+pub(crate) fn library_unavailable_response() -> ResolveModelArtifactLoadTargetResponse {
+    non_ready_response(
+        ModelArtifactState::Stale,
+        ModelEntryPathState::Stale,
+        PumasArtifactLoadTargetDiagnosticCode::LibraryUnavailable,
+        Some("model_ref.model_id"),
+        "model library could not refresh indexed state before load-target resolution",
     )
 }
 
@@ -238,6 +374,19 @@ fn response_from_cache_state(
             "fresh cache state did not include decoded package facts",
         ),
     }
+}
+
+fn missing_selected_artifact_response(
+    field_path: &str,
+    message: &str,
+) -> ResolveModelArtifactLoadTargetResponse {
+    non_ready_response(
+        ModelArtifactState::Ambiguous,
+        ModelEntryPathState::Ambiguous,
+        PumasArtifactLoadTargetDiagnosticCode::MissingSelectedArtifact,
+        Some(field_path),
+        message,
+    )
 }
 
 fn non_ready_response(

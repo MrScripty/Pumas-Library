@@ -175,6 +175,53 @@ impl ModelIndex {
         Ok(result)
     }
 
+    pub fn list_model_package_facts_cache(
+        &self,
+        model_id: &str,
+        cache_scope: ModelPackageFactsCacheScope,
+    ) -> Result<Vec<ModelPackageFactsCacheRecord>> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let mut stmt = conn.prepare(
+            "SELECT
+                model_id,
+                selected_artifact_id,
+                cache_scope,
+                package_facts_contract_version,
+                producer_revision,
+                source_fingerprint,
+                facts_json,
+                cached_at,
+                updated_at
+             FROM model_package_facts_cache
+             WHERE model_id = ?1
+               AND cache_scope = ?2
+             ORDER BY selected_artifact_id ASC",
+        )?;
+        let records = stmt
+            .query_map(params![model_id, cache_scope.as_str()], |row| {
+                let cache_scope_value: String = row.get(2)?;
+                let cache_scope = ModelPackageFactsCacheScope::from_db(2, &cache_scope_value)?;
+                Ok(ModelPackageFactsCacheRecord {
+                    model_id: row.get(0)?,
+                    selected_artifact_id: row.get(1)?,
+                    cache_scope,
+                    package_facts_contract_version: row.get(3)?,
+                    producer_revision: row.get(4)?,
+                    source_fingerprint: row.get(5)?,
+                    facts_json: row.get(6)?,
+                    cached_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        Ok(records)
+    }
+
     pub fn delete_model_package_facts_cache(&self, model_id: &str) -> Result<usize> {
         let conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),

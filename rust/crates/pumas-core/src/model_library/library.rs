@@ -17,7 +17,9 @@ use crate::index::{
     ModelRecord, SearchResult,
 };
 use crate::metadata::{atomic_read_json, atomic_write_json};
-use crate::model_library::artifact_load_target::resolve_artifact_load_target_from_index;
+use crate::model_library::artifact_load_target::{
+    library_unavailable_response, resolve_artifact_load_target_from_index,
+};
 use crate::model_library::external_assets::{
     get_diffusers_bundle_lookup_hints, is_diffusers_bundle, is_external_reference,
     refresh_external_metadata_validation, MODEL_EXECUTION_CONTRACT_VERSION,
@@ -1083,15 +1085,15 @@ impl ModelLibrary {
         Ok(count)
     }
 
-    async fn refresh_external_asset_state(&self, model_id: &str) -> Result<()> {
-        let model_dir = self.library_root.join(model_id);
+    async fn refresh_external_asset_state(&self, record: &ModelRecord) -> Result<bool> {
+        let model_dir = self.indexed_model_dir(record)?;
         let Some(mut metadata) = load_model_metadata_async(self.clone(), model_dir.clone()).await?
         else {
-            return Ok(());
+            return Ok(false);
         };
 
         if !is_external_reference(&metadata) {
-            return Ok(());
+            return Ok(false);
         }
 
         let validation_changed = tokio::task::spawn_blocking(move || {
@@ -1112,7 +1114,84 @@ impl ModelLibrary {
             self.upsert_index_from_metadata(&model_dir, &metadata)?;
         }
 
-        Ok(())
+        Ok(validation_changed)
+    }
+
+    async fn refresh_external_asset_state_by_model_id(&self, model_id: &str) -> Result<bool> {
+        let Some(record) = self.index.get(model_id)? else {
+            return Ok(false);
+        };
+        self.refresh_external_asset_state(&record).await
+    }
+
+    fn indexed_model_dir(&self, record: &ModelRecord) -> Result<PathBuf> {
+        let raw_path = PathBuf::from(&record.path);
+        let candidate = if raw_path.is_absolute() {
+            raw_path
+        } else {
+            self.library_root.join(raw_path)
+        };
+
+        if candidate
+            .components()
+            .any(|component| matches!(component, Component::ParentDir))
+        {
+            return Err(PumasError::InvalidParams {
+                message: format!(
+                    "indexed model path for {} contains parent directory traversal",
+                    record.id
+                ),
+            });
+        }
+
+        let root = self.library_root.canonicalize()?;
+        match candidate.canonicalize() {
+            Ok(canonical) if canonical.starts_with(&root) => Ok(canonical),
+            Ok(_) => Err(PumasError::InvalidParams {
+                message: format!(
+                    "indexed model path for {} escapes the library root",
+                    record.id
+                ),
+            }),
+            Err(_) if candidate.starts_with(&self.library_root) => Ok(candidate),
+            Err(_) => Err(PumasError::InvalidParams {
+                message: format!(
+                    "indexed model path for {} is outside the library root",
+                    record.id
+                ),
+            }),
+        }
+    }
+
+    fn external_asset_cache_should_be_invalidated(
+        record: &ModelRecord,
+        validation_changed: bool,
+    ) -> bool {
+        if validation_changed {
+            return true;
+        }
+
+        let storage_kind = record
+            .metadata
+            .get("storage_kind")
+            .and_then(Value::as_str)
+            .and_then(|value| {
+                serde_json::from_value::<StorageKind>(Value::String(value.to_string())).ok()
+            });
+        if storage_kind != Some(StorageKind::ExternalReference) {
+            return false;
+        }
+
+        let validation_state = record
+            .metadata
+            .get("validation_state")
+            .and_then(Value::as_str)
+            .and_then(|value| {
+                serde_json::from_value::<AssetValidationState>(Value::String(value.to_string()))
+                    .ok()
+            });
+
+        validation_state != Some(AssetValidationState::Valid)
     }
 
     /// Deep scan and rebuild with optional hash verification.
@@ -1282,7 +1361,8 @@ impl ModelLibrary {
     ///
     /// * `model_id` - Relative path from library root (e.g., "llm/llama/llama-2-7b")
     pub async fn get_model(&self, model_id: &str) -> Result<Option<ModelRecord>> {
-        self.refresh_external_asset_state(model_id).await?;
+        self.refresh_external_asset_state_by_model_id(model_id)
+            .await?;
         let library = self.clone();
         let model_id = model_id.to_string();
         tokio::task::spawn_blocking(move || library.get_model_sync(&model_id))
@@ -2202,7 +2282,8 @@ impl ModelLibrary {
         model_id: &str,
         include_dependency_resolution: bool,
     ) -> Result<ModelExecutionDescriptor> {
-        self.refresh_external_asset_state(model_id).await?;
+        self.refresh_external_asset_state_by_model_id(model_id)
+            .await?;
 
         let model_dir = self.library_root.join(model_id);
         if !tokio::fs::try_exists(&model_dir).await? {
@@ -2721,8 +2802,27 @@ impl ModelLibrary {
         request: ResolveModelArtifactLoadTargetRequest,
     ) -> Result<ResolveModelArtifactLoadTargetResponse> {
         if request.resolution_mode == PumasArtifactLoadTargetResolutionMode::OwnerFresh {
-            self.refresh_external_asset_state(&request.model_ref.model_id)
-                .await?;
+            if let Some(record) = self.index.get(&request.model_ref.model_id)? {
+                let validation_changed = match self.refresh_external_asset_state(&record).await {
+                    Ok(validation_changed) => validation_changed,
+                    Err(_) => return Ok(library_unavailable_response()),
+                };
+                let current_record = if validation_changed {
+                    self.index.get(&request.model_ref.model_id)?
+                } else {
+                    Some(record)
+                };
+                if current_record
+                    .as_ref()
+                    .map(|record| {
+                        Self::external_asset_cache_should_be_invalidated(record, validation_changed)
+                    })
+                    .unwrap_or(validation_changed)
+                {
+                    self.index
+                        .delete_model_package_facts_cache(&request.model_ref.model_id)?;
+                }
+            }
         }
         resolve_artifact_load_target_from_index(&self.index, request)
     }
@@ -6214,7 +6314,12 @@ pub struct LibraryStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope};
+    use crate::models::{
+        BackendHintFacts, ModelArtifactState, ModelEntryPathState, ModelFactFamily,
+        ModelLibraryChangeKind, ModelLibraryRefreshScope, PackageFactStatus, PumasArtifactConsumer,
+        PumasArtifactLoadTargetDiagnosticCode, PumasArtifactLoadTargetResolutionMode,
+        PACKAGE_FACTS_CONTRACT_VERSION,
+    };
     use std::io::Write;
     use tempfile::TempDir;
 
@@ -6305,6 +6410,77 @@ mod tests {
         )
         .unwrap();
         bundle_root
+    }
+
+    fn artifact_target_request(
+        model_id: &str,
+        selected_artifact_id: &str,
+        resolution_mode: PumasArtifactLoadTargetResolutionMode,
+    ) -> ResolveModelArtifactLoadTargetRequest {
+        ResolveModelArtifactLoadTargetRequest {
+            model_ref: PumasModelRef {
+                model_id: model_id.to_string(),
+                selected_artifact_id: Some(selected_artifact_id.to_string()),
+                selected_artifact_path: Some(format!("{model_id}/{selected_artifact_id}")),
+                ..PumasModelRef::default()
+            },
+            expected_artifact_kind: Some(PackageArtifactKind::DiffusersBundle),
+            caller_observed_entry_path: None,
+            caller_observed_package_facts_contract_version: None,
+            resolution_mode,
+            consumer: PumasArtifactConsumer {
+                consumer_name: "pantograph-test".to_string(),
+                task_kind: Some("image_generation".to_string()),
+                runtime_family: Some("pytorch.diffusers".to_string()),
+            },
+        }
+    }
+
+    fn external_diffusers_cache_summary(
+        model_id: &str,
+        selected_artifact_id: &str,
+        entry_path: &Path,
+    ) -> ModelPackageFactsCacheRecord {
+        let summary = ResolvedModelPackageFactsSummary {
+            package_facts_contract_version: PACKAGE_FACTS_CONTRACT_VERSION,
+            model_ref: PumasModelRef {
+                model_id: model_id.to_string(),
+                selected_artifact_id: Some(selected_artifact_id.to_string()),
+                selected_artifact_path: Some(format!("{model_id}/{selected_artifact_id}")),
+                ..PumasModelRef::default()
+            },
+            artifact_kind: PackageArtifactKind::DiffusersBundle,
+            entry_path: entry_path.display().to_string(),
+            storage_kind: StorageKind::ExternalReference,
+            validation_state: AssetValidationState::Valid,
+            task: TaskEvidence {
+                task_type_primary: Some("text-to-image".to_string()),
+                ..TaskEvidence::default()
+            },
+            backend_hints: BackendHintFacts::default(),
+            requires_custom_code: false,
+            config_status: PackageFactStatus::Uninspected,
+            tokenizer_status: PackageFactStatus::Uninspected,
+            processor_status: PackageFactStatus::Uninspected,
+            generation_config_status: PackageFactStatus::Uninspected,
+            generation_defaults_status: PackageFactStatus::Uninspected,
+            image_generation_family_evidence: Vec::new(),
+            diffusers_pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            gguf_architecture: None,
+            diagnostic_codes: Vec::new(),
+        };
+
+        ModelPackageFactsCacheRecord {
+            model_id: model_id.to_string(),
+            selected_artifact_id: selected_artifact_id.to_string(),
+            cache_scope: ModelPackageFactsCacheScope::Summary,
+            package_facts_contract_version: i64::from(PACKAGE_FACTS_CONTRACT_VERSION),
+            producer_revision: None,
+            source_fingerprint: "external-diffusers-fixture".to_string(),
+            facts_json: serde_json::to_string(&summary).unwrap(),
+            cached_at: "2026-05-17T00:00:00Z".to_string(),
+            updated_at: "2026-05-17T00:00:00Z".to_string(),
+        }
     }
 
     fn normalize_path_separators(value: &str) -> String {
@@ -7023,6 +7199,148 @@ mod tests {
             persisted.import_state,
             Some(crate::models::ImportState::Failed)
         );
+    }
+
+    #[tokio::test]
+    async fn artifact_owner_fresh_validates_index_before_external_refresh() {
+        let (temp_dir, library) = setup_library().await;
+        let response = library
+            .resolve_model_artifact_load_target(ResolveModelArtifactLoadTargetRequest {
+                model_ref: PumasModelRef {
+                    model_id: "../outside-library".to_string(),
+                    selected_artifact_id: Some("artifact".to_string()),
+                    selected_artifact_path: Some("../outside-library/artifact".to_string()),
+                    ..PumasModelRef::default()
+                },
+                expected_artifact_kind: Some(PackageArtifactKind::DiffusersBundle),
+                caller_observed_entry_path: None,
+                caller_observed_package_facts_contract_version: None,
+                resolution_mode: PumasArtifactLoadTargetResolutionMode::OwnerFresh,
+                consumer: PumasArtifactConsumer {
+                    consumer_name: "pantograph-test".to_string(),
+                    task_kind: Some("image_generation".to_string()),
+                    runtime_family: Some("pytorch.diffusers".to_string()),
+                },
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(response.artifact_state, ModelArtifactState::Missing);
+        assert_eq!(response.entry_path_state, ModelEntryPathState::Missing);
+        assert_eq!(
+            response.diagnostics[0].code,
+            PumasArtifactLoadTargetDiagnosticCode::MissingModel
+        );
+        assert!(!temp_dir.path().join("..").join("outside-library").exists());
+    }
+
+    #[tokio::test]
+    async fn artifact_owner_fresh_reports_invalid_index_path_as_library_unavailable() {
+        let (_, library) = setup_library().await;
+        let model_id = "diffusion/test/corrupt-index-path";
+        library
+            .index()
+            .upsert(&ModelRecord {
+                id: model_id.to_string(),
+                path: "../outside-library".to_string(),
+                cleaned_name: "corrupt-index-path".to_string(),
+                official_name: "Corrupt Index Path".to_string(),
+                model_type: "diffusion".to_string(),
+                tags: Vec::new(),
+                hashes: HashMap::new(),
+                metadata: serde_json::json!({
+                    "storage_kind": "external_reference",
+                    "validation_state": "valid"
+                }),
+                updated_at: "2026-05-17T00:00:00Z".to_string(),
+            })
+            .unwrap();
+
+        let response = library
+            .resolve_model_artifact_load_target(artifact_target_request(
+                model_id,
+                "diffusers",
+                PumasArtifactLoadTargetResolutionMode::OwnerFresh,
+            ))
+            .await
+            .unwrap();
+
+        assert!(!response.is_ready());
+        assert_eq!(
+            response.diagnostics[0].code,
+            PumasArtifactLoadTargetDiagnosticCode::LibraryUnavailable
+        );
+    }
+
+    #[tokio::test]
+    async fn artifact_owner_fresh_invalidates_cache_after_external_drift() {
+        let (temp_dir, library) = setup_library().await;
+        let external_root = temp_dir.path().join("external");
+        std::fs::create_dir_all(&external_root).unwrap();
+        let bundle_root = create_external_diffusers_bundle(&external_root);
+        let model_id = "diffusion/stable-diffusion/tiny-sd-target";
+        let artifact_id = "diffusers";
+        let model_dir = library.build_model_path("diffusion", "stable-diffusion", "tiny-sd-target");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("stable-diffusion".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("tiny-sd-target".to_string()),
+            cleaned_name: Some("tiny-sd-target".to_string()),
+            source_path: Some(bundle_root.display().to_string()),
+            entry_path: Some(bundle_root.display().to_string()),
+            storage_kind: Some(StorageKind::ExternalReference),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Ready),
+            validation_state: Some(AssetValidationState::Valid),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            recommended_backend: Some("diffusers".to_string()),
+            runtime_engine_hints: Some(vec!["diffusers".to_string(), "pytorch".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+        library
+            .index()
+            .upsert_model_package_facts_cache(&external_diffusers_cache_summary(
+                model_id,
+                artifact_id,
+                &bundle_root,
+            ))
+            .unwrap();
+        std::fs::remove_dir_all(&bundle_root).unwrap();
+
+        let response = library
+            .resolve_model_artifact_load_target(artifact_target_request(
+                model_id,
+                artifact_id,
+                PumasArtifactLoadTargetResolutionMode::OwnerFresh,
+            ))
+            .await
+            .unwrap();
+
+        assert!(!response.is_ready());
+        assert_eq!(response.artifact_state, ModelArtifactState::NeedsDetail);
+        assert_eq!(response.entry_path_state, ModelEntryPathState::NeedsDetail);
+        assert_eq!(
+            response.diagnostics[0].code,
+            PumasArtifactLoadTargetDiagnosticCode::ArtifactNeedsDetail
+        );
+        assert!(library
+            .index()
+            .get_model_package_facts_cache(
+                model_id,
+                Some(artifact_id),
+                ModelPackageFactsCacheScope::Summary,
+            )
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]

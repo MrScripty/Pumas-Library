@@ -95,12 +95,29 @@ mod tests {
         expected_artifact_kind: PackageArtifactKind,
         resolution_mode: PumasArtifactLoadTargetResolutionMode,
     ) -> ResolveModelArtifactLoadTargetRequest {
+        artifact_request_with_path(
+            model_id,
+            selected_artifact_id,
+            selected_artifact_id
+                .map(|artifact_id| format!("{model_id}/{artifact_id}"))
+                .as_deref(),
+            expected_artifact_kind,
+            resolution_mode,
+        )
+    }
+
+    fn artifact_request_with_path(
+        model_id: &str,
+        selected_artifact_id: Option<&str>,
+        selected_artifact_path: Option<&str>,
+        expected_artifact_kind: PackageArtifactKind,
+        resolution_mode: PumasArtifactLoadTargetResolutionMode,
+    ) -> ResolveModelArtifactLoadTargetRequest {
         ResolveModelArtifactLoadTargetRequest {
             model_ref: PumasModelRef {
                 model_id: model_id.to_string(),
                 selected_artifact_id: selected_artifact_id.map(ToOwned::to_owned),
-                selected_artifact_path: selected_artifact_id
-                    .map(|artifact_id| format!("{model_id}/{artifact_id}")),
+                selected_artifact_path: selected_artifact_path.map(ToOwned::to_owned),
                 ..PumasModelRef::default()
             },
             expected_artifact_kind: Some(expected_artifact_kind),
@@ -184,6 +201,20 @@ mod tests {
             cached_at: "2026-05-17T00:00:00Z".to_string(),
             updated_at: "2026-05-17T00:00:00Z".to_string(),
         }
+    }
+
+    fn cache_summary_with_selected_path(
+        root: &Path,
+        model_id: &str,
+        selected_artifact_id: &str,
+        selected_artifact_path: &str,
+    ) -> ModelPackageFactsCacheRecord {
+        let mut record = cache_summary(root, model_id, selected_artifact_id);
+        let mut summary =
+            serde_json::from_str::<ResolvedModelPackageFactsSummary>(&record.facts_json).unwrap();
+        summary.model_ref.selected_artifact_path = Some(selected_artifact_path.to_string());
+        record.facts_json = serde_json::to_string(&summary).unwrap();
+        record
     }
 
     #[test]
@@ -381,6 +412,142 @@ mod tests {
         assert_eq!(
             response.diagnostics[0].code,
             PumasArtifactLoadTargetDiagnosticCode::ArtifactNeedsDetail
+        );
+    }
+
+    #[test]
+    fn read_only_library_requires_selected_artifact_identity() {
+        let temp = TempDir::new().unwrap();
+        let writer = ModelIndex::new(temp.path().join(DB_FILENAME)).unwrap();
+        let model_id = "llm/example/missing-selected-artifact";
+        writer.upsert(&create_record(model_id)).unwrap();
+        drop(writer);
+
+        let read_only = PumasReadOnlyLibrary::open(temp.path()).unwrap();
+        let response = read_only
+            .resolve_model_artifact_load_target(artifact_request(
+                model_id,
+                None,
+                PackageArtifactKind::Gguf,
+                PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+            ))
+            .unwrap();
+
+        assert!(!response.is_ready());
+        assert_eq!(response.artifact_state, ModelArtifactState::Ambiguous);
+        assert_eq!(response.entry_path_state, ModelEntryPathState::Ambiguous);
+        assert_eq!(
+            response.diagnostics[0].code,
+            PumasArtifactLoadTargetDiagnosticCode::MissingSelectedArtifact
+        );
+    }
+
+    #[test]
+    fn read_only_library_resolves_selected_artifact_path_without_id() {
+        let temp = TempDir::new().unwrap();
+        let writer = ModelIndex::new(temp.path().join(DB_FILENAME)).unwrap();
+        let model_id = "llm/example/path-selected-artifact";
+        let artifact_id = "artifact-a";
+        let selected_artifact_path = format!("{model_id}/{artifact_id}");
+        writer.upsert(&create_record(model_id)).unwrap();
+        writer
+            .upsert_model_package_facts_cache(&cache_summary(temp.path(), model_id, artifact_id))
+            .unwrap();
+        drop(writer);
+
+        let read_only = PumasReadOnlyLibrary::open(temp.path()).unwrap();
+        let response = read_only
+            .resolve_model_artifact_load_target(artifact_request_with_path(
+                model_id,
+                None,
+                Some(&selected_artifact_path),
+                PackageArtifactKind::Gguf,
+                PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+            ))
+            .unwrap();
+
+        assert!(response.is_ready());
+        assert_eq!(
+            response
+                .target
+                .unwrap()
+                .model_ref
+                .selected_artifact_id
+                .as_deref(),
+            Some(artifact_id)
+        );
+    }
+
+    #[test]
+    fn read_only_library_reports_missing_selected_artifact_path() {
+        let temp = TempDir::new().unwrap();
+        let writer = ModelIndex::new(temp.path().join(DB_FILENAME)).unwrap();
+        let model_id = "llm/example/missing-selected-path";
+        writer.upsert(&create_record(model_id)).unwrap();
+        drop(writer);
+
+        let read_only = PumasReadOnlyLibrary::open(temp.path()).unwrap();
+        let response = read_only
+            .resolve_model_artifact_load_target(artifact_request_with_path(
+                model_id,
+                None,
+                Some(&format!("{model_id}/not-indexed")),
+                PackageArtifactKind::Gguf,
+                PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+            ))
+            .unwrap();
+
+        assert!(!response.is_ready());
+        assert_eq!(response.artifact_state, ModelArtifactState::Missing);
+        assert_eq!(response.entry_path_state, ModelEntryPathState::Missing);
+        assert_eq!(
+            response.diagnostics[0].code,
+            PumasArtifactLoadTargetDiagnosticCode::ArtifactMissing
+        );
+    }
+
+    #[test]
+    fn read_only_library_reports_ambiguous_selected_artifact_path() {
+        let temp = TempDir::new().unwrap();
+        let writer = ModelIndex::new(temp.path().join(DB_FILENAME)).unwrap();
+        let model_id = "llm/example/ambiguous-selected-path";
+        let selected_artifact_path = format!("{model_id}/shared");
+        writer.upsert(&create_record(model_id)).unwrap();
+        writer
+            .upsert_model_package_facts_cache(&cache_summary_with_selected_path(
+                temp.path(),
+                model_id,
+                "artifact-a",
+                &selected_artifact_path,
+            ))
+            .unwrap();
+        writer
+            .upsert_model_package_facts_cache(&cache_summary_with_selected_path(
+                temp.path(),
+                model_id,
+                "artifact-b",
+                &selected_artifact_path,
+            ))
+            .unwrap();
+        drop(writer);
+
+        let read_only = PumasReadOnlyLibrary::open(temp.path()).unwrap();
+        let response = read_only
+            .resolve_model_artifact_load_target(artifact_request_with_path(
+                model_id,
+                None,
+                Some(&selected_artifact_path),
+                PackageArtifactKind::Gguf,
+                PumasArtifactLoadTargetResolutionMode::ReadOnlyIndexed,
+            ))
+            .unwrap();
+
+        assert!(!response.is_ready());
+        assert_eq!(response.artifact_state, ModelArtifactState::Ambiguous);
+        assert_eq!(response.entry_path_state, ModelEntryPathState::Ambiguous);
+        assert_eq!(
+            response.diagnostics[0].code,
+            PumasArtifactLoadTargetDiagnosticCode::MissingSelectedArtifact
         );
     }
 

@@ -158,6 +158,7 @@ mutation.
 **Slice Verification:**
 - `cargo fmt --manifest-path rust/Cargo.toml --all`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library read_only_library`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library artifact_load_target`
 - `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
 
 **Status:** Complete
@@ -177,6 +178,7 @@ mutation.
 
 **Slice Verification:**
 - `cargo fmt --manifest-path rust/Cargo.toml --all`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library artifact_owner_fresh`
 - `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
 
 **Status:** Complete
@@ -226,6 +228,21 @@ targets to workers.
 - M3-001 closed: `OwnerFresh` on `ModelLibrary` now runs owner-owned external
   asset freshness before delegating to the shared resolver core. Read-only
   surfaces still reject `OwnerFresh`.
+- M3-002 closed: Pantograph review found `OwnerFresh` refreshed external asset
+  state from untrusted request `model_id` text before proving the model was
+  indexed. Owner refresh now first resolves the indexed `ModelRecord` and
+  derives the metadata path from indexed Pumas state with library-root
+  containment checks; invalid indexed paths return `LibraryUnavailable` as a
+  typed non-ready diagnostic.
+- M3-003 closed: Pantograph review found owner refresh could update external
+  metadata while returning a stale cached ready target. Owner refresh now
+  invalidates package-facts cache rows after validation changes, and also when
+  the current indexed external-reference validation state is non-valid.
+- M2-002 closed: Pantograph review found missing selected-artifact diagnostics
+  were enum-only for absent or ambiguous artifact identity. The shared resolver
+  now rejects requests with no selected artifact identity, resolves a missing
+  `selected_artifact_id` from a unique indexed `selected_artifact_path`, and
+  reports typed diagnostics for missing or ambiguous path matches.
 
 ## Risks And Mitigations
 | Risk | Mitigation |
@@ -244,4 +261,8 @@ targets to workers.
 - Pantograph requires a language-binding surface rather than Rust/API access.
 
 ## Completion Summary
-- Pending implementation.
+- Milestones 0 through 4 are implemented and committed in vertical slices.
+- The latest hardening slice addresses Pantograph's three Pumas boundary
+  findings for owner-fresh path validation, stale cache invalidation after
+  external-reference drift, and selected-artifact identity diagnostics.
+- Milestone 5 remains pending for Pantograph-side Rust integration.

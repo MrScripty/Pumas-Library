@@ -7,7 +7,8 @@ use super::serving_onnx::{serve_onnx_model, unserve_onnx_model};
 use crate::server::AppState;
 use pumas_library::models::{
     ModelServeError, ModelServeErrorCode, ServeModelRequest, ServeModelResponse,
-    UnserveModelRequest, UnserveModelResponse,
+    ServingEndpointMode, ServingStatusResponse, ServingStatusSnapshot, UnserveModelRequest,
+    UnserveModelResponse,
 };
 use pumas_library::{
     ProviderGatewayAliasPolicy, ProviderServingAdapterKind, ProviderUnloadBehavior,
@@ -36,7 +37,8 @@ struct ListServingStatusUpdatesSinceParams {
 }
 
 pub async fn get_serving_status(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
-    Ok(serde_json::to_value(state.api.get_serving_status().await?)?)
+    let response = decorate_serving_status_response(state, state.api.get_serving_status().await?);
+    Ok(serde_json::to_value(response)?)
 }
 
 pub async fn list_serving_status_updates_since(
@@ -121,7 +123,7 @@ pub async fn unserve_model(state: &AppState, params: &Value) -> pumas_library::R
             success: true,
             error: None,
             unloaded: false,
-            snapshot: Some(state.api.get_serving_status().await?.snapshot),
+            snapshot: Some(current_serving_snapshot(state).await?),
         })?);
     };
     let profile_id = command
@@ -154,7 +156,7 @@ pub async fn unserve_model(state: &AppState, params: &Value) -> pumas_library::R
             success: true,
             error: Some("served model provider is not registered".to_string()),
             unloaded: false,
-            snapshot: Some(state.api.get_serving_status().await?.snapshot),
+            snapshot: Some(current_serving_snapshot(state).await?),
         })?),
     }
 }
@@ -211,10 +213,33 @@ pub(super) async fn non_critical_failure_response(
     state: &AppState,
     error: ModelServeError,
 ) -> pumas_library::Result<Value> {
-    let snapshot = state.api.record_serving_load_error(error.clone()).await?;
+    let mut snapshot = state.api.record_serving_load_error(error.clone()).await?;
+    decorate_serving_snapshot(state, &mut snapshot);
     let mut response = ServeModelResponse::non_critical_failure(error);
     response.snapshot = Some(snapshot);
     Ok(serde_json::to_value(response)?)
+}
+
+pub(super) fn decorate_serving_snapshot(state: &AppState, snapshot: &mut ServingStatusSnapshot) {
+    if snapshot.endpoint.endpoint_mode == ServingEndpointMode::PumasGateway {
+        snapshot.endpoint.endpoint_url = Some(state.gateway_base_url.clone());
+    }
+}
+
+pub(super) async fn current_serving_snapshot(
+    state: &AppState,
+) -> pumas_library::Result<ServingStatusSnapshot> {
+    let mut snapshot = state.api.get_serving_status().await?.snapshot;
+    decorate_serving_snapshot(state, &mut snapshot);
+    Ok(snapshot)
+}
+
+fn decorate_serving_status_response(
+    state: &AppState,
+    mut response: ServingStatusResponse,
+) -> ServingStatusResponse {
+    decorate_serving_snapshot(state, &mut response.snapshot);
+    response
 }
 
 pub(super) fn serving_error(

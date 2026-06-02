@@ -84,6 +84,10 @@ async fn gateway_test_state_with_clients(
         shortcut_manager: Arc::new(RwLock::new(None)),
         plugin_loader: Arc::new(plugin_loader),
         gateway_http_client,
+        gateway_base_url: pumas_library::models::RuntimeEndpointUrl::parse(
+            "http://127.0.0.1:3456/v1",
+        )
+        .unwrap(),
         provider_registry: ProviderRegistry::builtin(),
         llama_cpp_router_client: LlamaCppRouterClient::new(reqwest::Client::new()),
         ollama_client_factory: OllamaClientFactory::new(

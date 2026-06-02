@@ -1,7 +1,8 @@
 //! llama.cpp serving adapter used by the serving RPC boundary.
 
 use super::serving::{
-    effective_gateway_alias_from_config, non_critical_failure_response, serving_error,
+    current_serving_snapshot, decorate_serving_snapshot, effective_gateway_alias_from_config,
+    non_critical_failure_response, serving_error,
 };
 use super::serving_llama_cpp_router::{
     serve_llama_cpp_router_model, unserve_llama_cpp_router_model,
@@ -151,7 +152,8 @@ pub(super) async fn serve_llama_cpp_model(
         loaded_at: None,
         last_error: None,
     };
-    let snapshot = state.api.record_served_model(status.clone()).await?;
+    let mut snapshot = state.api.record_served_model(status.clone()).await?;
+    decorate_serving_snapshot(state, &mut snapshot);
 
     Ok(serde_json::to_value(ServeModelResponse {
         success: true,
@@ -194,7 +196,7 @@ pub(super) async fn unserve_llama_cpp_model(
             success: true,
             error: Some("selected llama.cpp runtime profile mode is not supported".to_string()),
             unloaded: false,
-            snapshot: Some(state.api.get_serving_status().await?.snapshot),
+            snapshot: Some(current_serving_snapshot(state).await?),
         })?);
     }
 
@@ -204,11 +206,11 @@ pub(super) async fn unserve_llama_cpp_model(
             success: true,
             error: Some("llama.cpp runtime profile could not be stopped".to_string()),
             unloaded: false,
-            snapshot: Some(state.api.get_serving_status().await?.snapshot),
+            snapshot: Some(current_serving_snapshot(state).await?),
         })?);
     }
 
-    let snapshot = state
+    let mut snapshot = state
         .api
         .record_unserved_model(
             &request.model_id,
@@ -217,6 +219,7 @@ pub(super) async fn unserve_llama_cpp_model(
             Some(model_alias.as_str()),
         )
         .await?;
+    decorate_serving_snapshot(state, &mut snapshot);
     Ok(serde_json::to_value(UnserveModelResponse {
         success: true,
         error: None,

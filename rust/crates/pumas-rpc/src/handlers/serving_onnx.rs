@@ -1,7 +1,8 @@
 //! ONNX Runtime serving adapter used by the serving RPC boundary.
 
 use super::serving::{
-    effective_gateway_alias_from_config, non_critical_failure_response, serving_error,
+    current_serving_snapshot, decorate_serving_snapshot, effective_gateway_alias_from_config,
+    non_critical_failure_response, serving_error,
 };
 use crate::server::AppState;
 use pumas_library::models::{
@@ -162,7 +163,7 @@ pub(super) async fn serve_onnx_model(
         loaded_at: None,
         last_error: None,
     };
-    let snapshot = match state.api.record_served_model(status.clone()).await {
+    let mut snapshot = match state.api.record_served_model(status.clone()).await {
         Ok(snapshot) => snapshot,
         Err(error) => {
             warn!(
@@ -184,6 +185,7 @@ pub(super) async fn serve_onnx_model(
             return Err(error);
         }
     };
+    decorate_serving_snapshot(state, &mut snapshot);
     info!(
         provider = "onnx_runtime",
         model_id = %request.model_id,
@@ -268,7 +270,7 @@ pub(super) async fn unserve_onnx_model(
                 success: true,
                 error: Some("ONNX Runtime rejected the selected model unload request".to_string()),
                 unloaded: false,
-                snapshot: Some(state.api.get_serving_status().await?.snapshot),
+                snapshot: Some(current_serving_snapshot(state).await?),
             })?);
         }
     };
@@ -291,7 +293,7 @@ pub(super) async fn unserve_onnx_model(
                 gateway_alias = %validated.model_alias,
                 "ONNX session was already absent; removing stale served status"
             );
-            let snapshot = state
+            let mut snapshot = state
                 .api
                 .record_unserved_model(
                     &request.model_id,
@@ -300,6 +302,7 @@ pub(super) async fn unserve_onnx_model(
                     Some(validated.model_alias.as_str()),
                 )
                 .await?;
+            decorate_serving_snapshot(state, &mut snapshot);
             return Ok(serde_json::to_value(UnserveModelResponse {
                 success: true,
                 error: None,
@@ -320,12 +323,12 @@ pub(super) async fn unserve_onnx_model(
                 success: true,
                 error: Some("ONNX Runtime could not unload the selected model".to_string()),
                 unloaded: false,
-                snapshot: Some(state.api.get_serving_status().await?.snapshot),
+                snapshot: Some(current_serving_snapshot(state).await?),
             })?);
         }
     }
 
-    let snapshot = state
+    let mut snapshot = state
         .api
         .record_unserved_model(
             &request.model_id,
@@ -334,6 +337,7 @@ pub(super) async fn unserve_onnx_model(
             Some(validated.model_alias.as_str()),
         )
         .await?;
+    decorate_serving_snapshot(state, &mut snapshot);
     Ok(serde_json::to_value(UnserveModelResponse {
         success: true,
         error: None,
@@ -454,7 +458,7 @@ async fn existing_loaded_onnx_response(
         loaded_models_unchanged: true,
         status: Some(status),
         load_error: None,
-        snapshot: Some(state.api.get_serving_status().await?.snapshot),
+        snapshot: Some(current_serving_snapshot(state).await?),
     }))
 }
 

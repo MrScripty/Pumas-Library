@@ -1,7 +1,8 @@
 //! llama.cpp router serving adapter helpers.
 
 use super::serving::{
-    effective_gateway_alias_from_config, non_critical_failure_response, serving_error,
+    current_serving_snapshot, decorate_serving_snapshot, effective_gateway_alias_from_config,
+    non_critical_failure_response, serving_error,
 };
 use super::serving_llama_cpp_shared::{
     active_llama_cpp_runtime, llama_cpp_runtime_support_error, provider_request_model_id,
@@ -170,7 +171,8 @@ pub(super) async fn serve_llama_cpp_router_model(
         loaded_at: None,
         last_error: None,
     };
-    let snapshot = state.api.record_served_model(status.clone()).await?;
+    let mut snapshot = state.api.record_served_model(status.clone()).await?;
+    decorate_serving_snapshot(state, &mut snapshot);
 
     Ok(serde_json::to_value(ServeModelResponse {
         success: true,
@@ -209,7 +211,7 @@ pub(super) async fn unserve_llama_cpp_router_model(
                     success: true,
                     error: Some("llama.cpp router endpoint is not available".to_string()),
                     unloaded: false,
-                    snapshot: Some(state.api.get_serving_status().await?.snapshot),
+                    snapshot: Some(current_serving_snapshot(state).await?),
                 },
             )?));
         }
@@ -226,11 +228,11 @@ pub(super) async fn unserve_llama_cpp_router_model(
                 success: true,
                 error: Some(message),
                 unloaded: false,
-                snapshot: Some(state.api.get_serving_status().await?.snapshot),
+                snapshot: Some(current_serving_snapshot(state).await?),
             },
         )?));
     }
-    let snapshot = state
+    let mut snapshot = state
         .api
         .record_unserved_model(
             request_model_id,
@@ -239,6 +241,7 @@ pub(super) async fn unserve_llama_cpp_router_model(
             Some(model_alias),
         )
         .await?;
+    decorate_serving_snapshot(state, &mut snapshot);
     Ok(Some(serde_json::to_value(
         pumas_library::models::UnserveModelResponse {
             success: true,
@@ -264,7 +267,7 @@ async fn llama_cpp_router_should_restart_for_launch_settings(
     if !has_launch_overrides {
         return Ok(false);
     }
-    let snapshot = state.api.get_serving_status().await?.snapshot;
+    let snapshot = current_serving_snapshot(state).await?;
     Ok(!snapshot.served_models.iter().any(|status| {
         status.provider == RuntimeProviderId::LlamaCpp
             && status.profile_id == profile.profile_id

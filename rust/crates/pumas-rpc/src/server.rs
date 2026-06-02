@@ -15,7 +15,8 @@ use axum::{
 };
 use pumas_app_manager::{CustomNodesManager, SizeCalculator, VersionManager};
 use pumas_library::{
-    OnnxEmbeddingBackendKind, OnnxSessionManager, PluginLoader, ProviderRegistry, PumasApi,
+    models::RuntimeEndpointUrl, OnnxEmbeddingBackendKind, OnnxSessionManager, PluginLoader,
+    ProviderRegistry, PumasApi,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -52,6 +53,8 @@ pub struct AppState {
     pub plugin_loader: Arc<PluginLoader>,
     /// Shared HTTP client for OpenAI-compatible gateway proxying.
     pub gateway_http_client: reqwest::Client,
+    /// Public loopback base URL for the OpenAI-compatible serving gateway.
+    pub gateway_base_url: RuntimeEndpointUrl,
     /// Runtime provider behavior registry for RPC boundary routing.
     pub provider_registry: ProviderRegistry,
     /// Shared llama.cpp router client for provider serving operations.
@@ -123,6 +126,11 @@ pub async fn start_server(
 
     let gateway_http_client = build_gateway_http_client()?;
     let provider_http_client = build_provider_http_client()?;
+    let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let actual_addr = listener.local_addr()?;
+    let gateway_base_url = RuntimeEndpointUrl::parse(format!("http://{actual_addr}/v1"))
+        .map_err(|message| anyhow::anyhow!("invalid gateway base URL: {message}"))?;
     let ollama_client_factory = build_ollama_client_factory()?;
     let onnx_session_manager = OnnxSessionManager::new(
         OnnxEmbeddingBackendKind::real(),
@@ -138,6 +146,7 @@ pub async fn start_server(
         shortcut_manager: Arc::new(RwLock::new(shortcut_manager)),
         plugin_loader: Arc::new(plugin_loader),
         gateway_http_client,
+        gateway_base_url,
         provider_registry,
         llama_cpp_router_client: LlamaCppRouterClient::new(provider_http_client),
         ollama_client_factory,
@@ -184,13 +193,6 @@ pub async fn start_server(
         .layer(ConcurrencyLimitLayer::new(MAX_IN_FLIGHT_RPC_REQUESTS))
         .layer(cors)
         .with_state(state);
-
-    // Parse the address
-    let addr: SocketAddr = format!("{}:{}", host, port).parse()?;
-
-    // Bind to the address
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    let actual_addr = listener.local_addr()?;
 
     info!(
         "Server listening on {} with max {} in-flight requests and {} byte request bodies",

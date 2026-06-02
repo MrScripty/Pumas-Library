@@ -30,6 +30,10 @@ async fn serving_test_state() -> (TempDir, AppState) {
             shortcut_manager: Arc::new(RwLock::new(None)),
             plugin_loader: Arc::new(plugin_loader),
             gateway_http_client: reqwest::Client::new(),
+            gateway_base_url: pumas_library::models::RuntimeEndpointUrl::parse(
+                "http://127.0.0.1:3456/v1",
+            )
+            .unwrap(),
             provider_registry: ProviderRegistry::builtin(),
             llama_cpp_router_client: LlamaCppRouterClient::new(reqwest::Client::new()),
             ollama_client_factory: OllamaClientFactory::new(
@@ -82,6 +86,12 @@ async fn serve_onnx_model_is_idempotent_for_loaded_session() {
     let first = serve_onnx_model(&state, request.clone()).await.unwrap();
     assert_eq!(first["loaded"], true);
     assert_eq!(first["loaded_models_unchanged"], false);
+    assert_eq!(
+        first
+            .pointer("/snapshot/endpoint/endpoint_url")
+            .and_then(serde_json::Value::as_str),
+        Some("http://127.0.0.1:3456/v1")
+    );
     let first_cursor = first
         .pointer("/snapshot/cursor")
         .and_then(serde_json::Value::as_str)

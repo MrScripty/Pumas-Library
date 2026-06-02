@@ -1,6 +1,9 @@
 //! Ollama serving adapter used by the serving RPC boundary.
 
-use super::serving::{derive_fallback_model_alias, non_critical_failure_response, serving_error};
+use super::serving::{
+    current_serving_snapshot, decorate_serving_snapshot, derive_fallback_model_alias,
+    non_critical_failure_response, serving_error,
+};
 use crate::server::AppState;
 use pumas_library::models::{
     ModelServeErrorCode, RuntimeProfileId, RuntimeProviderId, ServeModelRequest,
@@ -135,7 +138,8 @@ pub(super) async fn serve_ollama_model(
         loaded_at: None,
         last_error: None,
     };
-    let snapshot = state.api.record_served_model(status.clone()).await?;
+    let mut snapshot = state.api.record_served_model(status.clone()).await?;
+    decorate_serving_snapshot(state, &mut snapshot);
 
     Ok(serde_json::to_value(ServeModelResponse {
         success: true,
@@ -170,7 +174,7 @@ pub(super) async fn unserve_ollama_model(
                 success: true,
                 error: Some("selected runtime profile is not available".to_string()),
                 unloaded: false,
-                snapshot: Some(state.api.get_serving_status().await?.snapshot),
+                snapshot: Some(current_serving_snapshot(state).await?),
             })?);
         }
     };
@@ -182,11 +186,11 @@ pub(super) async fn unserve_ollama_model(
             success: true,
             error: Some("Ollama could not unload the selected model".to_string()),
             unloaded: false,
-            snapshot: Some(state.api.get_serving_status().await?.snapshot),
+            snapshot: Some(current_serving_snapshot(state).await?),
         })?);
     }
 
-    let snapshot = state
+    let mut snapshot = state
         .api
         .record_unserved_model(
             &request.model_id,
@@ -195,6 +199,7 @@ pub(super) async fn unserve_ollama_model(
             Some(model_alias.as_str()),
         )
         .await?;
+    decorate_serving_snapshot(state, &mut snapshot);
     Ok(serde_json::to_value(UnserveModelResponse {
         success: true,
         error: None,

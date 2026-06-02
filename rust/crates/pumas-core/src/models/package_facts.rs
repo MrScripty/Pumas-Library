@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::{AssetValidationError, AssetValidationState, StorageKind};
 
 /// Current producer contract version for resolved package facts.
-pub const PACKAGE_FACTS_CONTRACT_VERSION: u32 = 2;
+pub const PACKAGE_FACTS_CONTRACT_VERSION: u32 = 3;
 
 /// Current stable contract version for `PumasModelRef`.
 pub const PUMAS_MODEL_REF_CONTRACT_VERSION: u32 = 1;
@@ -129,11 +129,26 @@ pub enum ProcessorComponentKind {
 pub enum PackageFactValueSource {
     Header,
     Config,
+    FilesystemMetadata,
     UpstreamMetadata,
     ComponentLayout,
     FilenameWeak,
     Ambiguous,
     Unavailable,
+}
+
+/// Stable logical-size file roles for package evidence.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PackageSizeRole {
+    SelectedArtifact,
+    Weight,
+    Shard,
+    ComponentConfig,
+    Tokenizer,
+    DependencyManifest,
+    CompanionArtifact,
+    Other,
 }
 
 /// Image-generation family labels produced only from package evidence.
@@ -280,7 +295,37 @@ pub struct PackageInspectionManifest {
 #[serde(rename_all = "snake_case")]
 pub struct PackageInspectionManifestEntry {
     pub relative_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(default)]
+    pub status: PackageFactStatus,
     pub value_source: PackageFactValueSource,
+}
+
+/// Source-tagged logical size facts for a selected package artifact.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct PackageLogicalSizeFacts {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_size_bytes: Option<u64>,
+    pub value_source: PackageFactValueSource,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<PackageFileSizeFact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<ModelPackageDiagnostic>,
+}
+
+/// Source-tagged logical size for one bounded package file.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct PackageFileSizeFact {
+    pub relative_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    pub status: PackageFactStatus,
+    pub value_source: PackageFactValueSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<PackageSizeRole>,
 }
 
 /// Component-level package-file evidence.
@@ -403,6 +448,8 @@ pub struct ResolvedArtifactFacts {
     pub sibling_files: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logical_size: Option<PackageLogicalSizeFacts>,
 }
 
 /// Generic package-fact diagnostic.
@@ -680,5 +727,29 @@ mod tests {
             serde_json::to_value(ModelPackageFactsSummaryStatus::WrongSelectedArtifact).unwrap(),
             serde_json::json!("wrong_selected_artifact")
         );
+    }
+
+    #[test]
+    fn logical_size_facts_round_trip_contract_shape() {
+        let facts = PackageLogicalSizeFacts {
+            total_size_bytes: Some(42),
+            value_source: PackageFactValueSource::FilesystemMetadata,
+            files: vec![PackageFileSizeFact {
+                relative_path: "model.gguf".to_string(),
+                size_bytes: Some(42),
+                status: PackageFactStatus::Present,
+                value_source: PackageFactValueSource::FilesystemMetadata,
+                role: Some(PackageSizeRole::SelectedArtifact),
+            }],
+            diagnostics: Vec::new(),
+        };
+
+        let value = serde_json::to_value(&facts).unwrap();
+        assert_eq!(value["total_size_bytes"], 42);
+        assert_eq!(value["value_source"], "filesystem_metadata");
+        assert_eq!(value["files"][0]["role"], "selected_artifact");
+
+        let parsed: PackageLogicalSizeFacts = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed, facts);
     }
 }

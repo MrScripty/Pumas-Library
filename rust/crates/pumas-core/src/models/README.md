@@ -16,7 +16,7 @@ frontend, ensuring type-compatible serialization across all layers.
 | `model.rs` | Model-related types: `ModelData`, `HuggingFaceModel`, `ModelMetadata`, external-asset metadata fields, and download/import types |
 | `artifact_load_target.rs` | Selected-artifact load-target request/response DTOs, diagnostics, approved path shape, and resolver mode contract for Pantograph and runtime consumers |
 | `model_library_selector.rs` | Fast model-library selector snapshot DTOs with canonical model refs, selected artifact identity, entry-path state, artifact state, and detail freshness |
-| `package_facts.rs` | Versioned model package-fact DTOs for artifact, component, task, backend-hint, generation-default, and custom-code evidence |
+| `package_facts.rs` | Versioned model package-fact DTOs for artifact, logical-size, component, task, backend-hint, generation-default, and custom-code evidence |
 | `runtime_profile.rs` | Local runtime profile, provider settings, model-route, status, snapshot, and update-feed DTOs shared with RPC/Electron/frontend consumers. |
 | `serving.rs` | User-directed model serving DTOs for explicit placement, served-model status, endpoint mode, update feeds, and non-critical load-error envelopes. |
 | `version.rs` | `VersionInfo`, `VersionsMetadata` - Version tracking and metadata persistence types |
@@ -42,13 +42,13 @@ frontend, ensuring type-compatible serialization across all layers.
 
 ## Decomposition Review
 
-- 2026-05-10: `package_facts.rs` is 684 lines after adding image-generation
+- 2026-06-02: `package_facts.rs` is 755 lines after adding logical-size
   package-facts DTOs. It remains a readable single contract module because it
   owns only wire DTOs, serde defaults, contract constants, and DTO-level tests.
-  Package inspection, summary projection, cache classification, and parser
-  behavior live outside `models/`. Split this file when it crosses roughly 800
-  lines, when generated schema output is introduced, or when a DTO group needs a
-  separate lifecycle/version boundary.
+  Package inspection, logical-size projection, summary projection, cache
+  classification, and parser behavior live outside `models/`. Split this file
+  when it crosses roughly 800 lines, when generated schema output is introduced,
+  or when a DTO group needs a separate lifecycle/version boundary.
 
 ## Dependencies
 
@@ -127,6 +127,9 @@ Required wire-shape rules:
   is available. Consumers must tolerate it being absent.
 - `artifact` carries executable-entry and validation facts; it does not select
   a runtime.
+- `artifact.logical_size` carries source-tagged logical package byte facts from
+  bounded package files and upstream metadata. It is not a loaded-memory,
+  device-fit, runtime-placement, or scheduler-admission estimate.
 - `backend_hints` are advisory package facts. They are not runtime placement,
   admission, queueing, or scheduler decisions.
 - `generation_defaults` are model-provided defaults from package files, not

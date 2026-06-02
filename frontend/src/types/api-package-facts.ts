@@ -36,11 +36,22 @@ export type ProcessorComponentKind =
 export type PackageFactValueSource =
   | 'header'
   | 'config'
+  | 'filesystem_metadata'
   | 'upstream_metadata'
   | 'component_layout'
   | 'filename_weak'
   | 'ambiguous'
   | 'unavailable';
+
+export type PackageSizeRole =
+  | 'selected_artifact'
+  | 'weight'
+  | 'shard'
+  | 'component_config'
+  | 'tokenizer'
+  | 'dependency_manifest'
+  | 'companion_artifact'
+  | 'other';
 
 export type ImageGenerationFamilyLabel =
   | 'stable_diffusion'
@@ -130,7 +141,24 @@ export interface PackageInspectionManifest {
 
 export interface PackageInspectionManifestEntry {
   relative_path: string;
+  size_bytes?: number | null;
+  status?: PackageFactStatus;
   value_source: PackageFactValueSource;
+}
+
+export interface PackageLogicalSizeFacts {
+  total_size_bytes?: number | null;
+  value_source: PackageFactValueSource;
+  files?: PackageFileSizeFact[];
+  diagnostics?: ModelPackageDiagnostic[];
+}
+
+export interface PackageFileSizeFact {
+  relative_path: string;
+  size_bytes?: number | null;
+  status: PackageFactStatus;
+  value_source: PackageFactValueSource;
+  role?: PackageSizeRole | null;
 }
 
 export type BackendHintLabel =
@@ -172,6 +200,7 @@ export interface ResolvedArtifactFacts {
   companion_artifacts?: string[];
   sibling_files?: string[];
   selected_files?: string[];
+  logical_size?: PackageLogicalSizeFacts | null;
 }
 
 export interface ProcessorComponentFacts {

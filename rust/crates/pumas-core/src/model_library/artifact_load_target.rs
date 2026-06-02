@@ -242,6 +242,7 @@ fn response_from_summary(
             companion_artifacts: Vec::new(),
             sibling_files: Vec::new(),
             selected_files: Vec::new(),
+            logical_size: None,
         },
         Some(summary.package_facts_contract_version),
     )

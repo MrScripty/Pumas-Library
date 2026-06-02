@@ -6,8 +6,8 @@ use pumas_library::models::{
     AssetValidationState, BackendHintLabel, BundleFormat, HuggingFaceEvidence,
     ImageGenerationFamilyLabel, ModelFactFamily, ModelFileInfo, ModelLibraryChangeKind,
     ModelLibraryRefreshScope, ModelMetadata, PackageArtifactKind, PackageFactStatus,
-    PackageFactValueSource, ProcessorComponentKind, ResolvedModelPackageFactsSummary, StorageKind,
-    PACKAGE_FACTS_CONTRACT_VERSION,
+    PackageFactValueSource, PackageSizeRole, ProcessorComponentKind,
+    ResolvedModelPackageFactsSummary, StorageKind, PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use pumas_library::ModelLibrary;
 use std::path::{Path, PathBuf};
@@ -918,9 +918,9 @@ async fn extracts_weight_index_and_shard_component_evidence() {
                 blake3: None,
             },
             ModelFileInfo {
-                name: "model-00002-of-00002.safetensors".to_string(),
+                name: "model-00003-of-00003.safetensors".to_string(),
                 original_name: None,
-                size: None,
+                size: Some(7),
                 sha256: None,
                 blake3: None,
             },
@@ -959,6 +959,37 @@ async fn extracts_weight_index_and_shard_component_evidence() {
         .artifact
         .selected_files
         .contains(&"model.safetensors.index.json".to_string()));
+    let logical_size = facts
+        .artifact
+        .logical_size
+        .as_ref()
+        .expect("logical size facts should be present");
+    assert_eq!(
+        logical_size.value_source,
+        PackageFactValueSource::UpstreamMetadata
+    );
+    assert!(
+        logical_size.total_size_bytes.is_some(),
+        "declared missing shard should use upstream size evidence when available"
+    );
+    assert!(logical_size.files.iter().any(|file| {
+        file.relative_path == "model-00002-of-00002.safetensors"
+            && file.status == PackageFactStatus::Present
+            && file.size_bytes == Some(7)
+            && file.value_source == PackageFactValueSource::FilesystemMetadata
+            && file.role == Some(PackageSizeRole::Shard)
+    }));
+    assert!(logical_size.files.iter().any(|file| {
+        file.relative_path == "model-00003-of-00003.safetensors"
+            && file.status == PackageFactStatus::Missing
+            && file.size_bytes == Some(7)
+            && file.value_source == PackageFactValueSource::UpstreamMetadata
+            && file.role == Some(PackageSizeRole::Shard)
+    }));
+    assert!(logical_size.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "logical_size_file_missing"
+            && diagnostic.path.as_deref() == Some("model-00003-of-00003.safetensors")
+    }));
 }
 
 #[tokio::test]
@@ -1086,6 +1117,12 @@ async fn extracts_diffusers_package_evidence_from_bundle_files() {
     tokio::fs::create_dir_all(model_dir.join("vae"))
         .await
         .unwrap();
+    tokio::fs::create_dir_all(model_dir.join("image_encoder"))
+        .await
+        .unwrap();
+    tokio::fs::create_dir_all(model_dir.join("prior"))
+        .await
+        .unwrap();
     tokio::fs::write(
         model_dir.join("model_index.json"),
         r#"{
@@ -1094,7 +1131,9 @@ async fn extracts_diffusers_package_evidence_from_bundle_files() {
   "_name_or_path": "synthetic/tiny-sd",
   "scheduler": ["diffusers", "EulerDiscreteScheduler"],
   "unet": ["diffusers", "UNet2DConditionModel"],
-  "vae": ["diffusers", "AutoencoderKL"]
+  "vae": ["diffusers", "AutoencoderKL"],
+  "image_encoder": ["transformers", "CLIPVisionModelWithProjection"],
+  "prior": ["diffusers", "PriorTransformer"]
 }"#,
     )
     .await
@@ -1111,6 +1150,36 @@ async fn extracts_diffusers_package_evidence_from_bundle_files() {
     )
     .await
     .unwrap();
+    tokio::fs::write(
+        model_dir.join("unet/diffusion_pytorch_model.safetensors"),
+        "unet-weights",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        model_dir.join("unet/diffusion_pytorch_model.fp16.safetensors"),
+        "unet-fp16-weights",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        model_dir.join("vae/diffusion_pytorch_model.safetensors"),
+        "vae-weights",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        model_dir.join("image_encoder/model.fp16.safetensors"),
+        "image-encoder-weights",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        model_dir.join("prior/diffusion_pytorch_model.safetensors"),
+        "prior-weights",
+    )
+    .await
+    .unwrap();
 
     let metadata = ModelMetadata {
         model_id: Some(model_id.to_string()),
@@ -1121,6 +1190,7 @@ async fn extracts_diffusers_package_evidence_from_bundle_files() {
         bundle_format: Some(BundleFormat::DiffusersDirectory),
         storage_kind: Some(StorageKind::LibraryOwned),
         validation_state: Some(AssetValidationState::Valid),
+        selected_artifact_files: Some(vec!["model_index.json".to_string()]),
         task_type_primary: Some("image_generation".to_string()),
         recommended_backend: Some("diffusers".to_string()),
         ..Default::default()
@@ -1155,6 +1225,44 @@ async fn extracts_diffusers_package_evidence_from_bundle_files() {
         .backend_hints
         .accepted
         .contains(&BackendHintLabel::Diffusers));
+    let logical_size = facts
+        .artifact
+        .logical_size
+        .as_ref()
+        .expect("logical size facts should be present");
+    assert_eq!(
+        logical_size.value_source,
+        PackageFactValueSource::ComponentLayout
+    );
+    assert!(logical_size.files.iter().any(|file| {
+        file.relative_path == "unet/diffusion_pytorch_model.safetensors"
+            && file.status == PackageFactStatus::Present
+            && file.role == Some(PackageSizeRole::Weight)
+    }));
+    assert!(logical_size.files.iter().any(|file| {
+        file.relative_path == "vae/diffusion_pytorch_model.safetensors"
+            && file.status == PackageFactStatus::Present
+            && file.role == Some(PackageSizeRole::Weight)
+    }));
+    assert!(logical_size.files.iter().any(|file| {
+        file.relative_path == "unet/diffusion_pytorch_model.fp16.safetensors"
+            && file.status == PackageFactStatus::Present
+            && file.role == Some(PackageSizeRole::Weight)
+    }));
+    assert!(logical_size.files.iter().any(|file| {
+        file.relative_path == "image_encoder/model.fp16.safetensors"
+            && file.status == PackageFactStatus::Present
+            && file.role == Some(PackageSizeRole::Weight)
+    }));
+    assert!(logical_size.files.iter().any(|file| {
+        file.relative_path == "prior/diffusion_pytorch_model.safetensors"
+            && file.status == PackageFactStatus::Present
+            && file.role == Some(PackageSizeRole::Weight)
+    }));
+    assert!(
+        logical_size.files.len() > 1,
+        "Diffusers logical size must not stop at model_index.json"
+    );
 }
 
 #[tokio::test]
@@ -1193,6 +1301,22 @@ async fn extracts_header_derived_gguf_package_evidence() {
     library.save_metadata(&model_dir, &metadata).await.unwrap();
 
     let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+    let logical_size = facts
+        .artifact
+        .logical_size
+        .as_ref()
+        .expect("logical size facts should be present");
+    assert_eq!(
+        logical_size.value_source,
+        PackageFactValueSource::FilesystemMetadata
+    );
+    assert!(logical_size.files.iter().any(|file| {
+        file.relative_path == "model-Q4_K_M.gguf"
+            && file.status == PackageFactStatus::Present
+            && file.size_bytes.is_some()
+            && file.value_source == PackageFactValueSource::FilesystemMetadata
+            && file.role == Some(PackageSizeRole::SelectedArtifact)
+    }));
     let gguf = facts.gguf.expect("gguf evidence should be present");
 
     assert_eq!(facts.artifact.artifact_kind, PackageArtifactKind::Gguf);
@@ -1377,6 +1501,7 @@ async fn persists_compact_package_facts_summary_cache() {
     assert!(summary_row.facts_json.len() < detail_row.facts_json.len());
     assert!(!summary_row.facts_json.contains("\"components\""));
     assert!(!summary_row.facts_json.contains("\"generation_defaults\""));
+    assert!(!summary_row.facts_json.contains("\"logical_size\""));
 }
 
 #[tokio::test]

@@ -23,15 +23,19 @@ Extraction is split by evidence owner:
 - `manifest.rs` selects bounded package files and builds source fingerprints.
 - `artifact.rs` projects artifact kind, components, weights, shards,
   quantization hints, companion files, and class references.
+- `size.rs` projects source-tagged logical package file and artifact sizes from
+  bounded manifest, component, and upstream metadata evidence.
 - `transformers.rs` extracts Transformers-compatible config evidence,
   custom-code sources, dependency manifests, and advisory backend hints.
 - `generation.rs` extracts model-provided generation defaults.
 - `summary.rs` projects compact selector summaries from full detail facts.
 
 All filesystem reads must stay inside the validated package directory and must
-use bounded standard file lists or selected artifact files. Human diagnostic
-messages may aid display and debugging, but machine-readable semantics belong in
-typed DTO fields.
+use bounded standard file lists or selected artifact files. Logical size facts
+are package-file byte evidence only; they are not loaded memory requirements,
+runtime fit decisions, device placement, or scheduler admission. Human
+diagnostic messages may aid display and debugging, but machine-readable
+semantics belong in typed DTO fields.
 
 ## Unsupported Behavior
 

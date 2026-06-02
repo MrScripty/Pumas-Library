@@ -2,7 +2,10 @@ use crate::error::Result;
 use crate::index::ModelDependencyBindingRecord;
 use crate::model_library::package_facts::manifest::PackageInspectionManifest;
 use crate::model_library::types::ModelMetadata;
-use crate::models::{ModelExecutionDescriptor, PumasModelRef, PUMAS_MODEL_REF_CONTRACT_VERSION};
+use crate::models::{
+    ModelExecutionDescriptor, PackageInspectionManifest as ContractPackageInspectionManifest,
+    PumasModelRef, PUMAS_MODEL_REF_CONTRACT_VERSION,
+};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
@@ -74,6 +77,14 @@ impl PackageInspectionContext {
 
     pub(crate) fn selected_files(&self) -> &[String] {
         self.manifest.selected_files()
+    }
+
+    pub(crate) fn manifest(&self) -> &PackageInspectionManifest {
+        &self.manifest
+    }
+
+    pub(crate) fn inspection_manifest(&self) -> ContractPackageInspectionManifest {
+        self.manifest.to_contract()
     }
 
     pub(crate) async fn source_fingerprint(&self) -> Result<String> {

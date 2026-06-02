@@ -29,11 +29,12 @@ use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
 use crate::model_library::importer::detect_dllm_from_config_json;
 use crate::model_library::naming::normalize_name;
 use crate::model_library::package_facts::{
-    auto_map_sources_from_config, backend_hint_facts, companion_artifacts,
-    custom_generate_dependency_manifests, custom_generate_sources, diffusers_package_evidence,
-    generation_default_facts, gguf_package_evidence, invalid_gguf_package_evidence,
-    merge_string_lists, package_artifact_kind, package_class_references, package_component_facts,
-    package_facts_summary, transformers_package_evidence, PackageInspectionContext,
+    artifact_logical_size_facts, auto_map_sources_from_config, backend_hint_facts,
+    companion_artifacts, custom_generate_dependency_manifests, custom_generate_sources,
+    diffusers_package_evidence, generation_default_facts, gguf_package_evidence,
+    invalid_gguf_package_evidence, merge_string_lists, package_artifact_kind,
+    package_class_references, package_component_facts, package_facts_summary,
+    transformers_package_evidence, PackageInspectionContext,
 };
 use crate::model_library::types::{
     HuggingFaceEvidence, ModelMetadata, ModelOverrides, ModelReviewFilter, ModelReviewItem,
@@ -2522,6 +2523,15 @@ impl ModelLibrary {
         let requires_custom_code = context.metadata().requires_custom_code.unwrap_or(false)
             || !auto_map_sources.is_empty()
             || !custom_generate_sources.is_empty();
+        let companion_artifacts = companion_artifacts(selected_files);
+        let logical_size = artifact_logical_size_facts(
+            context.metadata(),
+            artifact_kind,
+            selected_files,
+            &companion_artifacts,
+            &component_facts,
+            context.manifest(),
+        );
 
         let facts = ResolvedModelPackageFacts {
             package_facts_contract_version: PACKAGE_FACTS_CONTRACT_VERSION,
@@ -2536,7 +2546,7 @@ impl ModelLibrary {
                     .validation_errors
                     .clone()
                     .unwrap_or_default(),
-                companion_artifacts: companion_artifacts(selected_files),
+                companion_artifacts,
                 sibling_files: context
                     .metadata()
                     .huggingface_evidence
@@ -2544,6 +2554,7 @@ impl ModelLibrary {
                     .and_then(|evidence| evidence.sibling_filenames.clone())
                     .unwrap_or_default(),
                 selected_files: selected_files.to_vec(),
+                logical_size: Some(logical_size),
             },
             components: component_facts,
             transformers,
@@ -2551,7 +2562,7 @@ impl ModelLibrary {
                 .as_ref()
                 .and_then(|extraction| extraction.evidence.clone()),
             gguf,
-            inspection_manifest: None,
+            inspection_manifest: Some(context.inspection_manifest()),
             task: TaskEvidence {
                 pipeline_tag: context.metadata().pipeline_tag.clone().or_else(|| {
                     context

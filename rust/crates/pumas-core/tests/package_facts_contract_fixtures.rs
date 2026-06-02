@@ -2,8 +2,9 @@ use pumas_library::index::{ModelPackageFactsCacheRecord, ModelPackageFactsCacheS
 use pumas_library::models::{
     BackendHintLabel, DiffusersComponentRole, HuggingFaceModel, ImageGenerationFamilyLabel,
     ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope, ModelLibraryUpdateEvent,
-    PackageArtifactKind, PackageFactStatus, ProcessorComponentKind, ResolvedModelPackageFacts,
-    ResolvedModelPackageFactsSummary, PACKAGE_FACTS_CONTRACT_VERSION,
+    PackageArtifactKind, PackageFactStatus, PackageFactValueSource, PackageSizeRole,
+    ProcessorComponentKind, ResolvedModelPackageFacts, ResolvedModelPackageFactsSummary,
+    PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use serde_json::Value;
 use std::fs;
@@ -149,6 +150,21 @@ fn gguf_text_generation_fixture_matches_contract() {
     );
     assert_eq!(parsed.model_ref.model_id, "llm/llama/tiny-gguf");
     assert_eq!(parsed.artifact.artifact_kind, PackageArtifactKind::Gguf);
+    let logical_size = parsed
+        .artifact
+        .logical_size
+        .as_ref()
+        .expect("GGUF fixture should expose logical size");
+    assert_eq!(logical_size.total_size_bytes, Some(42));
+    assert_eq!(
+        logical_size.value_source,
+        PackageFactValueSource::FilesystemMetadata
+    );
+    assert!(logical_size.files.iter().any(|file| {
+        file.relative_path == "tiny-Q4_K_M.gguf"
+            && file.role == Some(PackageSizeRole::SelectedArtifact)
+            && file.status == PackageFactStatus::Present
+    }));
     assert!(
         parsed.transformers.is_none(),
         "GGUF fixture must not require HF/Transformers package evidence"
@@ -218,6 +234,25 @@ fn diffusers_text_to_image_fixture_matches_contract() {
         parsed.artifact.artifact_kind,
         PackageArtifactKind::DiffusersBundle
     );
+    let logical_size = parsed
+        .artifact
+        .logical_size
+        .as_ref()
+        .expect("Diffusers fixture should expose logical size");
+    assert_eq!(logical_size.total_size_bytes, Some(7952));
+    assert!(logical_size.files.iter().any(|file| {
+        file.relative_path == "unet/diffusion_pytorch_model.safetensors"
+            && file.role == Some(PackageSizeRole::Weight)
+    }));
+    assert!(
+        logical_size
+            .files
+            .iter()
+            .filter(|file| file.role == Some(PackageSizeRole::Weight))
+            .count()
+            >= 3,
+        "Diffusers fixture must include executable bundle weights, not only model_index.json"
+    );
     assert!(
         parsed.transformers.is_none(),
         "Diffusers fixture should use structured diffusers evidence instead of masquerading as Transformers"
@@ -263,6 +298,40 @@ fn diffusers_text_to_image_fixture_matches_contract() {
             .map(|evidence| evidence.family),
         Some(ImageGenerationFamilyLabel::StableDiffusion)
     );
+}
+
+#[test]
+fn sharded_safetensors_fixture_matches_logical_size_contract() {
+    let (_raw, parsed) = load_fixture("sharded_safetensors_package_facts.json");
+
+    assert_eq!(
+        parsed.package_facts_contract_version,
+        PACKAGE_FACTS_CONTRACT_VERSION
+    );
+    assert_eq!(
+        parsed.artifact.artifact_kind,
+        PackageArtifactKind::HfCompatibleDirectory
+    );
+    let logical_size = parsed
+        .artifact
+        .logical_size
+        .as_ref()
+        .expect("sharded safetensors fixture should expose logical size");
+    assert_eq!(logical_size.total_size_bytes, Some(164));
+    assert_eq!(
+        logical_size.value_source,
+        PackageFactValueSource::UpstreamMetadata
+    );
+    assert!(logical_size.files.iter().any(|file| {
+        file.relative_path == "model-00003-of-00003.safetensors"
+            && file.status == PackageFactStatus::Missing
+            && file.value_source == PackageFactValueSource::UpstreamMetadata
+            && file.role == Some(PackageSizeRole::Shard)
+    }));
+    assert!(logical_size.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "logical_size_file_missing"
+            && diagnostic.path.as_deref() == Some("model-00003-of-00003.safetensors")
+    }));
 }
 
 #[test]

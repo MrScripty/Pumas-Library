@@ -1,0 +1,129 @@
+{
+  "package_facts_contract_version": 3,
+  "model_ref": {
+    "model_id": "llm/example/sharded-safetensors"
+  },
+  "artifact": {
+    "artifact_kind": "hf_compatible_directory",
+    "entry_path": "llm/example/sharded-safetensors",
+    "storage_kind": "library_owned",
+    "validation_state": "valid",
+    "selected_files": [
+      "config.json",
+      "model.safetensors.index.json",
+      "model-00001-of-00003.safetensors",
+      "model-00002-of-00003.safetensors"
+    ],
+    "logical_size": {
+      "total_size_bytes": 164,
+      "value_source": "upstream_metadata",
+      "files": [
+        {
+          "relative_path": "config.json",
+          "size_bytes": 32,
+          "status": "present",
+          "value_source": "filesystem_metadata",
+          "role": "component_config"
+        },
+        {
+          "relative_path": "model-00001-of-00003.safetensors",
+          "size_bytes": 10,
+          "status": "present",
+          "value_source": "filesystem_metadata",
+          "role": "shard"
+        },
+        {
+          "relative_path": "model-00002-of-00003.safetensors",
+          "size_bytes": 14,
+          "status": "present",
+          "value_source": "filesystem_metadata",
+          "role": "shard"
+        },
+        {
+          "relative_path": "model-00003-of-00003.safetensors",
+          "size_bytes": 22,
+          "status": "missing",
+          "value_source": "upstream_metadata",
+          "role": "shard"
+        },
+        {
+          "relative_path": "model.safetensors.index.json",
+          "size_bytes": 90,
+          "status": "present",
+          "value_source": "filesystem_metadata",
+          "role": "component_config"
+        }
+      ],
+      "diagnostics": [
+        {
+          "code": "logical_size_file_missing",
+          "message": "model-00003-of-00003.safetensors is missing locally; size is sourced from upstream metadata",
+          "path": "model-00003-of-00003.safetensors"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "kind": "config",
+      "status": "present",
+      "relative_path": "config.json"
+    },
+    {
+      "kind": "weight_index",
+      "status": "present",
+      "relative_path": "model.safetensors.index.json"
+    },
+    {
+      "kind": "shard",
+      "status": "present",
+      "relative_path": "model-00001-of-00003.safetensors"
+    },
+    {
+      "kind": "shard",
+      "status": "present",
+      "relative_path": "model-00002-of-00003.safetensors"
+    },
+    {
+      "kind": "shard",
+      "status": "missing",
+      "relative_path": "model-00003-of-00003.safetensors",
+      "message": "declared by model.safetensors.index.json but file is missing"
+    }
+  ],
+  "transformers": {
+    "config_status": "present",
+    "config_model_type": "llama",
+    "generation_config_status": "missing",
+    "selected_files": [
+      "config.json",
+      "model.safetensors.index.json",
+      "model-00001-of-00003.safetensors",
+      "model-00002-of-00003.safetensors"
+    ]
+  },
+  "task": {
+    "pipeline_tag": "text-generation",
+    "task_type_primary": "text_generation",
+    "input_modalities": [
+      "text"
+    ],
+    "output_modalities": [
+      "text"
+    ]
+  },
+  "generation_defaults": {
+    "status": "missing"
+  },
+  "custom_code": {
+    "requires_custom_code": false
+  },
+  "backend_hints": {
+    "accepted": [
+      "transformers"
+    ],
+    "raw": [
+      "transformers"
+    ]
+  }
+}

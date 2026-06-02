@@ -62,7 +62,7 @@ describe('ModelMetadataModal', () => {
       inference_settings: [],
     });
     resolveModelPackageFactsMock.mockResolvedValue({
-      package_facts_contract_version: 2,
+      package_facts_contract_version: 3,
       model_ref: { model_id: 'model-1' },
       artifact: {
         artifact_kind: 'hf_compatible_directory',
@@ -90,7 +90,7 @@ describe('ModelMetadataModal', () => {
 
     expect(resolveModelPackageFactsMock).toHaveBeenCalledWith('model-1');
     expect(await screen.findByText('Package Facts Contract Version')).toBeInTheDocument();
-    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
     expect(screen.getByText('Artifact')).toBeInTheDocument();
   });
 });

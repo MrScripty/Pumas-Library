@@ -10,6 +10,7 @@ pub(crate) mod diffusers;
 pub(crate) mod generation;
 pub(crate) mod gguf;
 pub(crate) mod manifest;
+pub(crate) mod size;
 pub(crate) mod summary;
 pub(crate) mod transformers;
 
@@ -20,6 +21,7 @@ pub(crate) use context::PackageInspectionContext;
 pub(crate) use diffusers::diffusers_package_evidence;
 pub(crate) use generation::generation_default_facts;
 pub(crate) use gguf::{gguf_package_evidence, invalid_gguf_package_evidence};
+pub(crate) use size::artifact_logical_size_facts;
 pub(crate) use summary::package_facts_summary;
 pub(crate) use transformers::{
     auto_map_sources_from_config, backend_hint_facts, custom_generate_dependency_manifests,

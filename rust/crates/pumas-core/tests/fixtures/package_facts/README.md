@@ -14,6 +14,9 @@ selection policy.
 - Use stable snake_case field names and stable enum labels.
 - Omit optional fields when absent so defaults remain part of the contract.
 - Represent backend hints as advisory facts only.
+- Represent `artifact.logical_size` as logical package byte evidence only, with
+  value sources and diagnostics. Do not encode runtime memory, device fit,
+  scheduler admission, or consumer support verdicts.
 - Treat these fixtures as the producer truth for host consumers. Consumers may
   copy or generate snapshots from them for tests, but any copied fixture must
   preserve field names and enum labels unless it is intentionally testing a
@@ -53,7 +56,11 @@ repository from Pumas package facts, summaries, and update events.
   tasks use the same package-facts contract as generation models.
 - `diffusers_sd_text_to_image_package_facts.json`: Diffusers text-to-image
   package with `model_index.json`, component roles, Stable Diffusion family
-  evidence, image-generation task facts, and advisory Diffusers backend hinting.
+  evidence, image-generation task facts, logical bundle size evidence including
+  weight files, and advisory Diffusers backend hinting.
+- `sharded_safetensors_package_facts.json`: HF-compatible sharded safetensors
+  package with declared shard logical-size facts and source-tagged upstream
+  size evidence for a missing local shard.
 - `unsupported_ollama_hint_package_facts.json`: ecosystem hint preserved as
   unsupported evidence rather than converted into executable support.
 - `invalid_generation_config_package_facts.json`: invalid model-provided

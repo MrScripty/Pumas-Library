@@ -26,6 +26,7 @@ import { useAppProcessActions } from './hooks/useAppProcessActions';
 import { useAppStartupChecks } from './hooks/useAppStartupChecks';
 import { useAppWindowActions } from './hooks/useAppWindowActions';
 import { useLauncherUpdates } from './hooks/useLauncherUpdates';
+import { useLlamaCppRuntimeViewState } from './hooks/useLlamaCppRuntimeViewState';
 import { useManagedApps } from './hooks/useManagedApps';
 import { useModelPreferences } from './hooks/useModelPreferences';
 import { useRuntimeProfiles } from './hooks/useRuntimeProfiles';
@@ -40,7 +41,6 @@ export default function App() {
     __FEATURE_MULTI_APP__ ? null : 'comfyui'
   );
 
-  // --- Custom Hooks ---
   const {
     status,
     systemResources,
@@ -50,10 +50,7 @@ export default function App() {
     refetch: refetchStatus
   } = useStatus();
   const { diskSpacePercent, fetchDiskSpace } = useDiskSpace();
-  const {
-    installDependencies: handleInstallDeps,
-    isInstallingDeps,
-  } = useDependencyInstaller({
+  const { installDependencies: handleInstallDeps, isInstallingDeps } = useDependencyInstaller({
     refetchStatus,
   });
   const {
@@ -66,24 +63,10 @@ export default function App() {
   } = useLauncherUpdates();
   const runningState = useMemo(() => getAppRunningState(status), [status]);
   const { launchError, launchLogPath, isStarting, isStopping, launchComfyUI, stopComfyUI, openLogPath } = useComfyUIProcess(runningState.comfyUIRunning);
-  const {
-    launchError: ollamaLaunchError,
-    launchLogPath: ollamaLaunchLogPath,
-    isStarting: ollamaIsStarting,
-    isStopping: ollamaIsStopping,
-    launchOllama,
-    stopOllama,
-    openLogPath: openOllamaLogPath
-  } = useOllamaProcess(runningState.ollamaRunning);
-  const {
-    launchError: torchLaunchError,
-    launchLogPath: torchLaunchLogPath,
-    isStarting: torchIsStarting,
-    isStopping: torchIsStopping,
-    launchTorch,
-    stopTorch,
-    openLogPath: openTorchLogPath
-  } = useTorchProcess(runningState.torchRunning);
+  const { launchError: ollamaLaunchError, launchLogPath: ollamaLaunchLogPath, isStarting: ollamaIsStarting, isStopping: ollamaIsStopping, ...ollamaActions } =
+    useOllamaProcess(runningState.ollamaRunning);
+  const { launchError: torchLaunchError, launchLogPath: torchLaunchLogPath, isStarting: torchIsStarting, isStopping: torchIsStopping, ...torchActions } =
+    useTorchProcess(runningState.torchRunning);
   const { modelGroups, scanModels, fetchModels } = useModels();
   const { activeDownload, activeDownloadCount } = useActiveModelDownload();
   const runtimeProfiles = useRuntimeProfiles();
@@ -98,29 +81,13 @@ export default function App() {
     ollamaInstalledVersions,
     torchInstalledVersions,
   } = useSelectedAppVersions(selectedAppId);
-  const llamaCppProfileIds = useMemo(() => {
-    return new Set(
-      runtimeProfiles.profiles
-        .filter((profile) => profile.provider === 'llama_cpp')
-        .map((profile) => profile.profile_id)
-    );
-  }, [runtimeProfiles.profiles]);
-  const llamaCppRuntimeState = useMemo(() => {
-    const statuses = runtimeProfiles.statuses.filter((status) =>
-      llamaCppProfileIds.has(status.profile_id)
-    );
-    const hasServedModel = servingStatus.servedModels.some(
-      (model) => model.provider === 'llama_cpp' && model.load_state === 'loaded'
-    );
-    return {
-      isRunning:
-        hasServedModel ||
-        statuses.some((status) => status.state === 'running' || status.state === 'external'),
-      isStarting: statuses.some((status) => status.state === 'starting'),
-      isStopping: statuses.some((status) => status.state === 'stopping'),
-      launchError: statuses.find((status) => status.state === 'failed')?.last_error ?? null,
-    };
-  }, [llamaCppProfileIds, runtimeProfiles.statuses, servingStatus.servedModels]);
+  const { connectionUrl: llamaCppConnectionUrl, runtimeState: llamaCppRuntimeState } =
+    useLlamaCppRuntimeViewState({
+      profiles: runtimeProfiles.profiles,
+      runtimeStatuses: runtimeProfiles.statuses,
+      servedModels: servingStatus.servedModels,
+      servingEndpoint: servingStatus.endpoint,
+    });
 
   const managedAppsState = useMemo(() => buildManagedAppsState({
     running: runningState,
@@ -170,12 +137,7 @@ export default function App() {
     torchIsStopping,
     torchLaunchError,
   ]);
-  const {
-    apps,
-    deleteApp,
-    reorderApps,
-    addApp,
-  } = useManagedApps(managedAppsState);
+  const { apps, deleteApp, reorderApps, addApp } = useManagedApps(managedAppsState);
   const appIds = useMemo(() => apps.map((app) => app.id), [apps]);
   const { getPanelState, setShowVersionManager } = useAppPanelState(appIds);
   const selectedAppShellState = useMemo(
@@ -193,12 +155,7 @@ export default function App() {
     toggleLink: handleToggleLink,
     toggleStar: handleToggleStar,
   } = useModelPreferences({ selectedAppId });
-  const {
-    closeWindow,
-    minimizeWindow,
-    openModelsRoot,
-    chooseLibraryRoot,
-  } = useAppWindowActions();
+  const { closeWindow, minimizeWindow, openModelsRoot, chooseLibraryRoot } = useAppWindowActions();
   const {
     handleImportComplete,
     handleImportDialogClose,
@@ -208,26 +165,22 @@ export default function App() {
   } = useAppImportDialog({
     onImportComplete: fetchModels,
   });
-  const {
-    handleLaunchApp,
-    handleOpenLog,
-    handleStopApp,
-  } = useAppProcessActions({
+  const { handleLaunchApp, handleOpenLog, handleStopApp } = useAppProcessActions({
     comfyUIRunning: runningState.comfyUIRunning,
     launchComfyUI,
     stopComfyUI,
     launchLogPath,
     openLogPath,
     ollamaRunning: runningState.ollamaRunning,
-    launchOllama,
-    stopOllama,
+    launchOllama: ollamaActions.launchOllama,
+    stopOllama: ollamaActions.stopOllama,
     ollamaLaunchLogPath,
-    openOllamaLogPath,
+    openOllamaLogPath: ollamaActions.openLogPath,
     torchRunning: runningState.torchRunning,
-    launchTorch,
-    stopTorch,
+    launchTorch: torchActions.launchTorch,
+    stopTorch: torchActions.stopTorch,
     torchLaunchLogPath,
-    openTorchLogPath,
+    openTorchLogPath: torchActions.openLogPath,
     refetchStatus,
   });
 
@@ -238,7 +191,6 @@ export default function App() {
     refetchStatus,
   });
 
-  // --- Handlers ---
   const handleDeleteApp = (appId: string) => {
     if (appId === 'comfyui') {
       logger.warn('Attempt to delete ComfyUI app prevented', { appId });
@@ -283,7 +235,10 @@ export default function App() {
     appDisplayName: selectedAppShellState.appDisplayName,
     appVersions,
     comfyUIRunning: runningState.comfyUIRunning,
-    connectionUrl: selectedAppShellState.connectionUrl,
+    connectionUrl:
+      selectedAppId === 'llama-cpp'
+        ? llamaCppConnectionUrl
+        : selectedAppShellState.connectionUrl,
     depsInstalled: setupDisplayState.depsInstalled,
     diskSpacePercent,
     displayStatus: setupDisplayState.displayStatus,

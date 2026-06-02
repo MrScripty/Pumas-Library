@@ -23,6 +23,13 @@ describe('DEFAULT_APPS', () => {
     expect(DEFAULT_APPS.some((app) => app.id === 'onnx-runtime')).toBe(true);
   });
 
+  it('does not expose a stale static connection URL for llama.cpp', () => {
+    const llamaCpp = getAppById('llama-cpp');
+
+    expect(llamaCpp).toBeDefined();
+    expect(llamaCpp?.connectionUrl).toBeUndefined();
+  });
+
   it('keeps hard-coded ONNX app surfaces aligned with plugin metadata', () => {
     expect(onnxPlugin).toMatchObject({
       id: 'onnx-runtime',

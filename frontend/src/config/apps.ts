@@ -48,7 +48,6 @@ export const DEFAULT_APPS: AppConfig[] = [
     status: 'idle',
     iconState: 'uninstalled',
     description: 'Native GGUF runtime and OpenAI-compatible model server',
-    connectionUrl: 'http://127.0.0.1:18080',
     starred: false,
     linked: false,
   },

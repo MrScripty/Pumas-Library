@@ -6,6 +6,7 @@
  */
 
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
+import { decodeModelImportSelection, type ModelImportSelection } from './model-import-picker';
 import type {
   LauncherRootSelectionResult,
   LauncherRootStartupState,
@@ -911,24 +912,23 @@ const electronAPI = {
   },
 
   // Model Import Dialog - uses Electron's native dialog
-  open_model_import_dialog: async () => {
-    const result = await ipcRenderer.invoke('dialog:openFile', {
-      title: 'Select Model Files or Folders',
-      properties: ['openFile', 'openDirectory', 'multiSelections'],
-      filters: [
-        {
-          name: 'Model Files',
-          extensions: ['safetensors', 'ckpt', 'gguf', 'pt', 'bin', 'pth', 'onnx'],
-        },
-        { name: 'All Files', extensions: ['*'] },
-      ],
-    });
-
-    if (result.canceled) {
-      return { success: true, paths: [] };
+  open_model_import_dialog: async (): Promise<ModelImportSelection> => {
+    try {
+      const result: unknown = await ipcRenderer.invoke('dialog:openFile', {
+        title: 'Select Model Files or Folders',
+        properties: ['openFile', 'openDirectory', 'multiSelections'],
+        filters: [
+          {
+            name: 'Model Files',
+            extensions: ['safetensors', 'ckpt', 'gguf', 'pt', 'bin', 'pth', 'onnx'],
+          },
+          { name: 'All Files', extensions: ['*'] },
+        ],
+      });
+      return decodeModelImportSelection(result);
+    } catch {
+      return { status: 'unavailable' };
     }
-
-    return { success: true, paths: result.filePaths };
   },
 
   // ========================================

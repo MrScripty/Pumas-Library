@@ -168,6 +168,21 @@ function toPlainValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test('model import selection crosses the bundled preload as a closed desktop outcome', async () => {
+  const { chooseModelImportPaths } = await import('../dist/model-import-picker.js');
+  const harness = loadCompiledPreload();
+  for (const native of [{canceled:true,filePaths:[]}, {canceled:false,filePaths:['/models/ e\u0301.gguf','/models/ e\u0301.gguf']}]) {
+    const produced = await chooseModelImportPaths(async () => native);
+    harness.respondWith(produced);
+    assert.deepEqual(toPlainValue(await harness.api.open_model_import_dialog()), produced);
+  }
+  harness.respondWith({status:'selected',paths:[]});
+  assert.deepEqual(toPlainValue(await harness.api.open_model_import_dialog()), {status:'invalid'});
+  harness.respondWith(Promise.reject(new Error('/private/native-failure')));
+  assert.deepEqual(toPlainValue(await harness.api.open_model_import_dialog()), {status:'unavailable'});
+  assert.equal(harness.invocations.every(([channel]) => channel === 'dialog:openFile'), true);
+});
+
 test('partial recovery bridge sends only the current model ticket request', async () => {
   const harness = loadCompiledPreload();
   const recoveryToken = `v1:${'a'.repeat(64)}`;

@@ -12,6 +12,8 @@ import { buildDownloadingModels, mergeLocalModelGroups } from '../src/components
 import { LocalModelsList } from '../src/components/LocalModelsList';
 import { LinkHealthStatus } from '../src/components/LinkHealthStatus';
 import { ValidationError } from '../src/errors';
+import { useModelImportPicker } from '../src/hooks/useModelImportPicker';
+import { chooseModelImportPaths } from '../../electron/src/model-import-picker';
 
 const fixturePath = process.env['PUMAS_DESKTOP_CONTRACT_FIXTURES'];
 if (!fixturePath) throw new ValidationError('Actual desktop producer fixtures are required; run test:desktop-contract.', 'producer-fixtures');
@@ -33,6 +35,7 @@ function installActualPreload(
   listeners = new Map<string, (event: unknown, payload: unknown) => void>(),
   initialDownloads: unknown = fixture['download_list'],
   healthOutcomes: unknown[] = [],
+  picker: () => Promise<unknown> = async () => { throw new ValidationError('No picker fixture', 'producer-fixtures'); },
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -51,6 +54,7 @@ function installActualPreload(
         return { status: 'ready', selectionAction: 'select-library', libraryScopeId: null };
       },
       invoke: async (channel: string, method: string, params: unknown) => {
+        if (channel === 'dialog:openFile') return picker();
         if (channel === 'launcher-root:presentation-committed') return undefined;
         if (channel === 'model-download:subscribe' || channel === 'model-download:unsubscribe') return undefined;
         expect(channel).toBe('api:call');
@@ -123,6 +127,31 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('preserves native selection, cancellation and failure through the actual preload into picker state', async () => {
+    const paths = ['/models/ e\u0301.gguf', '/models/ e\u0301.gguf'];
+    const chooser = vi.fn()
+      .mockRejectedValueOnce(new Error('/private/native-error'))
+      .mockResolvedValueOnce({ canceled: true, filePaths: [] })
+      .mockResolvedValueOnce({ canceled: false, filePaths: paths });
+    installActualPreload(undefined, undefined, undefined, undefined, () => chooseModelImportPaths(chooser));
+    function Picker() {
+      const state = useModelImportPicker({});
+      return <><button onClick={() => void state.openImportPicker()}>Choose</button>
+        <output>{JSON.stringify({paths:state.importPaths, open:state.showImportDialog, error:state.pickerError})}</output></>;
+    }
+    render(<Picker />);
+    fireEvent.click(screen.getByRole('button', {name:'Choose'}));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Model file picker unavailable. Try again.'));
+    expect(screen.getByRole('status')).not.toHaveTextContent('/private');
+    fireEvent.click(screen.getByRole('button', {name:'Choose'}));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('"error":null'));
+    expect(screen.getByRole('status')).toHaveTextContent('"open":false');
+    fireEvent.click(screen.getByRole('button', {name:'Choose'}));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('"open":true'));
+    const observed: unknown = JSON.parse(screen.getByRole('status').textContent ?? '{}');
+    if (!isFixtureRecord(observed)) throw new ValidationError('Invalid observed state', 'producer-fixtures');
+    expect(observed['paths']).toEqual(paths);
+  });
   afterEach(() => { window.electronAPI = undefined; });
 
   it('renders complete, partial, and duplicate facts and sends the exact producer-admitted recovery ticket', async () => {

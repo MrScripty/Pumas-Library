@@ -135,6 +135,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     completeImport,
     importPaths,
     openImportPicker,
+    pickerError,
+    isPicking,
     showImportDialog,
   } = useModelImportPicker({ onModelsImported });
 
@@ -239,10 +241,21 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         onSelectFilter={handleFilterSelect}
         onOpenModelsRoot={onOpenModelsRoot}
         onImportModels={openImportPicker}
+        isPickingModels={isPicking}
         onHfAuthClick={openHfAuth}
         showModeToggle={Boolean(onAddModels)}
       />
 
+      {isPicking && <p role="status" className="px-4 py-2 text-sm text-[hsl(var(--launcher-text-secondary))]">Choosing model files…</p>}
+      {pickerError && (
+        <div className="px-4 py-2 space-y-2 text-sm text-[hsl(var(--launcher-text-primary))]">
+          <p role="alert">{pickerError}</p>
+          <button type="button" onClick={() => void openImportPicker()} disabled={isPicking}
+            className="rounded border border-[hsl(var(--launcher-border))] px-3 py-2 focus-visible:outline focus-visible:outline-2">
+            Retry model selection
+          </button>
+        </div>
+      )}
       {/* Model List */}
       <div className="flex-1 overflow-y-auto">
         <div className={isDownloadMode ? 'p-4 space-y-3' : 'p-4 space-y-4'}>

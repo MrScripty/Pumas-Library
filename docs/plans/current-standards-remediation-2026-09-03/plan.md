@@ -249,7 +249,8 @@ validators migrated together; no persistence schema or live data changed.
 
 **Next slice:** Continue API/UI contracts under the user's 2026-09-06 priority,
 following the accepted [standalone backend/link-health slice](frontend-and-ui/plan.md#standalone-backend-and-link-health-contract-admission).
-Import-picker and conversion contracts remain next in the frontend plan.
+The import-picker contract is also accepted; conversion contracts are next in
+the frontend plan.
 The GUI is independently optional; embedded Rust and standalone RPC remain
 supported. Pending cleanup replay is deferred, not accepted: it still needs an
 exact contract against durable authority and retained root custody. No old-format

@@ -24,6 +24,7 @@ interface ModelSearchBarProps {
   onSelectFilter: (filter: string) => void;
   onOpenModelsRoot?: () => void;
   onImportModels?: () => void;
+  isPickingModels?: boolean;
   onHfAuthClick?: () => void;
   showModeToggle?: boolean;
 }
@@ -43,6 +44,7 @@ export function ModelSearchBar({
   onSelectFilter,
   onOpenModelsRoot,
   onImportModels,
+  isPickingModels = false,
   onHfAuthClick,
   showModeToggle = true,
 }: ModelSearchBarProps) {
@@ -119,6 +121,7 @@ export function ModelSearchBar({
                 <button
                   type="button"
                   onClick={onImportModels}
+                  disabled={isPickingModels}
                   className="p-1 rounded text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-secondary))] transition-colors"
                   title="Import models"
                   aria-label="Import models"

@@ -1,5 +1,45 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-06 — Import-Picker Contract Accepted
+
+FE-I11 is resolved. The Electron-owned picker contract distinguishes selected
+paths, cancellation, invalid data and unavailable native/IPC work. Missing or
+destroyed windows no longer masquerade as cancellation. The canonical decoder
+rejects contradictory/extra fields and retains no mutable path-array alias;
+selection preserves spelling, Unicode, order and duplicates. This is an atomic,
+non-persisted desktop contract replacement, not a backend import change.
+
+The renderer exposes failure and named retry, shows pending state and disables
+duplicate selection, preserves an existing selection on failure/cancellation,
+and classifies late work after close/unmount as superseded. Native completion
+remains observed because this bridge cannot cancel the OS dialog. Backend import
+validation and execution remain independent of GUI selection and are unchanged.
+
+Acceptance evidence (Linux, automated unless noted):
+
+- Focused hook/presentation tests: 19 passed, including duplicate admission,
+  close/unmount, failure/retry, exact paths, native-button keyboard activation
+  and disabled/pending semantics. Full frontend: 551 tests in 113 files passed.
+- Electron: all 11 test files passed, including native-outcome projection,
+  closed decoder and actual bundled-preload contract cases. Native rejection
+  does not expose private diagnostic strings. Type checks and lint pass.
+- Actual producer/bundled-preload/renderer conformance: 8 tests passed. Picker
+  fixtures exercise failure, cancellation and selection through the production
+  native adapter and preload into the real hook, without a Rust picker contract.
+- Default and library-only production builds pass. Isolated real Chromium with
+  the compiled preload and native-result fixtures passes pointer import,
+  visible failure, retry/cancel, exact paths reaching import classification,
+  import-dialog opening and close. No backend import mutation is invoked.
+  Hidden-window capture needed a separate compositor observation; no production
+  timing or startup behavior was changed. Default GUI build is restored.
+
+The GUI fixture uses a private temporary profile, disabled sandbox/GPU for the
+verification environment and bounded process lifetime; it does not drive the
+real OS picker, prove native Windows/macOS behavior, or claim backend import
+execution. No live model files or user configuration changed. Existing recovery
+artifact directories remain untouched. Conversion contracts remain next; full
+M4/M5 and Pending cleanup replay are not accepted by this slice.
+
 ## 2026-09-06 — Standalone Backend And Link-Health Contract
 
 Status: accepted for this bounded slice; FE-I10 is resolved.

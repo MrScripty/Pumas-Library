@@ -7,6 +7,7 @@ import { useModels } from '../hooks/useModels';
 import { ModelManager } from './ModelManager';
 import { writeModelLibrarySnapshot } from '../utils/modelLibrarySnapshot';
 import { LauncherRootRecoveryProvider } from '../hooks/useLauncherRootRecovery';
+import userEvent from '@testing-library/user-event';
 
 const libraryScopeId = `display-v1:${'a'.repeat(64)}`;
 
@@ -16,12 +17,16 @@ const {
   isApiAvailableMock,
   downloadActivities,
   resumeDownloadMock,
+  pickerState,
+  retryPickerMock,
 } = vi.hoisted(() => ({
   getElectronAPIMock: vi.fn(),
   getModelsMock: vi.fn(),
   isApiAvailableMock: vi.fn<() => boolean>(),
   downloadActivities: {} as Record<string, DownloadStatus>,
   resumeDownloadMock: vi.fn(),
+  pickerState: { error: null as string | null, busy: false },
+  retryPickerMock: vi.fn(),
 }));
 
 vi.mock('../api/adapter', () => ({
@@ -79,7 +84,9 @@ vi.mock('../hooks/useModelImportPicker', () => ({
     closeImportDialog: vi.fn(),
     completeImport: vi.fn(),
     importPaths: [],
-    openImportPicker: vi.fn(),
+    openImportPicker: retryPickerMock,
+    pickerError: pickerState.error,
+    isPicking: pickerState.busy,
     showImportDialog: false,
   }),
 }));
@@ -210,6 +217,8 @@ async function flushMicrotasks() {
 describe('ModelManager integrity refresh acceptance', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    pickerState.error = null;
+    pickerState.busy = false;
     for (const key of Object.keys(downloadActivities)) delete downloadActivities[key];
     vi.useFakeTimers();
     isApiAvailableMock.mockReturnValue(true);
@@ -220,6 +229,24 @@ describe('ModelManager integrity refresh acceptance', () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+  });
+
+  it('shows picker failure with keyboard retry and disables import while choosing', async () => {
+    vi.useRealTimers();
+    getModelsMock.mockResolvedValue({ success: true, models: {} });
+    pickerState.error = 'Model file picker unavailable. Try again.';
+    const { rerender } = render(<Harness />);
+    expect(screen.getByRole('alert')).toHaveTextContent(pickerState.error);
+    const retry = screen.getByRole('button', { name: 'Retry model selection' });
+    retry.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(retryPickerMock).toHaveBeenCalledTimes(1);
+    pickerState.error = null;
+    pickerState.busy = true;
+    rerender(<Harness />);
+    expect(screen.getByRole('button', { name: 'Import models' })).toBeDisabled();
+    expect(screen.getByText('Choosing model files…')).toHaveAttribute('role', 'status');
+    expect(screen.queryByRole('button', { name: 'Retry model selection' })).not.toBeInTheDocument();
   });
 
   it('counts catalog models separately from visibly identified download activity with exact controls', async () => {

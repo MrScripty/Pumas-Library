@@ -1,4 +1,5 @@
 import type { BaseResponse } from './api-common';
+import type { ModelImportSelection } from '../../../electron/src/model-import-picker';
 import type {
   AppStatusResponse,
   GetPluginResponse,
@@ -71,7 +72,7 @@ export interface DesktopBridgeUtilityAPI {
   // Model Import
   // ========================================
   /** Open native file picker for model import */
-  open_model_import_dialog(): Promise<{ success: boolean; paths: string[] }>;
+  open_model_import_dialog(): Promise<ModelImportSelection>;
 
   // ========================================
   // Plugin System

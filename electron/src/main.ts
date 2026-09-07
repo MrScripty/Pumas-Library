@@ -17,6 +17,7 @@ import {
 import * as path from 'path';
 import * as fs from 'fs';
 import { readLibraryDisplayScope } from './library-display-scope';
+import { chooseModelImportPaths } from './model-import-picker';
 import {
   persistLauncherRootOverride,
   resolveLauncherRoot,
@@ -502,8 +503,9 @@ function registerIPCHandlers(): void {
 
   // File dialog handler
   ipcMain.handle('dialog:openFile', async (_event, options: unknown) => {
-    if (!mainWindow) return { canceled: true, filePaths: [] };
-    return await dialog.showOpenDialog(mainWindow, sanitizeOpenDialogOptions(options));
+    const targetWindow = mainWindow;
+    if (!targetWindow || targetWindow.isDestroyed()) return { status: 'unavailable' };
+    return chooseModelImportPaths(() => dialog.showOpenDialog(targetWindow, sanitizeOpenDialogOptions(options)));
   });
 
   ipcMain.handle('launcher:getRootState', () => launcherRootStartupState);

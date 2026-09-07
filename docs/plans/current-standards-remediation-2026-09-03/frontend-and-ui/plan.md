@@ -10,12 +10,50 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Admit the import-picker contract (FE-I11), then conversion
-consumer contracts. The standalone-backend/link-health slice below is accepted.
+**Next slice:** Admit conversion consumer contracts. The import-picker (FE-I11)
+and standalone-backend/link-health slices below are accepted.
 The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Import-Picker Contract Admission
+
+Status: accepted within the desktop selection and Linux fixture boundaries in
+the [execution ledger](execution-ledger.md#2026-09-06--import-picker-contract-accepted).
+
+Operation: `continue` this canonical plan under the user's continuation request.
+FE-I11 owns only native selection, not import execution. Replace the coordinated,
+non-persisted desktop-only picker result with `selected` (nonempty exact paths),
+`cancelled`, `invalid`, or `unavailable`. Missing windows and rejected native/IPC
+work are unavailable, never cancellation. Main owns native adaptation; preload
+decodes the closed result; the renderer preserves selected records without path
+normalization and shows failed selection with retry. No Rust/RPC import contract,
+GUI feature composition, live files, or backend import rules change.
+
+Write set: Electron picker contract module, main/preload and focused contract
+tests; frontend bridge type, import-picker hook/tests, ModelManager/SearchBar
+presentation and affected tests/conformance; this plan, issues, ledger and parent
+next-slice pointer. No generated RPC artifact or new dependency is required.
+
+Composed-design review: applicable. (1) Native choice and its process contract
+are desktop-owned; pending/retry/dialog visibility are renderer-owned; imports
+remain backend-owned. (2) A pending invocation must retain identity across await,
+close and unmount, but cannot own import state after revocation. (3) Callers know
+one closed outcome, not Electron's native result/options. (4) Native adaptation
+changes stay in Electron; presentation changes stay in the hook/manager.
+(5) A type-only frontend dependency points to the small canonical picker contract,
+not Electron startup or Rust. (6) Native adaptation and UI lifecycle are separately
+testable; their coordinated IPC replacement deploys atomically. (7) Removing the
+contract module redistributes native outcome and validation policy across main,
+preload and renderer. (8) Retain one narrow decoder and the existing hook/controls,
+not a generic dialog framework, schema generator or new runner.
+
+Acceptance: focused producer/decoder and current-invocation regressions; actual
+bundled preload into renderer failure/cancellation/selection; visible named retry
+and unchanged selection paths; types/lint/full affected suites; representative
+built Chromium interaction with isolated native-outcome fixtures. Native OS dialog
+automation and backend import execution are not claimed by those fixtures.
 
 ## Standalone Backend And Link-Health Contract Admission
 

@@ -1,0 +1,719 @@
+//! Base Python setup custody. The configured launcher-data directory and its
+//! lock file must not be replaced or unlinked while an owner is active. This is
+//! advisory setup exclusion, not a hostile-filesystem capability. Explicit
+//! shutdown must complete before the embedding application stops its runtime.
+
+use std::fs::{File, OpenOptions};
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus, Stdio};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use tokio::sync::watch;
+use tokio::task::JoinHandle;
+
+use super::{manager::probe_conversion_environment, scripts};
+use crate::cancel::CancellationToken;
+use crate::{PumasError, Result};
+
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const POLL_INTERVAL: Duration = Duration::from_millis(20);
+
+#[derive(Clone, Debug)]
+enum Failure {
+    Cancelled,
+    Failed(String),
+}
+
+impl Failure {
+    fn public(self) -> PumasError {
+        match self {
+            Self::Cancelled => PumasError::InstallationCancelled,
+            Self::Failed(message) => PumasError::ConversionFailed { message },
+        }
+    }
+}
+
+type Outcome = std::result::Result<(), Failure>;
+
+struct Operation {
+    cancel: CancellationToken,
+    completion: watch::Receiver<Option<Outcome>>,
+    // Keeping the handle inside this mutex makes an interrupted join resumable.
+    worker: tokio::sync::Mutex<WorkerReceipt>,
+}
+
+struct WorkerReceipt {
+    handle: Option<JoinHandle<()>>,
+    failure: Option<Failure>,
+}
+
+impl Operation {
+    async fn observe(&self) -> Outcome {
+        let mut receiver = self.completion.clone();
+        let outcome = loop {
+            if let Some(outcome) = receiver.borrow().clone() {
+                break outcome;
+            }
+            if receiver.changed().await.is_err() {
+                break Err(Failure::Failed(
+                    "Conversion setup completion was lost".into(),
+                ));
+            }
+        };
+        let mut worker = self.worker.lock().await;
+        if let Some(task) = worker.handle.as_mut() {
+            if task.await.is_err() {
+                worker.failure = Some(Failure::Failed("Conversion setup worker failed".into()));
+            }
+            worker.handle = None;
+        }
+        match worker.failure.as_ref() {
+            Some(failure) => Err(failure.clone()),
+            None => outcome,
+        }
+    }
+}
+
+#[derive(Default)]
+struct State {
+    closed: bool,
+    operation: Option<Arc<Operation>>,
+}
+
+pub(super) struct SetupOwner {
+    root: PathBuf,
+    state: Mutex<State>,
+}
+
+impl SetupOwner {
+    pub(super) fn new(root: PathBuf) -> Self {
+        Self {
+            root,
+            state: Mutex::new(State::default()),
+        }
+    }
+
+    pub(super) async fn ensure(&self) -> Result<()> {
+        loop {
+            let (operation, previous) = {
+                let mut state = self.state.lock().expect("conversion setup owner poisoned");
+                if state.closed {
+                    return Err(PumasError::InstallationCancelled);
+                }
+                match state.operation.as_ref() {
+                    Some(operation) => (
+                        Arc::clone(operation),
+                        operation.completion.borrow().is_some(),
+                    ),
+                    None => {
+                        let operation = self.start();
+                        state.operation = Some(Arc::clone(&operation));
+                        (operation, false)
+                    }
+                }
+            };
+            let outcome = operation.observe().await;
+            if !previous {
+                return outcome.map_err(Failure::public);
+            }
+            // An explicit new request may retry a completed operation, but only
+            // after its worker has been observed. Existing waiters keep its result.
+            let mut state = self.state.lock().expect("conversion setup owner poisoned");
+            if state
+                .operation
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, &operation))
+            {
+                state.operation = None;
+            }
+        }
+    }
+
+    fn start(&self) -> Arc<Operation> {
+        let root = self.root.clone();
+        let cancel = CancellationToken::new();
+        let worker_cancel = cancel.clone();
+        let (sender, receiver) = watch::channel(None);
+        // One blocking worker per owner. It retains the lease and every child
+        // independently of request cancellation and async runtime task aborts.
+        let handle = tokio::task::spawn_blocking(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                execute(&root, &worker_cancel)
+            }))
+            .unwrap_or_else(|_| Err(Failure::Failed("Conversion setup worker panicked".into())));
+            sender.send_replace(Some(result));
+        });
+        Arc::new(Operation {
+            cancel,
+            completion: receiver,
+            worker: tokio::sync::Mutex::new(WorkerReceipt {
+                handle: Some(handle),
+                failure: None,
+            }),
+        })
+    }
+
+    pub(super) async fn shutdown(&self) -> Result<()> {
+        let operation = {
+            let mut state = self.state.lock().expect("conversion setup owner poisoned");
+            state.closed = true;
+            state.operation.clone()
+        };
+        if let Some(operation) = operation {
+            operation.cancel.cancel();
+            match operation.observe().await {
+                Ok(()) | Err(Failure::Cancelled) => Ok(()),
+                Err(error) => Err(error.public()),
+            }
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Drop for SetupOwner {
+    fn drop(&mut self) {
+        // Drop requests cleanup; only shutdown supplies its completion receipt.
+        if let Some(operation) = self
+            .state
+            .get_mut()
+            .expect("conversion setup owner poisoned")
+            .operation
+            .as_ref()
+        {
+            operation.cancel.cancel();
+        }
+    }
+}
+
+fn check_cancel(cancel: &CancellationToken) -> Outcome {
+    if cancel.is_cancelled() {
+        Err(Failure::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
+fn failed(context: &str, error: impl std::fmt::Display) -> Failure {
+    Failure::Failed(format!("{context}: {error}"))
+}
+
+fn acquire(root: &Path) -> std::result::Result<(PathBuf, File), Failure> {
+    let directory = root.join("launcher-data");
+    std::fs::create_dir_all(&directory).map_err(|e| failed("Creating setup lock directory", e))?;
+    let directory = directory
+        .canonicalize()
+        .map_err(|e| failed("Resolving setup directory", e))?;
+    let path = directory.join("conversion-setup.lock");
+    if std::fs::symlink_metadata(&path).is_ok_and(|metadata| !metadata.file_type().is_file()) {
+        return Err(Failure::Failed(
+            "Conversion setup lock must be a regular file".into(),
+        ));
+    }
+    let mut options = OpenOptions::new();
+    options.create(true).truncate(false).read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW).mode(0o600);
+    }
+    let file = options
+        .open(&path)
+        .map_err(|e| failed("Opening setup lock", e))?;
+    fs2::FileExt::try_lock_exclusive(&file).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::WouldBlock {
+            Failure::Failed("Conversion environment setup is already running".into())
+        } else {
+            failed("Acquiring setup lock", error)
+        }
+    })?;
+    let root = root
+        .canonicalize()
+        .map_err(|e| failed("Resolving launcher root", e))?;
+    Ok((root, file))
+}
+
+fn execute(root: &Path, cancel: &CancellationToken) -> Outcome {
+    check_cancel(cancel)?;
+    let (root, _lease) = acquire(root)?;
+    check_cancel(cancel)?;
+    scripts::ensure_scripts_deployed_blocking(&root)
+        .map_err(|e| failed("Deploying conversion scripts", e))?;
+    let python = scripts::venv_python(&root);
+    if probe_conversion_environment(&python, Duration::from_secs(5))
+        .map_err(|e| failed("Checking conversion imports", e))?
+    {
+        return check_cancel(cancel);
+    }
+    check_cancel(cancel)?;
+    if !python
+        .try_exists()
+        .map_err(|e| failed("Checking conversion interpreter", e))?
+    {
+        let mut command = Command::new("python3");
+        command.arg("-m").arg("venv").arg(scripts::venv_dir(&root));
+        if !run_command(&mut command, cancel, COMMAND_TIMEOUT)?.success() {
+            return Err(Failure::Failed(
+                "Failed to create conversion virtual environment".into(),
+            ));
+        }
+    }
+    let mut upgrade = Command::new(&python);
+    upgrade.args(["-m", "pip", "install", "--upgrade", "pip"]);
+    if !run_command(&mut upgrade, cancel, COMMAND_TIMEOUT)?.success() {
+        tracing::warn!("Conversion pip upgrade failed; continuing dependency installation");
+    }
+    let mut install = Command::new(&python);
+    install
+        .args(["-m", "pip", "install", "-r"])
+        .arg(scripts::scripts_dir(&root).join("requirements.txt"));
+    if !run_command(&mut install, cancel, COMMAND_TIMEOUT)?.success() {
+        return Err(Failure::Failed(
+            "Failed to install conversion dependencies".into(),
+        ));
+    }
+    check_cancel(cancel)?;
+    if !probe_conversion_environment(&python, Duration::from_secs(5))
+        .map_err(|e| failed("Checking conversion imports", e))?
+    {
+        return Err(Failure::Failed(
+            "Conversion dependencies were installed but required imports are not ready".into(),
+        ));
+    }
+    check_cancel(cancel)
+}
+
+fn run_command(
+    command: &mut Command,
+    cancel: &CancellationToken,
+    timeout: Duration,
+) -> std::result::Result<ExitStatus, Failure> {
+    check_cancel(cancel)?;
+    // Setup has no streaming output contract. Null streams avoid unbounded pip
+    // output accumulation and pipe-drain descendants retaining completion.
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = OwnedChild(Some(
+        command
+            .spawn()
+            .map_err(|e| failed("Starting conversion setup command", e))?,
+    ));
+    let started = Instant::now();
+    loop {
+        let observed = child.0.as_mut().expect("setup child owned").try_wait();
+        if cancel.is_cancelled() || started.elapsed() >= timeout || observed.is_err() {
+            child.finish();
+            if cancel.is_cancelled() {
+                return Err(Failure::Cancelled);
+            }
+            return Err(Failure::Failed(
+                "Conversion setup command did not complete successfully".into(),
+            ));
+        }
+        if let Some(status) = observed.map_err(|e| failed("Observing setup command", e))? {
+            // A successfully exited leader must not leave background installers.
+            child.finish();
+            return Ok(status);
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+struct OwnedChild(Option<std::process::Child>);
+
+impl OwnedChild {
+    fn finish(&mut self) {
+        if let Some(child) = self.0.as_mut() {
+            terminate(child);
+            self.0 = None;
+        }
+    }
+}
+
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+fn terminate(child: &mut std::process::Child) {
+    #[cfg(target_os = "linux")]
+    {
+        use nix::sys::signal::{killpg, Signal};
+        use nix::unistd::Pid;
+        // Linux PIDs fit in pid_t. Failure to establish or observe custody must
+        // keep this worker and its outer file lease alive, never release early.
+        let group = Pid::from_raw(i32::try_from(child.id()).expect("Linux PID fits pid_t"));
+        loop {
+            let stopped = matches!(
+                killpg(group, Signal::SIGKILL),
+                Ok(()) | Err(nix::errno::Errno::ESRCH)
+            );
+            if stopped && matches!(group_has_live_members(group.as_raw()), Ok(false)) {
+                break;
+            }
+            std::thread::sleep(POLL_INTERVAL);
+        }
+    }
+    // Other targets deliberately drain the foreground command naturally. They
+    // do not claim Linux process-tree cleanup: cancellation prevents later
+    // steps but shutdown can wait for the installer to exit.
+    loop {
+        if child.wait().is_ok() {
+            break;
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn parse_process_group(stat: &[u8]) -> Option<(char, i32)> {
+    // Linux process names are arbitrary bytes. Decode only the numeric/stat
+    // fields after the final closing parenthesis, not an unrelated task's name.
+    let separator = stat.windows(2).rposition(|bytes| bytes == b") ")?;
+    let fields = std::str::from_utf8(&stat[separator + 2..]).ok()?;
+    let mut fields = fields.split_whitespace();
+    let state = fields.next()?.chars().next()?;
+    fields.next()?;
+    let group = fields.next()?.parse().ok()?;
+    Some((state, group))
+}
+
+#[cfg(target_os = "linux")]
+fn group_has_live_members(group: i32) -> std::io::Result<bool> {
+    for entry in std::fs::read_dir("/proc")? {
+        let entry = entry?;
+        if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
+            continue;
+        }
+        let stat = match std::fs::read(entry.path().join("stat")) {
+            Ok(stat) => stat,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        let (state, observed_group) = parse_process_group(&stat)
+            .ok_or_else(|| std::io::Error::other("Invalid process group observation"))?;
+        if observed_group == group && !matches!(state, 'Z' | 'X' | 'x') {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+    use std::future::Future;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    use tempfile::TempDir;
+
+    fn fixture() -> TempDir {
+        let root = tempfile::tempdir().expect("temporary setup root");
+        let python = scripts::venv_python(root.path());
+        std::fs::create_dir_all(python.parent().expect("interpreter directory"))
+            .expect("create fixture venv");
+        std::fs::write(&python, "#!/bin/sh\nif [ \"$1\" = '-I' ]; then test -f \"$0.ready\"; exit $?; fi\nif [ \"$4\" = '--upgrade' ]; then exit 0; fi\necho $$ > \"$0.started\"\nif test -f \"$0.fail\"; then exit 1; fi\nwhile ! test -f \"$0.release\"; do sleep 0.02; done\ntouch \"$0.ready\"\n").expect("write fixture interpreter");
+        std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o700))
+            .expect("executable interpreter");
+        root
+    }
+
+    fn marker(root: &Path, name: &str) -> PathBuf {
+        scripts::venv_python(root).with_file_name(format!("python.{name}"))
+    }
+
+    async fn started(root: &Path) -> u32 {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(pid) = tokio::fs::read_to_string(marker(root, "started")).await {
+                    if let Ok(pid) = pid.trim().parse() {
+                        return pid;
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("fixture child starts")
+    }
+
+    async fn manager(root: PathBuf) -> super::super::ConversionManager {
+        let library = Arc::new(
+            crate::model_library::ModelLibrary::new(root.join("models"))
+                .await
+                .expect("fixture model library"),
+        );
+        let importer = Arc::new(crate::model_library::ModelImporter::new(Arc::clone(
+            &library,
+        )));
+        super::super::ConversionManager::new(root, library, importer)
+    }
+
+    #[tokio::test]
+    async fn dropped_waiter_retains_setup_and_alias_exclusion_until_shutdown() {
+        let root = fixture();
+        let owner = Arc::new(manager(root.path().to_path_buf()).await);
+        let waiting = Arc::clone(&owner);
+        let waiter = tokio::spawn(async move { waiting.ensure_environment().await });
+        let pid = started(root.path()).await;
+        waiter.abort();
+        assert!(waiter.await.expect_err("waiter cancelled").is_cancelled());
+
+        let aliases = tempfile::tempdir().expect("alias root");
+        let alias = aliases.path().join("launcher");
+        symlink(root.path(), &alias).expect("physical root alias");
+        let contender = manager(alias).await;
+        let requirements = scripts::scripts_dir(root.path()).join("requirements.txt");
+        std::fs::write(&requirements, "unchanged while busy").expect("sentinel");
+        std::fs::write(requirements.with_extension("txt.hash"), "invalid")
+            .expect("invalidate script hash");
+        assert!(contender
+            .ensure_environment()
+            .await
+            .expect_err("root busy")
+            .to_string()
+            .contains("already running"));
+        assert_eq!(
+            std::fs::read_to_string(requirements).expect("read sentinel"),
+            "unchanged while busy"
+        );
+        let subprocess_root = root.path().to_path_buf();
+        let process = tokio::task::spawn_blocking(move || {
+            Command::new(std::env::current_exe().expect("test executable"))
+                .args([
+                    "--exact",
+                    "conversion::setup::tests::cross_process_lock_probe",
+                ])
+                .env("PUMAS_SETUP_LOCK_TEST_ROOT", subprocess_root)
+                .output()
+                .expect("launch independent lock probe")
+        })
+        .await
+        .expect("join lock probe");
+        assert!(
+            process.status.success(),
+            "{}",
+            String::from_utf8_lossy(&process.stderr)
+        );
+
+        let mut interrupted_shutdown = Box::pin(owner.shutdown_setup());
+        let _ = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(interrupted_shutdown.as_mut().poll(cx))
+        })
+        .await;
+        drop(interrupted_shutdown);
+        tokio::time::timeout(Duration::from_secs(5), owner.shutdown_setup())
+            .await
+            .expect("cleanup bounded")
+            .expect("cancel cleanup succeeds");
+        owner.shutdown_setup().await.expect("idempotent shutdown");
+        assert!(
+            !Path::new(&format!("/proc/{pid}")).exists(),
+            "direct child reaped"
+        );
+        assert!(
+            !group_has_live_members(i32::try_from(pid).expect("pid fits"))
+                .expect("observe descendants")
+        );
+        assert!(matches!(
+            owner.ensure_environment().await,
+            Err(PumasError::InstallationCancelled)
+        ));
+        assert!(
+            acquire(root.path()).is_ok(),
+            "lease released only after cleanup"
+        );
+    }
+
+    #[test]
+    fn cross_process_lock_probe() {
+        let Some(root) = std::env::var_os("PUMAS_SETUP_LOCK_TEST_ROOT") else {
+            return;
+        };
+        assert!(
+            matches!(acquire(Path::new(&root)), Err(Failure::Failed(message)) if message.contains("already running"))
+        );
+    }
+
+    #[test]
+    fn setup_completes_with_one_host_blocking_thread() {
+        let root = fixture();
+        std::fs::write(marker(root.path(), "release"), "").expect("release fixture");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .expect("embedding runtime");
+        let owner = SetupOwner::new(root.path().to_path_buf());
+        let result = runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                owner.ensure().await.expect("setup succeeds");
+                owner.shutdown().await.expect("setup drains");
+            })
+            .await
+        });
+        drop(owner);
+        runtime.shutdown_timeout(Duration::from_secs(1));
+        result.expect("no nested blocking-pool deadlock");
+    }
+
+    #[tokio::test]
+    async fn overlapping_callers_share_completion_and_completed_failure_can_retry() {
+        let root = fixture();
+        let owner = Arc::new(SetupOwner::new(root.path().to_path_buf()));
+        let first_owner = Arc::clone(&owner);
+        let first = tokio::spawn(async move { first_owner.ensure().await });
+        started(root.path()).await;
+        let mut second = Box::pin(owner.ensure());
+        assert!(
+            std::future::poll_fn(|cx| std::task::Poll::Ready(second.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
+        let operation = owner
+            .state
+            .lock()
+            .expect("owner state")
+            .operation
+            .clone()
+            .expect("active operation");
+        std::fs::write(marker(root.path(), "release"), "").expect("release installer");
+        first.await.expect("first waiter").expect("first success");
+        second.await.expect("shared success");
+        assert!(Arc::ptr_eq(
+            &operation,
+            owner
+                .state
+                .lock()
+                .expect("state")
+                .operation
+                .as_ref()
+                .expect("retained result")
+        ));
+        owner.shutdown().await.expect("success retained");
+
+        let failed_root = fixture();
+        std::fs::write(marker(failed_root.path(), "fail"), "").expect("fail installer");
+        let failed_owner = SetupOwner::new(failed_root.path().to_path_buf());
+        assert!(failed_owner.ensure().await.is_err());
+        let failed_operation = failed_owner
+            .state
+            .lock()
+            .expect("state")
+            .operation
+            .clone()
+            .expect("failed result retained");
+        std::fs::remove_file(marker(failed_root.path(), "fail")).expect("repair fixture");
+        std::fs::write(marker(failed_root.path(), "release"), "").expect("release retry");
+        failed_owner
+            .ensure()
+            .await
+            .expect("explicit retry succeeds");
+        assert!(
+            failed_operation.observe().await.is_err(),
+            "original failure stays observable"
+        );
+        failed_owner
+            .shutdown()
+            .await
+            .expect("latest successful result");
+    }
+
+    #[tokio::test]
+    async fn symlinked_launcher_data_keeps_original_execution_paths() {
+        let root = fixture();
+        let storage = tempfile::tempdir().expect("physical storage");
+        let actual = storage.path().join("tools");
+        std::fs::rename(root.path().join("launcher-data"), &actual).expect("relocate data");
+        symlink(&actual, root.path().join("launcher-data")).expect("link data");
+        std::fs::write(marker(root.path(), "release"), "").expect("release fixture");
+        let owner = SetupOwner::new(root.path().to_path_buf());
+        owner.ensure().await.expect("setup through data symlink");
+        assert!(marker(root.path(), "ready").exists());
+        assert!(
+            !storage.path().join("launcher-data").exists(),
+            "no redirected execution"
+        );
+        owner.shutdown().await.expect("shutdown");
+    }
+
+    #[test]
+    fn process_group_parser_handles_spaces_and_parentheses() {
+        assert_eq!(
+            parse_process_group(b"81 (python (pip) worker) S 4 81 81 0"),
+            Some(('S', 81))
+        );
+        assert_eq!(
+            parse_process_group(b"81 (python) Z 4 81 81 0"),
+            Some(('Z', 81))
+        );
+        assert_eq!(
+            parse_process_group(b"81 (worker\xff) S 4 81 81 0"),
+            Some(('S', 81))
+        );
+        assert_eq!(parse_process_group(b"malformed"), None);
+        assert_eq!(parse_process_group(b"81 (python) S 4 invalid"), None);
+    }
+
+    #[tokio::test]
+    async fn worker_join_failure_is_retained_without_polling_a_finished_handle() {
+        let (sender, receiver) = watch::channel(None);
+        let handle = tokio::spawn(async move {
+            drop(sender);
+            panic!("controlled setup worker failure");
+        });
+        let operation = Operation {
+            cancel: CancellationToken::new(),
+            completion: receiver,
+            worker: tokio::sync::Mutex::new(WorkerReceipt {
+                handle: Some(handle),
+                failure: None,
+            }),
+        };
+        for _ in 0..2 {
+            assert!(matches!(operation.observe().await,
+                Err(Failure::Failed(message)) if message == "Conversion setup worker failed"));
+        }
+    }
+
+    #[tokio::test]
+    async fn command_deadline_and_unwind_reap_owned_children() {
+        tokio::task::spawn_blocking(|| {
+            let mut command = Command::new("sh");
+            command.args(["-c", "while :; do sleep 1; done"]);
+            assert!(run_command(
+                &mut command,
+                &CancellationToken::new(),
+                Duration::from_millis(50)
+            )
+            .is_err());
+            use std::os::unix::process::CommandExt;
+            let child = Command::new("sh")
+                .args(["-c", "while :; do sleep 1; done"])
+                .process_group(0)
+                .spawn()
+                .expect("panic fixture");
+            let pid = child.id();
+            let panic = std::panic::catch_unwind(|| {
+                let _owned = OwnedChild(Some(child));
+                panic!("controlled custody unwind");
+            });
+            assert!(panic.is_err());
+            assert!(!Path::new(&format!("/proc/{pid}")).exists());
+            assert!(
+                !group_has_live_members(i32::try_from(pid).expect("pid fits"))
+                    .expect("observe group")
+            );
+        })
+        .await
+        .expect("join controlled command tests");
+    }
+}

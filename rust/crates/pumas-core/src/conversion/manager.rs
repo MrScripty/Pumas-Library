@@ -37,7 +37,10 @@ const MAX_CONCURRENT: usize = 1;
 const ENVIRONMENT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const ENVIRONMENT_PROBE_IMPORTS: &str = "import numpy, sentencepiece; from gguf import GGUFReader, GGUFWriter; from safetensors import safe_open; from safetensors.numpy import save_file";
 
-fn probe_conversion_environment(python: &Path, timeout: std::time::Duration) -> Result<bool> {
+pub(super) fn probe_conversion_environment(
+    python: &Path,
+    timeout: std::time::Duration,
+) -> Result<bool> {
     use std::process::Stdio;
     let mut child = match std::process::Command::new(python)
         .args(["-I", "-B", "-c", ENVIRONMENT_PROBE_IMPORTS])
@@ -94,6 +97,7 @@ fn probe_conversion_environment(python: &Path, timeout: std::time::Duration) -> 
 
 /// Orchestrates model format conversions and quantization.
 pub struct ConversionManager {
+    setup: super::setup::SetupOwner,
     launcher_root: PathBuf,
     model_library: Arc<ModelLibrary>,
     model_importer: Arc<ModelImporter>,
@@ -120,6 +124,7 @@ impl ConversionManager {
         ];
 
         Self {
+            setup: super::setup::SetupOwner::new(launcher_root.clone()),
             launcher_root,
             model_library,
             model_importer,
@@ -167,89 +172,14 @@ impl ConversionManager {
     ///
     /// Creates the virtual environment and installs required packages if needed.
     pub async fn ensure_environment(&self) -> Result<()> {
-        scripts::ensure_scripts_deployed(&self.launcher_root).await?;
+        self.setup.ensure().await
+    }
 
-        let venv_path = scripts::venv_dir(&self.launcher_root);
-        let python_path = scripts::venv_python(&self.launcher_root);
-
-        if self.is_environment_ready_async().await? {
-            debug!(
-                "Conversion environment imports verified at {}",
-                venv_path.display()
-            );
-            return Ok(());
-        }
-
-        if !fs::try_exists(&python_path)
-            .await
-            .map_err(|e| PumasError::io("checking conversion python", &python_path, e))?
-        {
-            info!(
-                "Creating conversion virtual environment at {}",
-                venv_path.display()
-            );
-
-            let output = Command::new("python3")
-                .args(["-m", "venv", &venv_path.to_string_lossy()])
-                .output()
-                .await
-                .map_err(|e| PumasError::Other(format!("Failed to create venv: {e}")))?;
-
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(PumasError::ConversionFailed {
-                    message: format!(
-                    "Failed to create Python venv. Ensure python3 is installed. Error: {stderr}"
-                ),
-                });
-            }
-        }
-
-        // Upgrade pip
-        let output = Command::new(&python_path)
-            .args(["-m", "pip", "install", "--upgrade", "pip"])
-            .output()
-            .await
-            .map_err(|e| PumasError::Other(format!("Failed to upgrade pip: {e}")))?;
-
-        if !output.status.success() {
-            warn!(
-                "pip upgrade failed (non-fatal): {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-
-        let requirements_path = scripts::scripts_dir(&self.launcher_root).join("requirements.txt");
-        info!("Installing conversion dependencies...");
-
-        let output = Command::new(&python_path)
-            .args([
-                "-m",
-                "pip",
-                "install",
-                "-r",
-                &requirements_path.to_string_lossy(),
-            ])
-            .output()
-            .await
-            .map_err(|e| PumasError::Other(format!("Failed to install dependencies: {e}")))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PumasError::ConversionFailed {
-                message: format!("Failed to install conversion dependencies: {stderr}"),
-            });
-        }
-
-        if !self.is_environment_ready_async().await? {
-            return Err(PumasError::ConversionFailed {
-                message:
-                    "Conversion dependencies were installed but required imports are not ready"
-                        .into(),
-            });
-        }
-        info!("Conversion environment ready");
-        Ok(())
+    /// Close setup admission, cancel active setup, and observe its cleanup.
+    /// Call before shutting down the hosting Tokio runtime. Repeated calls
+    /// observe the same terminal result; dropping a waiter does not stop cleanup.
+    pub async fn shutdown_setup(&self) -> Result<()> {
+        self.setup.shutdown().await
     }
 
     // -----------------------------------------------------------------------

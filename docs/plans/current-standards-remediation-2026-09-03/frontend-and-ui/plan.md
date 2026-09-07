@@ -10,8 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound backend conversion setup operation lifetime and identity
-(FE-I25) before quantization-specific GUI configuration (remaining FE-I23).
+**Next slice:** Expose backend conversion setup identity/state across timeout
+and reopen (remaining FE-I25), before quantization-specific GUI configuration
+(remaining FE-I23). Setup custody and aggregate shutdown are accepted within
+the Linux controlled-process evidence boundary below.
 The basic GGUF/safetensors format workflow is accepted within its documented
 Linux and simulated-native-execution evidence boundary.
 Conversion operation contracts (FE-I24), progress reads (FE-I14), import-picker
@@ -20,6 +22,54 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Conversion Setup Custody Admission
+
+Status: accepted for backend custody only; see the
+[execution ledger](execution-ledger.md#2026-09-06--conversion-setup-custody).
+
+Operation: `continue` this canonical plan. FE-I25 first establishes backend
+custody without changing existing setup/check wire shapes. Same-manager callers
+join one admitted setup result; independent managers/processes contend for the
+same physical launcher-environment lease before script deployment or installation.
+Caller cancellation drops only its wait, never process/lease ownership. Explicit
+shutdown closes admission, signals the owned worker and observes terminal cleanup;
+RPC shutdown drains setup even when another owner fails. Retain failed outcomes
+for current waiters; a later explicit setup request may retry only after release.
+
+The setup owner uses the application's existing runtime. Its bounded probe and
+controlled command lifetime retain exclusion until child cleanup is observed.
+Linux process-tree behavior requires controlled executable evidence, not just
+direct-child kill assertions. Abrupt host death, hostile lockfile/root replacement,
+new status/identity protocol, quantization-backend setup and actual installations
+are excluded from this custody slice and must not be claimed complete. Missing
+platform process-tree authority must be reported, not hidden by an unsafe fallback.
+
+Write set: backend agent owns conversion setup/manager/module and public conversion
+facade plus focused tests; root owns RPC server shutdown composition/tests and
+plan/README records. Integration also admits a blocking script-deployment adapter
+in the existing scripts owner: setup must work with one host blocking thread,
+without waiting on nested Tokio filesystem work. Both I/O adapters use the same
+embedded manifest/hash policy and have parity evidence; no second installer.
+No GUI, generated contract, new dependency or alternate
+runtime. Existing readiness probes and headless public setup signatures remain.
+
+Composed-design review: applicable. (1) Setup owns lease, process and result
+lifetime; manager exposes its interface; RPC owns aggregate shutdown. (2) Lease
+release and child completion must coordinate, unrelated download custody must not.
+(3) Callers await setup or shutdown without managing tasks/locks. (4) Native setup
+changes stay in the private setup module; lifecycle composition stays in server.
+(5) The backend consumes runtime/filesystem capabilities, never GUI types.
+(6) Controlled child tests prove custody; server tests prove non-short-circuit
+drain and repeated/cancelled waiters. (7) Replace request-owned setup rather than
+layer a second installer. (8) Reuse fs2 and the current runtime; no generic task
+framework, persisted operation database or download-grant repurposing.
+
+Acceptance: controlled-child contention/cancelled-waiter/shutdown/failure tests,
+cross-process Linux exclusion where applicable, all-target strict Rust lint and
+default/no-default core/RPC suites. No frontend behavior change, so no new GUI
+workflow claim. Next after custody is observable setup identity/state across
+timeout/reopen; FE-I25 remains open until that consumer contract is accepted.
 
 ## Format Conversion Workflow Admission
 

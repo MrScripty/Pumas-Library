@@ -14,6 +14,7 @@ pub mod nvfp4;
 pub(crate) mod pipeline;
 pub(crate) mod progress;
 mod scripts;
+mod setup;
 pub mod sherry;
 mod types;
 

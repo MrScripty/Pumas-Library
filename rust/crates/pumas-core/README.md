@@ -64,6 +64,30 @@ completed download.
 
 ## Public Boundary
 
+Base Python conversion setup is supervised independently of its caller.
+Concurrent requests on one manager share the active result; another manager or
+process must acquire the same physical `launcher-data/conversion-setup.lock`
+before deploying scripts or installing packages. Contention fails explicitly.
+Keep that advisory lock file and its directory stable while setup is active;
+this is not protection against hostile root replacement or abrupt host death.
+
+Call `PumasApi::shutdown_conversion_setup()` before stopping the hosting runtime.
+It closes setup admission and waits for owned cleanup; abandoning a setup or
+shutdown waiter does not release the environment lease. Expected cancellation
+with completed cleanup is a successful drain; retained setup failures
+remain errors. This does not shut down conversion jobs or quantization-backend
+installation. The RPC server includes this owner in its shutdown drain.
+Setup uses one host blocking worker without nested filesystem work in that pool;
+it also supports a current-thread Tokio runtime with one blocking thread.
+
+Linux setup cleanup controls the installer process group and checks that no
+live members remain before lease release. Installers must remain in that group.
+On other targets, cancellation drains the foreground command naturally before
+releasing custody, so shutdown can wait for it. Full process-tree evidence is
+Linux-only. If Linux cleanup cannot establish quiescence, it retains custody
+rather than report a completed shutdown. Public setup identity/progress across
+timeout and reopen remains a separate API-contract follow-up.
+
 The crate builds and runs independently of the optional GUI and RPC process.
 For registered-link inspection, `PumasApi::get_link_health(None)` exposes the
 owner's registry report. `model_library::LinkRegistry::health()` also supports

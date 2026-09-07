@@ -180,9 +180,11 @@ async fn drain_server_owners(
     server_result: anyhow::Result<()>,
     downloads: impl std::future::Future<Output = pumas_library::Result<()>>,
     catalog: impl std::future::Future<Output = anyhow::Result<()>>,
+    conversion_setup: impl std::future::Future<Output = pumas_library::Result<()>>,
 ) -> anyhow::Result<()> {
-    // Neither owner may be abandoned merely because the other failed first.
-    let (downloads_result, catalog_result) = tokio::join!(downloads, catalog);
+    // No owner may be abandoned merely because another failed first.
+    let (downloads_result, catalog_result, setup_result) =
+        tokio::join!(downloads, catalog, conversion_setup);
     let failures = [
         server_result
             .err()
@@ -193,6 +195,9 @@ async fn drain_server_owners(
         catalog_result
             .err()
             .map(|error| format!("catalog: {error:#}")),
+        setup_result
+            .err()
+            .map(|error| format!("conversion setup: {error}")),
     ]
     .into_iter()
     .flatten()
@@ -340,12 +345,13 @@ pub async fn start_server(
                 downloads_drain_observed.store(true, std::sync::atomic::Ordering::Release);
                 result
             },
-            async move {
+            async {
                 let result = catalog_worker.shutdown().await;
                 #[cfg(test)]
                 catalog_drain_observed.store(true, std::sync::atomic::Ordering::Release);
                 result
             },
+            state.api.shutdown_conversion_setup(),
         )
         .await
     });
@@ -436,6 +442,7 @@ mod tests {
                             }
                         },
                         catalog_worker.shutdown(),
+                        async { Ok(()) },
                     )
                     .await
                 });
@@ -481,12 +488,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn setup_drain_survives_a_cancelled_shutdown_waiter_and_retains_failure() {
+        let (signal, mut shutdown) = watch::channel(false);
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let (release, blocked) = tokio::sync::oneshot::channel();
+        let supervisor = tokio::spawn(async move {
+            shutdown.changed().await.unwrap();
+            drain_server_owners(
+                Err(anyhow::anyhow!("listener failed")),
+                async {
+                    Err(pumas_library::PumasError::Other(
+                        "download drain failed".into(),
+                    ))
+                },
+                async { Err(anyhow::anyhow!("catalog drain failed")) },
+                async move {
+                    entered.send(()).unwrap();
+                    blocked.await.unwrap();
+                    Err(pumas_library::PumasError::Other(
+                        "setup drain failed".into(),
+                    ))
+                },
+            )
+            .await
+        });
+        let server = Arc::new(ServerHandle::new(
+            "127.0.0.1:1".parse().unwrap(),
+            supervisor,
+            signal,
+        ));
+        let waiter = tokio::spawn({
+            let server = server.clone();
+            async move { server.shutdown().await }
+        });
+        started.await.unwrap();
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        let repeated = server.shutdown();
+        tokio::pin!(repeated);
+        assert!(futures::poll!(&mut repeated).is_pending());
+        release.send(()).unwrap();
+        let error = repeated.await.unwrap_err().to_string();
+        for owner in ["listener:", "downloads:", "catalog:", "conversion setup:"] {
+            assert!(error.contains(owner), "missing {owner} in {error}");
+        }
+        assert_eq!(server.shutdown().await.unwrap_err().to_string(), error);
+    }
+
+    #[tokio::test]
     async fn successful_shutdown_is_repeatedly_observable() {
         let (_, catalog_worker) = CatalogProjection::start(1);
         let (signal, mut shutdown) = watch::channel(false);
         let supervisor = tokio::spawn(async move {
             shutdown.changed().await.unwrap();
-            drain_server_owners(Ok(()), async { Ok(()) }, catalog_worker.shutdown()).await
+            drain_server_owners(Ok(()), async { Ok(()) }, catalog_worker.shutdown(), async {
+                Ok(())
+            })
+            .await
         });
         let server = ServerHandle::new("127.0.0.1:1".parse().unwrap(), supervisor, signal);
         server.shutdown().await.unwrap();
@@ -505,7 +563,10 @@ mod tests {
             shutdown.changed().await.unwrap();
             drain_started.send(()).unwrap();
             let result =
-                drain_server_owners(Ok(()), async { Ok(()) }, catalog_worker.shutdown()).await;
+                drain_server_owners(Ok(()), async { Ok(()) }, catalog_worker.shutdown(), async {
+                    Ok(())
+                })
+                .await;
             drained.send(result.is_ok()).unwrap();
             result
         });

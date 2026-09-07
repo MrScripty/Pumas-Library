@@ -308,21 +308,39 @@ pub fn venv_python(launcher_root: &Path) -> PathBuf {
 pub async fn ensure_scripts_deployed(launcher_root: &Path) -> Result<()> {
     let dir = scripts_dir(launcher_root);
     fs::create_dir_all(&dir).await.with_path(&dir)?;
+    for (filename, content) in EMBEDDED_SCRIPTS {
+        deploy_script(&dir, filename, content).await?;
+    }
 
-    deploy_script(
-        &dir,
-        "convert_gguf_to_safetensors.py",
-        GGUF_TO_SAFETENSORS_SCRIPT,
-    )
-    .await?;
-    deploy_script(
-        &dir,
-        "convert_safetensors_to_gguf.py",
-        SAFETENSORS_TO_GGUF_SCRIPT,
-    )
-    .await?;
-    deploy_script(&dir, "requirements.txt", REQUIREMENTS).await?;
+    info!("Conversion scripts deployed to {}", dir.display());
+    Ok(())
+}
 
+const EMBEDDED_SCRIPTS: &[(&str, &str)] = &[
+    ("convert_gguf_to_safetensors.py", GGUF_TO_SAFETENSORS_SCRIPT),
+    ("convert_safetensors_to_gguf.py", SAFETENSORS_TO_GGUF_SCRIPT),
+    ("requirements.txt", REQUIREMENTS),
+];
+
+/// Blocking I/O adapter for the setup worker, which already owns isolation and
+/// the environment lease. It must not wait for nested Tokio filesystem workers:
+/// embedding applications may provide only one blocking thread.
+pub(super) fn ensure_scripts_deployed_blocking(launcher_root: &Path) -> Result<()> {
+    let dir = scripts_dir(launcher_root);
+    std::fs::create_dir_all(&dir).with_path(&dir)?;
+    for (filename, content) in EMBEDDED_SCRIPTS {
+        let script_path = dir.join(filename);
+        let hash_path = dir.join(format!("{filename}.hash"));
+        let current_hash = content_hash(content);
+        if script_path.try_exists().with_path(&script_path)?
+            && std::fs::read_to_string(&hash_path)
+                .is_ok_and(|stored_hash| stored_hash.trim() == current_hash)
+        {
+            continue;
+        }
+        std::fs::write(&script_path, content).with_path(&script_path)?;
+        std::fs::write(&hash_path, &current_hash).with_path(&hash_path)?;
+    }
     info!("Conversion scripts deployed to {}", dir.display());
     Ok(())
 }
@@ -348,4 +366,54 @@ async fn deploy_script(dir: &Path, filename: &str, content: &str) -> Result<()> 
         .await
         .with_path(&hash_path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn async_and_blocking_deployment_share_content_and_repair_policy() {
+        let root = tempfile::tempdir().expect("deployment fixture");
+        ensure_scripts_deployed(root.path())
+            .await
+            .expect("async deployment");
+        let dir = scripts_dir(root.path());
+        for (filename, content) in EMBEDDED_SCRIPTS {
+            let path = dir.join(filename);
+            let hash_path = dir.join(format!("{filename}.hash"));
+            assert_eq!(fs::read_to_string(&path).await.unwrap(), *content);
+            let hash = fs::read_to_string(&hash_path).await.unwrap();
+            // Matching hashes preserve the same deployed file in either adapter.
+            fs::write(&path, "retained sentinel").await.unwrap();
+            let owned_root = root.path().to_path_buf();
+            tokio::task::spawn_blocking(move || ensure_scripts_deployed_blocking(&owned_root))
+                .await
+                .unwrap()
+                .unwrap();
+            ensure_scripts_deployed(root.path()).await.unwrap();
+            assert_eq!(
+                fs::read_to_string(&path).await.unwrap(),
+                "retained sentinel"
+            );
+
+            for blocking in [true, false] {
+                fs::write(&hash_path, "outdated").await.unwrap();
+                fs::write(&path, "outdated content").await.unwrap();
+                if blocking {
+                    let owned_root = root.path().to_path_buf();
+                    tokio::task::spawn_blocking(move || {
+                        ensure_scripts_deployed_blocking(&owned_root)
+                    })
+                    .await
+                    .unwrap()
+                    .unwrap();
+                } else {
+                    ensure_scripts_deployed(root.path()).await.unwrap();
+                }
+                assert_eq!(fs::read_to_string(&path).await.unwrap(), *content);
+                assert_eq!(fs::read_to_string(&hash_path).await.unwrap(), hash);
+            }
+        }
+    }
 }

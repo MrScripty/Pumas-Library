@@ -1,5 +1,52 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-06 — Conversion Setup Custody
+
+Accepted the backend custody prerequisite of FE-I25, not its public operation
+identity/state contract. One private setup owner retains the worker, result,
+installer children and physical environment lock. Same-manager callers join
+active work; independent managers/processes fail contention before deploying
+scripts. Dropped request waiters cannot abandon installation or release its lease.
+An explicit new request can retry completed failure after the old worker is
+observed. Setup shutdown closes admission, cancels and drains; interrupted or
+repeated shutdown waiters retain the outcome. RPC shutdown observes setup,
+downloads and catalog even when listener or another owner's drain fails.
+
+The backend agent implemented the setup owner and facade integration. Root
+integrated RPC shutdown and hardened retained join failures, non-UTF-8 Linux
+process-name parsing and single-blocking-thread runtime support. The
+codebase-design skill kept custody behind one private backend interface rather
+than adding UI-owned installation or a second lifecycle framework. Script
+deployment retains one manifest/hash policy with tested async/blocking I/O
+adapters, avoiding nested blocking-pool waits inside setup. No new dependency,
+runtime, feature gate or setup/check wire shape was introduced.
+
+Acceptance evidence:
+
+- Core/RPC: 1,391 default and 1,351 no-default-features tests pass, with 22 existing
+  ignored tests each. The focused conversion suite passes 34 tests.
+- Controlled Linux executables prove same-owner joining, dropped callers,
+  cross-process and alias exclusion, preserved execution through symlinked
+  launcher-data, cancellation and interrupted shutdown, deadline/unwind cleanup,
+  child reaping and no live installer process-group members before release.
+  Additional fixtures prove explicit failure retry, repeatable worker failure,
+  script-adapter parity and a host runtime with only one blocking thread.
+- RPC composition proves all four failures remain observable despite an
+  interrupted shutdown waiter. Strict all-target Clippy passes with all features
+  and no defaults; rustfmt, generated freshness and all five plan contracts pass.
+
+Limits: advisory exclusion assumes stable launcher-data/lockfile identity and
+installers staying in their process group. Linux cleanup retains custody if it
+cannot establish quiescence. Other platforms naturally drain the foreground
+installer; their process trees are not verified here. Abrupt host death,
+quantization-backend setup, conversion-job shutdown and actual installation or
+conversion are outside this slice. No GUI source changed or new GUI verification
+claim is made. Existing recovery artifacts remain untouched.
+
+Next: expose observable setup identity/state to embedded/RPC/desktop consumers
+across timeout and reopen (FE-I25 remains open), before remaining FE-I23
+quantization configuration. Full M4/M5 and Pending cleanup replay remain open.
+
 ## 2026-09-06 — Format Conversion Workflow
 
 Accepted the bounded FE-I23 GGUF/safetensors format workflow, replacing the

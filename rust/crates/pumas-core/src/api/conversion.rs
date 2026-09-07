@@ -55,6 +55,13 @@ impl PumasApi {
         self.primary().conversion_manager.ensure_environment().await
     }
 
+    /// Close base Python setup admission and await owned process cleanup.
+    /// Invoke before stopping the hosting runtime. Successful cancellation and
+    /// cleanup return success; repeated calls preserve actual setup failures.
+    pub async fn shutdown_conversion_setup(&self) -> Result<()> {
+        self.primary().conversion_manager.shutdown_setup().await
+    }
+
     /// Get the list of supported quantization types for conversion.
     pub async fn supported_quant_types(&self) -> Result<Vec<conversion::QuantOption>> {
         self.primary()

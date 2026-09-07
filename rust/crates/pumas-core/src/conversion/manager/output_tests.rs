@@ -10,7 +10,15 @@ fn executable(path: &Path, script: &str) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
 }
 
-const DIRECTORY_WRITER: &str = "#!/bin/sh\nwhile [ $# -gt 0 ]; do\n if [ \"$1\" = '--output-dir' ]; then printf 'fixture payload' > \"$2/model.safetensors\"; exit 0; fi\n shift\ndone\nexit 2\n";
+const DIRECTORY_WRITER: &str = r#"#!/bin/sh
+printf 'fixture diagnostic\n' >&2
+printf '{"stage":"converting","tensor_index":1,"tensor_count":2,"tensor_name":"fixture.weight"}\n'
+while [ $# -gt 0 ]; do
+ if [ "$1" = '--output-dir' ]; then printf 'fixture payload' > "$2/model.safetensors"; exit 0; fi
+ shift
+done
+exit 2
+"#;
 
 #[tokio::test]
 async fn every_conversion_path_indexes_the_actual_versioned_output_without_touching_old_data() {
@@ -79,7 +87,7 @@ async fn every_conversion_path_indexes_the_actual_versioned_output_without_touch
                     executable(&backend.convert_script(), "#!/bin/sh\nexit 2\n");
                     executable(
                         &backend.quantize_binary(),
-                        "#!/bin/sh\nprintf 'fixture payload' > \"$2\"\n",
+                        "#!/bin/sh\nprintf 'fixture diagnostic\\n'\nprintf '[ 1/ 2] fixture.weight\\n' >&2\nprintf 'fixture payload' > \"$2\"\n",
                     );
                     Box::new(backend)
                 }
@@ -136,6 +144,15 @@ async fn every_conversion_path_indexes_the_actual_versioned_output_without_touch
             b"other attempt"
         );
         let actual_id = format!("source-{suffix}-v2");
+        if matches!(
+            backend_id,
+            QuantBackend::PythonConversion | QuantBackend::LlamaCpp
+        ) {
+            let observed = progress.get("fixture").unwrap();
+            assert_eq!(observed.tensors_completed, Some(1), "{backend_id:?}");
+            assert_eq!(observed.tensors_total, Some(2), "{backend_id:?}");
+            assert_eq!(observed.current_tensor.as_deref(), Some("fixture.weight"));
+        }
         assert_eq!(
             progress.get("fixture").unwrap().output_model_id.as_deref(),
             Some(actual_id.as_str())
@@ -152,4 +169,95 @@ async fn every_conversion_path_indexes_the_actual_versioned_output_without_touch
             .unwrap()
             .is_none());
     }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn interrupted_shutdown_still_reaps_quiet_conversion_without_publishing() {
+    let root = tempfile::tempdir().unwrap();
+    let library = Arc::new(ModelLibrary::new(root.path().join("models")).await.unwrap());
+    let source = library.library_root().join("source");
+    std::fs::create_dir(&source).unwrap();
+    std::fs::write(source.join("source.gguf"), b"source fixture").unwrap();
+    let python = scripts::venv_python(root.path());
+    executable(&python, "#!/bin/sh\necho $$ > \"$0.pid\"\nexec sleep 30\n");
+    let marker = python.with_file_name("python.pid");
+    let progress = Arc::new(ConversionProgressTracker::new());
+    let owner = crate::conversion::workers::WorkerOwner::new(progress.clone(), 1);
+    let token = CancellationToken::new();
+    let initial = serde_json::from_value(serde_json::json!({
+        "conversionId": "quiet", "sourceModelId": "source",
+        "direction": "gguf_to_safetensors", "status": "converting"
+    }))
+    .unwrap();
+    let task_root = root.path().to_path_buf();
+    let task_library = library.clone();
+    let task_progress = progress.clone();
+    owner
+        .spawn(initial, token.clone(), async move {
+            let importer = ModelImporter::new(task_library.clone());
+            run_conversion(
+                "quiet",
+                ConversionDirection::GgufToSafetensors,
+                &task_root,
+                &source,
+                "source",
+                Some("F16"),
+                ModelMetadata::default(),
+                &task_progress,
+                &token,
+                &task_library,
+                &importer,
+            )
+            .await
+        })
+        .unwrap();
+
+    let pid: u32 = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if let Ok(contents) = tokio::fs::read_to_string(&marker).await {
+                if let Ok(pid) = contents.trim().parse() {
+                    break pid;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("quiet native conversion started");
+    let mut interrupted = Box::pin(owner.shutdown());
+    assert!(futures::poll!(interrupted.as_mut()).is_pending());
+    drop(interrupted);
+    tokio::time::timeout(std::time::Duration::from_secs(5), owner.shutdown())
+        .await
+        .expect("retained shutdown cancels quiet native child")
+        .expect("cancellation observed");
+
+    assert!(
+        !Path::new(&format!("/proc/{pid}")).exists(),
+        "foreground child reaped"
+    );
+    let observed = progress.get("quiet").unwrap();
+    assert_eq!(observed.status, ConversionStatus::Cancelled);
+    assert_eq!(observed.output_model_id, None);
+    assert!(!library.library_root().join("source-safetensors").exists());
+    assert!(library
+        .get_model("source-safetensors")
+        .await
+        .unwrap()
+        .is_none());
+    let stages = std::fs::read_dir(library.library_root())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".pumas-conversion-")
+        })
+        .count();
+    assert_eq!(
+        stages, 1,
+        "staging retained pending process-tree cleanup policy"
+    );
 }

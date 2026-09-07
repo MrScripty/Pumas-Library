@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 
 use regex::Regex;
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
+use super::native_process::{self, OutputStream};
 use super::outputs::OutputWorkspace;
 use super::pipeline;
 use super::progress::ConversionProgressTracker;
@@ -401,29 +401,21 @@ impl QuantizationBackend for LlamaCppBackend {
                 .check()
                 .map_err(|_| PumasError::ConversionCancelled)?;
 
-            let mut child = Command::new(self.venv_python())
+            let mut command = Command::new(self.venv_python());
+            command
                 .arg(self.convert_script())
                 .arg(&params.model_path)
                 .arg("--outtype")
                 .arg("f16")
                 .arg("--outfile")
-                .arg(&f16_gguf)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-                .map_err(|e| PumasError::ConversionFailed {
-                    message: format!("Failed to spawn convert_hf_to_gguf.py: {e}"),
-                })?;
-
-            pipeline::stream_subprocess_stderr_lines(
-                &params.conversion_id,
-                &mut child,
-                progress,
+                .arg(&f16_gguf);
+            native_process::run(
+                &mut command,
+                "convert_hf_to_gguf.py",
                 cancel_token,
+                |stream, line| debug!("[{}] {:?}: {}", params.conversion_id, stream, line),
             )
             .await?;
-            pipeline::wait_and_check_exit(&mut child, "convert_hf_to_gguf.py").await?;
         }
 
         // Determine the GGUF file to feed into quantize.
@@ -448,30 +440,22 @@ impl QuantizationBackend for LlamaCppBackend {
                 .map_err(|_| PumasError::ConversionCancelled)?;
 
             let cal = params.calibration_file.as_ref().expect("validated above");
-            let mut child = Command::new(self.imatrix_binary())
+            let mut command = Command::new(self.imatrix_binary());
+            command
                 .arg("-m")
                 .arg(&source_gguf)
                 .arg("-f")
                 .arg(cal)
                 .arg("-o")
                 .arg(&imatrix_file)
-                .arg("--no-ppl")
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-                .map_err(|e| PumasError::ConversionFailed {
-                    message: format!("Failed to spawn llama-imatrix: {e}"),
-                })?;
-
-            pipeline::stream_subprocess_stderr_lines(
-                &params.conversion_id,
-                &mut child,
-                progress,
+                .arg("--no-ppl");
+            native_process::run(
+                &mut command,
+                "llama-imatrix",
                 cancel_token,
+                |stream, line| debug!("[{}] {:?}: {}", params.conversion_id, stream, line),
             )
             .await?;
-            pipeline::wait_and_check_exit(&mut child, "llama-imatrix").await?;
         }
 
         // Step: quantize
@@ -499,17 +483,15 @@ impl QuantizationBackend for LlamaCppBackend {
             .arg(&output_gguf)
             .arg(&params.target_quant);
 
-        let mut child = cmd
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| PumasError::ConversionFailed {
-                message: format!("Failed to spawn llama-quantize: {e}"),
-            })?;
-
-        stream_quantize_progress(&params.conversion_id, &mut child, progress, cancel_token).await?;
-        pipeline::wait_and_check_exit(&mut child, "llama-quantize").await?;
+        let tensor_pattern = Regex::new(r"\[\s*(\d+)/\s*(\d+)\]\s+(\S+)").expect("valid regex");
+        native_process::run(&mut cmd, "llama-quantize", cancel_token, |stream, line| {
+            if stream == OutputStream::Stderr {
+                update_quantize_progress(&params.conversion_id, line, &tensor_pattern, progress);
+            } else {
+                debug!("[{}] stdout: {}", params.conversion_id, line);
+            }
+        })
+        .await?;
 
         // -- PHASE 4: CLEANUP --
         // Remove intermediate files (keep only the quantized output).
@@ -542,42 +524,20 @@ impl QuantizationBackend for LlamaCppBackend {
 /// ```text
 /// [ 123/ 456]  model.layers.5.attn_k.weight - [ 4096,  4096,     1,     1], type = f16, ...
 /// ```
-async fn stream_quantize_progress(
+fn update_quantize_progress(
     conversion_id: &str,
-    child: &mut tokio::process::Child,
+    line: &str,
+    pattern: &Regex,
     progress: &ConversionProgressTracker,
-    cancel_token: &CancellationToken,
-) -> Result<()> {
-    let stderr = child.stderr.take().expect("stderr was piped");
-    let mut reader = BufReader::new(stderr).lines();
-    let re = Regex::new(r"\[\s*(\d+)/\s*(\d+)\]\s+(\S+)").expect("valid regex");
-
-    loop {
-        if cancel_token.is_cancelled() {
-            child.kill().await.ok();
-            return Err(PumasError::ConversionCancelled);
-        }
-
-        match reader.next_line().await {
-            Ok(Some(line)) => {
-                if let Some(caps) = re.captures(&line) {
-                    let idx: u32 = caps[1].parse().unwrap_or(0);
-                    let total: u32 = caps[2].parse().unwrap_or(0);
-                    let tensor = caps[3].to_string();
-
-                    progress.update_tensor_progress(conversion_id, idx, total, &tensor);
-                } else {
-                    debug!("llama-quantize: {}", line);
-                }
-            }
-            Ok(None) => break,
-            Err(e) => {
-                warn!("Error reading llama-quantize stderr: {}", e);
-                break;
-            }
-        }
+) {
+    if let Some(caps) = pattern.captures(line) {
+        let idx: u32 = caps[1].parse().unwrap_or(0);
+        let total: u32 = caps[2].parse().unwrap_or(0);
+        let tensor = caps[3].to_string();
+        progress.update_tensor_progress(conversion_id, idx, total, &tensor);
+    } else {
+        debug!("llama-quantize: {}", line);
     }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------

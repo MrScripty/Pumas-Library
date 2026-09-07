@@ -342,7 +342,14 @@ pub trait QuantizationBackend: Send + Sync {
     /// # Postconditions
     /// - Quantized model files written to the returned `PathBuf` (output directory).
     /// - Source model directory unchanged.
-    /// - Temp files cleaned up on success or failure.
+    /// - Failed or cancelled attempts retain staging for later safe cleanup.
+    ///
+    /// # Cancellation
+    /// Built-in backends observe the token and reap their foreground subprocess
+    /// before returning cancellation. This does not establish descendant cleanup.
+    /// Direct callers must signal cancellation and await this future; dropping
+    /// it is not an observed cleanup contract. `ConversionManager` retains its
+    /// workers and provides the managed shutdown path.
     async fn quantize(
         &self,
         params: &QuantizeParams,

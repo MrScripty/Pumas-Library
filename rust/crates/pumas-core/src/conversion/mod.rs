@@ -10,6 +10,7 @@
 
 pub mod llama_cpp;
 mod manager;
+mod native_process;
 pub mod nvfp4;
 mod outputs;
 pub(crate) mod pipeline;

@@ -260,8 +260,11 @@ Quantization review found backend lifecycle and preflight prerequisites (FE-I26)
 Retained conversion worker observation, atomic manager-local admission and
 standalone/RPC shutdown composition are accepted. Unique conversion staging,
 non-replacing publication and actual destination identity are accepted within
-the documented stable-parent boundary. Native process cleanup and installer
-custody, followed by preflight, precede GUI configuration (FE-I23).
+the documented stable-parent boundary. Foreground cancellation, dual-pipe
+draining and direct-child reaping are accepted with Linux controlled-process
+evidence. Process-tree containment and installer custody, followed by preflight
+and truthful script-progress authority (FE-I27), precede GUI configuration
+(FE-I23).
 The GUI is independently optional; embedded Rust and standalone RPC remain
 supported. Pending cleanup replay is deferred, not accepted: it still needs an
 exact contract against durable authority and retained root custody. No old-format

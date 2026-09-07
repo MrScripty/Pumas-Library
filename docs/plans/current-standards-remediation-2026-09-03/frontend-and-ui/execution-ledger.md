@@ -1,5 +1,66 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-07 — Foreground Conversion Execution
+
+Accepted the bounded foreground portion of FE-I26. Review found all six
+execution calls consumed only one of two piped
+streams and checked cancellation only between lines. A quiet child could block
+cancellation; an unread pipe could deadlock execution. The private native
+process runner replaces the shared stderr/wait helpers and the separate Python
+and llama.cpp stream loops. The runner owns null stdin, both output pipes,
+bounded record framing, child completion, cancellation and direct-child reaping.
+Backend callbacks retain argument and progress-format policy. No additional
+runtime, task registry, dependency or detached pipe/cleanup tasks were added.
+
+Records are limited to 64 KiB, preserve final unterminated lines and trim CRLF.
+Malformed UTF-8 and oversized records fail explicitly. Cancellation is checked
+on each read-loop turn and a 50 ms wake covers silent children. After foreground
+exit, a one-second drain allowance precedes explicit failure for still-open
+pipes; it never silently truncates to success. Reader/parser errors and caught
+observer unwind keep the child outside the unwind scope until cleanup observes
+reaping. Failed cleanup observation retains the worker; an eventual cleanup
+failure preserves its cause alongside the original operation failure.
+
+The subprocess subagent implemented the runner and seven focused tests, then
+reviewed all six caller migrations. Root integrated Python format conversion,
+llama.cpp F16 conversion/imatrix/quantization, NVFP4 and Sherry; strengthened the
+existing actual-output/index fixture with stdout JSON and stderr tensor progress;
+and added real quiet-child execution through the retained worker owner. Dropping
+one shutdown waiter does not prevent a later waiter from observing cancellation
+and foreground reaping; no destination is published and staging remains.
+The codebase-design skill kept parsing separate from the shared lifecycle
+Interface, so a pipe or cancellation policy change no longer requires changes
+in every backend. Quantization Rustdoc now documents cancel-and-await and
+retained staging instead of incorrectly promising cleanup on every failure.
+
+Evidence: all 58 focused conversion tests passed. Linux system tests use real
+shell/exec processes and tiny controlled payloads: both pipes exceed pipe
+capacity, final records arrive, quiet cancellation reaps, observer panic reaps,
+pre-cancelled calls do not spawn, and bad output/nonzero/spawn failures surface.
+The inherited-pipe case injects a separately owned real pipe holder at the
+private drain seam and explicitly stops/reaps it; this proves the bounded
+foreground-output policy, not actual descendant containment. Review corrected
+an undersized oversized-record fixture before execution. Full core/RPC suites
+passed: 1,419 default-feature tests and 1,379 minimal-feature tests, each with
+22 existing ignored tests. Strict all-target clippy passed with all features
+and with no default features. Formatting, whitespace and all five plan-contract
+checks passed.
+Logs: `/tmp/pumas-foreground-process-{focused,default,minimal,clippy-default,clippy-minimal}.log`.
+
+Boundaries: foreground receipt does not establish descendant cleanup or prevent
+descendant writes after publication. Direct embedded callers must cancel via
+token and await; dropping a future invokes only the existing kill-on-drop
+fallback, not an observed cleanup contract. Setup's numeric group-kill loop is
+not generalized because post-reap group identity can be reused. Process-tree
+containment and installer ownership remain FE-I26 prerequisites. NVFP4/Sherry
+stdout is now drained/logged but their JSON progress is not newly projected;
+raw script terminal status remains distinct from actual worker/publication
+completion and needs the separate FE-I27 progress-authority repair. Quantization
+preflight and FE-I23 GUI controls remain deferred. No actual installer/model
+tools, live library data, GUI, generated API shapes or feature gates changed.
+No Windows/macOS runtime or release acceptance is claimed. Unrelated deletions
+and private recovery artifacts remain untouched.
+
 ## 2026-09-07 — Conversion Output Publication
 
 Accepted a bounded FE-I26 destination-safety prerequisite. Deterministic

@@ -8,11 +8,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::llama_cpp::LlamaCppBackend;
+use super::native_process::{self, OutputStream};
 use super::nvfp4::Nvfp4Backend;
 use super::outputs::OutputWorkspace;
 use super::pipeline;
@@ -711,64 +711,39 @@ async fn run_conversion(
         model_files.len()
     );
 
-    let mut child = Command::new(&python_path)
-        .arg(&script_path)
-        .args(&args)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| PumasError::ConversionFailed {
-            message: format!("Failed to spawn conversion process: {e}"),
-        })?;
-
-    let stdout = child.stdout.take().expect("stdout was piped");
-    let mut reader = BufReader::new(stdout).lines();
-
-    loop {
-        if cancel_token.is_cancelled() {
-            child.kill().await.ok();
-            // Retain this attempt's staging: leader cancellation does not
-            // establish native process-tree cleanup or authorize deletion.
-            return Err(PumasError::ConversionCancelled);
-        }
-
-        match reader.next_line().await {
-            Ok(Some(line)) => {
-                if let Ok(script_progress) = serde_json::from_str::<ScriptProgressLine>(&line) {
+    let mut command = Command::new(&python_path);
+    command.arg(&script_path).args(&args);
+    let outcome = native_process::run(
+        &mut command,
+        "conversion script",
+        cancel_token,
+        |stream, line| {
+            if stream == OutputStream::Stdout {
+                if let Ok(script_progress) = serde_json::from_str::<ScriptProgressLine>(line) {
                     progress.update_from_script(conversion_id, &script_progress);
-                } else {
-                    debug!("Non-JSON output from conversion script: {}", line);
+                    return;
                 }
             }
-            Ok(None) => break,
-            Err(e) => {
-                warn!("Error reading conversion output: {}", e);
-                break;
-            }
+            debug!("[{}] {:?}: {}", conversion_id, stream, line);
+        },
+    )
+    .await;
+    if let Err(error) = outcome {
+        if matches!(error, PumasError::ConversionCancelled) {
+            return Err(error);
         }
-    }
-
-    let status = child
-        .wait()
-        .await
-        .map_err(|e| PumasError::ConversionFailed {
-            message: format!("Conversion process error: {e}"),
-        })?;
-
-    if !status.success() {
         if let Some(p) = progress.get(conversion_id) {
             if p.status == ConversionStatus::Error {
                 return Err(PumasError::ConversionFailed {
-                    message: p
-                        .error
-                        .unwrap_or_else(|| "Conversion script failed".to_string()),
+                    message: format!(
+                        "{error}; script reported: {}",
+                        p.error
+                            .unwrap_or_else(|| "Conversion script failed".to_string())
+                    ),
                 });
             }
         }
-        return Err(PumasError::ConversionFailed {
-            message: format!("Conversion process exited with status: {status}"),
-        });
+        return Err(error);
     }
 
     // Rename temp dir to final

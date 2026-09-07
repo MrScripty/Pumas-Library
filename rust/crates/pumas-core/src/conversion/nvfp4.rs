@@ -10,6 +10,7 @@ use tokio::fs;
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
+use super::native_process;
 use super::outputs::OutputWorkspace;
 use super::pipeline;
 use super::progress::ConversionProgressTracker;
@@ -248,21 +249,17 @@ impl QuantizationBackend for Nvfp4Backend {
             args.push(cal_file.to_string_lossy().to_string());
         }
 
-        let mut child = Command::new(self.venv_python())
-            .args(&args)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| PumasError::ConversionFailed {
-                message: format!("Failed to spawn NVFP4 quantization process: {e}"),
-            })?;
-
-        // Stream stderr for progress
-        pipeline::stream_subprocess_stderr_lines(conversion_id, &mut child, progress, cancel_token)
-            .await?;
-
-        pipeline::wait_and_check_exit(&mut child, "nvfp4-quantize").await?;
+        let mut command = Command::new(self.venv_python());
+        command.args(&args);
+        native_process::run(
+            &mut command,
+            "nvfp4-quantize",
+            cancel_token,
+            |stream, line| {
+                debug!("[{}] {:?}: {}", conversion_id, stream, line);
+            },
+        )
+        .await?;
 
         // -- PHASE 4: CLEANUP --
         progress.update_pipeline(conversion_id, 2, 2, "Finalizing output");

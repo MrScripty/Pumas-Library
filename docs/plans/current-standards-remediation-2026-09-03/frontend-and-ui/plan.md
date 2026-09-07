@@ -10,13 +10,14 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Establish native conversion process custody and
+**Next slice:** Establish native conversion process-tree containment and
 quantization-backend setup/preflight before adding GUI configuration (FE-I26,
 remaining FE-I23). Atomic manager-local admission, retained Rust-worker
 observation and standalone/RPC shutdown composition are accepted below. Unique
 staging and non-replacing publication are also accepted within the stable-parent
-boundary below. Neither slice establishes process-tree cleanup. No new quantization
-GUI mutation is admitted.
+boundary below. Foreground cancellation, dual-pipe draining and direct-child
+reaping are accepted below; they do not establish descendant cleanup. No new
+quantization GUI mutation is admitted. Script progress authority remains FE-I27.
 The optional conversion dialog now uses setup start/observation across uncertain
 responses and reopen (FE-I25); see the accepted dialog ledger. Backend custody,
 aggregate shutdown and core/RPC/desktop setup observation are accepted within
@@ -29,6 +30,63 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Foreground Conversion Process Admission
+
+Status: `Accepted` for foreground-child execution on Linux; see the
+[execution ledger](execution-ledger.md#2026-09-07--foreground-conversion-execution).
+FE-I26 remains a backend prerequisite, not a new GUI admission.
+
+Systemic finding: all six execution calls pipe both streams but consume only
+one, and cancellation is checked only between lines. Quiet children ignore
+cancellation and unread pipes can deadlock. Replace these split stream/wait
+lifecycles together. One private native-process runner owns spawn, bounded
+concurrent pipe reads, cancellation observation, direct-child termination and
+reaping. Callers retain argument and progress-parsing policy. No detached drain
+tasks, new runtime, dependency or generated contract is admitted.
+
+Write set: subprocess agent owns `conversion/native_process.rs` and its
+colocated tests. Root owns `conversion/mod.rs`, `pipeline.rs`, `manager.rs`,
+`manager/output_tests.rs`, `llama_cpp.rs`, `nvfp4.rs`, `sherry.rs`, `types.rs`
+(quantization cancellation/staging Rustdoc only), and this
+plan/ledger/issues plus parent-plan summary. Rust paths are beneath
+`rust/crates/pumas-core/src`. Root serializes formatting, Cargo and commits.
+Existing workflow/stub deletions and recovery artifacts stay untouched.
+
+Composed design: command policy varies by backend; process lifecycle does not.
+The runner's Interface accepts a configured command, diagnostic name, token and
+line callback; callers no longer own pipes, child handles or reap ordering.
+The callback carries only stream identity and bounded text, keeping parsing
+independently changeable. The retained manager worker still owns async
+completion and admission. A cancellation/pipe-policy change touches only the
+runner; a progress-format change touches only its backend callback. Removing
+the runner would restore lifecycle duplication at six callers. Its necessary
+machinery is bounded line framing, concurrent I/O and a single owned child;
+there is no second task registry or new composition root.
+
+Binding foreground contract: observe the existing token every 50 ms while
+waiting; bound each text record to 64 KiB; malformed or oversized text fails
+without retaining unbounded output. After direct-child exit, allow one second
+to drain buffered output; pipes still open then produce a failure, not truncated
+success. Cancellation and reader/parser failures (including unwind) await
+direct-child reaping before returning. An unobservable cleanup retains the
+worker rather than releasing its execution slot. Direct callers must cancel
+and await; dropping an unmanaged future is not a cleanup guarantee.
+
+Acceptance claims (automated, satisfied within the ledger's Linux and controlled
+fixture boundaries): foreground process behavior is `system`
+evidence using real Linux shell processes and controlled tiny payloads: quiet
+cancellation, both-pipe flooding, bad records, spawn/nonzero failure, callback
+panic and inherited-pipe timeout. Consumer `integration` evidence preserves
+actual output metadata/index/progress through all four conversion backends.
+Core/RPC default/minimal suites, strict lint, formatting and all five plan
+contracts support acceptance. No real model tools or live library mutation.
+
+Boundary and next prerequisite: this slice does not prove descendants stopped
+writing. Process-tree identity/containment remains open, as do installer custody
+and quantization preflight. Do not generalize setup's post-reap group-kill loop:
+numeric group identity may be reused after the leader is reaped. Re-plan if
+foreground ownership cannot be guaranteed without a broader lifecycle change.
 
 ## Conversion Output Publication Admission
 

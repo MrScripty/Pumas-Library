@@ -1,87 +1,16 @@
-//! Shared subprocess utilities for conversion and quantization pipelines.
-//!
-//! Provides reusable helpers for streaming subprocess output, waiting for
-//! process exit and writing quantized model metadata. Output publication is
-//! owned by the private output workspace. Used by the Python conversion pipeline and
-//! the llama.cpp quantization backend.
+//! Shared file discovery and metadata helpers for conversion pipelines.
+//! Native execution and output publication have separate private owners.
 
 use std::path::Path;
 use std::path::PathBuf;
 
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tracing::{debug, warn};
 
 use super::progress::ConversionProgressTracker;
 use super::types::{ConversionSource, ConversionStatus};
-use crate::cancel::CancellationToken;
 use crate::model_library::ModelLibrary;
 use crate::models::ModelMetadata;
 use crate::{PumasError, Result};
-
-// ---------------------------------------------------------------------------
-// Subprocess output streaming
-// ---------------------------------------------------------------------------
-
-/// Stream a subprocess's stderr, logging each line at debug level.
-///
-/// Checks cancellation between lines. Does not parse the output — use this
-/// when you only need to drain stderr and watch for cancellation.
-pub async fn stream_subprocess_stderr_lines(
-    conversion_id: &str,
-    child: &mut tokio::process::Child,
-    _progress: &ConversionProgressTracker,
-    cancel_token: &CancellationToken,
-) -> Result<()> {
-    let stderr = child.stderr.take().expect("stderr was piped");
-    let mut reader = BufReader::new(stderr).lines();
-
-    loop {
-        if cancel_token.is_cancelled() {
-            child.kill().await.ok();
-            return Err(PumasError::ConversionCancelled);
-        }
-
-        match reader.next_line().await {
-            Ok(Some(line)) => {
-                debug!("[{}] stderr: {}", conversion_id, line);
-            }
-            Ok(None) => break,
-            Err(e) => {
-                warn!("Error reading subprocess stderr: {}", e);
-                break;
-            }
-        }
-    }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Process exit handling
-// ---------------------------------------------------------------------------
-
-/// Wait for a child process to exit and return an error on non-zero status.
-pub async fn wait_and_check_exit(
-    child: &mut tokio::process::Child,
-    process_name: &str,
-) -> Result<()> {
-    let status = child
-        .wait()
-        .await
-        .map_err(|e| PumasError::ConversionFailed {
-            message: format!("{process_name} process error: {e}"),
-        })?;
-
-    if !status.success() {
-        return Err(PumasError::ConversionFailed {
-            message: format!(
-                "{process_name} exited with status: {}",
-                status.code().unwrap_or(-1)
-            ),
-        });
-    }
-    Ok(())
-}
 
 // ---------------------------------------------------------------------------
 // Output directory management

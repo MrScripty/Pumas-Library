@@ -1,4 +1,4 @@
-//! Non-replacing moves for classification-owned directory entries.
+//! Non-replacing moves for application-owned directory entries.
 //!
 //! The caller owns path selection and move lifecycle. This boundary prevents
 //! replacement of an occupied destination; it does not grant containment,

@@ -1,5 +1,51 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-07 — Conversion Output Publication
+
+Accepted a bounded FE-I26 destination-safety prerequisite. Deterministic
+`.converting`/`.quantizing` staging previously deleted another attempt's files.
+The finalizer also discarded its chosen versioned destination, so callers could
+write metadata or report an ID for the original occupied output instead.
+
+One private `OutputWorkspace` exclusively allocates staging beside the desired
+output and consumes itself to return the actual published path. Publication
+reuses the platform non-replacing move and retries only `AlreadyExists` with a
+version suffix. Files, directories, dangling symlinks and non-UTF8 leaf names
+retain their identities; other I/O errors surface without replacement or a
+copy/delete fallback. Python conversion, llama.cpp, NVFP4 and Sherry all use the
+returned identity for metadata, indexing and progress. Existing deterministic
+staging is untouched; failed, cancelled and abandoned attempts retain their
+unique staging. Review removed Python error-path deletion because an ignored
+leader-kill error does not prove that native producers have stopped.
+
+The output subagent implemented the workspace and seven temporary-root tests;
+root integrated the four consumers and a simulated-executable test covering
+their real metadata/index/progress paths. The codebase-design skill placed
+allocation, collision policy and returned identity behind one shared interface.
+Fixtures use tiny shell-produced payloads, not actual model tools. The first
+consumer run exposed an incomplete simulated llama.cpp installation; correcting
+its unused conversion-script fixture made all 50 focused conversion tests pass.
+
+Verification: complete default core/RPC suite passed 1,411 tests; minimal-feature
+suite passed 1,371. Each retained 22 existing ignored tests. Strict all-target
+clippy passed with all features and with no default features. Rust formatting,
+diff whitespace and all five plan contracts passed.
+Logs: `/tmp/pumas-conversion-outputs-{focused,default,minimal,clippy-default,clippy-minimal}.log`.
+
+Boundary: parent paths must remain stable. This is not hostile-filesystem path
+pinning, native process-tree cleanup, crash-atomic metadata/index publication,
+installer custody or cross-process conversion admission. A dropped direct
+publication waiter can still allow its blocking move to finish; supported
+manager execution retains that future through the existing worker owner.
+Retained staging cleanup/recovery requires a later admitted policy and proof
+that producers have stopped. No live model data, installer, GUI, dependency,
+generated API shape or feature gate changed. No real conversion, release or
+Windows/macOS runtime acceptance is claimed. Unrelated workflow/stub deletions
+and private recovery artifacts remain untouched.
+
+Next: native process cleanup, quantization installer ownership and preflight;
+FE-I26 remains open and FE-I23 quantization GUI configuration remains deferred.
+
 ## 2026-09-07 — Conversion Worker Observation
 
 Quantization admission review found that base Python setup custody does not

@@ -258,8 +258,10 @@ RPC and the desktop bridge. The optional dialog migration across uncertain
 responses and reopen is accepted with built Linux GUI fixture evidence (FE-I25).
 Quantization review found backend lifecycle and preflight prerequisites (FE-I26).
 Retained conversion worker observation, atomic manager-local admission and
-standalone/RPC shutdown composition are accepted. Native process/destination
-and installer custody, followed by preflight, precede GUI configuration (FE-I23).
+standalone/RPC shutdown composition are accepted. Unique conversion staging,
+non-replacing publication and actual destination identity are accepted within
+the documented stable-parent boundary. Native process cleanup and installer
+custody, followed by preflight, precede GUI configuration (FE-I23).
 The GUI is independently optional; embedded Rust and standalone RPC remain
 supported. Pending cleanup replay is deferred, not accepted: it still needs an
 exact contract against durable authority and retained root custody. No old-format

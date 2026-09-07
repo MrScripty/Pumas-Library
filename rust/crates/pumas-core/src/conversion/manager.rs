@@ -14,6 +14,7 @@ use tracing::{debug, info, warn};
 
 use super::llama_cpp::LlamaCppBackend;
 use super::nvfp4::Nvfp4Backend;
+use super::outputs::OutputWorkspace;
 use super::pipeline;
 use super::progress::ConversionProgressTracker;
 use super::scripts;
@@ -30,6 +31,9 @@ use crate::{PumasError, Result};
 
 /// Maximum number of concurrent conversions (to avoid OOM on large models).
 const MAX_CONCURRENT: usize = 1;
+
+#[cfg(all(test, unix))]
+mod output_tests;
 
 /// Readiness must fit within interactive status requests even for a stuck interpreter.
 const ENVIRONMENT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
@@ -651,9 +655,8 @@ async fn run_conversion(
     }
 
     let output_dir = determine_output_dir(model_path, direction)?;
-    let temp_dir = output_dir.with_extension("converting");
-
-    pipeline::prepare_temp_output_dir(&temp_dir, "creating temp conversion dir").await?;
+    let workspace = OutputWorkspace::prepare(&output_dir).await?;
+    let temp_dir = workspace.staging_path().to_path_buf();
 
     let scripts_dir = scripts::scripts_dir(launcher_root);
     let (script_name, args) = match direction {
@@ -725,7 +728,8 @@ async fn run_conversion(
     loop {
         if cancel_token.is_cancelled() {
             child.kill().await.ok();
-            pipeline::cleanup_temp_output_dir(&temp_dir).await;
+            // Retain this attempt's staging: leader cancellation does not
+            // establish native process-tree cleanup or authorize deletion.
             return Err(PumasError::ConversionCancelled);
         }
 
@@ -753,7 +757,6 @@ async fn run_conversion(
         })?;
 
     if !status.success() {
-        pipeline::cleanup_temp_output_dir(&temp_dir).await;
         if let Some(p) = progress.get(conversion_id) {
             if p.status == ConversionStatus::Error {
                 return Err(PumasError::ConversionFailed {
@@ -769,7 +772,7 @@ async fn run_conversion(
     }
 
     // Rename temp dir to final
-    pipeline::finalize_output_dir(&temp_dir, &output_dir).await?;
+    let output_dir = workspace.publish().await?;
 
     // Build conversion source metadata
     let is_dequantized = direction == ConversionDirection::GgufToSafetensors

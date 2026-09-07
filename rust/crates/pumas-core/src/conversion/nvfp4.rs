@@ -10,6 +10,7 @@ use tokio::fs;
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
+use super::outputs::OutputWorkspace;
 use super::pipeline;
 use super::progress::ConversionProgressTracker;
 use super::types::{
@@ -230,9 +231,8 @@ impl QuantizationBackend for Nvfp4Backend {
             .parent()
             .unwrap_or(Path::new("."))
             .join(&output_dir_name);
-        let temp_dir = output_dir.with_extension("converting");
-
-        pipeline::prepare_temp_output_dir(&temp_dir, "creating nvfp4 temp dir").await?;
+        let workspace = OutputWorkspace::prepare(&output_dir).await?;
+        let temp_dir = workspace.staging_path().to_path_buf();
 
         // Build calibration dataset arg if provided
         let mut args = vec![
@@ -266,9 +266,7 @@ impl QuantizationBackend for Nvfp4Backend {
 
         // -- PHASE 4: CLEANUP --
         progress.update_pipeline(conversion_id, 2, 2, "Finalizing output");
-        pipeline::finalize_output_dir(&temp_dir, &output_dir).await?;
-
-        Ok(output_dir)
+        workspace.publish().await
     }
 }
 

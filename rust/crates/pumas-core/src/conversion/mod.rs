@@ -11,6 +11,7 @@
 pub mod llama_cpp;
 mod manager;
 pub mod nvfp4;
+mod outputs;
 pub(crate) mod pipeline;
 pub(crate) mod progress;
 mod scripts;

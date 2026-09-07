@@ -1,8 +1,8 @@
 //! Shared subprocess utilities for conversion and quantization pipelines.
 //!
 //! Provides reusable helpers for streaming subprocess output, waiting for
-//! process exit, finalizing output directories, and writing quantized model
-//! metadata. Used by both the existing Python-based conversion pipeline and
+//! process exit and writing quantized model metadata. Output publication is
+//! owned by the private output workspace. Used by the Python conversion pipeline and
 //! the llama.cpp quantization backend.
 
 use std::path::Path;
@@ -107,59 +107,6 @@ pub async fn list_files_with_extension(model_path: &Path, ext: &str) -> Result<V
 
     files.sort();
     Ok(files)
-}
-
-/// Remove any stale temp directory and recreate it for a fresh conversion run.
-pub async fn prepare_temp_output_dir(temp_dir: &Path, context: &str) -> Result<()> {
-    if fs::try_exists(temp_dir)
-        .await
-        .map_err(|e| PumasError::io("checking conversion temp dir", temp_dir, e))?
-    {
-        let _ = fs::remove_dir_all(temp_dir).await;
-    }
-
-    fs::create_dir_all(temp_dir)
-        .await
-        .map_err(|e| PumasError::io(context, temp_dir, e))?;
-    Ok(())
-}
-
-/// Best-effort removal for temp output directories after cancellation or failure.
-pub async fn cleanup_temp_output_dir(temp_dir: &Path) {
-    let _ = fs::remove_dir_all(temp_dir).await;
-}
-
-/// Atomically rename `temp_dir` to `output_dir`.
-///
-/// If `output_dir` already exists, appends a `-v{N}` suffix to avoid collision.
-pub async fn finalize_output_dir(temp_dir: &Path, output_dir: &Path) -> Result<()> {
-    if fs::try_exists(output_dir)
-        .await
-        .map_err(|e| PumasError::io("checking quantization output dir", output_dir, e))?
-    {
-        let mut suffix = 2u32;
-        let base = output_dir.to_path_buf();
-        let mut final_dir = base.clone();
-        while fs::try_exists(&final_dir)
-            .await
-            .map_err(|e| PumasError::io("checking quantization output dir", &final_dir, e))?
-        {
-            final_dir = base.with_file_name(format!(
-                "{}-v{}",
-                base.file_name().unwrap_or_default().to_string_lossy(),
-                suffix
-            ));
-            suffix += 1;
-        }
-        fs::rename(temp_dir, &final_dir)
-            .await
-            .map_err(|e| PumasError::io("renaming quantization output", temp_dir, e))?;
-    } else {
-        fs::rename(temp_dir, output_dir)
-            .await
-            .map_err(|e| PumasError::io("renaming quantization output", temp_dir, e))?;
-    }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------

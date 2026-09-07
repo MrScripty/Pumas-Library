@@ -12,6 +12,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
+use super::outputs::OutputWorkspace;
 use super::pipeline;
 use super::progress::ConversionProgressTracker;
 use super::types::{
@@ -375,9 +376,8 @@ impl QuantizationBackend for LlamaCppBackend {
 
         let quant_lower = params.target_quant.to_lowercase();
         let output_dir = determine_quantized_output_dir(&params.model_path, &params.target_quant)?;
-        let temp_dir = output_dir.with_extension("quantizing");
-
-        pipeline::prepare_temp_output_dir(&temp_dir, "creating quantization temp dir").await?;
+        let workspace = OutputWorkspace::prepare(&output_dir).await?;
+        let temp_dir = workspace.staging_path().to_path_buf();
 
         let f16_gguf = temp_dir.join("intermediate-f16.gguf");
         let imatrix_file = temp_dir.join("imatrix.dat");
@@ -528,9 +528,7 @@ impl QuantizationBackend for LlamaCppBackend {
         }
 
         // Atomic rename temp dir → final output dir.
-        pipeline::finalize_output_dir(&temp_dir, &output_dir).await?;
-
-        Ok(output_dir)
+        workspace.publish().await
     }
 }
 

@@ -10,11 +10,13 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Establish native conversion process/destination custody and
+**Next slice:** Establish native conversion process custody and
 quantization-backend setup/preflight before adding GUI configuration (FE-I26,
 remaining FE-I23). Atomic manager-local admission, retained Rust-worker
-observation and standalone/RPC shutdown composition are accepted below. They do
-not establish process-tree cleanup. No new quantization GUI mutation is admitted.
+observation and standalone/RPC shutdown composition are accepted below. Unique
+staging and non-replacing publication are also accepted within the stable-parent
+boundary below. Neither slice establishes process-tree cleanup. No new quantization
+GUI mutation is admitted.
 The optional conversion dialog now uses setup start/observation across uncertain
 responses and reopen (FE-I25); see the accepted dialog ledger. Backend custody,
 aggregate shutdown and core/RPC/desktop setup observation are accepted within
@@ -27,6 +29,45 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Conversion Output Publication Admission
+
+Status: accepted for unique staging, non-replacing publication and actual output
+identity; see the [execution ledger](execution-ledger.md#2026-09-07--conversion-output-publication).
+FE-I26 remains open for native cleanup, installer custody and preflight.
+
+Inspection found deterministic staging removed on every attempt, and a finalizer
+that chose a versioned path but returned no identity: callers then wrote metadata
+or returned the original occupied output. Replace shared staging with an
+exclusively created per-attempt directory and return the actual published path.
+Reuse the platform non-replacing directory move; occupied files, directories and
+symlinks must never be replaced. Version selection retries only actual collision
+outcomes, not other I/O failures. Failed, cancelled and abandoned staging is
+retained; later cleanup requires proof that native producers have stopped. No
+automatic Drop deletion may race native work. Existing staging and outputs stay
+untouched.
+
+Write set: output agent owns new private `conversion/outputs.rs` and its tests
+plus `conversion/mod.rs`. Root owns `conversion/pipeline.rs`, `manager.rs`,
+`llama_cpp.rs`, `nvfp4.rs`, `sherry.rs`, the filesystem helper's descriptive
+comments, `conversion/manager/output_tests.rs` for simulated-executable consumer
+regressions, and frontend/parent plan, issues and ledger. Rust paths above are under
+`rust/crates/pumas-core/src`; no dependency, generated schema or UI changes.
+
+Design: one output-workspace interface owns staging identity and desired
+destination, and consumes itself to return the actual publication identity. The
+four execution paths share it; deleting it would duplicate allocation and
+non-clobbering version selection. Existing host blocking capacity isolates
+filesystem operations; no runtime or generic framework is added. Parent paths
+must remain stable; this does not establish hostile path-replacement protection,
+process-tree cleanup, crash-atomic indexing or installer ownership.
+
+Acceptance: temporary-root tests prove exclusive staging, old data preservation,
+occupied/dangling destination behavior, independent concurrent publication,
+actual returned path and surfaced non-collision errors. All execution callers
+must consume that identity. Run core/RPC tests with default/minimal features,
+strict lint and formatting, and plan checks. No real model conversion or
+installation, live library, GUI or other-OS runtime claim.
 
 ## Conversion Worker Observation Admission
 

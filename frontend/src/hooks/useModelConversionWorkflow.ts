@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api/adapter';
-import type { ConversionDirection, ConversionProgress, ConversionStatus } from '../types/api-conversion';
+import type { ConversionDirection, ConversionProgress, ConversionSetupStatusResponse, ConversionStatus } from '../types/api-conversion';
 
 export function isConversionTerminal(status: ConversionStatus): boolean {
   return status === 'completed' || status === 'cancelled' || status === 'error';
@@ -20,6 +20,7 @@ interface State {
   error: string | null;
   startUncertain: boolean;
   setupUncertain: boolean;
+  setupOperation: ConversionSetupStatusResponse['setup'];
   awaitingProgress: boolean;
 }
 
@@ -30,10 +31,10 @@ interface Controller {
   cancel: (id: string) => Promise<void>;
 }
 
-const initialState: State = { ready: null, conversions: [], loading: true, busy: false, error: null, startUncertain: false, setupUncertain: false, awaitingProgress: false };
+const initialState: State = { ready: null, conversions: [], loading: true, busy: false, error: null, startUncertain: false, setupUncertain: false, setupOperation: null, awaitingProgress: false };
 const uncertainMessage = 'The conversion start outcome is unknown. Inspect conversion status, then close and reopen this dialog before retrying.';
 const readErrorMessage = 'Could not read conversion status. Refresh status to retry.';
-const setupUncertainMessage = 'Tool setup could not be confirmed and may still be running. Refresh status to check readiness.';
+const setupUncertainMessage = 'Tool setup could not be confirmed and may still be running. Refresh status to check backend setup status.';
 
 export function useModelConversionWorkflow({ modelId, direction, onCompleted }: Options) {
   const [state, setState] = useState<State>(initialState);
@@ -43,6 +44,7 @@ export function useModelConversionWorkflow({ modelId, direction, onCompleted }: 
   const tail = useRef<Promise<void>>(Promise.resolve());
   const uncertainStart = useRef(false);
   const uncertainSetup = useRef(false);
+  const uncertainSetupPrevious = useRef<string | null>(null);
   const completedCallback = useRef(onCompleted);
   completedCallback.current = onCompleted;
 
@@ -62,20 +64,31 @@ export function useModelConversionWorkflow({ modelId, direction, onCompleted }: 
       setState(current);
     };
     const stopTimer = () => { clearTimeout(timer); timer = undefined; };
+    const acceptSetup = (setupOperation: State['setupOperation']) => {
+      if (disposed) return;
+      if (uncertainSetup.current && setupOperation !== null &&
+        (setupOperation.status === 'in_progress' || setupOperation.operationId !== uncertainSetupPrevious.current)) {
+        uncertainSetup.current = false;
+        publish({ setupUncertain: false, error: current.startUncertain ? uncertainMessage : null });
+      }
+      publish({ setupOperation, setupUncertain: uncertainSetup.current,
+        ...(uncertainSetup.current ? { error: current.startUncertain ? uncertainMessage : setupUncertainMessage } : {}) });
+    };
     const read = async (checkReadiness = true) => {
       publish({ loading: true });
-      if (checkReadiness) {
+      const status = await api.get_conversion_setup();
+      if (!isCurrent()) return;
+      const previousSetup = current.setupOperation;
+      const terminalChanged = status.setup !== null && status.setup.status !== 'in_progress' &&
+        (previousSetup === null || previousSetup.operationId !== status.setup.operationId || previousSetup.status === 'in_progress');
+      acceptSetup(status.setup);
+      if (checkReadiness || terminalChanged) {
         const readiness = await api.check_conversion_environment();
-        if (disposed) return;
-        if (readiness.ready) {
-          uncertainSetup.current = false;
-          publish({ ready: true, setupUncertain: false, error: current.startUncertain ? uncertainMessage : null });
-        } else {
-          publish({ ready: false });
-        }
+        if (!isCurrent()) return;
+        publish({ ready: readiness.ready });
       }
       const listed = await api.list_model_conversions();
-      if (disposed) return;
+      if (!isCurrent()) return;
       const conversions = listed.conversions.filter((entry) => entry.sourceModelId === modelId);
       if (conversions.some((entry) => entry.conversionId === acceptedStartId && isConversionTerminal(entry.status))) acceptedStartId = null;
       publish({ conversions, awaitingProgress: acceptedStartId !== null && !conversions.some((entry) => entry.conversionId === acceptedStartId) });
@@ -107,7 +120,7 @@ export function useModelConversionWorkflow({ modelId, direction, onCompleted }: 
           pending = false;
           if (isCurrent()) {
             publish({ busy: false, loading: false });
-            if (succeeded && (acceptedStartId !== null || current.conversions.some((entry) => !isConversionTerminal(entry.status)))) {
+            if (succeeded && (current.setupOperation?.status === 'in_progress' || acceptedStartId !== null || current.conversions.some((entry) => !isConversionTerminal(entry.status)))) {
               timer = setTimeout(() => { void run(() => read(false)); }, 1000);
             }
           }
@@ -119,12 +132,16 @@ export function useModelConversionWorkflow({ modelId, direction, onCompleted }: 
     const scope: Controller = {
       refresh: () => { void run(read); },
       setup: () => {
-        if (current.setupUncertain) return Promise.resolve();
+        if (current.ready !== false || current.error !== null || current.setupUncertain || current.setupOperation?.status === 'in_progress' || acceptedStartId !== null || current.conversions.some((entry) => !isConversionTerminal(entry.status))) return Promise.resolve();
         return run(async () => {
+          const previous = current.setupOperation?.operationId ?? null;
           try {
-            await api.setup_conversion_environment();
+            const admitted = await api.start_conversion_setup(previous);
+            acceptSetup(admitted.setup);
+            publish({ busy: false });
           } catch (error) {
             uncertainSetup.current = true;
+            uncertainSetupPrevious.current = previous;
             publish({ setupUncertain: true });
             throw error;
           }
@@ -132,7 +149,7 @@ export function useModelConversionWorkflow({ modelId, direction, onCompleted }: 
         }, true);
       },
       start: () => {
-        if (current.ready !== true || current.error !== null || current.startUncertain || acceptedStartId !== null || current.conversions.some((entry) => !isConversionTerminal(entry.status))) return Promise.resolve();
+        if (current.ready !== true || current.error !== null || current.startUncertain || current.setupUncertain || current.setupOperation?.status === 'in_progress' || acceptedStartId !== null || current.conversions.some((entry) => !isConversionTerminal(entry.status))) return Promise.resolve();
         if (direction !== 'gguf_to_safetensors' && direction !== 'safetensors_to_gguf') {
           publish({ error: 'This dialog supports only GGUF and safetensors format conversion.' });
           return Promise.resolve();

@@ -90,7 +90,7 @@ describe('ModalDialog', () => {
 
     fireEvent.keyDown(document, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Outer dialog' })).not.toBeInTheDocument());
-    expect(outerTrigger).toHaveFocus();
+    await waitFor(() => expect(outerTrigger).toHaveFocus());
   });
 
   it('applies disabled dismissal to Escape and backdrop while retaining explicit actions', async () => {
@@ -132,7 +132,7 @@ describe('ModalDialog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Close all dialogs' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(outerTrigger).toHaveFocus();
+    await waitFor(() => expect(outerTrigger).toHaveFocus());
   });
 
   it('removes global lifecycle listeners when unmounted', () => {

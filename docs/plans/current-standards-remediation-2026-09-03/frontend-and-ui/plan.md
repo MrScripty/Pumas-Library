@@ -10,9 +10,9 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Migrate the optional conversion dialog to the accepted setup
-start/observation contract across timeout and reopen (remaining FE-I25), before
-quantization-specific GUI configuration (remaining FE-I23). Backend custody,
+**Next slice:** Admit quantization-specific GUI configuration (remaining FE-I23).
+The optional conversion dialog now uses setup start/observation across uncertain
+responses and reopen (FE-I25); see the accepted dialog ledger. Backend custody,
 aggregate shutdown and core/RPC/desktop setup observation are accepted within
 their documented evidence boundaries below.
 The basic GGUF/safetensors format workflow is accepted within its documented
@@ -23,6 +23,38 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Conversion Setup Dialog Admission
+
+Status: accepted within the Linux simulated-installer evidence boundary; see the
+[execution ledger](execution-ledger.md#2026-09-07--conversion-setup-dialog).
+
+Operation: migrate the optional format dialog to the accepted setup observation
+contract. The workflow hook owns serialized reads, admission and polling; the
+backend retains installation ownership across dialog closure. Mount and reopen
+only read. Explicit installation consent sends the observed terminal identity
+for retry; uncertain admission must reconcile through reads, never automatic
+mutation. Null status does not prove readiness or resolve an uncertain request.
+Active setup blocks conversion and duplicate setup, but permits dialog closure
+after admission. Terminal success still requires a readiness check. Read failure
+stops polling and exposes manual refresh; stale scopes cannot publish or restart.
+
+Write set: hook agent owns `frontend/src/hooks/useModelConversionWorkflow.ts`
+and its test; root owns `frontend/src/components/ModelConversionDialog.tsx` and
+its test, this plan, ledger, issues and parent-plan next-slice summary. No backend, generated contract, package,
+live library, workflow or cache changes are admitted.
+
+Verification-driven write-set addition: root also owns the idle setup fixture
+in `frontend/src/components/ModelManagerIntegrityRefresh.test.tsx` and the
+asynchronous focus assertion in `frontend/src/components/ui/ModalDialog.test.tsx`.
+The first full suite exposed the former's absent new read response and the
+latter's immediate focus assertion before deferred restoration. No modal
+production behavior change is admitted.
+
+Acceptance: hook lifecycle tests, dialog consent/status/closure tests, frontend
+types/lint/full tests, both production modes and actual built Linux Chromium
+interaction through compiled preload with simulated setup outcomes. No native
+installation or Windows/macOS claim. FE-I25 is resolved within this scope.
 
 ## Conversion Setup Observation Admission
 

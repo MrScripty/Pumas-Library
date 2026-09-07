@@ -31,6 +31,7 @@ const {
 
 vi.mock('../api/adapter', () => ({
   api: {
+    get_conversion_setup: vi.fn(async () => ({ success: true, setup: null })),
     check_conversion_environment: vi.fn(async () => ({ success: true, ready: false })),
     list_model_conversions: vi.fn(async () => ({ success: true, conversions: [] })),
   },

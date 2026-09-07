@@ -7,11 +7,12 @@ import type { ModelInfo } from '../types/apps';
 
 const bridge = vi.hoisted(() => ({
   check_conversion_environment: vi.fn(), list_model_conversions: vi.fn(),
-  setup_conversion_environment: vi.fn(), start_model_conversion: vi.fn(), cancel_model_conversion: vi.fn(),
+  get_conversion_setup: vi.fn(), start_conversion_setup: vi.fn(), start_model_conversion: vi.fn(), cancel_model_conversion: vi.fn(),
 }));
 vi.mock('../api/adapter', () => ({ api: bridge }));
 
 const model: ModelInfo = { id: 'llm/source', name: 'Source model', category: 'llm', primaryFormat: 'gguf' };
+const setupId = '11111111-1111-4111-8111-111111111111';
 function progress(status: ConversionProgress['status']): ConversionProgress {
   return { conversionId: 'conversion-1', sourceModelId: model.id, direction: 'gguf_to_safetensors',
     status, progress: 0.25, targetQuant: 'F16', currentTensor: null, tensorsCompleted: null,
@@ -24,7 +25,12 @@ describe('ModelConversionDialog', () => {
     vi.resetAllMocks();
     bridge.check_conversion_environment.mockResolvedValue({ success: true, ready: false });
     bridge.list_model_conversions.mockResolvedValue({ success: true, conversions: [] });
-    bridge.setup_conversion_environment.mockResolvedValue({ success: true });
+    bridge.get_conversion_setup.mockResolvedValue({ success: true, setup: null });
+    bridge.start_conversion_setup.mockImplementation(async () => {
+      const result = { success: true, setup: { operationId: setupId, status: 'completed', error: null } };
+      bridge.get_conversion_setup.mockResolvedValue(result);
+      return result;
+    });
     bridge.start_model_conversion.mockResolvedValue({ success: true, conversion_id: 'conversion-1' });
     bridge.cancel_model_conversion.mockResolvedValue({ success: true, cancelled: true });
   });
@@ -33,7 +39,7 @@ describe('ModelConversionDialog', () => {
     const user = userEvent.setup();
     render(<ModelConversionDialog model={model} direction="gguf_to_safetensors" onClose={vi.fn()} />);
     const setup = await screen.findByRole('button', { name: 'Install conversion tools' });
-    expect(bridge.setup_conversion_environment).not.toHaveBeenCalled();
+    expect(bridge.start_conversion_setup).not.toHaveBeenCalled();
     expect(bridge.start_model_conversion).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByText(/does not restore precision/)).toBeVisible());
     expect(screen.getByRole('button', { name: 'Start conversion' })).toBeDisabled();
@@ -42,7 +48,7 @@ describe('ModelConversionDialog', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Start conversion' })).toBeEnabled());
     bridge.list_model_conversions.mockResolvedValue({ success: true, conversions: [progress('converting')] });
     await user.click(screen.getByRole('button', { name: 'Start conversion' }));
-    expect(bridge.setup_conversion_environment).toHaveBeenCalledTimes(1);
+    expect(bridge.start_conversion_setup).toHaveBeenCalledTimes(1);
     expect(bridge.start_model_conversion).toHaveBeenCalledWith(model.id, 'gguf_to_safetensors', 'F16');
     expect(await screen.findByRole('progressbar', { name: 'Conversion progress' })).toHaveAttribute('value', '0.25');
     expect(screen.getByRole('button', { name: 'Start conversion' })).toBeDisabled();
@@ -79,5 +85,39 @@ describe('ModelConversionDialog', () => {
     expect(formatConversionDirection('safetensors')).toBe('safetensors_to_gguf');
     expect(formatConversionDirection('onnx')).toBeNull();
     expect(formatConversionDirection(undefined)).toBeNull();
+  });
+
+  it('shows retained setup on reopen and allows Escape without another installation', async () => {
+    bridge.get_conversion_setup.mockResolvedValue({ success: true, setup: { operationId: setupId, status: 'in_progress', error: null } });
+    const close = vi.fn();
+    render(<ModelConversionDialog model={model} direction="gguf_to_safetensors" onClose={close} />);
+    await waitFor(() => expect(screen.getByText(/Tool setup is in progress/)).toBeVisible());
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Install conversion tools' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start conversion' })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Close' })).toBeEnabled());
+    await userEvent.keyboard('{Escape}');
+    expect(close).toHaveBeenCalledOnce();
+    expect(bridge.start_conversion_setup).not.toHaveBeenCalled();
+    expect(bridge.cancel_model_conversion).not.toHaveBeenCalled();
+  });
+
+  it('requires an explicit identity-bound retry after failed setup', async () => {
+    bridge.get_conversion_setup.mockResolvedValue({ success: true, setup: {
+      operationId: setupId, status: 'failed', error: 'Conversion environment setup did not complete successfully.',
+    } });
+    render(<ModelConversionDialog model={model} direction="gguf_to_safetensors" onClose={vi.fn()} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Tool setup failed');
+    expect(bridge.start_conversion_setup).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry tool setup' }));
+    expect(bridge.start_conversion_setup).toHaveBeenCalledWith(setupId);
+  });
+
+  it('does not equate completed setup with current readiness', async () => {
+    bridge.get_conversion_setup.mockResolvedValue({ success: true, setup: { operationId: setupId, status: 'completed', error: null } });
+    render(<ModelConversionDialog model={model} direction="gguf_to_safetensors" onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Repair conversion tools' })).toBeVisible());
+    expect(screen.getByRole('button', { name: 'Start conversion' })).toBeDisabled();
+    expect(bridge.start_conversion_setup).not.toHaveBeenCalled();
   });
 });

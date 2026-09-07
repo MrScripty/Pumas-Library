@@ -35,6 +35,9 @@ export function ModelConversionDialog({ model, direction, onClose, onCompleted, 
   const closeRef = useRef<HTMLButtonElement>(null);
   const workflow = useModelConversionWorkflow({ modelId: model.id, direction, onCompleted });
   const active = workflow.conversions.some(item => !isConversionTerminal(item.status));
+  const setupActive = workflow.setupOperation?.status === 'in_progress';
+  const setupLabel = !workflow.setupOperation ? 'Install conversion tools'
+    : workflow.setupOperation.status === 'completed' ? 'Repair conversion tools' : 'Retry tool setup';
   const target = direction === 'gguf_to_safetensors' ? 'Safetensors (F16)' : 'GGUF (F16)';
   return (
     <ModalDialog isOpen ariaLabelledBy={titleId} onClose={onClose}
@@ -49,18 +52,24 @@ export function ModelConversionDialog({ model, direction, onClose, onCompleted, 
         <p className="break-words">{model.name}</p>
         <p>Output: {target}. The source model is kept.</p>
         {direction === 'gguf_to_safetensors' && <p>Dequantization does not restore precision lost during quantization. Output may require substantially more disk space.</p>}
-        <p>Closing this dialog does not cancel a conversion. Reopen it to check backend progress.</p>
+        <p>Closing this dialog does not cancel tool setup or a conversion. Reopen it to check backend progress.</p>
         {workflow.error && <p role="alert">{workflow.error}</p>}
         {workflow.loading && !workflow.busy && workflow.conversions.length === 0 && <p role="status">Checking conversion status…</p>}
         {workflow.awaitingProgress && <p role="status">Conversion accepted. Waiting for backend progress…</p>}
-        {workflow.busy && <p role="status">Waiting for the backend… Tool setup may take several minutes.</p>}
-        {workflow.ready === false && <div className="space-y-2">
+        {workflow.busy && <p role="status">Waiting for the backend to acknowledge the request…</p>}
+        {workflow.setupOperation && <section className="space-y-2" aria-label="Conversion tool setup">
+          {setupActive && <p role="status">Tool setup is in progress. This may take several minutes. You can close this dialog and check again later.</p>}
+          {workflow.setupOperation.status === 'completed' && <p role="status">Tool setup completed.{workflow.ready === false && ' The tools are not currently ready; repair is available below.'}</p>}
+          {workflow.setupOperation.status === 'failed' && <p role="alert">Tool setup failed. {workflow.setupOperation.error}</p>}
+          {workflow.setupOperation.status === 'cancelled' && <p role="status">Tool setup was cancelled.</p>}
+        </section>}
+        {workflow.ready === false && !setupActive && <div className="space-y-2">
           <p>Conversion tools are not ready. Setup downloads and installs Python conversion dependencies in this library’s launcher data. This uses network access and disk space.</p>
-          <button className={buttonClass} disabled={workflow.busy || workflow.loading || active || workflow.setupUncertain} onClick={() => { void workflow.setup(); }}>Install conversion tools</button>
+          <button className={buttonClass} disabled={workflow.busy || workflow.loading || active || workflow.setupUncertain || workflow.error !== null} onClick={() => { void workflow.setup(); }}>{setupLabel}</button>
         </div>}
         <div className="flex flex-wrap gap-2">
           <button className={buttonClass} disabled={workflow.busy || workflow.loading} onClick={workflow.refresh}>Refresh status</button>
-          <button className={buttonClass} disabled={workflow.ready !== true || workflow.busy || workflow.loading || active || workflow.awaitingProgress || workflow.startUncertain || workflow.error !== null}
+          <button className={buttonClass} disabled={workflow.ready !== true || workflow.busy || workflow.loading || active || setupActive || workflow.awaitingProgress || workflow.setupUncertain || workflow.startUncertain || workflow.error !== null}
             onClick={() => { void workflow.start(); }}>Start conversion</button>
         </div>
         {workflow.conversions.map(item => <section key={item.conversionId} className="space-y-2 rounded border border-[hsl(var(--launcher-border))] p-3" aria-label={`Conversion ${item.conversionId}`}>

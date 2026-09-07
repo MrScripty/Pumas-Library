@@ -1,5 +1,51 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-07 — Conversion Setup Dialog
+
+Accepted FE-I25's optional dialog migration to `start_conversion_setup` and
+`get_conversion_setup`. Mount/reopen only read. The existing workflow hook owns
+one serialized queue and poll timer; backend installation remains independently
+owned. Admission releases the busy dismissal gate before follow-up reads.
+Active setup blocks conversion without a guessed percentage. Terminal status
+does not imply readiness; failed/cancelled setup offers explicit retry with the
+observed operation ID, while a completed but unready environment offers repair.
+Null or an unchanged terminal ID cannot resolve uncertain admission; refresh
+can attach to current backend work without automatically repeating installation.
+Read failure stops automatic polling and exposes bounded manual refresh.
+
+The hook agent owned lifecycle implementation/tests; root owned dialog,
+integration and modal-test adjustments, review and verification. The
+codebase-design skill kept setup lifecycle complexity behind the existing hook
+interface rather than distributing it across controls. Full-suite counterevidence
+required an idle setup-read fixture in ModelManager tests and waiting for modal
+visibility/focus restoration instead of asserting during animation teardown.
+No modal production code, backend, generated contract or feature gate changed.
+
+Evidence: 577 frontend tests in 115 files, strict frontend typecheck/lint,
+library-only and default production builds, and all five canonical plan checks.
+Actual built Linux Chromium through the compiled sandboxed preload exercised
+explicit consent, simulated lost admission response, read-only reconciliation,
+active close/reopen, read failure stopping polls, identity-bound failed retry,
+completion/readiness, conversion progress/cancellation/completion refresh, native
+Escape and focus restoration in both modes. Visible screenshots were inspected
+for the active setup message, usable Close and blocked Start conversion. No
+renderer warning/error occurred; main-process IPC errors were deliberately
+injected fixture failures. Default build was restored last.
+
+Temporary evidence: `/tmp/pumas-setup-dialog.5S7QJn/main.cjs`, producer fixtures
+exported by the existing core/RPC binary, screenshots in that directory, and
+`/tmp/pumas-setup-dialog-{types,lint,tests,build-library,build-default,gui-library,gui-default}.log`.
+These are simulated installation/conversion outcomes, not native execution,
+real 60-second transport timing, restart persistence, release packaging or
+Windows/macOS evidence. Existing backend custody evidence remains separate.
+
+Environment repair restored absent lockfile-pinned JavaScript dependencies and
+Electron without modifying manifests/lockfile. Offline restore was unavailable;
+online restore needed a lower-concurrency retry. Partial-install checks are not
+acceptance evidence. No model files/build caches/recovery artifacts were removed;
+unrelated workflow/stub deletions remain unstaged. Next: FE-I23 quantization
+configuration admission; whole M4/M5 and program acceptance remain open.
+
 ## 2026-09-07 — Conversion Setup Observation
 
 Accepted the FE-I25 core/RPC/desktop observation contract, not dialog migration.

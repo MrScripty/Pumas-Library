@@ -1,10 +1,12 @@
-//! Foreground native conversion execution, not process-tree containment.
+//! Native conversion execution with cooperating Linux process-group custody.
 //!
 //! Both pipes are drained with bounded UTF-8 records. Callbacks must be short,
 //! synchronous progress projections. Managed conversion workers retain this
 //! future through cancellation/shutdown. Direct embedded callers must signal
 //! cancellation and await it: dropping the future only invokes kill-on-drop,
-//! which is not proof of reaping or descendant cleanup.
+//! which is not proof of cleanup. Linux keeps the group leader unreaped until
+//! group cleanup completes; other targets retain foreground-only cleanup.
+//! Escaped groups/namespaces and external child reapers are outside this contract.
 
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
@@ -87,6 +89,12 @@ pub(super) async fn run(
     if cancel.is_cancelled() {
         return Err(PumasError::ConversionCancelled);
     }
+    #[cfg(target_os = "linux")]
+    {
+        super::linux_group::ensure_supported()
+            .map_err(|error| failure(name, &format!("group custody unavailable: {error}")))?;
+        command.process_group(0);
+    }
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -111,12 +119,15 @@ pub(super) async fn run(
     .catch_unwind()
     .await
     .unwrap_or_else(|_| Err(failure(name, "subprocess output observer panicked")));
-    if let Err(operation_error) = &result {
+    // Linux must stop remaining group members even after a successful leader
+    // exit. Its leader has only been observed, not reaped, inside drain.
+    if cfg!(target_os = "linux") || result.is_err() {
         if let Err(cleanup_error) = cleanup(&mut child, name).await {
-            return Err(PumasError::ConversionFailed {
-                message: format!(
-                    "{operation_error}; foreground cleanup also failed: {cleanup_error}"
-                ),
+            return Err(match result {
+                Err(operation_error) => PumasError::ConversionFailed {
+                    message: format!("{operation_error}; cleanup also failed: {cleanup_error}"),
+                },
+                Ok(()) => cleanup_error,
             });
         }
     }
@@ -165,11 +176,14 @@ async fn drain(
         }
         tokio::select! {
             _ = tick.tick() => {}
-            observed = child.wait(), if status.is_none() => {
+            observed = observe_foreground(child), if status.is_none() => {
                 status = Some(observed.map_err(|error| {
                     failure(name, &format!("could not observe subprocess exit: {error}"))
                 })?);
                 exited_at = Some(Instant::now());
+                #[cfg(target_os = "linux")]
+                super::linux_group::signal_group(owned_pid(child, name)?)
+                    .map_err(|error| failure(name, &format!("could not stop process group: {error}")))?;
             }
             read = stdout.read(&mut stdout_buffer), if stdout_open => {
                 let count = read.map_err(|error| {
@@ -201,6 +215,87 @@ async fn drain(
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+async fn observe_foreground(child: &mut Child) -> std::io::Result<ExitStatus> {
+    child.wait().await
+}
+
+#[cfg(target_os = "linux")]
+async fn observe_foreground(child: &mut Child) -> std::io::Result<ExitStatus> {
+    let pid = child
+        .id()
+        .ok_or_else(|| std::io::Error::other("Child was already reaped"))?;
+    loop {
+        if let Some(status) = super::linux_group::observe_exit(pid)? {
+            return Ok(status);
+        }
+        tokio::time::sleep(OBSERVATION_INTERVAL).await;
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn owned_pid(child: &Child, name: &str) -> Result<u32> {
+    child
+        .id()
+        .ok_or_else(|| failure(name, "process-group leader was already reaped"))
+}
+
+#[cfg(target_os = "linux")]
+async fn cleanup(child: &mut Child, name: &str) -> Result<()> {
+    let pid = owned_pid(child, name)?;
+    let mut first_failure = None;
+    loop {
+        match super::linux_group::signal_group(pid) {
+            Ok(()) => {
+                // Only observation runs in blocking capacity. The retained async
+                // owner keeps Child alive and performs every signal itself; a
+                // dropped waiter cannot leave a queued signal with a stale PID.
+                let observation = tokio::task::spawn_blocking(move || {
+                    super::linux_group::group_has_live_members(
+                        i32::try_from(pid).expect("validated Linux PID"),
+                    )
+                })
+                .await;
+                match observation {
+                    Ok(Ok(false)) => break,
+                    Ok(Ok(true)) => {}
+                    Ok(Err(error)) => {
+                        first_failure.get_or_insert_with(|| {
+                            format!("could not observe process group: {error}")
+                        });
+                    }
+                    Err(error) => {
+                        first_failure.get_or_insert_with(|| {
+                            format!("process-group observation worker failed: {error}")
+                        });
+                    }
+                }
+            }
+            Err(error) => {
+                first_failure
+                    .get_or_insert_with(|| format!("could not stop owned process group: {error}"));
+            }
+        }
+        tokio::time::sleep(OBSERVATION_INTERVAL).await;
+    }
+    // Never signal this numeric group after wait releases the leader identity.
+    loop {
+        match child.wait().await {
+            Ok(_) => break,
+            Err(error) => {
+                first_failure
+                    .get_or_insert_with(|| format!("could not reap process-group leader: {error}"));
+                tokio::time::sleep(OBSERVATION_INTERVAL).await;
+            }
+        }
+    }
+    match first_failure {
+        Some(reason) => Err(failure(name, &reason)),
+        None => Ok(()),
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
 async fn cleanup(child: &mut Child, name: &str) -> Result<()> {
     let mut first_failure = None;
     loop {
@@ -437,6 +532,56 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
+    async fn group_descendants_stop_before_success_cancellation_or_observer_failure() {
+        for outcome in ["success", "cancel", "panic"] {
+            let script = if outcome == "success" {
+                "sleep 30 >/dev/null 2>&1 & echo $!; exit 0"
+            } else {
+                "sleep 30 & echo $!; wait"
+            };
+            let mut command = shell(script);
+            let token = CancellationToken::new();
+            let mut descendant = None;
+            let result = tokio::time::timeout(
+                Duration::from_secs(5),
+                run(&mut command, "group fixture", &token, |stream, line| {
+                    assert_eq!(stream, OutputStream::Stdout);
+                    descendant = Some(line.parse::<u32>().expect("descendant PID"));
+                    match outcome {
+                        "cancel" => token.cancel(),
+                        "panic" => panic!("controlled group observer panic"),
+                        _ => {}
+                    }
+                }),
+            )
+            .await
+            .expect("bounded controlled group cleanup");
+            match outcome {
+                "success" => result.expect("successful leader and stopped group"),
+                "cancel" => assert!(matches!(result, Err(PumasError::ConversionCancelled))),
+                "panic" => assert!(
+                    matches!(result, Err(PumasError::ConversionFailed { message }) if message.contains("observer panicked"))
+                ),
+                _ => unreachable!(),
+            }
+            // Independent kernel observation for this single-threaded sleep
+            // fixture. Orphan zombies are stopped; their reaper is not Pumas.
+            let stat = std::fs::read_to_string(format!(
+                "/proc/{}/stat",
+                descendant.expect("fixture started")
+            ));
+            match stat {
+                Ok(stat) => assert!(
+                    stat.rsplit(") ").next().unwrap().starts_with("Z "),
+                    "descendant still executing: {stat}"
+                ),
+                Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::NotFound),
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
     async fn inherited_pipe_has_bounded_failure_without_descendant_cleanup_claim() {
         // Inject the leader-exited/pipe-still-open condition at the drain seam.
         // The test owns the pipe holder independently and explicitly reaps it;
@@ -451,6 +596,7 @@ mod tests {
         let holder_stdout = holder.stdout.take().expect("holder stdout");
         let holder_stderr = holder.stderr.take().expect("holder stderr");
         let mut leader = shell("exit 0");
+        leader.process_group(0);
         let mut child = leader
             .stdout(Stdio::null())
             .stderr(Stdio::null())

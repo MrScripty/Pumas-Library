@@ -346,7 +346,12 @@ pub trait QuantizationBackend: Send + Sync {
     ///
     /// # Cancellation
     /// Built-in backends observe the token and reap their foreground subprocess
-    /// before returning cancellation. This does not establish descendant cleanup.
+    /// before returning cancellation. Foreground reaping alone does not establish
+    /// descendant cleanup.
+    /// On supported Linux hosts, built-in backends also stop cooperating members
+    /// of their own process group before reaping its leader or publishing output.
+    /// The host must not independently reap those children. Group/namespace
+    /// escapes are not contained; other targets retain foreground-only cleanup.
     /// Direct callers must signal cancellation and await this future; dropping
     /// it is not an observed cleanup contract. `ConversionManager` retains its
     /// workers and provides the managed shutdown path.

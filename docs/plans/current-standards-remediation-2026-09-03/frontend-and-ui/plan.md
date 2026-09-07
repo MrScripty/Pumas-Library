@@ -16,7 +16,8 @@ remaining FE-I23). Atomic manager-local admission, retained Rust-worker
 observation and standalone/RPC shutdown composition are accepted below. Unique
 staging and non-replacing publication are also accepted within the stable-parent
 boundary below. Foreground cancellation, dual-pipe draining and direct-child
-reaping are accepted below; they do not establish descendant cleanup. No new
+reaping are accepted below. Cooperating Linux group cleanup is accepted below;
+escaped descendants remain outside that bounded contract. No new
 quantization GUI mutation is admitted. Script progress authority remains FE-I27.
 The optional conversion dialog now uses setup start/observation across uncertain
 responses and reopen (FE-I25); see the accepted dialog ledger. Backend custody,
@@ -30,6 +31,76 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Linux Conversion Group Custody Admission
+
+Status: `Accepted` for bounded cooperating Linux groups; not full hostile-process
+containment. See the [execution ledger](execution-ledger.md#2026-09-07--linux-cooperating-conversion-groups).
+FE-I26 remains open for the prerequisites listed below.
+
+Systemic finding: native execution lacks group cleanup; setup signals a numeric
+group after `try_wait` may have reaped its leader. Retain the child without
+reaping, observe exit through Linux `waitid(WNOWAIT | WNOHANG | WEXITED)`, signal
+only its own still-owned group, observe group tasks stopped, then reap. The host
+must retain ordinary SIGCHLD semantics and exclusive wait ownership for these
+children. `ECHILD` forbids further group signals; it is not cleanup success.
+
+Write set: group agent owns new private `conversion/linux_group.rs`,
+`conversion/setup.rs` integration and their tests. Root owns
+`conversion/native_process.rs`, `conversion/mod.rs`, `conversion/types.rs`
+(lifecycle Rustdoc), `conversion/manager/output_tests.rs`, and frontend/parent
+plan, issues and ledger. Rust paths are under `rust/crates/pumas-core/src`.
+Root also owns the core Cargo manifest: review found nix 0.29 cannot represent
+realtime terminating signals, so enable `process` on the existing pinned rustix
+dependency for lossless non-reaping wait status. No new dependencies, generated
+schemas, GUI controls, live models or installers.
+Root serializes formatting, Cargo and commits; unrelated work stays untouched.
+
+Composed design: native streaming and blocking setup keep their distinct
+execution owners but share Linux non-reaping observation, group signalling and
+live-task interpretation. Only lifecycle owners know the signal/observe/reap
+ordering; backend parsers and argument builders remain unchanged. Kernel state
+parsing and ownership checks change in one private Module. Read-only `/proc`
+scans may use host blocking capacity while the async owner retains the child;
+no queued blocking work may signal a PID without also owning its unreaped child.
+Signal syscalls remain nonblocking and local to the retained owner. Removing
+the shared Module would duplicate Linux identity and liveness policy across
+setup and execution; no second registry, runtime, FFI or supervisor is added.
+
+Binding scope: spawn native Linux commands into their own process group. On
+success, error, cancellation or caught callback unwind, keep the leader
+unreaped until group cleanup is observed. Account for live worker threads even
+when a process leader is a zombie; inaccessible or ambiguous `/proc` state is
+not proof of cleanup. Preserve failed observation as a failure and keep custody
+while cleanup is unresolved. Managed shutdown retains the async operation;
+unmanaged future drop still does not guarantee completed cleanup.
+
+Acceptance claims (automated): real Linux controlled-process `system`
+evidence proves non-reaping exit observation, no post-reap group signalling,
+cleanup of same-group descendants on normal exit/cancel/unwind, thread-aware
+observation, and setup/native integration before publication or release.
+Existing pipe, progress, output-identity and retained-shutdown tests remain.
+Default/minimal core/RPC suites, strict lint, formatting and all five plan
+contracts passed: 66 focused conversion tests, 1,427 default and 1,387 minimal
+core/RPC tests, 22 existing ignored tests in each full configuration, and strict
+lint in both configurations. The zombie-thread-leader fixture requires `cc` and
+pthreads. No real model tools, GPU or installer runs.
+
+Verification-driven adjustment within setup ownership: the minimal gate found
+an immediate retry reporting busy, while 30 isolated retry runs passed. The
+old lease closed without explicit unlock; a duplicate-descriptor regression
+reproduced this lifetime mechanism before the fix. The Linux advisory lock now
+unlocks explicitly only after owned execution drains, retains unresolved
+release, and preserves release errors. No timing sleeps or retry-on-busy
+fallback mask the exclusion contract. Inherited fork involvement in the
+original run remains an inference, not captured process evidence.
+
+Limits: descendants that use `setsid`/`setpgid`, escape namespaces or change
+credentials are not contained by this contract. No process-global subreaper,
+new cgroup authority or Windows/macOS runtime claim is admitted. Non-Linux
+foreground execution/setup behavior remains unchanged. Stronger containment,
+quantization installer ownership, preflight and FE-I27 remain open. Re-plan if
+safe identity or thread observation cannot be established in this scope.
 
 ## Foreground Conversion Process Admission
 

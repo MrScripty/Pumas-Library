@@ -8,6 +8,8 @@
 //! environment. Quantization uses the `QuantizationBackend` trait with backend-
 //! specific implementations (e.g. `LlamaCppBackend` for GGUF quantization).
 
+#[cfg(target_os = "linux")]
+mod linux_group;
 pub mod llama_cpp;
 mod manager;
 mod native_process;

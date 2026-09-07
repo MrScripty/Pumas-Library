@@ -262,7 +262,10 @@ standalone/RPC shutdown composition are accepted. Unique conversion staging,
 non-replacing publication and actual destination identity are accepted within
 the documented stable-parent boundary. Foreground cancellation, dual-pipe
 draining and direct-child reaping are accepted with Linux controlled-process
-evidence. Process-tree containment and installer custody, followed by preflight
+evidence. Cooperating Linux group cleanup now retains unreaped leader identity,
+checks worker threads, preserves realtime exit signals and explicitly releases
+setup exclusion after cleanup. Escaped descendants remain outside this bounded
+contract. Stronger containment and installer custody, followed by preflight
 and truthful script-progress authority (FE-I27), precede GUI configuration
 (FE-I23).
 The GUI is independently optional; embedded Rust and standalone RPC remain

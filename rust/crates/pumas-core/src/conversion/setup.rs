@@ -316,7 +316,52 @@ fn failed(context: &str, error: impl std::fmt::Display) -> Failure {
     Failure::Failed(format!("{context}: {error}"))
 }
 
-fn acquire(root: &Path) -> std::result::Result<(PathBuf, File), Failure> {
+struct SetupLease(Option<File>);
+
+impl SetupLease {
+    fn finish(&mut self) -> Outcome {
+        let Some(_file) = self.0.as_ref() else {
+            return Ok(());
+        };
+        #[cfg(target_os = "linux")]
+        let outcome = {
+            let mut first_failure = None;
+            // Closing only our descriptor is insufficient when an unrelated
+            // fork temporarily retains the same open-file description. Unlock
+            // explicitly, but only after the setup worker drains its children.
+            loop {
+                match fs2::FileExt::unlock(_file) {
+                    Ok(()) => break,
+                    Err(error) => {
+                        first_failure.get_or_insert_with(|| {
+                            tracing::warn!(%error, "Retaining setup lease until unlock succeeds");
+                            failed("Releasing setup lock", error)
+                        });
+                    }
+                }
+                std::thread::sleep(POLL_INTERVAL);
+            }
+            first_failure.map_or(Ok(()), Err)
+        };
+        #[cfg(not(target_os = "linux"))]
+        let outcome = Ok(());
+        self.0 = None;
+        outcome
+    }
+}
+
+impl Drop for SetupLease {
+    fn drop(&mut self) {
+        if let Err(error) = self.finish() {
+            tracing::warn!(
+                ?error,
+                "Setup lease unwind release failed before eventual unlock"
+            );
+        }
+    }
+}
+
+fn acquire(root: &Path) -> std::result::Result<(PathBuf, SetupLease), Failure> {
     let directory = root.join("launcher-data");
     std::fs::create_dir_all(&directory).map_err(|e| failed("Creating setup lock directory", e))?;
     let directory = directory
@@ -345,19 +390,31 @@ fn acquire(root: &Path) -> std::result::Result<(PathBuf, File), Failure> {
             failed("Acquiring setup lock", error)
         }
     })?;
+    let lease = SetupLease(Some(file));
     let root = root
         .canonicalize()
         .map_err(|e| failed("Resolving launcher root", e))?;
-    Ok((root, file))
+    Ok((root, lease))
 }
 
 fn execute(root: &Path, cancel: &CancellationToken) -> Outcome {
     check_cancel(cancel)?;
-    let (root, _lease) = acquire(root)?;
+    let (root, mut lease) = acquire(root)?;
+    let outcome = execute_with_lease(&root, cancel);
+    match (outcome, lease.finish()) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(error), Err(release_error)) => Err(Failure::Failed(format!(
+            "{error:?}; setup lease release also failed: {release_error:?}"
+        ))),
+    }
+}
+
+fn execute_with_lease(root: &Path, cancel: &CancellationToken) -> Outcome {
     check_cancel(cancel)?;
-    scripts::ensure_scripts_deployed_blocking(&root)
+    scripts::ensure_scripts_deployed_blocking(root)
         .map_err(|e| failed("Deploying conversion scripts", e))?;
-    let python = scripts::venv_python(&root);
+    let python = scripts::venv_python(root);
     if probe_conversion_environment(&python, Duration::from_secs(5))
         .map_err(|e| failed("Checking conversion imports", e))?
     {
@@ -369,7 +426,7 @@ fn execute(root: &Path, cancel: &CancellationToken) -> Outcome {
         .map_err(|e| failed("Checking conversion interpreter", e))?
     {
         let mut command = Command::new("python3");
-        command.arg("-m").arg("venv").arg(scripts::venv_dir(&root));
+        command.arg("-m").arg("venv").arg(scripts::venv_dir(root));
         if !run_command(&mut command, cancel, COMMAND_TIMEOUT)?.success() {
             return Err(Failure::Failed(
                 "Failed to create conversion virtual environment".into(),
@@ -384,7 +441,7 @@ fn execute(root: &Path, cancel: &CancellationToken) -> Outcome {
     let mut install = Command::new(&python);
     install
         .args(["-m", "pip", "install", "-r"])
-        .arg(scripts::scripts_dir(&root).join("requirements.txt"));
+        .arg(scripts::scripts_dir(root).join("requirements.txt"));
     if !run_command(&mut install, cancel, COMMAND_TIMEOUT)?.success() {
         return Err(Failure::Failed(
             "Failed to install conversion dependencies".into(),
@@ -407,6 +464,9 @@ fn run_command(
     timeout: Duration,
 ) -> std::result::Result<ExitStatus, Failure> {
     check_cancel(cancel)?;
+    #[cfg(target_os = "linux")]
+    super::linux_group::ensure_supported()
+        .map_err(|error| failed("Checking setup process-group support", error))?;
     // Setup has no streaming output contract. Null streams avoid unbounded pip
     // output accumulation and pipe-drain descendants retaining completion.
     command
@@ -425,9 +485,13 @@ fn run_command(
     ));
     let started = Instant::now();
     loop {
+        #[cfg(target_os = "linux")]
+        let observed =
+            super::linux_group::observe_exit(child.0.as_ref().expect("setup child owned").id());
+        #[cfg(not(target_os = "linux"))]
         let observed = child.0.as_mut().expect("setup child owned").try_wait();
         if cancel.is_cancelled() || started.elapsed() >= timeout || observed.is_err() {
-            child.finish();
+            child.finish()?;
             if cancel.is_cancelled() {
                 return Err(Failure::Cancelled);
             }
@@ -437,7 +501,7 @@ fn run_command(
         }
         if let Some(status) = observed.map_err(|e| failed("Observing setup command", e))? {
             // A successfully exited leader must not leave background installers.
-            child.finish();
+            child.finish()?;
             return Ok(status);
         }
         std::thread::sleep(POLL_INTERVAL);
@@ -447,35 +511,50 @@ fn run_command(
 struct OwnedChild(Option<std::process::Child>);
 
 impl OwnedChild {
-    fn finish(&mut self) {
+    fn finish(&mut self) -> Outcome {
         if let Some(child) = self.0.as_mut() {
-            terminate(child);
+            let result = terminate(child);
             self.0 = None;
+            result
+        } else {
+            Ok(())
         }
     }
 }
 
 impl Drop for OwnedChild {
     fn drop(&mut self) {
-        self.finish();
+        if let Err(error) = self.finish() {
+            tracing::warn!(
+                ?error,
+                "Conversion setup unwind cleanup failed after process observation"
+            );
+        }
     }
 }
 
-fn terminate(child: &mut std::process::Child) {
+fn terminate(child: &mut std::process::Child) -> Outcome {
+    let mut first_failure = None;
     #[cfg(target_os = "linux")]
     {
-        use nix::sys::signal::{killpg, Signal};
-        use nix::unistd::Pid;
         // Linux PIDs fit in pid_t. Failure to establish or observe custody must
         // keep this worker and its outer file lease alive, never release early.
-        let group = Pid::from_raw(i32::try_from(child.id()).expect("Linux PID fits pid_t"));
+        let group = i32::try_from(child.id()).expect("Linux PID fits pid_t");
         loop {
-            let stopped = matches!(
-                killpg(group, Signal::SIGKILL),
-                Ok(()) | Err(nix::errno::Errno::ESRCH)
-            );
-            if stopped && matches!(group_has_live_members(group.as_raw()), Ok(false)) {
-                break;
+            match super::linux_group::signal_group(child.id()) {
+                Ok(()) => match super::linux_group::group_has_live_members(group) {
+                    Ok(false) => break,
+                    Ok(true) => {}
+                    Err(error) => {
+                        first_failure.get_or_insert_with(|| {
+                            failed("Observing setup process-group cleanup", error)
+                        });
+                    }
+                },
+                Err(error) => {
+                    first_failure
+                        .get_or_insert_with(|| failed("Signalling setup process group", error));
+                }
             }
             std::thread::sleep(POLL_INTERVAL);
         }
@@ -484,49 +563,20 @@ fn terminate(child: &mut std::process::Child) {
     // do not claim Linux process-tree cleanup: cancellation prevents later
     // steps but shutdown can wait for the installer to exit.
     loop {
-        if child.wait().is_ok() {
-            break;
+        match child.wait() {
+            Ok(_) => break,
+            Err(error) => {
+                first_failure.get_or_insert_with(|| failed("Reaping setup process", error));
+            }
         }
         std::thread::sleep(POLL_INTERVAL);
     }
-}
-
-#[cfg(target_os = "linux")]
-fn parse_process_group(stat: &[u8]) -> Option<(char, i32)> {
-    // Linux process names are arbitrary bytes. Decode only the numeric/stat
-    // fields after the final closing parenthesis, not an unrelated task's name.
-    let separator = stat.windows(2).rposition(|bytes| bytes == b") ")?;
-    let fields = std::str::from_utf8(&stat[separator + 2..]).ok()?;
-    let mut fields = fields.split_whitespace();
-    let state = fields.next()?.chars().next()?;
-    fields.next()?;
-    let group = fields.next()?.parse().ok()?;
-    Some((state, group))
-}
-
-#[cfg(target_os = "linux")]
-fn group_has_live_members(group: i32) -> std::io::Result<bool> {
-    for entry in std::fs::read_dir("/proc")? {
-        let entry = entry?;
-        if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
-            continue;
-        }
-        let stat = match std::fs::read(entry.path().join("stat")) {
-            Ok(stat) => stat,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error),
-        };
-        let (state, observed_group) = parse_process_group(&stat)
-            .ok_or_else(|| std::io::Error::other("Invalid process group observation"))?;
-        if observed_group == group && !matches!(state, 'Z' | 'X' | 'x') {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+    first_failure.map_or(Ok(()), Err)
 }
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
+    use super::super::linux_group::group_has_live_members;
     use super::*;
     use std::future::Future;
     use std::os::unix::fs::{symlink, PermissionsExt};
@@ -756,6 +806,33 @@ mod tests {
             .expect("latest successful result");
     }
 
+    #[test]
+    fn released_setup_lease_allows_retry_with_an_inherited_descriptor() {
+        let root = tempfile::tempdir().expect("isolated lease root");
+        let (_, lease) = acquire(root.path()).expect("first setup lease");
+        // dup and fork retain the same open-file description. Keep it alive
+        // deterministically instead of racing an unrelated child's pre-exec.
+        let inherited = lease
+            .0
+            .as_ref()
+            .expect("active lease")
+            .try_clone()
+            .expect("duplicate inherited descriptor");
+        assert!(
+            acquire(root.path()).is_err(),
+            "active setup excludes retries"
+        );
+        drop(lease);
+        let successor = acquire(root.path()).expect("completed setup permits retry");
+        drop(inherited);
+        assert!(
+            acquire(root.path()).is_err(),
+            "successor still owns exclusion"
+        );
+        drop(successor);
+        assert!(acquire(root.path()).is_ok(), "successor releases exclusion");
+    }
+
     #[tokio::test]
     async fn symlinked_launcher_data_keeps_original_execution_paths() {
         let root = fixture();
@@ -772,24 +849,6 @@ mod tests {
             "no redirected execution"
         );
         owner.shutdown().await.expect("shutdown");
-    }
-
-    #[test]
-    fn process_group_parser_handles_spaces_and_parentheses() {
-        assert_eq!(
-            parse_process_group(b"81 (python (pip) worker) S 4 81 81 0"),
-            Some(('S', 81))
-        );
-        assert_eq!(
-            parse_process_group(b"81 (python) Z 4 81 81 0"),
-            Some(('Z', 81))
-        );
-        assert_eq!(
-            parse_process_group(b"81 (worker\xff) S 4 81 81 0"),
-            Some(('S', 81))
-        );
-        assert_eq!(parse_process_group(b"malformed"), None);
-        assert_eq!(parse_process_group(b"81 (python) S 4 invalid"), None);
     }
 
     #[tokio::test]
@@ -1013,5 +1072,36 @@ mod tests {
         })
         .await
         .expect("join controlled command tests");
+    }
+
+    #[test]
+    fn successful_setup_command_cleans_group_before_reaping_leader() {
+        let root = tempfile::tempdir().expect("fixture root");
+        let marker = root.path().join("group");
+        let mut command = Command::new("sh");
+        command
+            .args([
+                "-c",
+                "printf '%s\\n' \"$$\" > \"$1\"; sleep 30 & exit 0",
+                "fixture",
+            ])
+            .arg(&marker);
+        let status = run_command(
+            &mut command,
+            &CancellationToken::new(),
+            Duration::from_secs(5),
+        )
+        .expect("successful setup command");
+        assert!(status.success());
+        let group: i32 = std::fs::read_to_string(marker)
+            .expect("group identity")
+            .trim()
+            .parse()
+            .expect("numeric group");
+        assert!(!group_has_live_members(group).expect("no live group after normal completion"));
+        assert!(
+            !Path::new(&format!("/proc/{group}")).exists(),
+            "leader reaped after group observation"
+        );
     }
 }

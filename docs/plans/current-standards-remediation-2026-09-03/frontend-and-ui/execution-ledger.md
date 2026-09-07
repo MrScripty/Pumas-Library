@@ -1,5 +1,77 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-07 — Linux Cooperating Conversion Groups
+
+Accepted the bounded cooperating Linux group-cleanup portion of FE-I26.
+Native conversion and blocking setup now share private Linux identity and task
+observation. Both retain the direct child without reaping it until its own
+group has been signalled and no live group tasks remain. Setup no longer uses
+`try_wait` before numeric group signalling. Native execution also stops surviving
+group members on successful leader exit, before returning to publication.
+Read-only `/proc` scans use blocking capacity for the async runner; no queued
+task can signal a PID after its owner drops the child. Observation failures
+retain custody and remain failures after eventual cleanup.
+
+The subagent implemented the shared helper and setup integration; root wired
+native execution and reviewed the composed lifecycle. The codebase-design skill
+kept Linux identity/liveness rules behind one private module, without changing
+backend argument builders or progress parsers. A zombie process leader is not
+sufficient evidence: group scans inspect worker tasks and fail closed when
+task visibility is incomplete. Controlled tests cover exited leaders with live
+descendants, success/cancel/observer panic, and an actual pthread worker whose
+main thread has exited. Test processes have explicit cleanup guards or bounded
+lifetimes; the tiny thread fixture requires `cc` and pthreads, not model tools.
+
+Review counterevidence: the first 64 focused tests passed, but nix 0.29's
+`WaitStatus` rejects realtime terminating signals. Treating that conversion
+failure as lost ownership would retain a zombie indefinitely. The full gate was
+interrupted before acceptance. The correction uses raw-capable wait status from
+the existing pinned rustix dependency, enabling its `process` feature; a real
+realtime-signal termination fixture guards this path. No new dependency or Rust
+unsafe code is introduced.
+
+Second gate counterevidence: the default suite passed 1,426 tests, but the
+minimal suite failed immediate setup retry with `already running`. The
+diagnosing-bugs skill narrowed this to lease release: 30 isolated retry runs
+passed, completion is published after execution returns, and each fixture root
+is unique. A retained duplicate of the acquired descriptor deterministically
+reproduced busy after dropping the original lease. Linux
+[`flock` ownership](https://man7.org/linux/man-pages/man2/flock.2.html) is shared
+by duplicated/inherited descriptors; closing only the parent's descriptor is
+not explicit release. A new lease guard unlocks after child cleanup, retains
+custody while unlock is unresolved, and preserves eventual release errors.
+The regression also checks active-owner exclusion and that dropping the old
+duplicate cannot unlock the successor. This establishes the descriptor-lifetime
+defect; an unrelated fork in the original full-suite failure is an inference,
+not captured process evidence. No sleeps, busy retries or serialization were
+added to hide the original symptom.
+
+Final evidence on Linux 7.0.0-28-generic: 66 focused conversion tests passed.
+Full core/RPC suites passed with 1,427 default-feature and 1,387 minimal-feature
+tests, each with 22 existing ignored tests. Strict all-target clippy passed
+with all features and with no default features. Four extraction-only needless
+borrows were corrected, then both full suites passed again on final source.
+Formatting, whitespace and all five plan-contract checks passed. Logs:
+`/tmp/pumas-linux-group-{focused,default,minimal,clippy-default,clippy-minimal}.log`;
+the deterministic pre-fix lock failure is `/tmp/pumas-setup-lease-red.log`.
+
+The identity ordering relies on Linux's documented non-reaping
+[`WNOWAIT` contract](https://man7.org/linux/man-pages/man2/waitpid.2.html).
+Kernel fork publication and group signalling serialize under `tasklist_lock`,
+with fatal-signal checking before publication; inspected primary sources are
+[fork.c](https://raw.githubusercontent.com/torvalds/linux/v6.12/kernel/fork.c)
+and [signal.c](https://raw.githubusercontent.com/torvalds/linux/v6.12/kernel/signal.c).
+This supports the cooperating-group scope, not arbitrary hostile containment.
+
+Limits: the host must preserve exclusive wait ownership and ordinary SIGCHLD
+semantics. `ECHILD` cannot authorize signalling or cleanup success. Descendants
+escaping groups, namespaces or credentials remain outside the contract.
+Direct embedded callers must cancel and await; unmanaged future drop has no
+observed cleanup guarantee. Non-Linux behavior remains foreground-only and was
+not runtime-tested. Stronger containment, quantization-installer ownership,
+preflight, retained-staging cleanup policy and FE-I27 progress authority remain
+open. No GUI, wire shapes, live library data or feature-gating contract changed.
+
 ## 2026-09-07 — Foreground Conversion Execution
 
 Accepted the bounded foreground portion of FE-I26. Review found all six

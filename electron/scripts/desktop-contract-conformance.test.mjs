@@ -53,6 +53,43 @@ test('conversion decoder rejects old field names and unsafe numeric evidence', (
   assert.equal(contract.decodeConversionListOutcome({success:true,conversions:[{...valid.progress,progress:2}]}).status, 'invalid');
 });
 
+test('conversion operation outcomes preserve producer readiness, cancellation and quant metadata', () => {
+  const pairs = [
+    ['conversion_started',contract.decodeConversionStartedOutcome],
+    ['conversion_setup_success',contract.decodeSuccessOutcome],
+    ['conversion_quant_types',contract.decodeSupportedQuantTypesOutcome],
+    ['conversion_quant_types_nullable_backend',contract.decodeSupportedQuantTypesOutcome],
+    ['conversion_backend_status',contract.decodeBackendStatusOutcome],
+  ];
+  for (const [name,decode] of pairs) {
+    const result = decode(fixtures[name]);
+    assert.equal(result.status,'valid',name);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)),fixtures[name]);
+  }
+  for (const result of fixtures.conversion_cancelled) assert.equal(contract.decodeConversionCancelledOutcome(result).value.cancelled,result.cancelled);
+  for (const result of fixtures.conversion_environment) assert.equal(contract.decodeConversionEnvironmentOutcome(result).value.ready,result.ready);
+  const option = contract.decodeSupportedQuantTypesOutcome(fixtures.conversion_quant_types).value.quant_types[0];
+  assert.equal(typeof option.bitsPerWeight,'number');
+  assert.equal(typeof option.imatrixRecommended,'boolean');
+  assert.equal('backend' in option,true);
+  assert.equal(Object.isFrozen(option),true);
+});
+
+test('conversion operation decoders reject malformed outcomes rather than coercing success', () => {
+  for (const value of [{success:false},{success:true,extra:true}]) assert.equal(contract.decodeSuccessOutcome(value).status,'invalid');
+  for (const value of [{success:true,ready:null},{success:true,ready:'false'}]) assert.equal(contract.decodeConversionEnvironmentOutcome(value).status,'invalid');
+  assert.equal(contract.decodeConversionCancelledOutcome({success:true,cancelled:0}).status,'invalid');
+  for (const conversion_id of ['', '   ', '\u0085', 'x'.repeat(4097), 'é'.repeat(2049)]) assert.equal(contract.decodeConversionStartedOutcome({success:true,conversion_id}).status,'invalid');
+  for (const conversion_id of [' conversion ', '\uFEFF', 'é'.repeat(2048)]) assert.equal(contract.decodeConversionStartedOutcome({success:true,conversion_id}).status,'valid');
+  const valid = fixtures.conversion_quant_types.quant_types[0];
+  for (const patch of [{bitsPerWeight:-1},{bitsPerWeight:NaN},{bitsPerWeight:Infinity},{backend:'unknown'},{imatrixRecommended:null},{bits_per_weight:4}]) {
+    assert.equal(contract.decodeSupportedQuantTypesOutcome({success:true,quant_types:[{...valid,...patch}]}).status,'invalid');
+  }
+  const missing = {...valid}; delete missing.backend;
+  assert.equal(contract.decodeSupportedQuantTypesOutcome({success:true,quant_types:[missing]}).status,'invalid');
+  assert.equal(contract.decodeBackendStatusOutcome({success:true,backends:[{backend:'unknown',name:'unknown',ready:true}]}).status,'invalid');
+});
+
 test('actual producer catalog and FTS cross the generated decoder', () => {
   const models = contract.decodeModelsOutcome(fixtures.models);
   const search = contract.decodeCatalogSearchOutcome(fixtures.search);

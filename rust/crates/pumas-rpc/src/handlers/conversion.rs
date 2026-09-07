@@ -13,7 +13,7 @@ pub async fn start_model_conversion(
     request: ConversionRequest,
 ) -> pumas_library::Result<ConversionStartedOutcome> {
     let conversion_id = state.api.start_conversion(request).await?;
-    Ok(ConversionStartedOutcome::new(conversion_id))
+    ConversionStartedOutcome::new(conversion_id)
 }
 
 pub fn get_conversion_progress(
@@ -53,7 +53,7 @@ pub async fn get_supported_quant_types(
         .api
         .supported_quant_types()
         .await
-        .map(SupportedQuantTypesOutcome::new)
+        .and_then(SupportedQuantTypesOutcome::new)
 }
 
 pub async fn get_backend_status(state: &AppState) -> pumas_library::Result<BackendStatusOutcome> {

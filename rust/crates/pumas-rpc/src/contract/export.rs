@@ -243,11 +243,42 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         .collect::<Result<Vec<_>, _>>()?;
     let conversion_list = ConversionListOutcome::new(conversions)?;
     let conversion_missing = ConversionProgressResponse::new(None)?;
+    use pumas_library::conversion::{
+        LlamaCppBackend, Nvfp4Backend, QuantizationBackend, SherryBackend,
+    };
+    let backends: Vec<Box<dyn QuantizationBackend>> = vec![
+        Box::new(LlamaCppBackend::new(root.path())),
+        Box::new(Nvfp4Backend::new(root.path())),
+        Box::new(SherryBackend::new(root.path())),
+    ];
+    let quant_options = backends[0].supported_quant_types();
+    let conversion_quant_types = SupportedQuantTypesOutcome::new(quant_options.clone())?;
+    let mut nullable_quant = quant_options[0].clone();
+    nullable_quant.backend = None;
+    let conversion_quant_types_nullable_backend =
+        SupportedQuantTypesOutcome::new(vec![nullable_quant])?;
+    let conversion_backend_status = BackendStatusOutcome::new(
+        backends
+            .iter()
+            .map(|backend| BackendStatus {
+                backend: backend.backend_id(),
+                name: backend.name().into(),
+                ready: backend.is_ready(),
+            })
+            .collect(),
+    );
     Ok(serde_json::json!({
         "models":models, "search":search, "recovery_request":recovery_request,
         "link_health_healthy":link_health_healthy, "link_health_degraded":link_health_degraded,
         "conversion_progress":conversion_progress, "conversion_missing":conversion_missing,
         "conversion_list":conversion_list,
+        "conversion_started":ConversionStartedOutcome::new("fixture-conversion".into())?,
+        "conversion_cancelled":[ConversionCancelledOutcome::new(false),ConversionCancelledOutcome::new(true)],
+        "conversion_environment":[ConversionEnvironmentOutcome::new(false),ConversionEnvironmentOutcome::new(true)],
+        "conversion_setup_success":SuccessOutcome::new(),
+        "conversion_quant_types":conversion_quant_types,
+        "conversion_quant_types_nullable_backend":conversion_quant_types_nullable_backend,
+        "conversion_backend_status":conversion_backend_status,
         "recovery_outcome":recovery_outcome,
         "recovery_busy_outcome":recovery_busy_outcome,
         "recovery_request_probes":recovery_request_probes,
@@ -283,6 +314,12 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         LinkHealthOutcome,
         ConversionProgressResponse,
         ConversionListOutcome,
+        ConversionStartedOutcome,
+        ConversionCancelledOutcome,
+        ConversionEnvironmentOutcome,
+        SupportedQuantTypesOutcome,
+        BackendStatusOutcome,
+        SuccessOutcome,
     );
     Ok(serde_json::json!({
         "format": "pumas-desktop-contract-1",
@@ -338,8 +375,22 @@ fn refine_named(name: &str, schema: &mut Value) {
     }
     if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
         match name {
-            "ConversionProgressResponse" | "ConversionListOutcome" => {
+            "ConversionProgressResponse"
+            | "ConversionListOutcome"
+            | "ConversionStartedOutcome"
+            | "ConversionCancelledOutcome"
+            | "ConversionEnvironmentOutcome"
+            | "SupportedQuantTypesOutcome"
+            | "BackendStatusOutcome"
+            | "SuccessOutcome" => {
                 properties["success"]["const"] = true.into();
+                if name == "ConversionStartedOutcome" {
+                    properties["conversion_id"]["pumasUtf8Max"] = MAX_IDENTIFIER_BYTES.into();
+                    properties["conversion_id"]["pattern"] = r"[^\t\n\v\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]".into();
+                }
+            }
+            "QuantOption" => {
+                properties["bitsPerWeight"]["minimum"] = 0.into();
             }
             "ConversionProgressOutcome" => {
                 properties["progress"]["minimum"] = 0.into();

@@ -1,15 +1,20 @@
-// Generated from pumas-rpc contract.rs; SHA256 c77f776a40f57d6ea7101504f4aa7e6c8ca8058153aa5db5c2862b1f0f16538c. DO NOT EDIT.
-import { validateCatalogSearchOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams } from './desktop-contract.validators.js';
+// Generated from pumas-rpc contract.rs; SHA256 8f887ca3e197a4274b29ec99ecafb885767766d60f824368f0c334c3bf277370. DO NOT EDIT.
+import { validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome } from './desktop-contract.validators.js';
+export type BackendStatus = { "backend": (QuantBackend); "name": string; "ready": boolean };
+export type BackendStatusOutcome = { "backends": ReadonlyArray<BackendStatus>; "success": true };
 export type CatalogArtifactState = ({ "state": "complete" }) | ({ "downloadProgressFraction"?: number; "reasons": ReadonlyArray<CatalogPartialReason>; "recovery"?: CatalogRecoveryIdentity; "state": "partial" });
 export type CatalogIntegrityState = ({ "state": "clean" }) | ({ "count": number; "otherModelIds": ReadonlyArray<string>; "state": "duplicate" });
 export type CatalogModel = { "artifact": CatalogArtifactState; "dependencyCount": number; "displayDate"?: string; "displayName": string; "format"?: string; "id": string; "integrity": CatalogIntegrityState; "modelDir": string; "modelType": string; "quantization"?: string; "relatedAvailable": boolean; "sizeBytes"?: number };
 export type CatalogPartialReason = "part_file_present" | "expected_files_missing";
 export type CatalogRecoveryIdentity = { "recoveryToken": string; "repoId": string; "selectedArtifactFiles"?: ReadonlyArray<string>; "selectedArtifactId"?: string; "selectedArtifactQuant"?: string };
 export type CatalogSearchOutcome = { "models": ReadonlyArray<CatalogModel>; "query": string; "query_time_ms": number; "success": true; "total_count": number };
+export type ConversionCancelledOutcome = { "cancelled": boolean; "success": true };
 export type ConversionDirection = ("gguf_to_safetensors") | ("safetensors_to_gguf") | ("safetensors_to_quantized_gguf") | ("gguf_to_quantized_gguf") | ("safetensors_to_nvfp4") | ("safetensors_to_sherry_qat");
+export type ConversionEnvironmentOutcome = { "ready": boolean; "success": true };
 export type ConversionListOutcome = { "conversions": ReadonlyArray<ConversionProgressOutcome>; "success": true };
 export type ConversionProgressOutcome = { "bytesWritten": number | null; "conversionId": string; "currentTensor": string | null; "direction": ConversionDirection; "error": null | "The model conversion did not complete successfully."; "estimatedOutputSize": number | null; "outputModelId": string | null; "pipelineStep": number | null; "pipelineStepLabel": string | null; "pipelineStepsTotal": number | null; "progress": number | null; "sourceModelId": string; "status": ConversionStatus; "targetQuant": string | null; "tensorsCompleted": number | null; "tensorsTotal": number | null };
 export type ConversionProgressResponse = { "progress": (ConversionProgressOutcome) | (null); "success": true };
+export type ConversionStartedOutcome = { "conversion_id": string; "success": true };
 export type ConversionStatus = ("setting_up") | ("validating") | ("converting") | ("writing") | ("importing") | ("completed") | ("cancelled") | ("error") | ("building_toolchain") | ("generating_f16_gguf") | ("computing_imatrix") | ("quantizing") | ("calibrating") | ("training");
 export type DownloadIdParams = { "download_id": string };
 export type DownloadListOutcome = { "downloads": ReadonlyArray<DownloadProgressOutcome>; "success": true };
@@ -31,8 +36,12 @@ export type PartialDownloadOutcome = { "action": PartialDownloadActionName; "dow
 export type PartialDownloadReason = "hf_client_unavailable" | "download_root_busy" | "model_not_found" | "model_not_partial" | "recovery_unavailable" | "recovery_context_stale" | "resume_rejected" | "already_completed" | "already_cancelled" | "invalid_repo_id" | "repo_not_found" | "rate_limited" | "permission_denied" | "network_error" | "recover_failed";
 export type PublicError = { "class": PublicErrorClass; "code": number; "message": string };
 export type PublicErrorClass = "invalid_request" | "not_found" | "conflict" | "cancelled" | "unavailable" | "operation_failed" | "internal";
+export type QuantBackend = ("python_conversion") | ("llama_cpp") | ("nvfp4") | ("sherry");
+export type QuantOption = { "backend": (QuantBackend) | (null); "bitsPerWeight": number; "description": string; "imatrixRecommended": boolean; "name": string; "recommended": boolean };
 export type RecoverDownloadParams = { "modelId": string; "recoveryToken": string };
 export type SearchCatalogParams = { "limit"?: number | null; "offset"?: number | null; "query": string };
+export type SuccessOutcome = { "success": true };
+export type SupportedQuantTypesOutcome = { "quant_types": ReadonlyArray<QuantOption>; "success": true };
 
 export type DecodeOutcome<T> = { readonly status: 'valid'; readonly value: T } | { readonly status: 'invalid' | 'unsupported' | 'unavailable'; readonly message: string };
 
@@ -67,9 +76,13 @@ function decode<T>(input: unknown, validate: (value: unknown) => boolean): Decod
     return {status:'invalid', message:'Invalid desktop contract payload.'};
   }
 }
+export function decodeBackendStatusOutcome(input: unknown): DecodeOutcome<BackendStatusOutcome> { return decode(input, validateBackendStatusOutcome); }
 export function decodeCatalogSearchOutcome(input: unknown): DecodeOutcome<CatalogSearchOutcome> { return decode(input, validateCatalogSearchOutcome); }
+export function decodeConversionCancelledOutcome(input: unknown): DecodeOutcome<ConversionCancelledOutcome> { return decode(input, validateConversionCancelledOutcome); }
+export function decodeConversionEnvironmentOutcome(input: unknown): DecodeOutcome<ConversionEnvironmentOutcome> { return decode(input, validateConversionEnvironmentOutcome); }
 export function decodeConversionListOutcome(input: unknown): DecodeOutcome<ConversionListOutcome> { return decode(input, validateConversionListOutcome); }
 export function decodeConversionProgressResponse(input: unknown): DecodeOutcome<ConversionProgressResponse> { return decode(input, validateConversionProgressResponse); }
+export function decodeConversionStartedOutcome(input: unknown): DecodeOutcome<ConversionStartedOutcome> { return decode(input, validateConversionStartedOutcome); }
 export function decodeDownloadIdParams(input: unknown): DecodeOutcome<DownloadIdParams> { return decode(input, validateDownloadIdParams); }
 export function decodeDownloadListOutcome(input: unknown): DecodeOutcome<DownloadListOutcome> { return decode(input, validateDownloadListOutcome); }
 export function decodeDownloadMutationOutcome(input: unknown): DecodeOutcome<DownloadMutationOutcome> { return decode(input, validateDownloadMutationOutcome); }
@@ -82,3 +95,5 @@ export function decodePartialDownloadOutcome(input: unknown): DecodeOutcome<Part
 export function decodePublicError(input: unknown): DecodeOutcome<PublicError> { return decode(input, validatePublicError); }
 export function decodeRecoverDownloadParams(input: unknown): DecodeOutcome<RecoverDownloadParams> { return decode(input, validateRecoverDownloadParams); }
 export function decodeSearchCatalogParams(input: unknown): DecodeOutcome<SearchCatalogParams> { return decode(input, validateSearchCatalogParams); }
+export function decodeSuccessOutcome(input: unknown): DecodeOutcome<SuccessOutcome> { return decode(input, validateSuccessOutcome); }
+export function decodeSupportedQuantTypesOutcome(input: unknown): DecodeOutcome<SupportedQuantTypesOutcome> { return decode(input, validateSupportedQuantTypesOutcome); }

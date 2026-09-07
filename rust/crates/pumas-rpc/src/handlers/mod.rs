@@ -1278,6 +1278,51 @@ mod tests {
     use tempfile::TempDir;
 
     #[tokio::test]
+    async fn conversion_remaining_rpc_outcomes_need_no_native_setup() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        for (method, params) in [
+            (
+                "cancel_model_conversion",
+                json!({"conversion_id":"missing"}),
+            ),
+            ("get_supported_quant_types", json!({})),
+            ("get_backend_status", json!({})),
+        ] {
+            let body = Bytes::from(
+                serde_json::to_vec(
+                    &json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}),
+                )
+                .unwrap(),
+            );
+            let response = handle_rpc(State(state.clone()), body).await.into_response();
+            let bytes = axum::body::to_bytes(response.into_body(), 65_536)
+                .await
+                .unwrap();
+            let value: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(value["result"]["success"], true, "{method}: {value}");
+            match method {
+                "cancel_model_conversion" => assert_eq!(value["result"]["cancelled"], false),
+                "get_supported_quant_types" => {
+                    let options = value["result"]["quant_types"].as_array().unwrap();
+                    assert_eq!(options.len(), 1);
+                    assert_eq!(options[0]["name"], "F16");
+                    assert_eq!(options[0]["bitsPerWeight"], 16.0);
+                    assert_eq!(options[0]["backend"], "python_conversion");
+                    assert_eq!(options[0]["imatrixRecommended"], false);
+                }
+                "get_backend_status" => {
+                    let backends = value["result"]["backends"].as_array().unwrap();
+                    assert_eq!(backends.len(), 3);
+                    assert!(backends.iter().all(|backend| backend["ready"] == false));
+                }
+                _ => unreachable!(),
+            }
+        }
+        assert!(!temp.path().join("launcher-data/llama-cpp").exists());
+    }
+
+    #[tokio::test]
     async fn conversion_read_rpc_preserves_missing_progress_and_empty_list() {
         let temp = TempDir::new().unwrap();
         let state = Arc::new(test_support::build_test_app_state(temp.path()).await);

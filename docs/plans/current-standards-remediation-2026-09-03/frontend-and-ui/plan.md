@@ -10,13 +10,59 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Admit the remaining conversion operation contracts (FE-I24):
-start/cancel/setup/environment/quant options. Conversion progress reads (FE-I14),
-import-picker (FE-I11), and standalone-backend/link-health slices are accepted.
+**Next slice:** Admit the unfinished GUI conversion workflow (FE-I23), including
+capability/readiness, explicit setup consent and owned start/progress/cancel states.
+Conversion operation contracts (FE-I24), progress reads (FE-I14), import-picker
+(FE-I11), and standalone-backend/link-health slices are accepted.
 The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Remaining Conversion Operations Admission
+
+Accepted on 2026-09-06; evidence and exclusions are recorded in the
+[execution ledger](execution-ledger.md#2026-09-06--conversion-operation-contracts-accepted).
+
+Operation: `continue` this canonical plan under the user's continuation request.
+FE-I24 owns start/cancel/environment/setup/quant-option and backend-readiness
+responses. Core remains the headless operation owner. Reuse existing RPC outcome
+schemas and generated validators, preserving true/false readiness and cancellation
+as distinct valid outcomes, explicit nulls, backend identity, importance-matrix
+metadata, and canonical public failures. Validate started identifiers and finite
+nonnegative bits-per-weight at the outgoing boundary. Preserve core signatures
+and mutation execution; no native tool installation or conversion is authorized
+for verification.
+
+Complete the optional desktop bridge with the already-supported backend-status
+and backend-setup methods. Append optional calibration-file and force-imatrix
+arguments to conversion start without changing existing positional arguments;
+derive direction/backend types from the generated contract. Exact request names
+and false/null values must survive preload forwarding. Native execution policy
+and request admission remain in Rust, not duplicated as UI business logic.
+
+Write set: backend agent owns conditional core schema derives, RPC response
+constructors/export/fixtures and affected handlers/tests. Root owns generated
+artifacts, preload, frontend conversion/bridge aliases, existing conformance,
+and plan/ledger/issues. Cargo, generation and commits are root-serialized.
+No new dependency, generator keyword, GUI workflow, persistence or live data.
+
+Composed-design review: applicable. (1) Core operation policy, RPC wire proof,
+preload transport and GUI interaction remain separate owners. (2) The necessary
+coupling is one request/result contract, not shared execution state. (3) Callers
+know generated results and optional start arguments, not native setup details.
+(4) Core metadata changes regenerate consumers; transport changes stay in preload;
+UI workflow remains FE-I23. (5) Stable core types feed schemas, never vice versa.
+(6) Constructors/handlers and preload are independently testable, then exercised
+together. (7) Generation replaces handwritten outcomes rather than layering a
+new registry or schema system. (8) Retain the existing generator and bounded
+constructor validation; backend capability is independent of GUI composition.
+
+Acceptance: actual core option catalog/typed response fixtures, malformed outcome
+rejection, exact bundled-preload request forwarding, typed renderer consumers,
+safe isolated read/cancel RPC paths, dual RPC suites and strict lint, generated
+freshness and affected frontend/Electron gates/builds. Native setup/conversion,
+GUI interaction and non-Linux execution are not acceptance claims for this slice.
 
 ## Conversion Progress Contract Admission
 

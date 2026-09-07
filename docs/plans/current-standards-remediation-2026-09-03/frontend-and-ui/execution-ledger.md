@@ -1,5 +1,47 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-06 — Conversion Operation Contracts Accepted
+
+FE-I24 is resolved. A bounded backend agent supplied canonical outcome schemas,
+projection validation and producer evidence; root integrated generated contracts,
+preload routes, typed consumers and verification. Start/cancel/environment/setup,
+quant options and backend readiness now cross validated desktop boundaries.
+Quant options preserve core camelCase, explicit nullable backend and importance-
+matrix metadata. The start bridge retains its existing positional arguments and
+adds optional calibration-file and force-imatrix inputs, preserving false/null.
+Existing backend status and backend setup RPC routes are now exposed to desktop
+callers. Invalid started IDs and nonfinite/negative quantization evidence fail
+projection rather than becoming misleading success data.
+
+Core public APIs and native mutation execution remain unchanged. Schema derives
+are conditional; neither embedded Rust nor standalone RPC requires the GUI.
+The codebase-design skill guided this boundary: core owns conversion policy,
+RPC projects outcomes, preload validates transport and the renderer consumes
+generated types. No GUI conversion workflow or native setup was added.
+
+Acceptance evidence (Linux):
+
+- RPC suites: 123 default and 83 no-default-features tests pass; 10 existing
+  ignored tests each. Isolated handler evidence verifies unknown cancellation,
+  actual available quant metadata and all three backend readiness states.
+- Strict all-target core/RPC Clippy passes with all features and without
+  defaults; rustfmt and generated-contract freshness pass.
+- Producer/decoder conformance: 10 tests pass, covering real catalogue fixtures,
+  nullable backend, false/true outcomes, Unicode/UTF-8 ID boundaries and malformed
+  metadata rejection. Bundled-preload/typed renderer conformance: 10 tests pass,
+  including exact start arguments, omission/null/false and backend setup routing.
+- Full frontend: 551 tests across 113 files pass. Electron: 11 test files pass.
+  Type checks, both linters and both production GUI builds pass; default output
+  restored. One fixture unsafe-return lint finding was corrected before acceptance.
+- A standalone RPC process using a fresh temporary root passes HTTP progress/list,
+  unknown cancellation, environment, quant metadata and backend readiness checks.
+  No conversion, installation, download or live-model mutation was performed.
+
+Start/setup success fixtures validate transport, not actual native execution.
+No GUI interaction or non-Linux runtime verification is claimed. FE-I23, full
+M4/M5 and Pending cleanup replay remain open; existing recovery artifacts are
+untouched. Next: a separate GUI conversion capability/workflow admission.
+
 ## 2026-09-06 — Conversion Progress Contract Accepted
 
 FE-I14 is resolved for the existing get/list progress routes. A bounded backend

@@ -608,6 +608,7 @@ impl AppStatusOutcome {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct SuccessOutcome {
     success: bool,
 }
@@ -724,17 +725,21 @@ impl FileWritableOutcome {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct ConversionStartedOutcome {
     success: bool,
     conversion_id: String,
 }
 
 impl ConversionStartedOutcome {
-    pub(crate) const fn new(conversion_id: String) -> Self {
-        Self {
+    pub(crate) fn new(conversion_id: String) -> Result<Self, PumasError> {
+        if conversion_id.trim().is_empty() || conversion_id.len() > MAX_IDENTIFIER_BYTES {
+            return Err(invalid_domain_outcome("started conversion ID"));
+        }
+        Ok(Self {
             success: true,
             conversion_id,
-        }
+        })
     }
 }
 
@@ -818,6 +823,7 @@ impl TryFrom<ConversionProgress> for ConversionProgressOutcome {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct ConversionCancelledOutcome {
     success: bool,
     cancelled: bool,
@@ -852,6 +858,7 @@ impl ConversionListOutcome {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct ConversionEnvironmentOutcome {
     success: bool,
     ready: bool,
@@ -867,21 +874,29 @@ impl ConversionEnvironmentOutcome {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct SupportedQuantTypesOutcome {
     success: bool,
     quant_types: Vec<QuantOption>,
 }
 
 impl SupportedQuantTypesOutcome {
-    pub(crate) const fn new(quant_types: Vec<QuantOption>) -> Self {
-        Self {
+    pub(crate) fn new(quant_types: Vec<QuantOption>) -> Result<Self, PumasError> {
+        if quant_types
+            .iter()
+            .any(|option| !option.bits_per_weight.is_finite() || option.bits_per_weight < 0.0)
+        {
+            return Err(invalid_domain_outcome("quantization bits per weight"));
+        }
+        Ok(Self {
             success: true,
             quant_types,
-        }
+        })
     }
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct BackendStatusOutcome {
     success: bool,
     backends: Vec<BackendStatus>,
@@ -2818,6 +2833,39 @@ mod tests {
     }
 
     #[test]
+    fn conversion_started_ids_and_quantization_evidence_are_validated() {
+        for invalid in [
+            String::new(),
+            " \t\n\u{85}".into(),
+            "x".repeat(MAX_IDENTIFIER_BYTES + 1),
+        ] {
+            assert!(ConversionStartedOutcome::new(invalid).is_err());
+        }
+        assert!(ConversionStartedOutcome::new("x".repeat(MAX_IDENTIFIER_BYTES)).is_ok());
+        assert!(ConversionStartedOutcome::new(" conversion ".into()).is_ok());
+        let option = |bits_per_weight| QuantOption {
+            name: "fixture".into(),
+            description: "quantization fixture".into(),
+            bits_per_weight,
+            recommended: false,
+            backend: None,
+            imatrix_recommended: true,
+        };
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.1] {
+            assert!(SupportedQuantTypesOutcome::new(vec![option(invalid)]).is_err());
+        }
+        for valid in [0.0, 16.0, f32::MAX] {
+            let encoded =
+                serde_json::to_value(SupportedQuantTypesOutcome::new(vec![option(valid)]).unwrap())
+                    .unwrap();
+            assert!(encoded["quant_types"][0]["backend"].is_null());
+            assert_eq!(encoded["quant_types"][0]["imatrixRecommended"], true);
+            assert!(encoded["quant_types"][0].get("bitsPerWeight").is_some());
+            assert!(encoded["quant_types"][0].get("bits_per_weight").is_none());
+        }
+    }
+
+    #[test]
     fn conversion_read_projection_rejects_invalid_numeric_evidence() {
         let valid = || {
             serde_json::from_value::<ConversionProgress>(json!({
@@ -2867,9 +2915,9 @@ mod tests {
 
     #[test]
     fn conversion_outcomes_are_typed_and_redact_internal_progress_errors() {
-        let started = RpcOutcome::ConversionStarted(ConversionStartedOutcome::new(
-            "conversion-1".to_string(),
-        ));
+        let started = RpcOutcome::ConversionStarted(
+            ConversionStartedOutcome::new("conversion-1".to_string()).unwrap(),
+        );
         assert!(!started.uses_response_wrapper());
         assert_eq!(
             started.into_value().unwrap(),

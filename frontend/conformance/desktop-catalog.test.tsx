@@ -63,6 +63,20 @@ function installActualPreload(
         requests.push({ method, params: requestParams });
         if (method === 'get_conversion_progress') return conversionResponse;
         if (method === 'list_model_conversions') return fixture['conversion_list'];
+        const conversionOperations: Record<string, unknown> = {
+          start_model_conversion: fixture['conversion_started'],
+          setup_conversion_environment: fixture['conversion_setup_success'],
+          setup_quantization_backend: fixture['conversion_setup_success'],
+          get_supported_quant_types: fixture['conversion_quant_types'],
+          get_backend_status: fixture['conversion_backend_status'],
+        };
+        if (Object.hasOwn(conversionOperations, method)) return conversionOperations[method];
+        if (method === 'cancel_model_conversion' || method === 'check_conversion_environment') {
+          const variants = fixture[method === 'cancel_model_conversion' ? 'conversion_cancelled' : 'conversion_environment'];
+          if (!Array.isArray(variants)) throw new ValidationError('Missing operation variants','producer-fixtures');
+          const first: unknown = variants[0];
+          return first;
+        }
         if (method === 'get_models') return fixture['models'];
         if (method === 'get_link_health') {
           if (healthOutcomes.length === 0) throw new ValidationError('No link-health fixture response remains.', 'producer-fixtures');
@@ -130,6 +144,22 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('forwards all conversion options and preserves operation outcomes through the bundled preload', async () => {
+    const requests = installActualPreload();
+    const bridge = window.electronAPI;
+    if (!bridge) throw new ValidationError('Missing preload bridge','producer-fixtures');
+    expect(await bridge.start_model_conversion('llm/example/model','gguf_to_quantized_gguf','Q4_K_M',null,'/fixture/calibration text.txt',false)).toEqual(fixture['conversion_started']);
+    expect(requests[0]).toEqual({method:'start_model_conversion',params:{model_id:'llm/example/model',direction:'gguf_to_quantized_gguf',target_quant:'Q4_K_M',output_name:null,imatrix_calibration_file:'/fixture/calibration text.txt',force_imatrix:false}});
+    await bridge.start_model_conversion('llm/example/model','gguf_to_safetensors');
+    expect(requests[1]).toEqual({method:'start_model_conversion',params:{model_id:'llm/example/model',direction:'gguf_to_safetensors'}});
+    expect((await bridge.cancel_model_conversion('missing')).cancelled).toBe(false);
+    expect((await bridge.check_conversion_environment()).ready).toBe(false);
+    expect(await bridge.setup_conversion_environment()).toEqual(fixture['conversion_setup_success']);
+    expect(await bridge.get_supported_quant_types()).toEqual(fixture['conversion_quant_types']);
+    expect(await bridge.get_backend_status()).toEqual(fixture['conversion_backend_status']);
+    expect(await bridge.setup_quantization_backend('llama_cpp')).toEqual(fixture['conversion_setup_success']);
+    expect(requests.at(-1)).toEqual({method:'setup_quantization_backend',params:{backend:'llama_cpp'}});
+  });
   it('exposes canonical conversion progress to typed renderer callers without a GUI-owned conversion service', async () => {
     const source = fixture['conversion_progress'];
     if (!Array.isArray(source)) throw new ValidationError('Missing conversion fixture', 'producer-fixtures');

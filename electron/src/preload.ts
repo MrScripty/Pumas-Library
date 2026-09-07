@@ -16,6 +16,14 @@ import {
   decodeCatalogSearchOutcome,
   decodeConversionProgressResponse,
   decodeConversionListOutcome,
+  decodeConversionStartedOutcome,
+  decodeConversionCancelledOutcome,
+  decodeConversionEnvironmentOutcome,
+  decodeSupportedQuantTypesOutcome,
+  decodeBackendStatusOutcome,
+  decodeSuccessOutcome,
+  type ConversionDirection,
+  type QuantBackend,
   decodeDownloadListOutcome,
   decodeDownloadMutationOutcome,
   decodeDownloadStartedOutcome,
@@ -820,24 +828,31 @@ const electronAPI = {
   // ========================================
   start_model_conversion: (
     modelId: string,
-    direction: string,
+    direction: ConversionDirection,
     targetQuant?: string | null,
-    outputName?: string | null
+    outputName?: string | null,
+    imatrixCalibrationFile?: string | null,
+    forceImatrix?: boolean | null
   ) =>
-    apiCall('start_model_conversion', {
+    validatedApiCall('start_model_conversion', decodeConversionStartedOutcome, {
       model_id: modelId,
       direction,
       target_quant: targetQuant,
       output_name: outputName,
+      imatrix_calibration_file: imatrixCalibrationFile,
+      force_imatrix: forceImatrix,
     }),
   get_conversion_progress: (conversionId: string) =>
     validatedApiCall('get_conversion_progress', decodeConversionProgressResponse, { conversion_id: conversionId }),
   cancel_model_conversion: (conversionId: string) =>
-    apiCall('cancel_model_conversion', { conversion_id: conversionId }),
+    validatedApiCall('cancel_model_conversion', decodeConversionCancelledOutcome, { conversion_id: conversionId }),
   list_model_conversions: () => validatedApiCall('list_model_conversions', decodeConversionListOutcome),
-  check_conversion_environment: () => apiCall('check_conversion_environment'),
-  setup_conversion_environment: () => apiCall('setup_conversion_environment'),
-  get_supported_quant_types: () => apiCall('get_supported_quant_types'),
+  check_conversion_environment: () => validatedApiCall('check_conversion_environment', decodeConversionEnvironmentOutcome),
+  setup_conversion_environment: () => validatedApiCall('setup_conversion_environment', decodeSuccessOutcome),
+  get_supported_quant_types: () => validatedApiCall('get_supported_quant_types', decodeSupportedQuantTypesOutcome),
+  get_backend_status: () => validatedApiCall('get_backend_status', decodeBackendStatusOutcome),
+  setup_quantization_backend: (backend: QuantBackend) =>
+    validatedApiCall('setup_quantization_backend', decodeSuccessOutcome, { backend }),
 
   // ========================================
   // Size Calculation

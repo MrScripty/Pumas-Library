@@ -2,6 +2,10 @@ import type { BaseResponse } from './api-common';
 import type {
   CancelConversionResponse,
   ConversionEnvironmentResponse,
+  ConversionDirection,
+  ConversionBackendStatusResponse,
+  ConversionSetupResponse,
+  QuantBackend,
   GetConversionProgressResponse,
   ListConversionsResponse,
   StartConversionResponse,
@@ -103,14 +107,18 @@ export interface DesktopBridgeLinkMappingAPI {
   // ========================================
   start_model_conversion(
     modelId: string,
-    direction: string,
+    direction: ConversionDirection,
     targetQuant?: string | null,
-    outputName?: string | null
+    outputName?: string | null,
+    imatrixCalibrationFile?: string | null,
+    forceImatrix?: boolean | null
   ): Promise<StartConversionResponse>;
   get_conversion_progress(conversionId: string): Promise<GetConversionProgressResponse>;
   cancel_model_conversion(conversionId: string): Promise<CancelConversionResponse>;
   list_model_conversions(): Promise<ListConversionsResponse>;
   check_conversion_environment(): Promise<ConversionEnvironmentResponse>;
-  setup_conversion_environment(): Promise<BaseResponse>;
+  setup_conversion_environment(): Promise<ConversionSetupResponse>;
   get_supported_quant_types(): Promise<SupportedQuantTypesResponse>;
+  get_backend_status(): Promise<ConversionBackendStatusResponse>;
+  setup_quantization_backend(backend: QuantBackend): Promise<ConversionSetupResponse>;
 }

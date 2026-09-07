@@ -1,9 +1,15 @@
-import type { BaseResponse } from './api-common';
 import type {
   ConversionProgressOutcome,
   ConversionProgressResponse,
   ConversionListOutcome,
+  ConversionStartedOutcome,
+  ConversionCancelledOutcome,
+  ConversionEnvironmentOutcome,
+  SupportedQuantTypesOutcome,
+  BackendStatusOutcome,
+  SuccessOutcome,
 } from '../generated/desktop-contract';
+export type { QuantBackend } from '../generated/desktop-contract';
 
 // ============================================================================
 // Model Conversion Types
@@ -23,29 +29,16 @@ export interface ConversionSource {
   conversion_date: string;
 }
 
-export interface QuantOption {
-  name: string;
-  description: string;
-  bits_per_weight: number;
-  recommended: boolean;
-}
-
-export interface StartConversionResponse extends BaseResponse {
-  conversion_id: string;
-}
+export type QuantOption = SupportedQuantTypesOutcome['quant_types'][number];
+export type StartConversionResponse = ConversionStartedOutcome;
 
 export type GetConversionProgressResponse = ConversionProgressResponse;
 
-export interface CancelConversionResponse extends BaseResponse {
-  cancelled: boolean;
-}
+export type CancelConversionResponse = ConversionCancelledOutcome;
 
 export type ListConversionsResponse = ConversionListOutcome;
 
-export interface ConversionEnvironmentResponse extends BaseResponse {
-  ready: boolean;
-}
-
-export interface SupportedQuantTypesResponse extends BaseResponse {
-  quant_types: QuantOption[];
-}
+export type ConversionEnvironmentResponse = ConversionEnvironmentOutcome;
+export type SupportedQuantTypesResponse = SupportedQuantTypesOutcome;
+export type ConversionBackendStatusResponse = BackendStatusOutcome;
+export type ConversionSetupResponse = SuccessOutcome;

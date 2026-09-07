@@ -77,6 +77,7 @@ pub enum ConversionStatus {
 /// Identifies which quantization backend provides a capability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub enum QuantBackend {
     /// Existing Python-based safetensors ↔ GGUF F16 conversion.
     PythonConversion,
@@ -198,6 +199,7 @@ pub struct ConversionSource {
 /// A supported quantization option.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub struct QuantOption {
     /// Quantization type name (e.g. "Q4_K_M", "F16")
     pub name: String,
@@ -218,6 +220,7 @@ pub struct QuantOption {
 /// Readiness status of a quantization backend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub struct BackendStatus {
     /// Backend identifier.
     pub backend: QuantBackend,

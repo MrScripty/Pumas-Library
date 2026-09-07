@@ -739,22 +739,26 @@ impl ConversionStartedOutcome {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct ConversionProgressResponse {
     success: bool,
     progress: Option<ConversionProgressOutcome>,
 }
 
 impl ConversionProgressResponse {
-    pub(crate) fn new(progress: Option<ConversionProgress>) -> Self {
-        Self {
+    pub(crate) fn new(progress: Option<ConversionProgress>) -> Result<Self, PumasError> {
+        Ok(Self {
             success: true,
-            progress: progress.map(ConversionProgressOutcome::from),
-        }
+            progress: progress
+                .map(ConversionProgressOutcome::try_from)
+                .transpose()?,
+        })
     }
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 struct ConversionProgressOutcome {
     conversion_id: String,
     source_model_id: String,
@@ -774,9 +778,23 @@ struct ConversionProgressOutcome {
     pipeline_step_label: Option<String>,
 }
 
-impl From<ConversionProgress> for ConversionProgressOutcome {
-    fn from(progress: ConversionProgress) -> Self {
-        Self {
+impl TryFrom<ConversionProgress> for ConversionProgressOutcome {
+    type Error = PumasError;
+
+    fn try_from(progress: ConversionProgress) -> Result<Self, Self::Error> {
+        if progress
+            .progress
+            .is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value))
+            || [progress.bytes_written, progress.estimated_output_size]
+                .into_iter()
+                .flatten()
+                .any(|value| value > MAX_JS_SAFE_INTEGER)
+        {
+            return Err(invalid_domain_outcome(
+                "conversion progress numeric evidence",
+            ));
+        }
+        Ok(Self {
             conversion_id: progress.conversion_id,
             source_model_id: progress.source_model_id,
             direction: progress.direction,
@@ -795,7 +813,7 @@ impl From<ConversionProgress> for ConversionProgressOutcome {
             pipeline_step: progress.pipeline_step,
             pipeline_steps_total: progress.pipeline_steps_total,
             pipeline_step_label: progress.pipeline_step_label,
-        }
+        })
     }
 }
 
@@ -815,20 +833,21 @@ impl ConversionCancelledOutcome {
 }
 
 #[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct ConversionListOutcome {
     success: bool,
     conversions: Vec<ConversionProgressOutcome>,
 }
 
 impl ConversionListOutcome {
-    pub(crate) fn new(conversions: Vec<ConversionProgress>) -> Self {
-        Self {
+    pub(crate) fn new(conversions: Vec<ConversionProgress>) -> Result<Self, PumasError> {
+        Ok(Self {
             success: true,
             conversions: conversions
                 .into_iter()
-                .map(ConversionProgressOutcome::from)
-                .collect(),
-        }
+                .map(ConversionProgressOutcome::try_from)
+                .collect::<Result<_, _>>()?,
+        })
     }
 }
 
@@ -2799,6 +2818,54 @@ mod tests {
     }
 
     #[test]
+    fn conversion_read_projection_rejects_invalid_numeric_evidence() {
+        let valid = || {
+            serde_json::from_value::<ConversionProgress>(json!({
+                "conversionId":"fixture", "sourceModelId":"llm/example/model",
+                "direction":"gguf_to_safetensors", "status":"converting",
+            }))
+            .unwrap()
+        };
+        for value in [f32::NAN, f32::INFINITY, -0.01, 1.01] {
+            let mut progress = valid();
+            progress.progress = Some(value);
+            assert!(ConversionProgressResponse::new(Some(progress.clone())).is_err());
+            assert!(ConversionListOutcome::new(vec![valid(), progress]).is_err());
+        }
+        for estimated in [false, true] {
+            let mut progress = valid();
+            if estimated {
+                progress.estimated_output_size = Some(MAX_JS_SAFE_INTEGER + 1);
+            } else {
+                progress.bytes_written = Some(MAX_JS_SAFE_INTEGER + 1);
+            }
+            assert!(ConversionProgressResponse::new(Some(progress.clone())).is_err());
+            assert!(ConversionListOutcome::new(vec![progress]).is_err());
+        }
+        let mut boundary = valid();
+        boundary.progress = Some(1.0);
+        boundary.bytes_written = Some(MAX_JS_SAFE_INTEGER);
+        boundary.estimated_output_size = Some(MAX_JS_SAFE_INTEGER);
+        assert!(ConversionProgressResponse::new(Some(boundary.clone())).is_ok());
+        assert!(ConversionListOutcome::new(vec![boundary]).is_ok());
+        assert_eq!(
+            serde_json::to_value(ConversionProgressResponse::new(None).unwrap()).unwrap(),
+            json!({"success":true,"progress":null})
+        );
+        let absent =
+            serde_json::to_value(ConversionProgressResponse::new(Some(valid())).unwrap()).unwrap();
+        for field in [
+            "progress",
+            "currentTensor",
+            "bytesWritten",
+            "error",
+            "pipelineStep",
+        ] {
+            assert_eq!(absent["progress"].get(field), Some(&Value::Null));
+        }
+    }
+
+    #[test]
     fn conversion_outcomes_are_typed_and_redact_internal_progress_errors() {
         let started = RpcOutcome::ConversionStarted(ConversionStartedOutcome::new(
             "conversion-1".to_string(),
@@ -2827,9 +2894,9 @@ mod tests {
             pipeline_steps_total: None,
             pipeline_step_label: None,
         };
-        let encoded = RpcOutcome::ConversionProgress(Box::new(ConversionProgressResponse::new(
-            Some(progress),
-        )))
+        let encoded = RpcOutcome::ConversionProgress(Box::new(
+            ConversionProgressResponse::new(Some(progress)).unwrap(),
+        ))
         .into_value()
         .unwrap();
         assert_eq!(encoded.get("success").and_then(Value::as_bool), Some(true));

@@ -26,6 +26,33 @@ test('registered-link health preserves actual producer facts and rejects contrad
   }
 });
 
+test('conversion reads preserve producer camelCase, nullable fields and complete enum vocabulary', () => {
+  for (const response of fixtures.conversion_progress) {
+    const decoded = contract.decodeConversionProgressResponse(response);
+    assert.equal(decoded.status, 'valid');
+    assert.deepEqual(JSON.parse(JSON.stringify(decoded.value)), response);
+    assert.ok(Object.isFrozen(decoded.value.progress));
+    assert.equal('conversion_id' in decoded.value.progress, false);
+    assert.equal(typeof decoded.value.progress.conversionId, 'string');
+    assert.equal('pipelineStepLabel' in decoded.value.progress, true);
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify(contract.decodeConversionProgressResponse(fixtures.conversion_missing).value)), {success:true,progress:null});
+  assert.deepEqual(JSON.parse(JSON.stringify(contract.decodeConversionListOutcome(fixtures.conversion_list).value)), fixtures.conversion_list);
+});
+
+test('conversion decoder rejects old field names and unsafe numeric evidence', () => {
+  const valid = fixtures.conversion_progress[0];
+  for (const patch of [{progress:-0.1},{progress:1.1},{bytesWritten:9007199254740992},
+    {tensorsCompleted:-1},{tensorsTotal:0.5},{status:'unknown'},{direction:'unknown'},
+    {conversion_id:'legacy'},{extra:true},{error:'/private/diagnostic'},
+  ]) assert.equal(contract.decodeConversionProgressResponse({...valid,progress:{...valid.progress,...patch}}).status, 'invalid');
+  const missingNull = structuredClone(valid);
+  delete missingNull.progress.currentTensor;
+  assert.equal(contract.decodeConversionProgressResponse(missingNull).status, 'invalid');
+  assert.equal(contract.decodeConversionProgressResponse({success:false,progress:null}).status, 'invalid');
+  assert.equal(contract.decodeConversionListOutcome({success:true,conversions:[{...valid.progress,progress:2}]}).status, 'invalid');
+});
+
 test('actual producer catalog and FTS cross the generated decoder', () => {
   const models = contract.decodeModelsOutcome(fixtures.models);
   const search = contract.decodeCatalogSearchOutcome(fixtures.search);

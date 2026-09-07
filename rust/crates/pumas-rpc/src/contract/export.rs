@@ -190,9 +190,64 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
             stale_cursor: false,
             snapshot_required: true,
         })?;
+    let mut conversions = Vec::new();
+    for direction in [
+        ConversionDirection::GgufToSafetensors,
+        ConversionDirection::SafetensorsToGguf,
+        ConversionDirection::SafetensorsToQuantizedGguf,
+        ConversionDirection::GgufToQuantizedGguf,
+        ConversionDirection::SafetensorsToNvfp4,
+        ConversionDirection::SafetensorsToSherryQat,
+    ] {
+        for status in [
+            ConversionStatus::SettingUp,
+            ConversionStatus::Validating,
+            ConversionStatus::Converting,
+            ConversionStatus::Writing,
+            ConversionStatus::Importing,
+            ConversionStatus::Completed,
+            ConversionStatus::Cancelled,
+            ConversionStatus::Error,
+            ConversionStatus::BuildingToolchain,
+            ConversionStatus::GeneratingF16Gguf,
+            ConversionStatus::ComputingImatrix,
+            ConversionStatus::Quantizing,
+            ConversionStatus::Calibrating,
+            ConversionStatus::Training,
+        ] {
+            conversions.push(ConversionProgress {
+                conversion_id: format!("fixture-conversion-{}", conversions.len()),
+                source_model_id: "llm/example/complete".into(),
+                direction,
+                status,
+                progress: Some(0.5),
+                current_tensor: None,
+                tensors_completed: Some(1),
+                tensors_total: Some(2),
+                bytes_written: Some(5),
+                estimated_output_size: Some(10),
+                target_quant: None,
+                error: (status == ConversionStatus::Error)
+                    .then(|| "private conversion diagnostic".into()),
+                output_model_id: None,
+                pipeline_step: None,
+                pipeline_steps_total: None,
+                pipeline_step_label: None,
+            });
+        }
+    }
+    let conversion_progress = conversions
+        .iter()
+        .cloned()
+        .map(|progress| ConversionProgressResponse::new(Some(progress)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let conversion_list = ConversionListOutcome::new(conversions)?;
+    let conversion_missing = ConversionProgressResponse::new(None)?;
     Ok(serde_json::json!({
         "models":models, "search":search, "recovery_request":recovery_request,
         "link_health_healthy":link_health_healthy, "link_health_degraded":link_health_degraded,
+        "conversion_progress":conversion_progress, "conversion_missing":conversion_missing,
+        "conversion_list":conversion_list,
         "recovery_outcome":recovery_outcome,
         "recovery_busy_outcome":recovery_busy_outcome,
         "recovery_request_probes":recovery_request_probes,
@@ -226,6 +281,8 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         DownloadIdParams,
         PublicError,
         LinkHealthOutcome,
+        ConversionProgressResponse,
+        ConversionListOutcome,
     );
     Ok(serde_json::json!({
         "format": "pumas-desktop-contract-1",
@@ -281,6 +338,17 @@ fn refine_named(name: &str, schema: &mut Value) {
     }
     if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
         match name {
+            "ConversionProgressResponse" | "ConversionListOutcome" => {
+                properties["success"]["const"] = true.into();
+            }
+            "ConversionProgressOutcome" => {
+                properties["progress"]["minimum"] = 0.into();
+                properties["progress"]["maximum"] = 1.into();
+                properties["error"]["enum"] = serde_json::json!([
+                    null,
+                    "The model conversion did not complete successfully."
+                ]);
+            }
             "LinkHealthOutcome" | "LinkHealthResponse" => {
                 properties["success"]["const"] = true.into();
                 properties["error"]["type"] = "null".into();

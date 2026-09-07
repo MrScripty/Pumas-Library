@@ -613,17 +613,19 @@ async fn dispatch_admitted_command(
                 .await
                 .map(RpcOutcome::ConversionStarted)
         }
-        RpcCommand::GetConversionProgress { conversion_id } => Ok(RpcOutcome::ConversionProgress(
-            Box::new(conversion::get_conversion_progress(state, &conversion_id)),
-        )),
+        RpcCommand::GetConversionProgress { conversion_id } => {
+            conversion::get_conversion_progress(state, &conversion_id)
+                .map(Box::new)
+                .map(RpcOutcome::ConversionProgress)
+        }
         RpcCommand::CancelModelConversion { conversion_id } => {
             conversion::cancel_model_conversion(state, &conversion_id)
                 .await
                 .map(RpcOutcome::ConversionCancelled)
         }
-        RpcCommand::ListModelConversions => Ok(RpcOutcome::ConversionList(Box::new(
-            conversion::list_model_conversions(state),
-        ))),
+        RpcCommand::ListModelConversions => conversion::list_model_conversions(state)
+            .map(Box::new)
+            .map(RpcOutcome::ConversionList),
         RpcCommand::CheckConversionEnvironment => conversion::check_conversion_environment(state)
             .await
             .map(RpcOutcome::ConversionEnvironment),
@@ -1274,6 +1276,38 @@ async fn dispatch_method(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn conversion_read_rpc_preserves_missing_progress_and_empty_list() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        for (method, params, expected) in [
+            (
+                "get_conversion_progress",
+                json!({"conversion_id":"missing"}),
+                json!({"success":true,"progress":null}),
+            ),
+            (
+                "list_model_conversions",
+                json!({}),
+                json!({"success":true,"conversions":[]}),
+            ),
+        ] {
+            let body = Bytes::from(
+                serde_json::to_vec(
+                    &json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}),
+                )
+                .unwrap(),
+            );
+            let response = handle_rpc(State(state.clone()), body).await.into_response();
+            let bytes = axum::body::to_bytes(response.into_body(), 16_384)
+                .await
+                .unwrap();
+            let value: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(value["result"], expected);
+            assert!(value.get("error").is_none());
+        }
+    }
 
     #[tokio::test]
     async fn link_health_rpc_preserves_headless_read_and_failure_contracts() {

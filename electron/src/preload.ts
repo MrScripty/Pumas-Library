@@ -14,6 +14,8 @@ import type {
 import type { LauncherRootCommittedPresentation } from './window-presentation';
 import {
   decodeCatalogSearchOutcome,
+  decodeConversionProgressResponse,
+  decodeConversionListOutcome,
   decodeDownloadListOutcome,
   decodeDownloadMutationOutcome,
   decodeDownloadStartedOutcome,
@@ -829,10 +831,10 @@ const electronAPI = {
       output_name: outputName,
     }),
   get_conversion_progress: (conversionId: string) =>
-    apiCall('get_conversion_progress', { conversion_id: conversionId }),
+    validatedApiCall('get_conversion_progress', decodeConversionProgressResponse, { conversion_id: conversionId }),
   cancel_model_conversion: (conversionId: string) =>
     apiCall('cancel_model_conversion', { conversion_id: conversionId }),
-  list_model_conversions: () => apiCall('list_model_conversions'),
+  list_model_conversions: () => validatedApiCall('list_model_conversions', decodeConversionListOutcome),
   check_conversion_environment: () => apiCall('check_conversion_environment'),
   setup_conversion_environment: () => apiCall('setup_conversion_environment'),
   get_supported_quant_types: () => apiCall('get_supported_quant_types'),

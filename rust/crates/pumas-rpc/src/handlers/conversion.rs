@@ -19,7 +19,7 @@ pub async fn start_model_conversion(
 pub fn get_conversion_progress(
     state: &AppState,
     conversion_id: &str,
-) -> ConversionProgressResponse {
+) -> pumas_library::Result<ConversionProgressResponse> {
     ConversionProgressResponse::new(state.api.get_conversion_progress(conversion_id))
 }
 
@@ -31,7 +31,7 @@ pub async fn cancel_model_conversion(
     Ok(ConversionCancelledOutcome::new(cancelled))
 }
 
-pub fn list_model_conversions(state: &AppState) -> ConversionListOutcome {
+pub fn list_model_conversions(state: &AppState) -> pumas_library::Result<ConversionListOutcome> {
     ConversionListOutcome::new(state.api.list_conversions())
 }
 

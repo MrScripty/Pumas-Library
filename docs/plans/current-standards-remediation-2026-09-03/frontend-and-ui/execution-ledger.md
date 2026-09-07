@@ -1,5 +1,52 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-06 — Conversion Progress Contract Accepted
+
+FE-I14 is resolved for the existing get/list progress routes. A bounded backend
+agent implemented canonical projection validation, enum schema derives and RPC
+fixtures; root integrated generated consumers, preload decoding and verification.
+The frontend no longer claims snake_case or omitted optional fields for a
+camelCase, explicit-null response. Generated aliases include all six directions,
+fourteen statuses and pipeline fields. Read/list wire errors are null or the
+existing fixed redacted message. Invalid fractions and unsafe byte counters fail
+the canonical constructor and decoder instead of producing misleading progress.
+
+Core public read signatures and persisted conversion metadata are unchanged.
+Conditional enum schema derives do not add GUI dependencies. Start, cancellation,
+tool installation and quant-option contracts are deliberately not migrated by
+this read-only slice. Inspection also found the GUI conversion action is still a
+logging TODO; FE-I23 tracks that unfinished workflow and FE-I24 owns the remaining
+API migration. No working conversion screen is claimed.
+
+Acceptance evidence:
+
+- RPC default suite: 121 passed; no-default-features suite: 81 passed, with 10
+  existing ignored tests each. Actual handler tests preserve missing progress
+  and empty lists; constructor tests reject nonfinite/out-of-range progress and
+  either byte counter above JavaScript's safe integer limit while preserving
+  explicit nulls and redaction.
+- Strict all-target core/RPC Clippy passes with all features and without defaults;
+  rustfmt passes. Public core compilation remains GUI-independent.
+- Actual producer fixtures cover 84 direction/status combinations. Generated
+  freshness passes; producer/decoder conformance passes 8 tests, including old
+  field names, extra fields, missing explicit nulls, malformed numeric evidence,
+  unsupported vocabulary and unredacted error rejection. Comparisons assert
+  wire fields independently of the decoder's intentional null-prototype objects.
+- Producer/bundled-preload/typed renderer-consumer conformance passes 9 tests,
+  including all conversion fixtures, exact read identifiers, missing progress,
+  list reads and malformed response rejection. There is no progress screen to
+  exercise; this proves the current callable consumer contract, not GUI behavior.
+- Full frontend: 551 tests in 113 files pass; Electron: 11 test files pass.
+  Types/lint and both production GUI builds pass; default build restored.
+- A fresh standalone RPC process on localhost returns `progress: null` for an
+  unknown conversion and an empty conversion list, and rejects invalid parameters.
+  Its root is a private temporary library; no conversion, download, setup, model
+  mutation or live application interaction occurs.
+
+Evidence is Linux-only. Full M4/M5, actual native conversion execution, the GUI
+workflow and Pending cleanup replay remain open. Existing recovery artifacts are
+untouched. Next: admit FE-I24 without making backend functionality GUI-dependent.
+
 ## 2026-09-06 — Import-Picker Contract Accepted
 
 FE-I11 is resolved. The Electron-owned picker contract distinguishes selected

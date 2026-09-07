@@ -36,6 +36,7 @@ function installActualPreload(
   initialDownloads: unknown = fixture['download_list'],
   healthOutcomes: unknown[] = [],
   picker: () => Promise<unknown> = async () => { throw new ValidationError('No picker fixture', 'producer-fixtures'); },
+  conversionResponse: unknown = fixture['conversion_missing'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -60,6 +61,8 @@ function installActualPreload(
         expect(channel).toBe('api:call');
         const requestParams: unknown = JSON.parse(JSON.stringify(params));
         requests.push({ method, params: requestParams });
+        if (method === 'get_conversion_progress') return conversionResponse;
+        if (method === 'list_model_conversions') return fixture['conversion_list'];
         if (method === 'get_models') return fixture['models'];
         if (method === 'get_link_health') {
           if (healthOutcomes.length === 0) throw new ValidationError('No link-health fixture response remains.', 'producer-fixtures');
@@ -127,6 +130,30 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('exposes canonical conversion progress to typed renderer callers without a GUI-owned conversion service', async () => {
+    const source = fixture['conversion_progress'];
+    if (!Array.isArray(source)) throw new ValidationError('Missing conversion fixture', 'producer-fixtures');
+    const cases: unknown[] = source;
+    for (const response of cases) {
+      if (!isFixtureRecord(response) || !isFixtureRecord(response['progress'])) throw new ValidationError('Invalid progress fixture', 'producer-fixtures');
+      const expected = response['progress'];
+      const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, response);
+      const bridge = window.electronAPI;
+      if (!bridge) throw new ValidationError('Missing preload bridge', 'producer-fixtures');
+      const result = await bridge.get_conversion_progress(String(expected['conversionId']));
+      expect(result).toEqual(response);
+      expect(result.progress?.conversionId).toBe(expected['conversionId']);
+      expect(result.progress?.pipelineStepLabel).toBeNull();
+      expect(requests[0]).toEqual({method:'get_conversion_progress',params:{conversion_id:expected['conversionId']}});
+    }
+    installActualPreload();
+    const bridge = window.electronAPI;
+    if (!bridge) throw new ValidationError('Missing preload bridge', 'producer-fixtures');
+    expect(await bridge.get_conversion_progress('not-found')).toEqual({success:true,progress:null});
+    expect(await bridge.list_model_conversions()).toEqual(fixture['conversion_list']);
+    installActualPreload(undefined, undefined, undefined, undefined, undefined, {success:true,progress:{conversion_id:'old-shape'}});
+    await expect(window.electronAPI?.get_conversion_progress('id')).rejects.toMatchObject({status:'invalid'});
+  });
   it('preserves native selection, cancellation and failure through the actual preload into picker state', async () => {
     const paths = ['/models/ e\u0301.gguf', '/models/ e\u0301.gguf'];
     const chooser = vi.fn()

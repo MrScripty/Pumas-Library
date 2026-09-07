@@ -1,11 +1,16 @@
-// Generated from pumas-rpc contract.rs; SHA256 743d700347e5480492c031c68383e64e6587d6329b60ffd58a3bde6e785f2e6a. DO NOT EDIT.
-import { validateCatalogSearchOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams } from './desktop-contract.validators.js';
+// Generated from pumas-rpc contract.rs; SHA256 c77f776a40f57d6ea7101504f4aa7e6c8ca8058153aa5db5c2862b1f0f16538c. DO NOT EDIT.
+import { validateCatalogSearchOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams } from './desktop-contract.validators.js';
 export type CatalogArtifactState = ({ "state": "complete" }) | ({ "downloadProgressFraction"?: number; "reasons": ReadonlyArray<CatalogPartialReason>; "recovery"?: CatalogRecoveryIdentity; "state": "partial" });
 export type CatalogIntegrityState = ({ "state": "clean" }) | ({ "count": number; "otherModelIds": ReadonlyArray<string>; "state": "duplicate" });
 export type CatalogModel = { "artifact": CatalogArtifactState; "dependencyCount": number; "displayDate"?: string; "displayName": string; "format"?: string; "id": string; "integrity": CatalogIntegrityState; "modelDir": string; "modelType": string; "quantization"?: string; "relatedAvailable": boolean; "sizeBytes"?: number };
 export type CatalogPartialReason = "part_file_present" | "expected_files_missing";
 export type CatalogRecoveryIdentity = { "recoveryToken": string; "repoId": string; "selectedArtifactFiles"?: ReadonlyArray<string>; "selectedArtifactId"?: string; "selectedArtifactQuant"?: string };
 export type CatalogSearchOutcome = { "models": ReadonlyArray<CatalogModel>; "query": string; "query_time_ms": number; "success": true; "total_count": number };
+export type ConversionDirection = ("gguf_to_safetensors") | ("safetensors_to_gguf") | ("safetensors_to_quantized_gguf") | ("gguf_to_quantized_gguf") | ("safetensors_to_nvfp4") | ("safetensors_to_sherry_qat");
+export type ConversionListOutcome = { "conversions": ReadonlyArray<ConversionProgressOutcome>; "success": true };
+export type ConversionProgressOutcome = { "bytesWritten": number | null; "conversionId": string; "currentTensor": string | null; "direction": ConversionDirection; "error": null | "The model conversion did not complete successfully."; "estimatedOutputSize": number | null; "outputModelId": string | null; "pipelineStep": number | null; "pipelineStepLabel": string | null; "pipelineStepsTotal": number | null; "progress": number | null; "sourceModelId": string; "status": ConversionStatus; "targetQuant": string | null; "tensorsCompleted": number | null; "tensorsTotal": number | null };
+export type ConversionProgressResponse = { "progress": (ConversionProgressOutcome) | (null); "success": true };
+export type ConversionStatus = ("setting_up") | ("validating") | ("converting") | ("writing") | ("importing") | ("completed") | ("cancelled") | ("error") | ("building_toolchain") | ("generating_f16_gguf") | ("computing_imatrix") | ("quantizing") | ("calibrating") | ("training");
 export type DownloadIdParams = { "download_id": string };
 export type DownloadListOutcome = { "downloads": ReadonlyArray<DownloadProgressOutcome>; "success": true };
 export type DownloadMutationOutcome = { "error"?: string; "success": boolean };
@@ -63,6 +68,8 @@ function decode<T>(input: unknown, validate: (value: unknown) => boolean): Decod
   }
 }
 export function decodeCatalogSearchOutcome(input: unknown): DecodeOutcome<CatalogSearchOutcome> { return decode(input, validateCatalogSearchOutcome); }
+export function decodeConversionListOutcome(input: unknown): DecodeOutcome<ConversionListOutcome> { return decode(input, validateConversionListOutcome); }
+export function decodeConversionProgressResponse(input: unknown): DecodeOutcome<ConversionProgressResponse> { return decode(input, validateConversionProgressResponse); }
 export function decodeDownloadIdParams(input: unknown): DecodeOutcome<DownloadIdParams> { return decode(input, validateDownloadIdParams); }
 export function decodeDownloadListOutcome(input: unknown): DecodeOutcome<DownloadListOutcome> { return decode(input, validateDownloadListOutcome); }
 export function decodeDownloadMutationOutcome(input: unknown): DecodeOutcome<DownloadMutationOutcome> { return decode(input, validateDownloadMutationOutcome); }

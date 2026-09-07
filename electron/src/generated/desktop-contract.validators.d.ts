@@ -1,5 +1,7 @@
-// Generated from pumas-rpc contract.rs; SHA256 743d700347e5480492c031c68383e64e6587d6329b60ffd58a3bde6e785f2e6a. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 c77f776a40f57d6ea7101504f4aa7e6c8ca8058153aa5db5c2862b1f0f16538c. DO NOT EDIT.
 export declare function validateCatalogSearchOutcome(value: unknown): boolean;
+export declare function validateConversionListOutcome(value: unknown): boolean;
+export declare function validateConversionProgressResponse(value: unknown): boolean;
 export declare function validateDownloadIdParams(value: unknown): boolean;
 export declare function validateDownloadListOutcome(value: unknown): boolean;
 export declare function validateDownloadMutationOutcome(value: unknown): boolean;

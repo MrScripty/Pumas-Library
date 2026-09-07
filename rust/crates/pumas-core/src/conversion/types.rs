@@ -16,6 +16,7 @@ use super::progress::ConversionProgressTracker;
 /// Direction of model format conversion or quantization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub enum ConversionDirection {
     /// Dequantize GGUF to Safetensors (float16/float32).
     GgufToSafetensors,
@@ -38,6 +39,7 @@ pub enum ConversionDirection {
 /// Status of a conversion or quantization operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub enum ConversionStatus {
     // -- Shared statuses (existing) --
     /// Python environment is being set up (venv creation, pip install)

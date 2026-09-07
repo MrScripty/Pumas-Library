@@ -1,36 +1,17 @@
 import type { BaseResponse } from './api-common';
+import type {
+  ConversionProgressOutcome,
+  ConversionProgressResponse,
+  ConversionListOutcome,
+} from '../generated/desktop-contract';
 
 // ============================================================================
 // Model Conversion Types
 // ============================================================================
 
-export type ConversionDirection = 'gguf_to_safetensors' | 'safetensors_to_gguf';
-
-export type ConversionStatus =
-  | 'setting_up'
-  | 'validating'
-  | 'converting'
-  | 'writing'
-  | 'importing'
-  | 'completed'
-  | 'cancelled'
-  | 'error';
-
-export interface ConversionProgress {
-  conversion_id: string;
-  source_model_id: string;
-  direction: ConversionDirection;
-  status: ConversionStatus;
-  progress?: number;
-  current_tensor?: string;
-  tensors_completed?: number;
-  tensors_total?: number;
-  bytes_written?: number;
-  estimated_output_size?: number;
-  target_quant?: string;
-  error?: string;
-  output_model_id?: string;
-}
+export type ConversionProgress = ConversionProgressOutcome;
+export type ConversionDirection = ConversionProgress['direction'];
+export type ConversionStatus = ConversionProgress['status'];
 
 export interface ConversionSource {
   source_model_id: string;
@@ -53,17 +34,13 @@ export interface StartConversionResponse extends BaseResponse {
   conversion_id: string;
 }
 
-export interface GetConversionProgressResponse extends BaseResponse {
-  progress: ConversionProgress | null;
-}
+export type GetConversionProgressResponse = ConversionProgressResponse;
 
 export interface CancelConversionResponse extends BaseResponse {
   cancelled: boolean;
 }
 
-export interface ListConversionsResponse extends BaseResponse {
-  conversions: ConversionProgress[];
-}
+export type ListConversionsResponse = ConversionListOutcome;
 
 export interface ConversionEnvironmentResponse extends BaseResponse {
   ready: boolean;

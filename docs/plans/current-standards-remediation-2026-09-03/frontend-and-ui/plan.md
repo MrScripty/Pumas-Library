@@ -10,12 +10,59 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Admit conversion consumer contracts. The import-picker (FE-I11)
-and standalone-backend/link-health slices below are accepted.
+**Next slice:** Admit the remaining conversion operation contracts (FE-I24):
+start/cancel/setup/environment/quant options. Conversion progress reads (FE-I14),
+import-picker (FE-I11), and standalone-backend/link-health slices are accepted.
 The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Conversion Progress Contract Admission
+
+Status: accepted within the read-only and Linux boundaries in the
+[execution ledger](execution-ledger.md#2026-09-06--conversion-progress-contract-accepted).
+
+Operation: `continue` this canonical plan under the user's continuation request.
+FE-I14's existing get/list conversion-progress routes are the bounded slice.
+Core owns direction/status vocabulary and progress semantics; RPC owns the
+existing camelCase, explicit-null, redacted-error projection. Generate the
+consumer types/decoders from that authority, reject nonfinite/out-of-range
+fractions and unrepresentable counters, and decode both preload methods.
+Preserve public core signatures, unknown-conversion `progress: null`, and the
+empty list. No GUI or inference-plugin dependency is added to core.
+
+Inspection found no production progress presentation: the conversion action
+only logs a TODO. Do not invent a conversion screen or claim GUI acceptance for
+these read contracts. Remaining setup/start/cancel/quant-option contracts and
+the unfinished GUI action receive separate next-slice dispositions.
+
+Write set: backend agent owns core conversion enum schema derives, RPC progress
+constructors, export schemas/fixtures and affected handlers/tests. Root owns six
+generated artifacts, preload get/list decoding, frontend conversion type aliases,
+actual producer/preload/consumer conformance and plan/issue/ledger records. Root
+serializes Cargo, generation, integration and commits. No downloads, conversion
+tool setup, model mutation, persistence, new generator machinery or dependencies.
+
+Composed-design review: applicable. (1) Core facts, RPC disclosure/representation,
+preload proof and GUI presentation stay independently owned. (2) Only wire
+projection/validation must coordinate; read contracts have no UI lifecycle state.
+(3) Callers learn the generated response, including explicit nulls and all core
+statuses, rather than copied field names. (4) Enum changes regenerate consumers;
+numeric/disclosure changes stay in the RPC projection; UI work remains separate.
+(5) Dependencies carry existing core values and generated wire types, never a GUI
+dependency in Rust. (6) Headless RPC reads and preload consumers are independently
+verified, then tested together. (7) Existing schema generation removes the
+conflicting handwritten progress shape; no new abstraction is introduced.
+(8) Necessary complexity is the existing cross-process representation, handled
+by ordinary schema bounds and the existing generator/decoder, without new custom
+keywords or a hypothetical conversion UI.
+
+Acceptance: focused producer validation/redaction, all status/direction fixtures,
+actual headless RPC missing/list reads, generated freshness/negative decoding,
+actual bundled-preload and typed renderer-consumer preservation; affected dual
+RPC tests, core compilation, strict lint and frontend/Electron suites/builds.
+No native conversion execution, GUI workflow, release or non-Linux claim.
 
 ## Import-Picker Contract Admission
 

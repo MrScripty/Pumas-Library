@@ -253,8 +253,9 @@ Import-picker, conversion progress reads and remaining conversion operation
 contracts (FE-I24) are also accepted. The basic GUI format-conversion workflow
 (FE-I23) is accepted within its documented evidence limits. Backend setup custody
 and aggregate shutdown are accepted with Linux controlled-process evidence.
-Observable setup identity/state across timeout and reopen (remaining FE-I25) is
-the next bounded API admission before quantization-specific GUI configuration.
+Setup identity/state and explicit retry admission are now accepted through core,
+RPC and the desktop bridge. Migrating the optional dialog to that contract across
+timeout/reopen (remaining FE-I25) precedes quantization-specific configuration.
 The GUI is independently optional; embedded Rust and standalone RPC remain
 supported. Pending cleanup replay is deferred, not accepted: it still needs an
 exact contract against durable authority and retained root custody. No old-format

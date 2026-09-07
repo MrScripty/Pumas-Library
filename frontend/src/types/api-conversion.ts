@@ -5,6 +5,8 @@ import type {
   ConversionStartedOutcome,
   ConversionCancelledOutcome,
   ConversionEnvironmentOutcome,
+  ConversionSetupStartedOutcome,
+  ConversionSetupStatusOutcome,
   SupportedQuantTypesOutcome,
   BackendStatusOutcome,
   SuccessOutcome,
@@ -42,3 +44,5 @@ export type ConversionEnvironmentResponse = ConversionEnvironmentOutcome;
 export type SupportedQuantTypesResponse = SupportedQuantTypesOutcome;
 export type ConversionBackendStatusResponse = BackendStatusOutcome;
 export type ConversionSetupResponse = SuccessOutcome;
+export type ConversionSetupStartedResponse = ConversionSetupStartedOutcome;
+export type ConversionSetupStatusResponse = ConversionSetupStatusOutcome;

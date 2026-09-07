@@ -13,6 +13,34 @@ use super::progress::ConversionProgressTracker;
 // Enums
 // ---------------------------------------------------------------------------
 
+/// Latest base Python setup state, retained for this owner/process lifetime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
+pub enum ConversionSetupStatus {
+    /// Queued, executing, or still cleaning up owned work.
+    InProgress,
+    /// Setup completed and its environment lease has been released.
+    Completed,
+    /// Setup failed; the retained snapshot contains the reason.
+    Failed,
+    /// Cancellation completed, including owned cleanup.
+    Cancelled,
+}
+
+/// Latest setup operation, not a persisted record or historical operation list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
+pub struct ConversionSetupSnapshot {
+    /// Opaque identity assigned once at admission.
+    pub operation_id: String,
+    /// Terminal states are published only after owned effects release their lease.
+    pub status: ConversionSetupStatus,
+    /// Retained backend failure reason; absent for every other state.
+    pub error: Option<String>,
+}
+
 /// Direction of model format conversion or quantization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

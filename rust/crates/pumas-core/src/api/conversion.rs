@@ -55,6 +55,26 @@ impl PumasApi {
         self.primary().conversion_manager.ensure_environment().await
     }
 
+    /// Start base Python setup, or inspect the latest retained operation.
+    /// `None` never retries a retained operation. Only a matching terminal ID
+    /// admits a successor; stale IDs return the current snapshot. IDs must be
+    /// canonical lower-case hyphenated UUIDs, and a retry without an owner-local
+    /// record is invalid. Records are not persisted across owner/process restart.
+    pub async fn start_conversion_setup(
+        &self,
+        expected_previous_operation_id: Option<&str>,
+    ) -> Result<conversion::ConversionSetupSnapshot> {
+        self.primary()
+            .conversion_manager
+            .start_conversion_setup(expected_previous_operation_id)
+            .await
+    }
+
+    /// Read the latest owner-local setup snapshot without starting work or disk I/O.
+    pub fn get_conversion_setup(&self) -> Option<conversion::ConversionSetupSnapshot> {
+        self.primary().conversion_manager.get_conversion_setup()
+    }
+
     /// Close base Python setup admission and await owned process cleanup.
     /// Invoke before stopping the hosting runtime. Successful cancellation and
     /// cleanup return success; repeated calls preserve actual setup failures.

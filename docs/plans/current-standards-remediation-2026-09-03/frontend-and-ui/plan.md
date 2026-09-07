@@ -10,10 +10,11 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Expose backend conversion setup identity/state across timeout
-and reopen (remaining FE-I25), before quantization-specific GUI configuration
-(remaining FE-I23). Setup custody and aggregate shutdown are accepted within
-the Linux controlled-process evidence boundary below.
+**Next slice:** Migrate the optional conversion dialog to the accepted setup
+start/observation contract across timeout and reopen (remaining FE-I25), before
+quantization-specific GUI configuration (remaining FE-I23). Backend custody,
+aggregate shutdown and core/RPC/desktop setup observation are accepted within
+their documented evidence boundaries below.
 The basic GGUF/safetensors format workflow is accepted within its documented
 Linux and simulated-native-execution evidence boundary.
 Conversion operation contracts (FE-I24), progress reads (FE-I14), import-picker
@@ -22,6 +23,49 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Conversion Setup Observation Admission
+
+Status: accepted for the core/RPC/desktop contract, not dialog migration; see the
+[execution ledger](execution-ledger.md#2026-09-07--conversion-setup-observation).
+
+Operation: `continue` this canonical plan. Extend FE-I25 custody with a non-blocking
+start/attach request and read-only latest setup snapshot. The backend owns an
+opaque UUID and in-progress/completed/failed/cancelled state. Terminal snapshots
+follow installer cleanup and lease release; idle reads do not deploy or install.
+The result is scoped to one manager/process lifetime, not persisted history or
+cross-process discovery. Independent setup owners still use physical exclusion.
+
+Admission without a previous ID starts only when there is no retained operation;
+otherwise it returns current work/result. An explicit retry names the observed
+terminal operation. Only a matching terminal ID permits replacement after join;
+repeating that request attaches to the successor, even if it has completed.
+An old token on an owner without a retained record fails explicitly. Shutdown
+closes admission. Existing blocking setup/check methods keep their contracts.
+
+Write set: backend agent owns core setup/types/manager/module/facade and fixtures;
+root owns RPC parsing/handlers/projection/schema fixtures, generated artifacts,
+desktop registry/preload/typed API and cross-consumer evidence plus these records.
+Root serializes Cargo, generation and commits. No new dependency, alternate
+runtime, native installation, GUI dialog behavior, persistence or feature gate.
+The separate dialog migration remains FE-I25 follow-up, not accepted by bridge
+availability. GUI dependencies must not enter the core or standalone RPC crate.
+
+Composed-design review: applicable. (1) Existing setup owns admission, identity,
+result and custody; RPC owns disclosure, preload decoding and typed consumers.
+(2) Identity and replacement coordinate under one owner; unrelated conversion
+jobs do not. (3) Callers start/attach or inspect, never manage installer tasks.
+(4) Lifecycle changes stay in setup, protocol changes in contract projection.
+(5) Core remains independently usable. (6) Held executable fixtures prove timely
+admission, repeat safety and cleanup-before-terminal; producer/preload fixtures
+prove exact IDs, nulls, states, bounded errors and failed decoding. (7) Extend the
+existing owner, not a parallel operation store. (8) Reuse UUID, schemas and the
+existing generator; no persisted replay or generic task framework.
+
+Acceptance: focused admission/retry/read/shutdown tests, default/minimal core/RPC
+suites and strict lint, generated freshness and producer-to-preload/typed-consumer
+conformance, frontend type/lint and affected tests, standalone HTTP status/admission
+against owned fake executables. No actual tool installation or new GUI claim.
 
 ## Conversion Setup Custody Admission
 

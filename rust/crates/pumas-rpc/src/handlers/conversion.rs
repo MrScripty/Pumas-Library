@@ -2,8 +2,8 @@
 
 use crate::contract::{
     BackendStatusOutcome, ConversionCancelledOutcome, ConversionEnvironmentOutcome,
-    ConversionListOutcome, ConversionProgressResponse, ConversionStartedOutcome,
-    SupportedQuantTypesOutcome,
+    ConversionListOutcome, ConversionProgressResponse, ConversionSetupStartedOutcome,
+    ConversionSetupStatusOutcome, ConversionStartedOutcome, SupportedQuantTypesOutcome,
 };
 use crate::server::AppState;
 use pumas_library::conversion::{ConversionRequest, QuantBackend};
@@ -44,6 +44,23 @@ pub async fn check_conversion_environment(
 
 pub async fn setup_conversion_environment(state: &AppState) -> pumas_library::Result<()> {
     state.api.ensure_conversion_environment().await
+}
+
+pub async fn start_conversion_setup(
+    state: &AppState,
+    expected_previous_operation_id: Option<&str>,
+) -> pumas_library::Result<ConversionSetupStartedOutcome> {
+    state
+        .api
+        .start_conversion_setup(expected_previous_operation_id)
+        .await
+        .and_then(ConversionSetupStartedOutcome::new)
+}
+
+pub fn get_conversion_setup(
+    state: &AppState,
+) -> pumas_library::Result<ConversionSetupStatusOutcome> {
+    ConversionSetupStatusOutcome::new(state.api.get_conversion_setup())
 }
 
 pub async fn get_supported_quant_types(

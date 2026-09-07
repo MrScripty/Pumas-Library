@@ -7,7 +7,8 @@
 use pumas_library::{
     conversion::{
         BackendStatus, ConversionDirection, ConversionProgress, ConversionRequest,
-        ConversionStatus, QuantBackend, QuantOption,
+        ConversionSetupSnapshot, ConversionSetupStatus, ConversionStatus, QuantBackend,
+        QuantOption,
     },
     model_library::{
         issue_download_recovery_ticket, DownloadRecoveryModelId, DownloadRecoveryTicket,
@@ -259,6 +260,10 @@ pub(crate) enum RpcCommand {
     ListModelConversions,
     CheckConversionEnvironment,
     SetupConversionEnvironment,
+    StartConversionSetup {
+        expected_previous_operation_id: Option<String>,
+    },
+    GetConversionSetup,
     GetSupportedQuantTypes,
     GetBackendStatus,
     SetupQuantizationBackend {
@@ -343,6 +348,8 @@ impl RpcCommand {
             Self::ListModelConversions => "list_model_conversions",
             Self::CheckConversionEnvironment => "check_conversion_environment",
             Self::SetupConversionEnvironment => "setup_conversion_environment",
+            Self::StartConversionSetup { .. } => "start_conversion_setup",
+            Self::GetConversionSetup => "get_conversion_setup",
             Self::GetSupportedQuantTypes => "get_supported_quant_types",
             Self::GetBackendStatus => "get_backend_status",
             Self::SetupQuantizationBackend { .. } => "setup_quantization_backend",
@@ -411,6 +418,8 @@ pub(crate) enum RpcOutcome {
     ConversionList(Box<ConversionListOutcome>),
     ConversionEnvironment(ConversionEnvironmentOutcome),
     ConversionMutation(SuccessOutcome),
+    ConversionSetupStarted(ConversionSetupStartedOutcome),
+    ConversionSetupStatus(ConversionSetupStatusOutcome),
     SupportedQuantTypes(Box<SupportedQuantTypesOutcome>),
     BackendStatus(Box<BackendStatusOutcome>),
     DownloadStarted(DownloadStartedOutcome),
@@ -464,6 +473,8 @@ impl RpcOutcome {
             Self::ConversionList(value) => serde_json::to_value(value),
             Self::ConversionEnvironment(value) => serde_json::to_value(value),
             Self::ConversionMutation(value) => serde_json::to_value(value),
+            Self::ConversionSetupStarted(value) => serde_json::to_value(value),
+            Self::ConversionSetupStatus(value) => serde_json::to_value(value),
             Self::SupportedQuantTypes(value) => serde_json::to_value(value),
             Self::BackendStatus(value) => serde_json::to_value(value),
             Self::DownloadStarted(value) => serde_json::to_value(value),
@@ -748,6 +759,81 @@ impl ConversionStartedOutcome {
 pub(crate) struct ConversionProgressResponse {
     success: bool,
     progress: Option<ConversionProgressOutcome>,
+}
+
+const SETUP_FAILURE_MESSAGE: &str = "Conversion environment setup did not complete successfully.";
+
+// Lexical projection of the core's canonical hyphenated UUID identity. No UUID
+// version or provenance is inferred here; operation ownership stays in core.
+fn canonical_setup_id(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+            }
+        })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+struct ConversionSetupSnapshotOutcome {
+    operation_id: String,
+    status: ConversionSetupStatus,
+    error: Option<&'static str>,
+}
+
+impl TryFrom<ConversionSetupSnapshot> for ConversionSetupSnapshotOutcome {
+    type Error = PumasError;
+
+    fn try_from(snapshot: ConversionSetupSnapshot) -> Result<Self, Self::Error> {
+        if !canonical_setup_id(&snapshot.operation_id)
+            || (snapshot.status == ConversionSetupStatus::Failed) != snapshot.error.is_some()
+        {
+            return Err(invalid_domain_outcome("conversion setup snapshot"));
+        }
+        Ok(Self {
+            operation_id: snapshot.operation_id,
+            status: snapshot.status,
+            error: snapshot.error.map(|_| SETUP_FAILURE_MESSAGE),
+        })
+    }
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct ConversionSetupStartedOutcome {
+    success: bool,
+    setup: ConversionSetupSnapshotOutcome,
+}
+
+impl ConversionSetupStartedOutcome {
+    pub(crate) fn new(setup: ConversionSetupSnapshot) -> Result<Self, PumasError> {
+        Ok(Self {
+            success: true,
+            setup: setup.try_into()?,
+        })
+    }
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct ConversionSetupStatusOutcome {
+    success: bool,
+    setup: Option<ConversionSetupSnapshotOutcome>,
+}
+
+impl ConversionSetupStatusOutcome {
+    pub(crate) fn new(setup: Option<ConversionSetupSnapshot>) -> Result<Self, PumasError> {
+        Ok(Self {
+            success: true,
+            setup: setup
+                .map(ConversionSetupSnapshotOutcome::try_from)
+                .transpose()?,
+        })
+    }
 }
 
 impl ConversionProgressResponse {
@@ -1930,6 +2016,14 @@ struct ConversionIdParams {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+struct StartConversionSetupParams {
+    #[serde(default)]
+    expected_previous_operation_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SetupQuantizationBackendParams {
     backend: String,
 }
@@ -2210,6 +2304,21 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
         "list_model_conversions" => empty().map(|()| RpcCommand::ListModelConversions),
         "check_conversion_environment" => empty().map(|()| RpcCommand::CheckConversionEnvironment),
         "setup_conversion_environment" => empty().map(|()| RpcCommand::SetupConversionEnvironment),
+        "get_conversion_setup" => empty().map(|()| RpcCommand::GetConversionSetup),
+        "start_conversion_setup" => {
+            parse_params::<StartConversionSetupParams>(params).and_then(|params| {
+                if params
+                    .expected_previous_operation_id
+                    .as_deref()
+                    .is_some_and(|id| !canonical_setup_id(id))
+                {
+                    return Err(PublicError::invalid_params());
+                }
+                Ok(RpcCommand::StartConversionSetup {
+                    expected_previous_operation_id: params.expected_previous_operation_id,
+                })
+            })
+        }
         "get_supported_quant_types" => empty().map(|()| RpcCommand::GetSupportedQuantTypes),
         "get_backend_status" => empty().map(|()| RpcCommand::GetBackendStatus),
         "setup_quantization_backend" => parse_params::<SetupQuantizationBackendParams>(params)
@@ -2863,6 +2972,93 @@ mod tests {
             assert!(encoded["quant_types"][0].get("bitsPerWeight").is_some());
             assert!(encoded["quant_types"][0].get("bits_per_weight").is_none());
         }
+    }
+
+    #[test]
+    fn conversion_setup_projection_preserves_states_and_redacts_diagnostics() {
+        let id = "2e038924-e0e3-4266-95ef-f7a02997b7b6";
+        for status in [
+            ConversionSetupStatus::InProgress,
+            ConversionSetupStatus::Completed,
+            ConversionSetupStatus::Failed,
+            ConversionSetupStatus::Cancelled,
+        ] {
+            let snapshot = ConversionSetupSnapshot {
+                operation_id: id.into(),
+                status,
+                error: (status == ConversionSetupStatus::Failed)
+                    .then(|| "/private/installer/token".into()),
+            };
+            let value =
+                serde_json::to_value(ConversionSetupStartedOutcome::new(snapshot.clone()).unwrap())
+                    .unwrap();
+            assert_eq!(value["setup"]["operationId"], id);
+            assert_eq!(
+                value["setup"]["status"],
+                serde_json::to_value(status).unwrap()
+            );
+            assert!(!value.to_string().contains("/private/"));
+            assert_eq!(
+                value["setup"]["error"].is_null(),
+                status != ConversionSetupStatus::Failed
+            );
+            let mut contradictory = snapshot;
+            contradictory.error = if contradictory.error.is_some() {
+                None
+            } else {
+                Some("unexpected".into())
+            };
+            assert!(ConversionSetupStartedOutcome::new(contradictory).is_err());
+        }
+        assert_eq!(
+            serde_json::to_value(ConversionSetupStatusOutcome::new(None).unwrap()).unwrap(),
+            json!({"success":true,"setup":null})
+        );
+        for operation_id in [
+            "",
+            "not-an-id",
+            "2E038924-e0e3-4266-95ef-f7a02997b7b6",
+            "2e038924-e0e3-4266-95ef-f7a02997b7b6\n",
+        ] {
+            assert!(ConversionSetupStartedOutcome::new(ConversionSetupSnapshot {
+                operation_id: operation_id.into(),
+                status: ConversionSetupStatus::InProgress,
+                error: None,
+            })
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn conversion_setup_admission_preserves_previous_id_and_rejects_unknown_params() {
+        let id = "2e038924-e0e3-4266-95ef-f7a02997b7b6";
+        for params in [json!({}), json!({"expected_previous_operation_id":null})] {
+            assert!(matches!(
+                parse_command("start_conversion_setup", Some(&params)).unwrap(),
+                RpcCommand::StartConversionSetup {
+                    expected_previous_operation_id: None
+                }
+            ));
+        }
+        let params = json!({"expected_previous_operation_id":id});
+        assert!(
+            matches!(parse_command("start_conversion_setup", Some(&params)).unwrap(),
+            RpcCommand::StartConversionSetup { expected_previous_operation_id: Some(value) } if value == id)
+        );
+        for params in [
+            json!({"expected_previous_operation_id":""}),
+            json!({"expected_previous_operation_id":42}),
+            json!({"expectedPreviousOperationId":id}),
+            json!({"force":true}),
+            json!({"expected_previous_operation_id":format!("{id}\n")}),
+        ] {
+            assert!(parse_command("start_conversion_setup", Some(&params)).is_err());
+        }
+        assert!(matches!(
+            parse_command("get_conversion_setup", None).unwrap(),
+            RpcCommand::GetConversionSetup
+        ));
+        assert!(parse_command("get_conversion_setup", Some(&json!({"force":true}))).is_err());
     }
 
     #[test]

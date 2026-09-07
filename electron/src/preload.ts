@@ -15,6 +15,8 @@ import type { LauncherRootCommittedPresentation } from './window-presentation';
 import {
   decodeCatalogSearchOutcome,
   decodeConversionProgressResponse,
+  decodeConversionSetupStartedOutcome,
+  decodeConversionSetupStatusOutcome,
   decodeConversionListOutcome,
   decodeConversionStartedOutcome,
   decodeConversionCancelledOutcome,
@@ -849,6 +851,8 @@ const electronAPI = {
   list_model_conversions: () => validatedApiCall('list_model_conversions', decodeConversionListOutcome),
   check_conversion_environment: () => validatedApiCall('check_conversion_environment', decodeConversionEnvironmentOutcome),
   setup_conversion_environment: () => validatedApiCall('setup_conversion_environment', decodeSuccessOutcome),
+  start_conversion_setup: (expectedPreviousOperationId?: string | null) => validatedApiCall('start_conversion_setup', decodeConversionSetupStartedOutcome, { expected_previous_operation_id: expectedPreviousOperationId ?? null }),
+  get_conversion_setup: () => validatedApiCall('get_conversion_setup', decodeConversionSetupStatusOutcome),
   get_supported_quant_types: () => validatedApiCall('get_supported_quant_types', decodeSupportedQuantTypesOutcome),
   get_backend_status: () => validatedApiCall('get_backend_status', decodeBackendStatusOutcome),
   setup_quantization_backend: (backend: QuantBackend) =>

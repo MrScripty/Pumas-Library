@@ -53,6 +53,39 @@ test('conversion decoder rejects old field names and unsafe numeric evidence', (
   assert.equal(contract.decodeConversionListOutcome({success:true,conversions:[{...valid.progress,progress:2}]}).status, 'invalid');
 });
 
+test('setup snapshots preserve all producer states, identities and explicit idle', () => {
+  for (const [name,decode] of [['conversion_setup_started',contract.decodeConversionSetupStartedOutcome],['conversion_setup_status',contract.decodeConversionSetupStatusOutcome]]) {
+    for (const response of fixtures[name]) {
+      const result = decode(response);
+      assert.equal(result.status, 'valid');
+      assert.deepEqual(JSON.parse(JSON.stringify(result.value)), response);
+      assert.equal(Object.isFrozen(result.value.setup), true);
+      assert.equal(JSON.stringify(result.value).includes('/secret/'), false);
+    }
+  }
+  assert.deepEqual(JSON.parse(JSON.stringify(contract.decodeConversionSetupStatusOutcome(fixtures.conversion_setup_idle).value)), {success:true,setup:null});
+  assert.equal(contract.decodeConversionSetupStartedOutcome(fixtures.conversion_setup_idle).status, 'invalid');
+});
+
+test('setup decoders reject contradictory status, malformed identity and raw diagnostics', () => {
+  const active = fixtures.conversion_setup_started[0];
+  for (const patch of [{operationId:''}, {operationId:'old-id'}, {operationId:active.setup.operationId.toUpperCase()},
+    {operationId:`${active.setup.operationId}\n`}, {operation_id:active.setup.operationId}, {status:'ready'},
+    {status:'failed',error:null}, {error:'Conversion environment setup did not complete successfully.'},
+    {status:'failed',error:'/private/diagnostic'}, {extra:true},
+  ]) assert.equal(contract.decodeConversionSetupStartedOutcome({...active,setup:{...active.setup,...patch}}).status, 'invalid');
+  const missing = structuredClone(active);
+  delete missing.setup.error;
+  assert.equal(contract.decodeConversionSetupStartedOutcome(missing).status, 'invalid');
+  assert.equal(contract.decodeConversionSetupStatusOutcome({success:false,setup:null}).status, 'invalid');
+  for (const params of [{}, {expected_previous_operation_id:null}, {expected_previous_operation_id:active.setup.operationId}]) {
+    assert.equal(contract.decodeStartConversionSetupParams(params).status, 'valid');
+  }
+  for (const params of [{force:true}, {expectedPreviousOperationId:active.setup.operationId}, {expected_previous_operation_id:''}, {expected_previous_operation_id:42}]) {
+    assert.equal(contract.decodeStartConversionSetupParams(params).status, 'invalid');
+  }
+});
+
 test('conversion operation outcomes preserve producer readiness, cancellation and quant metadata', () => {
   const pairs = [
     ['conversion_started',contract.decodeConversionStartedOutcome],

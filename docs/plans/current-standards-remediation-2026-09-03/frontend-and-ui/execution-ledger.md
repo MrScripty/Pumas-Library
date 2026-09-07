@@ -1,5 +1,60 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-07 — Conversion Setup Observation
+
+Accepted the FE-I25 core/RPC/desktop observation contract, not dialog migration.
+`start_conversion_setup` promptly starts or attaches to the retained operation;
+`get_conversion_setup` reads its UUID and in-progress/completed/failed/cancelled
+state without filesystem work. Idle is explicit null, not readiness. Terminal
+state follows cleanup and lease release. Only a matching observed terminal ID
+permits explicit retry; duplicate/stale retry requests return current work even
+after completion. A valid old token on a fresh owner fails without installing.
+The existing blocking setup method retains its behavior on the same owner.
+
+The backend agent owned core types, admission, snapshots and facade tests. Root
+owned RPC parsing/disclosure/schema fixtures, generated output, preload/registry,
+typed consumer contracts and gates. The codebase-design skill kept lifecycle
+behind the existing backend interface. Identity generation precedes worker spawn;
+replacement is atomic, including calls through the existing blocking method.
+RPC preserves canonical UUIDs and state/error correlation but replaces private
+failure text with a bounded public message. No new runtime, dependency, GUI
+requirement, persistence or inference-plugin gate was introduced.
+
+Acceptance evidence:
+
+- Core/RPC: 1,398 default and 1,358 no-default-features tests pass; 22 existing
+  ignored tests each. The focused conversion suite passes 38 tests. Fixtures
+  cover read-only idle, concurrent admission/retry, retained identity after
+  dropped waiters, failed/cancelled snapshots, invalid/obsolete tokens and
+  cleanup-before-terminal. RPC tests cover closed requests and redacted outcomes.
+- Strict all-target Clippy passes with all features and no defaults. Rustfmt,
+  generated freshness and all five plan contracts pass.
+- Actual producer/decoder and compiled-preload/typed-consumer conformance each
+  pass 12 tests, covering all states, explicit null, UUIDs, exact retry forwarding,
+  malformed payloads and contradictory errors. Generator tests pass 6;
+  compiled-preload/registry tests pass 14 with one existing GUI-oracle skip.
+  Electron build and both projects' lint
+  pass. Frontend types, all 569 tests in 115 files and both production builds pass;
+  default renderer build output is restored.
+- Standalone localhost HTTP uses the current no-default-features, contract-export
+  binary with an isolated library and owned fake interpreter. It proves idle,
+  rejected obsolete-token admission, timely start while an installer is held,
+  retained ID/status, observed completion/reaping and repeat-safe explicit retry.
+  No real packages, models or live application state were changed.
+
+Environment limit: an additional bare minimal-binary link crashed in rust-lld
+with the repository drive nearly full (about 420 MB free). HTTP evidence instead
+uses the successfully built current headless contract-export binary; the failed
+link is not claimed successful. Rust incremental caches occupy about 203 GB.
+No caches or recovery artifacts were removed; free build space before further
+large builds. This is not Windows/macOS or release-artifact acceptance.
+
+Identity remains latest-only and owner/process-lifetime, not durable history,
+restart recovery or another manager's operation discovery. FE-I25 stays open for
+the optional dialog's start/observe, timeout/reopen and consent behavior, followed
+by remaining FE-I23 quantization configuration. No new GUI interaction claim,
+full M4/M5 acceptance or Pending cleanup replay acceptance is made here.
+
 ## 2026-09-06 — Conversion Setup Custody
 
 Accepted the backend custody prerequisite of FE-I25, not its public operation

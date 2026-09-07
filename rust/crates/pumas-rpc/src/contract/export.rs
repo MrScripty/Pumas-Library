@@ -243,6 +243,29 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         .collect::<Result<Vec<_>, _>>()?;
     let conversion_list = ConversionListOutcome::new(conversions)?;
     let conversion_missing = ConversionProgressResponse::new(None)?;
+    let setup_snapshots = [
+        ConversionSetupStatus::InProgress,
+        ConversionSetupStatus::Completed,
+        ConversionSetupStatus::Failed,
+        ConversionSetupStatus::Cancelled,
+    ]
+    .into_iter()
+    .map(|status| ConversionSetupSnapshot {
+        operation_id: "2e038924-e0e3-4266-95ef-f7a02997b7b6".into(),
+        status,
+        error: (status == ConversionSetupStatus::Failed)
+            .then(|| "private setup diagnostic /secret/path".into()),
+    })
+    .collect::<Vec<_>>();
+    let setup_started = setup_snapshots
+        .iter()
+        .cloned()
+        .map(ConversionSetupStartedOutcome::new)
+        .collect::<Result<Vec<_>, _>>()?;
+    let setup_status = setup_snapshots
+        .into_iter()
+        .map(|snapshot| ConversionSetupStatusOutcome::new(Some(snapshot)))
+        .collect::<Result<Vec<_>, _>>()?;
     use pumas_library::conversion::{
         LlamaCppBackend, Nvfp4Backend, QuantizationBackend, SherryBackend,
     };
@@ -276,6 +299,9 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         "conversion_cancelled":[ConversionCancelledOutcome::new(false),ConversionCancelledOutcome::new(true)],
         "conversion_environment":[ConversionEnvironmentOutcome::new(false),ConversionEnvironmentOutcome::new(true)],
         "conversion_setup_success":SuccessOutcome::new(),
+        "conversion_setup_started":setup_started,
+        "conversion_setup_status":setup_status,
+        "conversion_setup_idle":ConversionSetupStatusOutcome::new(None)?,
         "conversion_quant_types":conversion_quant_types,
         "conversion_quant_types_nullable_backend":conversion_quant_types_nullable_backend,
         "conversion_backend_status":conversion_backend_status,
@@ -317,6 +343,9 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         ConversionStartedOutcome,
         ConversionCancelledOutcome,
         ConversionEnvironmentOutcome,
+        ConversionSetupStartedOutcome,
+        ConversionSetupStatusOutcome,
+        StartConversionSetupParams,
         SupportedQuantTypesOutcome,
         BackendStatusOutcome,
         SuccessOutcome,
@@ -371,6 +400,9 @@ fn refine_named(name: &str, schema: &mut Value) {
         "DownloadStartedSuccess" => {
             object.insert("pumasStarted".into(), true.into());
         }
+        "ConversionSetupSnapshotOutcome" => {
+            object.insert("pumasConversionSetup".into(), true.into());
+        }
         _ => {}
     }
     if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
@@ -380,6 +412,8 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "ConversionStartedOutcome"
             | "ConversionCancelledOutcome"
             | "ConversionEnvironmentOutcome"
+            | "ConversionSetupStartedOutcome"
+            | "ConversionSetupStatusOutcome"
             | "SupportedQuantTypesOutcome"
             | "BackendStatusOutcome"
             | "SuccessOutcome" => {
@@ -391,6 +425,19 @@ fn refine_named(name: &str, schema: &mut Value) {
             }
             "QuantOption" => {
                 properties["bitsPerWeight"]["minimum"] = 0.into();
+            }
+            "ConversionSetupSnapshotOutcome" => {
+                properties["operationId"]["pattern"] =
+                    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$".into();
+                properties["operationId"]["minLength"] = 36.into();
+                properties["operationId"]["maxLength"] = 36.into();
+                properties["error"]["enum"] = serde_json::json!([null, SETUP_FAILURE_MESSAGE]);
+            }
+            "StartConversionSetupParams" => {
+                properties["expected_previous_operation_id"]["pattern"] =
+                    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$".into();
+                properties["expected_previous_operation_id"]["minLength"] = 36.into();
+                properties["expected_previous_operation_id"]["maxLength"] = 36.into();
             }
             "ConversionProgressOutcome" => {
                 properties["progress"]["minimum"] = 0.into();

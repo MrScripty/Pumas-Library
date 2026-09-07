@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use super::{manager::probe_conversion_environment, scripts};
+use super::{
+    manager::probe_conversion_environment, scripts, ConversionSetupSnapshot, ConversionSetupStatus,
+};
 use crate::cancel::CancellationToken;
 use crate::{PumasError, Result};
 
@@ -37,6 +39,8 @@ impl Failure {
 type Outcome = std::result::Result<(), Failure>;
 
 struct Operation {
+    id: String,
+    failure: Mutex<Option<Failure>>,
     cancel: CancellationToken,
     completion: watch::Receiver<Option<Outcome>>,
     // Keeping the handle inside this mutex makes an interrupted join resumable.
@@ -45,10 +49,44 @@ struct Operation {
 
 struct WorkerReceipt {
     handle: Option<JoinHandle<()>>,
-    failure: Option<Failure>,
 }
 
 impl Operation {
+    fn snapshot(&self) -> ConversionSetupSnapshot {
+        let failure = self
+            .failure
+            .lock()
+            .expect("setup failure receipt poisoned")
+            .clone();
+        let outcome = failure
+            .map(Err)
+            .or_else(|| self.completion.borrow().clone())
+            .or_else(|| {
+                if self.completion.has_changed().is_err() {
+                    // Publication may race the first read. Re-read after closure
+                    // before classifying a missing terminal receipt as failure.
+                    self.completion.borrow().clone().or_else(|| {
+                        Some(Err(Failure::Failed(
+                            "Conversion setup completion was lost".into(),
+                        )))
+                    })
+                } else {
+                    None
+                }
+            });
+        let (status, error) = match outcome {
+            None => (ConversionSetupStatus::InProgress, None),
+            Some(Ok(())) => (ConversionSetupStatus::Completed, None),
+            Some(Err(Failure::Cancelled)) => (ConversionSetupStatus::Cancelled, None),
+            Some(Err(Failure::Failed(reason))) => (ConversionSetupStatus::Failed, Some(reason)),
+        };
+        ConversionSetupSnapshot {
+            operation_id: self.id.clone(),
+            status,
+            error,
+        }
+    }
+
     async fn observe(&self) -> Outcome {
         let mut receiver = self.completion.clone();
         let outcome = loop {
@@ -64,11 +102,17 @@ impl Operation {
         let mut worker = self.worker.lock().await;
         if let Some(task) = worker.handle.as_mut() {
             if task.await.is_err() {
-                worker.failure = Some(Failure::Failed("Conversion setup worker failed".into()));
+                *self.failure.lock().expect("setup failure receipt poisoned") =
+                    Some(Failure::Failed("Conversion setup worker failed".into()));
             }
             worker.handle = None;
         }
-        match worker.failure.as_ref() {
+        match self
+            .failure
+            .lock()
+            .expect("setup failure receipt poisoned")
+            .as_ref()
+        {
             Some(failure) => Err(failure.clone()),
             None => outcome,
         }
@@ -95,42 +139,114 @@ impl SetupOwner {
     }
 
     pub(super) async fn ensure(&self) -> Result<()> {
-        loop {
-            let (operation, previous) = {
-                let mut state = self.state.lock().expect("conversion setup owner poisoned");
-                if state.closed {
-                    return Err(PumasError::InstallationCancelled);
-                }
-                match state.operation.as_ref() {
-                    Some(operation) => (
-                        Arc::clone(operation),
-                        operation.completion.borrow().is_some(),
-                    ),
-                    None => {
-                        let operation = self.start();
-                        state.operation = Some(Arc::clone(&operation));
-                        (operation, false)
-                    }
-                }
-            };
-            let outcome = operation.observe().await;
-            if !previous {
-                return outcome.map_err(Failure::public);
-            }
-            // An explicit new request may retry a completed operation, but only
-            // after its worker has been observed. Existing waiters keep its result.
+        let (operation, previous) = {
             let mut state = self.state.lock().expect("conversion setup owner poisoned");
+            if state.closed {
+                return Err(PumasError::InstallationCancelled);
+            }
+            match state.operation.as_ref() {
+                Some(operation) => (
+                    Arc::clone(operation),
+                    operation.snapshot().status != ConversionSetupStatus::InProgress,
+                ),
+                None => {
+                    let operation = self.start();
+                    state.operation = Some(Arc::clone(&operation));
+                    (operation, false)
+                }
+            }
+        };
+        let outcome = operation.observe().await;
+        if !previous {
+            return outcome.map_err(Failure::public);
+        }
+        // An explicit new request may retry a completed operation, but only
+        // after its worker has been observed. Existing waiters keep its result.
+        let next = {
+            let mut state = self.state.lock().expect("conversion setup owner poisoned");
+            if state.closed {
+                return Err(PumasError::InstallationCancelled);
+            }
             if state
                 .operation
                 .as_ref()
                 .is_some_and(|current| Arc::ptr_eq(current, &operation))
             {
-                state.operation = None;
+                state.operation = Some(self.start());
             }
+            state.operation.clone().expect("retained setup operation")
+        };
+        next.observe().await.map_err(Failure::public)
+    }
+
+    pub(super) fn snapshot(&self) -> Option<ConversionSetupSnapshot> {
+        self.state
+            .lock()
+            .expect("conversion setup owner poisoned")
+            .operation
+            .as_ref()
+            .map(|operation| operation.snapshot())
+    }
+
+    pub(super) async fn start_or_get(
+        &self,
+        expected_previous: Option<&str>,
+    ) -> Result<ConversionSetupSnapshot> {
+        if expected_previous.is_some_and(|id| {
+            id.len() != 36
+                || uuid::Uuid::parse_str(id).map_or(true, |parsed| parsed.to_string() != id)
+        }) {
+            return Err(PumasError::InvalidParams {
+                message:
+                    "Expected setup operation ID must be a canonical lower-case hyphenated UUID"
+                        .into(),
+            });
         }
+        let previous = {
+            let mut state = self.state.lock().expect("conversion setup owner poisoned");
+            if state.closed {
+                return Err(PumasError::InstallationCancelled);
+            }
+            match state.operation.as_ref() {
+                None if expected_previous.is_some() => return Err(PumasError::InvalidParams { message: "No retained setup operation exists in this owner; refresh setup status before starting".into() }),
+                None => {
+                    let operation = self.start();
+                    let snapshot = operation.snapshot();
+                    state.operation = Some(operation);
+                    return Ok(snapshot);
+                }
+                Some(operation) => {
+                    let snapshot = operation.snapshot();
+                    if expected_previous != Some(operation.id.as_str()) || snapshot.status == ConversionSetupStatus::InProgress {
+                        return Ok(snapshot);
+                    }
+                    Arc::clone(operation)
+                }
+            }
+        };
+        // Observe the terminal worker before compare-and-swap admission. A
+        // dropped retry waiter cannot erase its record or admit partial work.
+        let _previous_outcome = previous.observe().await;
+        let mut state = self.state.lock().expect("conversion setup owner poisoned");
+        if state.closed {
+            return Err(PumasError::InstallationCancelled);
+        }
+        if state
+            .operation
+            .as_ref()
+            .is_some_and(|operation| Arc::ptr_eq(operation, &previous))
+        {
+            state.operation = Some(self.start());
+        }
+        Ok(state
+            .operation
+            .as_ref()
+            .expect("retained setup operation")
+            .snapshot())
     }
 
     fn start(&self) -> Arc<Operation> {
+        let id = uuid::Uuid::new_v4().to_string();
         let root = self.root.clone();
         let cancel = CancellationToken::new();
         let worker_cancel = cancel.clone();
@@ -145,11 +261,12 @@ impl SetupOwner {
             sender.send_replace(Some(result));
         });
         Arc::new(Operation {
+            id,
+            failure: Mutex::new(None),
             cancel,
             completion: receiver,
             worker: tokio::sync::Mutex::new(WorkerReceipt {
                 handle: Some(handle),
-                failure: None,
             }),
         })
     }
@@ -464,8 +581,20 @@ mod tests {
         let waiting = Arc::clone(&owner);
         let waiter = tokio::spawn(async move { waiting.ensure_environment().await });
         let pid = started(root.path()).await;
+        let admitted_id = owner
+            .get_conversion_setup()
+            .expect("owned setup identity")
+            .operation_id;
         waiter.abort();
         assert!(waiter.await.expect_err("waiter cancelled").is_cancelled());
+        assert_eq!(
+            owner
+                .start_conversion_setup(None)
+                .await
+                .expect("inspect after waiter dropped")
+                .operation_id,
+            admitted_id
+        );
 
         let aliases = tempfile::tempdir().expect("alias root");
         let alias = aliases.path().join("launcher");
@@ -671,16 +800,185 @@ mod tests {
             panic!("controlled setup worker failure");
         });
         let operation = Operation {
+            id: uuid::Uuid::new_v4().to_string(),
+            failure: Mutex::new(None),
             cancel: CancellationToken::new(),
             completion: receiver,
             worker: tokio::sync::Mutex::new(WorkerReceipt {
                 handle: Some(handle),
-                failure: None,
             }),
         };
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while operation.snapshot().status == ConversionSetupStatus::InProgress {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("closed completion channel is not eternal in-progress");
+        assert_eq!(operation.snapshot().status, ConversionSetupStatus::Failed);
         for _ in 0..2 {
             assert!(matches!(operation.observe().await,
                 Err(Failure::Failed(message)) if message == "Conversion setup worker failed"));
+            assert_eq!(operation.snapshot().status, ConversionSetupStatus::Failed);
+        }
+    }
+
+    async fn terminal(manager: &super::super::ConversionManager) -> ConversionSetupSnapshot {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let snapshot = manager.get_conversion_setup().expect("admitted operation");
+                if snapshot.status != ConversionSetupStatus::InProgress {
+                    return snapshot;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("setup reaches terminal state")
+    }
+
+    #[test]
+    fn idle_snapshot_is_read_only_and_has_no_record() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let absent = root.path().join("not-created");
+        let owner = SetupOwner::new(absent.clone());
+        assert_eq!(owner.snapshot(), None);
+        assert!(!absent.exists());
+    }
+
+    #[tokio::test]
+    async fn public_start_and_retry_are_identity_conditioned_and_cleanup_precedes_terminal() {
+        let root = fixture();
+        let manager = manager(root.path().to_path_buf()).await;
+        assert_eq!(manager.get_conversion_setup(), None);
+        let (first, repeated) = tokio::join!(
+            manager.start_conversion_setup(None),
+            manager.start_conversion_setup(None)
+        );
+        let first = first.expect("first admission");
+        assert_eq!(
+            first.operation_id,
+            repeated.expect("joined admission").operation_id
+        );
+        assert_eq!(first.status, ConversionSetupStatus::InProgress);
+        assert_eq!(first.error, None);
+        assert_eq!(
+            uuid::Uuid::parse_str(&first.operation_id)
+                .expect("UUID identity")
+                .to_string(),
+            first.operation_id
+        );
+        started(root.path()).await;
+        assert_eq!(
+            manager
+                .start_conversion_setup(Some(&first.operation_id))
+                .await
+                .expect("active retry is a read")
+                .operation_id,
+            first.operation_id
+        );
+        std::fs::write(marker(root.path(), "release"), "").expect("release installer");
+        let completed = terminal(&manager).await;
+        assert_eq!(completed.status, ConversionSetupStatus::Completed);
+        assert_eq!(completed.error, None);
+        assert!(
+            acquire(root.path()).is_ok(),
+            "terminal publication follows lease release"
+        );
+        assert_eq!(
+            manager
+                .start_conversion_setup(None)
+                .await
+                .expect("read completed")
+                .operation_id,
+            first.operation_id
+        );
+        let (retry, duplicate) = tokio::join!(
+            manager.start_conversion_setup(Some(&first.operation_id)),
+            manager.start_conversion_setup(Some(&first.operation_id)),
+        );
+        let retry = retry.expect("explicit successor");
+        assert_ne!(retry.operation_id, first.operation_id);
+        assert_eq!(
+            duplicate.expect("CAS duplicate").operation_id,
+            retry.operation_id
+        );
+        assert_eq!(
+            terminal(&manager).await.status,
+            ConversionSetupStatus::Completed
+        );
+        assert_eq!(
+            manager
+                .start_conversion_setup(Some(&first.operation_id))
+                .await
+                .expect("stale token is a read even after successor completion")
+                .operation_id,
+            retry.operation_id
+        );
+        manager.shutdown_setup().await.expect("drain setup");
+        assert!(matches!(
+            manager.start_conversion_setup(None).await,
+            Err(PumasError::InstallationCancelled)
+        ));
+    }
+
+    #[tokio::test]
+    async fn failed_and_cancelled_setup_snapshots_retain_exact_error_invariant() {
+        let root = fixture();
+        std::fs::write(marker(root.path(), "fail"), "").expect("fail fixture installer");
+        let manager = manager(root.path().to_path_buf()).await;
+        let admitted = manager
+            .start_conversion_setup(None)
+            .await
+            .expect("admit failed setup");
+        let failed = terminal(&manager).await;
+        assert_eq!(failed.status, ConversionSetupStatus::Failed);
+        assert!(failed.error.as_ref().is_some_and(|error| !error.is_empty()));
+        assert_eq!(failed.operation_id, admitted.operation_id);
+        assert_eq!(
+            manager
+                .start_conversion_setup(None)
+                .await
+                .expect("no implicit retry"),
+            failed
+        );
+        std::fs::remove_file(marker(root.path(), "fail")).expect("repair fixture");
+        let retry = manager
+            .start_conversion_setup(Some(&failed.operation_id))
+            .await
+            .expect("explicit retry");
+        assert_ne!(retry.operation_id, failed.operation_id);
+        // The old marker is not a readiness condition for the new child. The
+        // queued/active setup is owned and cancellation must drain it either way.
+        manager
+            .shutdown_setup()
+            .await
+            .expect("cancel and drain retry");
+        let cancelled = manager.get_conversion_setup().expect("cancelled record");
+        assert_eq!(cancelled.operation_id, retry.operation_id);
+        assert_eq!(cancelled.status, ConversionSetupStatus::Cancelled);
+        assert_eq!(cancelled.error, None);
+        assert!(acquire(root.path()).is_ok());
+    }
+
+    #[tokio::test]
+    async fn unknown_or_invalid_retry_tokens_do_not_create_setup_state_or_files() {
+        let root = tempfile::tempdir().expect("root");
+        let absent = root.path().join("absent");
+        let owner = SetupOwner::new(absent.clone());
+        let old_id = uuid::Uuid::new_v4().to_string();
+        for token in [
+            "",
+            "not-an-id",
+            "00112233-4455-6677-8899-AABBCCDDEEFF",
+            old_id.as_str(),
+        ] {
+            assert!(matches!(
+                owner.start_or_get(Some(token)).await,
+                Err(PumasError::InvalidParams { .. })
+            ));
+            assert_eq!(owner.snapshot(), None);
+            assert!(!absent.exists());
         }
     }
 

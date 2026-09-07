@@ -175,6 +175,25 @@ impl ConversionManager {
         self.setup.ensure().await
     }
 
+    /// Start base Python setup or return the latest retained operation.
+    /// `None` never retries a retained operation. A matching terminal operation
+    /// ID explicitly admits one successor; stale IDs return the current record.
+    /// IDs must be canonical lower-case hyphenated UUIDs. A retry token without
+    /// a retained record is invalid. Records are owner/process-lifetime only.
+    pub async fn start_conversion_setup(
+        &self,
+        expected_previous_operation_id: Option<&str>,
+    ) -> Result<super::ConversionSetupSnapshot> {
+        self.setup
+            .start_or_get(expected_previous_operation_id)
+            .await
+    }
+
+    /// Inspect the latest base Python setup without starting work or touching disk.
+    pub fn get_conversion_setup(&self) -> Option<super::ConversionSetupSnapshot> {
+        self.setup.snapshot()
+    }
+
     /// Close setup admission, cancel active setup, and observe its cleanup.
     /// Call before shutting down the hosting Tokio runtime. Repeated calls
     /// observe the same terminal result; dropping a waiter does not stop cleanup.

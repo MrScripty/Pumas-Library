@@ -1,5 +1,5 @@
-// Generated from pumas-rpc contract.rs; SHA256 8f887ca3e197a4274b29ec99ecafb885767766d60f824368f0c334c3bf277370. DO NOT EDIT.
-import { validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome } from './desktop-contract.validators.js';
+// Generated from pumas-rpc contract.rs; SHA256 17edaf803c5a0a9d43443a36270646ee2fbb4f65da377b4618393a502864ecfd. DO NOT EDIT.
+import { validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateStartConversionSetupParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome } from './desktop-contract.validators.js';
 export type BackendStatus = { "backend": (QuantBackend); "name": string; "ready": boolean };
 export type BackendStatusOutcome = { "backends": ReadonlyArray<BackendStatus>; "success": true };
 export type CatalogArtifactState = ({ "state": "complete" }) | ({ "downloadProgressFraction"?: number; "reasons": ReadonlyArray<CatalogPartialReason>; "recovery"?: CatalogRecoveryIdentity; "state": "partial" });
@@ -14,6 +14,10 @@ export type ConversionEnvironmentOutcome = { "ready": boolean; "success": true }
 export type ConversionListOutcome = { "conversions": ReadonlyArray<ConversionProgressOutcome>; "success": true };
 export type ConversionProgressOutcome = { "bytesWritten": number | null; "conversionId": string; "currentTensor": string | null; "direction": ConversionDirection; "error": null | "The model conversion did not complete successfully."; "estimatedOutputSize": number | null; "outputModelId": string | null; "pipelineStep": number | null; "pipelineStepLabel": string | null; "pipelineStepsTotal": number | null; "progress": number | null; "sourceModelId": string; "status": ConversionStatus; "targetQuant": string | null; "tensorsCompleted": number | null; "tensorsTotal": number | null };
 export type ConversionProgressResponse = { "progress": (ConversionProgressOutcome) | (null); "success": true };
+export type ConversionSetupSnapshotOutcome = { "error": null | "Conversion environment setup did not complete successfully."; "operationId": string; "status": ConversionSetupStatus };
+export type ConversionSetupStartedOutcome = { "setup": ConversionSetupSnapshotOutcome; "success": true };
+export type ConversionSetupStatus = ("in_progress") | ("completed") | ("failed") | ("cancelled");
+export type ConversionSetupStatusOutcome = { "setup": (ConversionSetupSnapshotOutcome) | (null); "success": true };
 export type ConversionStartedOutcome = { "conversion_id": string; "success": true };
 export type ConversionStatus = ("setting_up") | ("validating") | ("converting") | ("writing") | ("importing") | ("completed") | ("cancelled") | ("error") | ("building_toolchain") | ("generating_f16_gguf") | ("computing_imatrix") | ("quantizing") | ("calibrating") | ("training");
 export type DownloadIdParams = { "download_id": string };
@@ -40,6 +44,7 @@ export type QuantBackend = ("python_conversion") | ("llama_cpp") | ("nvfp4") | (
 export type QuantOption = { "backend": (QuantBackend) | (null); "bitsPerWeight": number; "description": string; "imatrixRecommended": boolean; "name": string; "recommended": boolean };
 export type RecoverDownloadParams = { "modelId": string; "recoveryToken": string };
 export type SearchCatalogParams = { "limit"?: number | null; "offset"?: number | null; "query": string };
+export type StartConversionSetupParams = { "expected_previous_operation_id"?: string | null };
 export type SuccessOutcome = { "success": true };
 export type SupportedQuantTypesOutcome = { "quant_types": ReadonlyArray<QuantOption>; "success": true };
 
@@ -82,6 +87,8 @@ export function decodeConversionCancelledOutcome(input: unknown): DecodeOutcome<
 export function decodeConversionEnvironmentOutcome(input: unknown): DecodeOutcome<ConversionEnvironmentOutcome> { return decode(input, validateConversionEnvironmentOutcome); }
 export function decodeConversionListOutcome(input: unknown): DecodeOutcome<ConversionListOutcome> { return decode(input, validateConversionListOutcome); }
 export function decodeConversionProgressResponse(input: unknown): DecodeOutcome<ConversionProgressResponse> { return decode(input, validateConversionProgressResponse); }
+export function decodeConversionSetupStartedOutcome(input: unknown): DecodeOutcome<ConversionSetupStartedOutcome> { return decode(input, validateConversionSetupStartedOutcome); }
+export function decodeConversionSetupStatusOutcome(input: unknown): DecodeOutcome<ConversionSetupStatusOutcome> { return decode(input, validateConversionSetupStatusOutcome); }
 export function decodeConversionStartedOutcome(input: unknown): DecodeOutcome<ConversionStartedOutcome> { return decode(input, validateConversionStartedOutcome); }
 export function decodeDownloadIdParams(input: unknown): DecodeOutcome<DownloadIdParams> { return decode(input, validateDownloadIdParams); }
 export function decodeDownloadListOutcome(input: unknown): DecodeOutcome<DownloadListOutcome> { return decode(input, validateDownloadListOutcome); }
@@ -95,5 +102,6 @@ export function decodePartialDownloadOutcome(input: unknown): DecodeOutcome<Part
 export function decodePublicError(input: unknown): DecodeOutcome<PublicError> { return decode(input, validatePublicError); }
 export function decodeRecoverDownloadParams(input: unknown): DecodeOutcome<RecoverDownloadParams> { return decode(input, validateRecoverDownloadParams); }
 export function decodeSearchCatalogParams(input: unknown): DecodeOutcome<SearchCatalogParams> { return decode(input, validateSearchCatalogParams); }
+export function decodeStartConversionSetupParams(input: unknown): DecodeOutcome<StartConversionSetupParams> { return decode(input, validateStartConversionSetupParams); }
 export function decodeSuccessOutcome(input: unknown): DecodeOutcome<SuccessOutcome> { return decode(input, validateSuccessOutcome); }
 export function decodeSupportedQuantTypesOutcome(input: unknown): DecodeOutcome<SupportedQuantTypesOutcome> { return decode(input, validateSupportedQuantTypesOutcome); }

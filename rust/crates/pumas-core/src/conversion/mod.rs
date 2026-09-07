@@ -23,7 +23,7 @@ pub use manager::ConversionManager;
 pub use nvfp4::Nvfp4Backend;
 pub use sherry::SherryBackend;
 pub use types::{
-    BackendStatus, ConversionDirection, ConversionProgress, ConversionRequest, ConversionSource,
-    ConversionStatus, QuantBackend, QuantOption, QuantizationBackend, QuantizeParams,
-    ScriptProgressLine,
+    BackendStatus, ConversionDirection, ConversionProgress, ConversionRequest,
+    ConversionSetupSnapshot, ConversionSetupStatus, ConversionSource, ConversionStatus,
+    QuantBackend, QuantOption, QuantizationBackend, QuantizeParams, ScriptProgressLine,
 };

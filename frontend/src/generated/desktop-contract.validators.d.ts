@@ -1,10 +1,12 @@
-// Generated from pumas-rpc contract.rs; SHA256 8f887ca3e197a4274b29ec99ecafb885767766d60f824368f0c334c3bf277370. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 17edaf803c5a0a9d43443a36270646ee2fbb4f65da377b4618393a502864ecfd. DO NOT EDIT.
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCatalogSearchOutcome(value: unknown): boolean;
 export declare function validateConversionCancelledOutcome(value: unknown): boolean;
 export declare function validateConversionEnvironmentOutcome(value: unknown): boolean;
 export declare function validateConversionListOutcome(value: unknown): boolean;
 export declare function validateConversionProgressResponse(value: unknown): boolean;
+export declare function validateConversionSetupStartedOutcome(value: unknown): boolean;
+export declare function validateConversionSetupStatusOutcome(value: unknown): boolean;
 export declare function validateConversionStartedOutcome(value: unknown): boolean;
 export declare function validateDownloadIdParams(value: unknown): boolean;
 export declare function validateDownloadListOutcome(value: unknown): boolean;
@@ -18,5 +20,6 @@ export declare function validatePartialDownloadOutcome(value: unknown): boolean;
 export declare function validatePublicError(value: unknown): boolean;
 export declare function validateRecoverDownloadParams(value: unknown): boolean;
 export declare function validateSearchCatalogParams(value: unknown): boolean;
+export declare function validateStartConversionSetupParams(value: unknown): boolean;
 export declare function validateSuccessOutcome(value: unknown): boolean;
 export declare function validateSupportedQuantTypesOutcome(value: unknown): boolean;

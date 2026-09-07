@@ -633,6 +633,14 @@ async fn dispatch_admitted_command(
             conversion::setup_conversion_environment(state).await?;
             Ok(RpcOutcome::ConversionMutation(SuccessOutcome::new()))
         }
+        RpcCommand::StartConversionSetup {
+            expected_previous_operation_id,
+        } => conversion::start_conversion_setup(state, expected_previous_operation_id.as_deref())
+            .await
+            .map(RpcOutcome::ConversionSetupStarted),
+        RpcCommand::GetConversionSetup => {
+            conversion::get_conversion_setup(state).map(RpcOutcome::ConversionSetupStatus)
+        }
         RpcCommand::GetSupportedQuantTypes => conversion::get_supported_quant_types(state)
             .await
             .map(Box::new)
@@ -1276,6 +1284,46 @@ async fn dispatch_method(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn conversion_setup_rpc_idle_and_obsolete_token_do_not_install() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        for (method, params, success) in [
+            ("get_conversion_setup", json!({}), true),
+            (
+                "start_conversion_setup",
+                json!({"expected_previous_operation_id":"2e038924-e0e3-4266-95ef-f7a02997b7b6"}),
+                false,
+            ),
+            ("start_conversion_setup", json!({"force":true}), false),
+            ("get_conversion_setup", json!({}), true),
+        ] {
+            let body = Bytes::from(
+                serde_json::to_vec(
+                    &json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}),
+                )
+                .unwrap(),
+            );
+            let response = handle_rpc(State(state.clone()), body).await.into_response();
+            let bytes = axum::body::to_bytes(response.into_body(), 65_536)
+                .await
+                .unwrap();
+            let value: Value = serde_json::from_slice(&bytes).unwrap();
+            if success {
+                assert_eq!(value["result"], json!({"success":true,"setup":null}));
+            } else {
+                assert_eq!(value["error"]["code"], -32602, "{value}");
+            }
+        }
+        for path in [
+            "converter-venv",
+            "converter-scripts",
+            "conversion-setup.lock",
+        ] {
+            assert!(!temp.path().join("launcher-data").join(path).exists());
+        }
+    }
 
     #[tokio::test]
     async fn conversion_remaining_rpc_outcomes_need_no_native_setup() {

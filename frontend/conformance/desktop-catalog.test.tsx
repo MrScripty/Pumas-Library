@@ -37,6 +37,7 @@ function installActualPreload(
   healthOutcomes: unknown[] = [],
   picker: () => Promise<unknown> = async () => { throw new ValidationError('No picker fixture', 'producer-fixtures'); },
   conversionResponse: unknown = fixture['conversion_missing'],
+  setupResponse: unknown = fixture['conversion_setup_idle'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -62,6 +63,7 @@ function installActualPreload(
         const requestParams: unknown = JSON.parse(JSON.stringify(params));
         requests.push({ method, params: requestParams });
         if (method === 'get_conversion_progress') return conversionResponse;
+        if (method === 'get_conversion_setup' || method === 'start_conversion_setup') return setupResponse;
         if (method === 'list_model_conversions') return fixture['conversion_list'];
         const conversionOperations: Record<string, unknown> = {
           start_model_conversion: fixture['conversion_started'],
@@ -144,6 +146,36 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('preserves setup identity, terminal states and retry tokens through the bundled preload', async () => {
+    const snapshots = fixture['conversion_setup_started'];
+    if (!Array.isArray(snapshots)) throw new ValidationError('Missing setup snapshots', 'producer-fixtures');
+    for (const snapshot of snapshots) {
+      const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, snapshot);
+      const bridge = window.electronAPI;
+      if (!bridge) throw new ValidationError('Missing preload bridge', 'producer-fixtures');
+      const started = await bridge.start_conversion_setup();
+      expect(started).toEqual(snapshot);
+      expect(requests[0]).toEqual({method:'start_conversion_setup',params:{expected_previous_operation_id:null}});
+      const previous = started.setup.operationId;
+      expect(await bridge.start_conversion_setup(previous)).toEqual(snapshot);
+      expect(requests[1]).toEqual({method:'start_conversion_setup',params:{expected_previous_operation_id:previous}});
+      await bridge.start_conversion_setup(null);
+      expect(requests[2]).toEqual({method:'start_conversion_setup',params:{expected_previous_operation_id:null}});
+      expect(await bridge.get_conversion_setup()).toEqual(snapshot);
+      expect(requests[3]).toEqual({method:'get_conversion_setup',params:{}});
+    }
+    installActualPreload();
+    expect(await window.electronAPI?.get_conversion_setup()).toEqual({success:true,setup:null});
+    await expect(window.electronAPI?.start_conversion_setup()).rejects.toMatchObject({status:'invalid'});
+  });
+
+  it('rejects malformed setup state before exposing it to typed consumers', async () => {
+    const malformed = {success:true,setup:{operationId:'2e038924-e0e3-4266-95ef-f7a02997b7b6',status:'failed',error:null}};
+    installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, malformed);
+    await expect(window.electronAPI?.get_conversion_setup()).rejects.toMatchObject({status:'invalid'});
+    await expect(window.electronAPI?.start_conversion_setup()).rejects.toMatchObject({status:'invalid'});
+  });
+
   it('forwards all conversion options and preserves operation outcomes through the bundled preload', async () => {
     const requests = installActualPreload();
     const bridge = window.electronAPI;

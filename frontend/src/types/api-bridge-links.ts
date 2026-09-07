@@ -5,6 +5,8 @@ import type {
   ConversionDirection,
   ConversionBackendStatusResponse,
   ConversionSetupResponse,
+  ConversionSetupStartedResponse,
+  ConversionSetupStatusResponse,
   QuantBackend,
   GetConversionProgressResponse,
   ListConversionsResponse,
@@ -118,6 +120,10 @@ export interface DesktopBridgeLinkMappingAPI {
   list_model_conversions(): Promise<ListConversionsResponse>;
   check_conversion_environment(): Promise<ConversionEnvironmentResponse>;
   setup_conversion_environment(): Promise<ConversionSetupResponse>;
+  /** Start/attach; retry only against the last observed terminal operation ID. */
+  start_conversion_setup(expectedPreviousOperationId?: string | null): Promise<ConversionSetupStartedResponse>;
+  /** Latest setup in this backend owner; null is not an environment-readiness claim. */
+  get_conversion_setup(): Promise<ConversionSetupStatusResponse>;
   get_supported_quant_types(): Promise<SupportedQuantTypesResponse>;
   get_backend_status(): Promise<ConversionBackendStatusResponse>;
   setup_quantization_backend(backend: QuantBackend): Promise<ConversionSetupResponse>;

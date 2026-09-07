@@ -65,6 +65,21 @@ completed download.
 ## Public Boundary
 
 Base Python conversion setup is supervised independently of its caller.
+Use `start_conversion_setup(None)` for prompt admission/attachment and
+`get_conversion_setup()` for a memory-only latest snapshot. The snapshot contains
+a canonical UUID and `in_progress`, `completed`, `failed` or `cancelled` state;
+terminal state follows owned cleanup. `None` means this manager has no recorded
+setup, not that Python is ready. Check readiness separately.
+
+Starting without a previous ID returns retained work/results without retrying.
+To explicitly retry, pass the last observed terminal operation ID. Only that
+matching terminal record can be replaced; replaying the same retry request
+returns the current operation instead of installing again. A valid old token on a fresh
+owner fails without setup. Identity is latest-only and ends with the manager/
+process lifetime: it is not historical lookup, durable restart recovery or
+discovery of another manager's setup. Existing blocking
+`ensure_conversion_environment()` still waits and permits explicit retry.
+
 Concurrent requests on one manager share the active result; another manager or
 process must acquire the same physical `launcher-data/conversion-setup.lock`
 before deploying scripts or installing packages. Contention fails explicitly.
@@ -85,8 +100,9 @@ live members remain before lease release. Installers must remain in that group.
 On other targets, cancellation drains the foreground command naturally before
 releasing custody, so shutdown can wait for it. Full process-tree evidence is
 Linux-only. If Linux cleanup cannot establish quiescence, it retains custody
-rather than report a completed shutdown. Public setup identity/progress across
-timeout and reopen remains a separate API-contract follow-up.
+rather than report a completed shutdown. RPC and desktop expose the same setup
+observation contract with redacted failures; dialog integration remains a
+separate consumer follow-up.
 
 The crate builds and runs independently of the optional GUI and RPC process.
 For registered-link inspection, `PumasApi::get_link_health(None)` exposes the

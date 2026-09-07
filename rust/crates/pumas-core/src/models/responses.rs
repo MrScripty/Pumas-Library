@@ -356,6 +356,7 @@ pub struct BrokenLinkInfo {
 /// Note: Not FFI-compatible due to `usize` fields. Use wrapper types in pumas-uniffi.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub struct LinkHealthResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -1,5 +1,5 @@
-// Generated from pumas-rpc contract.rs; SHA256 119933738c2905bcc927102620546469dc63bb6a8632afdb374f8798f0877ae0. DO NOT EDIT.
-import { validateCatalogSearchOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams } from './desktop-contract.validators.js';
+// Generated from pumas-rpc contract.rs; SHA256 743d700347e5480492c031c68383e64e6587d6329b60ffd58a3bde6e785f2e6a. DO NOT EDIT.
+import { validateCatalogSearchOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams } from './desktop-contract.validators.js';
 export type CatalogArtifactState = ({ "state": "complete" }) | ({ "downloadProgressFraction"?: number; "reasons": ReadonlyArray<CatalogPartialReason>; "recovery"?: CatalogRecoveryIdentity; "state": "partial" });
 export type CatalogIntegrityState = ({ "state": "clean" }) | ({ "count": number; "otherModelIds": ReadonlyArray<string>; "state": "duplicate" });
 export type CatalogModel = { "artifact": CatalogArtifactState; "dependencyCount": number; "displayDate"?: string; "displayName": string; "format"?: string; "id": string; "integrity": CatalogIntegrityState; "modelDir": string; "modelType": string; "quantization"?: string; "relatedAvailable": boolean; "sizeBytes"?: number };
@@ -17,6 +17,8 @@ export type DownloadStatus = "queued" | "downloading" | "pausing" | "paused" | "
 export type DownloadStatusFoundOutcome = { "downloadId": string; "downloadedBytes": number | null; "error": string | null; "etaSeconds": number | null; "libraryModelId": string | null; "modelName": string | null; "modelType": string | null; "nextRetryDelaySeconds": number | null; "progress": number | null; "repoId": string | null; "retryAttempt": number | null; "retryLimit": number | null; "retrying": boolean | null; "selectedArtifactId": string | null; "speed": number | null; "status": DownloadStatus; "success": true; "totalBytes": number | null };
 export type DownloadStatusMissingOutcome = { "error": string; "success": false };
 export type DownloadStatusOutcome = (DownloadStatusFoundOutcome) | (DownloadStatusMissingOutcome);
+export type LinkHealthOutcome = (LinkHealthResponse);
+export type LinkHealthResponse = { "broken_links": ReadonlyArray<string>; "error"?: null; "errors": ReadonlyArray<string>; "healthy_links": number; "orphaned_links": ReadonlyArray<string>; "status": "healthy" | "degraded"; "success": true; "total_links": number; "warnings": ReadonlyArray<string> };
 export type ModelIndexRefreshOutcome = { "indexed_count": number; "success": true };
 export type ModelsOutcome = { "models": Readonly<Record<string, CatalogModel>>; "success": true };
 export type PartialDownloadActionName = "resume" | "recover" | "attach" | "none";
@@ -66,6 +68,7 @@ export function decodeDownloadListOutcome(input: unknown): DecodeOutcome<Downloa
 export function decodeDownloadMutationOutcome(input: unknown): DecodeOutcome<DownloadMutationOutcome> { return decode(input, validateDownloadMutationOutcome); }
 export function decodeDownloadStartedOutcome(input: unknown): DecodeOutcome<DownloadStartedOutcome> { return decode(input, validateDownloadStartedOutcome); }
 export function decodeDownloadStatusOutcome(input: unknown): DecodeOutcome<DownloadStatusOutcome> { return decode(input, validateDownloadStatusOutcome); }
+export function decodeLinkHealthOutcome(input: unknown): DecodeOutcome<LinkHealthOutcome> { return decode(input, validateLinkHealthOutcome); }
 export function decodeModelIndexRefreshOutcome(input: unknown): DecodeOutcome<ModelIndexRefreshOutcome> { return decode(input, validateModelIndexRefreshOutcome); }
 export function decodeModelsOutcome(input: unknown): DecodeOutcome<ModelsOutcome> { return decode(input, validateModelsOutcome); }
 export function decodePartialDownloadOutcome(input: unknown): DecodeOutcome<PartialDownloadOutcome> { return decode(input, validatePartialDownloadOutcome); }

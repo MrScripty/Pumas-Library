@@ -64,6 +64,16 @@ completed download.
 
 ## Public Boundary
 
+The crate builds and runs independently of the optional GUI and RPC process.
+For registered-link inspection, `PumasApi::get_link_health(None)` exposes the
+owner's registry report. `model_library::LinkRegistry::health()` also supports
+an independently loaded registry without constructing an application owner.
+Both use the same read-only scan and return inspection failures as `Result`
+errors, not an empty healthy report. This checks registered entries only: it
+does not discover orphaned files, and the facade's version argument currently
+does not filter the registry. Mutation remains with the separately owned link
+operations; reading health never deletes or repairs files.
+
 Prefer the facade and typed domain records exported by `src/lib.rs`. Internal
 modules own persistence, network, process, provider, and conversion details.
 Do not make a new internal module public to avoid designing a stable operation.

@@ -10,6 +10,7 @@ import { useModelLibraryActions } from '../src/hooks/useModelLibraryActions';
 import { useModelDownloads } from '../src/hooks/useModelDownloads';
 import { buildDownloadingModels, mergeLocalModelGroups } from '../src/components/ModelManagerUtils';
 import { LocalModelsList } from '../src/components/LocalModelsList';
+import { LinkHealthStatus } from '../src/components/LinkHealthStatus';
 import { ValidationError } from '../src/errors';
 
 const fixturePath = process.env['PUMAS_DESKTOP_CONTRACT_FIXTURES'];
@@ -31,6 +32,7 @@ function installActualPreload(
   recoveryOutcome = 'recovery_outcome',
   listeners = new Map<string, (event: unknown, payload: unknown) => void>(),
   initialDownloads: unknown = fixture['download_list'],
+  healthOutcomes: unknown[] = [],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -55,6 +57,10 @@ function installActualPreload(
         const requestParams: unknown = JSON.parse(JSON.stringify(params));
         requests.push({ method, params: requestParams });
         if (method === 'get_models') return fixture['models'];
+        if (method === 'get_link_health') {
+          if (healthOutcomes.length === 0) throw new ValidationError('No link-health fixture response remains.', 'producer-fixtures');
+          return healthOutcomes.shift();
+        }
         if (method === 'search_models_fts') return fixture['search'];
         if (method === 'resume_partial_download') return fixture[recoveryOutcome];
         if (method === 'list_model_downloads') return initialDownloads;
@@ -194,5 +200,26 @@ describe('actual Rust catalog through bundled preload and renderer', () => {
     expect(response.success).toBe(true);
     expect(response.models).toHaveLength(4);
     expect(response.models.find((model) => model.id === 'llm/example/partial')?.artifact.state).toBe('partial');
+  });
+
+  it('rejects a contradictory producer report before UI use and recovers through visible retry', async () => {
+    const healthy = fixture['link_health_healthy'];
+    if (!isFixtureRecord(healthy)) throw new ValidationError('Missing link-health fixture.', 'producer-fixtures');
+    const requests = installActualPreload(undefined, undefined, undefined, [
+      { ...healthy, status: 'degraded' }, healthy,
+    ]);
+    render(<LinkHealthStatus />);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Link health unavailable'));
+    expect(screen.queryByText('All links healthy')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Retry link health' }));
+    await waitFor(() => expect(screen.getByText('All links healthy')).toBeVisible());
+    expect(requests.filter(request => request.method === 'get_link_health')).toHaveLength(2);
+  });
+
+  it('renders real registered-link degradation through the bundled preload', async () => {
+    installActualPreload(undefined, undefined, undefined, [fixture['link_health_degraded']]);
+    render(<LinkHealthStatus />);
+    await waitFor(() => expect(screen.getByText('Issues detected')).toBeVisible());
+    expect(screen.queryByText('All links healthy')).not.toBeInTheDocument();
   });
 });

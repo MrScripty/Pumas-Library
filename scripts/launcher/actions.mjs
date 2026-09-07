@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { ACTION_FLAGS, EXIT_CODES, buildUsage } from './contract.mjs';
+import { ACTION_FLAGS, EXIT_CODES, buildUsage, isGuiEnabled } from './contract.mjs';
 import { LauncherError } from './errors.mjs';
 import { installDependencies, ensureRuntimeDependencies } from './dependencies.mjs';
 import { log } from './logger.mjs';
@@ -13,30 +13,36 @@ const RELEASE_SMOKE_EXIT_DELAY_MS = 1_500;
 
 export async function executeAction(parsedArgs, runtime) {
   const { action, forwardedArgs } = parsedArgs;
+  const guiEnabled = isGuiEnabled();
 
   switch (action) {
     case ACTION_FLAGS.HELP:
       process.stdout.write(buildUsage(runtime.context.displayName));
       return EXIT_CODES.SUCCESS;
     case ACTION_FLAGS.INSTALL:
-      await installDependencies(runtime);
+      await installDependencies(runtime, { guiEnabled });
       return EXIT_CODES.SUCCESS;
     case ACTION_FLAGS.BUILD:
-      await buildApp('dev', runtime);
+      await buildApp('dev', runtime, guiEnabled);
       return EXIT_CODES.SUCCESS;
     case ACTION_FLAGS.BUILD_RELEASE:
-      await buildApp('release', runtime);
+      await buildApp('release', runtime, guiEnabled);
       return EXIT_CODES.SUCCESS;
     case ACTION_FLAGS.RUN:
-      await runDevApp(forwardedArgs, runtime);
+      await runDevApp(forwardedArgs, runtime, guiEnabled);
       return EXIT_CODES.SUCCESS;
     case ACTION_FLAGS.RUN_RELEASE:
-      await runReleaseApp(forwardedArgs, runtime);
+      await runReleaseApp(forwardedArgs, runtime, guiEnabled);
       return EXIT_CODES.SUCCESS;
     case ACTION_FLAGS.TEST:
-      await runTestSuite(runtime);
+      await runTestSuite(runtime, guiEnabled);
       return EXIT_CODES.SUCCESS;
     case ACTION_FLAGS.RELEASE_SMOKE:
+      if (!guiEnabled) {
+        throw new LauncherError('release-smoke requires PUMAS_GUI=true', {
+          exitCode: EXIT_CODES.UNSUPPORTED_ACTION,
+        });
+      }
       await runReleaseSmoke(runtime);
       return EXIT_CODES.SUCCESS;
     default:
@@ -47,12 +53,12 @@ export async function executeAction(parsedArgs, runtime) {
   }
 }
 
-async function buildApp(mode, runtime) {
+async function buildApp(mode, runtime, guiEnabled) {
   const { context, platformService } = runtime;
   const inferencePluginsEnabled = areInferencePluginsEnabled();
   const featureArgs = inferencePluginsEnabled ? [] : ['--no-default-features'];
 
-  ensureRuntimeDependencies(runtime);
+  ensureRuntimeDependencies(runtime, { guiEnabled });
 
   switch (mode) {
     case 'dev':
@@ -94,18 +100,20 @@ async function buildApp(mode, runtime) {
       });
   }
 
-  log('[build] compiling frontend assets');
-  await runCommand(platformService.corepackCommand, corepackPnpmArgs(workspaceScriptArgs('./frontend', 'build')), {
-    cwd: context.repoRoot,
-    env: {
-      PUMAS_INFERENCE_PLUGINS: String(inferencePluginsEnabled),
-    },
-  });
+  if (guiEnabled) {
+    log('[build] compiling frontend assets');
+    await runCommand(platformService.corepackCommand, corepackPnpmArgs(workspaceScriptArgs('./frontend', 'build')), {
+      cwd: context.repoRoot,
+      env: {
+        PUMAS_INFERENCE_PLUGINS: String(inferencePluginsEnabled),
+      },
+    });
 
-  log('[build] compiling electron main process');
-  await runCommand(platformService.corepackCommand, corepackPnpmArgs(workspaceScriptArgs('./electron', 'build')), {
-    cwd: context.repoRoot,
-  });
+    log('[build] compiling electron main process');
+    await runCommand(platformService.corepackCommand, corepackPnpmArgs(workspaceScriptArgs('./electron', 'build')), {
+      cwd: context.repoRoot,
+    });
+  }
 
   log(`[done] build completed (${mode})`);
 }
@@ -114,11 +122,17 @@ export function areInferencePluginsEnabled(env = process.env) {
   return env.PUMAS_INFERENCE_PLUGINS !== 'false';
 }
 
-async function runDevApp(runArgs, runtime) {
+async function runDevApp(runArgs, runtime, guiEnabled) {
   const { context, platformService } = runtime;
 
-  ensureRuntimeDependencies(runtime);
+  if (guiEnabled) ensureRuntimeDependencies(runtime);
   ensureDevRuntimeArtifacts(runtime);
+
+  if (!guiEnabled) {
+    log('[run] launching debug backend');
+    await runCommand(platformService.debugBackendBinary(context), runArgs, { cwd: context.repoRoot });
+    return;
+  }
 
   log('[run] launching development runtime');
   await runCommand(
@@ -134,11 +148,17 @@ async function runDevApp(runArgs, runtime) {
   );
 }
 
-async function runReleaseApp(runArgs, runtime) {
+async function runReleaseApp(runArgs, runtime, guiEnabled) {
   const { context, platformService } = runtime;
 
-  ensureRuntimeDependencies(runtime);
-  ensureReleaseArtifacts(runtime);
+  if (guiEnabled) ensureRuntimeDependencies(runtime);
+  ensureReleaseArtifacts(runtime, guiEnabled);
+
+  if (!guiEnabled) {
+    log('[run] launching release backend');
+    await runCommand(platformService.releaseBackendBinary(context), runArgs, { cwd: context.repoRoot });
+    return;
+  }
 
   log('[run] launching release runtime');
   await runCommand(
@@ -154,10 +174,25 @@ async function runReleaseApp(runArgs, runtime) {
   );
 }
 
-async function runTestSuite(runtime) {
+async function runTestSuite(runtime, guiEnabled) {
   const { context, platformService } = runtime;
 
-  ensureRuntimeDependencies(runtime);
+  ensureRuntimeDependencies(runtime, { guiEnabled });
+
+  if (!guiEnabled) {
+    log('[test] running backend tests');
+    await runCommand(platformService.cargoCommand, [
+      'test', '-p', 'pumas-library', '-p', 'pumas-rpc',
+      '--manifest-path', context.rustManifestPath,
+      ...(areInferencePluginsEnabled() ? [] : ['--no-default-features']),
+    ], { cwd: context.repoRoot });
+    log('[test] running launcher tests');
+    const tests = fs.readdirSync(path.join(context.repoRoot, 'scripts', 'launcher'))
+      .filter((name) => name.endsWith('.test.mjs')).sort()
+      .map((name) => path.join('scripts', 'launcher', name));
+    await runCommand(process.execPath, ['--test', ...tests], { cwd: context.repoRoot });
+    return;
+  }
 
   log('[test] running Rust workspace tests');
   await runCommand(
@@ -260,7 +295,7 @@ function ensureDevRuntimeArtifacts(runtime) {
   }
 }
 
-function ensureReleaseArtifacts(runtime) {
+function ensureReleaseArtifacts(runtime, guiEnabled = true) {
   const { context, platformService } = runtime;
   const releaseBackendBinary = platformService.releaseBackendBinary(context);
 
@@ -270,6 +305,8 @@ function ensureReleaseArtifacts(runtime) {
       { exitCode: EXIT_CODES.MISSING_RELEASE_ARTIFACT }
     );
   }
+
+  if (!guiEnabled) return;
 
   if (!fs.existsSync(context.frontendDistIndex)) {
     throw new LauncherError(

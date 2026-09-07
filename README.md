@@ -6,7 +6,7 @@
 
 ![Pumas Library](https://github.com/user-attachments/assets/be18cffc-b4fe-418b-a3b4-034ee0b35060)
 
-Pumas Library is a desktop and Rust library for keeping AI model files,
+Pumas Library is a reusable Rust backend with an optional desktop GUI for keeping AI model files,
 metadata, downloads, and local-runtime configuration in one place.
 
 Its main capabilities are:
@@ -23,7 +23,7 @@ Its main capabilities are:
 | Path | Responsibility |
 | --- | --- |
 | `rust/crates/pumas-core` | Model library, persistence, downloads, runtime profiles, and public Rust API |
-| `rust/crates/pumas-rpc` | Local HTTP/JSON-RPC sidecar used by the desktop app |
+| `rust/crates/pumas-rpc` | Standalone local HTTP/JSON-RPC server, also used by the desktop app |
 | `rust/crates/pumas-app-manager` | Optional runtime installation and process integration |
 | `rust/crates/pumas-uniffi` | Experimental UniFFI adapter and generators |
 | `frontend` | React renderer |
@@ -69,7 +69,40 @@ PUMAS_INFERENCE_PLUGINS=false ./launcher.sh --build-release
 root contains `launcher-data/` and `shared-resources/`; the model library itself
 lives under `shared-resources/models/`.
 
+## Standalone Backend
+
+Build and run without Node, Corepack, frontend assets or Electron:
+
+```bash
+cargo build --manifest-path rust/Cargo.toml -p pumas-rpc --release
+./rust/target/release/pumas-rpc --launcher-root /path/to/pumas --port 8080
+```
+
+Use `--no-default-features` on the Cargo build to omit RPC inference-plugin
+integration. GUI selection does not disable backend model-library operations.
+The RPC listener accepts loopback addresses only; standalone does not imply
+remote-network exposure. Its port and root can be selected with `--help`.
+
+The optional Node launcher exposes the same backend-only selection:
+
+```bash
+PUMAS_GUI=false ./launcher.sh --build-release
+PUMAS_GUI=false ./launcher.sh --run-release -- --launcher-root /path/to/pumas
+```
+
+`PUMAS_GUI` defaults to `true` and accepts only `true` or `false`. Select it
+for each launcher invocation. With `false`, build/install/test omit GUI packages
+and run requires only the selected existing backend binary; it never starts
+Electron or builds missing artifacts. `PUMAS_INFERENCE_PLUGINS` is independent
+and controls the backend build configuration. `--release-smoke` remains a
+GUI-only check and is explicitly unsupported in headless mode.
+
 ## Rust Usage
+
+The backend does not depend on React, Electron, or a running GUI. Applications
+can embed the Rust crate directly; separate processes can use the standalone
+RPC server. Native file dialogs and window controls belong only to the GUI,
+not to the reusable model-library contract.
 
 `PumasApi` is the owning API. Construction fails when another process already
 owns the same launcher root. Use `PumasLocalClient` to connect to a running

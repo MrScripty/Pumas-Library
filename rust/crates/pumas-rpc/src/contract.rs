@@ -396,7 +396,7 @@ pub(crate) enum RpcOutcome {
     AppStatus(AppStatusOutcome),
     HfTokenMutation(SuccessOutcome),
     HfAuth(Box<HfAuthOutcome>),
-    LinkHealth(Box<LinkHealthResponse>),
+    LinkHealth(Box<LinkHealthOutcome>),
     CleanBrokenLinks(CleanBrokenLinksResponse),
     RemoveOrphanedLinks(RemoveOrphanedLinksOutcome),
     LinksForModel(Box<LinksForModelResponse>),
@@ -641,6 +641,35 @@ impl From<HfAuthStatus> for HfAuthOutcome {
 pub(crate) struct RemoveOrphanedLinksOutcome {
     success: bool,
     removed: usize,
+}
+
+/// Validated desktop projection retaining the standalone core report shape.
+#[derive(Serialize)]
+#[serde(transparent)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct LinkHealthOutcome(LinkHealthResponse);
+
+impl TryFrom<LinkHealthResponse> for LinkHealthOutcome {
+    type Error = PumasError;
+
+    fn try_from(report: LinkHealthResponse) -> Result<Self, Self::Error> {
+        let expected_status = if report.broken_links.is_empty() {
+            "healthy"
+        } else {
+            "degraded"
+        };
+        if !report.success
+            || report.error.is_some()
+            || report.status != expected_status
+            || report.total_links as u128 > MAX_JS_SAFE_INTEGER as u128
+            || report.healthy_links as u128 > MAX_JS_SAFE_INTEGER as u128
+            || report.healthy_links.checked_add(report.broken_links.len())
+                != Some(report.total_links)
+        {
+            return Err(invalid_domain_outcome("link health report"));
+        }
+        Ok(Self(report))
+    }
 }
 
 impl RemoveOrphanedLinksOutcome {
@@ -3233,6 +3262,47 @@ mod tests {
             },
         ] {
             assert!(PartialDownloadOutcome::try_from(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn link_health_projection_preserves_public_shape_and_rejects_false_reports() {
+        let valid = || LinkHealthResponse {
+            success: true,
+            error: None,
+            status: "degraded".into(),
+            total_links: 2,
+            healthy_links: 1,
+            broken_links: vec!["/fixture/missing".into()],
+            orphaned_links: vec![],
+            warnings: vec![],
+            errors: vec![],
+        };
+        let report = valid();
+        let expected = serde_json::to_value(&report).unwrap();
+        assert_eq!(
+            RpcOutcome::LinkHealth(Box::new(report.try_into().unwrap()))
+                .into_value()
+                .unwrap(),
+            expected
+        );
+        for field in ["success", "error", "status", "total", "healthy", "overflow"] {
+            let mut report = valid();
+            match field {
+                "success" => report.success = false,
+                "error" => report.error = Some("private diagnostic".into()),
+                "status" => report.status = "healthy".into(),
+                "total" => report.total_links = 3,
+                "healthy" => report.healthy_links = 2,
+                "overflow" => report.healthy_links = usize::MAX,
+                _ => unreachable!(),
+            }
+            let error = LinkHealthOutcome::try_from(report)
+                .err()
+                .expect("contradictory health must fail");
+            let public = PublicError::from(&error);
+            assert_eq!(public.class, PublicErrorClass::Internal);
+            assert!(!public.message.contains("private diagnostic"));
         }
     }
 

@@ -7,11 +7,12 @@ import { log } from './logger.mjs';
 import { corepackPnpmArgs, installArgs } from './package-manager.mjs';
 
 export function createDependencyPlan({
+  guiEnabled = true,
   commandExistsFn = commandExists,
   runCommandFn = runCommand,
   existsSyncFn = fs.existsSync,
 } = {}) {
-  return [
+  const backendTools = [
     {
       name: 'cargo',
       check: ({ platformService }) =>
@@ -29,6 +30,11 @@ export function createDependencyPlan({
         return false;
       },
     },
+  ];
+  if (!guiEnabled) return backendTools;
+
+  return [
+    ...backendTools,
     {
       name: 'corepack',
       check: ({ platformService }) =>
@@ -54,8 +60,8 @@ export function createDependencyPlan({
   ];
 }
 
-export async function installDependencies(runtime) {
-  await installDependencyPlan(createDependencyPlan(), runtime);
+export async function installDependencies(runtime, { guiEnabled = true } = {}) {
+  await installDependencyPlan(createDependencyPlan({ guiEnabled }), runtime);
 }
 
 export async function installDependencyPlan(dependencies, runtime) {
@@ -84,8 +90,8 @@ export async function installDependencyPlan(dependencies, runtime) {
   }
 }
 
-export function ensureRuntimeDependencies(runtime) {
-  ensureDependencyPlan(createDependencyPlan(), runtime);
+export function ensureRuntimeDependencies(runtime, { guiEnabled = true } = {}) {
+  ensureDependencyPlan(createDependencyPlan({ guiEnabled }), runtime);
 }
 
 export function ensureDependencyPlan(dependencies, runtime) {

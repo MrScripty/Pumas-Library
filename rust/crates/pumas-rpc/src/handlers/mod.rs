@@ -1276,6 +1276,75 @@ mod tests {
     use tempfile::TempDir;
 
     #[tokio::test]
+    async fn link_health_rpc_preserves_headless_read_and_failure_contracts() {
+        use pumas_library::model_library::{LinkEntry, LinkType};
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        let request = |params| {
+            Bytes::from(
+                serde_json::to_vec(&json!({
+                    "jsonrpc": "2.0", "id": 1, "method": "get_link_health", "params": params,
+                }))
+                .unwrap(),
+            )
+        };
+        for params in [json!({}), json!({"version_tag": "currently-unfiltered"})] {
+            let response = handle_rpc(State(state.clone()), request(params))
+                .await
+                .into_response();
+            let bytes = axum::body::to_bytes(response.into_body(), 16_384)
+                .await
+                .unwrap();
+            let value: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(value["result"]["success"], true);
+            assert_eq!(value["result"]["status"], "healthy");
+            assert_eq!(value["result"]["total_links"], 0);
+            assert!(value.get("error").is_none());
+        }
+        let response = handle_rpc(State(state.clone()), request(json!({"unexpected": true})))
+            .await
+            .into_response();
+        let bytes = axum::body::to_bytes(response.into_body(), 16_384)
+            .await
+            .unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["error"]["code"], -32602);
+
+        let blocker = temp.path().join("private-inspection-blocker");
+        std::fs::write(&blocker, b"preserve").unwrap();
+        state
+            .api
+            .model_library()
+            .link_registry()
+            .read()
+            .await
+            .register(LinkEntry {
+                model_id: "llm/example/model".into(),
+                source: blocker.clone(),
+                target: blocker.join("child"),
+                link_type: LinkType::Copy,
+                created_at: "2026-09-06T00:00:00Z".into(),
+                app_id: "embedded-consumer".into(),
+                app_version: None,
+            })
+            .await
+            .unwrap();
+        let response = handle_rpc(State(state.clone()), request(json!({})))
+            .await
+            .into_response();
+        let bytes = axum::body::to_bytes(response.into_body(), 16_384)
+            .await
+            .unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["error"]["code"], -32603);
+        assert!(value.get("result").is_none());
+        assert!(!String::from_utf8(bytes.to_vec())
+            .unwrap()
+            .contains("private-inspection-blocker"));
+        assert_eq!(std::fs::read(blocker).unwrap(), b"preserve");
+    }
+
+    #[tokio::test]
     async fn download_push_validates_library_identity_and_redacts_diagnostics() {
         for (model_id, event_name) in [
             ("llm/acme/model", "model-download-update"),

@@ -36,3 +36,20 @@ test('canonical text uses Unicode White_Space rather than JavaScript trim', asyn
   assert.equal(module.validateText('\u0085Name'), false);
   assert.equal(module.validateText('\ufeffName'), true);
 });
+
+test('registered-link health refinement rejects contradictory counts and status', async () => {
+  // Product invariant: every registered entry is classified exactly once.
+  const files = await generate({format:'pumas-desktop-contract-1',dialect:'http://json-schema.org/draft-07/schema#',schemas:{Health:{
+    type:'object', pumasLinkHealth:true,
+    properties:{healthy_links:{type:'integer'},total_links:{type:'integer'},broken_links:{type:'array',items:{type:'string'}},status:{enum:['healthy','degraded']}},
+    required:['healthy_links','total_links','broken_links','status'],additionalProperties:false,
+  }}});
+  const module = await import(`data:text/javascript;base64,${Buffer.from(files['desktop-contract.validators.js']).toString('base64')}`);
+  const healthy = {healthy_links:2,total_links:2,broken_links:[],status:'healthy'};
+  const degraded = {healthy_links:1,total_links:2,broken_links:['missing.gguf'],status:'degraded'};
+  assert.equal(module.validateHealth(healthy),true);
+  assert.equal(module.validateHealth(degraded),true);
+  for (const value of [{...healthy,status:'degraded'},{...degraded,status:'healthy'},{...degraded,total_links:3},{...degraded,broken_links:null}]) {
+    assert.equal(module.validateHealth(value),false);
+  }
+});

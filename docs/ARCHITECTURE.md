@@ -5,6 +5,12 @@
 Pumas separates durable model-library behavior from desktop presentation and
 optional inference runtimes.
 
+The Rust crate is independently embeddable and the RPC binary independently
+executable. Neither requires the GUI or its JavaScript dependencies. The
+launcher selects the optional GUI with `PUMAS_GUI`; inference-plugin selection
+is independent. The GUI adapts backend operations and owns native dialogs and
+window controls, rather than defining the backend's available functionality.
+
 ```text
 React renderer
   -> sandboxed Electron preload/main boundary
@@ -30,7 +36,8 @@ claims the root and returns an error when another live process owns it.
 `PumasLocalClient` explicitly connects to an existing ready owner.
 `PumasReadOnlyLibrary` reads indexed state without taking lifecycle ownership.
 
-The desktop sidecar constructs the owner. Renderer state is a projection of
+An embedding application or standalone RPC process constructs the owner; in
+desktop use, Electron supervises that RPC process. Renderer state is a projection of
 backend responses and update events; local optimistic state must not redefine
 whether a model, download, route, or runtime is authoritative.
 
@@ -65,9 +72,8 @@ services. TypeScript interfaces are consumer projections, not runtime proof.
 New or changed operations must update the receiver decoder, producer, consumer,
 and negative contract evidence together.
 
-The sidecar listens on loopback by default. Non-loopback `--allow-lan` mode is
-not safe for untrusted networks until authentication and authorization are
-implemented.
+The RPC server accepts loopback binding only. There is no supported
+`--allow-lan` mode; standalone deployment does not broaden exposure.
 
 ## Updates and Cached State
 

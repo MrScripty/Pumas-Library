@@ -193,6 +193,53 @@ impl LinkRegistry {
         data.by_target.values().cloned().collect()
     }
 
+    /// Inspect registered links without changing the registry or filesystem.
+    ///
+    /// This report covers the entire registry, not unregistered orphan files or
+    /// a particular application version. Filesystem inspection failures return
+    /// an error rather than a healthy or empty report.
+    pub async fn health(&self) -> Result<crate::models::LinkHealthResponse> {
+        let entries = self.get_all().await;
+        let mut healthy = 0;
+        let mut broken = Vec::new();
+        for entry in &entries {
+            let symlink = match fs::symlink_metadata(&entry.target).await {
+                Ok(metadata) => metadata.file_type().is_symlink(),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                Err(error) => return Err(crate::PumasError::io_with_path(error, &entry.target)),
+            };
+            let inspected = if symlink {
+                &entry.source
+            } else {
+                &entry.target
+            };
+            if fs::try_exists(inspected)
+                .await
+                .map_err(|error| crate::PumasError::io_with_path(error, inspected))?
+            {
+                healthy += 1;
+            } else {
+                broken.push(entry.target.to_string_lossy().into_owned());
+            }
+        }
+        Ok(crate::models::LinkHealthResponse {
+            success: true,
+            error: None,
+            status: if broken.is_empty() {
+                "healthy"
+            } else {
+                "degraded"
+            }
+            .into(),
+            total_links: entries.len(),
+            healthy_links: healthy,
+            broken_links: broken,
+            orphaned_links: Vec::new(),
+            warnings: Vec::new(),
+            errors: Vec::new(),
+        })
+    }
+
     /// Find and remove broken links (links to non-existent files).
     ///
     /// Returns the list of broken links that were removed.

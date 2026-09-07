@@ -10,15 +10,78 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound and migrate the remaining M4 link-health, import-picker,
-and conversion outcome consumers (FE-I10/FE-I11/FE-I14) with their canonical
-Rust/platform providers. Record exact consumer dispositions and the write set
-before implementation; preserve scan/import's distinct raw record contract.
-Extend the existing generated contract and consumer evidence, not handwritten
-wire mirrors. This frontend slice is sequenced after the program's current
-Rust recovery work and does not reopen accepted catalog/startup implementation.
+**Next slice:** Admit the import-picker contract (FE-I11), then conversion
+consumer contracts. The standalone-backend/link-health slice below is accepted.
+The user explicitly prioritizes API/UI contracts ahead of Pending download
+cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Standalone Backend And Link-Health Contract Admission
+
+Status: accepted within the Linux and registered-link read boundaries recorded
+in the [execution ledger](execution-ledger.md#2026-09-06--standalone-backend-and-link-health-contract).
+
+Operation: `continue` this canonical plan on 2026-09-06. User authority requires
+the backend to remain independently usable as a Rust library or standalone RPC
+process; the GUI is a separately optional consumer, not a prerequisite for backend
+features. GUI selection and inference-plugin selection are independent.
+
+Implement `PUMAS_GUI=false` in the existing launcher composition. Default desktop
+behavior remains unchanged. Headless build/run/test/install omit GUI artifacts,
+Node package installation and Corepack requirements. The Node launcher itself
+still requires Node; direct Cargo and RPC binary entry points do not. Preserve
+exact backend arguments and failures, never build implicitly on run, and reject
+the GUI-only release-smoke action when GUI is disabled. No Cargo GUI feature is
+needed: neither Rust crate depends on the separately built JavaScript GUI.
+
+Migrate FE-I10's registered-link health read through the public core Interface,
+canonical RPC outcome, generated decoder, preload and UI. Core link scanning
+belongs to the existing public LinkRegistry Module; PumasApi and state dispatch
+share it. Preserve the public result shape and signature, including the current
+registry-wide (not version-filtered) semantics. A transparent validated RPC
+projection owns wire-safe counts, healthy/degraded consistency and bounded
+operation failure. Schema derivation reuses the core result instead of copying
+its fields. The existing AJV generator gets one product refinement for count/status
+correlation; ordinary schema semantics remain AJV-owned. Read failure is not a
+successful empty report. UI loading/failure never masquerades as current healthy
+state; provide visible retry and suppress superseded result application.
+
+Composed-design review: `applicable`. The artifact is a standalone backend plus
+optional GUI consuming one link-health read contract. (1) Core owns registered
+link facts; RPC owns transport proof; preload decoding and UI presentation are
+separate; launcher owns artifact selection. (2) Only request/result identity and
+current UI invocation must interleave; GUI build selection cannot control core
+availability. (3) Embedded callers know LinkRegistry/PumasApi and Result, RPC
+callers know the existing method, desktop callers consume generated output, and
+operators select GUI independently from plugins. (4) Scan changes stay in core;
+wire changes regenerate consumers; presentation changes stay in UI; GUI selection
+stays in launcher. (5) Stable core values cross inward dependencies; no backend
+imports generated TypeScript or Electron. (6) Core and RPC build/test independently
+of GUI, while wire changes coordinate generated consumers. (7) Moving the repeated
+scan into its existing owner removes duplicate policy; deleting the narrow
+refinement would permit contradictory reports; no new framework, registry or
+runner is admitted. (8) Retained machinery is the existing launcher, core registry,
+RPC exporter, AJV decoder and UI state, with ordinary focused tests.
+
+Write ownership: backend agent owns core `model_library/link_registry.rs`,
+`api/{links,state}.rs`, `models/responses.rs`, focused public core tests, RPC
+`contract.rs`, `contract/export.rs` and affected read handler/tests. Frontend agent
+owns `LinkHealthStatus.tsx` and tests, `LinkHealthDetails.tsx` if needed for immutable
+arrays, and `types/api-links.ts`. Launcher agent owns
+`scripts/launcher/{actions,contract,dependencies}.mjs` and their tests. Root alone
+owns generator/refinement tests, six generated artifacts, preload, existing
+producer/preload/renderer conformance, affected README guidance and these plans/
+ledgers/issues. Root serializes Cargo, generation, integration and commits.
+
+Acceptance: public Rust read with no GUI and no default features; backend-only
+build and real isolated RPC read; unchanged public result behavior; valid and
+invalid generated report conformance; actual producer/preload/UI visible read,
+failure and retry; stale/unmount regressions; launcher delegation and dependency
+exclusion with GUI/plugin combinations; affected types/lint/tests and built GUI
+verification. No live model files, cleanup mutations, persistence formats,
+new dependencies, complete RPC migration, or Windows/macOS runtime claims.
+Stop/re-plan if the read requires broader link mutation or persistence repair.
 
 ## Download Row Association Bug Admission
 

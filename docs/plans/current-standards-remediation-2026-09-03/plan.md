@@ -247,10 +247,13 @@ Phase custody, idle handoff, canonical admission validation, and busy consumer
 behavior pass Linux gates. The existing desktop diagnostic enum and generated
 validators migrated together; no persistence schema or live data changed.
 
-**Next slice:** Admit the exact Pending cleanup replay contract against current
-durable authority and retained root custody. The shutdown/importer/grant
-prerequisites are accepted, not Pending replay itself. No old-format support.
-Cargo/commits stay serial; full C3/M4 and program acceptance remain open.
+**Next slice:** Continue API/UI contracts under the user's 2026-09-06 priority,
+following the accepted [standalone backend/link-health slice](frontend-and-ui/plan.md#standalone-backend-and-link-health-contract-admission).
+Import-picker and conversion contracts remain next in the frontend plan.
+The GUI is independently optional; embedded Rust and standalone RPC remain
+supported. Pending cleanup replay is deferred, not accepted: it still needs an
+exact contract against durable authority and retained root custody. No old-format
+support. Cargo/commits stay serial; full C3/M4 and program acceptance remain open.
 
 The following checkpoints refine Slice C's integration order; they preserve its
 existing end-to-end criteria and do not authorize independent release or commit.

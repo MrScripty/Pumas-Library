@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { areInferencePluginsEnabled, resolveReleaseSmokeScript } from './actions.mjs';
-import { EXIT_CODES } from './contract.mjs';
+import { EXIT_CODES, isGuiEnabled } from './contract.mjs';
 import { EventEmitter } from 'node:events';
 import { LauncherError } from './errors.mjs';
 import { createPlatformService } from './platform-service.mjs';
@@ -88,6 +88,23 @@ test('inference plugins are enabled by default and can be compiled out', () => {
   assert.equal(areInferencePluginsEnabled({}), true);
   assert.equal(areInferencePluginsEnabled({ PUMAS_INFERENCE_PLUGINS: 'true' }), true);
   assert.equal(areInferencePluginsEnabled({ PUMAS_INFERENCE_PLUGINS: 'false' }), false);
+});
+
+test('GUI selection defaults on and is independent of inference plugins', () => {
+  for (const plugins of ['true', 'false']) {
+    for (const value of [undefined, 'true']) {
+      assert.equal(isGuiEnabled({ PUMAS_GUI: value, PUMAS_INFERENCE_PLUGINS: plugins }), true);
+    }
+    assert.equal(isGuiEnabled({ PUMAS_GUI: 'false', PUMAS_INFERENCE_PLUGINS: plugins }), false);
+  }
+});
+
+test('invalid GUI selection is a typed usage failure', () => {
+  for (const value of ['', '0', '1', 'FALSE', 'yes', ' true ']) {
+    assert.throws(() => isGuiEnabled({ PUMAS_GUI: value }), (error) =>
+      error instanceof LauncherError && error.exitCode === EXIT_CODES.USAGE_ERROR
+      && error.showUsage && error.message === 'PUMAS_GUI must be true or false');
+  }
 });
 
 test('resolveReleaseSmokeScript selects the CI-safe Electron entrypoint on Linux CI', () => {

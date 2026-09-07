@@ -1,4 +1,5 @@
 import type { BaseResponse } from './api-common';
+import type { LinkHealthOutcome } from '../generated/desktop-contract';
 
 // ============================================================================
 // Link Registry Types (Phase 1B)
@@ -7,7 +8,7 @@ import type { BaseResponse } from './api-common';
 /**
  * Health status levels returned by the backend link registry health check.
  */
-export type HealthStatus = 'healthy' | 'degraded';
+export type HealthStatus = LinkHealthOutcome['status'];
 
 /**
  * Link types supported by the registry
@@ -32,15 +33,7 @@ export interface LinkInfo {
 /**
  * Link health check response
  */
-export interface LinkHealthResponse extends BaseResponse {
-  status: HealthStatus;
-  total_links: number;
-  healthy_links: number;
-  broken_links: string[];
-  orphaned_links: string[];
-  warnings: string[];
-  errors: string[];
-}
+export type LinkHealthResponse = LinkHealthOutcome;
 
 /**
  * Clean broken links response

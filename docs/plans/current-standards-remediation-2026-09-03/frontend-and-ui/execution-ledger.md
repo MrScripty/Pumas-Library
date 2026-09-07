@@ -1,5 +1,55 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-06 — Standalone Backend And Link-Health Contract
+
+Status: accepted for this bounded slice; FE-I10 is resolved.
+
+The user prioritized API/UI contracts with the GUI as an optional consumer.
+Three scoped agents implemented launcher selection, public backend projection,
+and UI invocation ownership; root integrated the generator, preload, conformance,
+documentation and composed verification. The existing registry now owns the
+shared read, avoiding duplicate policy or a GUI-dependent backend service.
+
+- `PUMAS_GUI=false` omits desktop build/dependency/test paths independently of
+  inference plugins; direct Cargo and the RPC binary remain Node-independent.
+  Run executes a selected existing artifact without implicit build. GUI-only
+  release-smoke refuses headless use explicitly.
+- Public `LinkRegistry::health`, the owning facade and local dispatch share the
+  read-only implementation. The existing result signature and registry-wide,
+  version-independent behavior are preserved. Orphan discovery and link cleanup
+  semantics are not part of this slice.
+- The canonical RPC projection validates success, status and wire-safe counts;
+  generated immutable decoders replace the handwritten renderer response.
+  Failed and superseded reads cannot leave an apparently current healthy report.
+  Initial failure, refresh failure, retry, version replacement, same-scope
+  supersession and unmount are covered by 12 component tests.
+- Full affected Rust suites pass: 1,374 tests with defaults and 1,334 without
+  defaults, with 22 existing ignored tests in each combined core/RPC run.
+  The public registry tests and actual RPC handler exercise real filesystem
+  reads, preserve files, and reject inspection failures without leaking paths.
+  Strict all-target Clippy passes with all features and without defaults.
+- Frontend: 545 tests, TypeScript and lint pass. Electron: 10 test files,
+  compilation and lint pass. Launcher: 49 tests pass, including fake-executable
+  GUI/plugin/debug/release delegation and exact argument/error propagation.
+  Generator tests pass 6/6; freshness passes; actual producer/decoder conformance
+  passes 6/6 and producer/bundled-preload/renderer conformance passes 7/7.
+- Both production GUI builds pass. Isolated real Chromium runs with the actual
+  bundled preload reject a contradictory producer report, display unavailable,
+  and recover through native pointer retry in both GUI modes. Screenshots exposed
+  low-contrast new-state text; explicit theme colors corrected it before final
+  verification. Native keyboard delivery to the hidden fixture window did not
+  execute; keyboard accessibility evidence is the component interaction test,
+  not a claimed Chromium keyboard pass. Default build is restored.
+- A real standalone binary served healthy and version-independent JSON-RPC
+  reads and rejected unknown parameters over localhost using a fresh temporary
+  library. No live app, model payload, user configuration or library was changed.
+  The real `PUMAS_GUI=false PUMAS_INFERENCE_PLUGINS=false` debug build also passed,
+  followed by launcher argument forwarding and the same standalone HTTP check
+  against that plugin-disabled binary. All five canonical plan checks passed.
+
+Evidence remains Linux-only and slice-specific. Full API migration, frontend
+M4/M5, packaged platform verification and Pending cleanup replay remain open.
+
 ## Baseline
 
 - Plan status: `Active` after the Rust-first source gate was released.

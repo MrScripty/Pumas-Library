@@ -911,40 +911,7 @@ impl ipc::server::IpcDispatch for PrimaryState {
             }
             "get_link_health" => {
                 let registry = self.model_library.link_registry().read().await;
-                let all_links = registry.get_all().await;
-
-                let mut healthy = 0;
-                let mut broken: Vec<String> = Vec::new();
-
-                for link in &all_links {
-                    if path_is_symlink(&link.target).await? {
-                        if path_exists(&link.source).await? {
-                            healthy += 1;
-                        } else {
-                            broken.push(link.target.to_string_lossy().to_string());
-                        }
-                    } else if path_exists(&link.target).await? {
-                        healthy += 1;
-                    } else {
-                        broken.push(link.target.to_string_lossy().to_string());
-                    }
-                }
-
-                Ok(serde_json::to_value(models::LinkHealthResponse {
-                    success: true,
-                    error: None,
-                    status: if broken.is_empty() {
-                        "healthy".to_string()
-                    } else {
-                        "degraded".to_string()
-                    },
-                    total_links: all_links.len(),
-                    healthy_links: healthy,
-                    broken_links: broken,
-                    orphaned_links: vec![],
-                    warnings: vec![],
-                    errors: vec![],
-                })?)
+                Ok(serde_json::to_value(registry.health().await?)?)
             }
             "clean_broken_links" => {
                 let registry = self.model_library.link_registry().write().await;

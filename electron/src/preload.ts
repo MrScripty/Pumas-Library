@@ -19,6 +19,7 @@ import {
   decodeDownloadStatusOutcome,
   decodeModelIndexRefreshOutcome,
   decodeModelsOutcome,
+  decodeLinkHealthOutcome,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
   type DecodeOutcome,
@@ -789,7 +790,7 @@ const electronAPI = {
   // Link Health (Phase 1B)
   // ========================================
   get_link_health: (versionTag?: string | null) =>
-    apiCall('get_link_health', { version_tag: versionTag }),
+    validatedApiCall('get_link_health', decodeLinkHealthOutcome, { version_tag: versionTag }),
   clean_broken_links: () => apiCall('clean_broken_links'),
   remove_orphaned_links: (versionTag: string) =>
     apiCall('remove_orphaned_links', { version_tag: versionTag }),

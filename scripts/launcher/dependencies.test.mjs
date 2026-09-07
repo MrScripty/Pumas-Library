@@ -65,6 +65,19 @@ test('createDependencyPlan checks command and workspace dependency contracts', a
   ]);
 });
 
+test('headless dependency installation never checks or installs GUI tooling', async () => {
+  const checks = [];
+  const dependencies = createDependencyPlan({
+    guiEnabled: false,
+    commandExistsFn(command) { checks.push(command); return true; },
+    existsSyncFn() { assert.fail('headless dependencies must not inspect GUI packages'); },
+    runCommandFn() { assert.fail('satisfied backend tools must not install GUI packages'); },
+  });
+  assert.deepEqual(dependencies.map(({ name }) => name), ['cargo', 'node']);
+  await installDependencyPlan(dependencies, runtime);
+  assert.deepEqual(checks, ['cargo']);
+});
+
 test('installDependencyPlan skips dependencies that already pass checks', async () => {
   const calls = [];
   const dependencies = [

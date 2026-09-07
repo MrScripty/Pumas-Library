@@ -10,6 +10,22 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('registered-link health preserves actual producer facts and rejects contradictory reports', () => {
+  for (const name of ['link_health_healthy','link_health_degraded']) {
+    const outcome = contract.decodeLinkHealthOutcome(fixtures[name]);
+    assert.equal(outcome.status, 'valid', name);
+    assert.equal(outcome.value.total_links, outcome.value.healthy_links + outcome.value.broken_links.length);
+    assert.equal(Object.isFrozen(outcome.value.broken_links), true);
+  }
+  for (const change of [
+    {status:'unknown'}, {success:false}, {error:'private failure'},
+    {healthy_links:-1}, {total_links:9007199254740992}, {total_links:0.5},
+    {total_links:99}, {status:'healthy'}, {broken_links:[42]}, {extra:true},
+  ]) {
+    assert.equal(contract.decodeLinkHealthOutcome({...fixtures.link_health_degraded,...change}).status, 'invalid', JSON.stringify(change));
+  }
+});
+
 test('actual producer catalog and FTS cross the generated decoder', () => {
   const models = contract.decodeModelsOutcome(fixtures.models);
   const search = contract.decodeCatalogSearchOutcome(fixtures.search);

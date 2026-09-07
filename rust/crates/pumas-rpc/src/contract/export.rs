@@ -11,6 +11,34 @@ use schemars::{generate::SchemaSettings, JsonSchema};
 /// issuer. Temporary filesystem identity is deliberately not normalized.
 pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     let root = tempfile::TempDir::new()?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let (link_health_healthy, link_health_degraded) = runtime.block_on(async {
+        use pumas_library::model_library::{LinkEntry, LinkRegistry, LinkType};
+        let registry = LinkRegistry::new(root.path().join("link-health.json"));
+        let target = root.path().join("linked-model");
+        std::fs::write(&target, b"model")?;
+        let entry = LinkEntry {
+            model_id: "llm/example/model".into(),
+            source: target.clone(),
+            target,
+            link_type: LinkType::Copy,
+            created_at: "2026-09-06T00:00:00Z".into(),
+            app_id: "embedded-consumer".into(),
+            app_version: None,
+        };
+        registry.register(entry.clone()).await?;
+        let healthy = LinkHealthOutcome::try_from(registry.health().await?)?;
+        registry
+            .register(LinkEntry {
+                target: root.path().join("missing-link"),
+                ..entry
+            })
+            .await?;
+        let degraded = LinkHealthOutcome::try_from(registry.health().await?)?;
+        Ok::<_, PumasError>((healthy, degraded))
+    })?;
     let mut records = Vec::new();
     for (name, partial, duplicate) in [
         ("complete", false, false),
@@ -164,6 +192,7 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         })?;
     Ok(serde_json::json!({
         "models":models, "search":search, "recovery_request":recovery_request,
+        "link_health_healthy":link_health_healthy, "link_health_degraded":link_health_degraded,
         "recovery_outcome":recovery_outcome,
         "recovery_busy_outcome":recovery_busy_outcome,
         "recovery_request_probes":recovery_request_probes,
@@ -196,6 +225,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         RecoverDownloadParams,
         DownloadIdParams,
         PublicError,
+        LinkHealthOutcome,
     );
     Ok(serde_json::json!({
         "format": "pumas-desktop-contract-1",
@@ -229,6 +259,9 @@ fn refine_named(name: &str, schema: &mut Value) {
         return;
     };
     match name {
+        "LinkHealthOutcome" | "LinkHealthResponse" => {
+            object.insert("pumasLinkHealth".into(), true.into());
+        }
         "CatalogModel" => {
             object.insert("pumasCatalogRow".into(), true.into());
         }
@@ -248,6 +281,15 @@ fn refine_named(name: &str, schema: &mut Value) {
     }
     if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
         match name {
+            "LinkHealthOutcome" | "LinkHealthResponse" => {
+                properties["success"]["const"] = true.into();
+                properties["error"]["type"] = "null".into();
+                properties["status"]["enum"] = serde_json::json!(["healthy", "degraded"]);
+                for field in ["total_links", "healthy_links"] {
+                    properties[field]["minimum"] = 0.into();
+                    properties[field]["maximum"] = MAX_JS_SAFE_INTEGER.into();
+                }
+            }
             "ModelsOutcome" => {
                 properties["models"]["pumasCatalogMap"] = true.into();
             }
@@ -358,6 +400,10 @@ fn constrain_representation(value: &mut Value) {
                 .and_then(Value::as_str)
                 .map(str::to_owned);
             let bounds = match format.as_deref() {
+                Some("uint") => Some((
+                    0.0,
+                    (usize::MAX as u128).min(MAX_JS_SAFE_INTEGER as u128) as f64,
+                )),
                 Some("uint32") => Some((0.0, f64::from(u32::MAX))),
                 Some("uint64") => Some((0.0, MAX_JS_SAFE_INTEGER as f64)),
                 Some("int32") => Some((f64::from(i32::MIN), f64::from(i32::MAX))),

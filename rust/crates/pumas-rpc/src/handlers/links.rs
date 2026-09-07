@@ -2,19 +2,20 @@
 
 use super::{path_exists, validate_existing_local_path, validate_local_write_target_path};
 use crate::contract::{
-    FileLinkCountOutcome, FileWritableOutcome, FilesWritableOutcome, RemoveOrphanedLinksOutcome,
+    FileLinkCountOutcome, FileWritableOutcome, FilesWritableOutcome, LinkHealthOutcome,
+    RemoveOrphanedLinksOutcome,
 };
 use crate::server::AppState;
 use pumas_library::models::{
     BaseResponse, CleanBrokenLinksResponse, DeleteModelResponse, LinkExclusionsResponse,
-    LinkHealthResponse, LinksForModelResponse,
+    LinksForModelResponse,
 };
 
 pub async fn get_link_health(
     state: &AppState,
     version_tag: Option<&str>,
-) -> pumas_library::Result<LinkHealthResponse> {
-    state.api.get_link_health(version_tag).await
+) -> pumas_library::Result<LinkHealthOutcome> {
+    state.api.get_link_health(version_tag).await?.try_into()
 }
 
 pub async fn clean_broken_links(

@@ -37,6 +37,17 @@ function createRowState(overrides: Partial<LocalModelRowState> = {}): LocalModel
 }
 
 describe('LocalModelInstalledActions', () => {
+  it.each<{ format: NonNullable<ModelInfo['primaryFormat']>; partial: boolean; integrity: boolean }>([
+    { format: 'gguf', partial: true, integrity: false },
+    { format: 'gguf', partial: false, integrity: true },
+    { format: 'onnx', partial: false, integrity: false },
+  ])('does not offer format conversion for $format partial=$partial integrity=$integrity', ({ format, partial, integrity }) => {
+    render(<LocalModelInstalledActions model={createModel({ primaryFormat: format, hasIntegrityIssue: integrity })}
+      rowState={createRowState({ isPartialDownload: partial })} selectedAppId={null}
+      onToggleLink={vi.fn()} onConvertModel={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Convert model format' })).not.toBeInTheDocument();
+  });
+
   it('renders a grey retained progress ring for resumable partial downloads', () => {
     render(
       <LocalModelInstalledActions

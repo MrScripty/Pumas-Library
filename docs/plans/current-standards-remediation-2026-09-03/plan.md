@@ -250,9 +250,10 @@ validators migrated together; no persistence schema or live data changed.
 **Next slice:** Continue API/UI contracts under the user's 2026-09-06 priority,
 following the accepted [standalone backend/link-health slice](frontend-and-ui/plan.md#standalone-backend-and-link-health-contract-admission).
 Import-picker, conversion progress reads and remaining conversion operation
-contracts (FE-I24) are also accepted. The unfinished GUI conversion workflow
-(FE-I23) needs the next bounded admission in the frontend plan; its misleading
-log-only row control has been withdrawn without removing backend support.
+contracts (FE-I24) are also accepted. The basic GUI format-conversion workflow
+(FE-I23) is accepted within its documented evidence limits. Backend setup
+lifetime/identity (FE-I25) is the
+next bounded API admission before quantization-specific GUI configuration.
 The GUI is independently optional; embedded Rust and standalone RPC remain
 supported. Pending cleanup replay is deferred, not accepted: it still needs an
 exact contract against durable authority and retained root custody. No old-format

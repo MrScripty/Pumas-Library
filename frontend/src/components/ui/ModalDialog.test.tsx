@@ -37,6 +37,29 @@ function NestedDialogs() {
 }
 
 describe('ModalDialog', () => {
+  it('uses the task-owned focus destination when refresh removes the opener', async () => {
+    function RefreshingDialog() {
+      const [open, setOpen] = useState(false);
+      const [removed, setRemoved] = useState(false);
+      const fallback = useRef<HTMLButtonElement>(null);
+      return <>
+        <button ref={fallback}>Library</button>
+        {!removed && <button onClick={() => setOpen(true)}>Open conversion</button>}
+        <ModalDialog isOpen={open} ariaLabel="Conversion" onClose={() => setOpen(false)} restoreFocusFallbackRef={fallback}>
+          <button onClick={() => setRemoved(true)}>Refresh library</button>
+          <button onClick={() => setOpen(false)}>Close conversion</button>
+        </ModalDialog>
+      </>;
+    }
+    render(<RefreshingDialog />);
+    const opener = screen.getByRole('button', { name: 'Open conversion' });
+    opener.focus();
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh library' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close conversion' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Library' })).toHaveFocus());
+  });
+
   it('contains focus in only the topmost modal and restores each connected opener', async () => {
     render(<NestedDialogs />);
     const outerTrigger = screen.getByRole('button', { name: 'Open outer' });

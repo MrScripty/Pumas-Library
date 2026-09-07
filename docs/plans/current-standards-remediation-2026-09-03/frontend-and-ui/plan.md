@@ -10,14 +10,69 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Admit the unfinished GUI conversion workflow (FE-I23), including
-capability/readiness, explicit setup consent and owned start/progress/cancel states.
+**Next slice:** Bound backend conversion setup operation lifetime and identity
+(FE-I25) before quantization-specific GUI configuration (remaining FE-I23).
+The basic GGUF/safetensors format workflow is accepted within its documented
+Linux and simulated-native-execution evidence boundary.
 Conversion operation contracts (FE-I24), progress reads (FE-I14), import-picker
 (FE-I11), and standalone-backend/link-health slices are accepted.
 The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Format Conversion Workflow Admission
+
+Status: accepted within the scope below; see the
+[execution ledger](execution-ledger.md#2026-09-06--format-conversion-workflow).
+
+Operation: `continue` this canonical plan. Implement the first usable FE-I23
+workflow for complete, current GGUF and safetensors models: show the inverse
+format, disclose dequantization limits, explicitly consent to Python tool setup,
+start F16 conversion, observe backend progress and request cancellation. Backend
+validation remains authoritative. Quantization-specific configuration is excluded
+from this admission, not advertised by its control, and remains FE-I23 follow-up.
+
+The dialog owns one hook lifetime. Read existing conversions on open; sequential
+one-second list polling runs only while relevant work is active, pauses on errors
+with explicit refresh, and ends on close/unmount. Closing does not cancel backend
+work. Mutation admission is synchronous and single-flight; dismissal is disabled
+while a request is pending. Cancellation acceptance is not terminal cancellation.
+An unconfirmed start blocks repeated start in that dialog, with an explicit
+status-check/reopen instruction. Completed backend results refresh the library.
+
+Write set: backend agent owns `useModelConversionWorkflow.ts` and its tests;
+root owns `ModelConversionDialog`, row/list/manager integration, affected tests,
+frontend README and this plan's records. A directly required backend correction
+is also assigned to the agent: conversion manager readiness and focused tests.
+Inspection found that Python executable existence was incorrectly treated as
+completed dependency installation. Probe the required imports with bounded
+execution and repair incomplete environments on explicit setup; preserve public
+signatures and avoid a new persisted marker protocol. No generated, dependency or
+feature-gate changes. Root serializes verification/builds/commits. Reuse the
+existing validated desktop methods and ModalDialog focus/dismissal owner.
+GUI completion evidence additionally required an optional task-owned fallback
+focus ref in ModalDialog and its regression test: library refresh replaces the
+original row button. When that opener is removed, close restores focus to the
+named library region, preserving the existing opener/parent-modal priorities.
+
+Composed-design review: applicable. (1) Core owns execution, preload owns wire
+proof, hook owns async lifecycle and dialog owns presentation. (2) Only current
+model/direction and generated outcomes cross these interfaces. (3) Rows know an
+open-dialog action, not setup or polling. (4) Lifecycle changes stay in the hook;
+visual changes stay in the dialog. (5) GUI depends on backend contracts, never
+the reverse. (6) Hook and dialog are tested through their actual interfaces,
+then the compiled preload/renderer path is exercised. (7) One workflow hook
+avoids duplicated polling and replaces the withdrawn no-op with a real action.
+(8) Reuse the existing modal and pull-based conversion API, with no new store,
+framework, scheduler or generated contract machinery.
+
+Acceptance: focused single-flight, failure, cancellation, completion and teardown
+tests; complete-model entry/direction and partial/cached exclusion; full frontend
+types/lint/tests, both builds and isolated Chromium pointer/keyboard dialog,
+setup consent, start/progress/cancel and reopen evidence through compiled preload.
+Real tool installation/conversion and hardware-dependent quantization are not
+authorized verification effects; report fixture execution limits explicitly.
 
 ## Incomplete Conversion Control Withdrawal
 

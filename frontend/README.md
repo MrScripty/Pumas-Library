@@ -42,11 +42,15 @@ set of files. Repository identity and artifact identity are distinct: one
 Hugging Face repository may contain multiple files or quantizations, while the
 same model published in another repository remains a separate model.
 
-Model conversion is available through the backend and typed desktop APIs, but
-the GUI workflow is incomplete. Library rows intentionally expose no conversion
-button until [FE-I23](../docs/plans/current-standards-remediation-2026-09-03/frontend-and-ui/issues.md)
-delivers and verifies setup consent, capability/readiness, start, progress and
-cancellation. This is not removal of backend conversion support.
+Complete current GGUF and safetensors rows offer format conversion to the other
+format (F16). The dialog requires explicit tool-installation consent, observes
+backend progress and requests cancellation without assuming it has completed.
+Closing stops UI polling, not backend conversion; reopening reads existing work.
+Unconfirmed start/setup outcomes block repeated requests in that dialog. Setup
+readiness requires verified Python imports, not merely an existing interpreter.
+The backend and desktop APIs remain usable without the GUI. Quantization-specific
+configuration remains [FE-I23](../docs/plans/current-standards-remediation-2026-09-03/frontend-and-ui/issues.md)
+follow-up; the format-conversion control does not advertise quantization.
 
 ## Source Guide
 

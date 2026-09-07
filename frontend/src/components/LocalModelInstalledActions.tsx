@@ -1,4 +1,4 @@
-import { Download, Link2 } from 'lucide-react';
+import { ArrowRightLeft, Download, Link2 } from 'lucide-react';
 import type { ModelInfo } from '../types/apps';
 import type { ServedModelStatus } from '../types/api-serving';
 import { RuntimeModelServeAction } from '@runtime-model-serve-action';
@@ -12,6 +12,7 @@ interface LocalModelInstalledActionsProps {
   selectedAppId: string | null;
   servedStatus?: ServedModelStatus | null;
   onDeleteModel?: (modelId: string) => void;
+  onConvertModel?: (model: ModelInfo) => void;
   onRecoverPartialDownload?: (model: ModelInfo) => void;
   onServeModel?: (model: ModelInfo) => void;
   onToggleLink: (modelId: string) => void;
@@ -57,6 +58,7 @@ export function LocalModelInstalledActions({
   selectedAppId,
   servedStatus,
   onDeleteModel,
+  onConvertModel,
   onRecoverPartialDownload,
   onServeModel,
   onToggleLink,
@@ -90,6 +92,11 @@ export function LocalModelInstalledActions({
           size="sm"
         />
       )}
+      {onConvertModel && !rowState.isPartialDownload && !model.hasIntegrityIssue &&
+        (model.primaryFormat === 'gguf' || model.primaryFormat === 'safetensors') && (
+          <IconButton icon={<ArrowRightLeft />} tooltip="Convert model format"
+            onClick={() => onConvertModel(model)} size="sm" />
+        )}
       <RuntimeModelServeAction
         model={model}
         rowState={rowState}

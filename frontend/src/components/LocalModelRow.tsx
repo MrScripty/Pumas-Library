@@ -20,6 +20,7 @@ interface LocalModelRowProps {
   starredModels: Set<string>;
   onCancelDownload?: (repoId: string) => void;
   onDeleteModel?: (modelId: string) => void;
+  onConvertModel?: (model: ModelInfo) => void;
   onOpenMetadata: (modelId: string, modelName: string) => void;
   onOpenRelatedUrl: (url: string) => void;
   onPauseDownload?: (repoId: string) => void;
@@ -43,6 +44,7 @@ export function LocalModelRow({
   starredModels,
   onCancelDownload,
   onDeleteModel,
+  onConvertModel,
   onOpenMetadata,
   onOpenRelatedUrl,
   onPauseDownload,
@@ -123,6 +125,7 @@ export function LocalModelRow({
           servedStatus={servedStatus}
           onCancelDownload={onCancelDownload}
           onDeleteModel={onDeleteModel}
+          onConvertModel={onConvertModel}
           onPauseDownload={onPauseDownload}
           onRecoverPartialDownload={onRecoverPartialDownload}
           onResumeDownload={onResumeDownload}

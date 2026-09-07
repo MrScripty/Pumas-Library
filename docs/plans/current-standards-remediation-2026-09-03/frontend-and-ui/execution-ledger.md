@@ -1,5 +1,67 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-06 — Format Conversion Workflow
+
+Accepted the bounded FE-I23 GGUF/safetensors format workflow, replacing the
+withdrawn no-op with an actual dialog. Complete current models without integrity
+warnings expose an accurately named format action; partial, cached and unsupported
+formats do not. The dialog discloses F16 output and dequantization limits, requires
+explicit installation consent, starts through the generated bridge, displays
+backend progress and requests cancellation without claiming terminal success.
+Reopen reads existing work; close stops UI polling without cancelling backend work.
+
+The backend agent owned the workflow hook/tests and the directly required Rust
+readiness fix. Root owned presentation, integration, modal focus, gates and records.
+The codebase-design skill guided the split: one hook owns serialized operations,
+polling, stale results and uncertain outcomes; rows only open the dialog. The
+backend remains independent of GUI composition and inference-plugin features.
+
+Integration findings changed two directly affected owners:
+
+- Readiness formerly meant only that the venv interpreter existed, so failed or
+  ongoing dependency installation could appear ready. Core now probes required
+  imports using isolated Python with bytecode writes disabled and a five-second
+  bound. Async inspection stays off the async worker. Explicit setup repairs an
+  existing incomplete environment and verifies imports before success. Missing
+  imports/timeouts mean not ready; async spawn/observation I/O errors propagate.
+- Completion refresh replaces row controls. Modal close now uses the task-owned
+  library-region focus destination if its original opener disappeared. An existing
+  nested teardown test also exposed a cleared-ref race; cleanup now retains the
+  owned DOM node when transferring focus restoration to closing descendants.
+
+Acceptance evidence:
+
+- Frontend: 569 tests in 115 files pass; types/lint and both builds pass. Focused
+  hook tests cover duplicate prevention, accepted-but-not-listed work, uncertainty,
+  sequential polling, read errors/retry, cancellation and teardown/supersession.
+  Dialog/manager tests prove consent, exact source/direction, progress, reopen and
+  eligibility; modal tests prove the refresh fallback and nested teardown.
+- Core/RPC: 1,381 default and 1,341 no-default-features tests pass, with 22 existing
+  ignored tests each. Three new Unix readiness tests use owned fake executables
+  to prove import failure, repair/retry, timeout/reaping and I/O error semantics.
+  No real package installation or model conversion occurs in those fixtures.
+- Strict all-target core/RPC Clippy passes with all features and no defaults;
+  rustfmt and generated freshness pass. Producer/decoder and compiled-preload/
+  typed-consumer conformance each pass 10 tests. Standalone HTTP conversion reads,
+  unknown cancellation, quant metadata and environment/backend readiness pass in
+  a fresh temporary library without the GUI.
+- Both built GUI modes are exercised in hidden Chromium windows with compiled
+  preload and producer-derived fixtures: pointer setup consent, exact start,
+  determinate progress, close/reopen without duplicate start, native Escape,
+  cancellation, completion-driven library refresh and focus restoration. Linux
+  display `:0.0`, isolated temporary profile, context isolation/renderer sandbox
+  enabled, bounded 30-second process watchdog; no live application/model access.
+  Screenshots were inspected. Native installation/conversion is simulated, not
+  validated by this GUI evidence. Default build output is restored.
+
+Remaining: FE-I25 owns backend setup lifetime/identity across the existing
+60-second desktop timeout and independent callers. The UI retains unconfirmed
+outcomes and does not automatically repeat setup/start; that does not establish
+backend operation ownership across reopen or multiple apps. Resolve that contract
+before quantization-specific GUI configuration (remaining FE-I23). Real native
+execution, non-Linux evidence, full M4/M5 and Pending cleanup remain unaccepted.
+Existing recovery artifacts are untouched.
+
 ## 2026-09-06 — Inert Conversion Control Withdrawn
 
 Accepted only the FE-I23 control-withdrawal alternative, not the conversion

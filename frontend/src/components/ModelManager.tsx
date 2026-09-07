@@ -5,7 +5,7 @@
  * Includes drag-and-drop import support.
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import type { ModelCategory, ModelInfo, RemoteModelInfo } from '../types/apps';
 import type { ServedModelStatus, ServingEndpointStatus } from '../types/api-serving';
 import { useDownloadCompletionRefresh } from '../hooks/useDownloadCompletionRefresh';
@@ -22,6 +22,7 @@ import { ModelSearchBar } from './ModelSearchBar';
 import { LocalModelsList } from './LocalModelsList';
 import { RemoteModelsList } from './RemoteModelsList';
 import { ModelImportDialog } from './ModelImportDialog';
+import { ModelConversionDialog, formatConversionDirection } from './ModelConversionDialog';
 import { LinkHealthStatus } from './LinkHealthStatus';
 import { MigrationReportsPanel } from './MigrationReportsPanel';
 import { HuggingFaceAuthDialog } from './HuggingFaceAuthDialog';
@@ -71,6 +72,9 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   activeVersion,
   onChooseExistingLibrary,
 }) => {
+  const [conversionModel, setConversionModel] = useState<ModelInfo | null>(null);
+  const libraryRegionRef = useRef<HTMLDivElement>(null);
+  const conversionDirection = formatConversionDirection(conversionModel?.primaryFormat);
   const {
     chooseExistingLibrary,
     isChoosingExistingLibrary,
@@ -216,7 +220,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         onClose={closeHfAuth}
       />
 
-    <div className="flex-1 bg-[hsl(var(--launcher-bg-tertiary)/0.2)] overflow-hidden flex flex-col">
+    <div ref={libraryRegionRef} role="region" aria-label="Model library" tabIndex={-1}
+      className="flex-1 bg-[hsl(var(--launcher-bg-tertiary)/0.2)] overflow-hidden flex flex-col focus-visible:outline focus-visible:outline-2 focus-visible:outline-[hsl(var(--launcher-accent-primary))]">
       {/* Network status banner */}
       <NetworkStatusBanner
         isOffline={isOffline}
@@ -319,6 +324,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                   recoveringPartialModelIds={recoveringPartialModelIds}
                   downloadErrors={downloadErrors}
                   onDeleteModel={handleDeleteModel}
+                  onConvertModel={setConversionModel}
                   onServeModel={onServeModel}
                   onChooseExistingLibrary={onChooseExistingLibrary ? chooseExistingLibrary : undefined}
                   isChoosingExistingLibrary={isChoosingExistingLibrary}
@@ -337,6 +343,11 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         </div>
       </div>
     </div>
+    {conversionModel && conversionDirection && <ModelConversionDialog
+      key={conversionModel.id} model={conversionModel} direction={conversionDirection}
+      onClose={() => setConversionModel(null)} onCompleted={onModelsImported}
+      restoreFocusFallbackRef={libraryRegionRef}
+    />}
     </>
   );
 };

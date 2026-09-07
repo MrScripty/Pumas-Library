@@ -50,12 +50,12 @@ describe('LocalModelsList', () => {
       totalModels={1} hasFilters={false} relatedModelsById={{}} expandedRelated={new Set()}
       onToggleStar={callback} onToggleLink={callback} onToggleRelated={callback}
       onOpenRelatedUrl={callback} onServeModel={callback} onDeleteModel={callback}
-      onRecoverPartialDownload={callback}
+      onRecoverPartialDownload={callback} onConvertModel={callback}
     />);
     expect(screen.getByText('Test Model')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Test Model' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Star')).not.toBeInTheDocument();
-    expect(screen.queryByTitle('Convert / Re-quantize')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Convert model format' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /delete|link|serve|load/i })).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Test Model'), { ctrlKey: true });
     expect(screen.queryByTestId('metadata-modal')).not.toBeInTheDocument();

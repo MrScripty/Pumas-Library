@@ -33,6 +33,65 @@ use crate::{PumasError, Result};
 /// Maximum number of concurrent conversions (to avoid OOM on large models).
 const MAX_CONCURRENT: usize = 1;
 
+/// Readiness must fit within interactive status requests even for a stuck interpreter.
+const ENVIRONMENT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const ENVIRONMENT_PROBE_IMPORTS: &str = "import numpy, sentencepiece; from gguf import GGUFReader, GGUFWriter; from safetensors import safe_open; from safetensors.numpy import save_file";
+
+fn probe_conversion_environment(python: &Path, timeout: std::time::Duration) -> Result<bool> {
+    use std::process::Stdio;
+    let mut child = match std::process::Command::new(python)
+        .args(["-I", "-B", "-c", ENVIRONMENT_PROBE_IMPORTS])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(PumasError::io(
+                "probing conversion environment",
+                python,
+                error,
+            ))
+        }
+    };
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status.success()),
+            Ok(None) if started.elapsed() < timeout => {
+                std::thread::sleep(
+                    std::time::Duration::from_millis(20)
+                        .min(timeout.saturating_sub(started.elapsed())),
+                );
+            }
+            Ok(None) => {
+                let stopped = child.kill();
+                let reaped = child.wait();
+                stopped.map_err(|error| {
+                    PumasError::io("stopping conversion readiness probe", python, error)
+                })?;
+                reaped.map_err(|error| {
+                    PumasError::io("reaping conversion readiness probe", python, error)
+                })?;
+                return Ok(false);
+            }
+            Err(error) => {
+                // Retain process ownership through cleanup before reporting the
+                // original observation error; never leave a probe running.
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(PumasError::io(
+                    "observing conversion readiness probe",
+                    python,
+                    error,
+                ));
+            }
+        }
+    }
+}
+
 /// Orchestrates model format conversions and quantization.
 pub struct ConversionManager {
     launcher_root: PathBuf,
@@ -76,22 +135,32 @@ impl ConversionManager {
     // Python conversion environment (existing)
     // -----------------------------------------------------------------------
 
-    /// Check if the Python conversion environment is ready.
+    /// Probe required imports with the conversion interpreter (bounded to five seconds).
+    /// This boolean surface reports unavailable inspection as not ready.
     pub fn is_environment_ready(&self) -> bool {
-        scripts::venv_python(&self.launcher_root).exists()
+        probe_conversion_environment(
+            &scripts::venv_python(&self.launcher_root),
+            ENVIRONMENT_PROBE_TIMEOUT,
+        )
+        .unwrap_or(false)
     }
 
     /// Check if the Python conversion environment is ready on a blocking task.
     pub async fn is_environment_ready_async(&self) -> Result<bool> {
         let launcher_root = self.launcher_root.clone();
-        tokio::task::spawn_blocking(move || Ok(scripts::venv_python(&launcher_root).exists()))
-            .await
-            .map_err(|err| {
-                PumasError::Other(format!(
-                    "Failed to join conversion environment readiness task: {}",
-                    err
-                ))
-            })?
+        tokio::task::spawn_blocking(move || {
+            probe_conversion_environment(
+                &scripts::venv_python(&launcher_root),
+                ENVIRONMENT_PROBE_TIMEOUT,
+            )
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join conversion environment readiness task: {}",
+                err
+            ))
+        })?
     }
 
     /// Ensure the Python conversion environment is set up.
@@ -103,32 +172,37 @@ impl ConversionManager {
         let venv_path = scripts::venv_dir(&self.launcher_root);
         let python_path = scripts::venv_python(&self.launcher_root);
 
-        if fs::try_exists(&python_path)
-            .await
-            .map_err(|e| PumasError::io("checking conversion python", &python_path, e))?
-        {
-            debug!("Conversion venv already exists at {}", venv_path.display());
+        if self.is_environment_ready_async().await? {
+            debug!(
+                "Conversion environment imports verified at {}",
+                venv_path.display()
+            );
             return Ok(());
         }
 
-        info!(
-            "Creating conversion virtual environment at {}",
-            venv_path.display()
-        );
-
-        let output = Command::new("python3")
-            .args(["-m", "venv", &venv_path.to_string_lossy()])
-            .output()
+        if !fs::try_exists(&python_path)
             .await
-            .map_err(|e| PumasError::Other(format!("Failed to create venv: {e}")))?;
+            .map_err(|e| PumasError::io("checking conversion python", &python_path, e))?
+        {
+            info!(
+                "Creating conversion virtual environment at {}",
+                venv_path.display()
+            );
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PumasError::ConversionFailed {
-                message: format!(
+            let output = Command::new("python3")
+                .args(["-m", "venv", &venv_path.to_string_lossy()])
+                .output()
+                .await
+                .map_err(|e| PumasError::Other(format!("Failed to create venv: {e}")))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(PumasError::ConversionFailed {
+                    message: format!(
                     "Failed to create Python venv. Ensure python3 is installed. Error: {stderr}"
                 ),
-            });
+                });
+            }
         }
 
         // Upgrade pip
@@ -167,6 +241,13 @@ impl ConversionManager {
             });
         }
 
+        if !self.is_environment_ready_async().await? {
+            return Err(PumasError::ConversionFailed {
+                message:
+                    "Conversion dependencies were installed but required imports are not ready"
+                        .into(),
+            });
+        }
         info!("Conversion environment ready");
         Ok(())
     }
@@ -938,6 +1019,105 @@ fn target_extension(direction: ConversionDirection) -> &'static str {
         ConversionDirection::SafetensorsToGguf
         | ConversionDirection::SafetensorsToQuantizedGguf
         | ConversionDirection::GgufToQuantizedGguf => "gguf",
+    }
+}
+
+#[cfg(all(test, unix))]
+mod environment_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    async fn manager(root: &Path) -> ConversionManager {
+        let library = Arc::new(ModelLibrary::new(root.join("models")).await.unwrap());
+        let importer = Arc::new(ModelImporter::new(library.clone()));
+        ConversionManager::new(root.to_path_buf(), library, importer)
+    }
+
+    fn executable(path: &Path, script: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, script).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    const FIXTURE_PYTHON: &str = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$0.calls\"\nif [ \"$1\" = '-I' ]; then [ -f \"$0.ready\" ]; exit $?; fi\nif [ \"$1\" = '-m' ] && [ \"$2\" = 'pip' ]; then\n if [ -f \"$0.fail\" ]; then exit 1; fi\n if [ \"$4\" = '-r' ]; then touch \"$0.ready\"; fi\n exit 0\nfi\nexit 2\n";
+
+    #[tokio::test]
+    async fn readiness_requires_imports_and_repairs_existing_python_after_failed_install() {
+        let root = tempfile::TempDir::new().unwrap();
+        let manager = manager(root.path()).await;
+        let python = scripts::venv_python(root.path());
+        assert!(!manager.is_environment_ready_async().await.unwrap());
+        executable(&python, FIXTURE_PYTHON);
+        assert!(!manager.is_environment_ready());
+        assert!(!manager.is_environment_ready_async().await.unwrap());
+        std::fs::write(
+            python.with_file_name("python.fail"),
+            b"fail fixture install",
+        )
+        .unwrap();
+        assert!(matches!(
+            manager.ensure_environment().await,
+            Err(PumasError::ConversionFailed { .. })
+        ));
+        assert!(!manager.is_environment_ready_async().await.unwrap());
+        std::fs::remove_file(python.with_file_name("python.fail")).unwrap();
+        manager.ensure_environment().await.unwrap();
+        assert!(manager.is_environment_ready());
+        assert!(manager.is_environment_ready_async().await.unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&python).unwrap(),
+            FIXTURE_PYTHON,
+            "partial venv must not be recreated"
+        );
+        let calls = std::fs::read_to_string(python.with_file_name("python.calls")).unwrap();
+        assert!(calls.contains("-I -B -c"));
+        assert!(calls.contains("sentencepiece"));
+        assert!(calls.contains("GGUFReader, GGUFWriter"));
+        assert!(calls.contains("safetensors.numpy import save_file"));
+        let installations = calls
+            .lines()
+            .filter(|line| line.starts_with("-m pip"))
+            .count();
+        manager.ensure_environment().await.unwrap();
+        let after = std::fs::read_to_string(python.with_file_name("python.calls")).unwrap();
+        assert_eq!(
+            after
+                .lines()
+                .filter(|line| line.starts_with("-m pip"))
+                .count(),
+            installations
+        );
+    }
+
+    #[test]
+    fn readiness_probe_times_out_and_reaps_the_interpreter() {
+        let root = tempfile::TempDir::new().unwrap();
+        let python = root.path().join("python");
+        executable(
+            &python,
+            "#!/bin/sh\necho $$ > \"$0.pid\"\nwhile :; do :; done\n",
+        );
+        assert!(
+            !probe_conversion_environment(&python, std::time::Duration::from_millis(100)).unwrap()
+        );
+        #[cfg(target_os = "linux")]
+        {
+            let pid = std::fs::read_to_string(root.path().join("python.pid")).unwrap();
+            assert!(!Path::new("/proc").join(pid.trim()).exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn readiness_preserves_interpreter_spawn_io_failure() {
+        let root = tempfile::TempDir::new().unwrap();
+        let manager = manager(root.path()).await;
+        let python = scripts::venv_python(root.path());
+        std::fs::create_dir_all(&python).unwrap();
+        assert!(matches!(
+            manager.is_environment_ready_async().await,
+            Err(PumasError::Io { .. })
+        ));
+        assert!(!manager.is_environment_ready());
     }
 }
 

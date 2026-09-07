@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelLibraryUpdateNotification } from '../types/api';
 import type { CatalogModel } from '../generated/desktop-contract';
@@ -30,6 +30,10 @@ const {
 }));
 
 vi.mock('../api/adapter', () => ({
+  api: {
+    check_conversion_environment: vi.fn(async () => ({ success: true, ready: false })),
+    list_model_conversions: vi.fn(async () => ({ success: true, conversions: [] })),
+  },
   getElectronAPI: getElectronAPIMock,
   isAPIAvailable: isApiAvailableMock,
 }));
@@ -214,7 +218,7 @@ async function flushMicrotasks() {
 }
 
 describe('ModelManager integrity refresh acceptance', () => {
-  it.each(['gguf', 'safetensors'])('does not advertise the unfinished conversion workflow for %s models', async (format) => {
+  it.each(['gguf', 'safetensors'])('opens format conversion for a complete %s model without starting work', async (format) => {
     vi.useRealTimers();
     getModelsMock.mockResolvedValue({ success: true, models: {
       qwen: { ...makeRecord('qwen', false), format },
@@ -222,8 +226,13 @@ describe('ModelManager integrity refresh acceptance', () => {
     render(<Harness />);
     expect(await screen.findByText('Qwen Test')).toBeVisible();
     expect(screen.getByText(format.toUpperCase())).toBeVisible();
-    expect(screen.queryByRole('button', { name: /convert|quantize/i })).not.toBeInTheDocument();
-    expect(screen.queryByTitle(/convert|quantize/i)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Convert model format' }));
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Convert model format' })).toBeVisible());
+    expect(screen.getByText(format === 'gguf' ? /Output: Safetensors \(F16\)/ : /Output: GGUF \(F16\)/)).toBeVisible();
+    expect(await screen.findByRole('button', { name: 'Install conversion tools' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Start conversion' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    await flushMicrotasks();
     expect(screen.getByRole('button', { name: 'Import models' })).toBeEnabled();
   });
 

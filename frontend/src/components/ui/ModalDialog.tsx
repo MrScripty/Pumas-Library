@@ -24,6 +24,7 @@ type ModalEntry = {
   dialogRef: RefObject<HTMLDivElement | null>;
   initialFocusRef?: RefObject<HTMLElement | null>;
   restoreFocus: HTMLElement | null;
+  restoreFocusFallbackRef?: RefObject<HTMLElement | null>;
 };
 
 const modalStack: ModalEntry[] = [];
@@ -69,7 +70,10 @@ function restoreModalFocus(entry: ModalEntry): void {
   const parentModal = getTopModal();
   if (parentModal) {
     focusModal(parentModal);
+    return;
   }
+  const fallback = entry.restoreFocusFallbackRef?.current;
+  if (fallback?.isConnected) fallback.focus();
 }
 
 export interface ModalDialogProps {
@@ -81,6 +85,8 @@ export interface ModalDialogProps {
   contentClassName?: string;
   dismissDisabled?: boolean;
   initialFocusRef?: RefObject<HTMLElement | null>;
+  /** Owning task's destination when its original opener was removed. */
+  restoreFocusFallbackRef?: RefObject<HTMLElement | null>;
   isOpen: boolean;
   onClose: () => void;
   overlayClassName?: string;
@@ -101,6 +107,7 @@ export function ModalDialog({
   contentClassName = '',
   dismissDisabled = false,
   initialFocusRef,
+  restoreFocusFallbackRef,
   isOpen,
   onClose,
   overlayClassName = 'fixed inset-0 z-50 flex items-center justify-center p-4',
@@ -124,10 +131,14 @@ export function ModalDialog({
       id: entryId.current,
       dialogRef,
       initialFocusRef,
+      restoreFocusFallbackRef,
       restoreFocus: document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null,
     };
+    // React can clear the ref before passive cleanup. Retain the owned node
+    // so a closing parent can still transfer its opener to nested dialogs.
+    const ownedDialog = dialogRef.current;
     modalStack.push(entry);
     const unregisterEscapeLayer = registerOverlayEscapeLayer(entry.id, () => {
       if (!dismissDisabledRef.current) {
@@ -199,7 +210,7 @@ export function ModalDialog({
       if (entryIndex >= 0) {
         modalStack.splice(entryIndex, 1);
       }
-      const removedDialog = entry.dialogRef.current;
+      const removedDialog = ownedDialog;
       if (!wasTopModal && removedDialog) {
         for (const descendant of modalStack) {
           if (descendant.restoreFocus && removedDialog.contains(descendant.restoreFocus)) {
@@ -211,7 +222,7 @@ export function ModalDialog({
         restoreModalFocus(entry);
       }
     };
-  }, [initialFocusRef, isOpen]);
+  }, [initialFocusRef, isOpen, restoreFocusFallbackRef]);
 
   const handleBackdropMouseDown = (event: MouseEvent<HTMLDivElement>) => {
     event.preventDefault();

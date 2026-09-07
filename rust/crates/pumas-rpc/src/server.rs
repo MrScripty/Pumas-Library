@@ -181,10 +181,11 @@ async fn drain_server_owners(
     downloads: impl std::future::Future<Output = pumas_library::Result<()>>,
     catalog: impl std::future::Future<Output = anyhow::Result<()>>,
     conversion_setup: impl std::future::Future<Output = pumas_library::Result<()>>,
+    conversions: impl std::future::Future<Output = pumas_library::Result<()>>,
 ) -> anyhow::Result<()> {
     // No owner may be abandoned merely because another failed first.
-    let (downloads_result, catalog_result, setup_result) =
-        tokio::join!(downloads, catalog, conversion_setup);
+    let (downloads_result, catalog_result, setup_result, conversions_result) =
+        tokio::join!(downloads, catalog, conversion_setup, conversions);
     let failures = [
         server_result
             .err()
@@ -198,6 +199,9 @@ async fn drain_server_owners(
         setup_result
             .err()
             .map(|error| format!("conversion setup: {error}")),
+        conversions_result
+            .err()
+            .map(|error| format!("conversion workers: {error}")),
     ]
     .into_iter()
     .flatten()
@@ -352,6 +356,7 @@ pub async fn start_server(
                 result
             },
             state.api.shutdown_conversion_setup(),
+            state.api.shutdown_conversions(),
         )
         .await
     });
@@ -443,6 +448,7 @@ mod tests {
                         },
                         catalog_worker.shutdown(),
                         async { Ok(()) },
+                        async { Ok(()) },
                     )
                     .await
                 });
@@ -509,6 +515,11 @@ mod tests {
                         "setup drain failed".into(),
                     ))
                 },
+                async {
+                    Err(pumas_library::PumasError::Other(
+                        "worker drain failed".into(),
+                    ))
+                },
             )
             .await
         });
@@ -529,9 +540,60 @@ mod tests {
         assert!(futures::poll!(&mut repeated).is_pending());
         release.send(()).unwrap();
         let error = repeated.await.unwrap_err().to_string();
-        for owner in ["listener:", "downloads:", "catalog:", "conversion setup:"] {
+        for owner in [
+            "listener:",
+            "downloads:",
+            "catalog:",
+            "conversion setup:",
+            "conversion workers:",
+        ] {
             assert!(error.contains(owner), "missing {owner} in {error}");
         }
+        assert_eq!(server.shutdown().await.unwrap_err().to_string(), error);
+    }
+
+    #[tokio::test]
+    async fn conversion_worker_drain_survives_waiter_cancellation_and_other_owner_failure() {
+        let (signal, mut shutdown) = watch::channel(false);
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let (release, blocked) = tokio::sync::oneshot::channel();
+        let supervisor = tokio::spawn(async move {
+            shutdown.changed().await.unwrap();
+            drain_server_owners(
+                Ok(()),
+                async { Ok(()) },
+                async { Err(anyhow::anyhow!("catalog sentinel")) },
+                async { Ok(()) },
+                async move {
+                    entered.send(()).unwrap();
+                    blocked.await.unwrap();
+                    Err(pumas_library::PumasError::ConversionFailed {
+                        message: "worker sentinel".into(),
+                    })
+                },
+            )
+            .await
+        });
+        let server = Arc::new(ServerHandle::new(
+            "127.0.0.1:1".parse().unwrap(),
+            supervisor,
+            signal,
+        ));
+        let waiter = tokio::spawn({
+            let server = server.clone();
+            async move { server.shutdown().await }
+        });
+        started.await.unwrap();
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        let repeated = server.shutdown();
+        tokio::pin!(repeated);
+        assert!(futures::poll!(&mut repeated).is_pending());
+        release.send(()).unwrap();
+        let error = repeated.await.unwrap_err().to_string();
+        assert!(error.contains("catalog: catalog sentinel"));
+        assert!(error.contains("conversion workers:"));
+        assert!(error.contains("worker sentinel"));
         assert_eq!(server.shutdown().await.unwrap_err().to_string(), error);
     }
 
@@ -541,9 +603,13 @@ mod tests {
         let (signal, mut shutdown) = watch::channel(false);
         let supervisor = tokio::spawn(async move {
             shutdown.changed().await.unwrap();
-            drain_server_owners(Ok(()), async { Ok(()) }, catalog_worker.shutdown(), async {
-                Ok(())
-            })
+            drain_server_owners(
+                Ok(()),
+                async { Ok(()) },
+                catalog_worker.shutdown(),
+                async { Ok(()) },
+                async { Ok(()) },
+            )
             .await
         });
         let server = ServerHandle::new("127.0.0.1:1".parse().unwrap(), supervisor, signal);
@@ -562,11 +628,14 @@ mod tests {
         let supervisor = tokio::spawn(async move {
             shutdown.changed().await.unwrap();
             drain_started.send(()).unwrap();
-            let result =
-                drain_server_owners(Ok(()), async { Ok(()) }, catalog_worker.shutdown(), async {
-                    Ok(())
-                })
-                .await;
+            let result = drain_server_owners(
+                Ok(()),
+                async { Ok(()) },
+                catalog_worker.shutdown(),
+                async { Ok(()) },
+                async { Ok(()) },
+            )
+            .await;
             drained.send(result.is_ok()).unwrap();
             result
         });

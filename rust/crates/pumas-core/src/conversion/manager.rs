@@ -4,15 +4,13 @@
 //! quantization operations to registered backends, tracks progress, and
 //! registers output models in the library.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use super::llama_cpp::LlamaCppBackend;
 use super::nvfp4::Nvfp4Backend;
@@ -102,8 +100,7 @@ pub struct ConversionManager {
     model_library: Arc<ModelLibrary>,
     model_importer: Arc<ModelImporter>,
     progress: Arc<ConversionProgressTracker>,
-    cancel_tokens: Mutex<HashMap<String, CancellationToken>>,
-    task_handles: Mutex<HashMap<String, JoinHandle<()>>>,
+    workers: super::workers::WorkerOwner,
     /// Counter for generating unique conversion IDs.
     id_counter: Mutex<u64>,
     /// Registered quantization backends (strategy pattern).
@@ -123,14 +120,14 @@ impl ConversionManager {
             Arc::new(SherryBackend::new(&launcher_root)),
         ];
 
+        let progress = Arc::new(ConversionProgressTracker::new());
         Self {
             setup: super::setup::SetupOwner::new(launcher_root.clone()),
             launcher_root,
             model_library,
             model_importer,
-            progress: Arc::new(ConversionProgressTracker::new()),
-            cancel_tokens: Mutex::new(HashMap::new()),
-            task_handles: Mutex::new(HashMap::new()),
+            workers: super::workers::WorkerOwner::new(Arc::clone(&progress), MAX_CONCURRENT),
+            progress,
             id_counter: Mutex::new(0),
             backends,
         }
@@ -313,24 +310,7 @@ impl ConversionManager {
     ///
     /// Returns a conversion ID that can be used to track progress.
     pub async fn start_conversion(&self, request: ConversionRequest) -> Result<String> {
-        self.prune_finished_tasks();
-
-        // Check concurrent conversion limit
-        let active_count = self
-            .progress
-            .list_all()
-            .iter()
-            .filter(|p| is_active_status(p.status))
-            .count();
-
-        if active_count >= MAX_CONCURRENT {
-            return Err(PumasError::ConversionFailed {
-                message: format!(
-                    "Maximum concurrent conversions ({MAX_CONCURRENT}) reached. \
-                     Wait for the current conversion to finish."
-                ),
-            });
-        }
+        self.workers.observe_finished();
 
         // Validate source model exists
         let model = self
@@ -370,17 +350,10 @@ impl ConversionManager {
             pipeline_steps_total: None,
             pipeline_step_label: None,
         };
-        self.progress.insert(progress);
+        let initial_progress = progress;
 
         // Create cancellation token
         let cancel_token = CancellationToken::new();
-        {
-            let mut tokens = self
-                .cancel_tokens
-                .lock()
-                .expect("cancel_tokens lock poisoned");
-            tokens.insert(conversion_id.clone(), cancel_token.clone());
-        }
 
         // Spawn the conversion/quantization task
         let conv_id = conversion_id.clone();
@@ -393,11 +366,12 @@ impl ConversionManager {
         let target_quant = request.target_quant.clone();
         let source_model_id = request.model_id.clone();
 
-        let task_handle = match direction {
+        match direction {
             // Existing Python-based format conversions
-            ConversionDirection::GgufToSafetensors | ConversionDirection::SafetensorsToGguf => {
-                tokio::spawn(async move {
-                    let result = run_conversion(
+            ConversionDirection::GgufToSafetensors | ConversionDirection::SafetensorsToGguf => self
+                .workers
+                .spawn(initial_progress, cancel_token.clone(), async move {
+                    run_conversion(
                         &conv_id,
                         direction,
                         &launcher_root,
@@ -410,14 +384,8 @@ impl ConversionManager {
                         &library,
                         &importer,
                     )
-                    .await;
-
-                    if let Err(e) = result {
-                        error!("Conversion {} failed: {}", conv_id, e);
-                        progress.set_error(&conv_id, e.to_string());
-                    }
-                })
-            }
+                    .await
+                })?,
             // Quantization via backend — route to the appropriate backend by direction
             ConversionDirection::SafetensorsToQuantizedGguf
             | ConversionDirection::GgufToQuantizedGguf => {
@@ -431,24 +399,20 @@ impl ConversionManager {
                     &request,
                 )?;
 
-                tokio::spawn(async move {
-                    let result = run_quantization(
-                        &conv_id,
-                        backend.as_ref(),
-                        params,
-                        &source_model_id,
-                        metadata,
-                        progress.as_ref(),
-                        &cancel_token,
-                        &library,
-                    )
-                    .await;
-
-                    if let Err(e) = result {
-                        error!("Quantization {} failed: {}", conv_id, e);
-                        progress.set_error(&conv_id, e.to_string());
-                    }
-                })
+                self.workers
+                    .spawn(initial_progress, cancel_token.clone(), async move {
+                        run_quantization(
+                            &conv_id,
+                            backend.as_ref(),
+                            params,
+                            &source_model_id,
+                            metadata,
+                            progress.as_ref(),
+                            &cancel_token,
+                            &library,
+                        )
+                        .await
+                    })?
             }
             ConversionDirection::SafetensorsToNvfp4 => {
                 let (backend, params) = self.prepare_backend_quantization(
@@ -461,24 +425,20 @@ impl ConversionManager {
                     &request,
                 )?;
 
-                tokio::spawn(async move {
-                    let result = run_quantization(
-                        &conv_id,
-                        backend.as_ref(),
-                        params,
-                        &source_model_id,
-                        metadata,
-                        progress.as_ref(),
-                        &cancel_token,
-                        &library,
-                    )
-                    .await;
-
-                    if let Err(e) = result {
-                        error!("Quantization {} failed: {}", conv_id, e);
-                        progress.set_error(&conv_id, e.to_string());
-                    }
-                })
+                self.workers
+                    .spawn(initial_progress, cancel_token.clone(), async move {
+                        run_quantization(
+                            &conv_id,
+                            backend.as_ref(),
+                            params,
+                            &source_model_id,
+                            metadata,
+                            progress.as_ref(),
+                            &cancel_token,
+                            &library,
+                        )
+                        .await
+                    })?
             }
             ConversionDirection::SafetensorsToSherryQat => {
                 let (backend, params) = self.prepare_backend_quantization(
@@ -491,47 +451,24 @@ impl ConversionManager {
                     &request,
                 )?;
 
-                tokio::spawn(async move {
-                    let result = run_quantization(
-                        &conv_id,
-                        backend.as_ref(),
-                        params,
-                        &source_model_id,
-                        metadata,
-                        progress.as_ref(),
-                        &cancel_token,
-                        &library,
-                    )
-                    .await;
-
-                    if let Err(e) = result {
-                        error!("Quantization {} failed: {}", conv_id, e);
-                        progress.set_error(&conv_id, e.to_string());
-                    }
-                })
+                self.workers
+                    .spawn(initial_progress, cancel_token.clone(), async move {
+                        run_quantization(
+                            &conv_id,
+                            backend.as_ref(),
+                            params,
+                            &source_model_id,
+                            metadata,
+                            progress.as_ref(),
+                            &cancel_token,
+                            &library,
+                        )
+                        .await
+                    })?
             }
         };
-        self.store_task_handle(conversion_id.clone(), task_handle);
 
         Ok(conversion_id)
-    }
-
-    fn store_task_handle(&self, conversion_id: String, handle: JoinHandle<()>) {
-        let mut task_handles = self
-            .task_handles
-            .lock()
-            .expect("conversion task_handles lock poisoned");
-        if let Some(previous) = task_handles.insert(conversion_id, handle) {
-            previous.abort();
-        }
-    }
-
-    fn prune_finished_tasks(&self) {
-        let mut task_handles = self
-            .task_handles
-            .lock()
-            .expect("conversion task_handles lock poisoned");
-        task_handles.retain(|_, handle| !handle.is_finished());
     }
 
     /// Prepare a backend handle and QuantizeParams for a quantization task.
@@ -582,89 +519,28 @@ impl ConversionManager {
 
     /// Get progress for a specific conversion.
     pub fn get_progress(&self, conversion_id: &str) -> Option<ConversionProgress> {
+        self.workers.observe_finished();
         self.progress.get(conversion_id)
     }
 
-    /// Cancel a running conversion.
+    /// Request cooperative cancellation of an active conversion. `true` means
+    /// requested, not finished; inspect progress for the worker's terminal result.
     pub async fn cancel_conversion(&self, conversion_id: &str) -> Result<bool> {
-        let token = {
-            let tokens = self
-                .cancel_tokens
-                .lock()
-                .expect("cancel_tokens lock poisoned");
-            tokens.get(conversion_id).cloned()
-        };
-
-        if let Some(token) = token {
-            token.cancel();
-            if let Some(handle) = self
-                .task_handles
-                .lock()
-                .expect("conversion task_handles lock poisoned")
-                .remove(conversion_id)
-            {
-                handle.abort();
-            }
-            self.progress
-                .set_status(conversion_id, ConversionStatus::Cancelled);
-            info!("Cancelled conversion {}", conversion_id);
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        Ok(self.workers.cancel(conversion_id))
     }
 
     /// List all tracked conversions (active and recently completed).
     pub fn list_conversions(&self) -> Vec<ConversionProgress> {
-        self.prune_finished_tasks();
+        self.workers.observe_finished();
         self.progress.list_all()
     }
 
-    /// Graceful shutdown: cancel all active conversions.
-    pub async fn shutdown(&self) {
-        let tokens: Vec<(String, CancellationToken)> = {
-            let tokens = self
-                .cancel_tokens
-                .lock()
-                .expect("cancel_tokens lock poisoned");
-            tokens.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
-        };
-
-        for (id, token) in tokens {
-            token.cancel();
-            self.progress.set_status(&id, ConversionStatus::Cancelled);
-        }
-
-        let handles: Vec<JoinHandle<()>> = self
-            .task_handles
-            .lock()
-            .expect("conversion task_handles lock poisoned")
-            .drain()
-            .map(|(_, handle)| handle)
-            .collect();
-
-        for handle in handles {
-            handle.abort();
-        }
+    /// Close worker admission, request cancellation, and observe every retained
+    /// Rust worker. Repeated or interrupted callers retain the same failures.
+    /// This receipt does not establish native process-tree cleanup.
+    pub async fn shutdown(&self) -> Result<()> {
+        self.workers.shutdown().await
     }
-}
-
-/// Check whether a status indicates an active (in-progress) operation.
-fn is_active_status(status: ConversionStatus) -> bool {
-    matches!(
-        status,
-        ConversionStatus::SettingUp
-            | ConversionStatus::Validating
-            | ConversionStatus::Converting
-            | ConversionStatus::Writing
-            | ConversionStatus::Importing
-            | ConversionStatus::BuildingToolchain
-            | ConversionStatus::GeneratingF16Gguf
-            | ConversionStatus::ComputingImatrix
-            | ConversionStatus::Quantizing
-            | ConversionStatus::Calibrating
-            | ConversionStatus::Training
-    )
 }
 
 // ---------------------------------------------------------------------------

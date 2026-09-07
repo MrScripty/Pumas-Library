@@ -29,7 +29,9 @@ impl PumasApi {
             .get_progress(conversion_id)
     }
 
-    /// Cancel a running conversion.
+    /// Request cooperative cancellation of a running conversion.
+    /// `true` acknowledges the request, not completed cleanup. Observe conversion
+    /// progress for its terminal outcome; unknown or finished workers return false.
     pub async fn cancel_conversion(&self, conversion_id: &str) -> Result<bool> {
         self.primary()
             .conversion_manager
@@ -80,6 +82,14 @@ impl PumasApi {
     /// cleanup return success; repeated calls preserve actual setup failures.
     pub async fn shutdown_conversion_setup(&self) -> Result<()> {
         self.primary().conversion_manager.shutdown_setup().await
+    }
+
+    /// Close conversion admission, request cancellation and observe retained workers.
+    /// Call before stopping the hosting runtime. Dropping this waiter does not
+    /// release worker ownership; another caller can resume observing shutdown.
+    /// Native process-tree cleanup remains governed by each conversion backend.
+    pub async fn shutdown_conversions(&self) -> Result<()> {
+        self.primary().conversion_manager.shutdown().await
     }
 
     /// Get the list of supported quantization types for conversion.

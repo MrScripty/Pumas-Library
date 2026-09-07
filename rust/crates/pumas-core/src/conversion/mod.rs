@@ -17,6 +17,7 @@ mod scripts;
 mod setup;
 pub mod sherry;
 mod types;
+mod workers;
 
 pub use llama_cpp::LlamaCppBackend;
 pub use manager::ConversionManager;

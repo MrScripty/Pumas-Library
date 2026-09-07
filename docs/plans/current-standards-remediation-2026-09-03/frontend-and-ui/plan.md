@@ -10,7 +10,11 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Admit quantization-specific GUI configuration (remaining FE-I23).
+**Next slice:** Establish native conversion process/destination custody and
+quantization-backend setup/preflight before adding GUI configuration (FE-I26,
+remaining FE-I23). Atomic manager-local admission, retained Rust-worker
+observation and standalone/RPC shutdown composition are accepted below. They do
+not establish process-tree cleanup. No new quantization GUI mutation is admitted.
 The optional conversion dialog now uses setup start/observation across uncertain
 responses and reopen (FE-I25); see the accepted dialog ledger. Backend custody,
 aggregate shutdown and core/RPC/desktop setup observation are accepted within
@@ -23,6 +27,48 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Conversion Worker Observation Admission
+
+Status: accepted for Rust-worker observation and shutdown composition; see the
+[execution ledger](execution-ledger.md#2026-09-07--conversion-worker-observation).
+
+Scope: cancellation requests signal the retained conversion worker rather than
+aborting it and publishing an unobserved terminal status. Shutdown observes
+retained workers; dropping a shutdown waiter must not detach their join handles.
+Shutdown closes admission before draining, including starts awaiting model lookup;
+capacity and registration share that admission gate. Repeated cancellation
+must not cancel already-terminal conversions. Worker
+failure/cancellation is observed before reclaiming its retained record.
+
+Write set: backend agent owns `rust/crates/pumas-core/src/conversion/manager.rs`
+and a private conversion worker owner module with colocated tests, plus its
+module declaration. Root owns `rust/crates/pumas-core/src/api/conversion.rs`,
+`rust/crates/pumas-rpc/src/server.rs`, this plan, issues, ledger and parent-plan
+summary to expose and compose the retained drain for standalone consumers.
+Existing generated response shapes and optional frontend gates remain unchanged.
+No new native installation/conversion, GUI controls or live library mutation.
+
+Verification-driven addition: root may update the existing reopen visibility
+assertion in `frontend/src/components/ModelConversionDialog.test.tsx`. The
+affected contract check found it testing visibility before modal animation;
+wait for the intended visible state without changing production rendering.
+
+Composed-design review: the private worker owner replaces the manager's split
+token/handle maps and progress-count authority. Its interface hides admission,
+cancellation, join observation and receipt retention; the manager supplies the
+operation future, while the public facade and RPC compose shutdown. Read-only
+model lookup may finish after shutdown, but closed registration cannot publish
+progress or start work. Existing runtime capability is reused; no executor,
+dependency or generic task framework is introduced. Controlled futures test the
+same owner interface. Deleting the owner would put this lifecycle machinery back
+into the manager, so it is not a forwarding layer.
+
+Acceptance: deterministic held-worker cancellation/shutdown/drop-waiter tests,
+focused core tests, formatting and strict lint. This is Rust worker observation,
+not process-tree custody: backend installer ownership, native child cleanup,
+quantization preflight remain explicit follow-ups. GUI
+quantization stays withheld until those prerequisites are accepted.
 
 ## Conversion Setup Dialog Admission
 

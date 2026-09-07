@@ -72,7 +72,7 @@ describe('ModelConversionDialog', () => {
     bridge.list_model_conversions.mockResolvedValue(listing);
     const close = vi.fn();
     render(<ModelConversionDialog model={model} direction="gguf_to_safetensors" onClose={close} />);
-    expect(await screen.findByText('Converting')).toBeVisible();
+    await waitFor(() => expect(screen.getByText('Converting')).toBeVisible());
     expect(screen.getByRole('button', { name: 'Start conversion' })).toBeDisabled();
     await userEvent.keyboard('{Escape}');
     expect(close).toHaveBeenCalledOnce();

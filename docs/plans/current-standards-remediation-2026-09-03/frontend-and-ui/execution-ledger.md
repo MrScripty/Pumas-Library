@@ -1,5 +1,56 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-07 — Conversion Worker Observation
+
+Quantization admission review found that base Python setup custody does not
+cover quantization installers or execution. Accepted a bounded backend
+prerequisite instead of enabling new GUI mutations: the private worker owner
+replaces split token/handle maps and progress-count admission. It atomically
+checks manager-local capacity/closure, inserts initial progress and registers
+the task only after read-only model lookup and backend preparation. Rejected
+admission has no ghost progress or polled worker. Script status is not execution
+slot or cancellation authority.
+
+Cancellation now signals the worker without aborting it or immediately marking
+it cancelled. Joined success, operation failure, cancellation and panic determine
+the retained outcome. Completed workers are observed before pruning; the first
+failure remains available to repeated shutdown callers and individual failures
+remain in progress records. A borrowed join handle survives a dropped shutdown
+waiter, and closed admission prevents new workers while draining. Cancellation
+also remains valid while a shutdown observer holds the completion lock.
+
+`ConversionManager::shutdown` now returns a fallible result, and embedded users
+can call the additive `PumasApi::shutdown_conversions` before stopping their
+runtime. RPC shutdown composes this drain with downloads, catalog and base setup,
+observing all owners even after another fails. No new runtime, dependency,
+generated wire shape, GUI requirement or feature-gate change was introduced.
+
+The subagent inspected backend prerequisites and implemented worker ownership;
+root implemented public/RPC composition, reviewed the contended-cancellation
+case, and ran gates. The codebase-design skill concentrated lifecycle machinery
+behind one private owner rather than duplicating it across manager branches.
+Four controlled-future tests cover held cancellation, interrupted/repeated
+shutdown, closure/rejected work, premature script completion, panic/error
+retention and two-thread competing admission. RPC adds a delayed-worker drain
+test with a dropped waiter and another failed owner.
+
+Verification: complete default core/RPC suite 1,403 passed; minimal-feature suite
+1,363 passed; each retained 22 existing ignored tests. Strict all-target clippy
+passed with all features and with no default features. Rust formatting and all
+five plan contracts passed. The 20 affected frontend hook/dialog contract tests,
+frontend types and lint passed. Their first run exposed an existing reopen
+visibility assertion racing modal animation; it now waits for visibility, with
+no production renderer change. An initial sandboxed core run could not create
+required local socket fixtures; the complete permitted run is the accepted
+evidence, not those permission failures.
+
+Logs: `/tmp/pumas-conversion-workers-{default,minimal,clippy-default,clippy-minimal,ui-contract,ui-types,ui-lint}.log`.
+No real installer/conversion/model data was used, no caches were deleted, and
+unrelated workflow/stub deletions and recovery artifacts remain untouched. No
+new GUI, release, Windows/macOS or process-tree-cleanup acceptance is claimed.
+Next: FE-I26 native process/destination custody, installer ownership and
+quantization preflight; FE-I23 GUI configuration remains deferred behind them.
+
 ## 2026-09-07 — Conversion Setup Dialog
 
 Accepted FE-I25's optional dialog migration to `start_conversion_setup` and

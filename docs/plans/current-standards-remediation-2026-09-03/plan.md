@@ -251,7 +251,8 @@ validators migrated together; no persistence schema or live data changed.
 following the accepted [standalone backend/link-health slice](frontend-and-ui/plan.md#standalone-backend-and-link-health-contract-admission).
 Import-picker, conversion progress reads and remaining conversion operation
 contracts (FE-I24) are also accepted. The unfinished GUI conversion workflow
-(FE-I23) needs the next bounded admission in the frontend plan.
+(FE-I23) needs the next bounded admission in the frontend plan; its misleading
+log-only row control has been withdrawn without removing backend support.
 The GUI is independently optional; embedded Rust and standalone RPC remain
 supported. Pending cleanup replay is deferred, not accepted: it still needs an
 exact contract against durable authority and retained root custody. No old-format

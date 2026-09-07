@@ -37,7 +37,6 @@ interface LocalModelsListProps {
   recoveringPartialModelIds?: Set<string>;
   downloadErrors?: Record<string, string>;
   onDeleteModel?: (modelId: string) => void;
-  onConvertModel?: (modelId: string) => void;
   onServeModel?: (model: ModelInfo) => void;
   onChooseExistingLibrary?: () => Promise<void> | void;
   isChoosingExistingLibrary?: boolean;
@@ -65,7 +64,6 @@ export function LocalModelsList({
   recoveringPartialModelIds,
   downloadErrors,
   onDeleteModel,
-  onConvertModel,
   onServeModel,
   onChooseExistingLibrary,
   isChoosingExistingLibrary = false,
@@ -116,7 +114,6 @@ export function LocalModelsList({
                 servedStatus={servedModelById.get(model.id) ?? null}
                 starredModels={starredModels}
                 onCancelDownload={onCancelDownload}
-                onConvertModel={onConvertModel}
                 onDeleteModel={onDeleteModel}
                 onOpenMetadata={(modelId, modelName) => {
                   setMetadataModal({ modelId, modelName });

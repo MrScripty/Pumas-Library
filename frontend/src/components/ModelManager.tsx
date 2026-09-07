@@ -144,7 +144,6 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   const { isOffline, isRateLimited, successRate, circuitBreakerRejections } = useNetworkStatus();
   const {
     expandedRelated,
-    handleConvertModel,
     handleDeleteModel,
     handleRecoverPartialDownload,
     handleToggleRelated,
@@ -320,7 +319,6 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                   recoveringPartialModelIds={recoveringPartialModelIds}
                   downloadErrors={downloadErrors}
                   onDeleteModel={handleDeleteModel}
-                  onConvertModel={handleConvertModel}
                   onServeModel={onServeModel}
                   onChooseExistingLibrary={onChooseExistingLibrary ? chooseExistingLibrary : undefined}
                   isChoosingExistingLibrary={isChoosingExistingLibrary}

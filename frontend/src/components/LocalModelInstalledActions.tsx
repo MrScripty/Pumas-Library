@@ -1,4 +1,4 @@
-import { ArrowRightLeft, Download, Link2 } from 'lucide-react';
+import { Download, Link2 } from 'lucide-react';
 import type { ModelInfo } from '../types/apps';
 import type { ServedModelStatus } from '../types/api-serving';
 import { RuntimeModelServeAction } from '@runtime-model-serve-action';
@@ -11,18 +11,10 @@ interface LocalModelInstalledActionsProps {
   rowState: LocalModelRowState;
   selectedAppId: string | null;
   servedStatus?: ServedModelStatus | null;
-  onConvertModel?: (modelId: string) => void;
   onDeleteModel?: (modelId: string) => void;
   onRecoverPartialDownload?: (model: ModelInfo) => void;
   onServeModel?: (model: ModelInfo) => void;
   onToggleLink: (modelId: string) => void;
-}
-
-function getConvertTooltip(model: ModelInfo): string {
-  if (model.primaryFormat === 'safetensors') {
-    return 'Convert / Quantize';
-  }
-  return 'Convert / Re-quantize';
 }
 
 function getRecoveryTooltip(
@@ -64,7 +56,6 @@ export function LocalModelInstalledActions({
   rowState,
   selectedAppId,
   servedStatus,
-  onConvertModel,
   onDeleteModel,
   onRecoverPartialDownload,
   onServeModel,
@@ -96,14 +87,6 @@ export function LocalModelInstalledActions({
           tooltip={getRecoveryTooltip(rowState, canRecoverPartial)}
           onClick={getRecoveryAction(model, rowState, onRecoverPartialDownload)}
           disabled={!rowState.canRecoverPartial || rowState.isRecoveringPartial}
-          size="sm"
-        />
-      )}
-      {rowState.isConvertible && onConvertModel && (
-        <IconButton
-          icon={<ArrowRightLeft />}
-          tooltip={getConvertTooltip(model)}
-          onClick={() => onConvertModel(model.id)}
           size="sm"
         />
       )}

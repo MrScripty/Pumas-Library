@@ -19,7 +19,6 @@ interface LocalModelRowProps {
   servedStatus: ServedModelStatus | null;
   starredModels: Set<string>;
   onCancelDownload?: (repoId: string) => void;
-  onConvertModel?: (modelId: string) => void;
   onDeleteModel?: (modelId: string) => void;
   onOpenMetadata: (modelId: string, modelName: string) => void;
   onOpenRelatedUrl: (url: string) => void;
@@ -43,7 +42,6 @@ export function LocalModelRow({
   servedStatus,
   starredModels,
   onCancelDownload,
-  onConvertModel,
   onDeleteModel,
   onOpenMetadata,
   onOpenRelatedUrl,
@@ -57,7 +55,6 @@ export function LocalModelRow({
 }: LocalModelRowProps) {
   const isReadOnly = model.provenance === 'cached';
   const rowState = getLocalModelRowState({
-    canConvertModel: Boolean(onConvertModel),
     canPauseDownload: Boolean(onPauseDownload),
     canRecoverDownload: Boolean(onRecoverPartialDownload),
     canResumeDownload: Boolean(onResumeDownload),
@@ -125,7 +122,6 @@ export function LocalModelRow({
           selectedAppId={selectedAppId}
           servedStatus={servedStatus}
           onCancelDownload={onCancelDownload}
-          onConvertModel={onConvertModel}
           onDeleteModel={onDeleteModel}
           onPauseDownload={onPauseDownload}
           onRecoverPartialDownload={onRecoverPartialDownload}

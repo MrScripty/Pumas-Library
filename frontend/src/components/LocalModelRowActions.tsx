@@ -12,7 +12,6 @@ interface LocalModelRowActionsProps {
   selectedAppId: string | null;
   servedStatus: ServedModelStatus | null;
   onCancelDownload?: (downloadKey: string) => void;
-  onConvertModel?: (modelId: string) => void;
   onDeleteModel?: (modelId: string) => void;
   onPauseDownload?: (downloadKey: string) => void;
   onRecoverPartialDownload?: (model: ModelInfo) => void;
@@ -28,7 +27,6 @@ export function LocalModelRowActions({
   selectedAppId,
   servedStatus,
   onCancelDownload,
-  onConvertModel,
   onDeleteModel,
   onPauseDownload,
   onRecoverPartialDownload,
@@ -62,7 +60,6 @@ export function LocalModelRowActions({
           rowState={rowState}
           selectedAppId={selectedAppId}
           servedStatus={servedStatus}
-          onConvertModel={onConvertModel}
           onDeleteModel={onDeleteModel}
           onRecoverPartialDownload={onRecoverPartialDownload}
           onServeModel={onServeModel}

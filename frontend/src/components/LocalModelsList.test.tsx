@@ -50,7 +50,7 @@ describe('LocalModelsList', () => {
       totalModels={1} hasFilters={false} relatedModelsById={{}} expandedRelated={new Set()}
       onToggleStar={callback} onToggleLink={callback} onToggleRelated={callback}
       onOpenRelatedUrl={callback} onServeModel={callback} onDeleteModel={callback}
-      onConvertModel={callback} onRecoverPartialDownload={callback}
+      onRecoverPartialDownload={callback}
     />);
     expect(screen.getByText('Test Model')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Test Model' })).not.toBeInTheDocument();

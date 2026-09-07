@@ -21,7 +21,6 @@ function createRowState(overrides: Partial<LocalModelRowState> = {}): LocalModel
     canShowRelated: false,
     hasRetainedProgressRing: false,
     isActiveDownload: false,
-    isConvertible: false,
     isDownloading: false,
     isExpanded: false,
     isLinked: true,

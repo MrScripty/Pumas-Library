@@ -19,6 +19,33 @@ cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
 
+## Incomplete Conversion Control Withdrawal
+
+Status: accepted for control withdrawal only; see the
+[ledger](execution-ledger.md#2026-09-06--inert-conversion-control-withdrawn).
+
+Operation: `continue` this canonical plan. FE-I23 permits withdrawing the inert
+control; classify the GUI workflow as incomplete, not the backend as unsupported.
+The only production handler logs a TODO. Remove that handler, its row/list prop
+chain and conversion-only row state/icon. Keep core, RPC, generated contracts and
+desktop methods intact. Full conversion interaction remains the next admission;
+do not count control withdrawal as implementing start/setup/progress/cancel UI.
+
+Write set: `useModelLibraryActions`, `ModelManager`, `LocalModelsList`,
+`LocalModelRow`, `LocalModelRowActions`, `LocalModelInstalledActions`,
+`LocalModelRowState`, affected component tests, frontend README and this plan's
+issue/ledger plus parent next-state summary. Root owns all edits and commits.
+No new state, flag, dependency or native mutation. Composed-design review is
+not-applicable: delete a production no-op and its sole forwarding chain without
+introducing a replacement composition or changing backend ownership.
+
+Acceptance: complete GGUF/safetensors rows advertise no conversion control;
+existing import and model rendering remain available. Component regression,
+types/lint/full frontend suite and both built Chromium configurations prove that
+bounded presentation claim. Native conversion execution is excluded. FE-I23
+stays open until the replacement workflow has explicit setup consent, backend
+capability/readiness, owned start/progress/cancel lifecycle and GUI evidence.
+
 ## Remaining Conversion Operations Admission
 
 Accepted on 2026-09-06; evidence and exclusions are recorded in the

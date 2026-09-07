@@ -1,5 +1,27 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-06 — Inert Conversion Control Withdrawn
+
+Accepted only the FE-I23 control-withdrawal alternative, not the conversion
+workflow. Inspection confirmed the sole GUI action logged a TODO; no dialog or
+progress consumer existed. Removed that callback, forwarding props, icon and
+conversion-only row state. Core, RPC, generated/preload contracts and backend
+conversion remain unchanged. The frontend README records the incomplete GUI
+lifecycle and re-enable criteria; FE-I23 remains open as the next workflow slice.
+This explicitly narrows the initial workflow implementation intention to remove
+a production no-op while preserving that unfulfilled objective.
+
+Verification: 553 frontend tests in 113 files pass, including complete GGUF and
+safetensors rows with no conversion action and import still enabled. Types/lint
+and both production builds pass. A hidden Electron/Chromium window using the
+compiled preload and built renderer verifies both configurations: both formats
+render, import remains present and no button advertises conversion. No renderer
+warnings/errors were observed; screenshot inspected. Linux display `:0.0`,
+context isolation and renderer sandbox enabled, private temporary profile and
+fixture responses, bounded 30-second watchdog; no live backend/model access.
+This proves presentation removal, not native conversion or a replacement user
+workflow. Default build restored. Existing recovery artifacts untouched.
+
 ## 2026-09-06 — Conversion Operation Contracts Accepted
 
 FE-I24 is resolved. A bounded backend agent supplied canonical outcome schemas,

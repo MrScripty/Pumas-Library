@@ -94,7 +94,6 @@ vi.mock('../hooks/useModelImportPicker', () => ({
 vi.mock('../hooks/useModelLibraryActions', () => ({
   useModelLibraryActions: () => ({
     expandedRelated: new Set<string>(),
-    handleConvertModel: vi.fn(),
     handleDeleteModel: vi.fn(),
     handleRecoverPartialDownload: vi.fn(),
     handleToggleRelated: vi.fn(),
@@ -215,6 +214,19 @@ async function flushMicrotasks() {
 }
 
 describe('ModelManager integrity refresh acceptance', () => {
+  it.each(['gguf', 'safetensors'])('does not advertise the unfinished conversion workflow for %s models', async (format) => {
+    vi.useRealTimers();
+    getModelsMock.mockResolvedValue({ success: true, models: {
+      qwen: { ...makeRecord('qwen', false), format },
+    } });
+    render(<Harness />);
+    expect(await screen.findByText('Qwen Test')).toBeVisible();
+    expect(screen.getByText(format.toUpperCase())).toBeVisible();
+    expect(screen.queryByRole('button', { name: /convert|quantize/i })).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/convert|quantize/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import models' })).toBeEnabled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     pickerState.error = null;

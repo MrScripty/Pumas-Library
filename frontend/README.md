@@ -42,6 +42,12 @@ set of files. Repository identity and artifact identity are distinct: one
 Hugging Face repository may contain multiple files or quantizations, while the
 same model published in another repository remains a separate model.
 
+Model conversion is available through the backend and typed desktop APIs, but
+the GUI workflow is incomplete. Library rows intentionally expose no conversion
+button until [FE-I23](../docs/plans/current-standards-remediation-2026-09-03/frontend-and-ui/issues.md)
+delivers and verifies setup consent, capability/readiness, start, progress and
+cancellation. This is not removal of backend conversion support.
+
 ## Source Guide
 
 | Path | Responsibility |

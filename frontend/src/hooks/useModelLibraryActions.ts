@@ -260,14 +260,8 @@ export function useModelLibraryActions({
     }
   }, [onModelsImported]);
 
-  const handleConvertModel = useCallback((modelId: string) => {
-    logger.info('Convert model requested', { modelId });
-    // TODO(@jeremy): Open conversion dialog with format/quant options
-  }, []);
-
   return {
     expandedRelated,
-    handleConvertModel,
     handleDeleteModel,
     handleRecoverPartialDownload,
     handleToggleRelated,

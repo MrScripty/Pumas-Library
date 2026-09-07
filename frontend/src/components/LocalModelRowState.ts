@@ -7,7 +7,6 @@ export interface LocalModelRowState {
   canShowRelated: boolean;
   hasRetainedProgressRing: boolean;
   isActiveDownload: boolean;
-  isConvertible: boolean;
   isDownloading: boolean;
   isExpanded: boolean;
   isLinked: boolean;
@@ -120,7 +119,6 @@ export function getLocalModelRowState({
   recoveringPartialModelIds,
   relatedModelsById,
   starredModels,
-  canConvertModel,
   canPauseDownload,
   canRecoverDownload,
   canResumeDownload,
@@ -132,7 +130,6 @@ export function getLocalModelRowState({
   recoveringPartialModelIds?: Set<string>;
   relatedModelsById: Record<string, RelatedModelsState>;
   starredModels: Set<string>;
-  canConvertModel: boolean;
   canPauseDownload: boolean;
   canRecoverDownload: boolean;
   canResumeDownload: boolean;
@@ -162,7 +159,6 @@ export function getLocalModelRowState({
     canShowRelated: Boolean(model.relatedAvailable) && !isDownloading && !isPartialDownload,
     hasRetainedProgressRing: download.hasRetainedProgressRing,
     isActiveDownload: download.isActiveDownload,
-    isConvertible: !isDownloading && !isPartialDownload && Boolean(model.primaryFormat) && canConvertModel,
     isDownloading,
     isExpanded: expandedRelated.has(model.id),
     isLinked: model.provenance !== 'cached' && !excludedModels.has(model.id),

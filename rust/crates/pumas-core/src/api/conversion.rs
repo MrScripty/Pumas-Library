@@ -77,9 +77,10 @@ impl PumasApi {
         self.primary().conversion_manager.get_conversion_setup()
     }
 
-    /// Close base Python and all built-in quantization setup admission and await cleanup.
+    /// Close base Python setup and built-in quantization setup/probe admission,
+    /// then await cleanup. Finish caller-owned synchronous readiness calls first.
     /// Invoke before stopping the hosting runtime. Successful cancellation and
-    /// cleanup return success; repeated calls preserve actual setup failures.
+    /// cleanup return success; repeated calls preserve setup/probe failures.
     pub async fn shutdown_conversion_setup(&self) -> Result<()> {
         self.primary().conversion_manager.shutdown_setup().await
     }

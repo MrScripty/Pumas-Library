@@ -40,6 +40,9 @@ mod admission_tests;
 #[cfg(all(test, target_os = "linux"))]
 mod setup_tests;
 
+#[cfg(all(test, target_os = "linux"))]
+mod probe_tests;
+
 /// Readiness must fit within interactive status requests even for a stuck interpreter.
 const ENVIRONMENT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const ENVIRONMENT_PROBE_IMPORTS: &str = "import numpy, sentencepiece; from gguf import GGUFReader, GGUFWriter; from safetensors import safe_open; from safetensors.numpy import save_file";
@@ -106,6 +109,7 @@ pub(super) fn probe_conversion_environment(
 pub struct ConversionManager {
     setup: super::setup::SetupOwner,
     backend_setups: Vec<Arc<super::setup::SetupOwner>>,
+    backend_probes: Vec<Arc<super::readiness::ProbeOwner>>,
     launcher_root: PathBuf,
     model_library: Arc<ModelLibrary>,
     model_importer: Arc<ModelImporter>,
@@ -132,12 +136,18 @@ impl ConversionManager {
             nvfp4.setup.clone(),
             sherry.setup.clone(),
         ];
+        let backend_probes = vec![
+            llama.readiness.clone(),
+            nvfp4.readiness.clone(),
+            sherry.readiness.clone(),
+        ];
         let backends: Vec<Arc<dyn QuantizationBackend>> = vec![llama, nvfp4, sherry];
 
         let progress = Arc::new(ConversionProgressTracker::new());
         Self {
             setup: super::setup::SetupOwner::new(launcher_root.clone()),
             backend_setups,
+            backend_probes,
             launcher_root,
             model_library,
             model_importer,
@@ -206,9 +216,10 @@ impl ConversionManager {
         self.setup.snapshot()
     }
 
-    /// Close all built-in setup admission, cancel active setup, and observe cleanup.
+    /// Close all built-in setup/probe admission, cancel active work, and observe cleanup.
     /// Call before shutting down the hosting Tokio runtime. Repeated calls
     /// observe the same terminal result; dropping a waiter does not stop cleanup.
+    /// Finish caller-owned synchronous readiness calls before invoking shutdown.
     pub async fn shutdown_setup(&self) -> Result<()> {
         // Close every owner before the first suspension; a held installer must
         // not leave other backends open to new setup while shutdown drains.
@@ -216,12 +227,20 @@ impl ConversionManager {
         for setup in &self.backend_setups {
             setup.close();
         }
+        for probe in &self.backend_probes {
+            probe.close();
+        }
         let mut failures = Vec::new();
         if let Err(error) = self.setup.shutdown().await {
             failures.push(error.to_string());
         }
         for setup in &self.backend_setups {
             if let Err(error) = setup.shutdown().await {
+                failures.push(error.to_string());
+            }
+        }
+        for probe in &self.backend_probes {
+            if let Err(error) = probe.shutdown().await {
                 failures.push(error.to_string());
             }
         }
@@ -238,7 +257,8 @@ impl ConversionManager {
     // Quantization backend management
     // -----------------------------------------------------------------------
 
-    /// Get the readiness status of all registered quantization backends.
+    /// Get backend readiness with caller-owned blocking probes. Finish these
+    /// calls before shutdown; prefer the async method on a runtime thread.
     pub fn backend_status(&self) -> Vec<BackendStatus> {
         self.backends
             .iter()
@@ -250,21 +270,18 @@ impl ConversionManager {
             .collect()
     }
 
-    /// Get backend readiness status on a blocking task.
+    /// Get backend readiness through retained, bounded per-backend probes.
+    /// Dropping this read does not detach a probe; shutdown_setup drains it.
     pub async fn backend_status_async(&self) -> Result<Vec<BackendStatus>> {
-        let backends = self.backends.clone();
-        tokio::task::spawn_blocking(move || {
-            Ok(backends
-                .iter()
-                .map(|b| BackendStatus {
-                    backend: b.backend_id(),
-                    name: b.name().to_string(),
-                    ready: b.is_ready(),
-                })
-                .collect())
-        })
-        .await
-        .map_err(|err| PumasError::Other(format!("Failed to join backend status task: {}", err)))?
+        let mut statuses = Vec::with_capacity(self.backends.len());
+        for backend in &self.backends {
+            statuses.push(BackendStatus {
+                backend: backend.backend_id(),
+                name: backend.name().to_string(),
+                ready: backend.is_ready_async().await?,
+            });
+        }
+        Ok(statuses)
     }
 
     /// Set up the environment for a specific quantization backend.
@@ -311,34 +328,24 @@ impl ConversionManager {
         types
     }
 
-    /// Get supported quantization types on a blocking task.
+    /// Get supported quantization types through retained backend probes.
     pub async fn supported_quant_types_async(&self) -> Result<Vec<QuantOption>> {
-        let backends = self.backends.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut types = vec![QuantOption {
-                name: "F16".to_string(),
-                description: "Half-precision float, no quality loss".to_string(),
-                bits_per_weight: 16.0,
-                recommended: true,
-                backend: Some(QuantBackend::PythonConversion),
-                imatrix_recommended: false,
-            }];
+        let mut types = vec![QuantOption {
+            name: "F16".to_string(),
+            description: "Half-precision float, no quality loss".to_string(),
+            bits_per_weight: 16.0,
+            recommended: true,
+            backend: Some(QuantBackend::PythonConversion),
+            imatrix_recommended: false,
+        }];
 
-            for backend in &backends {
-                if backend.is_ready() {
-                    types.extend(backend.supported_quant_types());
-                }
+        for backend in &self.backends {
+            if backend.is_ready_async().await? {
+                types.extend(backend.supported_quant_types());
             }
+        }
 
-            Ok(types)
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join supported quantization types task: {}",
-                err
-            ))
-        })?
+        Ok(types)
     }
 
     // -----------------------------------------------------------------------

@@ -326,11 +326,27 @@ pub trait QuantizationBackend: Send + Sync {
     fn backend_id(&self) -> QuantBackend;
 
     /// Advisory backend environment summary, not an execution guarantee.
-    /// Built-in checks inspect artifacts; operation-specific requirements are
+    /// Built-in checks inspect artifacts and required imports; route requirements are
     /// rechecked by `quantize`. llama.cpp summarizes its basic safetensors route,
-    /// so GGUF-only execution may work when this summary is false. Imports,
-    /// optional tools, hardware and loader compatibility are not established.
+    /// so GGUF-only execution may work when this summary is false. Optional
+    /// tools, hardware and loader compatibility are not established. This is a
+    /// blocking, caller-owned probe; finish synchronous calls before shutdown.
+    /// Failures are conservatively reported as false. Prefer `is_ready_async`
+    /// in async code to retain probe custody without blocking the runtime.
     fn is_ready(&self) -> bool;
+
+    /// Read readiness without blocking the async runtime. Built-ins retain one
+    /// shared probe through dropped waiters and drain it in `shutdown_setup`.
+    /// Later reads are fresh; missing artifacts/imports return false, while
+    /// probe execution, timeout and cleanup failures remain errors. The five-
+    /// second built-in execution budget does not bound fail-closed cleanup.
+    /// Downstream implementations must supply their own async lifetime contract;
+    /// the default explicitly reports unavailable rather than calling blocking code.
+    async fn is_ready_async(&self) -> Result<bool> {
+        Err(crate::PumasError::ConversionFailed {
+            message: format!("Async readiness is unavailable for backend {}", self.name()),
+        })
+    }
 
     /// Set up the backend environment (clone repos, build, install deps).
     /// Built-in implementations retain setup when a waiter is dropped. Their

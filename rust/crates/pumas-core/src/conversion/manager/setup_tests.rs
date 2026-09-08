@@ -76,7 +76,11 @@ fn backend(
     root: &Path,
     id: QuantBackend,
     programs: Programs,
-) -> (Arc<dyn QuantizationBackend>, Arc<SetupOwner>) {
+) -> (
+    Arc<dyn QuantizationBackend>,
+    Arc<SetupOwner>,
+    Arc<super::super::readiness::ProbeOwner>,
+) {
     match id {
         QuantBackend::LlamaCpp => {
             let mut backend = LlamaCppBackend::new(root);
@@ -84,7 +88,8 @@ fn backend(
                 .unwrap()
                 .set_programs(programs);
             let owner = backend.setup.clone();
-            (Arc::new(backend), owner)
+            let probes = backend.readiness.clone();
+            (Arc::new(backend), owner, probes)
         }
         QuantBackend::Nvfp4 => {
             let mut backend = Nvfp4Backend::new(root);
@@ -92,7 +97,8 @@ fn backend(
                 .unwrap()
                 .set_programs(programs);
             let owner = backend.setup.clone();
-            (Arc::new(backend), owner)
+            let probes = backend.readiness.clone();
+            (Arc::new(backend), owner, probes)
         }
         QuantBackend::Sherry => {
             let mut backend = SherryBackend::new(root);
@@ -100,7 +106,8 @@ fn backend(
                 .unwrap()
                 .set_programs(programs);
             let owner = backend.setup.clone();
-            (Arc::new(backend), owner)
+            let probes = backend.readiness.clone();
+            (Arc::new(backend), owner, probes)
         }
         QuantBackend::PythonConversion => unreachable!(),
     }
@@ -137,7 +144,7 @@ async fn every_backend_retains_dropped_installers_and_observes_outcomes() {
     ] {
         for outcome in ["success", "failure", "cancel"] {
             let root = tempfile::tempdir().unwrap();
-            let (backend, owner) = backend(root.path(), id, programs(root.path()));
+            let (backend, owner, _probes) = backend(root.path(), id, programs(root.path()));
             let mut waiter = Box::pin(backend.ensure_environment());
             let pid = tokio::select! {
                 result = &mut waiter => panic!("installer returned before hold: {result:?}"),
@@ -211,8 +218,12 @@ async fn aggregate_setup_shutdown_closes_all_owners_and_survives_waiter_drop() {
     .into_iter()
     .map(|id| backend(root.path(), id, fixture_programs.clone()))
     .collect();
-    manager.backends = pairs.iter().map(|(backend, _)| backend.clone()).collect();
-    manager.backend_setups = pairs.into_iter().map(|(_, owner)| owner).collect();
+    manager.backends = pairs
+        .iter()
+        .map(|(backend, _, _)| backend.clone())
+        .collect();
+    manager.backend_probes = pairs.iter().map(|(_, _, probes)| probes.clone()).collect();
+    manager.backend_setups = pairs.into_iter().map(|(_, owner, _)| owner).collect();
     let mut waiter = Box::pin(manager.ensure_backend_environment(QuantBackend::Nvfp4));
     let pid = tokio::select! {
         result = &mut waiter => panic!("installer returned before hold: {result:?}"),
@@ -275,7 +286,7 @@ async fn setup_repairs_existing_interpreters_and_skips_healthy_dependencies() {
                 std::fs::write(marker(root.path(), directory, "installed"), "").unwrap();
             }
             let creations = tools.python.with_file_name("python3.creations");
-            let (backend, owner) = backend(root.path(), id, tools);
+            let (backend, owner, _probes) = backend(root.path(), id, tools);
             backend.ensure_environment().await.unwrap();
             assert!(!creations.exists(), "existing venv must not be recreated");
             assert_eq!(
@@ -331,7 +342,7 @@ async fn successful_pip_exit_cannot_complete_setup_with_failed_imports() {
         );
         std::fs::write(marker(root.path(), directory, "release"), "").unwrap();
         std::fs::write(marker(root.path(), directory, "broken"), "").unwrap();
-        let (backend, owner) = backend(root.path(), id, tools);
+        let (backend, owner, _probes) = backend(root.path(), id, tools);
         let error = backend.ensure_environment().await.unwrap_err();
         assert!(matches!(error, PumasError::ConversionFailed { .. }));
         assert!(error.to_string().contains("imports"), "{error}");

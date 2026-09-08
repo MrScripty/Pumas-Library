@@ -16,11 +16,11 @@ use crate::cancel::CancellationToken;
 // Setup probes may load native libraries; this is not an interactive readiness
 // deadline. Cancellation and cleanup remain owned by the setup runner.
 const SETUP_IMPORT_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
-const NVFP4_IMPORTS: &str = "import torch; from transformers import AutoModelForCausalLM, AutoTokenizer; import modelopt.torch.quantization; from modelopt.torch.export import export_tensorrt_llm_checkpoint";
-const SHERRY_IMPORTS: &str = "import torch; from transformers import AutoModelForCausalLM, AutoTokenizer; from angelslim import TernaryQuantizer";
+pub(super) const NVFP4_IMPORTS: &str = "import torch; from transformers import AutoModelForCausalLM, AutoTokenizer; import modelopt.torch.quantization; from modelopt.torch.export import export_tensorrt_llm_checkpoint";
+pub(super) const SHERRY_IMPORTS: &str = "import torch; from transformers import AutoModelForCausalLM, AutoTokenizer; from angelslim import TernaryQuantizer";
 // This proves the locally declared dependencies, not compatibility with every
 // revision of the externally maintained llama.cpp conversion script.
-const LLAMA_IMPORTS: &str =
+pub(super) const LLAMA_IMPORTS: &str =
     "import torch, transformers, gguf, sentencepiece, numpy, google.protobuf, safetensors";
 
 #[derive(Clone)]
@@ -132,7 +132,7 @@ fn exists(path: &Path, step: &str) -> std::result::Result<bool, Failure> {
     path.try_exists().map_err(|error| failed(step, error))
 }
 
-fn imports_ready(
+pub(super) fn imports_ready(
     python: &Path,
     name: &str,
     imports: &str,

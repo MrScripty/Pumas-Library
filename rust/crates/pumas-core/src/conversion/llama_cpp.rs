@@ -15,6 +15,7 @@ use super::native_process::{self, OutputStream};
 use super::outputs::OutputWorkspace;
 use super::pipeline;
 use super::progress::ConversionProgressTracker;
+use super::readiness::usable_artifact;
 use super::types::{
     BackendStatus, ConversionStatus, QuantBackend, QuantOption, QuantizationBackend, QuantizeParams,
 };
@@ -23,22 +24,6 @@ use crate::{PumasError, Result};
 
 #[cfg(all(test, target_os = "linux"))]
 mod readiness_tests;
-
-// This is an artifact plausibility check, not proof of loader compatibility,
-// effective access (ACLs/noexec), imports, or custody until execution.
-fn usable_artifact(metadata: &std::fs::Metadata, executable: bool) -> bool {
-    if !metadata.is_file() || metadata.len() == 0 {
-        return false;
-    }
-    #[cfg(unix)]
-    if executable {
-        use std::os::unix::fs::PermissionsExt;
-        return metadata.permissions().mode() & 0o111 != 0;
-    }
-    #[cfg(not(unix))]
-    let _ = executable;
-    true
-}
 
 fn artifact_present(path: &Path, executable: bool) -> bool {
     std::fs::metadata(path).is_ok_and(|metadata| usable_artifact(&metadata, executable))
@@ -74,17 +59,30 @@ async fn require_artifact(path: &Path, name: &str, executable: bool) -> Result<(
 pub struct LlamaCppBackend {
     base_dir: PathBuf,
     pub(super) setup: std::sync::Arc<super::setup::SetupOwner>,
+    pub(super) readiness: std::sync::Arc<super::readiness::ProbeOwner>,
 }
 
 impl LlamaCppBackend {
     /// Create a new backend rooted under `{launcher_root}/launcher-data/llama-cpp/`.
     pub fn new(launcher_root: &Path) -> Self {
+        let base_dir = launcher_root.join("launcher-data").join("llama-cpp");
+        let python = base_dir.join("venv/bin/python");
         Self {
+            readiness: std::sync::Arc::new(super::readiness::ProbeOwner::new(
+                python.clone(),
+                "llama.cpp",
+                super::backend_setup::LLAMA_IMPORTS,
+                vec![
+                    (base_dir.join("build/bin/llama-quantize"), true),
+                    (base_dir.join("source/convert_hf_to_gguf.py"), false),
+                    (python, true),
+                ],
+            )),
             setup: std::sync::Arc::new(super::setup::SetupOwner::for_backend(
                 launcher_root.to_path_buf(),
                 QuantBackend::LlamaCpp,
             )),
-            base_dir: launcher_root.join("launcher-data").join("llama-cpp"),
+            base_dir,
         }
     }
 
@@ -138,10 +136,10 @@ impl LlamaCppBackend {
         }
     }
 
-    /// Close installer admission and observe retained setup cleanup before
-    /// stopping the host runtime. Dropping an ensure waiter does not stop setup.
+    /// Close installer/probe admission and drain retained async work before
+    /// stopping the host runtime. Finish caller-owned synchronous reads first.
     pub async fn shutdown_setup(&self) -> Result<()> {
-        self.setup.shutdown().await
+        super::readiness::shutdown_backend(&self.setup, &self.readiness).await
     }
 }
 
@@ -160,12 +158,14 @@ impl QuantizationBackend for LlamaCppBackend {
     }
 
     /// Advisory aggregate for the basic safetensors-to-quantized-GGUF route.
-    /// Checks artifacts, not imports, GPU/ABI compatibility or optional imatrix.
+    /// Checks artifacts and required imports, not GPU/ABI or optional imatrix.
     /// GGUF-only requests do not require this aggregate to be true.
     fn is_ready(&self) -> bool {
-        artifact_present(&self.quantize_binary(), true)
-            && artifact_present(&self.convert_script(), false)
-            && artifact_present(&self.venv_python(), true)
+        self.readiness.check_blocking().unwrap_or(false)
+    }
+
+    async fn is_ready_async(&self) -> Result<bool> {
+        self.readiness.check().await
     }
 
     async fn ensure_environment(&self) -> Result<()> {
@@ -215,6 +215,23 @@ impl QuantizationBackend for LlamaCppBackend {
         }
         if needs_imatrix {
             require_artifact(&self.imatrix_binary(), "llama-imatrix", true).await?;
+        }
+        if needs_f16_conversion {
+            cancel_token
+                .check()
+                .map_err(|_| PumasError::ConversionCancelled)?;
+            let ready = self.is_ready_async().await?;
+            cancel_token
+                .check()
+                .map_err(|_| PumasError::ConversionCancelled)?;
+            if !ready {
+                return Err(PumasError::QuantizationEnvNotReady {
+                    backend: "llama.cpp".into(),
+                    message:
+                        "Required conversion imports are unavailable; repair setup before retrying"
+                            .into(),
+                });
+            }
         }
         let total_steps = match (needs_f16_conversion, needs_imatrix) {
             (true, true) => 3u32,   // convert + imatrix + quantize

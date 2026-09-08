@@ -278,7 +278,12 @@ setup contract, not real package/GPU compatibility or public readiness checks.
 llama.cpp now checks required artifacts by selected route before staging/spawn:
 GGUF needs no Python converter, safetensors requires Python and converter, and
 IQ/forced calibration requires imatrix. Aggregate readiness remains advisory;
-artifact metadata does not prove imports, effective access or loader compatibility.
+artifact metadata alone does not prove imports, effective access or loader compatibility.
+Public quantization readiness now also verifies imports through bounded retained
+async probes. Later reads are fresh, dropped waiters retain cleanup, and aggregate
+setup shutdown closes/drains all matching probe owners. Sync reads remain
+caller-owned; no real package/hardware compatibility claim is added. Native setup
+repair and backend-specific setup observation/retry remain next prerequisites.
 Stronger containment, setup
 observation/retry and preflight remain prerequisites before GUI configuration
 (FE-I23).

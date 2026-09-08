@@ -1,5 +1,64 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Retained Quantization Readiness Probes
+
+Accepted PROBE, the public quantization import-readiness portion of FE-I26.
+Built-in summaries now check regular nonempty artifacts (Unix execute bits for
+executables) and the same isolated imports as setup. NVFP4/Sherry use embedded
+script imports; llama.cpp checks locally declared modules, not every requirement
+of an evolving upstream converter. Missing artifacts or normal failed imports
+return false. Metadata/spawn/signal/timeout/cleanup failures remain contextual
+ConversionFailed errors on async reads; closed/cancelled probes return
+ConversionCancelled. Synchronous boolean summaries conservatively return false.
+
+One private ProbeOwner per concrete backend retains a bounded blocking operation.
+Concurrent async callers join it; later reads first observe the old worker then
+atomically admit a fresh probe, rather than reuse a cached terminal answer.
+The worker captures paths/imports only, never its owning backend. Dropped callers
+do not release joins or native cleanup. Shutdown closes all setup/probe owners
+before its first await, cancels probes, observes all receipts even after errors,
+and retains results across interrupted/repeated drain. Missing artifacts still
+use the retained inspection worker but do not spawn an interpreter. Probe reads
+do not acquire install leases, produce setup snapshots or install dependencies.
+
+The codebase-design skill kept this read lifecycle distinct from installer
+mutation identity, while reusing the existing command runner and import recipe
+authority. Agent implemented probe ownership/tests and reviewed integration;
+root wired concrete backends, manager/API shutdown, caller fixtures and manager
+contract tests. Manager async status/catalog no longer spawn unretained wrapper
+tasks. The additive trait is_ready_async default explicitly reports unavailable;
+downstream implementations remain source-compatible without a blocking fallback.
+Built-ins override it. Python-dependent execution awaits it before staging;
+GGUF-only llama.cpp skips Python. Public/wire data shapes and features are unchanged.
+
+Each interactive import command has a five-second execution budget; a sequential
+status/catalog read may probe three backends. Fail-closed cleanup is not bounded
+by that budget. Setup keeps its separate thirty-second import budget. Conversion
+cancellation is checked before/after the shared read, not used to cancel other
+readers' work; probe execution/cleanup errors still propagate. Blocking summaries
+are caller-owned, need no runtime, and must finish before shutdown. Async owner
+capacity does not govern independent synchronous invocations. No stronger sync
+shutdown or cancellation guarantee is claimed.
+
+Evidence: 96 focused conversion tests passed.
+Controlled Linux fixtures prove fresh import results, shared active work after
+waiter drop, runtime responsiveness, held-probe shutdown/closure/reaping,
+five-second timeout plus repeated failure observation, and synthetic lost/join
+panic receipt retention. A downstream-style trait implementation proves the new
+default does not invoke synchronous readiness. Actual manager tests prove catalog
+and status follow each backend's imports without setup records, and aggregate
+shutdown closes all matching setup/probe owners while three probes are active.
+Existing publication/progress fixtures now distinguish probes from model steps.
+
+Limits: no real packages, model tools, GPU/ABI compatibility, GUI workflow or
+Windows/macOS execution. Base-format probe modernization, setup-versus-conversion
+exclusion, native setup repair, hardware, calibration/source-file custody and
+backend-specific observable setup remain open. Supporting gates passed: 1,457
+default and 1,417 no-default-feature core/RPC tests, with 22 existing ignored tests
+each; strict all-target clippy in both configurations; formatting, whitespace
+and all five plan contracts. No gate bypass or live-library mutation occurred.
+Logs: `/tmp/pumas-public-probes-{focused,focused-final,clippy-default,clippy-minimal,default,minimal}.log`.
+
 ## 2026-09-08 — Direction-Specific llama.cpp Artifacts
 
 Accepted ART, a bounded FE-I26 artifact prerequisite. llama.cpp execution

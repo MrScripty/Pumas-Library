@@ -10,10 +10,11 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Repair public direction-specific quantization readiness
-(FE-I26, remaining FE-I23). Installer custody and setup import verification/repair
-are accepted below, as are direction-specific llama.cpp artifact checks. Public
-import-probe lifetime, setup observation/retry and stronger containment remain open.
+**Next slice:** Verify and repair native llama.cpp setup artifacts
+(FE-I26, remaining FE-I23), then expose backend-specific setup observation/retry.
+Installer custody, setup import verification/repair, direction-specific llama.cpp
+artifacts and public quantization import-probe lifetime are accepted below.
+Setup-versus-conversion exclusion and stronger containment remain open.
 Managed quantization target/calibration admission is accepted below; execution
 readiness and lower-level backend preconditions are not closed by it.
 NVFP4/Sherry script progress is accepted below, closing FE-I27.
@@ -37,6 +38,44 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Retained Quantization Readiness Probes
+
+Status: `Accepted`; see the
+[execution ledger](execution-ledger.md#2026-09-08--retained-quantization-readiness-probes).
+Continue FE-I26. Replace built-in public path-only
+quantization readiness with required-artifact and isolated import checks using
+the shared setup runner. Async callers share one retained blocking probe per
+backend; later reads observe the prior worker then admit a fresh probe. Dropping
+a caller never drops ownership. Close all setup/probe admission before aggregate
+shutdown awaits; retain errors and interrupted joins. Reads do not create setup
+records, acquire install leases or install anything. Sync boolean reads remain
+caller-owned and conservative on failure; callers must finish them before shutdown.
+
+Add a trait async-readiness method with an explicit unavailable error default,
+preserving downstream implementations without an inline blocking fallback.
+Built-ins implement it; manager status/catalog and Python-dependent execution
+await it. GGUF-only llama.cpp remains independent of Python. Public/wire data
+types and GUI feature composition do not change. Five seconds bounds each
+interactive probe's execution (up to three sequential probes for a status list),
+not fail-closed cleanup. Setup retains its separate thirty-second import budget.
+Quantization cancellation is checked before and after its shared probe; it does
+not cancel another status reader's probe. Execution/cleanup failures propagate.
+
+Agent owns private readiness.rs with retained lifecycle and fixture tests. Root
+owns backend/manager/trait wiring, shared import visibility, affected fixtures,
+manager consumer tests, API lifecycle Rustdoc and plan records. Root serializes
+Cargo/fmt/commits. Captured paths/imports never retain the owning backend. This
+private read owner has different results/admission from setup and does not reuse
+its mutation snapshots; the command runner remains sole process-cleanup owner.
+
+Acceptance PROBE (satisfied): controlled Linux fixtures prove import truth/failure,
+fresh reads, overlap, dropped waiters, shutdown closure and retained cleanup,
+current-thread responsiveness, and actual manager/backend consumers. Require full
+default/minimal core/RPC tests, strict lint, formatting and five plan contracts.
+No real package/GPU/ABI, setup-versus-conversion exclusion, base-format probe
+modernization or Windows/macOS execution claim. Re-plan if this needs a new wire
+shape, runtime, installation effect or unrelated process supervisor.
 
 ## Direction-Specific llama.cpp Artifacts
 

@@ -11,6 +11,7 @@ fn executable(path: &Path, script: &str) {
 }
 
 const DIRECTORY_WRITER: &str = r#"#!/bin/sh
+if test "$1" = '-I'; then exit 0; fi
 printf 'fixture diagnostic\n' >&2
 printf '{"stage":"converting","tensor_index":1,"tensor_count":2,"tensor_name":"fixture.weight"}\n'
 while [ $# -gt 0 ]; do
@@ -406,6 +407,7 @@ async fn quantization_scripts_expose_phases_and_defer_failures_before_publicatio
                 &python,
                 &format!(
                     r#"#!/bin/sh
+if test "$1" = '-I'; then exit 0; fi
 {diagnostic}
 printf '%s\n' '{phase}'
 attempt=0

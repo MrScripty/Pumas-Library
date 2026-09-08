@@ -32,7 +32,7 @@ fn params(root: &Path, extension: &str) -> QuantizeParams {
 }
 
 const QUANTIZER: &str = "#!/bin/sh\ntouch \"$0.started\"\nif test \"$1\" = '--imatrix'; then shift 2; fi\nprintf 'quantized fixture' > \"$2\"\n";
-const CONVERTER: &str = "#!/bin/sh\ntouch \"$0.started\"\nwhile test $# -gt 0; do\n if test \"$1\" = '--outfile'; then printf 'converted fixture' > \"$2\"; exit 0; fi\n shift\ndone\nexit 2\n";
+const CONVERTER: &str = "#!/bin/sh\nif test \"$1\" = '-I'; then exit 0; fi\ntouch \"$0.started\"\nwhile test $# -gt 0; do\n if test \"$1\" = '--outfile'; then printf 'converted fixture' > \"$2\"; exit 0; fi\n shift\ndone\nexit 2\n";
 
 fn started(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();

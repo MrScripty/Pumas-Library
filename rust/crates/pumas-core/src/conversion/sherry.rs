@@ -28,17 +28,26 @@ use crate::{PumasError, Result};
 pub struct SherryBackend {
     base_dir: PathBuf,
     pub(super) setup: std::sync::Arc<super::setup::SetupOwner>,
+    pub(super) readiness: std::sync::Arc<super::readiness::ProbeOwner>,
 }
 
 impl SherryBackend {
     /// Create a new backend rooted under `{launcher_root}/launcher-data/sherry/`.
     pub fn new(launcher_root: &Path) -> Self {
+        let base_dir = launcher_root.join("launcher-data").join("sherry");
+        let python = base_dir.join("venv/bin/python");
         Self {
+            readiness: std::sync::Arc::new(super::readiness::ProbeOwner::new(
+                python.clone(),
+                "sherry",
+                super::backend_setup::SHERRY_IMPORTS,
+                vec![(base_dir.join("sherry_qat.py"), false), (python, true)],
+            )),
             setup: std::sync::Arc::new(super::setup::SetupOwner::for_backend(
                 launcher_root.to_path_buf(),
                 QuantBackend::Sherry,
             )),
-            base_dir: launcher_root.join("launcher-data").join("sherry"),
+            base_dir,
         }
     }
 
@@ -54,10 +63,10 @@ impl SherryBackend {
         self.base_dir.join("sherry_qat.py")
     }
 
-    /// Close installer admission and observe retained setup cleanup before
-    /// stopping the host runtime. Dropping an ensure waiter does not stop setup.
+    /// Close installer/probe admission and drain retained async work before
+    /// stopping the host runtime. Finish caller-owned synchronous reads first.
     pub async fn shutdown_setup(&self) -> Result<()> {
-        self.setup.shutdown().await
+        super::readiness::shutdown_backend(&self.setup, &self.readiness).await
     }
 }
 
@@ -72,7 +81,11 @@ impl QuantizationBackend for SherryBackend {
     }
 
     fn is_ready(&self) -> bool {
-        self.venv_python().exists() && self.train_script().exists()
+        self.readiness.check_blocking().unwrap_or(false)
+    }
+
+    async fn is_ready_async(&self) -> Result<bool> {
+        self.readiness.check().await
     }
 
     async fn ensure_environment(&self) -> Result<()> {
@@ -121,7 +134,14 @@ impl QuantizationBackend for SherryBackend {
         }
 
         // -- PHASE 2: VALIDATE --
-        if !self.is_ready() {
+        cancel_token
+            .check()
+            .map_err(|_| PumasError::ConversionCancelled)?;
+        let ready = self.is_ready_async().await?;
+        cancel_token
+            .check()
+            .map_err(|_| PumasError::ConversionCancelled)?;
+        if !ready {
             return Err(PumasError::QuantizationEnvNotReady {
                 backend: "sherry".to_string(),
                 message:

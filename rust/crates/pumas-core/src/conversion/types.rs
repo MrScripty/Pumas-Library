@@ -13,7 +13,7 @@ use super::progress::ConversionProgressTracker;
 // Enums
 // ---------------------------------------------------------------------------
 
-/// Latest base Python setup state, retained for this owner/process lifetime.
+/// Latest built-in conversion or quantization setup state, retained per owner/process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]

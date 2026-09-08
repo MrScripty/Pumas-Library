@@ -1,5 +1,60 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Backend-Specific Rust Setup Observation
+
+Accepted BSETUP. Standalone PumasApi/ConversionManager callers can select
+all four built-in setup environments for start, memory-only status and guarded
+retry. Selection uses the existing owner's backend identity; PythonConversion
+selects the existing base owner. Setup snapshots, CAS retry admission, ensure
+semantics, retained worker custody and aggregate shutdown are unchanged. No
+backend trait expansion, dependency, wire shape, GUI or second lifecycle owner.
+Rustdoc and the core README own the caller contract, including caller-owned
+setup/execution exclusion and process-local observation rather than readiness.
+The README's obsolete exclusion of quantization installers from shutdown was
+corrected, and transport claims now distinguish base setup from Rust-only
+backend observation. RPC/desktop projection remains the next consumer slice.
+
+The codebase-design skill kept state and retry semantics in SetupOwner instead
+of adding per-backend observation machinery. Root implemented/wired the public
+surface and PumasApi contract check; root_diagnostics added the controlled
+manager regression and reviewed production identity/lifecycle/docs. Tests prove
+all-backend selection, read/rejected-token non-effects, base alias identity,
+attachment to held ensure work, dropped waiter custody, None not retrying,
+cross-backend/stale tokens not retrying, duplicate matching retries sharing one
+successor, exact controlled install counts and post-shutdown reads/rejection.
+
+Verification deviation: the first full minimal suite failed an existing held
+installer test during llama.cpp venv creation with `Observing setup process-group
+cleanup: No such process (os error 3)`. The same isolated test passed 20/20;
+repetition alone was not accepted as a fix. The diagnosing-bugs skill guided a
+deterministic Linux regression: open a live child's procfs stat inode, kill/reap
+the test-owned child, reopen the retained inode through `/proc/self/fd`, and
+observe raw ESRCH. The real read_stat helper failed its expected-absence assertion
+before correction. This reproduces an actual reader failure consistent with the
+suite symptom; the original transient process/path was not traced.
+
+The bounded write set expanded to linux_group.rs because this cleanup failure
+invalidated the setup acceptance gate. Its stat reader now recognizes ESRCH,
+as well as ENOENT, as a disappeared task. It does not ignore permission, parser,
+task-enumeration or child-identity errors, weaken group checks, or relax lease
+custody. The held-inode regression uses real Linux procfs rather than fabricated
+errno; all installer programs remain controlled substitutes. No debug logging
+or new runtime owner was added. This is not stronger containment or proof for
+escaped processes, unsupported procfs visibility or Windows/macOS.
+The independently reviewable cleanup correction is commit `b89d403a`.
+
+Final evidence: 102 focused conversion tests passed, including the deterministic
+procfs regression and previously failing installer case. Full default core/RPC
+passed 1,464 tests; no-default passed 1,424 tests (22 ignored in each). Strict
+all-target/all-feature and all-target/no-default clippy passed with warnings
+denied; cargo fmt, whitespace and all five canonical plan checks passed.
+Both new backend-observation tests also passed in the initial focused run.
+Final runs use `/tmp/pumas-backend-observation-*-final.log`; the deterministic
+red is `/tmp/pumas-proc-stat-red.log`. Commands use offline/locked Cargo with
+`-p pumas-library -p pumas-rpc`, or `--lib conversion::` for focused evidence.
+Linux controlled installer evidence is not real package/native build/GPU
+compatibility. No real library, release, GUI, network or installation action.
+
 ## 2026-09-08 — Native llama.cpp Setup Artifacts
 
 Accepted NATIVE, the native artifact portion of FE-I26 setup repair.

@@ -77,6 +77,37 @@ impl PumasApi {
         self.primary().conversion_manager.get_conversion_setup()
     }
 
+    /// Start or inspect setup for a built-in backend, including PythonConversion.
+    /// `None` never retries a retained operation. Only a matching terminal ID
+    /// admits a successor; stale IDs return the selected backend's current record.
+    /// Malformed IDs or retry without an owner-local record return `InvalidParams`.
+    /// Records are process-local and shared with the corresponding ensure method.
+    /// Keep conversions and external environment use excluded during setup;
+    /// native repair may clean/rebuild generated outputs. Exclusion is caller-owned.
+    /// Dropped callers do not cancel setup; drain `shutdown_conversion_setup`
+    /// before stopping the runtime. Closed admission returns `InstallationCancelled`.
+    /// See [`conversion::ConversionManager::start_backend_setup`] for the contract.
+    pub async fn start_backend_setup(
+        &self,
+        backend: conversion::QuantBackend,
+        expected_previous_operation_id: Option<&str>,
+    ) -> Result<conversion::ConversionSetupSnapshot> {
+        self.primary()
+            .conversion_manager
+            .start_backend_setup(backend, expected_previous_operation_id)
+            .await
+    }
+
+    /// Inspect a built-in backend's retained setup without disk I/O or starting work.
+    /// `None` means no owner-local record, not a readiness result. Includes
+    /// PythonConversion and remains readable after setup shutdown.
+    pub fn get_backend_setup(
+        &self,
+        backend: conversion::QuantBackend,
+    ) -> Result<Option<conversion::ConversionSetupSnapshot>> {
+        self.primary().conversion_manager.get_backend_setup(backend)
+    }
+
     /// Close base Python setup and built-in quantization setup/probe admission,
     /// then await cleanup. Finish caller-owned synchronous readiness calls first.
     /// Invoke before stopping the hosting runtime. Successful cancellation and

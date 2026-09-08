@@ -10,8 +10,9 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Expose backend-specific setup observation/retry
-(FE-I26, remaining FE-I23). Native llama.cpp artifact verification/guarded repair
+**Next slice:** Project backend-specific setup observation/retry through RPC and
+the optional desktop bridge (FE-I26, remaining FE-I23). The standalone Rust
+surface is accepted below. Native llama.cpp artifact verification/guarded repair
 is accepted below; source/build revision coherence remains outside that claim.
 Installer custody, setup import verification/repair, direction-specific llama.cpp
 artifacts and public quantization import-probe lifetime are accepted below.
@@ -39,6 +40,52 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Backend-Specific Rust Setup Observation
+
+Status: `Accepted`; see the
+[execution ledger](execution-ledger.md#2026-09-08--backend-specific-rust-setup-observation).
+Continue FE-I26/FE-I23 by exposing start/status/guarded retry
+through ConversionManager and PumasApi for all four built-in environments.
+Reuse each existing SetupOwner, its backend identity, snapshot and retry CAS;
+do not add a parallel state machine or expand the downstream backend trait.
+PythonConversion selects the base owner used by the existing conversion methods.
+Memory-only reads never install or probe. None does not retry retained results;
+only the selected owner's matching terminal ID admits a successor. Stale IDs
+return that owner's current snapshot; invalid IDs or retries without a record
+fail explicitly. Records remain readable after shutdown closes admission.
+Setup-versus-conversion exclusion remains caller-owned and documented.
+
+The standalone Rust contract is independently usable without transport or GUI.
+RPC/desktop projection requires separate protocol/generated-consumer evidence
+and follows this prerequisite; no quantization GUI mutation is admitted here.
+Existing base setup methods and ensure-method semantics remain supported.
+
+Exact write set: `rust/crates/pumas-core/src/api/conversion.rs`,
+`rust/crates/pumas-core/src/conversion/{manager.rs,setup.rs,types.rs}`,
+`rust/crates/pumas-core/src/conversion/linux_group.rs` (verification-discovered
+procfs disappearance classification; preserve fail-closed custody),
+`rust/crates/pumas-core/src/conversion/manager/setup_tests.rs`,
+`rust/crates/pumas-core/tests/api_tests.rs`, `rust/crates/pumas-core/README.md`,
+this plan, its ledger/issues, and the parent plan. Root owns source/docs and
+serial Cargo/fmt/integration/commits; root_diagnostics owns only setup_tests.rs,
+reports via its message, and must escalate scope changes. No other files, real
+tools, network installation or library data writes. Existing test fixtures own
+their temporary roots. Composed-design review is not applicable to this additive
+selection surface: owner, lifecycle and composition remain unchanged; the
+existing owner is selected by its own identity, not parallel positional policy.
+
+Acceptance BSETUP (satisfied): public manager controlled Linux integration proves
+backend selection, shared ensure identity, observational reads, guarded retries,
+overlap and shutdown. PumasApi contract checks prove forwarding and rejection
+without real installation. Default/minimal core/RPC suites, strict lint, format,
+and five plan contracts support acceptance. No real installer/GPU/Windows/macOS
+or transport/GUI claim. Re-plan if a new lifecycle or wire shape is required.
+The first minimal suite exposed ESRCH when a task disappears during procfs stat
+reading. A deterministic held-inode regression reproduced the read_stat failure;
+the reader recognizes this disappearance without suppressing other observation
+failures. The shared cleanup correction and original full suite passed;
+see ledger for the bounded write-set expansion and evidence limits.
 
 ## Native llama.cpp Setup Artifacts
 

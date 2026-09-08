@@ -138,6 +138,10 @@ pub(super) struct SetupOwner {
 }
 
 impl SetupOwner {
+    pub(super) fn backend_id(&self) -> super::QuantBackend {
+        self.backend
+    }
+
     pub(super) fn new(root: PathBuf) -> Self {
         Self::for_backend(root, super::QuantBackend::PythonConversion)
     }

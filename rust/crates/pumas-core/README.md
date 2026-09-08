@@ -64,8 +64,18 @@ completed download.
 
 ## Public Boundary
 
-Base Python conversion setup is supervised independently of its caller.
-Use `start_conversion_setup(None)` for prompt admission/attachment and
+Built-in conversion and quantization setup is supervised independently of its caller.
+Standalone callers use `start_backend_setup(backend, previous_id)` and
+`get_backend_setup(backend)` on `PumasApi` or `ConversionManager` for
+`PythonConversion`, `LlamaCpp`, `Nvfp4`, and `Sherry`. The backend selects its
+existing installer owner, shared with the corresponding ensure method; it does
+not create a second installation. Reads are memory-only, do not probe or install,
+and remain available after shutdown. Keep the selected backend alongside its
+snapshot: IDs cannot retry another backend's operation. Malformed IDs and retry
+tokens without a selected owner-local record return `InvalidParams`.
+
+For base Python conversion setup,
+use `start_conversion_setup(None)` for prompt admission/attachment and
 `get_conversion_setup()` for a memory-only latest snapshot. The snapshot contains
 a canonical UUID and `in_progress`, `completed`, `failed` or `cancelled` state;
 terminal state follows owned cleanup. `None` means this manager has no recorded
@@ -90,9 +100,15 @@ Call `PumasApi::shutdown_conversion_setup()` before stopping the hosting runtime
 It closes setup admission and waits for owned cleanup; abandoning a setup or
 shutdown waiter does not release the environment lease. Expected cancellation
 with completed cleanup is a successful drain; retained setup failures
-remain errors. This does not shut down conversion jobs or quantization-backend
-installation. The RPC server includes this owner in its shutdown drain.
-Setup uses one host blocking worker without nested filesystem work in that pool;
+remain errors. This also closes and drains all built-in quantization installers
+and async readiness probes, but does not shut down conversion jobs. Finish
+caller-owned synchronous readiness calls first. The RPC server includes these
+owners in its shutdown drain. Closed setup admission returns `InstallationCancelled`.
+Keep conversions and external tools excluded while their environment is being
+set up: native repair can clean/rebuild generated CMake outputs. This execution
+exclusion is caller-owned, not enforced by the installer lock. A completed setup
+is not proof that a later conversion's route, hardware or inputs are ready.
+Each setup operation uses one host blocking worker without nested filesystem work in that pool;
 it also supports a current-thread Tokio runtime with one blocking thread.
 
 Linux setup cleanup controls the installer process group and checks that no
@@ -100,9 +116,10 @@ live members remain before lease release. Installers must remain in that group.
 On other targets, cancellation drains the foreground command naturally before
 releasing custody, so shutdown can wait for it. Full process-tree evidence is
 Linux-only. If Linux cleanup cannot establish quiescence, it retains custody
-rather than report a completed shutdown. RPC and desktop expose the same setup
-observation contract with redacted failures; dialog integration remains a
-separate consumer follow-up.
+rather than report a completed shutdown. RPC and desktop currently expose base
+Python setup observation with redacted failures. Backend-specific observation
+is currently a Rust library contract; its RPC/desktop projection remains a
+separate follow-up.
 
 The crate builds and runs independently of the optional GUI and RPC process.
 For registered-link inspection, `PumasApi::get_link_health(None)` exposes the

@@ -216,6 +216,55 @@ impl ConversionManager {
         self.setup.snapshot()
     }
 
+    fn backend_setup(&self, backend: QuantBackend) -> Result<&super::setup::SetupOwner> {
+        if backend == QuantBackend::PythonConversion {
+            return Ok(&self.setup);
+        }
+        self.backend_setups
+            .iter()
+            .find(|setup| setup.backend_id() == backend)
+            .map(Arc::as_ref)
+            .ok_or_else(|| PumasError::InvalidParams {
+                message: format!("No managed setup owner for backend: {backend:?}"),
+            })
+    }
+
+    /// Start or inspect setup for a built-in backend, including PythonConversion.
+    /// Shares the owner used by the corresponding ensure method and shutdown.
+    /// `None` starts only when no record exists; it never retries retained work.
+    /// Only a matching terminal operation ID admits one successor. Stale IDs
+    /// return the selected backend's current record, not another backend's record.
+    /// IDs must be canonical lower-case hyphenated UUIDs; malformed IDs or a
+    /// retry without a selected owner-local record return `InvalidParams`.
+    /// Records are not persisted across owner/process restart.
+    ///
+    /// Exclude conversions and external environment use while setup runs; native
+    /// repair may clean/rebuild generated outputs. This exclusion is caller-owned.
+    /// Dropping this call does not cancel admitted work. Drain `shutdown_setup`
+    /// before stopping the Tokio runtime; closed admission returns
+    /// `InstallationCancelled`. Setup success is not execution readiness proof.
+    pub async fn start_backend_setup(
+        &self,
+        backend: QuantBackend,
+        expected_previous_operation_id: Option<&str>,
+    ) -> Result<super::ConversionSetupSnapshot> {
+        self.backend_setup(backend)?
+            .start_or_get(expected_previous_operation_id)
+            .await
+    }
+
+    /// Inspect the selected built-in setup owner without disk I/O or starting work.
+    /// `None` means no operation in this owner/process lifetime, not "not ready".
+    /// Includes PythonConversion and remains readable after shutdown. An absent
+    /// managed owner returns `InvalidParams`; snapshots are advisory observations
+    /// and may change immediately after this read.
+    pub fn get_backend_setup(
+        &self,
+        backend: QuantBackend,
+    ) -> Result<Option<super::ConversionSetupSnapshot>> {
+        Ok(self.backend_setup(backend)?.snapshot())
+    }
+
     /// Close all built-in setup/probe admission, cancel active work, and observe cleanup.
     /// Call before shutting down the hosting Tokio runtime. Repeated calls
     /// observe the same terminal result; dropping a waiter does not stop cleanup.

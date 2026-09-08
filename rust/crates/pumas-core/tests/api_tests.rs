@@ -225,6 +225,51 @@ async fn test_local_ipc_production_adapter_rejects_unauthorized_and_obsolete_ope
 }
 
 #[tokio::test]
+async fn backend_setup_api_reads_and_rejects_without_installing() {
+    use pumas_library::conversion::QuantBackend;
+
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
+    for backend in [
+        QuantBackend::PythonConversion,
+        QuantBackend::LlamaCpp,
+        QuantBackend::Nvfp4,
+        QuantBackend::Sherry,
+    ] {
+        assert!(api.get_backend_setup(backend).unwrap().is_none());
+        for token in ["invalid", "00112233-4455-4677-8899-aabbccddeeff"] {
+            assert!(matches!(
+                api.start_backend_setup(backend, Some(token)).await,
+                Err(PumasError::InvalidParams { .. })
+            ));
+        }
+        assert!(api.get_backend_setup(backend).unwrap().is_none());
+    }
+    assert!(api.get_conversion_setup().is_none());
+    assert!(!api
+        .launcher_data_dir()
+        .join("conversion-setup.lock")
+        .exists());
+    api.shutdown_conversion_setup().await.unwrap();
+    for backend in [
+        QuantBackend::PythonConversion,
+        QuantBackend::LlamaCpp,
+        QuantBackend::Nvfp4,
+        QuantBackend::Sherry,
+    ] {
+        assert!(matches!(
+            api.start_backend_setup(backend, None).await,
+            Err(PumasError::InstallationCancelled)
+        ));
+        assert!(api.get_backend_setup(backend).unwrap().is_none());
+    }
+    api.shutdown_conversion_setup().await.unwrap();
+    api.shutdown_conversions().await.unwrap();
+    api.shutdown_downloads().await.unwrap();
+}
+
+#[tokio::test]
 async fn test_api_creation_succeeds() {
     let temp_dir = create_test_env();
     let _registry = RegistryTestGuard::new(temp_dir.path());

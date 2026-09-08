@@ -591,3 +591,206 @@ async fn llama_setup_preserves_unexpected_native_outputs_before_cmake_clean() {
         }
     }
 }
+
+async fn fixture_manager(root: &Path) -> ConversionManager {
+    let library = Arc::new(ModelLibrary::new(root.join("models")).await.unwrap());
+    let mut manager = ConversionManager::new(
+        root.to_path_buf(),
+        library.clone(),
+        Arc::new(ModelImporter::new(library)),
+    );
+    let tools = programs(root);
+    let fixtures: Vec<_> = [
+        QuantBackend::LlamaCpp,
+        QuantBackend::Nvfp4,
+        QuantBackend::Sherry,
+    ]
+    .into_iter()
+    .map(|id| backend(root, id, tools.clone()))
+    .collect();
+    manager.backends = fixtures
+        .iter()
+        .map(|(backend, _, _)| backend.clone())
+        .collect();
+    manager.backend_probes = fixtures
+        .iter()
+        .map(|(_, _, probes)| probes.clone())
+        .collect();
+    manager.backend_setups = fixtures.into_iter().map(|(_, owner, _)| owner).collect();
+    manager
+}
+
+async fn backend_terminal(
+    manager: &ConversionManager,
+    backend: QuantBackend,
+) -> super::super::ConversionSetupSnapshot {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let snapshot = manager.get_backend_setup(backend).unwrap().unwrap();
+            if snapshot.status != super::super::ConversionSetupStatus::InProgress {
+                return snapshot;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("retained backend setup reached terminal receipt")
+}
+
+#[tokio::test]
+async fn backend_setup_observation_routes_existing_owners_and_requires_exact_retry_identity() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = fixture_manager(root.path()).await;
+    for id in [
+        QuantBackend::PythonConversion,
+        QuantBackend::LlamaCpp,
+        QuantBackend::Nvfp4,
+        QuantBackend::Sherry,
+    ] {
+        assert!(manager.get_backend_setup(id).unwrap().is_none());
+        assert!(matches!(
+            manager.start_backend_setup(id, Some("not-a-uuid")).await,
+            Err(PumasError::InvalidParams { .. })
+        ));
+        assert!(matches!(
+            manager
+                .start_backend_setup(id, Some("00112233-4455-4677-8899-aabbccddeeff"))
+                .await,
+            Err(PumasError::InvalidParams { .. })
+        ));
+    }
+    assert!(
+        !root.path().join("launcher-data").exists(),
+        "reads and rejected retry tokens do not deploy or install"
+    );
+    executable(&scripts::venv_python(root.path()), "#!/bin/sh\nexit 0\n");
+    let base = manager
+        .start_backend_setup(QuantBackend::PythonConversion, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        manager.get_conversion_setup().unwrap().operation_id,
+        base.operation_id
+    );
+    let base = backend_terminal(&manager, QuantBackend::PythonConversion).await;
+    assert_eq!(base.status, super::super::ConversionSetupStatus::Completed);
+    assert_eq!(
+        manager
+            .start_conversion_setup(None)
+            .await
+            .unwrap()
+            .operation_id,
+        base.operation_id
+    );
+    let mut other_backend_token = base.operation_id;
+
+    for (id, directory) in [
+        (QuantBackend::LlamaCpp, "llama-cpp"),
+        (QuantBackend::Nvfp4, "nvfp4"),
+        (QuantBackend::Sherry, "sherry"),
+    ] {
+        let mut ensure = Box::pin(manager.ensure_backend_environment(id));
+        tokio::select! {
+            result = &mut ensure => panic!("ensure completed before held installer: {result:?}"),
+            _ = started(root.path(), directory) => {}
+        }
+        let active = manager.get_backend_setup(id).unwrap().unwrap();
+        assert_eq!(
+            active.status,
+            super::super::ConversionSetupStatus::InProgress
+        );
+        assert_eq!(
+            manager
+                .start_backend_setup(id, None)
+                .await
+                .unwrap()
+                .operation_id,
+            active.operation_id
+        );
+        drop(ensure);
+        std::fs::write(marker(root.path(), directory, "release"), "").unwrap();
+        let complete = backend_terminal(&manager, id).await;
+        assert_eq!(
+            complete.status,
+            super::super::ConversionSetupStatus::Completed
+        );
+        assert_eq!(
+            manager
+                .start_backend_setup(id, None)
+                .await
+                .unwrap()
+                .operation_id,
+            active.operation_id
+        );
+        assert_eq!(
+            manager
+                .start_backend_setup(id, Some(&other_backend_token))
+                .await
+                .unwrap()
+                .operation_id,
+            active.operation_id
+        );
+        assert_eq!(
+            std::fs::read_to_string(marker(root.path(), directory, "starts")).unwrap(),
+            "start\n"
+        );
+
+        std::fs::remove_file(marker(root.path(), directory, "installed")).unwrap();
+        std::fs::remove_file(marker(root.path(), directory, "release")).unwrap();
+        let (first, second) = tokio::join!(
+            manager.start_backend_setup(id, Some(&active.operation_id)),
+            manager.start_backend_setup(id, Some(&active.operation_id))
+        );
+        let successor = first.unwrap();
+        assert_eq!(second.unwrap().operation_id, successor.operation_id);
+        assert_ne!(successor.operation_id, active.operation_id);
+        assert_eq!(
+            manager
+                .start_backend_setup(id, Some(&active.operation_id))
+                .await
+                .unwrap()
+                .operation_id,
+            successor.operation_id
+        );
+        std::fs::write(marker(root.path(), directory, "release"), "").unwrap();
+        let completed_successor = backend_terminal(&manager, id).await;
+        assert_eq!(
+            completed_successor.status,
+            super::super::ConversionSetupStatus::Completed
+        );
+        assert_eq!(
+            manager
+                .start_backend_setup(id, Some(&active.operation_id))
+                .await
+                .unwrap()
+                .operation_id,
+            successor.operation_id
+        );
+        assert_eq!(
+            std::fs::read_to_string(marker(root.path(), directory, "starts")).unwrap(),
+            "start\nstart\n"
+        );
+        other_backend_token = successor.operation_id;
+    }
+    manager.shutdown_setup().await.unwrap();
+    for id in [
+        QuantBackend::PythonConversion,
+        QuantBackend::LlamaCpp,
+        QuantBackend::Nvfp4,
+        QuantBackend::Sherry,
+    ] {
+        let retained = manager.get_backend_setup(id).unwrap().unwrap();
+        assert_eq!(
+            retained.status,
+            super::super::ConversionSetupStatus::Completed
+        );
+        assert!(matches!(
+            manager.start_backend_setup(id, None).await,
+            Err(PumasError::InstallationCancelled)
+        ));
+        assert_eq!(
+            manager.get_backend_setup(id).unwrap().unwrap().operation_id,
+            retained.operation_id
+        );
+    }
+}

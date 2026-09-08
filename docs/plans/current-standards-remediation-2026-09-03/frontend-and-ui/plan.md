@@ -12,6 +12,8 @@ one-second main-owned marker barrier remains the reveal authority.
 
 **Next slice:** Resolve quantization installer custody and direction-specific
 setup/preflight (FE-I26, remaining FE-I23); stronger containment remains open.
+Managed quantization target/calibration admission is accepted below; execution
+readiness and lower-level backend preconditions are not closed by it.
 NVFP4/Sherry script progress is accepted below, closing FE-I27.
 Atomic manager-local admission, retained Rust-worker
 observation and standalone/RPC shutdown composition are accepted below. Unique
@@ -33,6 +35,45 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Managed Quantization Request Admission
+
+Status: `Accepted`; see the
+[execution ledger](execution-ledger.md#2026-09-08--managed-quantization-request-admission).
+FE-I26 now rejects invalid
+managed quantization inputs before worker admission. Direction selects the
+backend; target names must match its catalog exactly, including backend identity.
+Preserve existing omitted-target defaults. IQ targets require calibration even
+when force is false; forced imatrix is llama.cpp-only. Every supplied calibration
+path must name a nonempty regular file at inspection. Missing optional NVFP4/
+Sherry calibration remains allowed. Inspection is not content/readability proof
+or retained file custody; callers must keep supplied files stable through use.
+No new containment promise or restriction to the model root is introduced.
+
+Root write set: core `conversion/manager.rs`, `conversion/types.rs`, new private
+`conversion/manager/admission_tests.rs`, and frontend/parent plan, ledger and
+issues. Subagent reviews callers/catalogs read-only and reports to root; root
+owns all edits, serial Cargo and commits. No GUI, wire schema, dependencies,
+installers, live models or direct backend execution changes.
+
+Composed-design review: not applicable to a new architecture; this adds input
+checks in the existing managed-request preparation owner, not a Module or
+lifetime mechanism. Catalogs retain target authority, request preparation owns
+cross-field admission, and WorkerOwner still owns atomic capacity/lifetime.
+Deleting the checks would again defer invalid input to spawned workers. Core,
+PumasApi and RPC managed starts share this owner; direct QuantizationBackend
+calls are lower-level execution with existing preconditions, not managed starts.
+Python format-conversion admission is unchanged.
+
+Acceptance QREQ (satisfied): automated public-manager contract tests with isolated
+library/file fixtures prove precise InvalidParams rejection without progress,
+staging or backend setup effects. Focused preparation tests cover each backend's
+catalog/default, IQ/force cross-fields and supplied-file checks. Supporting gates
+are conversion tests, default/minimal core/RPC suites, strict lint, formatting
+and five plan contracts, all passed. No model algorithm, GUI workflow, installer readiness,
+hostile-path replacement, calibration content or hardware claim. Re-plan if
+request validation requires a new public representation or lifetime owner.
+After acceptance return to installer custody and remaining preflight in FE-I26.
 
 ## Python Quantization Progress Admission
 

@@ -34,6 +34,9 @@ const MAX_CONCURRENT: usize = 1;
 #[cfg(all(test, unix))]
 mod output_tests;
 
+#[cfg(test)]
+mod admission_tests;
+
 /// Readiness must fit within interactive status requests even for a stuck interpreter.
 const ENVIRONMENT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const ENVIRONMENT_PROBE_IMPORTS: &str = "import numpy, sentencepiece; from gguf import GGUFReader, GGUFWriter; from safetensors import safe_open; from safetensors.numpy import save_file";
@@ -312,6 +315,10 @@ impl ConversionManager {
     /// Start a model format conversion or quantization.
     ///
     /// Returns a conversion ID that can be used to track progress.
+    /// Managed quantization rejects unsupported target/backend pairs, missing
+    /// required calibration, and invalid supplied calibration files before
+    /// admitting a worker. File inspection is not retained custody: callers
+    /// must keep calibration files stable and readable through execution.
     pub async fn start_conversion(&self, request: ConversionRequest) -> Result<String> {
         self.workers.observe_finished();
 
@@ -392,15 +399,17 @@ impl ConversionManager {
             // Quantization via backend — route to the appropriate backend by direction
             ConversionDirection::SafetensorsToQuantizedGguf
             | ConversionDirection::GgufToQuantizedGguf => {
-                let (backend, params) = self.prepare_backend_quantization(
-                    QuantBackend::LlamaCpp,
-                    "llama.cpp",
-                    &conv_id,
-                    &model_path,
-                    &source_model_id,
-                    target_quant,
-                    &request,
-                )?;
+                let (backend, params) = self
+                    .prepare_backend_quantization(
+                        QuantBackend::LlamaCpp,
+                        "llama.cpp",
+                        &conv_id,
+                        &model_path,
+                        &source_model_id,
+                        target_quant,
+                        &request,
+                    )
+                    .await?;
 
                 self.workers
                     .spawn(initial_progress, cancel_token.clone(), async move {
@@ -418,15 +427,17 @@ impl ConversionManager {
                     })?
             }
             ConversionDirection::SafetensorsToNvfp4 => {
-                let (backend, params) = self.prepare_backend_quantization(
-                    QuantBackend::Nvfp4,
-                    "nvfp4",
-                    &conv_id,
-                    &model_path,
-                    &source_model_id,
-                    target_quant,
-                    &request,
-                )?;
+                let (backend, params) = self
+                    .prepare_backend_quantization(
+                        QuantBackend::Nvfp4,
+                        "nvfp4",
+                        &conv_id,
+                        &model_path,
+                        &source_model_id,
+                        target_quant,
+                        &request,
+                    )
+                    .await?;
 
                 self.workers
                     .spawn(initial_progress, cancel_token.clone(), async move {
@@ -444,15 +455,17 @@ impl ConversionManager {
                     })?
             }
             ConversionDirection::SafetensorsToSherryQat => {
-                let (backend, params) = self.prepare_backend_quantization(
-                    QuantBackend::Sherry,
-                    "sherry",
-                    &conv_id,
-                    &model_path,
-                    &source_model_id,
-                    target_quant,
-                    &request,
-                )?;
+                let (backend, params) = self
+                    .prepare_backend_quantization(
+                        QuantBackend::Sherry,
+                        "sherry",
+                        &conv_id,
+                        &model_path,
+                        &source_model_id,
+                        target_quant,
+                        &request,
+                    )
+                    .await?;
 
                 self.workers
                     .spawn(initial_progress, cancel_token.clone(), async move {
@@ -479,7 +492,7 @@ impl ConversionManager {
     /// Finds the backend by ID, builds params from the request, and returns
     /// an owned backend handle suitable for use in a spawned task.
     #[allow(clippy::too_many_arguments)]
-    fn prepare_backend_quantization(
+    async fn prepare_backend_quantization(
         &self,
         backend_id: QuantBackend,
         backend_name: &str,
@@ -507,6 +520,48 @@ impl ConversionManager {
                 backend: backend_name.to_string(),
                 message: format!("No {} backend registered", backend_name),
             })?;
+
+        if !backend
+            .supported_quant_types()
+            .iter()
+            .any(|option| option.backend == Some(backend_id) && option.name == quant_type)
+        {
+            return Err(PumasError::InvalidParams {
+                message: format!("Unsupported target quantization for {backend_name}"),
+            });
+        }
+        if force_imatrix && backend_id != QuantBackend::LlamaCpp {
+            return Err(PumasError::InvalidParams {
+                message: "force_imatrix is only supported by llama.cpp".into(),
+            });
+        }
+        if backend_id == QuantBackend::LlamaCpp
+            && (force_imatrix || quant_type.starts_with("IQ"))
+            && calibration_file.is_none()
+        {
+            return Err(PumasError::InvalidParams {
+                message: "IQ targets and forced importance matrices require a calibration file"
+                    .into(),
+            });
+        }
+        if let Some(path) = &calibration_file {
+            let metadata = match fs::metadata(path).await {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(PumasError::InvalidParams {
+                        message: "Calibration file does not exist".into(),
+                    });
+                }
+                Err(error) => {
+                    return Err(PumasError::io("inspecting calibration file", path, error))
+                }
+            };
+            if !metadata.is_file() || metadata.len() == 0 {
+                return Err(PumasError::InvalidParams {
+                    message: "Calibration must be a nonempty regular file".into(),
+                });
+            }
+        }
 
         let params = QuantizeParams {
             conversion_id: conv_id.to_string(),

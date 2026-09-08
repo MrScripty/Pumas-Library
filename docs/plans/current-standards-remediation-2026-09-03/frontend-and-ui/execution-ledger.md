@@ -1,5 +1,57 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Managed Quantization Request Admission
+
+Accepted QREQ, the managed-input portion of FE-I26. All four managed
+quantization directions validate their exact target against the selected
+backend's catalog, including backend identity, before WorkerOwner admission.
+Omitted targets retain Q4_K_M, NVFP4 and Sherry-1.25bit defaults. No case,
+whitespace, path or foreign-backend aliases are accepted. IQ calibration remains
+required even with force=false; force=true requires llama.cpp and calibration.
+Supplied paths must resolve at inspection to nonempty regular files. Missing
+paths return InvalidParams, while other metadata-inspection errors retain I/O
+failure context. NVFP4/Sherry missing optional calibration remains allowed;
+their existing sample-data behavior is not changed or newly endorsed.
+
+The codebase-design skill kept the checks in existing managed request
+preparation rather than introducing another public validator or owner. Core
+manager, PumasApi and RPC managed requests reach this same preparation. Backend
+catalogs remain target authority; the worker still owns atomic capacity and
+lifetime. Subagent reviewed catalogs/callers and the implementation read-only;
+root implemented, verified and integrated. Rustdoc now correctly states that
+false cannot bypass IQ requirements and scopes supplied-file checks to managed
+quantization starts.
+
+Evidence: 77 focused conversion tests passed. Public-manager contract fixtures
+assert exact InvalidParams diagnostics for wrong-backend/unknown/empty/case/
+whitespace/path/option-like targets, missing IQ or forced calibration, unsupported
+force flags, and supplied missing/empty/directory paths. Rejection preserves
+the pre-call library entries and source payload, creates no progress or setup
+directory, and leaves shutdown clean. Preparation fixtures accept all current
+backend catalog entries and defaults, preserve supplied paths with spaces,
+and preserve optional absence where allowed. Existing controlled-process
+conversion tests exercise valid requests through real managed worker paths.
+Initial new assertions incorrectly assumed the model directory was the only
+library entry; the index also owns files there. Corrected to compare the actual
+pre-call entry set, retaining the no-staging/no-output claim without a guessed
+count. No production correction was needed for that fixture failure.
+
+Both complete core/RPC suites passed: 1,438 default and 1,398 no-default-feature
+tests, with 22 existing ignored tests each. Strict all-target clippy passed
+with all features and without defaults; formatting, whitespace and all five
+plan contracts passed. Logs:
+`/tmp/pumas-request-admission-{focused,default,minimal,clippy-default,clippy-minimal}.log`.
+
+Limits: evidence uses isolated local library/file fixtures and controlled
+processes, not live models, installers, GPUs or a graphical workflow. No wire
+types, dependencies or feature gates change. This is input rejection, not
+complete preflight: inspection proves neither readable/valid calibration text
+nor retained custody against replacement; callers must keep inputs stable and
+readable through execution. Direct QuantizationBackend calls and base Python
+format conversion are outside this managed-quantization admission guarantee.
+FE-I26 remains open for installer custody, direction-specific tools/hardware,
+calibration content and stronger containment before new quantization GUI work.
+
 ## 2026-09-08 — Python Quantization Progress
 
 Accepted the remaining FE-I27 script-progress projection. NVFP4 and Sherry now

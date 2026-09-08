@@ -136,7 +136,11 @@ pub struct ConversionRequest {
     #[serde(default)]
     pub output_name: Option<String>,
     /// Path to a calibration text file for importance matrix generation.
-    /// Required for IQ* quant types unless `force_imatrix` is false.
+    /// Required for llama.cpp IQ* targets even when `force_imatrix` is false,
+    /// and for any llama.cpp target when `force_imatrix` is true. Managed
+    /// quantization starts require supplied paths to name nonempty regular
+    /// files; callers retain responsibility for stable, readable content
+    /// through execution.
     #[serde(default)]
     pub imatrix_calibration_file: Option<String>,
     /// Use an importance matrix even for non-IQ quant types.

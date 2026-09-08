@@ -272,6 +272,11 @@ failure now share the base conversion protocol, closing FE-I27 within controlled
 Linux process evidence; public/wire types are unchanged. Stronger containment,
 installer custody and preflight remain prerequisites before GUI configuration
 (FE-I23).
+Managed quantization starts now reject foreign/invalid target names, missing
+required IQ/forced calibration, unsupported force flags and supplied paths
+that are missing, empty or not regular files before worker admission. This
+does not establish execution readiness, calibration content or file custody;
+direct backend execution retains its existing lower-level preconditions.
 The GUI is independently optional; embedded Rust and standalone RPC remain
 supported. Pending cleanup replay is deferred, not accepted: it still needs an
 exact contract against durable authority and retained root custody. No old-format

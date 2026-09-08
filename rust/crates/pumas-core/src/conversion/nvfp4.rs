@@ -6,9 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tokio::fs;
 use tokio::process::Command;
-use tracing::{debug, info, warn};
 
 use super::outputs::OutputWorkspace;
 use super::pipeline;
@@ -27,12 +25,17 @@ use crate::{PumasError, Result};
 /// NVFP4 quantization backend using nvidia-modelopt.
 pub struct Nvfp4Backend {
     base_dir: PathBuf,
+    pub(super) setup: std::sync::Arc<super::setup::SetupOwner>,
 }
 
 impl Nvfp4Backend {
     /// Create a new backend rooted under `{launcher_root}/launcher-data/nvfp4/`.
     pub fn new(launcher_root: &Path) -> Self {
         Self {
+            setup: std::sync::Arc::new(super::setup::SetupOwner::for_backend(
+                launcher_root.to_path_buf(),
+                QuantBackend::Nvfp4,
+            )),
             base_dir: launcher_root.join("launcher-data").join("nvfp4"),
         }
     }
@@ -49,102 +52,10 @@ impl Nvfp4Backend {
         self.base_dir.join("quantize_nvfp4.py")
     }
 
-    /// Deploy the NVFP4 quantization script to the backend directory.
-    async fn deploy_script(&self) -> Result<()> {
-        fs::create_dir_all(&self.base_dir)
-            .await
-            .map_err(|e| PumasError::io("creating nvfp4 dir", &self.base_dir, e))?;
-
-        let script = include_str!("nvfp4_script.py");
-        fs::write(self.quantize_script(), script)
-            .await
-            .map_err(|e| PumasError::io("writing nvfp4 script", self.quantize_script(), e))?;
-        Ok(())
-    }
-
-    /// Create the Python venv and install nvidia-modelopt dependencies.
-    async fn setup_venv(&self) -> Result<()> {
-        let venv_dir = self.venv_dir();
-        let python = self.venv_python();
-
-        if fs::try_exists(&python)
-            .await
-            .map_err(|e| PumasError::io("checking nvfp4 python", &python, e))?
-        {
-            debug!("NVFP4 venv already exists at {}", venv_dir.display());
-            return Ok(());
-        }
-
-        info!(
-            "Creating NVFP4 virtual environment at {}",
-            venv_dir.display()
-        );
-
-        let output = Command::new("python3")
-            .args(["-m", "venv", &venv_dir.to_string_lossy()])
-            .output()
-            .await
-            .map_err(|e| PumasError::QuantizationEnvNotReady {
-                backend: "nvfp4".to_string(),
-                message: format!("Failed to create venv: {e}"),
-            })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PumasError::QuantizationEnvNotReady {
-                backend: "nvfp4".to_string(),
-                message: format!("Failed to create venv: {stderr}"),
-            });
-        }
-
-        // Upgrade pip
-        let output = Command::new(&python)
-            .args(["-m", "pip", "install", "--upgrade", "pip"])
-            .output()
-            .await
-            .map_err(|e| PumasError::QuantizationEnvNotReady {
-                backend: "nvfp4".to_string(),
-                message: format!("Failed to upgrade pip: {e}"),
-            })?;
-
-        if !output.status.success() {
-            warn!(
-                "NVFP4 pip upgrade failed (non-fatal): {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-
-        // Install nvidia-modelopt and dependencies
-        info!("Installing nvidia-modelopt dependencies...");
-        let output = Command::new(&python)
-            .args([
-                "-m",
-                "pip",
-                "install",
-                "nvidia-modelopt[all]",
-                "transformers",
-                "torch",
-                "safetensors",
-                "datasets",
-                "accelerate",
-            ])
-            .output()
-            .await
-            .map_err(|e| PumasError::QuantizationEnvNotReady {
-                backend: "nvfp4".to_string(),
-                message: format!("Failed to install dependencies: {e}"),
-            })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PumasError::QuantizationEnvNotReady {
-                backend: "nvfp4".to_string(),
-                message: format!("Failed to install nvidia-modelopt: {stderr}"),
-            });
-        }
-
-        info!("NVFP4 environment ready");
-        Ok(())
+    /// Close installer admission and observe retained setup cleanup before
+    /// stopping the host runtime. Dropping an ensure waiter does not stop setup.
+    pub async fn shutdown_setup(&self) -> Result<()> {
+        self.setup.shutdown().await
     }
 }
 
@@ -163,8 +74,7 @@ impl QuantizationBackend for Nvfp4Backend {
     }
 
     async fn ensure_environment(&self) -> Result<()> {
-        self.deploy_script().await?;
-        self.setup_venv().await
+        self.setup.ensure().await
     }
 
     fn supported_quant_types(&self) -> Vec<QuantOption> {

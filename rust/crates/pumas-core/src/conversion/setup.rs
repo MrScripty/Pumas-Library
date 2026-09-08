@@ -1,4 +1,4 @@
-//! Base Python setup custody. The configured launcher-data directory and its
+//! Built-in conversion/quantization setup custody. The configured launcher-data directory and its
 //! lock file must not be replaced or unlinked while an owner is active. This is
 //! advisory setup exclusion, not a hostile-filesystem capability. Explicit
 //! shutdown must complete before the embedding application stops its runtime.
@@ -18,25 +18,28 @@ use super::{
 use crate::cancel::CancellationToken;
 use crate::{PumasError, Result};
 
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+pub(super) const COMMAND_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 #[derive(Clone, Debug)]
-enum Failure {
+pub(super) enum Failure {
     Cancelled,
     Failed(String),
+    CommandNotFound(String),
 }
 
 impl Failure {
     fn public(self) -> PumasError {
         match self {
             Self::Cancelled => PumasError::InstallationCancelled,
-            Self::Failed(message) => PumasError::ConversionFailed { message },
+            Self::Failed(message) | Self::CommandNotFound(message) => {
+                PumasError::ConversionFailed { message }
+            }
         }
     }
 }
 
-type Outcome = std::result::Result<(), Failure>;
+pub(super) type Outcome = std::result::Result<(), Failure>;
 
 struct Operation {
     id: String,
@@ -78,7 +81,9 @@ impl Operation {
             None => (ConversionSetupStatus::InProgress, None),
             Some(Ok(())) => (ConversionSetupStatus::Completed, None),
             Some(Err(Failure::Cancelled)) => (ConversionSetupStatus::Cancelled, None),
-            Some(Err(Failure::Failed(reason))) => (ConversionSetupStatus::Failed, Some(reason)),
+            Some(Err(Failure::Failed(reason) | Failure::CommandNotFound(reason))) => {
+                (ConversionSetupStatus::Failed, Some(reason))
+            }
         };
         ConversionSetupSnapshot {
             operation_id: self.id.clone(),
@@ -128,14 +133,27 @@ struct State {
 pub(super) struct SetupOwner {
     root: PathBuf,
     state: Mutex<State>,
+    backend: super::QuantBackend,
+    programs: super::backend_setup::Programs,
 }
 
 impl SetupOwner {
     pub(super) fn new(root: PathBuf) -> Self {
+        Self::for_backend(root, super::QuantBackend::PythonConversion)
+    }
+
+    pub(super) fn for_backend(root: PathBuf, backend: super::QuantBackend) -> Self {
         Self {
             root,
             state: Mutex::new(State::default()),
+            backend,
+            programs: super::backend_setup::Programs::default(),
         }
+    }
+
+    #[cfg(all(test, target_os = "linux"))]
+    pub(super) fn set_programs(&mut self, programs: super::backend_setup::Programs) {
+        self.programs = programs;
     }
 
     pub(super) async fn ensure(&self) -> Result<()> {
@@ -248,6 +266,8 @@ impl SetupOwner {
     fn start(&self) -> Arc<Operation> {
         let id = uuid::Uuid::new_v4().to_string();
         let root = self.root.clone();
+        let backend = self.backend;
+        let programs = self.programs.clone();
         let cancel = CancellationToken::new();
         let worker_cancel = cancel.clone();
         let (sender, receiver) = watch::channel(None);
@@ -255,7 +275,7 @@ impl SetupOwner {
         // independently of request cancellation and async runtime task aborts.
         let handle = tokio::task::spawn_blocking(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                execute(&root, &worker_cancel)
+                execute(&root, &worker_cancel, backend, &programs)
             }))
             .unwrap_or_else(|_| Err(Failure::Failed("Conversion setup worker panicked".into())));
             sender.send_replace(Some(result));
@@ -269,6 +289,17 @@ impl SetupOwner {
                 handle: Some(handle),
             }),
         })
+    }
+
+    pub(super) fn close(&self) {
+        let operation = {
+            let mut state = self.state.lock().expect("conversion setup owner poisoned");
+            state.closed = true;
+            state.operation.clone()
+        };
+        if let Some(operation) = operation {
+            operation.cancel.cancel();
+        }
     }
 
     pub(super) async fn shutdown(&self) -> Result<()> {
@@ -304,7 +335,7 @@ impl Drop for SetupOwner {
     }
 }
 
-fn check_cancel(cancel: &CancellationToken) -> Outcome {
+pub(super) fn check_cancel(cancel: &CancellationToken) -> Outcome {
     if cancel.is_cancelled() {
         Err(Failure::Cancelled)
     } else {
@@ -312,7 +343,7 @@ fn check_cancel(cancel: &CancellationToken) -> Outcome {
     }
 }
 
-fn failed(context: &str, error: impl std::fmt::Display) -> Failure {
+pub(super) fn failed(context: &str, error: impl std::fmt::Display) -> Failure {
     Failure::Failed(format!("{context}: {error}"))
 }
 
@@ -397,10 +428,19 @@ fn acquire(root: &Path) -> std::result::Result<(PathBuf, SetupLease), Failure> {
     Ok((root, lease))
 }
 
-fn execute(root: &Path, cancel: &CancellationToken) -> Outcome {
+fn execute(
+    root: &Path,
+    cancel: &CancellationToken,
+    backend: super::QuantBackend,
+    programs: &super::backend_setup::Programs,
+) -> Outcome {
     check_cancel(cancel)?;
     let (root, mut lease) = acquire(root)?;
-    let outcome = execute_with_lease(&root, cancel);
+    let outcome = if backend == super::QuantBackend::PythonConversion {
+        execute_with_lease(&root, cancel)
+    } else {
+        super::backend_setup::execute(&root, backend, cancel, programs)
+    };
     match (outcome, lease.finish()) {
         (Ok(()), Ok(())) => Ok(()),
         (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
@@ -458,7 +498,7 @@ fn execute_with_lease(root: &Path, cancel: &CancellationToken) -> Outcome {
     check_cancel(cancel)
 }
 
-fn run_command(
+pub(super) fn run_command(
     command: &mut Command,
     cancel: &CancellationToken,
     timeout: Duration,
@@ -478,11 +518,13 @@ fn run_command(
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    let mut child = OwnedChild(Some(
-        command
-            .spawn()
-            .map_err(|e| failed("Starting conversion setup command", e))?,
-    ));
+    let mut child = OwnedChild(Some(command.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            Failure::CommandNotFound(format!("Starting conversion setup command: {e}"))
+        } else {
+            failed("Starting conversion setup command", e)
+        }
+    })?));
     let started = Instant::now();
     loop {
         #[cfg(target_os = "linux")]

@@ -269,8 +269,10 @@ contract. Worker receipts now own terminal progress after cleanup, publication
 and indexing; script complete/error records cannot declare early completion.
 NVFP4/Sherry nonterminal phases, completed-epoch progress and deferred script
 failure now share the base conversion protocol, closing FE-I27 within controlled
-Linux process evidence; public/wire types are unchanged. Stronger containment,
-installer custody and preflight remain prerequisites before GUI configuration
+Linux process evidence; public/wire types are unchanged. Built-in quantization
+installers now share retained setup custody and root exclusion; manager setup
+shutdown closes all owners before draining. Stronger containment, setup
+observation/retry and preflight remain prerequisites before GUI configuration
 (FE-I23).
 Managed quantization starts now reject foreign/invalid target names, missing
 required IQ/forced calibration, unsupported force flags and supplied paths

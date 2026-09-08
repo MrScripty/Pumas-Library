@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use regex::Regex;
 use tokio::fs;
 use tokio::process::Command;
-use tracing::{debug, info, warn};
+use tracing::debug;
 
 use super::native_process::{self, OutputStream};
 use super::outputs::OutputWorkspace;
@@ -20,9 +20,6 @@ use super::types::{
 };
 use crate::cancel::CancellationToken;
 use crate::{PumasError, Result};
-
-/// Git repository URL for llama.cpp.
-const LLAMA_CPP_REPO: &str = "https://github.com/ggml-org/llama.cpp.git";
 
 // ---------------------------------------------------------------------------
 // Environment
@@ -35,12 +32,17 @@ const LLAMA_CPP_REPO: &str = "https://github.com/ggml-org/llama.cpp.git";
 /// `{launcher_root}/launcher-data/llama-cpp/`.
 pub struct LlamaCppBackend {
     base_dir: PathBuf,
+    pub(super) setup: std::sync::Arc<super::setup::SetupOwner>,
 }
 
 impl LlamaCppBackend {
     /// Create a new backend rooted under `{launcher_root}/launcher-data/llama-cpp/`.
     pub fn new(launcher_root: &Path) -> Self {
         Self {
+            setup: std::sync::Arc::new(super::setup::SetupOwner::for_backend(
+                launcher_root.to_path_buf(),
+                QuantBackend::LlamaCpp,
+            )),
             base_dir: launcher_root.join("launcher-data").join("llama-cpp"),
         }
     }
@@ -94,170 +96,10 @@ impl LlamaCppBackend {
         }
     }
 
-    // -- Build steps --------------------------------------------------------
-
-    async fn git_clone(&self) -> Result<()> {
-        let source = self.source_dir();
-        std::fs::create_dir_all(&source)
-            .map_err(|e| PumasError::io("creating llama-cpp source dir", &source, e))?;
-
-        let output = Command::new("git")
-            .args([
-                "clone",
-                "--depth",
-                "1",
-                LLAMA_CPP_REPO,
-                &source.to_string_lossy(),
-            ])
-            .output()
-            .await
-            .map_err(|e| PumasError::Other(format!("Failed to run git clone: {e}")))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PumasError::Other(format!("git clone failed: {stderr}")));
-        }
-        Ok(())
-    }
-
-    async fn git_pull(&self) -> Result<()> {
-        let output = Command::new("git")
-            .args(["pull", "--ff-only"])
-            .current_dir(self.source_dir())
-            .output()
-            .await
-            .map_err(|e| PumasError::Other(format!("Failed to run git pull: {e}")))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!("git pull failed (non-fatal): {}", stderr);
-        }
-        Ok(())
-    }
-
-    async fn cmake_configure(&self) -> Result<()> {
-        let build = self.build_dir();
-        std::fs::create_dir_all(&build)
-            .map_err(|e| PumasError::io("creating llama-cpp build dir", &build, e))?;
-
-        // Detect CUDA availability.
-        let has_cuda = Command::new("nvcc").arg("--version").output().await.is_ok();
-
-        let mut args = vec![
-            format!("-B{}", build.display()),
-            format!("-S{}", self.source_dir().display()),
-            "-DCMAKE_BUILD_TYPE=Release".to_string(),
-        ];
-
-        if has_cuda {
-            info!("CUDA detected — enabling GGML_CUDA for llama.cpp build");
-            args.push("-DGGML_CUDA=ON".to_string());
-        }
-
-        let output = Command::new("cmake")
-            .args(&args)
-            .output()
-            .await
-            .map_err(|e| PumasError::Other(format!("cmake configure failed: {e}")))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PumasError::Other(format!(
-                "cmake configure failed: {stderr}"
-            )));
-        }
-        Ok(())
-    }
-
-    async fn cmake_build(&self) -> Result<()> {
-        let nproc = std::thread::available_parallelism()
-            .map(|n| n.get().to_string())
-            .unwrap_or_else(|_| "4".to_string());
-
-        let output = Command::new("cmake")
-            .args([
-                "--build",
-                &self.build_dir().to_string_lossy(),
-                "--config",
-                "Release",
-                "-j",
-                &nproc,
-                "--target",
-                "llama-quantize",
-                "--target",
-                "llama-imatrix",
-            ])
-            .output()
-            .await
-            .map_err(|e| PumasError::Other(format!("cmake build failed: {e}")))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PumasError::Other(format!("cmake build failed: {stderr}")));
-        }
-        Ok(())
-    }
-
-    async fn setup_python_venv(&self) -> Result<()> {
-        let venv = self.venv_dir();
-        let python = self.venv_python();
-
-        // Create venv
-        let output = Command::new("python3")
-            .args(["-m", "venv", &venv.to_string_lossy()])
-            .output()
-            .await
-            .map_err(|e| PumasError::Other(format!("Failed to create llama-cpp venv: {e}")))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PumasError::Other(format!(
-                "Failed to create Python venv: {stderr}"
-            )));
-        }
-
-        // Install convert_hf_to_gguf.py dependencies.
-        // The llama.cpp repo has its own requirements but the core deps are:
-        let deps = [
-            "torch",
-            "transformers",
-            "gguf",
-            "sentencepiece",
-            "numpy",
-            "protobuf",
-            "safetensors",
-        ];
-
-        info!("Installing Python dependencies for convert_hf_to_gguf.py...");
-        let output = Command::new(&python)
-            .args(["-m", "pip", "install", "--upgrade", "pip"])
-            .output()
-            .await
-            .ok();
-        if let Some(o) = output {
-            if !o.status.success() {
-                warn!("pip upgrade failed (non-fatal)");
-            }
-        }
-
-        let output = Command::new(&python)
-            .arg("-m")
-            .arg("pip")
-            .arg("install")
-            .args(deps)
-            .output()
-            .await
-            .map_err(|e| PumasError::Other(format!("pip install failed: {e}")))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PumasError::Other(format!(
-                "Failed to install convert_hf_to_gguf.py dependencies: {stderr}"
-            )));
-        }
-
-        info!("llama.cpp Python environment ready");
-        Ok(())
+    /// Close installer admission and observe retained setup cleanup before
+    /// stopping the host runtime. Dropping an ensure waiter does not stop setup.
+    pub async fn shutdown_setup(&self) -> Result<()> {
+        self.setup.shutdown().await
     }
 }
 
@@ -280,47 +122,7 @@ impl QuantizationBackend for LlamaCppBackend {
     }
 
     async fn ensure_environment(&self) -> Result<()> {
-        fs::create_dir_all(&self.base_dir)
-            .await
-            .map_err(|e| PumasError::io("creating llama-cpp dir", &self.base_dir, e))?;
-
-        // Step 1: Clone or update source
-        if fs::try_exists(&self.source_dir().join(".git"))
-            .await
-            .map_err(|e| PumasError::io("checking llama.cpp checkout", self.source_dir(), e))?
-        {
-            info!("Updating llama.cpp source...");
-            self.git_pull().await?;
-        } else {
-            info!("Cloning llama.cpp repository...");
-            self.git_clone().await?;
-        }
-
-        // Step 2-3: cmake build (only if binaries missing)
-        if !fs::try_exists(&self.quantize_binary()).await.map_err(|e| {
-            PumasError::io(
-                "checking llama.cpp quantize binary",
-                self.quantize_binary(),
-                e,
-            )
-        })? {
-            info!("Building llama.cpp (cmake configure)...");
-            self.cmake_configure().await?;
-            info!("Building llama.cpp (compiling)...");
-            self.cmake_build().await?;
-        }
-
-        // Step 4: Python venv (only if missing)
-        if !fs::try_exists(&self.venv_python())
-            .await
-            .map_err(|e| PumasError::io("checking llama.cpp python", self.venv_python(), e))?
-        {
-            info!("Setting up Python environment for HF conversion...");
-            self.setup_python_venv().await?;
-        }
-
-        info!("llama.cpp quantization environment ready");
-        Ok(())
+        self.setup.ensure().await
     }
 
     fn supported_quant_types(&self) -> Vec<QuantOption> {

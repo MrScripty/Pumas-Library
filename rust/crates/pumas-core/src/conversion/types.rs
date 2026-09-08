@@ -329,6 +329,9 @@ pub trait QuantizationBackend: Send + Sync {
     fn is_ready(&self) -> bool;
 
     /// Set up the backend environment (clone repos, build, install deps).
+    /// Built-in implementations retain setup when a waiter is dropped. Their
+    /// concrete `shutdown_setup` methods (or the manager's aggregate method)
+    /// close admission and observe cleanup before the host runtime stops.
     ///
     /// # Postconditions
     /// - `is_ready()` returns true on success.

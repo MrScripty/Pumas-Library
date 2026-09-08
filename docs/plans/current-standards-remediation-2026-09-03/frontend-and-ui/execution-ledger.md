@@ -1,5 +1,66 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Quantization Installer Custody
+
+Accepted INST, the built-in installer-lifetime portion of FE-I26. llama.cpp,
+NVFP4 and Sherry each retain an existing SetupOwner configured with a private
+recipe. Their public trait ensure methods delegate to that owner; dropped
+request waiters no longer release installer lifetime or exclusion. The manager
+captures the exact same owner Arcs from its concrete backends and closes all
+four owners before its first drain await. Repeated/interrupted shutdown retains
+and observes the same workers and failures. Concrete backends expose additive
+shutdown_setup methods for direct embedded consumers; no trait signatures change.
+Trait-object-only users must retain a concrete handle for explicit shutdown.
+PumasApi shutdown_conversion_setup now drains base and quantization setup; RPC
+and local IPC managed ensure calls use the same ownership path.
+
+The codebase-design skill guided extending the existing owner and command runner,
+not adding another supervisor. Agent moved installer recipes to one private
+Module; root wired backend ownership, aggregate shutdown and controlled tests.
+Recipes capture only root/program values, never their backend owner. The existing
+launcher-data lease serializes all setup kinds across root aliases/processes;
+another owner receives contention, not a path-based join. One instance joins its
+active operation. The existing blocking worker retains every child through
+cleanup before lease release and receipt. Linux cooperating-group and other-OS
+foreground limits remain unchanged; lock files and directories must stay stable.
+
+All installer commands now use the retained null-stream runner, including CUDA
+compiler detection, avoiding unbounded captured installer output. Each command
+uses the existing fifteen-minute setup timeout. Step labels and exit status
+remain diagnostic context, rather than captured pip stderr. Cancellation and
+runner/cleanup failures cannot become optional success. Only previously optional
+git-pull/pip-upgrade unsuccessful exit statuses warn and continue. A private
+CommandNotFound outcome allows absent nvcc to select the existing CPU-build path;
+other probe failures fail. Existing observed-nvcc-exit detection semantics,
+dependency lists, paths, build arguments and venv-present shortcuts are preserved.
+Owner failures surface as ConversionFailed and cancellation as InstallationCancelled;
+shutdown treats successfully cleaned cancellation as success and retains failures.
+
+Evidence: 79 focused conversion tests passed. Controlled Linux fake executables
+traverse all three actual recipes, stopping inside dependency installation.
+Nine backend/outcome cases drop the first caller, prove the child remains owned,
+reject a competing setup owner, then prove same-owner joining and success/error
+or cancellation cleanup. Terminal receipts have reaped the direct child; failure
+survives repeated shutdown and closed owners reject setup. A manager fixture
+polls then drops aggregate shutdown, proves base and all backend admissions are
+closed, resumes/idempotently repeats drain, and observes no unrelated backend
+directories created. Existing base setup alias, process-lock, group cleanup,
+panic and single-blocking-thread tests continue to pass. Private Programs paths
+select isolated fixture tools without changing global PATH. This exercises real
+process/owner/recipe boundaries, not real dependency installation or GPU behavior.
+
+Supporting gates passed: 1,440 default and 1,400 no-default-feature core/RPC
+tests, with 22 existing ignored tests each; strict all-target clippy in both
+feature configurations; formatting, whitespace and all five plan contracts.
+Logs: `/tmp/pumas-installer-custody-{focused,default,minimal,clippy-default,clippy-minimal}.log`.
+
+Limits: GUI and wire types/feature gates remain unchanged; no live installers,
+models, release build or Windows/macOS execution. Readiness still uses existing
+interpreter/binary presence shortcuts, so incomplete-install repair is next.
+Backend-specific setup start/observation/retry, setup-versus-conversion exclusion,
+hardware/content preflight and stronger containment remain FE-I26 before new
+quantization GUI mutations. Custody acceptance does not establish full readiness.
+
 ## 2026-09-08 — Managed Quantization Request Admission
 
 Accepted QREQ, the managed-input portion of FE-I26. All four managed

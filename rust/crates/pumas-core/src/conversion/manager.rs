@@ -37,6 +37,9 @@ mod output_tests;
 #[cfg(test)]
 mod admission_tests;
 
+#[cfg(all(test, target_os = "linux"))]
+mod setup_tests;
+
 /// Readiness must fit within interactive status requests even for a stuck interpreter.
 const ENVIRONMENT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 const ENVIRONMENT_PROBE_IMPORTS: &str = "import numpy, sentencepiece; from gguf import GGUFReader, GGUFWriter; from safetensors import safe_open; from safetensors.numpy import save_file";
@@ -102,6 +105,7 @@ pub(super) fn probe_conversion_environment(
 /// Orchestrates model format conversions and quantization.
 pub struct ConversionManager {
     setup: super::setup::SetupOwner,
+    backend_setups: Vec<Arc<super::setup::SetupOwner>>,
     launcher_root: PathBuf,
     model_library: Arc<ModelLibrary>,
     model_importer: Arc<ModelImporter>,
@@ -120,15 +124,20 @@ impl ConversionManager {
         model_library: Arc<ModelLibrary>,
         model_importer: Arc<ModelImporter>,
     ) -> Self {
-        let backends: Vec<Arc<dyn QuantizationBackend>> = vec![
-            Arc::new(LlamaCppBackend::new(&launcher_root)),
-            Arc::new(Nvfp4Backend::new(&launcher_root)),
-            Arc::new(SherryBackend::new(&launcher_root)),
+        let llama = Arc::new(LlamaCppBackend::new(&launcher_root));
+        let nvfp4 = Arc::new(Nvfp4Backend::new(&launcher_root));
+        let sherry = Arc::new(SherryBackend::new(&launcher_root));
+        let backend_setups = vec![
+            llama.setup.clone(),
+            nvfp4.setup.clone(),
+            sherry.setup.clone(),
         ];
+        let backends: Vec<Arc<dyn QuantizationBackend>> = vec![llama, nvfp4, sherry];
 
         let progress = Arc::new(ConversionProgressTracker::new());
         Self {
             setup: super::setup::SetupOwner::new(launcher_root.clone()),
+            backend_setups,
             launcher_root,
             model_library,
             model_importer,
@@ -197,11 +206,32 @@ impl ConversionManager {
         self.setup.snapshot()
     }
 
-    /// Close setup admission, cancel active setup, and observe its cleanup.
+    /// Close all built-in setup admission, cancel active setup, and observe cleanup.
     /// Call before shutting down the hosting Tokio runtime. Repeated calls
     /// observe the same terminal result; dropping a waiter does not stop cleanup.
     pub async fn shutdown_setup(&self) -> Result<()> {
-        self.setup.shutdown().await
+        // Close every owner before the first suspension; a held installer must
+        // not leave other backends open to new setup while shutdown drains.
+        self.setup.close();
+        for setup in &self.backend_setups {
+            setup.close();
+        }
+        let mut failures = Vec::new();
+        if let Err(error) = self.setup.shutdown().await {
+            failures.push(error.to_string());
+        }
+        for setup in &self.backend_setups {
+            if let Err(error) = setup.shutdown().await {
+                failures.push(error.to_string());
+            }
+        }
+        if failures.is_empty() {
+            Ok(())
+        } else {
+            Err(PumasError::ConversionFailed {
+                message: failures.join("; "),
+            })
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -238,6 +268,8 @@ impl ConversionManager {
     }
 
     /// Set up the environment for a specific quantization backend.
+    /// The backend retains installer work if this waiter is dropped. Drain
+    /// `shutdown_setup` before stopping the host runtime.
     ///
     /// # Preconditions
     /// - The backend must be registered.

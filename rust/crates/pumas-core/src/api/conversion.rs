@@ -77,7 +77,7 @@ impl PumasApi {
         self.primary().conversion_manager.get_conversion_setup()
     }
 
-    /// Close base Python setup admission and await owned process cleanup.
+    /// Close base Python and all built-in quantization setup admission and await cleanup.
     /// Invoke before stopping the hosting runtime. Successful cancellation and
     /// cleanup return success; repeated calls preserve actual setup failures.
     pub async fn shutdown_conversion_setup(&self) -> Result<()> {
@@ -109,6 +109,8 @@ impl PumasApi {
     }
 
     /// Ensure a specific quantization backend's environment is set up.
+    /// Dropping this waiter does not release installer ownership; use
+    /// `shutdown_conversion_setup` before stopping the host runtime.
     pub async fn ensure_backend_environment(
         &self,
         backend: conversion::QuantBackend,

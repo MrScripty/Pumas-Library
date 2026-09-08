@@ -10,8 +10,9 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Resolve quantization installer custody and direction-specific
-setup/preflight (FE-I26, remaining FE-I23); stronger containment remains open.
+**Next slice:** Repair direction-specific quantization environment readiness
+and incomplete-install detection (FE-I26, remaining FE-I23). Installer custody
+is accepted below; setup observation/retry and stronger containment remain open.
 Managed quantization target/calibration admission is accepted below; execution
 readiness and lower-level backend preconditions are not closed by it.
 NVFP4/Sherry script progress is accepted below, closing FE-I27.
@@ -35,6 +36,52 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Quantization Installer Custody Admission
+
+Status: `Accepted`; see the
+[execution ledger](execution-ledger.md#2026-09-08--quantization-installer-custody).
+Extend the existing retained
+SetupOwner to the three built-in quantization recipes. Each concrete backend
+owns an Arc to its setup owner; the manager retains the same owners and closes
+all setup admission before any drain await. Direct backend users get additive
+inherent shutdown_setup methods; the public backend trait is unchanged. Caller
+drop does not release installer work or exclusion. Repeated/interrupted shutdown
+drains the same receipts and preserves failures. The existing launcher-data lock
+serializes base and quantization setup across aliases/processes; other owners
+report contention rather than joining. Lock files/directories must remain stable.
+
+Agent owns new private conversion/backend_setup.rs recipes; root owns
+conversion/{setup.rs,manager.rs,mod.rs,llama_cpp.rs,nvfp4.rs,sherry.rs,types.rs},
+api/conversion.rs, new conversion/manager/setup_tests.rs and frontend/parent
+plan, ledger and issues. Root owns integration, formatting, serial Cargo and
+commits. No trait additions, wire schemas, GUI, dependencies, live installers
+or model data changes. Private program paths allow controlled fixture execution
+without mutating process-global PATH. Production defaults retain existing tools.
+
+Composed design is applicable. Recipes own filesystem/command sequencing;
+SetupOwner owns admission, cancellation, lease and terminal receipts; its existing
+runner owns child/group cleanup; backends own their recipe selection and expose
+ensure/drain; manager composes all owned drains. Required ordering is acquire,
+recipe, child cleanup, lease release, receipt. No recipe captures its backend or
+owner, so there is no ownership cycle. Callers need ensure and explicit shutdown,
+not recipe steps or child handles. Recipe changes stay in the recipe Module;
+lifetime changes stay in SetupOwner. The existing base owner is extended, not
+duplicated. Deleting recipes would spread command policy back through backends;
+deleting retained setup would restore request-owned installers. Private Programs
+varies executable identity for tests; it adds no runtime, global config or registry.
+The single shared lease deliberately trades simultaneous setup for exclusion.
+
+Acceptance INST (satisfied): automated controlled Linux executables traverse each
+real backend recipe to prove retained work after dropped waiters, same-owner
+joining, failure receipts and cancellation cleanup. Manager tests prove all-owner
+admission closes before waiting, interrupted shutdown resumes, and independent
+owners cannot mutate the leased root. Existing base setup and worker tests stay
+valid. Supporting gates: default/minimal core/RPC suites, strict lint, formatting
+and five plan contracts, all passed. No real dependency installation, GPU readiness, new GUI,
+hostile process escape or Windows/macOS execution claim. Existing interpreter-
+present readiness shortcuts remain FE-I26 follow-up; do not call custody full
+preflight. Re-plan if a new public lifetime representation becomes necessary.
 
 ## Managed Quantization Request Admission
 
@@ -73,7 +120,8 @@ are conversion tests, default/minimal core/RPC suites, strict lint, formatting
 and five plan contracts, all passed. No model algorithm, GUI workflow, installer readiness,
 hostile-path replacement, calibration content or hardware claim. Re-plan if
 request validation requires a new public representation or lifetime owner.
-After acceptance return to installer custody and remaining preflight in FE-I26.
+Installer custody is accepted in the subsequent admission above; remaining
+preflight stays FE-I26.
 
 ## Python Quantization Progress Admission
 

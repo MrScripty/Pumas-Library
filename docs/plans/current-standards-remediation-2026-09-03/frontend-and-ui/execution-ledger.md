@@ -1,5 +1,60 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Direction-Specific llama.cpp Artifacts
+
+Accepted ART, a bounded FE-I26 artifact prerequisite. llama.cpp execution
+now checks tools for the route it actually selects before staging or spawning:
+all routes need llama-quantize, safetensors-only needs converter and Python,
+and IQ/forced imatrix needs llama-imatrix. Existing mixed-source GGUF preference
+is unchanged. GGUF requantization no longer requires unrelated Python artifacts.
+Aggregate is_ready remains advisory for the basic safetensors route and now
+includes Python; has_imatrix checks the optional tool independently.
+
+Required artifacts must be regular, nonempty files. Unix executable artifacts
+must have execute bits; the converter script need not. These are metadata checks,
+not effective-user/ACL/noexec, loader/ABI, import or hardware proofs. Execution
+uses async metadata, preserves inspection I/O errors, and rejects known missing
+or invalid artifacts as QuantizationEnvNotReady. The existing boolean summaries
+remain conservative on inspection failure. Symlinks are followed, not retained;
+callers must keep artifacts stable through execution. No new probe subprocess,
+installer, cache, lifetime owner, public type, feature or wire change is added.
+
+The codebase-design skill kept the common metadata rule private to llama.cpp,
+with route requirements beside pipeline selection rather than in API/UI callers.
+Agent supplied public-backend fixtures and review; root implemented the source,
+added inspection-error evidence and integrated verification. Public Rustdoc now
+distinguishes advisory readiness from route-specific execution requirements.
+Setup completion does not promise native artifact or future readiness validity.
+
+Evidence: 87 focused conversion tests passed.
+Four new controlled Linux tests prove GGUF/mixed-source execution without Python,
+missing converter/Python/imatrix rejection before staging/spawn, a successful
+safetensors-plus-imatrix route, invalid aggregate artifacts, and a symlink-loop
+inspection error retained as I/O failure before staging. The existing manager
+publication fixture also runs GGUF without dummy Python/converter artifacts.
+Tiny shell executables produce fixture bytes, not real model conversions.
+
+Verification incident: the first focused run passed 85 tests but failed the
+existing import-probe timeout assertion. After improving its diagnostic, isolated
+and focused reruns passed, but the full default suite reproduced a spawn failure:
+`Text file busy (os error 26)`, before timeout behavior was exercised. The
+diagnosing-bugs skill separated this fixture failure from artifact correctness.
+The fixture now writes/chmods its script in an awaited single-threaded shell,
+passing path/content as positional arguments. Concurrent Rust test forks cannot
+inherit its writable script descriptor. The originating fork was not traced;
+this removes that fixture-lifetime hazard, not a production ETXTBSY recovery
+policy. No production retry, timeout, cleanup or assertion meaning is weakened.
+Logs: `/tmp/pumas-route-artifacts-{focused,probe-isolated,focused-rerun,default,focused-final}.log`.
+
+Limits: public import-probe lifetime/readiness, native setup repair, hardware,
+calibration/source-file validation and artifact custody remain FE-I26. No GUI,
+live installations, real dependency compatibility or Windows/macOS execution
+claim is made. Supporting gates passed: 1,448 default and 1,408 minimal-feature
+core/RPC tests, with 22 existing ignored tests each; strict all-target clippy in
+both configurations; formatting, whitespace and all five plan contracts. The
+corrected timeout fixture passed in both complete runs. Final gate logs:
+`/tmp/pumas-route-artifacts-{default-final,minimal,clippy-default,clippy-minimal}.log`.
+
 ## 2026-09-08 — Quantization Setup Import Verification
 
 Accepted IMP, the setup dependency-verification/repair portion of FE-I26.

@@ -275,6 +275,10 @@ shutdown closes all owners before draining. Setup now verifies dependency import
 before skipping installation and before success, repairing incomplete existing
 environments without recreating them. Controlled Linux fixtures establish this
 setup contract, not real package/GPU compatibility or public readiness checks.
+llama.cpp now checks required artifacts by selected route before staging/spawn:
+GGUF needs no Python converter, safetensors requires Python and converter, and
+IQ/forced calibration requires imatrix. Aggregate readiness remains advisory;
+artifact metadata does not prove imports, effective access or loader compatibility.
 Stronger containment, setup
 observation/retry and preflight remain prerequisites before GUI configuration
 (FE-I23).

@@ -12,7 +12,8 @@ one-second main-owned marker barrier remains the reveal authority.
 
 **Next slice:** Repair public direction-specific quantization readiness
 (FE-I26, remaining FE-I23). Installer custody and setup import verification/repair
-are accepted below; setup observation/retry and stronger containment remain open.
+are accepted below, as are direction-specific llama.cpp artifact checks. Public
+import-probe lifetime, setup observation/retry and stronger containment remain open.
 Managed quantization target/calibration admission is accepted below; execution
 readiness and lower-level backend preconditions are not closed by it.
 NVFP4/Sherry script progress is accepted below, closing FE-I27.
@@ -36,6 +37,38 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Direction-Specific llama.cpp Artifacts
+
+Status: `Accepted`; see the
+[execution ledger](execution-ledger.md#2026-09-08--direction-specific-llamacpp-artifacts).
+This FE-I26 prerequisite corrects aggregate checks that required a converter even
+for GGUF but missed Python for safetensors and imatrix for IQ/forced requests.
+Keep aggregate readiness advisory and inspect selected-route artifacts again
+before staging or subprocess creation. Every route requires llama-quantize;
+safetensors-only additionally requires converter and Python; IQ/forced requests
+require llama-imatrix. Preserve mixed-source GGUF preference. Regular, nonempty
+files are required; executable artifacts additionally require Unix execute bits.
+Other targets have no Unix-mode claim; OS loader/access/ABI checks remain at
+execution. No probes, install, cache, new owner, dependency or wire changes.
+
+Root owns llama_cpp.rs, trait/manager Rustdoc, the existing manager output fixture,
+fixture write isolation and assertion diagnostics in backend_setup.rs and plan records; agent owns
+llama_cpp/readiness_tests.rs. Root serializes Cargo,
+formatting and commits. The private metadata predicate owns the common artifact
+rule; route selection remains beside the existing pipeline. This passes the
+codebase-design deletion test without adding a readiness service or public type.
+Async execution uses async metadata and preserves inspection I/O failures;
+existing boolean summaries conservatively report inspection failure as false.
+
+Acceptance ART (satisfied): controlled Linux public-backend fixtures prove GGUF
+without Python/converter, conditional safetensors/imatrix rejection before
+staging/spawn, valid routes, invalid aggregate artifacts and typed inspection
+failure. Full default/minimal
+core/RPC tests, strict lint, formatting and five plan contracts support this
+bounded claim. Public import probes and their lifetime, real package/GPU/ABI
+compatibility, source-file validation, stable artifact custody, and Windows/macOS
+execution remain unaccepted; no new quantization GUI mutation is admitted.
 
 ## Quantization Setup Import Verification
 

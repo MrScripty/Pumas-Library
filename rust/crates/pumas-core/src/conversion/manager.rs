@@ -275,7 +275,8 @@ impl ConversionManager {
     /// - The backend must be registered.
     ///
     /// # Postconditions
-    /// - The backend's `is_ready()` returns true on success.
+    /// - The backend's setup recipe and dependency checks completed. Readiness
+    ///   remains advisory; execution rechecks operation-specific requirements.
     pub async fn ensure_backend_environment(&self, backend: QuantBackend) -> Result<()> {
         let b = self
             .backends

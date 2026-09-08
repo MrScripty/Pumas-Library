@@ -328,8 +328,20 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     fn executable(path: &Path, script: &str) {
-        fs::write(path, script).unwrap();
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+        // Other tests fork concurrently. Write in an awaited, single-threaded
+        // child so they cannot inherit a writable script descriptor and cause
+        // a transient ETXTBSY when this test immediately executes the fixture.
+        let status = Command::new("/bin/sh")
+            .args([
+                "-c",
+                "printf '%s' \"$2\" > \"$1\" && chmod 700 \"$1\"",
+                "fixture-writer",
+            ])
+            .arg(path)
+            .arg(script)
+            .status()
+            .unwrap();
+        assert!(status.success(), "fixture writer failed: {status}");
     }
 
     #[test]
@@ -415,7 +427,8 @@ mod tests {
                 assert!(matches!(result, Err(Failure::Cancelled)));
             } else {
                 assert!(
-                    matches!(result, Err(Failure::Failed(message)) if message.contains("Checking fixture imports") && message.contains("Conversion setup command did not complete successfully"))
+                    matches!(&result, Err(Failure::Failed(message)) if message.contains("Checking fixture imports") && message.contains("Conversion setup command did not complete successfully")),
+                    "expected timed-out probe, got {result:?}"
                 );
             }
             let pid: u32 = fs::read_to_string(pid_path)

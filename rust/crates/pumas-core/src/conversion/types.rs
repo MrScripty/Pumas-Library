@@ -325,7 +325,11 @@ pub trait QuantizationBackend: Send + Sync {
     /// Which `QuantBackend` variant this backend corresponds to.
     fn backend_id(&self) -> QuantBackend;
 
-    /// Check if the backend's environment is fully set up (binaries exist, etc.).
+    /// Advisory backend environment summary, not an execution guarantee.
+    /// Built-in checks inspect artifacts; operation-specific requirements are
+    /// rechecked by `quantize`. llama.cpp summarizes its basic safetensors route,
+    /// so GGUF-only execution may work when this summary is false. Imports,
+    /// optional tools, hardware and loader compatibility are not established.
     fn is_ready(&self) -> bool;
 
     /// Set up the backend environment (clone repos, build, install deps).
@@ -334,7 +338,8 @@ pub trait QuantizationBackend: Send + Sync {
     /// close admission and observe cleanup before the host runtime stops.
     ///
     /// # Postconditions
-    /// - `is_ready()` returns true on success.
+    /// - Setup completes its recipe and dependency checks. External changes or
+    ///   missing native artifacts can still make readiness false afterward.
     async fn ensure_environment(&self) -> Result<()>;
 
     /// Return the quantization types this backend supports.
@@ -343,7 +348,8 @@ pub trait QuantizationBackend: Send + Sync {
     /// Execute the quantization pipeline.
     ///
     /// # Preconditions
-    /// - `is_ready()` must be true.
+    /// - The selected route's environment must be available; `is_ready()` is
+    ///   advisory and does not replace operation-specific validation.
     /// - Source model files must exist at `params.model_path`.
     /// - For IQ types: `params.calibration_file` should be provided.
     ///

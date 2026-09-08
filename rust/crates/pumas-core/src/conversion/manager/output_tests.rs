@@ -262,8 +262,6 @@ async fn every_conversion_path_indexes_the_actual_versioned_output_without_touch
             let backend: Box<dyn QuantizationBackend> = match backend_id {
                 QuantBackend::LlamaCpp => {
                     let backend = LlamaCppBackend::new(root.path());
-                    executable(&backend.venv_python(), "#!/bin/sh\nexit 2\n");
-                    executable(&backend.convert_script(), "#!/bin/sh\nexit 2\n");
                     executable(
                         &backend.quantize_binary(),
                         "#!/bin/sh\nprintf 'fixture diagnostic\\n'\nprintf '[ 1/ 2] fixture.weight\\n' >&2\nprintf 'fixture payload' > \"$2\"\n",

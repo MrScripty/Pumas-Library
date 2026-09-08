@@ -21,6 +21,47 @@ use super::types::{
 use crate::cancel::CancellationToken;
 use crate::{PumasError, Result};
 
+#[cfg(all(test, target_os = "linux"))]
+mod readiness_tests;
+
+// This is an artifact plausibility check, not proof of loader compatibility,
+// effective access (ACLs/noexec), imports, or custody until execution.
+fn usable_artifact(metadata: &std::fs::Metadata, executable: bool) -> bool {
+    if !metadata.is_file() || metadata.len() == 0 {
+        return false;
+    }
+    #[cfg(unix)]
+    if executable {
+        use std::os::unix::fs::PermissionsExt;
+        return metadata.permissions().mode() & 0o111 != 0;
+    }
+    #[cfg(not(unix))]
+    let _ = executable;
+    true
+}
+
+fn artifact_present(path: &Path, executable: bool) -> bool {
+    std::fs::metadata(path).is_ok_and(|metadata| usable_artifact(&metadata, executable))
+}
+
+async fn require_artifact(path: &Path, name: &str, executable: bool) -> Result<()> {
+    let usable = match fs::metadata(path).await {
+        Ok(metadata) => usable_artifact(&metadata, executable),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(PumasError::io("checking llama.cpp artifact", path, error)),
+    };
+    if usable {
+        Ok(())
+    } else {
+        Err(PumasError::QuantizationEnvNotReady {
+            backend: "llama.cpp".to_string(),
+            message: format!(
+                "Required artifact {name} is missing, empty, or unusable. Repair the backend setup before retrying."
+            ),
+        })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Environment
 // ---------------------------------------------------------------------------
@@ -82,9 +123,10 @@ impl LlamaCppBackend {
         self.venv_dir().join("bin").join("python")
     }
 
-    /// Whether the `llama-imatrix` binary is available.
+    /// Whether `llama-imatrix` is a nonempty regular file with Unix execute bits.
+    /// This advisory check does not prove loader compatibility or effective access.
     pub fn has_imatrix(&self) -> bool {
-        self.imatrix_binary().exists()
+        artifact_present(&self.imatrix_binary(), true)
     }
 
     /// Returns the backend status summary.
@@ -117,8 +159,13 @@ impl QuantizationBackend for LlamaCppBackend {
         QuantBackend::LlamaCpp
     }
 
+    /// Advisory aggregate for the basic safetensors-to-quantized-GGUF route.
+    /// Checks artifacts, not imports, GPU/ABI compatibility or optional imatrix.
+    /// GGUF-only requests do not require this aggregate to be true.
     fn is_ready(&self) -> bool {
-        self.quantize_binary().exists() && self.convert_script().exists()
+        artifact_present(&self.quantize_binary(), true)
+            && artifact_present(&self.convert_script(), false)
+            && artifact_present(&self.venv_python(), true)
     }
 
     async fn ensure_environment(&self) -> Result<()> {
@@ -136,14 +183,6 @@ impl QuantizationBackend for LlamaCppBackend {
         cancel_token: &CancellationToken,
     ) -> Result<PathBuf> {
         // -- PHASE 1: GATHER (read-only, fail early) --
-        if !self.is_ready() {
-            return Err(PumasError::QuantizationEnvNotReady {
-                backend: "llama.cpp".to_string(),
-                message: "llama.cpp environment not built. Call ensure_environment() first."
-                    .to_string(),
-            });
-        }
-
         let is_safetensors_source = has_safetensors_files(&params.model_path);
         let is_gguf_source = has_gguf_files(&params.model_path);
 
@@ -169,6 +208,14 @@ impl QuantizationBackend for LlamaCppBackend {
 
         // -- PHASE 2: VALIDATE --
         let needs_f16_conversion = is_safetensors_source && !is_gguf_source;
+        require_artifact(&self.quantize_binary(), "llama-quantize", true).await?;
+        if needs_f16_conversion {
+            require_artifact(&self.convert_script(), "convert_hf_to_gguf.py", false).await?;
+            require_artifact(&self.venv_python(), "venv python", true).await?;
+        }
+        if needs_imatrix {
+            require_artifact(&self.imatrix_binary(), "llama-imatrix", true).await?;
+        }
         let total_steps = match (needs_f16_conversion, needs_imatrix) {
             (true, true) => 3u32,   // convert + imatrix + quantize
             (true, false) => 2u32,  // convert + quantize

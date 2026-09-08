@@ -110,6 +110,8 @@ impl PumasApi {
     }
 
     /// Ensure a specific quantization backend's environment is set up.
+    /// Exclude conversions and external tool use during setup: native repair
+    /// may clean/rebuild generated CMake outputs. This exclusion is caller-owned.
     /// Dropping this waiter does not release installer ownership; use
     /// `shutdown_conversion_setup` before stopping the host runtime.
     pub async fn ensure_backend_environment(

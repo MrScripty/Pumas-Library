@@ -10,8 +10,9 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Verify and repair native llama.cpp setup artifacts
-(FE-I26, remaining FE-I23), then expose backend-specific setup observation/retry.
+**Next slice:** Expose backend-specific setup observation/retry
+(FE-I26, remaining FE-I23). Native llama.cpp artifact verification/guarded repair
+is accepted below; source/build revision coherence remains outside that claim.
 Installer custody, setup import verification/repair, direction-specific llama.cpp
 artifacts and public quantization import-probe lifetime are accepted below.
 Setup-versus-conversion exclusion and stronger containment remain open.
@@ -38,6 +39,43 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Native llama.cpp Setup Artifacts
+
+Status: `Accepted`; see the
+[execution ledger](execution-ledger.md#2026-09-08--native-llamacpp-setup-artifacts).
+Continue FE-I26. After checkout update, require a regular
+nonempty converter script. Require both native tools to meet the shared readiness
+artifact rule. If either is unusable, configure and clean-rebuild CMake-owned
+outputs in the existing managed build directory; verify both outputs before
+Python installation or setup success. Healthy tools skip rebuilding. Zero exit
+alone is insufficient. Preserve checkout/venv and unrelated files; do not reset
+source, delete occupied paths or reclone to disguise a failed repair. An unusable
+converter fails clearly and remains available for explicit repair/retry. Before
+cleaning, require both output entries to be missing or regular files: reject
+directories, symlinks and other occupied entries without invoking CMake. Healthy
+symlinked tools may remain usable when no rebuild is required. Stable paths are
+required; this inspection is not custody against concurrent replacement.
+
+Root owns backend_setup.rs, public setup Rustdoc and plan records; agent owns manager/setup_tests.rs
+fixtures and public setup regressions. Root serializes Cargo/fmt/commits. Reuse
+the readiness metadata predicate and existing retained installer runner/lease;
+no new validator, process owner, public/wire types or GUI behavior. Clean-first
+applies only to generated outputs owned by the managed CMake build, not models,
+checkout or Python dependencies. Source/binary revision coherence, effective
+access, ABI/hardware and real upstream build behavior remain outside this claim.
+The existing managed checkout, CMake configuration and compiler discovery remain
+build inputs; no reproducibility or source-revision cache-validity claim is added.
+Callers must keep setup exclusive of conversion/external tool use and keep paths
+stable. Enforcing setup-versus-conversion exclusion remains a separate prerequisite.
+
+Acceptance NATIVE (satisfied): controlled Linux fixtures prove healthy skip,
+repair-triggering missing/empty/nonexecutable native artifacts, clean-build argv,
+post-build rejection despite zero exit, invalid converter/occupied-output preservation, and
+retained failure followed by successful explicit retry. Full default/minimal
+core/RPC tests, strict lint, formatting and five plan contracts support this
+bounded setup contract. No real git/network/build/package/model execution or
+Windows/macOS evidence. Backend-specific setup observation/retry remains next.
 
 ## Retained Quantization Readiness Probes
 

@@ -50,7 +50,7 @@ touch "$0.installed"
 if test "$1" = 'clone'; then
  for destination do :; done
  mkdir -p "$destination/.git"
- touch "$destination/convert_hf_to_gguf.py"
+ printf 'fixture converter\n' > "$destination/convert_hf_to_gguf.py"
 fi
 "#,
     );
@@ -58,9 +58,13 @@ fi
     executable(
         &cmake,
         r#"#!/bin/sh
+printf '%s\n' "$@" >> "$0.args"
 if test "$1" = '--build'; then
+ if test -f "$0.omit"; then exit 0; fi
  mkdir -p "$2/bin"
- touch "$2/bin/llama-quantize" "$2/bin/llama-imatrix"
+ printf '#!/bin/sh\nexit 0\n' > "$2/bin/llama-quantize"
+ printf '#!/bin/sh\nexit 0\n' > "$2/bin/llama-imatrix"
+ chmod 700 "$2/bin/llama-quantize" "$2/bin/llama-imatrix"
 fi
 "#,
     );
@@ -368,5 +372,222 @@ async fn successful_pip_exit_cannot_complete_setup_with_failed_imports() {
             "start\nstart\n"
         );
         owner.shutdown().await.unwrap();
+    }
+}
+
+fn native_fixture(root: &Path, tools: &Programs) -> PathBuf {
+    let base = root.join("launcher-data/llama-cpp");
+    std::fs::create_dir_all(base.join("source/.git")).unwrap();
+    std::fs::write(base.join("source/keep"), "preserve checkout").unwrap();
+    std::fs::write(
+        base.join("source/convert_hf_to_gguf.py"),
+        "fixture converter",
+    )
+    .unwrap();
+    for binary in ["llama-quantize", "llama-imatrix"] {
+        executable(&base.join("build/bin").join(binary), "#!/bin/sh\nexit 0\n");
+    }
+    executable(
+        &base.join("venv/bin/python"),
+        &std::fs::read_to_string(tools.python.with_file_name("python3.venv")).unwrap(),
+    );
+    std::fs::write(marker(root, "llama-cpp", "release"), "").unwrap();
+    base
+}
+
+#[tokio::test]
+async fn llama_setup_repairs_each_unusable_native_artifact_and_skips_healthy_pair() {
+    for binary in ["llama-quantize", "llama-imatrix"] {
+        for state in ["healthy", "missing", "empty", "not_executable"] {
+            let root = tempfile::tempdir().unwrap();
+            let tools = programs(root.path());
+            let base = native_fixture(root.path(), &tools);
+            let target = base.join("build/bin").join(binary);
+            match state {
+                "missing" => std::fs::remove_file(&target).unwrap(),
+                "empty" => std::fs::write(&target, "").unwrap(),
+                "not_executable" => {
+                    std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600))
+                        .unwrap()
+                }
+                _ => {}
+            }
+            let cmake_log = tools.cmake.with_file_name("cmake.args");
+            let (backend, owner, probes) = backend(root.path(), QuantBackend::LlamaCpp, tools);
+            backend.ensure_environment().await.unwrap();
+            assert_eq!(
+                owner.snapshot().unwrap().status,
+                super::super::ConversionSetupStatus::Completed
+            );
+            assert_eq!(cmake_log.exists(), state != "healthy");
+            if state != "healthy" {
+                let arguments = std::fs::read_to_string(cmake_log).unwrap();
+                assert!(arguments.lines().any(|arg| arg == "--clean-first"));
+                assert!(arguments.lines().any(|arg| arg == "--build"));
+            }
+            assert!(backend.is_ready_async().await.unwrap());
+            assert_eq!(
+                std::fs::read_to_string(base.join("source/keep")).unwrap(),
+                "preserve checkout"
+            );
+            super::super::readiness::shutdown_backend(&owner, &probes)
+                .await
+                .unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn llama_setup_rejects_zero_exit_without_usable_outputs_then_retries() {
+    for state in ["missing", "empty", "not_executable"] {
+        let root = tempfile::tempdir().unwrap();
+        let tools = programs(root.path());
+        let base = native_fixture(root.path(), &tools);
+        let imatrix = base.join("build/bin/llama-imatrix");
+        match state {
+            "missing" => std::fs::remove_file(&imatrix).unwrap(),
+            "empty" => std::fs::write(&imatrix, "").unwrap(),
+            _ => {
+                std::fs::set_permissions(&imatrix, std::fs::Permissions::from_mode(0o600)).unwrap()
+            }
+        }
+        let omit = tools.cmake.with_file_name("cmake.omit");
+        std::fs::write(&omit, "").unwrap();
+        let (backend, owner, probes) = backend(root.path(), QuantBackend::LlamaCpp, tools);
+        let error = backend.ensure_environment().await.unwrap_err();
+        assert!(error.to_string().contains("llama-imatrix"), "{error}");
+        assert_eq!(
+            owner.snapshot().unwrap().status,
+            super::super::ConversionSetupStatus::Failed
+        );
+        assert!(
+            !marker(root.path(), "llama-cpp", "starts").exists(),
+            "native verification precedes pip"
+        );
+        assert!(
+            !marker(root.path(), "llama-cpp", "probes").exists(),
+            "native verification precedes import probes"
+        );
+        std::fs::remove_file(omit).unwrap();
+        backend.ensure_environment().await.unwrap();
+        assert_eq!(
+            owner.snapshot().unwrap().status,
+            super::super::ConversionSetupStatus::Completed
+        );
+        assert!(backend.is_ready_async().await.unwrap());
+        assert_eq!(
+            std::fs::read_to_string(base.join("source/keep")).unwrap(),
+            "preserve checkout"
+        );
+        super::super::readiness::shutdown_backend(&owner, &probes)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn llama_setup_rejects_bad_converter_without_building_or_installing() {
+    for state in ["missing", "empty", "directory"] {
+        let root = tempfile::tempdir().unwrap();
+        let tools = programs(root.path());
+        let base = native_fixture(root.path(), &tools);
+        let converter = base.join("source/convert_hf_to_gguf.py");
+        std::fs::remove_file(&converter).unwrap();
+        match state {
+            "empty" => std::fs::write(&converter, "").unwrap(),
+            "directory" => std::fs::create_dir(&converter).unwrap(),
+            _ => {}
+        }
+        let cmake_log = tools.cmake.with_file_name("cmake.args");
+        let (backend, owner, probes) = backend(root.path(), QuantBackend::LlamaCpp, tools);
+        let error = backend.ensure_environment().await.unwrap_err();
+        assert!(
+            error.to_string().contains("convert_hf_to_gguf.py"),
+            "{error}"
+        );
+        assert_eq!(
+            owner.snapshot().unwrap().status,
+            super::super::ConversionSetupStatus::Failed
+        );
+        assert!(!cmake_log.exists());
+        assert!(!marker(root.path(), "llama-cpp", "starts").exists());
+        assert!(!marker(root.path(), "llama-cpp", "probes").exists());
+        assert_eq!(
+            std::fs::read_to_string(base.join("source/keep")).unwrap(),
+            "preserve checkout"
+        );
+        assert!(super::super::readiness::shutdown_backend(&owner, &probes)
+            .await
+            .is_err());
+    }
+}
+
+#[tokio::test]
+async fn llama_setup_preserves_unexpected_native_outputs_before_cmake_clean() {
+    for binary in ["llama-quantize", "llama-imatrix"] {
+        for occupied in ["directory", "symlink"] {
+            let root = tempfile::tempdir().unwrap();
+            let tools = programs(root.path());
+            let base = native_fixture(root.path(), &tools);
+            let target = base.join("build/bin").join(binary);
+            std::fs::remove_file(&target).unwrap();
+            let outside = root.path().join("outside-native-tool");
+            if occupied == "directory" {
+                std::fs::create_dir(&target).unwrap();
+                std::fs::write(target.join("keep"), "preserve occupied directory").unwrap();
+            } else {
+                executable(&outside, "#!/bin/sh\n# preserve external tool\nexit 0\n");
+                std::os::unix::fs::symlink(&outside, &target).unwrap();
+                // The link itself is usable. Another missing tool forces the
+                // clean-first decision to inspect every generated-output entry.
+                let other = if binary == "llama-quantize" {
+                    "llama-imatrix"
+                } else {
+                    "llama-quantize"
+                };
+                std::fs::remove_file(base.join("build/bin").join(other)).unwrap();
+            }
+            let cmake_log = tools.cmake.with_file_name("cmake.args");
+            let (backend, owner, probes) = backend(root.path(), QuantBackend::LlamaCpp, tools);
+            let error = backend.ensure_environment().await.unwrap_err();
+            assert!(error.to_string().contains(binary), "{error}");
+            assert_eq!(
+                owner.snapshot().unwrap().status,
+                super::super::ConversionSetupStatus::Failed
+            );
+            assert!(
+                !cmake_log.exists(),
+                "unexpected output must block configure and clean"
+            );
+            assert!(!marker(root.path(), "llama-cpp", "starts").exists());
+            assert!(!marker(root.path(), "llama-cpp", "probes").exists());
+            if occupied == "directory" {
+                assert_eq!(
+                    std::fs::read_to_string(target.join("keep")).unwrap(),
+                    "preserve occupied directory"
+                );
+            } else {
+                assert!(std::fs::symlink_metadata(&target)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink());
+                assert_eq!(std::fs::read_link(&target).unwrap(), outside);
+                assert_eq!(
+                    std::fs::read_to_string(&outside).unwrap(),
+                    "#!/bin/sh\n# preserve external tool\nexit 0\n"
+                );
+            }
+            let first = super::super::readiness::shutdown_backend(&owner, &probes)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert_eq!(
+                super::super::readiness::shutdown_backend(&owner, &probes)
+                    .await
+                    .unwrap_err()
+                    .to_string(),
+                first
+            );
+        }
     }
 }

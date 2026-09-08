@@ -132,6 +132,40 @@ fn exists(path: &Path, step: &str) -> std::result::Result<bool, Failure> {
     path.try_exists().map_err(|error| failed(step, error))
 }
 
+fn artifact_ready(path: &Path, executable: bool) -> std::result::Result<bool, Failure> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(super::readiness::usable_artifact(&metadata, executable)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(failed(
+            &format!("Inspecting setup artifact {}", path.display()),
+            error,
+        )),
+    }
+}
+
+fn require_artifact(path: &Path, executable: bool) -> Outcome {
+    if artifact_ready(path, executable)? {
+        Ok(())
+    } else {
+        Err(Failure::Failed(format!(
+            "Required llama.cpp setup artifact {} is missing, empty, or unusable; repair setup before retrying",
+            path.display()
+        )))
+    }
+}
+
+fn require_rebuildable_output(path: &Path) -> Outcome {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Ok(_) => Err(Failure::Failed(format!(
+            "Refusing to rebuild occupied llama.cpp output {}; move the non-regular entry before retrying",
+            path.display()
+        ))),
+        Err(error) => Err(failed(&format!("Inspecting rebuild output {}", path.display()), error)),
+    }
+}
+
 pub(super) fn imports_ready(
     python: &Path,
     name: &str,
@@ -253,11 +287,17 @@ fn llama_cpp(base: &Path, cancel: &CancellationToken, programs: &Programs) -> Ou
             cancel,
         )?;
     }
+    require_artifact(&source.join("convert_hf_to_gguf.py"), false)?;
     let build = base.join("build");
-    if !exists(
-        &build.join("bin/llama-quantize"),
-        "Checking llama.cpp quantize binary",
-    )? {
+    let quantizer = build.join("bin/llama-quantize");
+    let imatrix = build.join("bin/llama-imatrix");
+    let quantizer_ready = artifact_ready(&quantizer, true)?;
+    let imatrix_ready = artifact_ready(&imatrix, true)?;
+    if !quantizer_ready || !imatrix_ready {
+        // CMake's clean target may recursively remove an output path. Never
+        // authorize that for a directory, symlink or other unexpected entry.
+        require_rebuildable_output(&quantizer)?;
+        require_rebuildable_output(&imatrix)?;
         check_cancel(cancel)?;
         fs::create_dir_all(&build)
             .map_err(|error| failed("Creating llama.cpp build directory", error))?;
@@ -290,6 +330,9 @@ fn llama_cpp(base: &Path, cancel: &CancellationToken, programs: &Programs) -> Ou
                 .arg("--build")
                 .arg(&build)
                 .args([
+                    // Invalid output can otherwise appear up-to-date to CMake.
+                    // Rebuild generated outputs, never reset the source/venv.
+                    "--clean-first",
                     "--config",
                     "Release",
                     "-j",
@@ -303,6 +346,8 @@ fn llama_cpp(base: &Path, cancel: &CancellationToken, programs: &Programs) -> Ou
             cancel,
         )?;
     }
+    require_artifact(&quantizer, true)?;
+    require_artifact(&imatrix, true)?;
     ensure_python(
         base,
         "llama.cpp",

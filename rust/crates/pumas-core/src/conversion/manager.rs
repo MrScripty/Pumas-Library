@@ -290,6 +290,9 @@ impl ConversionManager {
     ///
     /// # Preconditions
     /// - The backend must be registered.
+    /// - No conversion or external tool may concurrently use its environment.
+    ///   Setup may clean/rebuild generated native artifacts; installer exclusion
+    ///   does not enforce this caller-owned execution exclusion.
     ///
     /// # Postconditions
     /// - The backend's setup recipe and dependency checks completed. Readiness

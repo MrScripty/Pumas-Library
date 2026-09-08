@@ -1,5 +1,54 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Native llama.cpp Setup Artifacts
+
+Accepted NATIVE, the native artifact portion of FE-I26 setup repair.
+After git clone/pull, setup rejects an absent, empty or non-file converter before
+building or installing Python dependencies. Both llama-quantize and llama-imatrix
+must satisfy the existing readiness metadata predicate. An unusable tool triggers
+configuration and a clean rebuild of managed CMake outputs; a healthy pair skips
+CMake. Both outputs are checked again before Python setup, so a successful build
+exit without usable tools cannot produce a completed setup receipt.
+
+The codebase-design skill kept these decisions in the existing retained recipe
+and reused the readiness predicate. Agent updated fixtures and public setup
+regressions; root implemented the checks, repair decision and public Rustdoc.
+The build workflow guided the explicit generated-output scope and invalidation
+reason: an empty/nonexecutable artifact can otherwise appear up-to-date. Local
+CMake help confirmed the clean-first option; no actual model build was run.
+
+Review identified that cleaning an occupied output might remove unrelated
+contents. Before any CMake invocation, both output entries must therefore be
+missing or regular files according to symlink_metadata. A directory, symlink or
+other unexpected entry refuses repair without being removed. A healthy symlink
+may still be used when no rebuild is necessary. Both initial metadata checks
+run before deciding to rebuild; inspection errors cannot become missing output.
+This assumes stable paths, not protection against hostile concurrent replacement.
+
+Setup keeps the existing checkout/venv and does not reset, reclone or delete an
+invalid converter to disguise failure. Generated CMake outputs are disposable
+within their managed build directory. The existing checkout/configuration and
+compiler discovery remain inputs; source-revision coherence and build-cache
+validity are not established by this metadata check. Public setup docs require
+caller-owned exclusion of conversions/external tool use; enforcing that exclusion
+remains FE-I26. Existing setup lease, cancellation, command cleanup and explicit
+retry remain authoritative, with no new owner, public/wire type or GUI change.
+
+Evidence: 100 focused conversion tests and strict lint in both feature
+configurations passed. Four new Linux test functions cover both native tools
+healthy/missing/empty/nonexecutable, clean-first argv, zero-exit build with invalid
+outputs failing before pip/import probes, explicit retry reaching Completed,
+bad converter preservation, and occupied native directories/symlinks preserved
+before CMake. Retained failures survive repeated composed shutdown. Fake git and
+CMake now create meaningful artifacts so existing installer tests remain valid.
+
+Limits: controlled tools prove recipe decisions and receipts, not real CMake
+cleanup behavior, native builds, packages, GPUs, ABI or Windows/macOS execution.
+No live checkout, model or library was changed. Supporting gates passed: 1,461
+default and 1,421 no-default-feature core/RPC tests, with 22 existing ignored tests
+each; formatting, whitespace and all five plan contracts. No gate bypass.
+Logs: `/tmp/pumas-native-setup-{focused,focused-final,clippy-default,clippy-minimal,default,minimal}.log`.
+
 ## 2026-09-08 — Retained Quantization Readiness Probes
 
 Accepted PROBE, the public quantization import-readiness portion of FE-I26.

@@ -283,7 +283,11 @@ Public quantization readiness now also verifies imports through bounded retained
 async probes. Later reads are fresh, dropped waiters retain cleanup, and aggregate
 setup shutdown closes/drains all matching probe owners. Sync reads remain
 caller-owned; no real package/hardware compatibility claim is added. Native setup
-repair and backend-specific setup observation/retry remain next prerequisites.
+now checks converter and both tools, rebuilds unusable generated outputs, and
+verifies outputs before Python setup/success. Occupied output directories and
+symlinks refuse cleaning. This is controlled recipe evidence, not real build or
+source-revision coherence. Backend-specific setup observation/retry remains next;
+setup-versus-conversion exclusion is still caller-owned, not enforced.
 Stronger containment, setup
 observation/retry and preflight remain prerequisites before GUI configuration
 (FE-I23).

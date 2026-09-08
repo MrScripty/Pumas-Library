@@ -352,6 +352,10 @@ pub trait QuantizationBackend: Send + Sync {
     /// Built-in implementations retain setup when a waiter is dropped. Their
     /// concrete `shutdown_setup` methods (or the manager's aggregate method)
     /// close admission and observe cleanup before the host runtime stops.
+    /// Callers must exclude conversions and other users of the environment
+    /// during setup. Installer exclusion does not serialize conversion execution.
+    /// llama.cpp repair may clean/rebuild generated CMake outputs, but does not
+    /// reset the source checkout or recreate an existing Python environment.
     ///
     /// # Postconditions
     /// - Setup completes its recipe and dependency checks. External changes or

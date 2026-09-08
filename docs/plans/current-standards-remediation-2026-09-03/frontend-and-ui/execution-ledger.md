@@ -1,5 +1,45 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Quantization Setup Import Verification
+
+Accepted IMP, the setup dependency-verification/repair portion of FE-I26.
+All three retained quantization recipes probe required imports before skipping
+pip and after installation. Existing interpreters are reused, never deleted or
+recreated as repair. A healthy environment skips dependency installation;
+pip success alone cannot complete setup. NVFP4/Sherry probe embedded-script
+imports; llama.cpp probes locally declared dependencies, not the full evolving
+requirements of an unvendored upstream converter.
+
+The codebase-design skill kept this sequence in the shared private recipe helper
+and existing retained command runner, with no new owner or public configuration.
+Probes use isolated Python with bytecode writes disabled and a thirty-second
+setup-only budget. Normal nonzero exit or missing interpreter permits repair;
+cancellation, signal termination, timeout, spawn/observation and cleanup failure
+cannot silently become missing dependencies. A review caught signal termination
+being classified as repairable; the corrected code and regression passed before
+acceptance. Public is_ready checks remain unchanged and require a separate
+nonblocking design; setup probes are not interactive readiness checks.
+
+Evidence: 83 focused conversion tests passed. Controlled Linux fixtures traverse
+all three actual recipes with existing healthy and incomplete environments,
+prove no interpreter recreation, dependency-loss repair and healthy retry
+without another pip invocation. A successful pip fixture with failed imports
+retains Failed; explicit repair/retry reaches Completed. Colocated probe tests
+check actual isolated argv, missing interpreter, nonzero exit, signal termination,
+permission failure and child reaping before timeout/cancellation returns.
+No real Python packages, model code, installers or GPU work ran.
+
+Supporting gates passed: 1,444 default and 1,404 no-default-feature core/RPC
+tests, with 22 existing ignored tests each; strict all-target clippy in both
+feature configurations; formatting, whitespace and all five plan contracts.
+Logs: `/tmp/pumas-setup-imports-{focused,default,minimal,clippy-default,clippy-minimal}.log`.
+
+Limits: no public/wire types, feature gates or GUI changes, and no Windows/macOS
+execution or real dependency compatibility claim. Public direction-specific
+readiness, native artifacts/hardware, backend setup observation/retry,
+setup-versus-conversion exclusion and the remaining FE-I26 prerequisites stay
+open before quantization GUI configuration.
+
 ## 2026-09-08 — Quantization Installer Custody
 
 Accepted INST, the built-in installer-lifetime portion of FE-I26. llama.cpp,

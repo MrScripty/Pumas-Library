@@ -271,7 +271,11 @@ NVFP4/Sherry nonterminal phases, completed-epoch progress and deferred script
 failure now share the base conversion protocol, closing FE-I27 within controlled
 Linux process evidence; public/wire types are unchanged. Built-in quantization
 installers now share retained setup custody and root exclusion; manager setup
-shutdown closes all owners before draining. Stronger containment, setup
+shutdown closes all owners before draining. Setup now verifies dependency imports
+before skipping installation and before success, repairing incomplete existing
+environments without recreating them. Controlled Linux fixtures establish this
+setup contract, not real package/GPU compatibility or public readiness checks.
+Stronger containment, setup
 observation/retry and preflight remain prerequisites before GUI configuration
 (FE-I23).
 Managed quantization starts now reject foreign/invalid target names, missing

@@ -5,12 +5,23 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
+use std::time::Duration;
 
 use tracing::{info, warn};
 
 use super::setup::{check_cancel, failed, run_command, Failure, Outcome, COMMAND_TIMEOUT};
 use super::QuantBackend;
 use crate::cancel::CancellationToken;
+
+// Setup probes may load native libraries; this is not an interactive readiness
+// deadline. Cancellation and cleanup remain owned by the setup runner.
+const SETUP_IMPORT_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
+const NVFP4_IMPORTS: &str = "import torch; from transformers import AutoModelForCausalLM, AutoTokenizer; import modelopt.torch.quantization; from modelopt.torch.export import export_tensorrt_llm_checkpoint";
+const SHERRY_IMPORTS: &str = "import torch; from transformers import AutoModelForCausalLM, AutoTokenizer; from angelslim import TernaryQuantizer";
+// This proves the locally declared dependencies, not compatibility with every
+// revision of the externally maintained llama.cpp conversion script.
+const LLAMA_IMPORTS: &str =
+    "import torch, transformers, gguf, sentencepiece, numpy, google.protobuf, safetensors";
 
 #[derive(Clone)]
 pub(super) struct Programs {
@@ -47,14 +58,17 @@ pub(super) fn execute(
             "NVFP4",
             "quantize_nvfp4.py",
             include_str!("nvfp4_script.py"),
-            &[
-                "nvidia-modelopt[all]",
-                "transformers",
-                "torch",
-                "safetensors",
-                "datasets",
-                "accelerate",
-            ],
+            (
+                &[
+                    "nvidia-modelopt[all]",
+                    "transformers",
+                    "torch",
+                    "safetensors",
+                    "datasets",
+                    "accelerate",
+                ],
+                NVFP4_IMPORTS,
+            ),
             cancel,
             programs,
         ),
@@ -63,15 +77,18 @@ pub(super) fn execute(
             "Sherry",
             "sherry_qat.py",
             include_str!("sherry_script.py"),
-            &[
-                "angelslim",
-                "transformers",
-                "torch",
-                "safetensors",
-                "datasets",
-                "accelerate",
-                "bitsandbytes",
-            ],
+            (
+                &[
+                    "angelslim",
+                    "transformers",
+                    "torch",
+                    "safetensors",
+                    "datasets",
+                    "accelerate",
+                    "bitsandbytes",
+                ],
+                SHERRY_IMPORTS,
+            ),
             cancel,
             programs,
         ),
@@ -115,23 +132,58 @@ fn exists(path: &Path, step: &str) -> std::result::Result<bool, Failure> {
     path.try_exists().map_err(|error| failed(step, error))
 }
 
-fn install_python(
+fn imports_ready(
+    python: &Path,
+    name: &str,
+    imports: &str,
+    cancel: &CancellationToken,
+    timeout: Duration,
+) -> std::result::Result<bool, Failure> {
+    match run_command(
+        Command::new(python).args(["-I", "-B", "-c", imports]),
+        cancel,
+        timeout,
+    ) {
+        Ok(status) => match status.code() {
+            Some(0) => Ok(true),
+            Some(_) => Ok(false),
+            None => Err(failed(
+                &format!("Checking {name} imports"),
+                format!("probe terminated without a normal exit ({status})"),
+            )),
+        },
+        Err(Failure::CommandNotFound(_)) => Ok(false),
+        Err(Failure::Cancelled) => Err(Failure::Cancelled),
+        Err(error) => Err(failed(
+            &format!("Checking {name} imports"),
+            format!("{error:?}"),
+        )),
+    }
+}
+
+fn ensure_python(
     base: &Path,
     name: &str,
     dependencies: &[&str],
+    imports: &str,
     cancel: &CancellationToken,
     programs: &Programs,
 ) -> Outcome {
     check_cancel(cancel)?;
     let venv = base.join("venv");
     let python = venv.join("bin/python");
-    required(
-        Command::new(&programs.python)
-            .args(["-m", "venv"])
-            .arg(&venv),
-        &format!("Creating {name} venv"),
-        cancel,
-    )?;
+    if imports_ready(&python, name, imports, cancel, SETUP_IMPORT_PROBE_TIMEOUT)? {
+        return check_cancel(cancel);
+    }
+    if !exists(&python, &format!("Checking {name} interpreter"))? {
+        required(
+            Command::new(&programs.python)
+                .args(["-m", "venv"])
+                .arg(&venv),
+            &format!("Creating {name} venv"),
+            cancel,
+        )?;
+    }
     optional(
         Command::new(&python).args(["-m", "pip", "install", "--upgrade", "pip"]),
         &format!("Upgrading {name} pip"),
@@ -144,6 +196,11 @@ fn install_python(
         &format!("Installing {name} dependencies"),
         cancel,
     )?;
+    if !imports_ready(&python, name, imports, cancel, SETUP_IMPORT_PROBE_TIMEOUT)? {
+        return Err(Failure::Failed(format!(
+            "{name} dependencies were installed but required imports are not ready"
+        )));
+    }
     check_cancel(cancel)
 }
 
@@ -152,7 +209,7 @@ fn python_backend(
     name: &str,
     script_name: &str,
     script: &str,
-    dependencies: &[&str],
+    requirements: (&[&str], &str),
     cancel: &CancellationToken,
     programs: &Programs,
 ) -> Outcome {
@@ -162,15 +219,7 @@ fn python_backend(
     check_cancel(cancel)?;
     fs::write(base.join(script_name), script)
         .map_err(|error| failed(&format!("Deploying {name} script"), error))?;
-    // Preserve the existing interpreter-present shortcut; dependency readiness
-    // and repairing incomplete environments are separate from setup custody.
-    if exists(
-        &base.join("venv/bin/python"),
-        &format!("Checking {name} interpreter"),
-    )? {
-        return check_cancel(cancel);
-    }
-    install_python(base, name, dependencies, cancel, programs)?;
+    ensure_python(base, name, requirements.0, requirements.1, cancel, programs)?;
     info!(%name, "Quantization backend setup finished");
     Ok(())
 }
@@ -254,25 +303,130 @@ fn llama_cpp(base: &Path, cancel: &CancellationToken, programs: &Programs) -> Ou
             cancel,
         )?;
     }
-    if !exists(
-        &base.join("venv/bin/python"),
-        "Checking llama.cpp interpreter",
-    )? {
-        install_python(
-            base,
-            "llama.cpp",
-            &[
-                "torch",
-                "transformers",
-                "gguf",
-                "sentencepiece",
-                "numpy",
-                "protobuf",
-                "safetensors",
-            ],
-            cancel,
-            programs,
-        )?;
-    }
+    ensure_python(
+        base,
+        "llama.cpp",
+        &[
+            "torch",
+            "transformers",
+            "gguf",
+            "sentencepiece",
+            "numpy",
+            "protobuf",
+            "safetensors",
+        ],
+        LLAMA_IMPORTS,
+        cancel,
+        programs,
+    )?;
     check_cancel(cancel)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn executable(path: &Path, script: &str) {
+        fs::write(path, script).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    #[test]
+    fn import_probe_distinguishes_missing_imports_from_execution_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let python = root.path().join("python");
+        let cancel = CancellationToken::new();
+        assert!(!imports_ready(
+            &python,
+            "fixture",
+            "import fixture",
+            &cancel,
+            Duration::from_secs(1)
+        )
+        .unwrap());
+        executable(&python, "#!/bin/sh\nexit 1\n");
+        assert!(!imports_ready(
+            &python,
+            "fixture",
+            "import fixture",
+            &cancel,
+            Duration::from_secs(1)
+        )
+        .unwrap());
+        executable(&python, "#!/bin/sh\ntest \"$1\" = '-I' && test \"$2\" = '-B' && test \"$3\" = '-c' && test \"$4\" = 'import fixture'\n");
+        assert!(imports_ready(
+            &python,
+            "fixture",
+            "import fixture",
+            &cancel,
+            Duration::from_secs(1)
+        )
+        .unwrap());
+        executable(&python, "#!/bin/sh\nkill -TERM $$\n");
+        assert!(
+            matches!(imports_ready(&python, "fixture", "import fixture", &cancel, Duration::from_secs(1)), Err(Failure::Failed(message)) if message.contains("Checking fixture imports") && message.contains("terminated without a normal exit") && message.contains("signal"))
+        );
+        fs::set_permissions(&python, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(
+            matches!(imports_ready(&python, "fixture", "import fixture", &cancel, Duration::from_secs(1)), Err(Failure::Failed(message)) if message.contains("Checking fixture imports"))
+        );
+    }
+
+    #[test]
+    fn held_import_probe_timeout_and_cancellation_reap_before_returning() {
+        for cancelled in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let python = root.path().join("python");
+            let pid_path = root.path().join("python.pid");
+            executable(&python, "#!/bin/sh\necho $$ > \"$0.pid\"\nexec sleep 10\n");
+            let cancel = CancellationToken::new();
+            let result = std::thread::scope(|scope| {
+                let observer = cancelled.then(|| {
+                    scope.spawn(|| {
+                        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                        while !pid_path.exists() && std::time::Instant::now() < deadline {
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        cancel.cancel();
+                        pid_path.exists()
+                    })
+                });
+                let outcome = imports_ready(
+                    &python,
+                    "fixture",
+                    "import fixture",
+                    &cancel,
+                    if cancelled {
+                        Duration::from_secs(5)
+                    } else {
+                        Duration::from_millis(200)
+                    },
+                );
+                if let Some(observer) = observer {
+                    assert!(
+                        observer.join().unwrap(),
+                        "probe started before cancellation"
+                    );
+                }
+                outcome
+            });
+            if cancelled {
+                assert!(matches!(result, Err(Failure::Cancelled)));
+            } else {
+                assert!(
+                    matches!(result, Err(Failure::Failed(message)) if message.contains("Checking fixture imports") && message.contains("Conversion setup command did not complete successfully"))
+                );
+            }
+            let pid: u32 = fs::read_to_string(pid_path)
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap();
+            assert!(
+                !Path::new(&format!("/proc/{pid}")).exists(),
+                "probe reaped before receipt"
+            );
+        }
+    }
 }

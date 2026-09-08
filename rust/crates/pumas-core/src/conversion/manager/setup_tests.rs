@@ -16,6 +16,7 @@ fn programs(root: &Path) -> Programs {
     executable(
         &python,
         r#"#!/bin/sh
+printf 'create\n' >> "$0.creations"
 mkdir -p "$3/bin"
 cp "$0.venv" "$3/bin/python"
 "#,
@@ -23,6 +24,12 @@ cp "$0.venv" "$3/bin/python"
     executable(
         &python.with_file_name("python3.venv"),
         r#"#!/bin/sh
+if test "$1" = '-I'; then
+ test "$2" = '-B' && test "$3" = '-c' || exit 8
+ printf '%s\n' "$4" >> "$0.probes"
+ test -f "$0.installed" && ! test -f "$0.broken"
+ exit $?
+fi
 if test "$4" = '--upgrade'; then exit 0; fi
 printf 'start\n' >> "$0.starts"
 echo $$ > "$0.started"
@@ -238,4 +245,117 @@ async fn aggregate_setup_shutdown_closes_all_owners_and_survives_waiter_drop() {
     assert!(!Path::new(&format!("/proc/{pid}")).exists());
     assert!(!root.path().join("launcher-data/sherry").exists());
     assert!(!root.path().join("launcher-data/llama-cpp").exists());
+}
+
+#[tokio::test]
+async fn setup_repairs_existing_interpreters_and_skips_healthy_dependencies() {
+    for (id, directory, expected_import) in [
+        (QuantBackend::LlamaCpp, "llama-cpp", "google.protobuf"),
+        (
+            QuantBackend::Nvfp4,
+            "nvfp4",
+            "export_tensorrt_llm_checkpoint",
+        ),
+        (QuantBackend::Sherry, "sherry", "TernaryQuantizer"),
+    ] {
+        for initially_healthy in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let tools = programs(root.path());
+            let python = marker(root.path(), directory, "unused").with_file_name("python");
+            let fixture =
+                std::fs::read_to_string(tools.python.with_file_name("python3.venv")).unwrap();
+            executable(&python, &fixture);
+            std::fs::write(
+                marker(root.path(), directory, "keep"),
+                "existing environment",
+            )
+            .unwrap();
+            std::fs::write(marker(root.path(), directory, "release"), "").unwrap();
+            if initially_healthy {
+                std::fs::write(marker(root.path(), directory, "installed"), "").unwrap();
+            }
+            let creations = tools.python.with_file_name("python3.creations");
+            let (backend, owner) = backend(root.path(), id, tools);
+            backend.ensure_environment().await.unwrap();
+            assert!(!creations.exists(), "existing venv must not be recreated");
+            assert_eq!(
+                marker(root.path(), directory, "starts").exists(),
+                !initially_healthy,
+                "pip runs only when imports are missing"
+            );
+            assert!(
+                std::fs::read_to_string(marker(root.path(), directory, "probes"))
+                    .unwrap()
+                    .contains(expected_import)
+            );
+            // A later dependency loss must invalidate the old successful setup.
+            std::fs::remove_file(marker(root.path(), directory, "installed")).unwrap();
+            backend.ensure_environment().await.unwrap();
+            let expected_starts = if initially_healthy {
+                "start\n"
+            } else {
+                "start\nstart\n"
+            };
+            assert_eq!(
+                std::fs::read_to_string(marker(root.path(), directory, "starts")).unwrap(),
+                expected_starts
+            );
+            backend.ensure_environment().await.unwrap();
+            assert_eq!(
+                std::fs::read_to_string(marker(root.path(), directory, "starts")).unwrap(),
+                expected_starts
+            );
+            assert!(!creations.exists());
+            assert_eq!(
+                std::fs::read_to_string(marker(root.path(), directory, "keep")).unwrap(),
+                "existing environment"
+            );
+            owner.shutdown().await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn successful_pip_exit_cannot_complete_setup_with_failed_imports() {
+    for (id, directory) in [
+        (QuantBackend::LlamaCpp, "llama-cpp"),
+        (QuantBackend::Nvfp4, "nvfp4"),
+        (QuantBackend::Sherry, "sherry"),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let tools = programs(root.path());
+        let python = marker(root.path(), directory, "unused").with_file_name("python");
+        executable(
+            &python,
+            &std::fs::read_to_string(tools.python.with_file_name("python3.venv")).unwrap(),
+        );
+        std::fs::write(marker(root.path(), directory, "release"), "").unwrap();
+        std::fs::write(marker(root.path(), directory, "broken"), "").unwrap();
+        let (backend, owner) = backend(root.path(), id, tools);
+        let error = backend.ensure_environment().await.unwrap_err();
+        assert!(matches!(error, PumasError::ConversionFailed { .. }));
+        assert!(error.to_string().contains("imports"), "{error}");
+        assert!(
+            marker(root.path(), directory, "installed").exists(),
+            "pip fixture exited successfully"
+        );
+        assert_eq!(
+            owner.snapshot().unwrap().status,
+            super::super::ConversionSetupStatus::Failed
+        );
+        // Repair the fixture's package source, not its venv; an explicit retry
+        // rechecks imports and runs installation again.
+        std::fs::remove_file(marker(root.path(), directory, "broken")).unwrap();
+        std::fs::remove_file(marker(root.path(), directory, "installed")).unwrap();
+        backend.ensure_environment().await.unwrap();
+        assert_eq!(
+            owner.snapshot().unwrap().status,
+            super::super::ConversionSetupStatus::Completed
+        );
+        assert_eq!(
+            std::fs::read_to_string(marker(root.path(), directory, "starts")).unwrap(),
+            "start\nstart\n"
+        );
+        owner.shutdown().await.unwrap();
+    }
 }

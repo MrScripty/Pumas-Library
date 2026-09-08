@@ -10,9 +10,9 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Repair direction-specific quantization environment readiness
-and incomplete-install detection (FE-I26, remaining FE-I23). Installer custody
-is accepted below; setup observation/retry and stronger containment remain open.
+**Next slice:** Repair public direction-specific quantization readiness
+(FE-I26, remaining FE-I23). Installer custody and setup import verification/repair
+are accepted below; setup observation/retry and stronger containment remain open.
 Managed quantization target/calibration admission is accepted below; execution
 readiness and lower-level backend preconditions are not closed by it.
 NVFP4/Sherry script progress is accepted below, closing FE-I27.
@@ -36,6 +36,46 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Quantization Setup Import Verification
+
+Status: `Accepted`; see the
+[execution ledger](execution-ledger.md#2026-09-08--quantization-setup-import-verification).
+Complete the dependency-repair
+part of FE-I26 by checking imports inside retained setup before skipping pip and
+again before declaring success. A present interpreter alone is insufficient.
+Reuse an existing venv when imports fail; never delete or recreate it as repair.
+Missing interpreters may be created. A normal unsuccessful probe or missing
+interpreter permits repair; cancellation, timeout, spawn/observation or cleanup
+failures do not. Setup probes use isolated Python (-I -B -c), no model loading,
+and a thirty-second command budget for native ML runtime imports. This is not
+an interactive readiness query or hardware/algorithm compatibility proof.
+
+Agent owns conversion/backend_setup.rs and colocated probe tests; root owns
+conversion/manager/setup_tests.rs and frontend/parent plan, ledger and issues.
+Root serializes Cargo, formatting, integration and commits. No public/wire
+types, features, GUI, dependencies, live installations or models change.
+NVFP4/Sherry probe the imports used by their embedded scripts; llama.cpp probes
+locally declared dependency modules, not an unvendored upstream script's full
+requirements. Existing command custody and root exclusion remain authoritative.
+
+Composed-design review: not applicable to a new architecture. Existing recipes
+own skip/install/success decisions and reference their dependency imports; the
+existing runner retains probe cleanup and cancellation. A shared private helper
+keeps the same verification sequence in the three actual recipes without a new
+owner, task, persistent marker, public configuration or validation-history flag.
+Removing it would restore interpreter-presence authority or duplicate the same
+sequence. Public is_ready surfaces deliberately remain outside this setup-only
+claim; no synchronous probes are added to async conversion consumers.
+
+Acceptance IMP (satisfied): automated controlled Linux recipe tests show failed
+imports trigger repair without venv recreation, healthy imports skip pip, pip
+success with failed imports fails setup, and retry can repair the same retained
+environment. Probe tests preserve cancellation/timeout/cleanup failures. Existing
+installer/worker tests remain valid. Supporting gates: conversion tests, full
+default/minimal core/RPC tests, strict lint, formatting and five plan contracts.
+No real dependency/GPU or GUI workflow claim. Re-plan if this requires changing
+public readiness, executing model code, or replacing installer lifetime owners.
 
 ## Quantization Installer Custody Admission
 

@@ -10,16 +10,17 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Project NVFP4/Sherry script progress under the accepted terminal
-authority contract (FE-I27), before remaining containment and setup/preflight (FE-I26,
-remaining FE-I23). Atomic manager-local admission, retained Rust-worker
+**Next slice:** Resolve quantization installer custody and direction-specific
+setup/preflight (FE-I26, remaining FE-I23); stronger containment remains open.
+NVFP4/Sherry script progress is accepted below, closing FE-I27.
+Atomic manager-local admission, retained Rust-worker
 observation and standalone/RPC shutdown composition are accepted below. Unique
 staging and non-replacing publication are also accepted within the stable-parent
 boundary below. Foreground cancellation, dual-pipe draining and direct-child
 reaping are accepted below. Cooperating Linux group cleanup is accepted below;
 escaped descendants remain outside that bounded contract. No new
-quantization GUI mutation is admitted. Terminal authority is accepted below;
-NVFP4/Sherry script-progress projection remains FE-I27.
+quantization GUI mutation is admitted. Terminal authority and NVFP4/Sherry
+script-progress projection are accepted below.
 The optional conversion dialog now uses setup start/observation across uncertain
 responses and reopen (FE-I25); see the accepted dialog ledger. Backend custody,
 aggregate shutdown and core/RPC/desktop setup observation are accepted within
@@ -32,6 +33,52 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Python Quantization Progress Admission
+
+Status: `Accepted`; see the
+[execution ledger](execution-ledger.md#2026-09-08--python-quantization-progress).
+FE-I27 is resolved by routing
+NVFP4/Sherry stdout through the same nonterminal observations and deferred
+failure contract as base Python conversion. Keep worker receipts as the only
+terminal authority. Setup/loading map to SettingUp, calibrating to Calibrating,
+training to Training, quantizing to Quantizing, exporting to Writing. Unknown
+duration remains indeterminate; complete remains Writing at 95% pending cleanup.
+Sherry announces each epoch before training it, so observed phase progress is
+`(epoch - 1) / epochs_total`, never completed epochs inferred from an announcement.
+Missing epoch pairs remain indeterminate; invalid provided pairs fail after
+cleanup. Epoch transport fields stay private, leaving public/wire types unchanged.
+
+Write set: subagent owns new private core `conversion/script_process.rs` and
+colocated tests. Root owns core `conversion/{mod.rs,manager.rs,nvfp4.rs,sherry.rs,
+progress.rs}` and `conversion/manager/output_tests.rs`, plus frontend/parent
+plan, issues and ledger. No scripts, GUI production files, schemas, dependencies,
+native cleanup implementation, feature gates or model data change. Root owns
+serial formatting, Cargo, integration and commits; other agent work is read-only.
+
+Composed design is applicable: the script runner owns stdout decoding and sticky
+diagnostics; native runner retains process cleanup; tracker owns synchronized
+phase snapshots; worker owns terminal receipts; backends retain arguments and
+output publication. Required ordering is decode, cleanup, failure decision,
+publication and receipt. Three callers no longer need to duplicate that order
+or diagnostic handling. Script protocol changes stay in the script runner and
+tracker; process-policy changes remain in native execution. The private runner
+composes existing owners without a new task, registry, runtime or public type.
+Deleting it would replicate protocol/failure policy in three callers. It can
+evolve independently of native cleanup because it consumes its existing result.
+This removes the base-conversion local parser, not layers a second parser over it.
+
+Acceptance (automated, satisfied): focused stage/epoch checks, real controlled
+Linux script-runner tests for mixed output and deferred failure/cancellation,
+and actual NVFP4/Sherry backend fixtures held through phases prove observable
+progress and no early publication. Existing base-conversion, four-backend output
+and worker/UI terminal-contract evidence remains applicable. Supporting gates:
+default/minimal core/RPC tests, strict lint, formatting and five plan contracts
+passed. The ledger retains the initial unrelated download-test timeout and
+successful isolated/full reruns; it does not claim that timeout's cause is fixed.
+No actual GPU/model conversion or new graphical workflow claim. FE-I26 setup,
+hardware/preflight and stronger containment stay open. Re-plan if exposing epoch
+fields publicly or changing script execution behavior becomes necessary.
 
 ## Conversion Terminal Authority Admission
 
@@ -76,10 +123,10 @@ importing, followed by one confirmed-completion refresh. These are backend
 system/integration and simulated UI-consumer claims, not a new graphical or
 real-model workflow claim. Default/minimal core/RPC tests, strict lint, focused
 frontend tests/type checks and plan contracts passed. See the ledger for exact
-counts and evidence limits. Nonterminal NVFP4/Sherry projection remains open.
+counts and evidence limits. Nonterminal NVFP4/Sherry projection is now accepted
+in the subsequent admission above.
 
-Limits: NVFP4/Sherry nonterminal JSON projection remains FE-I27 follow-up;
-stronger containment, installer ownership and preflight remain FE-I26. No new
+Limits: stronger containment, installer ownership and preflight remain FE-I26. No new
 quantization GUI mutation is admitted. Re-plan if terminal truth needs a changed
 wire contract or a new lifetime owner.
 

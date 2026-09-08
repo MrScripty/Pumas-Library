@@ -12,10 +12,10 @@ use tokio::fs;
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
-use super::native_process;
 use super::outputs::OutputWorkspace;
 use super::pipeline;
 use super::progress::ConversionProgressTracker;
+use super::script_process;
 use super::types::{
     ConversionStatus, QuantBackend, QuantOption, QuantizationBackend, QuantizeParams,
 };
@@ -256,9 +256,13 @@ impl QuantizationBackend for SherryBackend {
 
         let mut command = Command::new(self.venv_python());
         command.args(&args);
-        native_process::run(&mut command, "sherry-qat", cancel_token, |stream, line| {
-            debug!("[{}] {:?}: {}", conversion_id, stream, line);
-        })
+        script_process::run(
+            &mut command,
+            "sherry-qat",
+            conversion_id,
+            progress,
+            cancel_token,
+        )
         .await?;
 
         // -- PHASE 4: CLEANUP --

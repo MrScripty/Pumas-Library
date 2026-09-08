@@ -51,6 +51,22 @@ impl ConversionProgressTracker {
         }
 
         match line.stage.as_str() {
+            "setup" | "loading" => {
+                progress.status = ConversionStatus::SettingUp;
+                progress.progress = None;
+            }
+            "calibrating" => {
+                progress.status = ConversionStatus::Calibrating;
+                progress.progress = None;
+            }
+            "training" => {
+                progress.status = ConversionStatus::Training;
+                progress.progress = None;
+            }
+            "quantizing" => {
+                progress.status = ConversionStatus::Quantizing;
+                progress.progress = None;
+            }
             "validating" => {
                 progress.status = ConversionStatus::Validating;
             }
@@ -68,7 +84,7 @@ impl ConversionProgressTracker {
                     }
                 }
             }
-            "writing" => {
+            "writing" | "exporting" => {
                 progress.status = ConversionStatus::Writing;
                 progress.progress = Some(0.95);
             }
@@ -81,6 +97,20 @@ impl ConversionProgressTracker {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Project a validated announcement made before an epoch starts.
+    pub(super) fn update_training_progress(&self, conversion_id: &str, epoch: u32, total: u32) {
+        assert!(
+            epoch > 0 && epoch <= total,
+            "validated training epoch required"
+        );
+        let mut state = self.state.lock().expect("progress lock poisoned");
+        if let Some(progress) = state.get_mut(conversion_id) {
+            if progress.status == ConversionStatus::Training {
+                progress.progress = Some((epoch - 1) as f32 / total as f32);
+            }
         }
     }
 

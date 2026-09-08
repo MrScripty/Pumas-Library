@@ -1,5 +1,57 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Python Quantization Progress
+
+Accepted the remaining FE-I27 script-progress projection. NVFP4 and Sherry now
+share base conversion's private stdout JSON decoder and deferred-error policy.
+Setup/loading, calibration, training, quantization and export are observable
+through existing manager get/list snapshots. Unknown durations are indeterminate.
+Sherry announces an epoch before executing it, so training progress measures
+`(epoch - 1) / epochs_total`. Missing pairs remain indeterminate; invalid provided
+pairs retain failure until cleanup. Epoch transport fields remain private.
+Complete still means Writing at 95%, not terminal success. The first script
+error survives subsequent records and exit zero; nonzero exit retains both
+contexts, and cancellation remains distinct. Publication follows successful
+cleanup and protocol outcome; retained worker receipts still own terminal state.
+
+The codebase-design skill guided one private script-protocol module shared by
+three callers, replacing the base-conversion local parser. Native cleanup,
+worker custody and backend argument/publication ownership are unchanged. The
+subagent implemented the private runner and tests; root integrated the three
+callers, phase tracker and public-manager fixtures, then serialized verification.
+
+Evidence: 73 focused conversion tests passed. Controlled Linux script tests
+cover mixed diagnostic stdout, stderr excluded from protocol, stage projection,
+missing/invalid epochs, first-error retention on zero/nonzero exit, and
+cancellation after an observed error. Actual NVFP4/Sherry backend fixtures hold
+scripts while public manager get/list show their phase and no output identity.
+Both successful and error-reporting zero-exit cases prove indexed completion
+only after release, or failure without publication. Existing four-backend
+versioned-output and base-conversion terminal-authority tests also pass. The
+initial focused run caught a mistaken test expectation: quantization deliberately
+clears prior tensor counters when entering finalization. The corrected assertion
+preserves that contract; held-phase fixtures verify progress before it is cleared.
+Tiny isolated fixture payloads exercise real process execution and backend
+integration, not actual model tools, GPUs or live library data.
+
+Supporting gates passed: 1,434 default and 1,394 no-default-feature core/RPC
+tests, with 22 existing ignored tests each; strict all-target clippy in
+all-feature and no-default configurations; formatting, whitespace and five
+plan-contract checks. The first minimal run had 1,200 passing tests and one
+failure in existing download admission
+`incumbent_disappearance_cannot_return_a_stale_id_or_drop_overlap_files`:
+its one-second second-ID wait timed out. That test passed unchanged in isolation,
+then the complete minimal suite passed unchanged. Timing sensitivity is a
+possible cause, not an established diagnosis or a fixed download defect. Preserve
+this signal for verification follow-up if it recurs; no timeout was relaxed.
+Logs: `/tmp/pumas-quant-progress-{focused,default,minimal,minimal-recheck,download-recheck,clippy-default,clippy-minimal}.log`.
+
+Limits: public/wire shapes and feature gates are unchanged; backend operation
+remains standalone and GUI-independent. Prior UI terminal-consumer evidence is
+unchanged, not newly rerun graphical verification. FE-I27 is resolved; FE-I26
+installer custody, preflight and stronger containment remain open before new
+quantization GUI mutation (FE-I23). No release build or live library mutation.
+
 ## 2026-09-08 — Conversion Terminal Progress Authority
 
 Accepted the terminal-authority portion of FE-I27. Python complete/error

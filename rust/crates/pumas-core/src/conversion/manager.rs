@@ -9,20 +9,19 @@ use std::sync::{Arc, Mutex};
 
 use tokio::fs;
 use tokio::process::Command;
-use tracing::{debug, info};
+use tracing::info;
 
 use super::llama_cpp::LlamaCppBackend;
-use super::native_process::{self, OutputStream};
 use super::nvfp4::Nvfp4Backend;
 use super::outputs::OutputWorkspace;
 use super::pipeline;
 use super::progress::ConversionProgressTracker;
+use super::script_process;
 use super::scripts;
 use super::sherry::SherryBackend;
 use super::types::{
     BackendStatus, ConversionDirection, ConversionProgress, ConversionRequest, ConversionSource,
     ConversionStatus, QuantBackend, QuantOption, QuantizationBackend, QuantizeParams,
-    ScriptProgressLine,
 };
 use crate::cancel::CancellationToken;
 use crate::model_library::{ModelImporter, ModelLibrary};
@@ -713,44 +712,14 @@ async fn run_conversion(
 
     let mut command = Command::new(&python_path);
     command.arg(&script_path).args(&args);
-    let mut script_failure = None;
-    let outcome = native_process::run(
+    script_process::run(
         &mut command,
         "conversion script",
+        conversion_id,
+        progress,
         cancel_token,
-        |stream, line| {
-            if stream == OutputStream::Stdout {
-                if let Ok(script_progress) = serde_json::from_str::<ScriptProgressLine>(line) {
-                    if script_progress.stage == "error" {
-                        script_failure.get_or_insert_with(|| {
-                            script_progress
-                                .message
-                                .clone()
-                                .unwrap_or_else(|| "Conversion script failed".to_string())
-                        });
-                    }
-                    progress.update_from_script(conversion_id, &script_progress);
-                    return;
-                }
-            }
-            debug!("[{}] {:?}: {}", conversion_id, stream, line);
-        },
     )
-    .await;
-    if let Err(error) = outcome {
-        if matches!(error, PumasError::ConversionCancelled) {
-            return Err(error);
-        }
-        if let Some(message) = script_failure {
-            return Err(PumasError::ConversionFailed {
-                message: format!("{error}; script reported: {message}"),
-            });
-        }
-        return Err(error);
-    }
-    if let Some(message) = script_failure {
-        return Err(PumasError::ConversionFailed { message });
-    }
+    .await?;
 
     // Rename temp dir to final
     let output_dir = workspace.publish().await?;

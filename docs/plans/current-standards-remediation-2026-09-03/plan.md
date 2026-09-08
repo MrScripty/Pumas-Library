@@ -267,7 +267,9 @@ checks worker threads, preserves realtime exit signals and explicitly releases
 setup exclusion after cleanup. Escaped descendants remain outside this bounded
 contract. Worker receipts now own terminal progress after cleanup, publication
 and indexing; script complete/error records cannot declare early completion.
-NVFP4/Sherry nonterminal projection remains FE-I27. Stronger containment,
+NVFP4/Sherry nonterminal phases, completed-epoch progress and deferred script
+failure now share the base conversion protocol, closing FE-I27 within controlled
+Linux process evidence; public/wire types are unchanged. Stronger containment,
 installer custody and preflight remain prerequisites before GUI configuration
 (FE-I23).
 The GUI is independently optional; embedded Rust and standalone RPC remain

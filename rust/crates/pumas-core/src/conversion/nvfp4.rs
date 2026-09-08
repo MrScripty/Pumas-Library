@@ -10,10 +10,10 @@ use tokio::fs;
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
-use super::native_process;
 use super::outputs::OutputWorkspace;
 use super::pipeline;
 use super::progress::ConversionProgressTracker;
+use super::script_process;
 use super::types::{
     ConversionStatus, QuantBackend, QuantOption, QuantizationBackend, QuantizeParams,
 };
@@ -251,13 +251,12 @@ impl QuantizationBackend for Nvfp4Backend {
 
         let mut command = Command::new(self.venv_python());
         command.args(&args);
-        native_process::run(
+        script_process::run(
             &mut command,
             "nvfp4-quantize",
+            conversion_id,
+            progress,
             cancel_token,
-            |stream, line| {
-                debug!("[{}] {:?}: {}", conversion_id, stream, line);
-            },
         )
         .await?;
 

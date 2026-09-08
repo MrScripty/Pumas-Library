@@ -336,6 +336,13 @@ async fn every_conversion_path_indexes_the_actual_versioned_output_without_touch
             assert_eq!(observed.tensors_completed, Some(1), "{backend_id:?}");
             assert_eq!(observed.tensors_total, Some(2), "{backend_id:?}");
             assert_eq!(observed.current_tensor.as_deref(), Some("fixture.weight"));
+        } else {
+            // Quantization advances to finalization, clearing the prior step's
+            // counters. Held-phase tests observe script progress before this.
+            let observed = progress.get("fixture").unwrap();
+            assert_eq!(observed.tensors_completed, None, "{backend_id:?}");
+            assert_eq!(observed.tensors_total, None, "{backend_id:?}");
+            assert_eq!(observed.current_tensor, None, "{backend_id:?}");
         }
         assert_eq!(
             progress.get("fixture").unwrap().output_model_id.as_deref(),
@@ -352,6 +359,139 @@ async fn every_conversion_path_indexes_the_actual_versioned_output_without_touch
             .await
             .unwrap()
             .is_none());
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn quantization_scripts_expose_phases_and_defer_failures_before_publication() {
+    use std::time::Duration;
+    for (directory, script_name, direction, quant, phase, expected, fraction) in [
+        (
+            "nvfp4",
+            "quantize_nvfp4.py",
+            ConversionDirection::SafetensorsToNvfp4,
+            "NVFP4",
+            r#"{"stage":"quantizing"}"#,
+            ConversionStatus::Quantizing,
+            None,
+        ),
+        (
+            "sherry",
+            "sherry_qat.py",
+            ConversionDirection::SafetensorsToSherryQat,
+            "Sherry-1.25bit",
+            r#"{"stage":"training","epoch":2,"epochs_total":4}"#,
+            ConversionStatus::Training,
+            Some(0.25),
+        ),
+    ] {
+        for fails in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let library = Arc::new(ModelLibrary::new(root.path().join("models")).await.unwrap());
+            let source = library.library_root().join("source");
+            std::fs::create_dir(&source).unwrap();
+            std::fs::write(source.join("source.safetensors"), b"source fixture").unwrap();
+            library
+                .save_metadata(&source, &ModelMetadata::default())
+                .await
+                .unwrap();
+            library.index_model_dir(&source).await.unwrap();
+            let base = root.path().join("launcher-data").join(directory);
+            let python = base.join("venv/bin/python");
+            let diagnostic = if fails {
+                "printf '%s\\n' '{\"stage\":\"error\",\"message\":\"controlled quantization failure\"}'"
+            } else {
+                ":"
+            };
+            executable(
+                &python,
+                &format!(
+                    r#"#!/bin/sh
+{diagnostic}
+printf '%s\n' '{phase}'
+attempt=0
+while ! test -f "$0.release"; do
+ attempt=$((attempt + 1))
+ if test "$attempt" -ge 500; then exit 9; fi
+ sleep 0.02
+done
+printf '%s\n' '{{"stage":"complete"}}'
+while [ $# -gt 0 ]; do
+ if [ "$1" = '--output-dir' ]; then printf 'fixture payload' > "$2/model.safetensors"; exit 0; fi
+ shift
+done
+exit 2
+"#
+                ),
+            );
+            std::fs::write(base.join(script_name), b"unused fixture script").unwrap();
+            let manager = ConversionManager::new(
+                root.path().to_path_buf(),
+                library.clone(),
+                Arc::new(ModelImporter::new(library.clone())),
+            );
+            let id = manager
+                .start_conversion(ConversionRequest {
+                    model_id: "source".into(),
+                    direction,
+                    target_quant: Some(quant.into()),
+                    output_name: None,
+                    imatrix_calibration_file: None,
+                    force_imatrix: None,
+                })
+                .await
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let observed = manager.get_progress(&id).unwrap();
+                    if observed.status == expected && observed.progress == fraction {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect("actual backend script phase projected");
+            let observed = manager.list_conversions().pop().unwrap();
+            assert_eq!(observed.error, None);
+            assert_eq!(observed.output_model_id, None);
+            assert_eq!(library.list_models().await.unwrap().len(), 1);
+            std::fs::write(python.with_file_name("python.release"), "").unwrap();
+            let terminal = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let observed = manager.get_progress(&id).unwrap();
+                    if matches!(
+                        observed.status,
+                        ConversionStatus::Completed | ConversionStatus::Error
+                    ) {
+                        break observed;
+                    }
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .expect("quantization receipt observed");
+            if fails {
+                assert_eq!(terminal.status, ConversionStatus::Error);
+                assert!(terminal
+                    .error
+                    .unwrap()
+                    .contains("controlled quantization failure"));
+                assert_eq!(terminal.output_model_id, None);
+                assert_eq!(library.list_models().await.unwrap().len(), 1);
+                assert!(manager.shutdown().await.is_err());
+            } else {
+                assert_eq!(terminal.status, ConversionStatus::Completed);
+                assert_eq!(terminal.progress, Some(1.0));
+                assert!(library
+                    .get_model(&terminal.output_model_id.unwrap())
+                    .await
+                    .unwrap()
+                    .is_some());
+                manager.shutdown().await.unwrap();
+            }
+        }
     }
 }
 

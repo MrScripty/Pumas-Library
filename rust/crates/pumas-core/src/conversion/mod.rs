@@ -17,6 +17,7 @@ pub mod nvfp4;
 mod outputs;
 pub(crate) mod pipeline;
 pub(crate) mod progress;
+mod script_process;
 mod scripts;
 mod setup;
 pub mod sherry;

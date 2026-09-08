@@ -713,6 +713,7 @@ async fn run_conversion(
 
     let mut command = Command::new(&python_path);
     command.arg(&script_path).args(&args);
+    let mut script_failure = None;
     let outcome = native_process::run(
         &mut command,
         "conversion script",
@@ -720,6 +721,14 @@ async fn run_conversion(
         |stream, line| {
             if stream == OutputStream::Stdout {
                 if let Ok(script_progress) = serde_json::from_str::<ScriptProgressLine>(line) {
+                    if script_progress.stage == "error" {
+                        script_failure.get_or_insert_with(|| {
+                            script_progress
+                                .message
+                                .clone()
+                                .unwrap_or_else(|| "Conversion script failed".to_string())
+                        });
+                    }
                     progress.update_from_script(conversion_id, &script_progress);
                     return;
                 }
@@ -732,18 +741,15 @@ async fn run_conversion(
         if matches!(error, PumasError::ConversionCancelled) {
             return Err(error);
         }
-        if let Some(p) = progress.get(conversion_id) {
-            if p.status == ConversionStatus::Error {
-                return Err(PumasError::ConversionFailed {
-                    message: format!(
-                        "{error}; script reported: {}",
-                        p.error
-                            .unwrap_or_else(|| "Conversion script failed".to_string())
-                    ),
-                });
-            }
+        if let Some(message) = script_failure {
+            return Err(PumasError::ConversionFailed {
+                message: format!("{error}; script reported: {message}"),
+            });
         }
         return Err(error);
+    }
+    if let Some(message) = script_failure {
+        return Err(PumasError::ConversionFailed { message });
     }
 
     // Rename temp dir to final
@@ -796,7 +802,6 @@ async fn run_conversion(
         .unwrap_or_else(|| output_dir.to_string_lossy().to_string());
 
     progress.set_output_model_id(conversion_id, output_model_id);
-    progress.set_status(conversion_id, ConversionStatus::Completed);
 
     info!("Conversion {} completed successfully", conversion_id);
     Ok(())

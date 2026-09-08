@@ -10,15 +10,16 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Establish native conversion process-tree containment and
-quantization-backend setup/preflight before adding GUI configuration (FE-I26,
+**Next slice:** Project NVFP4/Sherry script progress under the accepted terminal
+authority contract (FE-I27), before remaining containment and setup/preflight (FE-I26,
 remaining FE-I23). Atomic manager-local admission, retained Rust-worker
 observation and standalone/RPC shutdown composition are accepted below. Unique
 staging and non-replacing publication are also accepted within the stable-parent
 boundary below. Foreground cancellation, dual-pipe draining and direct-child
 reaping are accepted below. Cooperating Linux group cleanup is accepted below;
 escaped descendants remain outside that bounded contract. No new
-quantization GUI mutation is admitted. Script progress authority remains FE-I27.
+quantization GUI mutation is admitted. Terminal authority is accepted below;
+NVFP4/Sherry script-progress projection remains FE-I27.
 The optional conversion dialog now uses setup start/observation across uncertain
 responses and reopen (FE-I25); see the accepted dialog ledger. Backend custody,
 aggregate shutdown and core/RPC/desktop setup observation are accepted within
@@ -31,6 +32,56 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Conversion Terminal Authority Admission
+
+Status: `Accepted` for terminal authority; see the
+[execution ledger](execution-ledger.md#2026-09-08--conversion-terminal-progress-authority).
+FE-I27 is systemic across script observations and worker outcomes:
+Python complete/error records previously exposed terminal state before native
+cleanup, publication and indexing. Managed worker receipts own terminal status;
+scripts own only nonterminal progress and failure diagnostics. Complete records
+mean Writing at 95%, not operation completion. Script failure remains local
+until native cleanup, then returns failure even if the script exits zero.
+Terminal snapshots resist late script observations; successful receipt sets
+100% and clears stale error. Percentage alone never authorizes completion.
+
+Root write set: core `conversion/{progress.rs,manager.rs,pipeline.rs,types.rs}`
+and `conversion/manager/output_tests.rs`, plus this plan, issues, ledger and
+parent summary. Subagent owns only
+`frontend/src/hooks/useModelConversionWorkflow.test.ts`; no production UI edits.
+Root serializes Cargo, formatting, plans and commits. No schemas, dependencies,
+feature gates, native execution owners, live models or installers change.
+
+Composed-design applicability: applicable to terminal authority. Existing
+tracker owns synchronized snapshots; worker receipts own terminal outcomes;
+pipeline owns metadata/index effects; scripts own execution observations.
+These concerns must sequence cleanup, publication, indexing and receipt, but
+must not share authority for terminal status. Callers keep existing read/start/
+cancel Interfaces; no new registry or state machine is added. Completion-policy
+changes stay in the tracker/receipt, while script parsing stays with execution.
+Remove duplicate pipeline completion writes; deleting the tracker would spread
+snapshot policy across callers, whereas deleting those writes removes accidental
+authority. The composition retains one tracker and one worker owner, not an
+additional supervisor. Wire shapes are unchanged; this corrects the existing
+meaning of Completed/Error rather than adding compatibility behavior.
+
+Acceptance (automated, satisfied): focused tracker checks; real controlled Linux
+process tests held after complete/error and during metadata publication prove
+nonterminal get/list until cleanup and receipt, then success with indexed output
+identity or failure/cancellation without published output; existing all-backend
+output integration stays valid.
+Optional UI hook tests prove continued polling and no refresh while writing/
+importing, followed by one confirmed-completion refresh. These are backend
+system/integration and simulated UI-consumer claims, not a new graphical or
+real-model workflow claim. Default/minimal core/RPC tests, strict lint, focused
+frontend tests/type checks and plan contracts passed. See the ledger for exact
+counts and evidence limits. Nonterminal NVFP4/Sherry projection remains open.
+
+Limits: NVFP4/Sherry nonterminal JSON projection remains FE-I27 follow-up;
+stronger containment, installer ownership and preflight remain FE-I26. No new
+quantization GUI mutation is admitted. Re-plan if terminal truth needs a changed
+wire contract or a new lifetime owner.
 
 ## Linux Conversion Group Custody Admission
 

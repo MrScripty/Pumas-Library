@@ -265,8 +265,10 @@ draining and direct-child reaping are accepted with Linux controlled-process
 evidence. Cooperating Linux group cleanup now retains unreaped leader identity,
 checks worker threads, preserves realtime exit signals and explicitly releases
 setup exclusion after cleanup. Escaped descendants remain outside this bounded
-contract. Stronger containment and installer custody, followed by preflight
-and truthful script-progress authority (FE-I27), precede GUI configuration
+contract. Worker receipts now own terminal progress after cleanup, publication
+and indexing; script complete/error records cannot declare early completion.
+NVFP4/Sherry nonterminal projection remains FE-I27. Stronger containment,
+installer custody and preflight remain prerequisites before GUI configuration
 (FE-I23).
 The GUI is independently optional; embedded Rust and standalone RPC remain
 supported. Pending cleanup replay is deferred, not accepted: it still needs an

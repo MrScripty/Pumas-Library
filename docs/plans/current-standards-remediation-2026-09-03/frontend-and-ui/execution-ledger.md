@@ -1,5 +1,51 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Conversion Terminal Progress Authority
+
+Accepted the terminal-authority portion of FE-I27. Python complete/error
+records previously became public terminal status while their process could
+still run and before output publication/indexing. Script completion now means
+Writing at 95%; failure text stays local until native cleanup, then fails the
+operation even on exit zero. Nonzero exit preserves both native and script
+context; cancellation retains its distinct outcome. Late script records cannot
+rewrite terminal snapshots. Duplicate completion writes in conversion and
+quantized metadata publication were removed: the existing retained worker
+receipt alone publishes terminal status. Success sets 100% and clears stale
+error in the same tracker critical section; cancellation clears stale error.
+Output identity is recorded after indexing, before the worker returns.
+
+The codebase-design skill localized snapshot semantics in the existing tracker
+and terminal authority in the existing worker owner, without adding a registry,
+state machine or public Interface. Root implemented and verified the backend;
+the subagent reviewed sibling producers and added the optional UI consumer
+regression. No production frontend changes were needed.
+
+Evidence: 68 focused conversion tests passed. A real controlled Linux process
+emits complete, remains held, then reaches a separately held metadata write.
+Public manager get/list remain Writing before child exit and Importing before
+indexing; only the worker receipt exposes Completed with the indexed identity.
+Six cases cover success, nonzero exit, reported failure with exit zero,
+cancellation, reported failure plus nonzero exit, and reported failure then
+cancellation. Existing four-backend output integration also proves pipeline
+publication supplies identity without declaring terminal status. Fixtures use
+tiny payloads, bounded holds and isolated roots, not model tools or live models.
+
+Both full core/RPC suites passed: 1,429 default and 1,389 no-default-feature
+tests, with 22 existing ignored tests each. Strict all-target clippy passed in
+all-feature and no-default configurations; formatting and whitespace passed.
+The 21 selected UI hook/dialog tests, focused frontend lint and full frontend
+type check passed. The new hook test keeps polling and cancellation through
+writing/importing, refuses duplicate start, and refreshes exactly once after
+backend completion. This is simulated consumer evidence, not a new graphical
+workflow or real conversion claim. All five plan-contract checks passed.
+Rust logs: `/tmp/pumas-terminal-progress-{focused,default,minimal,clippy-default,clippy-minimal}.log`.
+
+Limits: wire shapes and feature gates are unchanged; backend use remains
+standalone and GUI-independent. NVFP4/Sherry stdout remains log-only pending
+nonterminal projection under this contract. FE-I27 therefore remains open;
+stronger containment, installer custody and preflight remain FE-I26. No new
+quantization GUI capability, release build or live library mutation is accepted.
+
 ## 2026-09-07 — Linux Cooperating Conversion Groups
 
 Accepted the bounded cooperating Linux group-cleanup portion of FE-I26.

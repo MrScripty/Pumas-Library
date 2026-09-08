@@ -80,7 +80,7 @@ pub enum ConversionStatus {
     Writing,
     /// Registering converted model in the library
     Importing,
-    /// Conversion completed successfully
+    /// Managed worker completed successfully after cleanup and library indexing.
     Completed,
     /// Conversion was cancelled by the user
     Cancelled,
@@ -152,7 +152,8 @@ pub struct ConversionProgress {
     pub source_model_id: String,
     pub direction: ConversionDirection,
     pub status: ConversionStatus,
-    /// Overall progress from 0.0 to 1.0
+    /// Current phase progress from 0.0 to 1.0, not a terminal-state receipt.
+    /// Consumers determine completion from status, never percentage alone.
     #[serde(default)]
     pub progress: Option<f32>,
     /// Name of the tensor currently being processed

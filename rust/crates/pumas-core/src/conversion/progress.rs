@@ -36,12 +36,19 @@ impl ConversionProgressTracker {
         state.values().cloned().collect()
     }
 
-    /// Update progress from a Python script stdout JSON line.
+    /// Project nonterminal script observations, never an operation outcome.
+    /// The execution owner retains script errors until child cleanup finishes.
     pub fn update_from_script(&self, conversion_id: &str, line: &ScriptProgressLine) {
         let mut state = self.state.lock().expect("progress lock poisoned");
         let Some(progress) = state.get_mut(conversion_id) else {
             return;
         };
+        if matches!(
+            progress.status,
+            ConversionStatus::Completed | ConversionStatus::Cancelled | ConversionStatus::Error
+        ) {
+            return;
+        }
 
         match line.stage.as_str() {
             "validating" => {
@@ -66,15 +73,12 @@ impl ConversionProgressTracker {
                 progress.progress = Some(0.95);
             }
             "complete" => {
-                progress.status = ConversionStatus::Completed;
-                progress.progress = Some(1.0);
+                // The script can still fail, and publication/indexing follow it.
+                progress.status = ConversionStatus::Writing;
+                progress.progress = Some(0.95);
                 if let Some(size) = line.output_size {
                     progress.estimated_output_size = Some(size);
                 }
-            }
-            "error" => {
-                progress.status = ConversionStatus::Error;
-                progress.error = line.message.clone();
             }
             _ => {}
         }
@@ -85,6 +89,15 @@ impl ConversionProgressTracker {
         let mut state = self.state.lock().expect("progress lock poisoned");
         if let Some(progress) = state.get_mut(conversion_id) {
             progress.status = status;
+            if matches!(
+                status,
+                ConversionStatus::Completed | ConversionStatus::Cancelled
+            ) {
+                progress.error = None;
+            }
+            if status == ConversionStatus::Completed {
+                progress.progress = Some(1.0);
+            }
         }
     }
 
@@ -230,9 +243,51 @@ mod tests {
         tracker.update_from_script("conv-1", &line);
         let progress = tracker.get("conv-1").unwrap();
 
-        assert_eq!(progress.status, ConversionStatus::Completed);
-        assert_eq!(progress.progress, Some(1.0));
+        assert_eq!(progress.status, ConversionStatus::Writing);
+        assert_eq!(progress.progress, Some(0.95));
         assert_eq!(progress.estimated_output_size, Some(14_000_000_000));
+    }
+
+    #[test]
+    fn script_errors_and_late_events_cannot_authorize_terminal_state() {
+        let tracker = ConversionProgressTracker::new();
+        tracker.insert(make_progress("fixture"));
+        let error: ScriptProgressLine = serde_json::from_value(serde_json::json!({
+            "stage": "error", "message": "script failed"
+        }))
+        .unwrap();
+        tracker.update_from_script("fixture", &error);
+        let pending = tracker.get("fixture").unwrap();
+        assert_eq!(pending.status, ConversionStatus::SettingUp);
+        assert_eq!(pending.error, None);
+        for terminal in [
+            ConversionStatus::Completed,
+            ConversionStatus::Cancelled,
+            ConversionStatus::Error,
+        ] {
+            tracker.set_error("fixture", "owned failure".into());
+            tracker.set_status("fixture", terminal);
+            for stage in ["complete", "converting", "writing", "validating", "error"] {
+                let line = ScriptProgressLine {
+                    stage: stage.into(),
+                    ..error.clone()
+                };
+                tracker.update_from_script("fixture", &line);
+                let observed = tracker.get("fixture").unwrap();
+                assert_eq!(observed.status, terminal);
+                assert_eq!(
+                    observed.error.as_deref(),
+                    if terminal == ConversionStatus::Error {
+                        Some("owned failure")
+                    } else {
+                        None
+                    }
+                );
+                if terminal == ConversionStatus::Completed {
+                    assert_eq!(observed.progress, Some(1.0));
+                }
+            }
+        }
     }
 
     #[test]

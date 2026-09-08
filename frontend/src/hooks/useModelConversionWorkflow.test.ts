@@ -158,6 +158,39 @@ describe('model conversion workflow ownership', () => {
     expect(onCompleted).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps writing and importing active until backend completion refreshes the model list once', async () => {
+    const onCompleted = vi.fn();
+    mocks.list.mockResolvedValue({ success: true, conversions: [{ ...conversion('writing'), progress: 0.95 }] });
+    const { result } = renderHook(() => useModelConversionWorkflow({ modelId: 'model', direction: 'gguf_to_safetensors', onCompleted }));
+    await flush();
+    expect(result.current.conversions[0]?.status).toBe('writing');
+    expect(onCompleted).not.toHaveBeenCalled();
+    await act(async () => { await result.current.start(); });
+    expect(mocks.start).not.toHaveBeenCalled();
+
+    mocks.list.mockResolvedValue({ success: true, conversions: [{ ...conversion('importing'), progress: 1 }] });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+    expect(result.current.conversions[0]?.status).toBe('importing');
+    expect(onCompleted).not.toHaveBeenCalled();
+    await act(async () => { await result.current.cancel('job'); });
+    expect(mocks.cancel).toHaveBeenCalledExactlyOnceWith('job');
+    expect(result.current.conversions[0]?.status).toBe('importing');
+    expect(onCompleted).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(mocks.list).toHaveBeenCalledTimes(4);
+
+    mocks.list.mockResolvedValue({ success: true, conversions: [{ ...conversion('completed'), progress: 1, outputModelId: 'converted-model' }] });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+    expect(result.current.conversions[0]?.outputModelId).toBe('converted-model');
+    expect(onCompleted).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(mocks.list).toHaveBeenCalledTimes(5);
+    act(() => result.current.refresh());
+    await flush();
+    expect(onCompleted).toHaveBeenCalledTimes(1);
+  });
+
   it('reports false cancellation and waits for backend terminal status after accepted cancellation', async () => {
     mocks.list.mockResolvedValue({ success: true, conversions: [conversion('converting')] });
     mocks.cancel.mockResolvedValueOnce({ success: true, cancelled: false });

@@ -51,6 +51,7 @@ pub async fn list_files_with_extension(model_path: &Path, ext: &str) -> Result<V
 /// # Postconditions
 /// - `metadata.json` written in `output_dir`.
 /// - Model indexed in the library.
+/// - Output identity recorded; terminal status remains the worker owner's duty.
 #[allow(clippy::too_many_arguments)]
 pub async fn write_quantized_metadata(
     conversion_id: &str,
@@ -108,7 +109,6 @@ pub async fn write_quantized_metadata(
         .unwrap_or_else(|| output_dir.to_string_lossy().to_string());
 
     progress.set_output_model_id(conversion_id, output_model_id.clone());
-    progress.set_status(conversion_id, ConversionStatus::Completed);
 
     Ok(output_model_id)
 }

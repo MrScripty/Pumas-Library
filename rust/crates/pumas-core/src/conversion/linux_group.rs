@@ -118,7 +118,15 @@ fn read_stat(path: &Path) -> io::Result<Option<(char, i32)>> {
         Ok(bytes) => parse_process_group(&bytes)
             .map(Some)
             .ok_or_else(|| io::Error::other("Invalid process-group stat observation")),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        // procfs can return ESRCH if the task exits after its stat inode was
+        // opened. Like ENOENT before open, this establishes disappearance, not
+        // a failed observation of a still-present task.
+        Err(error)
+            if error.kind() == io::ErrorKind::NotFound
+                || error.raw_os_error() == Some(nix::libc::ESRCH) =>
+        {
+            Ok(None)
+        }
         Err(error) => Err(error),
     }
 }
@@ -392,6 +400,31 @@ mod tests {
             "zombie leader cannot prove no live worker"
         );
         finish(&mut child);
+    }
+
+    #[test]
+    fn reaped_process_stat_is_absent_even_when_opened_before_exit() {
+        use std::os::fd::AsRawFd;
+
+        let mut child = FixtureChild(
+            Command::new("sleep")
+                .arg("30")
+                .process_group(0)
+                .spawn()
+                .expect("procfs fixture child"),
+        );
+        let stat = std::fs::File::open(format!("/proc/{}/stat", child.id()))
+            .expect("open live process stat");
+        child.kill().expect("stop fixture child");
+        child.wait().expect("reap fixture child");
+        // Reopen the retained procfs inode to deterministically model a process
+        // exiting between the scanner's open and read, without a timing race.
+        let retained = std::path::PathBuf::from(format!("/proc/self/fd/{}", stat.as_raw_fd()));
+        let error = std::fs::read(&retained).expect_err("reaped procfs task is unavailable");
+        assert_eq!(error.raw_os_error(), Some(nix::libc::ESRCH));
+        assert!(read_stat(&retained)
+            .expect("disappeared process is absent")
+            .is_none());
     }
 
     #[test]

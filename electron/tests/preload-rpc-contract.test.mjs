@@ -168,6 +168,29 @@ function toPlainValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test('settings updates reject malformed replacements before IPC and preserve explicit clearing', async () => {
+  const harness = loadCompiledPreload();
+  const setting = { key: ' Exact key ', label: 'Label λ', param_type: 'Integer', default: null };
+  for (const settings of [
+    undefined, null, {}, 'clear', [null], [42], [{}], [['key', 'Label', 'Integer', null]],
+    [{ ...setting, param_type: 'Float' }], [{ ...setting, key: 42 }],
+    [{ key: 'missing-default', label: 'Label', param_type: 'String' }],
+    [{ ...setting, extra: true }], [{ ...setting, constraints: { min: '0' } }],
+    [{ ...setting, constraints: { extra: true } }], [{ ...setting, constraints: [] }],
+    [{ ...setting, default: { nested: [9007199254740992] } }],
+  ]) {
+    await assert.rejects(harness.api.update_inference_settings('llm/Exact Model', settings), { name: 'DesktopContractError' });
+  }
+  await assert.rejects(harness.api.update_inference_settings(null, []), { name: 'DesktopContractError' });
+  assert.equal(harness.invocations.length, 0);
+  harness.respondWith({ success: true, model_id: 'llm/Exact Model' });
+  for (const settings of [[], [setting, setting], [{ ...setting, description: null, constraints: {} }],
+    [{ ...setting, default: { nested: [null, true, 'λ'] }, constraints: { allowed_values: [null, { value: 'Exact' }], min: null, max: 1.5 } }]]) {
+    await harness.api.update_inference_settings('llm/Exact Model', settings);
+    assert.deepEqual(toPlainValue(harness.invocations.at(-1)), ['api:call', 'update_inference_settings', { model_id: 'llm/Exact Model', settings }]);
+  }
+});
+
 test('library metadata preserves omission and rejects invalid nested payloads in preload', async () => {
   const harness = loadCompiledPreload();
   const empty = { success: true, model_id: 'llm/Exact Model' };

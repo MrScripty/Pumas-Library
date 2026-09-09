@@ -38,6 +38,7 @@ import {
   decodeHfDownloadDetailsOutcome,
   decodeInferenceSettingsOutcome,
   decodeLibraryModelMetadataOutcome,
+  decodeUpdateInferenceSettingsParams,
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
@@ -754,8 +755,12 @@ const electronAPI = {
   // Inference Settings
   get_inference_settings: (modelId: string) =>
     validatedApiCall('get_inference_settings', decodeInferenceSettingsOutcome, { model_id: modelId }),
-  update_inference_settings: (modelId: string, inferenceSettings: Record<string, unknown>[]) =>
-    apiCall('update_inference_settings', { model_id: modelId, settings: inferenceSettings }),
+  update_inference_settings: async (modelId: string, inferenceSettings: Record<string, unknown>[]) => {
+    const params = requireDecoded(decodeUpdateInferenceSettingsParams({
+      model_id: modelId, settings: inferenceSettings,
+    }), 'update_inference_settings');
+    return apiCall('update_inference_settings', params);
+  },
   update_model_notes: (modelId: string, notes?: string | null) =>
     apiCall('update_model_notes', { model_id: modelId, notes }),
 

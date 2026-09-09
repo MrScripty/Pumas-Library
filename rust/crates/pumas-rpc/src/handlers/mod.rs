@@ -735,6 +735,11 @@ async fn dispatch_admitted_command(
                 .map(Box::new)
                 .map(RpcOutcome::HfDownloadDetails)
         }
+        RpcCommand::UpdateInferenceSettings { model_id, settings } => {
+            models::update_inference_settings(state, &model_id, settings)
+                .await
+                .map(RpcOutcome::Legacy)
+        }
         RpcCommand::Legacy { method, params } if method == "get_library_model_metadata" => {
             models::get_library_model_metadata(state, &params)
                 .await
@@ -1198,7 +1203,6 @@ async fn dispatch_method(
         "scan_shared_storage" => models::scan_shared_storage(state, params).await,
 
         // Inference Settings
-        "update_inference_settings" => models::update_inference_settings(state, params).await,
         "update_model_notes" => models::update_model_notes(state, params).await,
         "resolve_model_dependency_requirements" => {
             models::resolve_model_dependency_requirements(state, params).await
@@ -1312,6 +1316,99 @@ async fn dispatch_method(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn update_inference_settings_rpc_rejects_without_write_and_only_explicit_array_replaces()
+    {
+        async fn update(state: &Arc<AppState>, params: Value) -> Value {
+            let body = Bytes::from(serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"settings-write","method":"update_inference_settings","params":params})).unwrap());
+            let response = handle_rpc(State(state.clone()), body).await.into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            serde_json::from_slice(
+                &axum::body::to_bytes(response.into_body(), 65_536)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap()
+        }
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        let model_id = "llm/fixture/settings";
+        let directory = state.api.model_library().library_root().join(model_id);
+        std::fs::create_dir_all(&directory).unwrap();
+        let old = json!({"key":"old","label":"Old","param_type":"Integer","default":7});
+        let metadata = pumas_library::models::ModelMetadata {
+            model_id: Some(model_id.into()),
+            inference_settings: Some(serde_json::from_value(json!([old])).unwrap()),
+            ..Default::default()
+        };
+        state
+            .api
+            .model_library()
+            .save_metadata(&directory, &metadata)
+            .await
+            .unwrap();
+        let metadata_path = directory.join("metadata.json");
+        let before = std::fs::read(&metadata_path).unwrap();
+        for params in [
+            json!({"model_id":model_id}),
+            json!({"model_id":model_id,"settings":null}),
+            json!({"model_id":model_id,"settings":"wrong"}),
+            json!({"model_id":model_id,"settings":[{"key":"missing-default","label":"Label","param_type":"String"}]}),
+            json!({"model_id":model_id,"settings":[
+                {"key":"valid","label":"Valid","param_type":"String","default":"keep"},
+                {"key":"invalid","label":"Invalid","param_type":"String"},
+            ]}),
+            json!({"model_id":model_id,"settings":[],"inferenceSettings":[]}),
+            json!({"model_id":model_id,"modelId":model_id,"settings":[]}),
+            json!({"model_id":model_id,"settings":[{"key":"x","label":"X","param_type":"Integer","default":null,"constraints":{"unknown":true}}]}),
+        ] {
+            assert_eq!(
+                update(&state, params).await,
+                json!({"jsonrpc":"2.0","id":"settings-write","error":{
+                    "code":-32602,"message":"Request parameters are invalid.","data":{"class":"invalid_request"},
+                }})
+            );
+            assert_eq!(std::fs::read(&metadata_path).unwrap(), before);
+        }
+        let setting = json!({"key":" Exact λ ","label":" Exact label ","param_type":"Boolean","default":{"nested":[null,0.5]},"constraints":{"allowed_values":[null,{"x":true}]}});
+        let expected: Vec<pumas_library::models::InferenceParamSchema> =
+            serde_json::from_value(json!([setting.clone(), setting.clone()])).unwrap();
+        let response = update(
+            &state,
+            json!({"modelId":model_id,"inferenceSettings":[setting.clone(),setting]}),
+        )
+        .await;
+        assert_eq!(
+            response,
+            json!({"jsonrpc":"2.0","id":"settings-write","result":{"success":true,"model_id":model_id}})
+        );
+        let stored = state
+            .api
+            .model_library()
+            .load_metadata(&directory)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(stored.inference_settings.unwrap()).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+        assert_eq!(
+            update(&state, json!({"model_id":model_id,"settings":[]})).await,
+            response
+        );
+        assert!(state
+            .api
+            .model_library()
+            .load_metadata(&directory)
+            .unwrap()
+            .unwrap()
+            .inference_settings
+            .is_none());
+        let cleared: Value =
+            serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
+        assert!(cleared.get("inference_settings").is_none_or(Value::is_null));
+    }
 
     #[tokio::test]
     async fn library_model_metadata_rpc_projects_objects_and_rejects_malformed_embedded_metadata() {

@@ -70,6 +70,7 @@ function installActualPreload(
         const requestParams: unknown = JSON.parse(JSON.stringify(params));
         requests.push({ method, params: requestParams });
         if (method === 'get_inference_settings') return inferenceRead;
+        if (method === 'update_inference_settings') return { success: true, model_id: 'llm/Exact Model' };
         if (method === 'get_library_model_metadata') return metadataRead;
         if (method === 'search_hf_models' && hfReads) return { success: true, models: hfReads.models };
         if (method === 'get_hf_download_details' && hfReads) return hfReads.details;
@@ -207,6 +208,14 @@ describe('actual Rust catalog through bundled preload and renderer', () => {
     if (!numeric) throw new ValidationError('Missing inference editor', 'producer-fixtures');
     fireEvent.change(numeric, { target: { value: '2048' } });
     expect(numeric).toHaveValue(2048);
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }));
+    await waitFor(() => expect(requests.some(request => request.method === 'update_inference_settings')).toBe(true));
+    const updated = requests.find(request => request.method === 'update_inference_settings')?.params;
+    expect(updated).toMatchObject({ model_id: 'llm/Exact Model', settings: [
+      { key: ' Exact key 0 ', default: { nested: [null, true, ' λ ', 0.25, { edge: 9007199254740991 }] } },
+      { key: ' Exact key 1 ', default: 2048 },
+      { key: ' Exact key 2 ' }, { key: ' Exact key 3 ' },
+    ] });
   });
 
   it('shows malformed producer settings as unavailable without an editable empty list', async () => {

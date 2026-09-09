@@ -15,20 +15,12 @@ pub async fn get_inference_settings(
 
 pub async fn update_inference_settings(
     state: &AppState,
-    params: &Value,
+    model_id: &str,
+    settings: Vec<pumas_library::models::InferenceParamSchema>,
 ) -> pumas_library::Result<Value> {
-    let model_id = require_str_param(params, "model_id", "modelId")?;
-
-    let settings: Vec<pumas_library::models::InferenceParamSchema> = params
-        .get("settings")
-        .or_else(|| params.get("inference_settings"))
-        .or_else(|| params.get("inferenceSettings"))
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-
     state
         .api
-        .update_inference_settings(&model_id, settings)
+        .update_inference_settings(model_id, settings)
         .await?;
     Ok(json!({
         "success": true,

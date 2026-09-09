@@ -10,6 +10,16 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('settings mutation decoding agrees with actual Rust request admission', () => {
+  const probes = fixtures.update_inference_settings_request_probes;
+  assert.ok(Array.isArray(probes) && probes.length > 0);
+  for (const { params, accepted } of probes) {
+    const result = contract.decodeUpdateInferenceSettingsParams(params);
+    assert.equal(result.status, accepted ? 'valid' : 'invalid', JSON.stringify(params));
+    if (accepted) assert.deepEqual(JSON.parse(JSON.stringify(result.value)), params);
+  }
+});
+
 test('library metadata decoding preserves actual producer optionality and nested JSON', () => {
   for (const name of ['library_model_metadata', 'library_model_metadata_empty', 'library_model_metadata_gguf']) {
     const result = contract.decodeLibraryModelMetadataOutcome(fixtures[name]);

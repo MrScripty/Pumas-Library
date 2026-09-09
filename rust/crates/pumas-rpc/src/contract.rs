@@ -310,6 +310,10 @@ pub(crate) enum RpcCommand {
         repo_id: String,
         quants: Vec<String>,
     },
+    UpdateInferenceSettings {
+        model_id: String,
+        settings: Vec<pumas_library::models::InferenceParamSchema>,
+    },
     SearchCatalog {
         query: String,
         limit: usize,
@@ -379,6 +383,7 @@ impl RpcCommand {
             Self::GetModels => "get_models",
             Self::SearchCatalog { .. } => "search_models_fts",
             Self::GetHfDownloadDetails { .. } => "get_hf_download_details",
+            Self::UpdateInferenceSettings { .. } => "update_inference_settings",
             Self::RefreshModelIndex => "refresh_model_index",
             Self::Legacy { method, .. } => method,
         }
@@ -2365,6 +2370,240 @@ fn invalid_domain_outcome(name: &str) -> PumasError {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct UpdateInferenceSettingsParams {
+    #[serde(alias = "modelId")]
+    model_id: String,
+    #[serde(
+        alias = "inference_settings",
+        alias = "inferenceSettings",
+        deserialize_with = "inference_setting_objects"
+    )]
+    settings: Vec<InferenceSettingInput>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+struct InferenceSettingInput {
+    key: String,
+    label: String,
+    param_type: pumas_library::models::ParamType,
+    // Missing JSON Value fields otherwise deserialize as null. Mutation input
+    // must distinguish an explicit null default from an omitted default.
+    #[serde(deserialize_with = "required_json_value")]
+    default: Value,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default, deserialize_with = "inference_constraints_object")]
+    constraints: Option<InferenceConstraintsInput>,
+}
+
+fn inference_setting_objects<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<InferenceSettingInput>, D::Error> {
+    // Derived structs also accept positional sequences. The desktop request
+    // admits object entries only, independently of core persistence serde.
+    Vec::<Map<String, Value>>::deserialize(deserializer)?
+        .into_iter()
+        .map(|object| {
+            serde_json::from_value(Value::Object(object)).map_err(serde::de::Error::custom)
+        })
+        .collect()
+}
+
+fn inference_constraints_object<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<InferenceConstraintsInput>, D::Error> {
+    Option::<Map<String, Value>>::deserialize(deserializer)?
+        .map(|object| {
+            serde_json::from_value(Value::Object(object)).map_err(serde::de::Error::custom)
+        })
+        .transpose()
+}
+
+fn required_json_value<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Value, D::Error> {
+    Value::deserialize(deserializer)
+}
+
+#[cfg(any(test, feature = "export-contract"))]
+fn update_inference_settings_requests() -> Vec<(Value, bool)> {
+    use serde_json::json;
+    let setting =
+        json!({"key":" Exact λ ","label":" Exact label ","param_type":"Integer","default":null});
+    let mut cases = Vec::new();
+    for model_key in ["model_id", "modelId"] {
+        for settings_key in ["settings", "inference_settings", "inferenceSettings"] {
+            cases.push((
+                json!({model_key:" Exact model ",settings_key:[setting.clone(),setting.clone()]}),
+                true,
+            ));
+            cases.push((json!({model_key:"",settings_key:[]}), true));
+        }
+    }
+    for invalid in [
+        Value::Null,
+        json!({}),
+        json!("invalid"),
+        json!([null]),
+        json!([1]),
+    ] {
+        cases.push((json!({"model_id":"model","settings":invalid}), false));
+    }
+    cases.push((json!({"model_id":"model"}), false));
+    cases.push((
+        json!({"model_id":"model","settings":[["key","label","Integer",null]]}),
+        false,
+    ));
+    cases.push((json!({"model_id":null,"settings":[]}), false));
+    cases.push((json!({"modelId":42,"settings":[]}), false));
+    cases.push((json!([]), false));
+    cases.push((Value::Null, false));
+    cases.push((json!({"settings":[]}), false));
+    cases.push((
+        json!({"model_id":"model","modelId":"model","settings":[]}),
+        false,
+    ));
+    for (first, second) in [
+        ("settings", "inference_settings"),
+        ("settings", "inferenceSettings"),
+        ("inference_settings", "inferenceSettings"),
+    ] {
+        cases.push((json!({"model_id":"model",first:[],second:[]}), false));
+    }
+    cases.push((
+        json!({"model_id":"model","settings":[],"extra":true}),
+        false,
+    ));
+    for key in ["key", "label", "param_type", "default"] {
+        let mut invalid = setting.clone();
+        invalid.as_object_mut().unwrap().remove(key);
+        cases.push((json!({"model_id":"model","settings":[invalid]}), false));
+    }
+    for (key, value) in [
+        ("extra", json!(true)),
+        ("key", Value::Null),
+        ("param_type", json!("integer")),
+        ("description", json!(3)),
+        ("constraints", json!([])),
+        ("constraints", json!({"extra":true})),
+        ("constraints", json!({"min":"1"})),
+        ("constraints", json!({"allowed_values":false})),
+        ("default", json!({"deep":[MAX_JS_SAFE_INTEGER+1]})),
+        ("constraints", json!({"allowed_values":[{"deep":1e30}]})),
+    ] {
+        let mut invalid = setting.clone();
+        invalid[key] = value;
+        cases.push((json!({"model_id":"model","settings":[invalid]}), false));
+    }
+    for constraints in [
+        Value::Null,
+        json!({}),
+        json!({"min":null,"max":null,"allowed_values":null}),
+        json!({"min":4.5,"max":-2.0,"allowed_values":[null,{"arbitrary":[1,false]}]}),
+    ] {
+        let mut valid = setting.clone();
+        valid["constraints"] = constraints;
+        valid["description"] = Value::Null;
+        valid["default"] = json!({"arbitrary":[true,-0.125,MAX_JS_SAFE_INTEGER]});
+        cases.push((json!({"model_id":"model","settings":[valid]}), true));
+    }
+    cases
+}
+
+#[cfg(test)]
+mod inference_update_admission_tests {
+    use super::*;
+
+    #[test]
+    fn update_inference_settings_preserves_explicit_intent_and_rejects_invalid_inputs() {
+        assert!(parse_command("update_inference_settings", None).is_err());
+        for (params, expected) in update_inference_settings_requests() {
+            let result = parse_command("update_inference_settings", Some(&params));
+            assert_eq!(result.is_ok(), expected, "{params}");
+            if expected {
+                let command = result.unwrap();
+                assert_eq!(command.method(), "update_inference_settings");
+                let RpcCommand::UpdateInferenceSettings { model_id, settings } = command else {
+                    panic!("typed update expected");
+                };
+                assert_eq!(
+                    model_id,
+                    params
+                        .get("model_id")
+                        .or_else(|| params.get("modelId"))
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                );
+                let selected = params
+                    .get("settings")
+                    .or_else(|| params.get("inference_settings"))
+                    .or_else(|| params.get("inferenceSettings"))
+                    .unwrap();
+                let expected: Vec<pumas_library::models::InferenceParamSchema> =
+                    serde_json::from_value(selected.clone()).unwrap();
+                assert_eq!(
+                    serde_json::to_value(settings).unwrap(),
+                    serde_json::to_value(expected).unwrap()
+                );
+            } else {
+                assert_eq!(result.err().unwrap().code, -32602);
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+struct InferenceConstraintsInput {
+    #[serde(default)]
+    min: Option<f64>,
+    #[serde(default)]
+    max: Option<f64>,
+    #[serde(default)]
+    allowed_values: Option<Vec<Value>>,
+}
+
+impl InferenceSettingInput {
+    fn into_core(self) -> Result<pumas_library::models::InferenceParamSchema, PublicError> {
+        if !desktop_json_representable(&self.default)
+            || self.constraints.as_ref().is_some_and(|constraints| {
+                [constraints.min, constraints.max]
+                    .into_iter()
+                    .flatten()
+                    .any(|value| !value.is_finite())
+                    || constraints.allowed_values.as_ref().is_some_and(|values| {
+                        values
+                            .iter()
+                            .any(|value| !desktop_json_representable(value))
+                    })
+            })
+        {
+            return Err(PublicError::invalid_params());
+        }
+        Ok(pumas_library::models::InferenceParamSchema {
+            key: self.key,
+            label: self.label,
+            param_type: self.param_type,
+            default: self.default,
+            description: self.description,
+            constraints: self.constraints.map(|constraints| {
+                pumas_library::models::ParamConstraints {
+                    min: constraints.min,
+                    max: constraints.max,
+                    allowed_values: constraints.allowed_values,
+                }
+            }),
+        })
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct GetHfDownloadDetailsParams {
     #[serde(alias = "repoId")]
     repo_id: String,
@@ -2949,6 +3188,17 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             })
         }
         "get_models" => empty().map(|()| RpcCommand::GetModels),
+        "update_inference_settings" => parse_params::<UpdateInferenceSettingsParams>(params)
+            .and_then(|params| {
+                Ok(RpcCommand::UpdateInferenceSettings {
+                    model_id: params.model_id,
+                    settings: params
+                        .settings
+                        .into_iter()
+                        .map(InferenceSettingInput::into_core)
+                        .collect::<Result<_, _>>()?,
+                })
+            }),
         "get_hf_download_details" => {
             parse_params::<GetHfDownloadDetailsParams>(params).map(|params| {
                 RpcCommand::GetHfDownloadDetails {

@@ -58,8 +58,10 @@ Inference-settings reads use backend-generated decoding, including nullable
 constraints and structured JSON defaults. The modal keeps drafts and read
 results scoped to one model and rejects mismatched identities. Failed settings
 reads show an unavailable state, not an editable empty list; close and reopen
-to retry. Structured defaults display as read-only JSON. Settings-write admission
-remains separate contract work.
+to retry. Structured defaults display as read-only JSON. Settings updates require
+an explicit array; malformed or missing settings reject before IPC and RPC
+persistence. An explicit empty array clears stored overrides and restores the
+backend's lazy defaults. Valid strings, ordering and nested JSON remain intact.
 
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.

@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 9d1f6b615694e1207669676a156752d906b3d2e43770359e48c250f7b3a02e1e. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 ff6c02f4ce94da734aeb2214c695cf75c25e1bd7f2c6f13327f014f7d4329034. DO NOT EDIT.
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCatalogSearchOutcome(value: unknown): boolean;
 export declare function validateConversionCancelledOutcome(value: unknown): boolean;
@@ -29,3 +29,4 @@ export declare function validateStartBackendSetupParams(value: unknown): boolean
 export declare function validateStartConversionSetupParams(value: unknown): boolean;
 export declare function validateSuccessOutcome(value: unknown): boolean;
 export declare function validateSupportedQuantTypesOutcome(value: unknown): boolean;
+export declare function validateUpdateInferenceSettingsParams(value: unknown): boolean;

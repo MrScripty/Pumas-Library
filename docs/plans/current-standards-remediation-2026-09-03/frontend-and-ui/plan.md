@@ -10,9 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Strict inference-settings mutation request admission (FE-I31/M4):
-reject malformed settings before an empty replacement can reach persistence,
-with temporary-library no-write regressions. Metadata response decoding is accepted
+**Next slice:** Bound model-notes mutation admission (FE-I33/M4): distinguish
+malformed values from the supported omitted/null clear semantics before edits,
+then prove rejected input cannot clear existing notes in temporary libraries.
+Inference-settings mutation admission is accepted below. Metadata response decoding is accepted
 below; extraction/reconciliation behavior remains separate (FE-I32).
 Inference-settings reads and modal model-isolation are accepted below.
 No live-library writes are authorized by contract verification.
@@ -60,6 +61,42 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Inference-Settings Mutation Admission
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--inference-settings-mutation-admission).
+Operation: `continue` this canonical plan. FE-I31 owns strict
+`update_inference_settings` request admission before persistence. Require exactly
+one model ID spelling (`model_id`/`modelId`) and one settings spelling (`settings`,
+`inference_settings`, `inferenceSettings`). Missing/null/malformed settings and
+duplicate aliases reject; explicit `[]` retains the core's clear-to-lazy-defaults
+meaning. Reject unknown fields. Required setting fields are key, label, param_type
+and default (explicit null allowed); optional description/constraints and their
+optional fields retain null/omitted semantics. Preserve exact strings, order,
+duplicates and JSON defaults without inventing parameter-domain validation.
+Reuse desktop JSON numeric representation checks. Core typed/persisted contracts,
+model ID interpretation and the operation's response are unchanged.
+
+root_capability owns RPC command/parameter types, export, dispatch, inference
+handler and parser/no-write tests. Root owns preload and its regression tests,
+existing decoder and renderer conformance, six generated files, frontend README and four plan
+records. Generation, Cargo and integration are root-serialized. Separate private
+request DTOs may express closed input fields and omission semantics without
+tightening core persistence deserialization or reusing output-only constraints.
+
+Acceptance is local automated focused/contract evidence: actual parser and
+generated decoder agreement, bundled preload rejection before IPC, correlated
+invalid-request errors and unchanged stored settings for malformed calls, plus
+intentional replacement and explicit empty clearing in temporary libraries.
+Run focused default/minimal RPC tests, strict lint/formatting, frontend types,
+existing producer-to-renderer conformance, generator freshness/tests and plan
+checks. No live-library mutation, GUI workflow, new response guarantee or other-OS
+claim. Composed-design review applies: typed admission removes JSON fallback
+knowledge from the handler; core retains persistence and parameter semantics;
+existing AJV interprets exported schemas. Deletion restores accidental clears.
+No new framework. Re-plan for changes to core settings meaning, persisted
+compatibility or model ID authority.
 
 ## Library-Model Metadata Read Contract
 

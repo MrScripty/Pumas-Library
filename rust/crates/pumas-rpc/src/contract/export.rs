@@ -342,6 +342,14 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
             serde_json::json!({"method":"get_hf_download_details","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
         }).collect();
     let metadata = library_model_metadata_fixture();
+    let update_inference_settings_request_probes:Vec<Value> = update_inference_settings_requests().into_iter().map(|(params,_)| {
+        let parsed = parse_command("update_inference_settings",Some(&params));
+        let normalized = match &parsed {
+            Ok(RpcCommand::UpdateInferenceSettings { model_id,settings }) => serde_json::json!({"model_id":model_id,"settings":settings}),
+            _ => Value::Null,
+        };
+        serde_json::json!({"method":"update_inference_settings","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
+    }).collect();
     let mut metadata_gguf = library_model_metadata_fixture();
     metadata_gguf.embedded_metadata = Some(pumas_library::EmbeddedMetadataResponse {
         file_type: "gguf".into(),
@@ -363,6 +371,7 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     };
     Ok(serde_json::json!({
         "library_model_metadata":LibraryModelMetadataOutcome::new("llm/Exact Model",metadata)?,
+        "update_inference_settings_request_probes":update_inference_settings_request_probes,
         "library_model_metadata_gguf":LibraryModelMetadataOutcome::new("llm/Exact Model",metadata_gguf)?,
         "library_model_metadata_empty":LibraryModelMetadataOutcome::new("llm/Exact Model",metadata_empty)?,
         "hf_download_details_request_probes":hf_download_details_request_probes,
@@ -412,6 +421,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         InferenceSettingsOutcome,
         LibraryModelMetadataOutcome,
         GetHfDownloadDetailsParams,
+        UpdateInferenceSettingsParams,
         SearchCatalogParams,
         DownloadListOutcome,
         DownloadStatusOutcome,
@@ -454,7 +464,10 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
     let mut schema = serde_json::to_value(settings.into_generator().into_root_schema_for::<T>())?;
     if matches!(
         T::schema_name().as_ref(),
-        "InferenceSettingsOutcome" | "LibraryModelMetadataOutcome" | "LibraryModelMetadataResponse"
+        "InferenceSettingsOutcome"
+            | "LibraryModelMetadataOutcome"
+            | "LibraryModelMetadataResponse"
+            | "UpdateInferenceSettingsParams"
     ) {
         schema["definitions"]["DesktopJsonValue"] = serde_json::json!({
             "anyOf":[
@@ -478,6 +491,40 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
 // These named wire refinements project existing constructor invariants, not
 // authorization. The generator owns their executable TypeScript projection.
 fn refine_named(name: &str, schema: &mut Value) {
+    if name == "UpdateInferenceSettingsParams" {
+        let mut canonical = schema.clone();
+        let object = canonical.as_object_mut().expect("request object schema");
+        let definitions = object.remove("definitions");
+        object.remove("$schema");
+        object.remove("title");
+        let mut variants = Vec::new();
+        for model_key in ["model_id", "modelId"] {
+            for settings_key in ["settings", "inference_settings", "inferenceSettings"] {
+                let mut branch = canonical.clone();
+                for (from, to) in [("model_id", model_key), ("settings", settings_key)] {
+                    let properties = branch["properties"]
+                        .as_object_mut()
+                        .expect("request properties");
+                    let property = properties.remove(from).expect("canonical request field");
+                    properties.insert(to.into(), property);
+                    for required in branch["required"]
+                        .as_array_mut()
+                        .expect("required request fields")
+                    {
+                        if required == from {
+                            *required = to.into();
+                        }
+                    }
+                }
+                variants.push(branch);
+            }
+        }
+        *schema = serde_json::json!({"anyOf":variants});
+        if let Some(definitions) = definitions {
+            schema["definitions"] = definitions;
+        }
+        return;
+    }
     if name == "GetHfDownloadDetailsParams" {
         // Serde accepts either spelling but rejects duplicate aliases. Both
         // closed branches project that existing parser policy without a keyword.
@@ -505,6 +552,19 @@ fn refine_named(name: &str, schema: &mut Value) {
     let Some(object) = schema.as_object_mut() else {
         return;
     };
+    if name == "InferenceSettingInput" {
+        object.insert(
+            "required".into(),
+            serde_json::json!(["key", "label", "param_type", "default"]),
+        );
+        object["properties"]["default"] =
+            serde_json::json!({"$ref":"#/definitions/DesktopJsonValue"});
+    }
+    if name == "InferenceConstraintsInput" {
+        object["properties"]["allowed_values"] = serde_json::json!({"anyOf":[
+            {"type":"null"},{"type":"array","items":{"$ref":"#/definitions/DesktopJsonValue"}},
+        ]});
+    }
     if name == "InferenceParamSchema" {
         object.insert(
             "required".into(),

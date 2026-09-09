@@ -1,5 +1,40 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Inference-Settings Mutation Admission
+
+Accepted FE-I31 request admission. A typed RPC command now carries validated
+settings to the handler; missing/null/malformed arrays no longer become empty
+replacements. Exactly one model alias and settings alias is accepted, with six
+supported spelling combinations. Private closed request DTOs preserve optional
+null fields without changing core persistence serde. Each setting requires an
+explicit default, including explicit null. Strings, order, duplicates and nested
+JSON remain intact; shared desktop numeric checks add no parameter-domain rules.
+Only explicit `[]` requests clear stored overrides to the core's lazy defaults.
+Core model ID interpretation, persistence semantics and update responses remain
+unchanged. FE-I33 records the adjacent notes-write coercion separately.
+
+root_capability owned Rust admission/dispatch and no-write regressions; root
+integrated preload, generation, conformance and docs. The codebase-design skill
+guided typed handler inputs and separate request DTOs instead of JSON fallback
+knowledge in the handler or changes to persisted types. The preload regression
+first failed with `Missing expected rejection`. The parser matrix exposed Serde's
+positional-array acceptance for nested structs; field-scoped object deserializers
+now reject that form while preserving omitted/null constraints.
+
+Two focused RPC tests pass with default and no-default features. Actual
+temporary-library RPC calls prove malformed and mixed-validity replacements
+leave metadata bytes unchanged, valid alias-based replacements preserve nested
+data and duplicates, and explicit empty arrays clear persisted overrides.
+Nineteen decoder conformance tests pass, including agreement with actual Rust
+request probes; 21 renderer conformance tests pass, including saving an edited
+producer-derived draft through the bundled preload. This renderer test captures
+IPC and supplies a controlled response, not a real persistent GUI save.
+Twenty preload tests pass; one real-Electron sandbox test remains gated.
+Frontend types, affected lint, Electron build, seven generator tests, generation
+freshness, strict all-targets/all-features RPC Clippy, formatting and all canonical
+plan checks pass. No live-library mutation, graphical workflow, other-OS or new
+response-validation claim. Next: FE-I33 model-notes admission.
+
 ## 2026-09-08 — Library-Model Metadata Read Contract
 
 Accepted response projection and consumer decoding for library-model metadata.

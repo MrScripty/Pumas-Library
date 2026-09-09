@@ -1,5 +1,5 @@
-// Generated from pumas-rpc contract.rs; SHA256 9d1f6b615694e1207669676a156752d906b3d2e43770359e48c250f7b3a02e1e. DO NOT EDIT.
-import { validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateGetBackendSetupParams, validateGetHfDownloadDetailsParams, validateHfDownloadDetailsOutcome, validateInferenceSettingsOutcome, validateLibraryModelMetadataOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateStartBackendSetupParams, validateStartConversionSetupParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome } from './desktop-contract.validators.js';
+// Generated from pumas-rpc contract.rs; SHA256 ff6c02f4ce94da734aeb2214c695cf75c25e1bd7f2c6f13327f014f7d4329034. DO NOT EDIT.
+import { validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateGetBackendSetupParams, validateGetHfDownloadDetailsParams, validateHfDownloadDetailsOutcome, validateInferenceSettingsOutcome, validateLibraryModelMetadataOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateStartBackendSetupParams, validateStartConversionSetupParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome, validateUpdateInferenceSettingsParams } from './desktop-contract.validators.js';
 export type BackendStatus = { "backend": (QuantBackend); "name": string; "ready": boolean };
 export type BackendStatusOutcome = { "backends": ReadonlyArray<BackendStatus>; "success": true };
 export type BundleComponentManifestEntry = { "class_name": string | null; "name": string; "relative_path": string; "source_library": string | null; "state": BundleComponentState };
@@ -43,7 +43,9 @@ export type HfDownloadDetails = { "downloadOptions": ReadonlyArray<DownloadOptio
 export type HfDownloadDetailsFailure = { "error": string; "success": false };
 export type HfDownloadDetailsOutcome = (HfDownloadDetailsSuccess) | (HfDownloadDetailsFailure);
 export type HfDownloadDetailsSuccess = { "details": HfDownloadDetails; "success": true };
+export type InferenceConstraintsInput = { "allowed_values"?: (null) | (ReadonlyArray<DesktopJsonValue>); "max"?: number | null; "min"?: number | null };
 export type InferenceParamSchema = { "constraints": (ParamConstraints) | (null); "default": DesktopJsonValue; "description": string | null; "key": string; "label": string; "param_type": (ParamType) };
+export type InferenceSettingInput = { "constraints"?: (InferenceConstraintsInput) | (null); "default": DesktopJsonValue; "description"?: string | null; "key": string; "label": string; "param_type": ParamType };
 export type InferenceSettingsOutcome = { "inference_settings": ReadonlyArray<InferenceParamSchema>; "model_id": string; "success": true };
 export type LibraryModelMetadataOutcome = { "component_manifest"?: ReadonlyArray<BundleComponentManifestEntry>; "effective_metadata"?: { readonly [key: string]: DesktopJsonValue }; "embedded_metadata"?: EmbeddedMetadataResponse; "model_id": string; "primary_file"?: string; "stored_metadata"?: { readonly [key: string]: DesktopJsonValue }; "success": true };
 export type LinkHealthOutcome = (LinkHealthResponse);
@@ -65,6 +67,7 @@ export type StartBackendSetupParams = { "backend": QuantBackend; "expected_previ
 export type StartConversionSetupParams = { "expected_previous_operation_id"?: string | null };
 export type SuccessOutcome = { "success": true };
 export type SupportedQuantTypesOutcome = { "quant_types": ReadonlyArray<QuantOption>; "success": true };
+export type UpdateInferenceSettingsParams = ({ "model_id": string; "settings": ReadonlyArray<InferenceSettingInput> }) | ({ "inference_settings": ReadonlyArray<InferenceSettingInput>; "model_id": string }) | ({ "inferenceSettings": ReadonlyArray<InferenceSettingInput>; "model_id": string }) | ({ "modelId": string; "settings": ReadonlyArray<InferenceSettingInput> }) | ({ "inference_settings": ReadonlyArray<InferenceSettingInput>; "modelId": string }) | ({ "inferenceSettings": ReadonlyArray<InferenceSettingInput>; "modelId": string });
 
 export type DecodeOutcome<T> = { readonly status: 'valid'; readonly value: T } | { readonly status: 'invalid' | 'unsupported' | 'unavailable'; readonly message: string };
 
@@ -129,3 +132,4 @@ export function decodeStartBackendSetupParams(input: unknown): DecodeOutcome<Sta
 export function decodeStartConversionSetupParams(input: unknown): DecodeOutcome<StartConversionSetupParams> { return decode(input, validateStartConversionSetupParams); }
 export function decodeSuccessOutcome(input: unknown): DecodeOutcome<SuccessOutcome> { return decode(input, validateSuccessOutcome); }
 export function decodeSupportedQuantTypesOutcome(input: unknown): DecodeOutcome<SupportedQuantTypesOutcome> { return decode(input, validateSupportedQuantTypesOutcome); }
+export function decodeUpdateInferenceSettingsParams(input: unknown): DecodeOutcome<UpdateInferenceSettingsParams> { return decode(input, validateUpdateInferenceSettingsParams); }

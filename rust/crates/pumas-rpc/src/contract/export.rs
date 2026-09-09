@@ -427,6 +427,16 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     });
     fixtures["update_inference_settings"] =
         serde_json::to_value(UpdateInferenceSettingsOutcome::new("llm/Exact Model"))?;
+    fixtures["available_versions"] = serde_json::to_value(AvailableVersionsOutcome::available(
+        available_versions_fixture(),
+    )?)?;
+    fixtures["available_versions_empty"] =
+        serde_json::to_value(AvailableVersionsOutcome::available(vec![])?)?;
+    fixtures["available_versions_rate_limited"] = serde_json::to_value(
+        AvailableVersionsOutcome::rate_limited(Some(MAX_JS_SAFE_INTEGER))?,
+    )?;
+    fixtures["available_versions_rate_limited_unknown"] =
+        serde_json::to_value(AvailableVersionsOutcome::rate_limited(None)?)?;
     fixtures["update_model_notes_text"] = serde_json::to_value(notes_outcome(
         true,
         Some("  # Exact λ\n\n**notes**  "),
@@ -454,6 +464,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         HfDownloadDetailsOutcome,
         InferenceSettingsOutcome,
         UpdateInferenceSettingsOutcome,
+        AvailableVersionsOutcome,
         UpdateModelNotesOutcome,
         LibraryModelMetadataOutcome,
         GetHfDownloadDetailsParams,
@@ -601,6 +612,31 @@ fn refine_named(name: &str, schema: &mut Value) {
     let Some(object) = schema.as_object_mut() else {
         return;
     };
+    if name == "VersionReleaseInfo" {
+        object.insert(
+            "required".into(),
+            serde_json::json!([
+                "tagName",
+                "name",
+                "publishedAt",
+                "prerelease",
+                "body",
+                "htmlUrl",
+                "assets",
+                "totalSize",
+                "archiveSize",
+                "dependenciesSize",
+                "installing"
+            ]),
+        );
+    }
+    if name == "AvailableVersionsRateLimited" {
+        object.insert(
+            "required".into(),
+            serde_json::json!(["success", "error", "rate_limited", "retry_after_secs"]),
+        );
+        object["properties"]["rate_limited"]["const"] = true.into();
+    }
     if name == "InferenceSettingInput" {
         object.insert(
             "required".into(),
@@ -857,6 +893,7 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "HfDownloadDetailsSuccess"
             | "InferenceSettingsOutcome"
             | "UpdateInferenceSettingsOutcome"
+            | "AvailableVersionsSuccess"
             | "UpdateModelNotesSuccess"
             | "LibraryModelMetadataOutcome"
             | "LibraryModelMetadataResponse"
@@ -864,7 +901,8 @@ fn refine_named(name: &str, schema: &mut Value) {
             "DownloadStartedFailure"
             | "DownloadStatusMissingOutcome"
             | "HfDownloadDetailsFailure"
-            | "UpdateModelNotesFailure" => Some(false),
+            | "UpdateModelNotesFailure"
+            | "AvailableVersionsRateLimited" => Some(false),
             _ => None,
         };
         if let Some(success) = success {

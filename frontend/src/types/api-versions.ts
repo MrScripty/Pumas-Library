@@ -1,36 +1,12 @@
 import type { BaseResponse } from './api-common';
+import type { AvailableVersionsOutcome } from '../generated/desktop-contract';
+export type { VersionReleaseAsset, VersionReleaseInfo } from '../generated/desktop-contract';
 
 // ============================================================================
 // Version Management Types
 // ============================================================================
 
-export interface VersionReleaseAsset {
-  name: string;
-  size: number;
-  download_url: string;
-}
-
-export interface VersionReleaseInfo {
-  tag_name: string;
-  name: string;
-  published_at: string;
-  prerelease: boolean;
-  body: string;
-  html_url: string;
-  assets: VersionReleaseAsset[];
-  total_size?: number | null;
-  archive_size?: number | null;
-  dependencies_size?: number | null;
-  installing?: boolean;
-}
-
-export interface GetAvailableVersionsResponse extends BaseResponse {
-  versions: VersionReleaseInfo[];
-  /** True when the request was rate limited by the API provider (e.g., GitHub) */
-  rate_limited?: boolean;
-  /** Seconds until the rate limit resets (if known) */
-  retry_after_secs?: number | null;
-}
+export type GetAvailableVersionsResponse = AvailableVersionsOutcome;
 
 export interface GetInstalledVersionsResponse extends BaseResponse {
   versions: string[];

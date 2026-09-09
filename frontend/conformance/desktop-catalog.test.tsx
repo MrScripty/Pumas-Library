@@ -15,6 +15,7 @@ import { ValidationError } from '../src/errors';
 import { useModelImportPicker } from '../src/hooks/useModelImportPicker';
 import { chooseModelImportPaths } from '../../electron/src/model-import-picker';
 import { useRemoteModelSearch } from '../src/hooks/useRemoteModelSearch';
+import { useAvailableVersionState } from '../src/hooks/useAvailableVersionState';
 import { ModelMetadataModal } from '../src/components/ModelMetadataModal';
 import type { RemoteModelInfo } from '../src/types/apps';
 import { decodeHfDownloadDetailsOutcome } from '../src/generated/desktop-contract';
@@ -46,6 +47,7 @@ function installActualPreload(
   inferenceRead: unknown = fixture['inference_settings'],
   metadataRead: unknown = fixture['library_model_metadata_empty'],
   mutationResponses: { notes?: () => unknown; settings?: () => unknown } = {},
+  availableVersions: () => unknown = () => fixture['available_versions'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -70,6 +72,7 @@ function installActualPreload(
         expect(channel).toBe('api:call');
         const requestParams: unknown = JSON.parse(JSON.stringify(params));
         requests.push({ method, params: requestParams });
+        if (method === 'get_available_versions') return availableVersions();
         if (method === 'get_inference_settings') return inferenceRead;
         if (method === 'update_inference_settings') return mutationResponses.settings ? mutationResponses.settings() : fixture['update_inference_settings'];
         if (method === 'update_model_notes' && mutationResponses.notes) return mutationResponses.notes();
@@ -163,6 +166,39 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('consumes producer releases and rate limits without reading absent versions or dropping valid rows', async () => {
+    let response: unknown = fixture['available_versions'];
+    const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => response);
+    const { result } = renderHook(() => useAvailableVersionState({ isEnabled: true, resolvedAppId: 'ollama', trackAvailableVersions: false }));
+    await act(async () => { await result.current.fetchAvailableVersions(false); });
+    const initial = result.current.availableVersions;
+    expect(initial.length).toBeGreaterThan(0);
+    expect(requests.at(-1)?.params).toEqual({ force_refresh: false, app_id: 'ollama' });
+    const producer = fixture['available_versions'];
+    if (!isFixtureRecord(producer) || !Array.isArray(producer['versions'])) throw new ValidationError('Missing releases', 'producer-fixtures');
+    expect(initial).toEqual(producer['versions'].map((version: unknown) => {
+      if (!isFixtureRecord(version)) throw new ValidationError('Invalid release', 'producer-fixtures');
+      return { ...version, body: version['body'] ?? undefined, installing: version['installing'] ?? false };
+    }));
+    for (const key of ['available_versions_rate_limited', 'available_versions_rate_limited_unknown']) {
+      response = fixture[key];
+      await act(async () => { await result.current.fetchAvailableVersions(false); });
+      expect(result.current.isRateLimited).toBe(true);
+      expect(result.current.availableVersions).toEqual(initial);
+      if (!isFixtureRecord(response)) throw new ValidationError('Missing rate limit', 'producer-fixtures');
+      expect(result.current.rateLimitRetryAfter).toBe(response['retry_after_secs']);
+    }
+    response = { success: true, versions: [{}] };
+    await act(async () => { await expect(result.current.fetchAvailableVersions(false)).rejects.toThrow(/Desktop contract/); });
+    expect(result.current.availableVersions).toEqual(initial);
+    response = fixture['available_versions_empty'];
+    await act(async () => { await result.current.fetchAvailableVersions(false); });
+    expect(result.current.availableVersions).toEqual([]);
+    expect(result.current.isRateLimited).toBe(false);
+    expect(result.current.rateLimitRetryAfter).toBeNull();
+    expect(requests.filter(request => request.method === 'get_available_versions')).toHaveLength(5);
+  });
+
   it.each(['malformed', 'wrong-model', 'transport', 'missing'] as const)('preserves notes draft on %s save response without retry', async (kind) => {
     const response = () => {
       if (kind === 'transport') throw new ValidationError('private transport detail', 'producer-fixtures');

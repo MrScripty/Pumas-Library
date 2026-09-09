@@ -1,5 +1,38 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Available Runtime-Version Read Contract
+
+Accepted available-version response projection and decoding. Core release/asset
+types supply feature-gated schemas; typed RPC outcomes preserve camelCase fields,
+required nulls, exact strings/order and safe integer sizes. Rate limits carry
+false, a public error and required nullable retry delay, without a versions list.
+The preload decodes before exposing data; frontend wire aliases derive from the
+producer. The hook discriminates success before accessing rows and no longer
+accepts dual spellings, trims tags or silently drops malformed releases. Existing
+view-only null-to-absent body and null-to-false installing presentation remains.
+Requests, refresh timing, manager lookup and installations are unchanged.
+
+The corrected rate-limit fixture first reproduced `Cannot read properties of
+undefined (reading 'length')`; all five focused hook tests now pass. Twenty-two
+decoder tests and 30 bundled-preload/renderer-hook tests pass, covering populated
+and empty lists, exact release facts, known/unknown retry delays, invalid payload
+rejection and retaining the last list on throttling. Twenty-three preload tests
+pass; one real-Electron sandbox test remains gated. Four focused RPC tests pass
+with default and no-default features, including an actual offline request that
+proves the method stays unavailable without inference plugins. Minimal fixture
+setup initially hit sandbox permission denial; elevated fixture permissions
+resolved setup and the same tests passed.
+
+Standalone core without default features, strict RPC Clippy, formatting, frontend
+types/affected lint, Electron build, both frontend build modes, seven generator
+tests/freshness and canonical plan checks pass. root_capability owned Rust; root
+integrated consumers and verification. The codebase-design skill guided reuse of
+core wire types and deletion of handwritten consumer normalization. Producer
+fixtures are serialized Rust outcomes; no live upstream/network, graphical UI,
+install or other-OS acceptance. FE-I34 records no-manager empty success separately;
+existing async-lifetime follow-up remains FE-I09. M4 is still open. Next: runtime
+GitHub cache-status response validation.
+
 ## 2026-09-08 — Notes and Settings Mutation Response Contracts
 
 Accepted generated notes/settings mutation responses and exact requested-model

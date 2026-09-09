@@ -42,6 +42,7 @@ import {
   decodeUpdateModelNotesParams,
   decodeUpdateModelNotesOutcome,
   decodeUpdateInferenceSettingsOutcome,
+  decodeAvailableVersionsOutcome,
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
@@ -511,7 +512,7 @@ const electronAPI = {
   // Version Management
   // ========================================
   get_available_versions: (forceRefresh?: boolean, appId?: string) =>
-    apiCall('get_available_versions', { force_refresh: forceRefresh, app_id: appId }),
+    validatedApiCall('get_available_versions', decodeAvailableVersionsOutcome, { force_refresh: forceRefresh, app_id: appId }),
   get_installed_versions: (appId?: string) => apiCall('get_installed_versions', { app_id: appId }),
   get_active_version: (appId?: string) => apiCall('get_active_version', { app_id: appId }),
   install_version: (tag: string, appId?: string) =>

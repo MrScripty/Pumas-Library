@@ -42,6 +42,7 @@ pub struct GitHubRelease {
 /// Version release info as returned to frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub struct VersionReleaseInfo {
     pub tag_name: String,
     pub name: String,
@@ -66,6 +67,7 @@ pub struct VersionReleaseInfo {
 /// Release asset for frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub struct VersionReleaseAsset {
     pub name: String,
     pub size: u64,

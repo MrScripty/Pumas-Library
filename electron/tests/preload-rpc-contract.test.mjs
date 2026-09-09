@@ -11,6 +11,22 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('available versions decode rate limits without invented rows and reject malformed releases', async () => {
+  const harness = loadCompiledPreload();
+  for (const retry_after_secs of [null, 120]) {
+    const response = { success: false, rate_limited: true, error: 'Rate limited', retry_after_secs };
+    harness.respondWith(response);
+    assert.deepEqual(toPlainValue(await harness.api.get_available_versions(false, 'ollama')), response);
+  }
+  for (const response of [null, { success: true }, { success: true, versions: [{}] },
+    { success: true, versions: [], rate_limited: true },
+    { success: false, rate_limited: true, error: 'Rate limited' },
+    { success: false, rate_limited: true, error: 'Rate limited', retry_after_secs: -1 }]) {
+    harness.respondWith(response);
+    await assert.rejects(harness.api.get_available_versions(false, 'ollama'), { name: 'DesktopContractError' });
+  }
+});
+
 test('mutation responses reject malformed and mismatched confirmations without retry', async () => {
   const harness = loadCompiledPreload();
   for (const method of ['update_model_notes', 'update_inference_settings']) {

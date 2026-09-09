@@ -1,75 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import { APIError } from '../errors';
-import type { VersionReleaseInfo } from '../types/api';
 import type { CacheStatus, VersionRelease } from '../types/versions';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger('useAvailableVersionState');
-
-type RawVersionRelease = Partial<VersionReleaseInfo> & Partial<VersionRelease> & Record<string, unknown>;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function readString(record: RawVersionRelease, ...keys: string[]): string | undefined {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === 'string') {
-      return value;
-    }
-  }
-  return undefined;
-}
-
-function readBoolean(record: RawVersionRelease, defaultValue: boolean, ...keys: string[]): boolean {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === 'boolean') {
-      return value;
-    }
-  }
-  return defaultValue;
-}
-
-function readNumber(record: RawVersionRelease, ...keys: string[]): number | null | undefined {
-  for (const key of keys) {
-    const value = record[key];
-    if (value === null) {
-      return null;
-    }
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
-  }
-  return undefined;
-}
-
-export function normalizeVersionReleaseInfo(version: unknown): VersionRelease | null {
-  if (!isRecord(version)) {
-    return null;
-  }
-
-  const record = version as RawVersionRelease;
-  const tagName = readString(record, 'tag_name', 'tagName')?.trim();
-  if (!tagName) {
-    return null;
-  }
-
-  return {
-    tagName,
-    name: readString(record, 'name') || tagName,
-    publishedAt: readString(record, 'published_at', 'publishedAt') || '',
-    prerelease: readBoolean(record, false, 'prerelease'),
-    body: readString(record, 'body'),
-    htmlUrl: readString(record, 'html_url', 'htmlUrl'),
-    totalSize: readNumber(record, 'total_size', 'totalSize'),
-    archiveSize: readNumber(record, 'archive_size', 'archiveSize'),
-    dependenciesSize: readNumber(record, 'dependencies_size', 'dependenciesSize'),
-    installing: readBoolean(record, false, 'installing'),
-  };
-}
 
 interface UseAvailableVersionStateOptions {
   isEnabled: boolean;
@@ -118,21 +53,12 @@ export function useAvailableVersionState({
     try {
       logger.debug('Fetching available versions', { forceRefresh });
       const result = await api.get_available_versions(forceRefresh, resolvedAppId);
-      logger.debug('Available versions result received', {
-        versionsCount: result.versions.length,
-      });
-
       if (result.success) {
-        const mapped = result.versions
-          .map(normalizeVersionReleaseInfo)
-          .filter((release): release is VersionRelease => release !== null);
-        const skippedVersions = result.versions.length - mapped.length;
-        if (skippedVersions > 0) {
-          logger.warn('Dropped version releases with missing tag names', {
-            appId: resolvedAppId,
-            skippedVersions,
-          });
-        }
+        const mapped = result.versions.map((version) => ({
+          ...version,
+          body: version.body ?? undefined,
+          installing: version.installing ?? false,
+        }));
         setAvailableVersions(mapped);
         setIsRateLimited(false);
         setRateLimitRetryAfter(null);
@@ -146,16 +72,10 @@ export function useAvailableVersionState({
             void fetchAvailableVersionsRef.current(false);
           }, 1500) as unknown as NodeJS.Timeout;
         }
-      } else if (result.rate_limited) {
+      } else {
         logger.warn('GitHub API rate limited', { retryAfter: result.retry_after_secs });
         setIsRateLimited(true);
-        setRateLimitRetryAfter(result.retry_after_secs ?? null);
-      } else {
-        logger.error('Failed to fetch available versions', { error: result.error });
-        throw new APIError(
-          result.error || 'Failed to fetch available versions',
-          'get_available_versions'
-        );
+        setRateLimitRetryAfter(result.retry_after_secs);
       }
     } catch (error) {
       if (error instanceof APIError) {

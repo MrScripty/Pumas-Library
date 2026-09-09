@@ -8,7 +8,7 @@ use tracing::warn;
 pub async fn get_available_versions(
     state: &AppState,
     params: &Value,
-) -> pumas_library::Result<Value> {
+) -> pumas_library::Result<crate::contract::AvailableVersionsOutcome> {
     let force_refresh = get_bool_param(params, "force_refresh", "forceRefresh").unwrap_or(false);
     let app_id_str = require_str_param(params, "app_id", "appId")?;
 
@@ -20,30 +20,19 @@ pub async fn get_available_versions(
                     .into_iter()
                     .map(pumas_library::models::VersionReleaseInfo::from)
                     .collect();
-                Ok(json!({
-                    "success": true,
-                    "versions": versions
-                }))
+                crate::contract::AvailableVersionsOutcome::available(versions)
             }
             Err(pumas_library::PumasError::RateLimited {
                 service,
                 retry_after_secs,
             }) => {
                 warn!("Rate limited by {} when fetching versions", service);
-                Ok(json!({
-                    "success": false,
-                    "error": format!("Rate limited by {}", service),
-                    "rate_limited": true,
-                    "retry_after_secs": retry_after_secs
-                }))
+                crate::contract::AvailableVersionsOutcome::rate_limited(retry_after_secs)
             }
             Err(e) => Err(e),
         }
     } else {
-        Ok(json!({
-            "success": true,
-            "versions": []
-        }))
+        crate::contract::AvailableVersionsOutcome::available(vec![])
     }
 }
 

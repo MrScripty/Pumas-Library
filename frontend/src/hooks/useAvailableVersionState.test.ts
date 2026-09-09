@@ -36,15 +36,15 @@ describe('useAvailableVersionState', () => {
       success: true,
       versions: [
         {
-          tag_name: 'v1.2.3',
+          tagName: 'v1.2.3',
           name: 'Version 1.2.3',
-          published_at: '2026-04-12T00:00:00Z',
+          publishedAt: '2026-04-12T00:00:00Z',
           prerelease: false,
           body: '',
-          html_url: 'https://github.com/example/app/releases/tag/v1.2.3',
-          total_size: 4096,
-          archive_size: 2048,
-          dependencies_size: 2048,
+          htmlUrl: 'https://github.com/example/app/releases/tag/v1.2.3',
+          totalSize: 4096,
+          archiveSize: 2048,
+          dependenciesSize: 2048,
           installing: true,
           assets: [],
         },
@@ -97,7 +97,7 @@ describe('useAvailableVersionState', () => {
       success: false,
       rate_limited: true,
       retry_after_secs: 120,
-      versions: [],
+      error: 'Rate limited',
     });
 
     const { result } = renderHook(() => useAvailableVersionState({
@@ -134,36 +134,22 @@ describe('useAvailableVersionState', () => {
     expect(resetBackgroundFetchFlagMock).not.toHaveBeenCalled();
   });
 
-  it('normalizes mixed release payload field names and skips malformed rows', async () => {
+  it('preserves exact producer strings and maps nullable presentation fields', async () => {
     getAvailableVersionsMock.mockResolvedValue({
       success: true,
       versions: [
         {
-          tagName: 'v0.8.0',
-          name: 'Ollama 0.8.0',
+          tagName: ' v0.8.0 λ ',
+          name: '',
           publishedAt: '2026-04-13T00:00:00Z',
           prerelease: false,
           htmlUrl: 'https://github.com/ollama/ollama/releases/tag/v0.8.0',
           totalSize: 1024,
           archiveSize: 512,
           dependenciesSize: 512,
-          installing: false,
-        },
-        {
-          tag_name: 'v1.0.0',
-          name: 'Ollama 1.0.0',
-          published_at: '2026-04-14T00:00:00Z',
-          prerelease: true,
-          html_url: 'https://github.com/ollama/ollama/releases/tag/v1.0.0',
-          total_size: 2048,
-          archive_size: 1024,
-          dependencies_size: 1024,
-          installing: true,
-        },
-        {
-          name: 'Missing tag',
-          published_at: '2026-04-15T00:00:00Z',
-          prerelease: false,
+          installing: null,
+          body: null,
+          assets: [],
         },
       ],
     });
@@ -180,17 +166,13 @@ describe('useAvailableVersionState', () => {
 
     expect(result.current.availableVersions).toEqual([
       expect.objectContaining({
-        tagName: 'v0.8.0',
+        tagName: ' v0.8.0 λ ',
+        name: '',
         publishedAt: '2026-04-13T00:00:00Z',
         htmlUrl: 'https://github.com/ollama/ollama/releases/tag/v0.8.0',
         totalSize: 1024,
-      }),
-      expect.objectContaining({
-        tagName: 'v1.0.0',
-        publishedAt: '2026-04-14T00:00:00Z',
-        htmlUrl: 'https://github.com/ollama/ollama/releases/tag/v1.0.0',
-        totalSize: 2048,
-        installing: true,
+        body: undefined,
+        installing: false,
       }),
     ]);
   });

@@ -20,6 +20,14 @@
 
 ## Slice Log
 
+### 2026-09-08 — Available-version responses accepted
+
+- Generated release decoding and success discrimination fix the rate-limit
+  response crash; exact camelCase release facts replace dual-spelling coercion.
+- The [frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-08--available-runtime-version-read-contract)
+  records focused/contract evidence and preserved no-plugin behavior. No live
+  upstream or installation verification; cache-status reads remain the next slice.
+
 ### 2026-09-08 — Notes/settings save confirmations accepted
 
 - Typed mutation responses and generated preload decoding now reject malformed

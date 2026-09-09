@@ -425,6 +425,8 @@ pub(crate) enum RpcOutcome {
     Library(Box<LibraryStatusResponse>),
     #[cfg(feature = "inference-plugins")]
     AppStatus(AppStatusOutcome),
+    #[cfg(feature = "inference-plugins")]
+    AvailableVersions(AvailableVersionsOutcome),
     HfTokenMutation(SuccessOutcome),
     HfAuth(Box<HfAuthOutcome>),
     LinkHealth(Box<LinkHealthOutcome>),
@@ -485,6 +487,8 @@ impl RpcOutcome {
             Self::Library(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::AppStatus(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::AvailableVersions(value) => serde_json::to_value(value),
             Self::HfTokenMutation(value) => serde_json::to_value(value),
             Self::HfAuth(value) => serde_json::to_value(value),
             Self::LinkHealth(value) => serde_json::to_value(value),
@@ -1252,6 +1256,148 @@ impl DownloadListOutcome {
 pub(crate) struct ModelsOutcome {
     success: bool,
     models: BTreeMap<String, CatalogModel>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(untagged)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum AvailableVersionsOutcome {
+    Available(AvailableVersionsSuccess),
+    RateLimited(AvailableVersionsRateLimited),
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct AvailableVersionsSuccess {
+    success: bool,
+    versions: Vec<pumas_library::models::VersionReleaseInfo>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct AvailableVersionsRateLimited {
+    success: bool,
+    error: &'static str,
+    rate_limited: bool,
+    retry_after_secs: Option<u64>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl AvailableVersionsOutcome {
+    pub(crate) fn available(
+        versions: Vec<pumas_library::models::VersionReleaseInfo>,
+    ) -> Result<Self, PumasError> {
+        if versions.iter().any(|version| {
+            [
+                version.total_size,
+                version.archive_size,
+                version.dependencies_size,
+            ]
+            .into_iter()
+            .flatten()
+            .any(|size| size > MAX_JS_SAFE_INTEGER)
+                || version
+                    .assets
+                    .iter()
+                    .any(|asset| asset.size > MAX_JS_SAFE_INTEGER)
+        }) {
+            return Err(invalid_domain_outcome("available versions"));
+        }
+        Ok(Self::Available(AvailableVersionsSuccess {
+            success: true,
+            versions,
+        }))
+    }
+    pub(crate) fn rate_limited(retry_after_secs: Option<u64>) -> Result<Self, PumasError> {
+        if retry_after_secs.is_some_and(|seconds| seconds > MAX_JS_SAFE_INTEGER) {
+            return Err(invalid_domain_outcome("available versions rate limit"));
+        }
+        Ok(Self::RateLimited(AvailableVersionsRateLimited {
+            success: false,
+            error: "A required operation is currently unavailable.",
+            rate_limited: true,
+            retry_after_secs,
+        }))
+    }
+}
+
+#[cfg(any(test, feature = "export-contract"))]
+fn available_versions_fixture() -> Vec<pumas_library::models::VersionReleaseInfo> {
+    use pumas_library::models::{VersionReleaseAsset, VersionReleaseInfo};
+    vec![
+        VersionReleaseInfo {
+            tag_name: " vλ.1 ".into(),
+            name: " Exact runtime λ ".into(),
+            published_at: "2026-09-08T00:00:00Z".into(),
+            prerelease: false,
+            body: Some(" # Exact notes\nλ ".into()),
+            html_url: "https://example.invalid/releases/v1".into(),
+            assets: vec![VersionReleaseAsset {
+                name: " Runtime λ.zip ".into(),
+                size: MAX_JS_SAFE_INTEGER,
+                download_url: "https://example.invalid/runtime.zip".into(),
+            }],
+            total_size: Some(MAX_JS_SAFE_INTEGER),
+            archive_size: Some(0),
+            dependencies_size: Some(42),
+            installing: Some(false),
+        },
+        VersionReleaseInfo {
+            tag_name: "v2".into(),
+            name: "Second".into(),
+            published_at: "".into(),
+            prerelease: true,
+            body: None,
+            html_url: "".into(),
+            assets: vec![],
+            total_size: None,
+            archive_size: None,
+            dependencies_size: None,
+            installing: None,
+        },
+    ]
+}
+
+#[cfg(test)]
+mod available_versions_tests {
+    use super::*;
+    #[test]
+    fn available_versions_preserve_core_fields_nulls_and_rate_limit_shape() {
+        let versions = available_versions_fixture();
+        let expected = serde_json::json!({"success":true,"versions":versions});
+        assert_eq!(
+            serde_json::to_value(AvailableVersionsOutcome::available(versions).unwrap()).unwrap(),
+            expected
+        );
+        assert_eq!(
+            serde_json::to_value(AvailableVersionsOutcome::available(vec![]).unwrap()).unwrap(),
+            serde_json::json!({"success":true,"versions":[]})
+        );
+        for retry in [None, Some(0), Some(MAX_JS_SAFE_INTEGER)] {
+            assert_eq!(
+                serde_json::to_value(AvailableVersionsOutcome::rate_limited(retry).unwrap())
+                    .unwrap(),
+                serde_json::json!({"success":false,"rate_limited":true,"error":"A required operation is currently unavailable.","retry_after_secs":retry})
+            );
+        }
+    }
+    #[test]
+    fn available_versions_reject_unsafe_sizes_and_retry_without_normalization() {
+        for field in 0..4 {
+            let mut versions = available_versions_fixture();
+            match field {
+                0 => versions[0].total_size = Some(MAX_JS_SAFE_INTEGER + 1),
+                1 => versions[0].archive_size = Some(MAX_JS_SAFE_INTEGER + 1),
+                2 => versions[0].dependencies_size = Some(MAX_JS_SAFE_INTEGER + 1),
+                _ => versions[0].assets[0].size = MAX_JS_SAFE_INTEGER + 1,
+            }
+            assert!(AvailableVersionsOutcome::available(versions).is_err());
+        }
+        assert!(AvailableVersionsOutcome::rate_limited(Some(MAX_JS_SAFE_INTEGER + 1)).is_err());
+    }
 }
 
 #[derive(Serialize)]

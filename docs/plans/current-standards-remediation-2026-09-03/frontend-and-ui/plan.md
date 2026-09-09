@@ -10,10 +10,11 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound available-runtime-version read response validation (M4):
-`get_available_versions` is still raw and its consumer reads `versions.length`
-before success discrimination. Preserve optional inference-plugin builds and
-standalone backend operation; no install/update mutations. Notes/settings
+**Next slice:** Bound runtime GitHub cache-status response validation (M4):
+`get_github_cache_status` still crosses preload undecoded into the version hook.
+Preserve cache/refresh timing, optional inference-plugin builds and standalone
+backend operation; no install/update mutations. Available-version response
+validation is accepted below. Notes/settings
 mutation response validation is accepted below. Model-notes request admission
 (FE-I33) is accepted below; malformed input cannot clear existing notes.
 Inference-settings mutation admission is accepted below. Metadata response decoding is accepted
@@ -64,6 +65,35 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Available Runtime-Version Read Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--available-runtime-version-read-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Generate and decode the actual `get_available_versions` wire outcomes: success
+with camelCase release/asset fields, or rate-limit failure with no versions and
+required nullable retry delay. Preserve required nullable release fields, exact
+strings/order and safe integer sizes. Discriminate success before reading rows;
+remove dual-spelling normalization and silent malformed-row dropping. Requests,
+cache/refresh timing, manager lookup and installs are outside this slice.
+
+root_capability owns typed RPC outcomes/export/dispatch/release handler, focused
+tests and schema-only core release derives. Root owns preload/tests, frontend
+response aliases/hook/tests, decoder and renderer conformance, generated files,
+README and four plan records. Root serializes Cargo/generation/integration.
+No-manager empty success remains current behavior, not proof of availability;
+record that semantic limitation separately. Public rate-limit text must not
+copy arbitrary provider diagnostics. No GUI dependency or plugin feature changes.
+
+Acceptance: actual producer fixtures for populated/empty and known/unknown-delay
+rate limits; generated negative nested/contradictory/numeric tests; bundled
+preload rejection; real hook consumption preserving rate-limit state without
+reading absent versions. Default/minimal RPC tests, core minimal build, strict
+lint/format, frontend types/focused tests, conformance, generator tests/freshness,
+both frontend builds and plan checks. Automated local contract/integration only;
+no real network, install, live library, graphical or other-OS claims. Existing
+typed outcomes and generated decoder own the wire contract; no new framework.
 
 ## Notes and Settings Mutation Response Contracts
 

@@ -10,6 +10,24 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('available-version decoding preserves actual camelCase/null facts and rejects invented or unsafe shapes', () => {
+  for (const key of ['available_versions', 'available_versions_empty', 'available_versions_rate_limited', 'available_versions_rate_limited_unknown']) {
+    const result = contract.decodeAvailableVersionsOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  const release = fixtures.available_versions.versions[0];
+  for (const patch of [{ tagName: undefined }, { tag_name: 'old' }, { body: undefined }, { body: 42 },
+    { assets: null }, { assets: [{ name: 'x', size: -1, downloadUrl: 'url' }] },
+    { totalSize: 9007199254740992 }, { archiveSize: -1 }, { installing: 'false' }]) {
+    assert.equal(contract.decodeAvailableVersionsOutcome({ success: true, versions: [{ ...release, ...patch }] }).status, 'invalid', JSON.stringify(patch));
+  }
+  for (const patch of [{ versions: [] }, { retry_after_secs: undefined }, { retry_after_secs: 9007199254740992 },
+    { retry_after_secs: -1 }, { rate_limited: false }, { success: true }]) {
+    assert.equal(contract.decodeAvailableVersionsOutcome({ ...fixtures.available_versions_rate_limited, ...patch }).status, 'invalid');
+  }
+});
+
 test('mutation response decoding preserves producer confirmations and rejects contradictory payloads', () => {
   for (const [key, decode] of [
     ['update_inference_settings', contract.decodeUpdateInferenceSettingsOutcome],

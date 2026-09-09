@@ -75,6 +75,12 @@ errors leave drafts intact and display an unconfirmed-save warning, without
 automatic retries. Reopen the model to check persisted values before retrying:
 an unconfirmed response does not prove that the backend write failed.
 
+Available runtime-version reads decode the backend's camelCase release and
+asset fields, including nullable sizes and descriptions. Rate-limit responses
+have no version list; the UI keeps its last releases and records the known or
+unknown retry delay. Malformed responses reject rather than dropping individual
+rows or accepting legacy field spellings. Existing refresh timing is unchanged.
+
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.
 Malformed responses cannot enter the modal; nested values display without

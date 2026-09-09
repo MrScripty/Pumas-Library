@@ -745,6 +745,12 @@ async fn dispatch_admitted_command(
                 .await
                 .map(RpcOutcome::UpdateModelNotes)
         }
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::Legacy { method, params } if method == "get_available_versions" => {
+            versions::get_available_versions(state, &params)
+                .await
+                .map(RpcOutcome::AvailableVersions)
+        }
         RpcCommand::Legacy { method, params } if method == "get_library_model_metadata" => {
             models::get_library_model_metadata(state, &params)
                 .await
@@ -1118,8 +1124,6 @@ async fn dispatch_method(
 
         // Version Management
         #[cfg(feature = "inference-plugins")]
-        "get_available_versions" => versions::get_available_versions(state, params).await,
-        #[cfg(feature = "inference-plugins")]
         "get_installed_versions" => versions::get_installed_versions(state, params).await,
         #[cfg(feature = "inference-plugins")]
         "get_active_version" => versions::get_active_version(state, params).await,
@@ -1320,6 +1324,37 @@ async fn dispatch_method(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn available_versions_rpc_preserves_unregistered_runtime_and_feature_gate() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        let request = Bytes::from(
+            serde_json::to_vec(&json!({
+                "jsonrpc":"2.0","id":"available-runtime-fixture","method":"get_available_versions",
+                "params":{"app_id":"unregistered-runtime","force_refresh":true},
+            }))
+            .unwrap(),
+        );
+        let response = handle_rpc(State(state), request).await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 65_536)
+            .await
+            .unwrap();
+        let wire: Value = serde_json::from_slice(&body).unwrap();
+        #[cfg(feature = "inference-plugins")]
+        assert_eq!(
+            wire,
+            json!({"jsonrpc":"2.0","id":"available-runtime-fixture","result":{"success":true,"versions":[]}})
+        );
+        #[cfg(not(feature = "inference-plugins"))]
+        assert_eq!(
+            wire,
+            json!({"jsonrpc":"2.0","id":"available-runtime-fixture","error":{
+                "code":-32601,"message":"The requested method is not supported.","data":{"class":"not_found"},
+            }})
+        );
+    }
 
     #[tokio::test]
     async fn update_model_notes_rpc_preserves_notes_on_invalid_input_and_applies_explicit_intent() {

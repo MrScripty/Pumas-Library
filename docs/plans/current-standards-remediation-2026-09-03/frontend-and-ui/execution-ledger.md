@@ -1,5 +1,64 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Runtime Installation-Validation Response Contract
+
+Accepted `validate_installations` typed RPC output and generated preload
+decoding. Operation inventory established that the exact response is a raw
+snake_case record—removed tag strings, orphan directory path strings and a valid
+count—with no success/result envelope. The former frontend type described three
+different, nonexistent fields. No production hook or component calls this API;
+the facade and bridge are the only consumers, so generated aliases replace the
+handwritten shape without new frontend state or fallback.
+
+The operation is mutating: app-manager validation removes stale metadata entries,
+may clear active/default metadata and reports but does not delete orphaned
+directories. This slice preserves that behavior and path serialization. Preload
+response rejection performs no automatic retry, preventing a malformed response
+from repeating the mutation. No-manager empty results remain FE-I34 and are not
+proof of availability. Existing orphan-path disclosure and optional frontend
+app ID versus required RPC app ID remain unchanged separate semantics.
+
+Evidence: three focused RPC tests pass in default and no-default feature modes,
+covering literal prior-wire and actual app-manager `ValidationResult`
+serialization, maximum-safe count acceptance/overflow refusal, real no-manager
+empty output and disabled-plugin method-not-found. Producer fixtures cover
+populated, empty and no-manager results. Twenty-eight decoder tests and 37
+bundled-preload/renderer conformance tests pass. Twenty-nine of 30 preload tests
+pass with the existing real-Electron sandbox test gated. Negative cases reject
+missing/extra fields, wrong list members, null lists, negative/fractional/unsafe
+counts and the former false success/result envelope. Frontend TypeScript and
+affected lint, Electron and both frontend builds, seven generator tests/
+freshness, strict RPC Clippy and formatting pass. Canonical plan checks and final
+diff checks pass below. Existing app-manager temporary-root tests cover metadata
+mutation; this slice did not invoke a populated RPC manager or touch a live
+library. No graphical, network, installation or other-OS claim.
+
+Luna max performed the read-only inventory and substantive independent review,
+which found no blocking defect and distinguished the duplicate no-manager fixture
+from the actual RPC proof. Astra low implemented the settled four-file Rust
+projection; root owned the consumer side, integration, Cargo, generation,
+verification, review repairs and reporting. Spark remains absent
+from the exposed model identifiers, with no silent substitution. Overall M4 and
+remediation remain incomplete. Next: runtime installation-progress response
+(`get_installation_progress`).
+
+Cost checkpoint, deduplicated by `response_id`: current root
+`01a084bf-3ff2-77d3-bdf4-714d30c2173d`, turn
+`01a084d3-29f5-7ae2-9148-31df7832a81c`. Luna max used 11,207,657 input tokens
+(10,756,864 cached) and 37,111 output (21,411 reasoning), estimated at $0.3498
+standard / $0.6997 priority scenario. Astra low used 333,362 input (303,360
+cached) and 3,626 output (14 reasoning), estimated at $0.7847 / $1.5694. Root
+gpt-5.6-sol low used 9,108,624 input (8,907,648 cached) and 15,123 output (2,100
+reasoning); its price is unknown and is not treated as free. Priced subtotal:
+$1.1345 / $2.2690 plus unpriced root usage. API-equivalent assumptions, not
+invoices: Luna 0.2/0.02/0.25/1.2 and Astra 10/1/12.5/50 USD per million
+uncached/cached/cache-write/output, 272,000-input long-context threshold and 2x
+priority scenario. No cache writes or above-threshold requests were observed;
+delivered tier is unexposed. This checkpoint reaches 2026-09-09T06:43:08.099Z
+and excludes later review/commit/reporting tail. PostgreSQL port 5433 was absent
+even outside the sandbox, so no operational row could be written. Temporary
+deduplication artifacts: `/tmp/pumas-validation-costs.{py,json}`.
+
 ## 2026-09-08 — Runtime-Version Info Response Contract
 
 Accepted `get_version_info` typed RPC output and generated preload decoding.

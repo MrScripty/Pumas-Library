@@ -129,16 +129,16 @@ pub async fn get_installation_progress(
 pub async fn validate_installations(
     state: &AppState,
     params: &Value,
-) -> pumas_library::Result<Value> {
+) -> pumas_library::Result<crate::contract::ValidateInstallationsOutcome> {
     let app_id_str = require_str_param(params, "app_id", "appId")?;
     if let Some(vm) = get_version_manager(state, app_id_str).await {
         let result = vm.validate_installations().await?;
-        Ok(serde_json::to_value(result)?)
+        crate::contract::ValidateInstallationsOutcome::new(
+            result.removed_tags,
+            result.orphaned_dirs,
+            result.valid_count,
+        )
     } else {
-        Ok(json!({
-            "removed_tags": [],
-            "orphaned_dirs": [],
-            "valid_count": 0
-        }))
+        crate::contract::ValidateInstallationsOutcome::new(vec![], vec![], 0)
     }
 }

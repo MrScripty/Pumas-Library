@@ -108,6 +108,12 @@ release metadata or a computed size. The generated preload decoder rejects
 missing fields, non-null size and invented metadata before the hook receives the
 record. A no-manager installed-false result does not prove runtime availability.
 
+Runtime installation validation returns the backend's raw removed-tag list,
+orphan-directory path list and valid count without a success wrapper. Validation
+may remove stale installation metadata, but does not delete reported orphaned
+directories. The preload rejects malformed results without retrying the
+operation. Empty no-manager results do not establish runtime availability.
+
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.
 Malformed responses cannot enter the modal; nested values display without

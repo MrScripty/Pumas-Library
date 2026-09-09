@@ -318,7 +318,9 @@ is also accepted, as are [inference-settings reads and modal isolation](frontend
 model-notes admission and the selected runtime-version read contracts are accepted.
 Latest is the exact [runtime-version info response](frontend-and-ui/plan.md#runtime-version-info-response-contract),
 which removes false path/date/release metadata without inventing numeric size.
-Next, bound runtime installation-validation responses against temporary libraries.
+The raw [runtime installation-validation response](frontend-and-ui/plan.md#runtime-installation-validation-response-contract)
+is also accepted without changing its stale-metadata mutation. Next, bound
+runtime installation-progress responses without installing a runtime.
 This does not admit
 Pending cleanup replay. FE-I29 retains a separate
 intermittent preflight-test failure despite fixture hardening.

@@ -59,6 +59,25 @@ test('version-info decoding preserves actual null-only facts and rejects invente
   }
 });
 
+test('installation-validation decoding preserves raw mutation results and rejects false envelopes', () => {
+  for (const key of ['validate_installations_populated', 'validate_installations_empty', 'validate_installations_no_manager']) {
+    const result = contract.decodeValidateInstallationsOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  const valid = fixtures.validate_installations_populated;
+  const boundary = { ...valid, valid_count: Number.MAX_SAFE_INTEGER };
+  assert.equal(contract.decodeValidateInstallationsOutcome(boundary).status, 'valid');
+  for (const patch of [{ removed_tags: undefined }, { removed_tags: ['ok', 42] },
+    { orphaned_dirs: null }, { orphaned_dirs: ['/ok', {}] }, { valid_count: -1 },
+    { valid_count: 0.5 }, { valid_count: Number.MAX_SAFE_INTEGER + 1 }, { extra: true }]) {
+    assert.equal(contract.decodeValidateInstallationsOutcome({ ...valid, ...patch }).status, 'invalid', JSON.stringify(patch));
+  }
+  for (const value of [null, [], {}, { success: true, result: valid }]) {
+    assert.equal(contract.decodeValidateInstallationsOutcome(value).status, 'invalid');
+  }
+});
+
 test('selected-version decoding preserves producer text and empty absence', () => {
   for (const key of ['selected_version', 'selected_version_empty']) {
     const result = contract.decodeSelectedVersionOutcome(fixtures[key]);

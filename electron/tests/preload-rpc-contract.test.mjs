@@ -48,6 +48,25 @@ test('version info rejects invented metadata and preserves exact producer facts'
   assert.deepEqual(toPlainValue(await harness.api.get_version_info(' vλ.1 ', 'ollama')), valid);
 });
 
+test('installation validation rejects false envelopes and unsafe result facts', async () => {
+  const harness = loadCompiledPreload();
+  const valid = {
+    removed_tags: [' vλ.1 ', 'v2', 'v2'],
+    orphaned_dirs: ['/tmp/runtime λ/orphan', 'relative/orphan'],
+    valid_count: Number.MAX_SAFE_INTEGER,
+  };
+  for (const response of [null, [], {}, { success: true, result: valid },
+    { ...valid, removed_tags: ['ok', 42] }, { ...valid, orphaned_dirs: null },
+    { ...valid, orphaned_dirs: ['/ok', {}] }, { ...valid, valid_count: -1 },
+    { ...valid, valid_count: 0.5 }, { ...valid, valid_count: Number.MAX_SAFE_INTEGER + 1 },
+    { ...valid, extra: true }]) {
+    harness.respondWith(response);
+    await assert.rejects(harness.api.validate_installations('ollama'), { name: 'DesktopContractError' });
+  }
+  harness.respondWith(valid);
+  assert.deepEqual(toPlainValue(await harness.api.validate_installations('ollama')), valid);
+});
+
 test('selected versions reject malformed values and preserve empty-string absence', async () => {
   const harness = loadCompiledPreload();
   for (const method of ['get_active_version', 'get_default_version']) {

@@ -437,6 +437,8 @@ pub(crate) enum RpcOutcome {
     VersionStatus(VersionStatusOutcome),
     #[cfg(feature = "inference-plugins")]
     VersionInfo(VersionInfoOutcome),
+    #[cfg(feature = "inference-plugins")]
+    ValidateInstallations(ValidateInstallationsOutcome),
     HfTokenMutation(SuccessOutcome),
     HfAuth(Box<HfAuthOutcome>),
     LinkHealth(Box<LinkHealthOutcome>),
@@ -509,6 +511,8 @@ impl RpcOutcome {
             Self::VersionStatus(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::VersionInfo(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::ValidateInstallations(value) => serde_json::to_value(value),
             Self::HfTokenMutation(value) => serde_json::to_value(value),
             Self::HfAuth(value) => serde_json::to_value(value),
             Self::LinkHealth(value) => serde_json::to_value(value),
@@ -1457,6 +1461,104 @@ mod version_info_tests {
                 assert!(!rpc.uses_response_wrapper());
                 assert_eq!(rpc.into_value().unwrap(), previous);
             }
+        }
+    }
+}
+
+/// Raw validation result: validation can remove stale registry entries.
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct ValidateInstallationsOutcome {
+    removed_tags: Vec<String>,
+    orphaned_dirs: Vec<std::path::PathBuf>,
+    valid_count: usize,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl ValidateInstallationsOutcome {
+    pub(crate) fn new(
+        removed_tags: Vec<String>,
+        orphaned_dirs: Vec<std::path::PathBuf>,
+        valid_count: usize,
+    ) -> pumas_library::Result<Self> {
+        if valid_count as u128 > MAX_JS_SAFE_INTEGER as u128 {
+            return Err(invalid_domain_outcome("installation validation"));
+        }
+        Ok(Self {
+            removed_tags,
+            orphaned_dirs,
+            valid_count,
+        })
+    }
+}
+
+#[cfg(any(feature = "export-contract", test))]
+fn validate_installations_fixture() -> ValidateInstallationsOutcome {
+    ValidateInstallationsOutcome::new(
+        vec![" vλ.1 ".into(), "v2".into(), "v2".into(), String::new()],
+        vec![
+            " runtime λ/old ".into(),
+            "relative/../orphan".into(),
+            "relative/../orphan".into(),
+        ],
+        2,
+    )
+    .unwrap()
+}
+
+#[cfg(test)]
+mod validate_installations_tests {
+    use super::*;
+
+    #[test]
+    fn validate_installations_matches_previous_raw_wire() {
+        for (outcome, previous_raw) in [
+            (
+                validate_installations_fixture(),
+                serde_json::json!({
+                    "removed_tags": [" vλ.1 ", "v2", "v2", ""],
+                    "orphaned_dirs": [" runtime λ/old ", "relative/../orphan", "relative/../orphan"],
+                    "valid_count": 2,
+                }),
+            ),
+            (
+                ValidateInstallationsOutcome::new(vec![], vec![], 0).unwrap(),
+                serde_json::json!({"removed_tags": [], "orphaned_dirs": [], "valid_count": 0}),
+            ),
+        ] {
+            #[cfg(feature = "inference-plugins")]
+            {
+                let producer = pumas_app_manager::version_manager::ValidationResult {
+                    removed_tags: outcome.removed_tags.clone(),
+                    orphaned_dirs: outcome.orphaned_dirs.clone(),
+                    valid_count: outcome.valid_count,
+                };
+                assert_eq!(serde_json::to_value(producer).unwrap(), previous_raw);
+            }
+            assert_eq!(serde_json::to_value(&outcome).unwrap(), previous_raw);
+            let previous = crate::wrapper::wrap_response("validate_installations", previous_raw);
+            assert_eq!(serde_json::to_value(&outcome).unwrap(), previous);
+            #[cfg(feature = "inference-plugins")]
+            {
+                let rpc = RpcOutcome::ValidateInstallations(outcome);
+                assert!(!rpc.uses_response_wrapper());
+                assert_eq!(rpc.into_value().unwrap(), previous);
+            }
+        }
+    }
+
+    #[test]
+    fn validate_installations_enforces_safe_count() {
+        if let Ok(count) = usize::try_from(MAX_JS_SAFE_INTEGER) {
+            let outcome = ValidateInstallationsOutcome::new(vec![], vec![], count).unwrap();
+            assert_eq!(
+                serde_json::to_value(outcome).unwrap()["valid_count"],
+                MAX_JS_SAFE_INTEGER
+            );
+        }
+        if let Ok(count) = usize::try_from(MAX_JS_SAFE_INTEGER + 1) {
+            assert!(ValidateInstallationsOutcome::new(vec![], vec![], count).is_err());
         }
     }
 }

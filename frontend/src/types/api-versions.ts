@@ -1,5 +1,5 @@
 import type { BaseResponse } from './api-common';
-import type { AvailableVersionsOutcome, GithubCacheStatusOutcome, InstalledVersionsOutcome, SelectedVersionOutcome, VersionInfoOutcome, VersionStatusOutcome } from '../generated/desktop-contract';
+import type { AvailableVersionsOutcome, GithubCacheStatusOutcome, InstalledVersionsOutcome, SelectedVersionOutcome, ValidateInstallationsOutcome, VersionInfoOutcome, VersionStatusOutcome } from '../generated/desktop-contract';
 export type { VersionReleaseAsset, VersionReleaseInfo } from '../generated/desktop-contract';
 
 // ============================================================================
@@ -16,13 +16,7 @@ export interface VersionActionResponse extends BaseResponse {
   // Used for install, remove, switch operations
 }
 
-export interface ValidateInstallationsResponse extends BaseResponse {
-  result: {
-    had_invalid: boolean;
-    removed: string[];
-    valid: string[];
-  };
-}
+export type ValidateInstallationsResponse = ValidateInstallationsOutcome;
 
 export type GetVersionInfoResponse = VersionInfoOutcome;
 

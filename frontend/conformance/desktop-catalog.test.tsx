@@ -55,6 +55,7 @@ function installActualPreload(
   selectedVersion: () => unknown = () => fixture['selected_version'],
   versionStatus: () => unknown = () => fixture['version_status'],
   versionInfo: () => unknown = () => fixture['version_info_installed'],
+  validationResult: () => unknown = () => fixture['validate_installations_populated'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -83,6 +84,7 @@ function installActualPreload(
         if (method === 'get_github_cache_status') return githubCacheStatus();
         if (method === 'get_version_status') return versionStatus();
         if (method === 'get_version_info') return versionInfo();
+        if (method === 'validate_installations') return validationResult();
         if (method === 'get_installed_versions') return installedVersions();
         if (method === 'get_active_version' || method === 'get_default_version') return selectedVersion();
         if (method === 'get_inference_settings') return inferenceRead;
@@ -178,6 +180,19 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('exposes exact installation-validation results and rejects malformed replies without retrying', async () => {
+    let response: unknown = fixture['validate_installations_populated'];
+    const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => response);
+    const bridge = window.electronAPI;
+    if (!bridge) throw new ValidationError('Desktop bridge was not installed.', 'producer-fixtures');
+
+    await expect(bridge.validate_installations('ollama')).resolves.toEqual(response);
+    expect(requests.at(-1)?.params).toEqual({ app_id: 'ollama' });
+    response = { success: true, result: response };
+    await expect(bridge.validate_installations('ollama')).rejects.toMatchObject({ name: 'DesktopContractError' });
+    expect(requests.filter(request => request.method === 'validate_installations')).toHaveLength(2);
+  });
+
   it('returns exact version info and rejects malformed replies without retrying', async () => {
     let response: unknown = fixture['version_info_installed'];
     const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => response);

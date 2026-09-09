@@ -758,6 +758,12 @@ async fn dispatch_admitted_command(
                 .map(RpcOutcome::VersionInfo)
         }
         #[cfg(feature = "inference-plugins")]
+        RpcCommand::Legacy { method, params } if method == "validate_installations" => {
+            versions::validate_installations(state, &params)
+                .await
+                .map(RpcOutcome::ValidateInstallations)
+        }
+        #[cfg(feature = "inference-plugins")]
         RpcCommand::Legacy { method, params } if method == "get_available_versions" => {
             versions::get_available_versions(state, &params)
                 .await
@@ -1172,8 +1178,6 @@ async fn dispatch_method(
         #[cfg(feature = "inference-plugins")]
         "get_installation_progress" => versions::get_installation_progress(state, params).await,
         #[cfg(feature = "inference-plugins")]
-        "validate_installations" => versions::validate_installations(state, params).await,
-        #[cfg(feature = "inference-plugins")]
         "get_release_size_info" => versions::get_release_size_info(state, params).await,
         #[cfg(feature = "inference-plugins")]
         "get_release_size_breakdown" => versions::get_release_size_breakdown(state, params).await,
@@ -1410,6 +1414,39 @@ mod tests {
         assert_eq!(
             wire,
             json!({"jsonrpc":"2.0","id":"version-status-fixture","error":{
+                "code":-32601,"message":"The requested method is not supported.","data":{"class":"not_found"},
+            }})
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_installations_rpc_preserves_no_manager_and_feature_gate() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        let request = Bytes::from(
+            serde_json::to_vec(&json!({
+                "jsonrpc":"2.0","id":"validate-installations-fixture","method":"validate_installations",
+                "params":{"app_id":"unregistered-runtime"},
+            }))
+            .unwrap(),
+        );
+        let response = handle_rpc(State(state), request).await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 65_536)
+            .await
+            .unwrap();
+        let wire: Value = serde_json::from_slice(&body).unwrap();
+        #[cfg(feature = "inference-plugins")]
+        assert_eq!(
+            wire,
+            json!({"jsonrpc":"2.0","id":"validate-installations-fixture","result":{
+                "removed_tags":[],"orphaned_dirs":[],"valid_count":0,
+            }})
+        );
+        #[cfg(not(feature = "inference-plugins"))]
+        assert_eq!(
+            wire,
+            json!({"jsonrpc":"2.0","id":"validate-installations-fixture","error":{
                 "code":-32601,"message":"The requested method is not supported.","data":{"class":"not_found"},
             }})
         );

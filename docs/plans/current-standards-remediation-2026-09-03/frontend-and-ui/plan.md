@@ -10,12 +10,13 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound runtime installation-validation responses (M4):
-`validate_installations` still crosses preload undecoded with a handwritten
-frontend response. Inventory its producer and actual consumers before selecting
-the projection. Preserve optional inference-plugin builds, standalone backend
-operation and existing mutation semantics; use temporary libraries only.
-Runtime-version info, comprehensive status, active/default, installed-version, runtime
+**Next slice:** Bound runtime installation-progress responses (M4):
+`get_installation_progress` still crosses preload undecoded with handwritten
+frontend response/state types. Inventory its producer nullability, numeric and
+terminal semantics and actual consumers before selecting the projection. Preserve
+optional inference-plugin builds, standalone backend operation and polling
+lifecycle; no runtime installation.
+Installation validation, runtime-version info, comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
 validation is accepted below. Notes/settings
 mutation response validation is accepted below. Model-notes request admission
@@ -68,6 +69,38 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Runtime Installation-Validation Response Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--runtime-installation-validation-response-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Project `validate_installations` as the exact existing raw result with required
+snake_case removed-tag and orphan-path string arrays plus a safe nonnegative
+valid count. Do not add a success/result envelope, infer consistency among
+fields or translate paths. Preserve order, duplicates, empty strings and empty
+results. The operation may remove stale installation metadata before responding;
+malformed response rejection must never retry it.
+
+The RPC typed outcome owns serialization and generated schema; preload decodes
+before exposing the API. No production renderer calls the facade, so replace the
+false handwritten response type without adding state, presentation or fallback.
+No core/app-manager logic, request, lookup, install, directory deletion, runtime
+registration or live-library change. Existing no-manager empty output remains
+FE-I34 and does not establish manager availability. Optional inference plugins
+and standalone backend composition remain unchanged.
+
+Acceptance: literal prior-wire and app-manager result equivalence; safe count
+boundaries; actual no-manager/default and no-plugin/minimal RPC responses;
+populated/empty/no-manager producer fixtures; decoder and bundled-preload
+rejection of malformed fields, unsafe counts and false envelopes; actual bundled
+preload API exact consumption with one call. Run frontend types/affected lint,
+Electron/both frontend builds, generator tests/freshness, strict RPC lint/format
+and canonical plan checks. Existing app-manager temporary tests remain mutation
+evidence; this slice does not execute a populated RPC manager or live library.
+Automated local contract/integration only, not graphical, network, install or
+other-OS evidence. Orphan path disclosure and optional bridge app ID spelling
+remain existing semantics, not changed policy.
 
 ## Runtime-Version Info Response Contract
 

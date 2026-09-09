@@ -472,6 +472,15 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     }
     fixtures["version_info_installed"] =
         serde_json::to_value(VersionInfoOutcome::new(" vλ.1 ".into(), true))?;
+    fixtures["validate_installations_populated"] =
+        serde_json::to_value(validate_installations_fixture())?;
+    for key in [
+        "validate_installations_empty",
+        "validate_installations_no_manager",
+    ] {
+        fixtures[key] =
+            serde_json::to_value(ValidateInstallationsOutcome::new(vec![], vec![], 0)?)?;
+    }
     fixtures["version_info_uninstalled"] =
         serde_json::to_value(VersionInfoOutcome::new("v2".into(), false))?;
     fixtures["installed_versions"] = serde_json::to_value(InstalledVersionsOutcome::new(vec![
@@ -530,6 +539,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         SelectedVersionOutcome,
         VersionStatusOutcome,
         VersionInfoOutcome,
+        ValidateInstallationsOutcome,
         UpdateModelNotesOutcome,
         LibraryModelMetadataOutcome,
         GetHfDownloadDetailsParams,

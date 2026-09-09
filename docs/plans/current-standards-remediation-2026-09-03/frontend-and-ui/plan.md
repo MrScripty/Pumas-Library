@@ -10,10 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound active/default runtime-version read contracts (M4):
-both selected-version reads still cross preload undecoded into version state.
+**Next slice:** Bound comprehensive runtime-version status response validation
+(M4): `get_version_status` still crosses preload undecoded into version state.
 Preserve optional inference-plugin builds and standalone backend operation;
-no install/update mutations. Installed-version, runtime GitHub cache-status and available-version response
+no install/update mutations. Active/default, installed-version, runtime GitHub cache-status and available-version response
 validation is accepted below. Notes/settings
 mutation response validation is accepted below. Model-notes request admission
 (FE-I33) is accepted below; malformed input cannot clear existing notes.
@@ -65,6 +65,30 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Active and Default Runtime-Version Read Contracts
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--active-and-default-runtime-version-read-contracts).
+Operation: `continue` this canonical plan, remaining M4.
+Both reads use one typed success/string response. Preserve existing empty-string
+wire representation for no selection and exact nonempty tags; the view maps only
+empty strings to null. Reject missing/null/non-string values before hook state.
+Core optional values, lookup, request and selection mutations are unchanged.
+
+root_capability owns RPC outcome/export/dispatch/lifecycle handlers and tests;
+root owns preload/tests, frontend response aliases/hook, existing conformance,
+generated files, README and four plan records. Root serializes Cargo/generation.
+No new tag grammar, core or feature-registration changes. Preserve no-manager
+and no-plugin outcomes, existing active-error/default-warning behavior and last
+valid selections on decoding failure. No live runtime/network/install changes.
+
+Acceptance: exact/empty producer fixtures, prior wrapper equivalence, offline
+RPC tests for both methods and feature modes, malformed preload refusal and
+actual hook selection retention. Focused hooks/types/lint, decoder/renderer
+conformance, Electron/both frontend builds, generator tests/freshness, strict
+RPC lint/format and plan checks. Local automated evidence, not graphical or
+other-OS acceptance. Share the matching response contract without new machinery.
 
 ## Installed Runtime-Version List Response Contract
 

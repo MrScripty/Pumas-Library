@@ -51,6 +51,7 @@ function installActualPreload(
   availableVersions: () => unknown = () => fixture['available_versions'],
   githubCacheStatus: () => unknown = () => fixture['github_cache_status_no_manager'],
   installedVersions: () => unknown = () => fixture['installed_versions'],
+  selectedVersion: () => unknown = () => fixture['selected_version'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -78,6 +79,7 @@ function installActualPreload(
         if (method === 'get_available_versions') return availableVersions();
         if (method === 'get_github_cache_status') return githubCacheStatus();
         if (method === 'get_installed_versions') return installedVersions();
+        if (method === 'get_active_version' || method === 'get_default_version') return selectedVersion();
         if (method === 'get_inference_settings') return inferenceRead;
         if (method === 'update_inference_settings') return mutationResponses.settings ? mutationResponses.settings() : fixture['update_inference_settings'];
         if (method === 'update_model_notes' && mutationResponses.notes) return mutationResponses.notes();
@@ -171,6 +173,26 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it.each(['active', 'default'] as const)('preserves the %s selection on invalid replies and maps explicit empty absence', async (kind) => {
+    let response: unknown = fixture['selected_version'];
+    const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => response);
+    const { result } = renderHook(() => useVersionFetching({ appId: 'ollama', trackAvailableVersions: false }));
+    const fetch = () => kind === 'active' ? result.current.fetchActiveVersion() : result.current.fetchDefaultVersion();
+    const selection = () => kind === 'active' ? result.current.activeVersion : result.current.defaultVersion;
+    await act(async () => { await fetch(); });
+    expect(selection()).toBe(' vλ.1 ');
+    expect(requests.at(-1)?.params).toEqual({ app_id: 'ollama' });
+    response = { success: true, version: null };
+    await act(async () => { await fetch(); });
+    expect(selection()).toBe(' vλ.1 ');
+    if (kind === 'active') expect(result.current.error).toMatch(/Desktop contract/);
+    else expect(result.current.error).toBeNull();
+    response = fixture['selected_version_empty'];
+    await act(async () => { await fetch(); });
+    expect(selection()).toBeNull();
+    expect(requests.filter(request => request.method === `get_${kind}_version`)).toHaveLength(3);
+  });
+
   it('keeps exact installed tags and retains the last list when preload rejects malformed data', async () => {
     let response: unknown = fixture['installed_versions'];
     const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => response);

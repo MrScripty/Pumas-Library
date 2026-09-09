@@ -1,5 +1,31 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Active and Default Runtime-Version Read Contracts
+
+Accepted a shared typed selected-version response for both matching read
+interfaces. Core None continues to serialize as an empty version string; exact
+Some strings remain unchanged. Typed dispatch replaces raw wrapper-dependent
+responses. Generated preload decoding rejects missing/null/non-string versions,
+false success and extra fields. Generated frontend aliases replace handwritten
+nullable wire types; the view maps only empty strings to null. Invalid replies
+retain prior selections. Active errors and nonfatal default warnings are unchanged.
+
+The bundled-preload regression first failed with `Missing expected rejection`.
+Two focused RPC tests pass in default and no-default modes, covering both prior
+wrapper shapes and actual offline no-manager/disabled-plugin calls. Minimal
+fixtures used established elevated setup permissions. Twenty-five decoder tests,
+34 bundled-preload/renderer-hook tests, 26 preload tests and seven focused hook
+tests pass. One real-Electron sandbox test remains gated. Tests cover exact and
+empty producer values, malformed selection retention and existing error policy.
+Frontend types/affected lint, Electron/both frontend builds, seven generator
+tests/freshness, strict RPC lint, formatting and canonical plan checks pass.
+
+root_capability owned Rust; root integrated consumers and verification. The
+codebase-design skill guided one shared response contract rather than duplicate
+method-specific validators. No core/request/selection mutation, runtime lookup,
+live network, graphical workflow or other-OS change/acceptance. FE-I34 and the
+remaining M4 inventory stay open. Next: comprehensive runtime-version status.
+
 ## 2026-09-08 — Installed Runtime-Version List Response Contract
 
 Accepted typed installed-version success responses and generated preload decoding.

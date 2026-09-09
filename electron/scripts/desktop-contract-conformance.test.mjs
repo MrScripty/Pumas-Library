@@ -10,6 +10,18 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('selected-version decoding preserves producer text and empty absence', () => {
+  for (const key of ['selected_version', 'selected_version_empty']) {
+    const result = contract.decodeSelectedVersionOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  for (const patch of [{ version: null }, { version: undefined }, { version: [] },
+    { version: 42 }, { success: false }, { extra: true }]) {
+    assert.equal(contract.decodeSelectedVersionOutcome({ ...fixtures.selected_version, ...patch }).status, 'invalid');
+  }
+});
+
 test('installed-list decoding preserves actual tags and rejects malformed success payloads', () => {
   for (const key of ['installed_versions', 'installed_versions_empty']) {
     const result = contract.decodeInstalledVersionsOutcome(fixtures[key]);

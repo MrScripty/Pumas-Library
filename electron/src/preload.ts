@@ -45,6 +45,7 @@ import {
   decodeAvailableVersionsOutcome,
   decodeGithubCacheStatusOutcome,
   decodeInstalledVersionsOutcome,
+  decodeSelectedVersionOutcome,
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
@@ -516,7 +517,7 @@ const electronAPI = {
   get_available_versions: (forceRefresh?: boolean, appId?: string) =>
     validatedApiCall('get_available_versions', decodeAvailableVersionsOutcome, { force_refresh: forceRefresh, app_id: appId }),
   get_installed_versions: (appId?: string) => validatedApiCall('get_installed_versions', decodeInstalledVersionsOutcome, { app_id: appId }),
-  get_active_version: (appId?: string) => apiCall('get_active_version', { app_id: appId }),
+  get_active_version: (appId?: string) => validatedApiCall('get_active_version', decodeSelectedVersionOutcome, { app_id: appId }),
   install_version: (tag: string, appId?: string) =>
     apiCall('install_version', { tag, app_id: appId }),
   remove_version: (tag: string, appId?: string) =>
@@ -527,7 +528,7 @@ const electronAPI = {
     apiCall('validate_installations', { app_id: appId }),
   get_version_info: (tag: string, appId?: string) =>
     apiCall('get_version_info', { tag, app_id: appId }),
-  get_default_version: (appId?: string) => apiCall('get_default_version', { app_id: appId }),
+  get_default_version: (appId?: string) => validatedApiCall('get_default_version', decodeSelectedVersionOutcome, { app_id: appId }),
   set_default_version: (tag?: string | null, appId?: string) =>
     apiCall('set_default_version', { tag, app_id: appId }),
   get_version_status: (appId?: string) => apiCall('get_version_status', { app_id: appId }),

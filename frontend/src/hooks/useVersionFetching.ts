@@ -110,11 +110,7 @@ export function useVersionFetching({
 
     try {
       const result = await api.get_active_version(resolvedAppId);
-      if (result.success) {
-        setActiveVersion(result.version || null);
-      } else {
-        setError(result.error || 'Failed to fetch active version');
-      }
+      setActiveVersion(result.version === '' ? null : result.version);
     } catch (error) {
       if (error instanceof APIError) {
         logger.error('API error fetching active version', { error: error.message, endpoint: error.endpoint });
@@ -137,9 +133,7 @@ export function useVersionFetching({
 
     try {
       const result = await api.get_default_version(resolvedAppId);
-      if (result.success) {
-        setDefaultVersionState(result.version || null);
-      }
+      setDefaultVersionState(result.version === '' ? null : result.version);
     } catch (error) {
       // non-fatal - log but don't set error state
       if (error instanceof APIError) {

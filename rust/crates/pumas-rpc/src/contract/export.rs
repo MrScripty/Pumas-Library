@@ -470,6 +470,9 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         "v2".into(),
         String::new(),
     ]))?;
+    fixtures["selected_version"] =
+        serde_json::to_value(SelectedVersionOutcome::new(Some(" vλ.1 ".into())))?;
+    fixtures["selected_version_empty"] = serde_json::to_value(SelectedVersionOutcome::new(None))?;
     fixtures["installed_versions_empty"] =
         serde_json::to_value(InstalledVersionsOutcome::new(vec![]))?;
     fixtures["github_cache_status_no_manager"] =
@@ -514,6 +517,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         AvailableVersionsOutcome,
         GithubCacheStatusOutcome,
         InstalledVersionsOutcome,
+        SelectedVersionOutcome,
         UpdateModelNotesOutcome,
         LibraryModelMetadataOutcome,
         GetHfDownloadDetailsParams,
@@ -962,6 +966,7 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "UpdateInferenceSettingsOutcome"
             | "AvailableVersionsSuccess"
             | "InstalledVersionsOutcome"
+            | "SelectedVersionOutcome"
             | "UpdateModelNotesSuccess"
             | "LibraryModelMetadataOutcome"
             | "LibraryModelMetadataResponse"

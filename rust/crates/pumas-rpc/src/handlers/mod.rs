@@ -763,6 +763,18 @@ async fn dispatch_admitted_command(
                 .await
                 .map(RpcOutcome::InstalledVersions)
         }
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::Legacy { method, params } if method == "get_active_version" => {
+            versions::get_active_version(state, &params)
+                .await
+                .map(RpcOutcome::SelectedVersion)
+        }
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::Legacy { method, params } if method == "get_default_version" => {
+            versions::get_default_version(state, &params)
+                .await
+                .map(RpcOutcome::SelectedVersion)
+        }
         RpcCommand::Legacy { method, params } if method == "get_library_model_metadata" => {
             models::get_library_model_metadata(state, &params)
                 .await
@@ -1136,10 +1148,6 @@ async fn dispatch_method(
 
         // Version Management
         #[cfg(feature = "inference-plugins")]
-        "get_active_version" => versions::get_active_version(state, params).await,
-        #[cfg(feature = "inference-plugins")]
-        "get_default_version" => versions::get_default_version(state, params).await,
-        #[cfg(feature = "inference-plugins")]
         "set_default_version" => versions::set_default_version(state, params).await,
         #[cfg(feature = "inference-plugins")]
         "switch_version" => versions::switch_version(state, params).await,
@@ -1332,6 +1340,41 @@ async fn dispatch_method(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn selected_version_rpc_preserves_no_manager_and_feature_gate() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        for method in ["get_active_version", "get_default_version"] {
+            let request = Bytes::from(
+                serde_json::to_vec(&json!({
+                    "jsonrpc":"2.0","id":"selected-version-fixture","method":method,
+                    "params":{"app_id":"unregistered-runtime"},
+                }))
+                .unwrap(),
+            );
+            let response = handle_rpc(State(state.clone()), request)
+                .await
+                .into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(response.into_body(), 65_536)
+                .await
+                .unwrap();
+            let wire: Value = serde_json::from_slice(&body).unwrap();
+            #[cfg(feature = "inference-plugins")]
+            assert_eq!(
+                wire,
+                json!({"jsonrpc":"2.0","id":"selected-version-fixture","result":{"success":true,"version":""}})
+            );
+            #[cfg(not(feature = "inference-plugins"))]
+            assert_eq!(
+                wire,
+                json!({"jsonrpc":"2.0","id":"selected-version-fixture","error":{
+                    "code":-32601,"message":"The requested method is not supported.","data":{"class":"not_found"},
+                }})
+            );
+        }
+    }
 
     #[tokio::test]
     async fn installed_versions_rpc_preserves_no_manager_and_feature_gate() {

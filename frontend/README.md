@@ -91,6 +91,10 @@ Installed runtime-version lists are decoded before entering state. Exact tags,
 ordering and duplicates are preserved; malformed lists report an error and keep
 the last valid list. Runtime lookup and installation behavior are unchanged.
 
+Active/default version reads share a validated string response. Empty strings
+retain the existing wire meaning of no selection and display as null; other
+tags remain exact. Invalid replies leave the previous selection intact.
+
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.
 Malformed responses cannot enter the modal; nested values display without

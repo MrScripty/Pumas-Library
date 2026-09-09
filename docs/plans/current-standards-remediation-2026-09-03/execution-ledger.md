@@ -20,6 +20,14 @@
 
 ## Slice Log
 
+### 2026-09-08 — Active/default version reads accepted
+
+- Both selection reads use one typed/generated response, preserving existing
+  empty-string absence and exact tags while rejecting malformed replies.
+- The [frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-08--active-and-default-runtime-version-read-contracts)
+  records prior-wire equivalence, hook retention and feature-gate evidence.
+  Selection mutations are unchanged; comprehensive version status remains next.
+
 ### 2026-09-08 — Installed-version list responses accepted
 
 - Installed lists now use typed RPC responses and generated preload decoding;

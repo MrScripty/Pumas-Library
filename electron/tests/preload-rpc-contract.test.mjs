@@ -11,6 +11,22 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('selected versions reject malformed values and preserve empty-string absence', async () => {
+  const harness = loadCompiledPreload();
+  for (const method of ['get_active_version', 'get_default_version']) {
+    for (const response of [null, {}, { success: true, version: null },
+      { success: true, version: 42 }, { success: true, version: [] },
+      { success: false, version: '' }, { success: true, version: '', error: 'bad' }]) {
+      harness.respondWith(response);
+      await assert.rejects(harness.api[method]('ollama'), { name: 'DesktopContractError' });
+    }
+    for (const version of ['', ' vλ.1 ']) {
+      harness.respondWith({ success: true, version });
+      assert.deepEqual(toPlainValue(await harness.api[method]('ollama')), { success: true, version });
+    }
+  }
+});
+
 test('installed versions reject malformed lists and preserve exact tags', async () => {
   const harness = loadCompiledPreload();
   for (const response of [null, [], {}, { success: true, versions: null },

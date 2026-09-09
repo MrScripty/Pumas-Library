@@ -20,25 +20,29 @@ pub async fn get_installed_versions(
     }
 }
 
-pub async fn get_active_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
+pub async fn get_active_version(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<crate::contract::SelectedVersionOutcome> {
     let app_id_str = require_str_param(params, "app_id", "appId")?;
     if let Some(vm) = get_version_manager(state, app_id_str).await {
         let version = vm.get_active_version().await?;
-        // Return raw value - wrapper.rs will add {success, version} wrapper
-        Ok(serde_json::to_value(version)?)
+        Ok(crate::contract::SelectedVersionOutcome::new(version))
     } else {
-        Ok(Value::Null)
+        Ok(crate::contract::SelectedVersionOutcome::new(None))
     }
 }
 
-pub async fn get_default_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
+pub async fn get_default_version(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<crate::contract::SelectedVersionOutcome> {
     let app_id_str = require_str_param(params, "app_id", "appId")?;
     if let Some(vm) = get_version_manager(state, app_id_str).await {
         let version = vm.get_default_version().await?;
-        // Return raw value - wrapper.rs will add {success, version} wrapper
-        Ok(serde_json::to_value(version)?)
+        Ok(crate::contract::SelectedVersionOutcome::new(version))
     } else {
-        Ok(Value::Null)
+        Ok(crate::contract::SelectedVersionOutcome::new(None))
     }
 }
 

@@ -1,5 +1,46 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Download Admission Wait Diagnostics
+
+Accepted diagnostic fidelity only; FE-I28 remains open. root_diagnostics added
+private per-fixture atomic observations to the two pause tests whose original
+one-second admitted-ID waits failed. Error messages retain the receive failure
+and add last-observed admission milestone, worker-thread completion, and the
+cleanup fixture variant when applicable. Existing admission observers supply
+three milestones; fixture thread entry, start call and return supply the others.
+Unknown observer events do not erase the last selected milestone.
+
+The failure path reads an atomic and `JoinHandle::is_finished`, without taking
+an owner lock, awaiting, reading files or joining. These are separately sampled
+observations, not a consistent lifecycle snapshot or proof of a pending effect.
+Pre-prepare internal substeps remain indistinguishable. No production hook,
+public API, deadline, default parallelism or existing fixture hold changed.
+Keep this bounded assertion context while those waits remain; review its value
+when FE-I28 is diagnosed, rather than growing a general event recorder.
+
+Root reviewed/integrated the source and owned formatting, serial verification
+and plan updates; root_capability's independent read-only review found no blockers.
+The diagnosing-bugs skill was used to improve the feedback signal, not to infer
+a cause from green reruns. No temporary debug logging was introduced.
+
+From `rust/`, `cargo test --offline --locked -p pumas-library --lib
+model_library::hf::download::tests::pause_` passed all nine tests, including the
+diagnostic formatter and both affected lifecycle tests. The original combined
+configuration, `cargo test --offline --locked -p pumas-library -p pumas-rpc --
+--quiet`, passed 1,487 executions (including one extra marker-child invocation),
+with 22 ignored and zero failures. Log:
+`/tmp/pumas-download-admission-diagnostics-default.log`. Both commands had
+localhost fixture permissions. Strict core lint passed via `cargo clippy
+--offline --locked -p pumas-library --all-targets --all-features -- -D warnings`;
+`cargo fmt --all --check` and all five canonical plan checks passed.
+
+No timeout was reproduced. Return FE-I28 to diagnosis on recurrence with the new
+context; do not block further API/UI prerequisites on repeated passing runs.
+Next is FE-I26 calibration-file preflight, where existing manager metadata
+checks and direct llama.cpp presence checks differ. Pending download cleanup
+replay is not admitted. No GUI, native-tool, live-model or other-platform
+acceptance is inferred.
+
 ## 2026-09-08 — Download Timeout Reproduction
 
 FE-I28 remains open; no source fix or verification-stability acceptance. Root

@@ -299,9 +299,9 @@ is accepted with explicit probe failures and aggregate shutdown.
 is accepted for the successful-setup path.
 [Native setup interruption invalidation](frontend-and-ui/plan.md#native-setup-interruption-invalidation)
 is accepted for process-exit/reopen and explicit repair. Later external mutation
-provenance remains open. FE-I28 verification stability is next after a broader
-download-deadline failure cluster; final rechecks passed without establishing
-the cause. This does not admit Pending cleanup replay. FE-I29 retains a separate
+provenance remains open. Test-only [admission wait diagnostics](frontend-and-ui/plan.md#download-admission-wait-diagnostics)
+are accepted; FE-I28 stays open on recurrence without a diagnosed cause.
+Calibration-file preflight is next under FE-I26. This does not admit Pending cleanup replay. FE-I29 retains a separate
 intermittent preflight-test failure despite fixture hardening.
 Independent probes, direct backend calls
 and external tools still need caller coordination. FE-I28 records an unrelated

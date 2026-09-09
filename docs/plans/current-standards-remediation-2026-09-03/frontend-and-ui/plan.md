@@ -10,14 +10,14 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Download lifecycle verification stability (FE-I28).
-The NINVALID default matrix exposed 18 download deadline failures. The bounded
-[reproduction pass](execution-ledger.md#2026-09-08--download-timeout-reproduction)
-did not reproduce them, including the original build configuration and elevated
-test concurrency. FE-I28 remains open: capture admission/effect state at a failing
-wait before selecting a fix. Do not repeat passing suites without a new deciding
-observation. This is verification work, not admission of the separately Pending
-download cleanup replay.
+**Next slice:** Calibration-file preflight (FE-I26, remaining FE-I23).
+Bound the managed/direct llama.cpp input checks before native effects; manager
+admission currently checks metadata while direct calls only require a supplied
+path. Content/readability and execution-custody claims need explicit scope before
+implementation. FE-I28 remains open on recurrence: accepted test-only admission
+diagnostics below improve the next failing wait, without establishing its cause.
+Do not repeat passing suites without a new deciding observation. Pending download
+cleanup replay remains separately unadmitted.
 Successful native setup now reconfigures and rebuilds current source below;
 interrupted native recipe invalidation is accepted below. Later external mutation
 provenance and independent probe/setup coordination remain outside acceptance.
@@ -53,6 +53,31 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Download Admission Wait Diagnostics
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--download-admission-wait-diagnostics).
+FE-I28 remains unresolved. This bounded slice enriches the
+two existing one-second admitted-ID wait failures with the last observed
+admission milestone and worker-thread completion. It does not infer the exact
+pending effect or diagnose the original timeout from a last-observed milestone.
+
+Write set: the two pause/admission tests and their private diagnostic helper in
+core `src/model_library/hf/download.rs` (root_diagnostics); this plan, ledger,
+issues and parent plan (root). Root serializes verification, integration and commits. No new
+production hooks, public APIs, persisted state, runtime, deadline, concurrency
+configuration, live-library or GUI changes. Existing fixture holds remain intact.
+
+Acceptance: focused automated simulated evidence that diagnostic reads preserve
+unobserved/observed milestones and worker completion without locks or awaits;
+both existing lifecycle tests still pass. Run the original combined core/RPC
+configuration once to exercise the enriched assertions in their failing-suite
+context, plus affected strict core lint and formatting; all passed. A passing run accepts
+only diagnostic fidelity, not FE-I28 stability. Composed-design review is
+not-applicable: private assertion context reuses existing test-only observers,
+without changing a production Interface or lifecycle. Re-plan if deciding
+evidence needs new production hooks or a different ownership boundary.
 
 ## Native Setup Interruption Invalidation
 

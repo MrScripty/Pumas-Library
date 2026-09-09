@@ -11551,6 +11551,82 @@ mod tests {
         assert!(client.cancel_download(transition_id).await.unwrap());
     }
 
+    #[derive(Clone, Copy)]
+    #[repr(u8)]
+    enum PauseAdmissionStage {
+        Unobserved = 0,
+        RuntimeThreadEntered = 1,
+        CallingStart = 2,
+        PreparingTask = 3,
+        InventoryChecked = 4,
+        WorkerStarted = 5,
+        StartReturned = 6,
+    }
+
+    struct PauseAdmissionObservation(std::sync::atomic::AtomicU8);
+
+    impl PauseAdmissionObservation {
+        fn new() -> Self {
+            Self(std::sync::atomic::AtomicU8::new(
+                PauseAdmissionStage::Unobserved as u8,
+            ))
+        }
+
+        fn record(&self, stage: PauseAdmissionStage) {
+            self.0.store(stage as u8, Ordering::Relaxed);
+        }
+
+        fn observe(&self, operation: &str) {
+            let stage = match operation {
+                "prepare-download-task" => PauseAdmissionStage::PreparingTask,
+                "admission-inventory-checked" => PauseAdmissionStage::InventoryChecked,
+                "ordinary-start-started" => PauseAdmissionStage::WorkerStarted,
+                _ => return,
+            };
+            self.record(stage);
+        }
+
+        fn describe(&self, runtime_finished: bool) -> String {
+            // Diagnostic only: one atomic read, no owner lock, filesystem read,
+            // or join. This is the last observation, not proof of a pending phase.
+            let stage = match self.0.load(Ordering::Relaxed) {
+                0 => "unobserved",
+                1 => "runtime-thread-entered",
+                2 => "calling-start",
+                3 => "prepare-download-task",
+                4 => "admission-inventory-checked",
+                5 => "ordinary-start-started",
+                6 => "start-returned",
+                _ => unreachable!("only PauseAdmissionStage values are recorded"),
+            };
+            format!(
+                "last observed admission stage={stage}; worker runtime finished={runtime_finished}"
+            )
+        }
+    }
+
+    #[test]
+    fn pause_admission_diagnostics_report_observations_without_waiting_for_workers() {
+        let observation = PauseAdmissionObservation::new();
+        assert_eq!(
+            observation.describe(false),
+            "last observed admission stage=unobserved; worker runtime finished=false"
+        );
+        observation.observe("prepare-download-task");
+        observation.observe("unrelated-event");
+        assert_eq!(
+            observation.describe(false),
+            "last observed admission stage=prepare-download-task; worker runtime finished=false"
+        );
+        observation.observe("admission-inventory-checked");
+        assert_eq!(observation.describe(true), "last observed admission stage=admission-inventory-checked; worker runtime finished=true");
+        observation.record(PauseAdmissionStage::StartReturned);
+        assert_eq!(
+            observation.describe(true),
+            "last observed admission stage=start-returned; worker runtime finished=true"
+        );
+    }
+
     #[tokio::test]
     async fn pause_after_a_worker_check_is_settled_by_the_same_generation() {
         let temp = TempDir::new().unwrap();
@@ -11594,19 +11670,30 @@ mod tests {
         let request = recovery_test_request("acme/model", &["weights.gguf".to_string()]);
         let (id_sender, id_receiver) = std::sync::mpsc::channel();
         let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
+        let admission = Arc::new(PauseAdmissionObservation::new());
+        client
+            .download_tasks
+            .set_ambient_admission_observer(Some(Arc::new({
+                let admission = admission.clone();
+                move |operation, _| admission.observe(operation)
+            })));
         let worker_runtime = std::thread::spawn({
             let client = client.clone();
             let destination = destination.clone();
+            let admission = admission.clone();
             move || {
+                admission.record(PauseAdmissionStage::RuntimeThreadEntered);
                 tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .unwrap()
                     .block_on(async move {
+                        admission.record(PauseAdmissionStage::CallingStart);
                         let download_id = client
                             .start_download(&request, &destination, None)
                             .await
                             .unwrap();
+                        admission.record(PauseAdmissionStage::StartReturned);
                         id_sender.send(download_id).unwrap();
                         let _ = shutdown_receiver.await;
                     });
@@ -11614,7 +11701,12 @@ mod tests {
         });
         let download_id = id_receiver
             .recv_timeout(Duration::from_secs(1))
-            .expect("start must return its admitted ID");
+            .unwrap_or_else(|error| {
+                panic!(
+                    "start must return its admitted ID: {error:?}; {}",
+                    admission.describe(worker_runtime.is_finished())
+                )
+            });
         drop(physical_guard);
         reached
             .recv_timeout(Duration::from_secs(1))
@@ -11715,19 +11807,30 @@ mod tests {
             let request = recovery_test_request("acme/model", &["weights.gguf".to_string()]);
             let (id_sender, id_receiver) = std::sync::mpsc::channel();
             let (shutdown_sender, shutdown_receiver) = tokio::sync::oneshot::channel();
+            let admission = Arc::new(PauseAdmissionObservation::new());
+            client
+                .download_tasks
+                .set_ambient_admission_observer(Some(Arc::new({
+                    let admission = admission.clone();
+                    move |operation, _| admission.observe(operation)
+                })));
             let worker_runtime = std::thread::spawn({
                 let client = client.clone();
                 let destination = destination.clone();
+                let admission = admission.clone();
                 move || {
+                    admission.record(PauseAdmissionStage::RuntimeThreadEntered);
                     tokio::runtime::Builder::new_current_thread()
                         .enable_all()
                         .build()
                         .unwrap()
                         .block_on(async move {
+                            admission.record(PauseAdmissionStage::CallingStart);
                             let download_id = client
                                 .start_download(&request, &destination, None)
                                 .await
                                 .unwrap();
+                            admission.record(PauseAdmissionStage::StartReturned);
                             id_sender.send(download_id).unwrap();
                             let _ = shutdown_receiver.await;
                         });
@@ -11735,7 +11838,7 @@ mod tests {
             });
             let download_id = id_receiver
                 .recv_timeout(Duration::from_secs(1))
-                .expect("start must return its admitted ID");
+                .unwrap_or_else(|error| panic!("start must return its admitted ID: {error:?}; cleanup fixture={block_at}; {}", admission.describe(worker_runtime.is_finished())));
             drop(physical_guard);
             reached
                 .recv_timeout(Duration::from_secs(1))

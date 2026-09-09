@@ -7,14 +7,10 @@ use serde_json::{json, Value};
 pub async fn get_inference_settings(
     state: &AppState,
     params: &Value,
-) -> pumas_library::Result<Value> {
+) -> pumas_library::Result<crate::contract::InferenceSettingsOutcome> {
     let model_id = require_str_param(params, "model_id", "modelId")?;
     let settings = state.api.get_inference_settings(&model_id).await?;
-    Ok(json!({
-        "success": true,
-        "model_id": model_id,
-        "inference_settings": settings
-    }))
+    crate::contract::InferenceSettingsOutcome::new(model_id, settings)
 }
 
 pub async fn update_inference_settings(

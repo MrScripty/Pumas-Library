@@ -75,7 +75,12 @@ export function ModelInferenceSettingsEditor({
                     {param.label}
                     <span className="ml-1 opacity-50">({param.param_type})</span>
                   </label>
-                  {param.param_type === 'Boolean' ? (
+                  {param.default !== null && typeof param.default === 'object' ? (
+                    <div className="text-xs text-[hsl(var(--text-muted))]">
+                      <span>Structured default (read-only)</span>
+                      <pre className="overflow-x-auto whitespace-pre-wrap">{JSON.stringify(param.default, null, 2)}</pre>
+                    </div>
+                  ) : param.param_type === 'Boolean' ? (
                     <select
                       value={String(param.default)}
                       onChange={(event) => onParamDefaultChange(index, event.target.value)}

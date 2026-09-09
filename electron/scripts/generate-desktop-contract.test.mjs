@@ -11,6 +11,11 @@ test('type projection refuses unknown reachable schema constructs', () => {
   assert.throws(() => schemaType({dynamicRef:'#anchor'}), /Unsupported/);
 });
 
+test('dictionary projection preserves readonly recursive references', () => {
+  assert.equal(schemaType({type:'object', additionalProperties:{$ref:'#/definitions/JsonValue'}}),
+    '{ readonly [key: string]: JsonValue }');
+});
+
 test('standalone validator preserves UTF8 byte bounds and closed shapes', async () => {
   const files = await generate({format:'pumas-desktop-contract-1',dialect:'http://json-schema.org/draft-07/schema#',schemas:{Example:{type:'object',additionalProperties:false,required:['text'],properties:{text:{type:'string',pumasUtf8Max:4}}}}});
   const module = await import(`data:text/javascript;base64,${Buffer.from(files['desktop-contract.validators.js']).toString('base64')}`);

@@ -10,6 +10,31 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('inference settings preserve actual producer values and reject malformed nested facts', () => {
+  for (const name of ['inference_settings', 'inference_settings_empty']) {
+    const result = contract.decodeInferenceSettingsOutcome(fixtures[name]);
+    assert.equal(result.status, 'valid', name);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[name]);
+  }
+  const valid = fixtures.inference_settings;
+  const first = valid.inference_settings[0];
+  for (const patch of [
+    { param_type: 'Float' }, { description: 42 }, { key: null },
+    { constraints: { min: null, max: null } },
+    { constraints: { min: '1', max: null, allowed_values: null } },
+    { default: { nested: [-9007199254740992] } },
+    { constraints: { min: null, max: null, allowed_values: [{ nested: 9007199254740992 }] } },
+    { extra: true },
+  ]) {
+    assert.equal(contract.decodeInferenceSettingsOutcome({ ...valid, inference_settings: [{ ...first, ...patch }] }).status, 'invalid', JSON.stringify(patch));
+  }
+  for (const key of ['default', 'description', 'constraints']) {
+    const incomplete = { ...first };
+    delete incomplete[key];
+    assert.equal(contract.decodeInferenceSettingsOutcome({ ...valid, inference_settings: [incomplete] }).status, 'invalid', key);
+  }
+});
+
 test('HF download-details request decoding agrees with the actual Rust parser', () => {
   const probes = fixtures.hf_download_details_request_probes;
   assert.ok(Array.isArray(probes) && probes.length > 0);

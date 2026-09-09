@@ -20,7 +20,11 @@ interface ModelMetadataModalProps {
   onClose: () => void;
 }
 
-export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
+export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = (props) => (
+  <ModelMetadataModalSession key={props.modelId} {...props} />
+);
+
+const ModelMetadataModalSession: React.FC<ModelMetadataModalProps> = ({
   modelId,
   modelName,
   onClose,
@@ -44,6 +48,7 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
 
   // Inference settings state
   const [inferenceSettings, setInferenceSettings] = useState<InferenceParamSchema[]>([]);
+  const [inferenceSettingsError, setInferenceSettingsError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -80,38 +85,58 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
   };
 
   useEffect(() => {
+    // The bridge cannot cancel reads. Observe completion, but only this mounted
+    // model session may apply it; replacement also discards model-specific drafts.
+    let superseded = false;
     async function fetchMetadata() {
       setLoading(true);
       setError(null);
       try {
-        const [metaResult, settingsResult] = await Promise.all([
+        const [metadataRead, settingsRead] = await Promise.allSettled([
           modelsAPI.getLibraryModelMetadata(modelId),
-          modelsAPI.getInferenceSettings(modelId).catch(() => null),
+          modelsAPI.getInferenceSettings(modelId),
         ]);
+        if (superseded) return;
+        if (metadataRead.status === 'rejected') {
+          setError('Failed to load metadata');
+          return;
+        }
+        const metaResult = metadataRead.value;
 
-        if (metaResult.success) {
-          setStoredMetadata(metaResult.stored_metadata);
+        if (metaResult.success && metaResult.model_id === modelId) {
+          setStoredMetadata(metaResult.stored_metadata ?? null);
           setNotesDraft(getStoredNotes(metaResult.stored_metadata));
           if (metaResult.embedded_metadata) {
             setEmbeddedMetadata(metaResult.embedded_metadata.metadata);
             setEmbeddedFileType(metaResult.embedded_metadata.file_type);
           }
-          setPrimaryFile(metaResult.primary_file);
+          setPrimaryFile(metaResult.primary_file ?? null);
           setComponentManifest(metaResult.component_manifest || []);
         } else {
           setError('Failed to load metadata');
         }
 
-        if (settingsResult !== null && settingsResult.success) {
-          setInferenceSettings(settingsResult.inference_settings);
+        if (settingsRead.status === 'fulfilled'
+            && settingsRead.value.model_id === modelId) {
+          setInferenceSettings(settingsRead.value.inference_settings.map((param) => ({
+            ...param,
+            constraints: param.constraints == null ? param.constraints : {
+              ...param.constraints,
+              allowed_values: param.constraints.allowed_values == null
+                ? param.constraints.allowed_values : [...param.constraints.allowed_values],
+            },
+          })));
+        } else {
+          setInferenceSettingsError('Unable to load inference settings. Close and reopen this model to retry.');
         }
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Unknown error');
+        if (!superseded) setError(e instanceof Error ? e.message : 'Unknown error');
       } finally {
-        setLoading(false);
+        if (!superseded) setLoading(false);
       }
     }
     void fetchMetadata();
+    return () => { superseded = true; };
   }, [modelId]);
 
   useEffect(() => {
@@ -132,17 +157,19 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
       if (!param) {
         return prev;
       }
+      const updated = { ...param };
       if (param.param_type === 'Integer') {
         const parsed = parseInt(value, 10);
-        param.default = isNaN(parsed) ? value : parsed;
+        updated.default = isNaN(parsed) ? value : parsed;
       } else if (param.param_type === 'Number') {
         const parsed = parseFloat(value);
-        param.default = isNaN(parsed) ? value : parsed;
+        updated.default = isNaN(parsed) ? value : parsed;
       } else if (param.param_type === 'Boolean') {
-        param.default = value === 'true';
+        updated.default = value === 'true';
       } else {
-        param.default = value;
+        updated.default = value;
       }
+      next[index] = updated;
       return next;
     });
   };
@@ -273,6 +300,7 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
               executionFactsLoading={executionFactsLoading}
               expandedFieldKeys={expandedFieldKeys}
             inferenceSettings={inferenceSettings}
+            inferenceSettingsError={inferenceSettingsError}
             modelId={modelId}
             modelName={modelName}
             newParam={newParam}

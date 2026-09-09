@@ -102,7 +102,9 @@ export function schemaType(schema) {
       const fields = Object.entries(schema.properties ?? {}).map(([name, field]) => `${JSON.stringify(name)}${schema.required?.includes(name) ? '' : '?'}: ${schemaType(field)}`);
       if (schema.additionalProperties && typeof schema.additionalProperties === 'object') {
         if (fields.length) throw new Error('Unsupported mixed dictionary and named properties');
-        return `Readonly<Record<string, ${schemaType(schema.additionalProperties)}>>`;
+        // An index signature also permits recursive JSON aliases; Record's
+        // mapped-type indirection makes those aliases illegal in TypeScript.
+        return `{ readonly [key: string]: ${schemaType(schema.additionalProperties)} }`;
       }
       return `{ ${fields.join('; ')} }`;
     }

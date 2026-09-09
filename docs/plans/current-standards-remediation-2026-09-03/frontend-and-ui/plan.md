@@ -10,9 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound metadata and inference-settings reads in the model metadata
-modal (FE-I01/M4): inventory backend response ownership, decoding and stale-model
-completion before edits. Read-only contract work does not admit settings writes.
+**Next slice:** Complete the library-model metadata response contract (FE-I01/M4),
+including omitted optional fields and arbitrary-JSON versus object consumers.
+Inference-settings reads and modal model-isolation are accepted below.
+Read-only contract work does not admit settings writes.
 Hugging Face download-details request and response contracts below are accepted.
 The user's conversion-priority decision below supersedes source-root follow-up.
 Source-file classification and llama.cpp discovery are accepted below. Direct
@@ -57,6 +58,50 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Inference-Settings Read Contract And Modal Isolation
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--inference-settings-reads-and-modal-isolation).
+Operation: `continue` this canonical plan. Implement the
+inference-settings response through core-owned parameter types, typed RPC
+outcome and existing generated preload decoding. Project dictionary types as
+readonly index signatures so recursive JSON aliases compile; existing runtime
+schema semantics are unchanged. Preserve exact model identity,
+all four parameter types, ordered settings, explicit nullable fields and JSON
+defaults/allowed values without inventing parameter-domain validation. Reject
+nonfinite constraints and JSON numbers outside the JavaScript-safe range at the
+RPC projection; the core and persisted values are unchanged. RPC errors retain
+their existing error envelope; no new success-false payload is invented.
+
+The modal owns one per-model state lifetime. Superseded/unmounted reads cannot
+apply state; mismatched model identities fail. Settings-read failure is visible
+and cannot authorize editing an empty replacement, while metadata stays usable.
+Existing mutation operations are unchanged. Metadata's full generated response
+is separate: its omitted optional payloads disagree with the handwritten null
+shape and require a dedicated arbitrary-JSON/object projection decision.
+
+Write set: root_capability owns core model schema derives and RPC contract,
+export, dispatch, inference handler and focused tests. Root owns preload/tests,
+the existing generator's dictionary projection and regression test,
+six generated files, frontend response alias/edit draft adaptation, metadata
+modal/content/settings-editor/tests, existing producer-renderer conformance, frontend README and
+four plan records. Root serializes generation, Cargo, integration and commits.
+
+Acceptance is automated focused and contract evidence in the local/simulated
+environment: real Rust serialization through generated decoder and bundled
+preload/modal, malformed nested rejection, visible failure, exact identity,
+stale success/failure and model replacement. Run focused RPC default/minimal
+tests, strict lint/formatting, frontend types/component tests, Electron build,
+generator tests/freshness and plan checks. No real GUI, model writes or other-OS
+claim. Composed-design review applies: core owns schemas, RPC owns destination
+representation, existing AJV owns schema semantics and per-model React lifetime
+owns drafts/results. Deleting these mechanisms would restore handwritten shape
+knowledge and stale/empty-success behavior; no new framework is introduced.
+The producer-to-modal fixture exposed object defaults crashing scalar conversion;
+project compound defaults as explicitly read-only JSON without changing their
+values or introducing structured editing. Re-plan if preserving core/persisted semantics needs a migration or read
+acceptance requires changing mutation policy.
 
 ## Hugging Face Download-Details Request Admission
 

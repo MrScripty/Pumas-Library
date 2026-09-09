@@ -444,6 +444,7 @@ pub(crate) enum RpcOutcome {
     Models(Box<ModelsOutcome>),
     CatalogSearch(Box<CatalogSearchOutcome>),
     HfDownloadDetails(Box<HfDownloadDetailsOutcome>),
+    InferenceSettings(Box<InferenceSettingsOutcome>),
     ModelIndexRefresh(ModelIndexRefreshOutcome),
     Legacy(Value),
 }
@@ -500,6 +501,7 @@ impl RpcOutcome {
             Self::Models(value) => serde_json::to_value(value),
             Self::CatalogSearch(value) => serde_json::to_value(value),
             Self::HfDownloadDetails(value) => serde_json::to_value(value),
+            Self::InferenceSettings(value) => serde_json::to_value(value),
             Self::ModelIndexRefresh(value) => serde_json::to_value(value),
             Self::Legacy(value) => return Ok(value),
         };
@@ -1234,6 +1236,151 @@ impl DownloadListOutcome {
 pub(crate) struct ModelsOutcome {
     success: bool,
     models: BTreeMap<String, CatalogModel>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct InferenceSettingsOutcome {
+    success: bool,
+    model_id: String,
+    inference_settings: Vec<pumas_library::models::InferenceParamSchema>,
+}
+
+impl InferenceSettingsOutcome {
+    pub(crate) fn new(
+        model_id: String,
+        inference_settings: Vec<pumas_library::models::InferenceParamSchema>,
+    ) -> Result<Self, PumasError> {
+        for setting in &inference_settings {
+            if !inference_json_representable(&setting.default)
+                || setting.constraints.as_ref().is_some_and(|constraints| {
+                    [constraints.min, constraints.max]
+                        .into_iter()
+                        .flatten()
+                        .any(|number| !number.is_finite())
+                        || constraints.allowed_values.as_ref().is_some_and(|values| {
+                            values
+                                .iter()
+                                .any(|value| !inference_json_representable(value))
+                        })
+                })
+            {
+                return Err(invalid_domain_outcome("inference settings"));
+            }
+        }
+        Ok(Self {
+            success: true,
+            model_id,
+            inference_settings,
+        })
+    }
+}
+
+fn inference_json_representable(value: &Value) -> bool {
+    match value {
+        Value::Number(number) => number
+            .as_f64()
+            .is_some_and(|number| number.is_finite() && number.abs() <= MAX_JS_SAFE_INTEGER as f64),
+        Value::Array(values) => values.iter().all(inference_json_representable),
+        Value::Object(values) => values.values().all(inference_json_representable),
+        Value::Null | Value::Bool(_) | Value::String(_) => true,
+    }
+}
+
+#[cfg(any(test, feature = "export-contract"))]
+fn inference_settings_fixture() -> Vec<pumas_library::models::InferenceParamSchema> {
+    use pumas_library::models::{InferenceParamSchema, ParamConstraints, ParamType};
+    [
+        ParamType::Number,
+        ParamType::Integer,
+        ParamType::String,
+        ParamType::Boolean,
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, param_type)| InferenceParamSchema {
+        key: format!(" Exact key {index} "),
+        label: format!("Label {index} λ"),
+        param_type,
+        // Parameter-type/default correspondence belongs to the domain,
+        // not this representation-only response projection.
+        default: if index == 1 {
+            serde_json::json!(4096)
+        } else {
+            serde_json::json!({"nested":[null,true," λ ",0.25,{"edge":MAX_JS_SAFE_INTEGER}]})
+        },
+        description: (index == 0).then(|| " Exact description ".into()),
+        constraints: (index != 0).then(|| ParamConstraints {
+            min: (index == 1).then_some(-0.5),
+            max: (index == 1).then_some(1.5),
+            allowed_values: (index == 2)
+                .then(|| vec![Value::Null, serde_json::json!({"nested":[1,false]})]),
+        }),
+    })
+    .collect()
+}
+
+#[cfg(test)]
+mod inference_settings_tests {
+    use super::*;
+
+    #[test]
+    fn inference_settings_projection_preserves_emitted_fields_and_core_json() {
+        let settings = inference_settings_fixture();
+        let expected = serde_json::json!({"success":true,"model_id":" Exact model ","inference_settings":settings});
+        let outcome = RpcOutcome::InferenceSettings(Box::new(
+            InferenceSettingsOutcome::new(" Exact model ".into(), settings).unwrap(),
+        ));
+        assert!(!outcome.uses_response_wrapper());
+        assert_eq!(outcome.into_value().unwrap(), expected);
+        assert_eq!(
+            serde_json::to_value(InferenceSettingsOutcome::new("empty".into(), vec![]).unwrap())
+                .unwrap(),
+            serde_json::json!({"success":true,"model_id":"empty","inference_settings":[]})
+        );
+    }
+
+    #[test]
+    fn inference_settings_projection_rejects_unrepresentable_nested_numbers() {
+        for number in [
+            serde_json::json!(MAX_JS_SAFE_INTEGER + 1),
+            serde_json::json!(-(MAX_JS_SAFE_INTEGER as i64) - 1),
+            serde_json::json!(1e30),
+        ] {
+            let mut settings = inference_settings_fixture();
+            settings[0].default = serde_json::json!({"nested":[number.clone()]});
+            assert!(InferenceSettingsOutcome::new("model".into(), settings).is_err());
+            let mut settings = inference_settings_fixture();
+            settings[1].constraints.as_mut().unwrap().allowed_values =
+                Some(vec![serde_json::json!([number])]);
+            assert!(InferenceSettingsOutcome::new("model".into(), settings).is_err());
+        }
+        let mut settings = inference_settings_fixture();
+        settings[0].default =
+            serde_json::json!([-(MAX_JS_SAFE_INTEGER as i64), MAX_JS_SAFE_INTEGER, 0.125]);
+        InferenceSettingsOutcome::new("model".into(), settings).unwrap();
+    }
+
+    #[test]
+    fn inference_settings_projection_rejects_nonfinite_constraints_without_domain_range_rules() {
+        for number in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for minimum in [true, false] {
+                let mut settings = inference_settings_fixture();
+                let constraints = settings[1].constraints.as_mut().unwrap();
+                if minimum {
+                    constraints.min = Some(number);
+                } else {
+                    constraints.max = Some(number);
+                }
+                assert!(InferenceSettingsOutcome::new("model".into(), settings).is_err());
+            }
+        }
+        let mut settings = inference_settings_fixture();
+        let constraints = settings[1].constraints.as_mut().unwrap();
+        constraints.min = Some(f64::MAX);
+        constraints.max = Some(-f64::MAX);
+        InferenceSettingsOutcome::new("model".into(), settings).unwrap();
+    }
 }
 
 #[derive(Serialize)]

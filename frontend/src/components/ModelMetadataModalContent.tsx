@@ -30,6 +30,7 @@ interface ModelMetadataModalContentProps {
   executionFactsLoading: boolean;
   expandedFieldKeys: Set<string>;
   inferenceSettings: InferenceParamSchema[];
+  inferenceSettingsError: string | null;
   modelId: string;
   modelName: string;
   newParam: {
@@ -92,6 +93,7 @@ export function ModelMetadataModalContent({
   executionFactsLoading,
   expandedFieldKeys,
   inferenceSettings,
+  inferenceSettingsError,
   modelId,
   modelName,
   newParam,
@@ -176,20 +178,26 @@ export function ModelMetadataModalContent({
           linkedGgufFields={LINKED_GGUF_FIELDS}
         />
       ) : activeSource === 'inference' ? (
-        <ModelInferenceSettingsEditor
-          addingParam={addingParam}
-          inferenceSettings={inferenceSettings}
-          newParam={newParam}
-          saveError={saveError}
-          saveSuccess={saveSuccess}
-          saving={saving}
-          onAddParam={onAddParam}
-          onNewParamChange={onNewParamChange}
-          onParamDefaultChange={onParamDefaultChange}
-          onRemoveParam={onRemoveParam}
-          onSave={onSaveInferenceSettings}
-          onSetAddingParam={onSetAddingParam}
-        />
+        inferenceSettingsError ? (
+          <div role="alert" className="text-center py-4 text-[hsl(var(--accent-error))]">
+            {inferenceSettingsError}
+          </div>
+        ) : (
+          <ModelInferenceSettingsEditor
+            addingParam={addingParam}
+            inferenceSettings={inferenceSettings}
+            newParam={newParam}
+            saveError={saveError}
+            saveSuccess={saveSuccess}
+            saving={saving}
+            onAddParam={onAddParam}
+            onNewParamChange={onNewParamChange}
+            onParamDefaultChange={onParamDefaultChange}
+            onRemoveParam={onRemoveParam}
+            onSave={onSaveInferenceSettings}
+            onSetAddingParam={onSetAddingParam}
+          />
+        )
       ) : activeSource === 'execution' ? (
         executionFactsLoading ? (
           <div className="text-center py-4 text-[hsl(var(--text-muted))]">

@@ -54,6 +54,13 @@ strings. Malformed selections are rejected before IPC and at RPC admission,
 not replaced with an empty selection. RPC accepts either `repo_id` or `repoId`,
 but not both or extra fields; exact string contents and ordering are preserved.
 
+Inference-settings reads use backend-generated decoding, including nullable
+constraints and structured JSON defaults. The modal keeps drafts and read
+results scoped to one model and rejects mismatched identities. Failed settings
+reads show an unavailable state, not an editable empty list; close and reopen
+to retry. Structured defaults display as read-only JSON. The full metadata
+response and settings-write admission remain separate contract work.
+
 Complete current GGUF and safetensors rows offer format conversion to the other
 format (F16). The dialog requires explicit tool-installation consent, observes
 backend progress and requests cancellation without assuming it has completed.

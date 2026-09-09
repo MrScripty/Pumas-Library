@@ -1,5 +1,46 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Inference-Settings Reads And Modal Isolation
+
+Accepted the response-only inference-settings contract and per-model modal
+lifetime. Core parameter types supply feature-gated schemas; RPC constructs a
+typed success outcome and retains existing JSON-RPC errors. Projection rejects
+nonfinite constraints and JSON numbers outside ±9,007,199,254,740,991 before
+transport, without changing persisted/core values or parameter-domain rules.
+Generated decoding preserves all four parameter types, exact identities/order,
+explicit nullable fields and nested JSON defaults/allowed values. The mutable
+editor draft remains distinct from the readonly response.
+
+The modal now observes both reads, rejects mismatched model IDs and prevents
+superseded success/failure from applying to a replacement model. Keyed model
+lifetime resets loaded fields and drafts. Settings failure shows an alert and
+withholds the editor, while usable metadata stays available; reopening retries.
+Request parsing and mutations are unchanged. FE-I31 records malformed mutation
+input becoming an empty replacement. Metadata's full response remains pending,
+including omitted optional fields and JSON/object projection.
+
+root_capability implemented Rust; root integrated preload, renderer, tests and
+generation. The codebase-design skill guided backend-owned representation and
+per-model state lifetime instead of duplicated validation or another UI store.
+The preload regression first failed with `Missing expected rejection` and then
+passed. Compilation exposed recursive `Readonly<Record<...>>` aliases; equivalent
+readonly index signatures fix dictionary type projection without changing AJV
+semantics. Actual producer-to-modal evidence exposed a crash converting decoded
+object defaults to scalar text. Compound defaults now display explicit read-only
+JSON; scalar controls remain editable and cannot mutate the frozen response.
+
+Four focused RPC tests pass with default and no-default features, including
+actual temporary-library RPC reads, unchanged metadata and redacted missing-model
+errors. Standalone core no-default compilation, strict RPC all-targets/all-features
+Clippy and formatting pass. Seventeen actual-producer decoder tests and 17
+bundled-preload/renderer conformance tests pass. Eighteen preload tests pass,
+one real-Electron sandbox test remains gated. Eight modal tests and all 590
+frontend tests pass. Types, affected lint, Electron build, both frontend build
+variants, seven generator tests and generation freshness pass. Canonical plan
+checks complete the acceptance. Logs: `/tmp/pumas-inference-read-frontend.log`,
+`/tmp/pumas-inference-read-build.log`, `/tmp/pumas-inference-read-library-only.log`.
+No actual model mutation, graphical workflow, remote service or other-OS claim.
+
 ## 2026-09-08 — Hugging Face Download-Details Request Admission
 
 Accepted typed RPC admission and generated preload request validation. Exactly

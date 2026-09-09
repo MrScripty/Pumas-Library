@@ -343,6 +343,8 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         }).collect();
     Ok(serde_json::json!({
         "hf_download_details_request_probes":hf_download_details_request_probes,
+        "inference_settings":InferenceSettingsOutcome::new("llm/Exact Model".into(), inference_settings_fixture())?,
+        "inference_settings_empty":InferenceSettingsOutcome::new("llm/empty".into(), vec![])?,
         "hf_download_details_success":hf_details,
         "hf_download_details_empty":hf_empty,
         "hf_download_details_failure":HfDownloadDetailsOutcome::failed(&PumasError::Other("private upstream detail".into())),
@@ -384,6 +386,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         ModelsOutcome,
         CatalogSearchOutcome,
         HfDownloadDetailsOutcome,
+        InferenceSettingsOutcome,
         GetHfDownloadDetailsParams,
         SearchCatalogParams,
         DownloadListOutcome,
@@ -425,6 +428,16 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
         settings.for_serialize()
     };
     let mut schema = serde_json::to_value(settings.into_generator().into_root_schema_for::<T>())?;
+    if T::schema_name() == "InferenceSettingsOutcome" {
+        schema["definitions"]["InferenceSettingsJsonValue"] = serde_json::json!({
+            "anyOf":[
+                {"type":"null"}, {"type":"boolean"}, {"type":"string"},
+                {"type":"number","minimum":-(MAX_JS_SAFE_INTEGER as i64),"maximum":MAX_JS_SAFE_INTEGER},
+                {"type":"array","items":{"$ref":"#/definitions/InferenceSettingsJsonValue"}},
+                {"type":"object","additionalProperties":{"$ref":"#/definitions/InferenceSettingsJsonValue"}},
+            ]
+        });
+    }
     refine_named(&T::schema_name(), &mut schema);
     if let Some(definitions) = schema.get_mut("definitions").and_then(Value::as_object_mut) {
         for (name, definition) in definitions {
@@ -465,6 +478,36 @@ fn refine_named(name: &str, schema: &mut Value) {
     let Some(object) = schema.as_object_mut() else {
         return;
     };
+    if name == "InferenceParamSchema" {
+        object.insert(
+            "required".into(),
+            serde_json::json!([
+                "key",
+                "label",
+                "param_type",
+                "default",
+                "description",
+                "constraints"
+            ]),
+        );
+        if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
+            properties.insert(
+                "default".into(),
+                serde_json::json!({"$ref":"#/definitions/InferenceSettingsJsonValue"}),
+            );
+        }
+    }
+    if name == "ParamConstraints" {
+        object.insert(
+            "required".into(),
+            serde_json::json!(["min", "max", "allowed_values"]),
+        );
+        if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
+            properties.insert("allowed_values".into(), serde_json::json!({"anyOf":[
+                {"type":"null"}, {"type":"array","items":{"$ref":"#/definitions/InferenceSettingsJsonValue"}},
+            ]}));
+        }
+    }
     if name == "HfDownloadDetails" {
         object.insert(
             "required".into(),
@@ -628,6 +671,7 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "DownloadStartedSuccess"
             | "DownloadStatusFoundOutcome"
             | "HfDownloadDetailsSuccess"
+            | "InferenceSettingsOutcome"
             | "ModelIndexRefreshOutcome" => Some(true),
             "DownloadStartedFailure"
             | "DownloadStatusMissingOutcome"

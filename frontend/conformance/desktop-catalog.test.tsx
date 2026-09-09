@@ -15,6 +15,7 @@ import { ValidationError } from '../src/errors';
 import { useModelImportPicker } from '../src/hooks/useModelImportPicker';
 import { chooseModelImportPaths } from '../../electron/src/model-import-picker';
 import { useRemoteModelSearch } from '../src/hooks/useRemoteModelSearch';
+import { ModelMetadataModal } from '../src/components/ModelMetadataModal';
 import type { RemoteModelInfo } from '../src/types/apps';
 import { decodeHfDownloadDetailsOutcome } from '../src/generated/desktop-contract';
 
@@ -42,6 +43,7 @@ function installActualPreload(
   conversionResponse: unknown = fixture['conversion_missing'],
   setupResponse: unknown = fixture['conversion_setup_idle'],
   hfReads?: { models: RemoteModelInfo[]; details: unknown },
+  inferenceRead: unknown = fixture['inference_settings'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -66,6 +68,8 @@ function installActualPreload(
         expect(channel).toBe('api:call');
         const requestParams: unknown = JSON.parse(JSON.stringify(params));
         requests.push({ method, params: requestParams });
+        if (method === 'get_inference_settings') return inferenceRead;
+        if (method === 'get_library_model_metadata') return { success: true, model_id: 'llm/Exact Model' };
         if (method === 'search_hf_models' && hfReads) return { success: true, models: hfReads.models };
         if (method === 'get_hf_download_details' && hfReads) return hfReads.details;
         if (method === 'get_conversion_progress') return conversionResponse;
@@ -152,6 +156,29 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('renders producer inference settings through the bundled preload and preserves editable drafts', async () => {
+    const requests = installActualPreload();
+    render(<ModelMetadataModal modelId="llm/Exact Model" modelName="Fixture" onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Inference' }));
+    expect(await screen.findByText('Label 0 λ')).toBeInTheDocument();
+    expect(screen.getByText('Label 3 λ')).toBeInTheDocument();
+    expect(screen.getAllByText('Structured default (read-only)')).toHaveLength(3);
+    expect(requests.find(request => request.method === 'get_inference_settings')?.params).toEqual({ model_id: 'llm/Exact Model' });
+    const numeric = screen.getAllByRole('spinbutton')[0];
+    if (!numeric) throw new ValidationError('Missing inference editor', 'producer-fixtures');
+    fireEvent.change(numeric, { target: { value: '2048' } });
+    expect(numeric).toHaveValue(2048);
+  });
+
+  it('shows malformed producer settings as unavailable without an editable empty list', async () => {
+    installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      { success: true, model_id: 'llm/Exact Model', inference_settings: [{ key: 'incomplete' }] });
+    render(<ModelMetadataModal modelId="llm/Exact Model" modelName="Fixture" onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Inference' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load inference settings');
+    expect(screen.queryByRole('button', { name: /Save/ })).not.toBeInTheDocument();
+  });
+
   it('hydrates exact producer download details through bundled preload and the real search hook', async () => {
     const produced = fixture['hf_download_details_success'];
     const decoded = decodeHfDownloadDetailsOutcome(produced);

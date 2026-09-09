@@ -156,6 +156,7 @@ pub struct ModelFileInfo {
 
 /// Data type for an inference parameter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub enum ParamType {
     Number,
     Integer,
@@ -165,6 +166,7 @@ pub enum ParamType {
 
 /// Constraints on an inference parameter value.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub struct ParamConstraints {
     #[serde(default)]
     pub min: Option<f64>,
@@ -181,6 +183,7 @@ pub struct ParamConstraints {
 /// Downstream consumers (e.g. Pantograph node graph) use this schema
 /// to dynamically render UI controls for model-specific settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub struct InferenceParamSchema {
     /// Machine-readable key (e.g. "context_length", "denoising_steps").
     pub key: String,

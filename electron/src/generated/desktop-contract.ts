@@ -1,5 +1,5 @@
-// Generated from pumas-rpc contract.rs; SHA256 5f8e39c53eb20e09b3e8dc15c3b96ccf5bcf508c93dae6360017350239a22bce. DO NOT EDIT.
-import { validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateGetBackendSetupParams, validateGetHfDownloadDetailsParams, validateHfDownloadDetailsOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateStartBackendSetupParams, validateStartConversionSetupParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome } from './desktop-contract.validators.js';
+// Generated from pumas-rpc contract.rs; SHA256 860c21e5455db063e373b1b2e996503dd4985abad8456e80fec38bf4bfd94baf. DO NOT EDIT.
+import { validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateGetBackendSetupParams, validateGetHfDownloadDetailsParams, validateHfDownloadDetailsOutcome, validateInferenceSettingsOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateStartBackendSetupParams, validateStartConversionSetupParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome } from './desktop-contract.validators.js';
 export type BackendStatus = { "backend": (QuantBackend); "name": string; "ready": boolean };
 export type BackendStatusOutcome = { "backends": ReadonlyArray<BackendStatus>; "success": true };
 export type CatalogArtifactState = ({ "state": "complete" }) | ({ "downloadProgressFraction"?: number; "reasons": ReadonlyArray<CatalogPartialReason>; "recovery"?: CatalogRecoveryIdentity; "state": "partial" });
@@ -39,10 +39,15 @@ export type HfDownloadDetails = { "downloadOptions": ReadonlyArray<DownloadOptio
 export type HfDownloadDetailsFailure = { "error": string; "success": false };
 export type HfDownloadDetailsOutcome = (HfDownloadDetailsSuccess) | (HfDownloadDetailsFailure);
 export type HfDownloadDetailsSuccess = { "details": HfDownloadDetails; "success": true };
+export type InferenceParamSchema = { "constraints": (ParamConstraints) | (null); "default": InferenceSettingsJsonValue; "description": string | null; "key": string; "label": string; "param_type": (ParamType) };
+export type InferenceSettingsJsonValue = (null) | (boolean) | (string) | (number) | (ReadonlyArray<InferenceSettingsJsonValue>) | ({ readonly [key: string]: InferenceSettingsJsonValue });
+export type InferenceSettingsOutcome = { "inference_settings": ReadonlyArray<InferenceParamSchema>; "model_id": string; "success": true };
 export type LinkHealthOutcome = (LinkHealthResponse);
 export type LinkHealthResponse = { "broken_links": ReadonlyArray<string>; "error"?: null; "errors": ReadonlyArray<string>; "healthy_links": number; "orphaned_links": ReadonlyArray<string>; "status": "healthy" | "degraded"; "success": true; "total_links": number; "warnings": ReadonlyArray<string> };
 export type ModelIndexRefreshOutcome = { "indexed_count": number; "success": true };
-export type ModelsOutcome = { "models": Readonly<Record<string, CatalogModel>>; "success": true };
+export type ModelsOutcome = { "models": { readonly [key: string]: CatalogModel }; "success": true };
+export type ParamConstraints = { "allowed_values": (null) | (ReadonlyArray<InferenceSettingsJsonValue>); "max": number | null; "min": number | null };
+export type ParamType = "Number" | "Integer" | "String" | "Boolean";
 export type PartialDownloadActionName = "resume" | "recover" | "attach" | "none";
 export type PartialDownloadOutcome = { "action": PartialDownloadActionName; "download_id": string | null; "error": string | null; "reason_code": (PartialDownloadReason) | (null); "status": (DownloadStatus) | (null); "success": boolean };
 export type PartialDownloadReason = "hf_client_unavailable" | "download_root_busy" | "model_not_found" | "model_not_partial" | "recovery_unavailable" | "recovery_context_stale" | "resume_rejected" | "already_completed" | "already_cancelled" | "invalid_repo_id" | "repo_not_found" | "rate_limited" | "permission_denied" | "network_error" | "recover_failed";
@@ -107,6 +112,7 @@ export function decodeDownloadStatusOutcome(input: unknown): DecodeOutcome<Downl
 export function decodeGetBackendSetupParams(input: unknown): DecodeOutcome<GetBackendSetupParams> { return decode(input, validateGetBackendSetupParams); }
 export function decodeGetHfDownloadDetailsParams(input: unknown): DecodeOutcome<GetHfDownloadDetailsParams> { return decode(input, validateGetHfDownloadDetailsParams); }
 export function decodeHfDownloadDetailsOutcome(input: unknown): DecodeOutcome<HfDownloadDetailsOutcome> { return decode(input, validateHfDownloadDetailsOutcome); }
+export function decodeInferenceSettingsOutcome(input: unknown): DecodeOutcome<InferenceSettingsOutcome> { return decode(input, validateInferenceSettingsOutcome); }
 export function decodeLinkHealthOutcome(input: unknown): DecodeOutcome<LinkHealthOutcome> { return decode(input, validateLinkHealthOutcome); }
 export function decodeModelIndexRefreshOutcome(input: unknown): DecodeOutcome<ModelIndexRefreshOutcome> { return decode(input, validateModelIndexRefreshOutcome); }
 export function decodeModelsOutcome(input: unknown): DecodeOutcome<ModelsOutcome> { return decode(input, validateModelsOutcome); }

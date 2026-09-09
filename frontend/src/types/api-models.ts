@@ -1,6 +1,6 @@
 import type { BaseResponse } from './api-common';
 import type {
-  DownloadListOutcome, DownloadProgressOutcome, DownloadStartedOutcome, DownloadStatusOutcome, HfDownloadDetailsOutcome, ModelsOutcome, PartialDownloadOutcome,
+  DownloadListOutcome, DownloadProgressOutcome, DownloadStartedOutcome, DownloadStatusOutcome, HfDownloadDetailsOutcome, InferenceSettingsOutcome, ModelsOutcome, PartialDownloadOutcome,
 } from '../generated/desktop-contract';
 
 // ============================================================================
@@ -93,31 +93,28 @@ export interface HfAuthStatusResponse extends BaseResponse {
  * Constraints on an inference parameter value.
  */
 export interface ParamConstraints {
-  min?: number;
-  max?: number;
-  allowed_values?: unknown[];
+  min?: number | null;
+  max?: number | null;
+  allowed_values?: unknown[] | null;
 }
 
 /**
- * Describes a single configurable inference parameter with its type,
- * default value, and optional constraints.
+ * Mutable editor/update draft. Reads use the generated InferenceSettingsResponse;
+ * new drafts may omit fields that the backend serializes explicitly as null.
  */
 export interface InferenceParamSchema {
   key: string;
   label: string;
-  param_type: 'Number' | 'Integer' | 'String' | 'Boolean';
+  param_type: InferenceSettingsOutcome['inference_settings'][number]['param_type'];
   default: unknown;
-  description?: string;
-  constraints?: ParamConstraints;
+  description?: string | null;
+  constraints?: ParamConstraints | null;
 }
 
 /**
  * Response containing the inference settings schema for a model.
  */
-export interface InferenceSettingsResponse extends BaseResponse {
-  model_id: string;
-  inference_settings: InferenceParamSchema[];
-}
+export type InferenceSettingsResponse = InferenceSettingsOutcome;
 
 /**
  * Response after updating inference settings.

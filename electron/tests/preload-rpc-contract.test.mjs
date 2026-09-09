@@ -168,6 +168,26 @@ function toPlainValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test('inference settings are decoded before the bundled preload exposes them', async () => {
+  const harness = loadCompiledPreload();
+  const valid = { success: true, model_id: 'model-1', inference_settings: [{
+    key: 'context', label: 'Context', param_type: 'Integer', default: 4096,
+    description: null, constraints: { min: null, max: null, allowed_values: null },
+  }] };
+  for (const malformed of [
+    { ...valid, success: false }, { ...valid, inference_settings: null },
+    { ...valid, inference_settings: [{ ...valid.inference_settings[0], param_type: 'Float' }] },
+    { ...valid, inference_settings: [{ ...valid.inference_settings[0], description: 42 }] },
+    { ...valid, inference_settings: [{ ...valid.inference_settings[0], default: { nested: [9007199254740992] } }] },
+  ]) {
+    harness.respondWith(malformed);
+    await assert.rejects(harness.api.get_inference_settings('model-1'), { name: 'DesktopContractError' });
+  }
+  harness.respondWith(valid);
+  assert.deepEqual(toPlainValue(await harness.api.get_inference_settings('model-1')), valid);
+  assert.deepEqual(toPlainValue(harness.invocations.at(-1)), ['api:call', 'get_inference_settings', { model_id: 'model-1' }]);
+});
+
 test('HF download-details requests reject malformed selections before IPC', async () => {
   const harness = loadCompiledPreload();
   harness.respondWith({ success: false, error: 'Operation failed.' });

@@ -735,6 +735,12 @@ async fn dispatch_admitted_command(
                 .map(Box::new)
                 .map(RpcOutcome::HfDownloadDetails)
         }
+        RpcCommand::Legacy { method, params } if method == "get_inference_settings" => {
+            models::get_inference_settings(state, &params)
+                .await
+                .map(Box::new)
+                .map(RpcOutcome::InferenceSettings)
+        }
         RpcCommand::Legacy { method, params } => {
             return dispatch_method(state, &method, &params)
                 .await
@@ -1187,7 +1193,6 @@ async fn dispatch_method(
         "scan_shared_storage" => models::scan_shared_storage(state, params).await,
 
         // Inference Settings
-        "get_inference_settings" => models::get_inference_settings(state, params).await,
         "update_inference_settings" => models::update_inference_settings(state, params).await,
         "update_model_notes" => models::update_model_notes(state, params).await,
         "resolve_model_dependency_requirements" => {
@@ -1302,6 +1307,74 @@ async fn dispatch_method(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn inference_settings_rpc_reads_temporary_library_and_preserves_redacted_errors() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        let model_id = "llm/fixture/Exact Model";
+        let model_dir = state.api.model_library().library_root().join(model_id);
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("weights.gguf"), b"fixture").unwrap();
+        let settings = vec![pumas_library::models::InferenceParamSchema {
+            key: "temperature".into(),
+            label: "Temperature".into(),
+            param_type: pumas_library::models::ParamType::Number,
+            default: json!({"nested":[0.25,null,"exact"]}),
+            description: None,
+            constraints: None,
+        }];
+        let metadata = pumas_library::models::ModelMetadata {
+            model_id: Some(model_id.into()),
+            model_type: Some("llm".into()),
+            inference_settings: Some(settings.clone()),
+            ..Default::default()
+        };
+        state
+            .api
+            .model_library()
+            .save_metadata(&model_dir, &metadata)
+            .await
+            .unwrap();
+        let before = std::fs::read(model_dir.join("metadata.json")).unwrap();
+        for selected in [model_id, "private/missing/model"] {
+            let request = Bytes::from(
+                serde_json::to_vec(&json!({
+                    "jsonrpc":"2.0", "id":"inference-read", "method":"get_inference_settings",
+                    "params":{"model_id":selected},
+                }))
+                .unwrap(),
+            );
+            let response = handle_rpc(State(state.clone()), request)
+                .await
+                .into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), 65_536)
+                .await
+                .unwrap();
+            let wire: Value = serde_json::from_slice(&bytes).unwrap();
+            if selected == model_id {
+                assert_eq!(
+                    wire,
+                    json!({"jsonrpc":"2.0","id":"inference-read","result":{
+                        "success":true,"model_id":model_id,"inference_settings":settings,
+                    }})
+                );
+            } else {
+                assert_eq!(
+                    wire,
+                    json!({"jsonrpc":"2.0","id":"inference-read","error":{
+                        "code":-32603,"message":"The request could not be completed due to an internal error.","data":{"class":"internal"},
+                    }})
+                );
+                assert!(!wire.to_string().contains("private"));
+            }
+        }
+        assert_eq!(
+            std::fs::read(model_dir.join("metadata.json")).unwrap(),
+            before
+        );
+    }
 
     #[tokio::test]
     async fn hf_download_details_rpc_preserves_request_error_without_network() {

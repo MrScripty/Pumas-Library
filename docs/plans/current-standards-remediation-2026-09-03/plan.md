@@ -312,7 +312,8 @@ prefer existing runtime/tool capabilities when revisited; Sherry is not required
 [Hugging Face download-details responses](frontend-and-ui/plan.md#hugging-face-download-details-contract)
 are accepted through generated decoding and the hydration consumer. Its
 [request admission](frontend-and-ui/plan.md#hugging-face-download-details-request-admission)
-is also accepted. Next, bound metadata/inference-settings reads under M4. This does not admit
+is also accepted, as are [inference-settings reads and modal isolation](frontend-and-ui/plan.md#inference-settings-read-contract-and-modal-isolation).
+Next, complete library-model metadata response decoding under M4. This does not admit
 Pending cleanup replay. FE-I29 retains a separate
 intermittent preflight-test failure despite fixture hardening.
 Independent probes, direct backend calls

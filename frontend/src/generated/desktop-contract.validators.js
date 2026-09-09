@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 ff6c02f4ce94da734aeb2214c695cf75c25e1bd7f2c6f13327f014f7d4329034. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 0354fd9c7f4faa9d7490aaa663560584c4cc4494e24ce884a982d7cbec6dcd54. DO NOT EDIT.
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
@@ -11523,6 +11523,338 @@ function validate85(data, { instancePath = "", parentData, parentDataProperty, r
   validate85.errors = vErrors;
   return errors === 0;
 }
+var validateUpdateModelNotesParams = validate98;
+var schema97 = { "anyOf": [{ "additionalProperties": false, "properties": { "model_id": { "type": "string" }, "notes": { "default": null, "type": ["string", "null"] } }, "required": ["model_id"], "type": "object" }, { "additionalProperties": false, "properties": { "model_id": { "type": "string" }, "model_notes": { "default": null, "type": ["string", "null"] } }, "required": ["model_id"], "type": "object" }, { "additionalProperties": false, "properties": { "modelId": { "type": "string" }, "notes": { "default": null, "type": ["string", "null"] } }, "required": ["modelId"], "type": "object" }, { "additionalProperties": false, "properties": { "modelId": { "type": "string" }, "model_notes": { "default": null, "type": ["string", "null"] } }, "required": ["modelId"], "type": "object" }] };
+function validate98(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
+  let vErrors = null;
+  let errors = 0;
+  const _errs0 = errors;
+  let valid0 = false;
+  const _errs1 = errors;
+  if (errors === _errs1) {
+    if (data && typeof data == "object" && !Array.isArray(data)) {
+      let missing0;
+      if (data.model_id === void 0 && (missing0 = "model_id")) {
+        const err0 = { instancePath, schemaPath: "#/anyOf/0/required", keyword: "required", params: { missingProperty: missing0 }, message: "must have required property '" + missing0 + "'" };
+        if (vErrors === null) {
+          vErrors = [err0];
+        } else {
+          vErrors.push(err0);
+        }
+        errors++;
+      } else {
+        const _errs3 = errors;
+        for (const key0 in data) {
+          if (!(key0 === "model_id" || key0 === "notes")) {
+            const err1 = { instancePath, schemaPath: "#/anyOf/0/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key0 }, message: "must NOT have additional properties" };
+            if (vErrors === null) {
+              vErrors = [err1];
+            } else {
+              vErrors.push(err1);
+            }
+            errors++;
+            break;
+          }
+        }
+        if (_errs3 === errors) {
+          if (data.model_id !== void 0) {
+            const _errs4 = errors;
+            if (typeof data.model_id !== "string") {
+              const err2 = { instancePath: instancePath + "/model_id", schemaPath: "#/anyOf/0/properties/model_id/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+              if (vErrors === null) {
+                vErrors = [err2];
+              } else {
+                vErrors.push(err2);
+              }
+              errors++;
+            }
+            var valid1 = _errs4 === errors;
+          } else {
+            var valid1 = true;
+          }
+          if (valid1) {
+            if (data.notes !== void 0) {
+              let data1 = data.notes;
+              const _errs6 = errors;
+              if (typeof data1 !== "string" && data1 !== null) {
+                const err3 = { instancePath: instancePath + "/notes", schemaPath: "#/anyOf/0/properties/notes/type", keyword: "type", params: { type: schema97.anyOf[0].properties.notes.type }, message: "must be string,null" };
+                if (vErrors === null) {
+                  vErrors = [err3];
+                } else {
+                  vErrors.push(err3);
+                }
+                errors++;
+              }
+              var valid1 = _errs6 === errors;
+            } else {
+              var valid1 = true;
+            }
+          }
+        }
+      }
+    } else {
+      const err4 = { instancePath, schemaPath: "#/anyOf/0/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+      if (vErrors === null) {
+        vErrors = [err4];
+      } else {
+        vErrors.push(err4);
+      }
+      errors++;
+    }
+  }
+  var _valid0 = _errs1 === errors;
+  valid0 = valid0 || _valid0;
+  if (!valid0) {
+    const _errs8 = errors;
+    if (errors === _errs8) {
+      if (data && typeof data == "object" && !Array.isArray(data)) {
+        let missing1;
+        if (data.model_id === void 0 && (missing1 = "model_id")) {
+          const err5 = { instancePath, schemaPath: "#/anyOf/1/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" };
+          if (vErrors === null) {
+            vErrors = [err5];
+          } else {
+            vErrors.push(err5);
+          }
+          errors++;
+        } else {
+          const _errs10 = errors;
+          for (const key1 in data) {
+            if (!(key1 === "model_id" || key1 === "model_notes")) {
+              const err6 = { instancePath, schemaPath: "#/anyOf/1/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" };
+              if (vErrors === null) {
+                vErrors = [err6];
+              } else {
+                vErrors.push(err6);
+              }
+              errors++;
+              break;
+            }
+          }
+          if (_errs10 === errors) {
+            if (data.model_id !== void 0) {
+              const _errs11 = errors;
+              if (typeof data.model_id !== "string") {
+                const err7 = { instancePath: instancePath + "/model_id", schemaPath: "#/anyOf/1/properties/model_id/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                if (vErrors === null) {
+                  vErrors = [err7];
+                } else {
+                  vErrors.push(err7);
+                }
+                errors++;
+              }
+              var valid2 = _errs11 === errors;
+            } else {
+              var valid2 = true;
+            }
+            if (valid2) {
+              if (data.model_notes !== void 0) {
+                let data3 = data.model_notes;
+                const _errs13 = errors;
+                if (typeof data3 !== "string" && data3 !== null) {
+                  const err8 = { instancePath: instancePath + "/model_notes", schemaPath: "#/anyOf/1/properties/model_notes/type", keyword: "type", params: { type: schema97.anyOf[1].properties.model_notes.type }, message: "must be string,null" };
+                  if (vErrors === null) {
+                    vErrors = [err8];
+                  } else {
+                    vErrors.push(err8);
+                  }
+                  errors++;
+                }
+                var valid2 = _errs13 === errors;
+              } else {
+                var valid2 = true;
+              }
+            }
+          }
+        }
+      } else {
+        const err9 = { instancePath, schemaPath: "#/anyOf/1/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+        if (vErrors === null) {
+          vErrors = [err9];
+        } else {
+          vErrors.push(err9);
+        }
+        errors++;
+      }
+    }
+    var _valid0 = _errs8 === errors;
+    valid0 = valid0 || _valid0;
+    if (!valid0) {
+      const _errs15 = errors;
+      if (errors === _errs15) {
+        if (data && typeof data == "object" && !Array.isArray(data)) {
+          let missing2;
+          if (data.modelId === void 0 && (missing2 = "modelId")) {
+            const err10 = { instancePath, schemaPath: "#/anyOf/2/required", keyword: "required", params: { missingProperty: missing2 }, message: "must have required property '" + missing2 + "'" };
+            if (vErrors === null) {
+              vErrors = [err10];
+            } else {
+              vErrors.push(err10);
+            }
+            errors++;
+          } else {
+            const _errs17 = errors;
+            for (const key2 in data) {
+              if (!(key2 === "modelId" || key2 === "notes")) {
+                const err11 = { instancePath, schemaPath: "#/anyOf/2/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key2 }, message: "must NOT have additional properties" };
+                if (vErrors === null) {
+                  vErrors = [err11];
+                } else {
+                  vErrors.push(err11);
+                }
+                errors++;
+                break;
+              }
+            }
+            if (_errs17 === errors) {
+              if (data.modelId !== void 0) {
+                const _errs18 = errors;
+                if (typeof data.modelId !== "string") {
+                  const err12 = { instancePath: instancePath + "/modelId", schemaPath: "#/anyOf/2/properties/modelId/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                  if (vErrors === null) {
+                    vErrors = [err12];
+                  } else {
+                    vErrors.push(err12);
+                  }
+                  errors++;
+                }
+                var valid3 = _errs18 === errors;
+              } else {
+                var valid3 = true;
+              }
+              if (valid3) {
+                if (data.notes !== void 0) {
+                  let data5 = data.notes;
+                  const _errs20 = errors;
+                  if (typeof data5 !== "string" && data5 !== null) {
+                    const err13 = { instancePath: instancePath + "/notes", schemaPath: "#/anyOf/2/properties/notes/type", keyword: "type", params: { type: schema97.anyOf[2].properties.notes.type }, message: "must be string,null" };
+                    if (vErrors === null) {
+                      vErrors = [err13];
+                    } else {
+                      vErrors.push(err13);
+                    }
+                    errors++;
+                  }
+                  var valid3 = _errs20 === errors;
+                } else {
+                  var valid3 = true;
+                }
+              }
+            }
+          }
+        } else {
+          const err14 = { instancePath, schemaPath: "#/anyOf/2/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+          if (vErrors === null) {
+            vErrors = [err14];
+          } else {
+            vErrors.push(err14);
+          }
+          errors++;
+        }
+      }
+      var _valid0 = _errs15 === errors;
+      valid0 = valid0 || _valid0;
+      if (!valid0) {
+        const _errs22 = errors;
+        if (errors === _errs22) {
+          if (data && typeof data == "object" && !Array.isArray(data)) {
+            let missing3;
+            if (data.modelId === void 0 && (missing3 = "modelId")) {
+              const err15 = { instancePath, schemaPath: "#/anyOf/3/required", keyword: "required", params: { missingProperty: missing3 }, message: "must have required property '" + missing3 + "'" };
+              if (vErrors === null) {
+                vErrors = [err15];
+              } else {
+                vErrors.push(err15);
+              }
+              errors++;
+            } else {
+              const _errs24 = errors;
+              for (const key3 in data) {
+                if (!(key3 === "modelId" || key3 === "model_notes")) {
+                  const err16 = { instancePath, schemaPath: "#/anyOf/3/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key3 }, message: "must NOT have additional properties" };
+                  if (vErrors === null) {
+                    vErrors = [err16];
+                  } else {
+                    vErrors.push(err16);
+                  }
+                  errors++;
+                  break;
+                }
+              }
+              if (_errs24 === errors) {
+                if (data.modelId !== void 0) {
+                  const _errs25 = errors;
+                  if (typeof data.modelId !== "string") {
+                    const err17 = { instancePath: instancePath + "/modelId", schemaPath: "#/anyOf/3/properties/modelId/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                    if (vErrors === null) {
+                      vErrors = [err17];
+                    } else {
+                      vErrors.push(err17);
+                    }
+                    errors++;
+                  }
+                  var valid4 = _errs25 === errors;
+                } else {
+                  var valid4 = true;
+                }
+                if (valid4) {
+                  if (data.model_notes !== void 0) {
+                    let data7 = data.model_notes;
+                    const _errs27 = errors;
+                    if (typeof data7 !== "string" && data7 !== null) {
+                      const err18 = { instancePath: instancePath + "/model_notes", schemaPath: "#/anyOf/3/properties/model_notes/type", keyword: "type", params: { type: schema97.anyOf[3].properties.model_notes.type }, message: "must be string,null" };
+                      if (vErrors === null) {
+                        vErrors = [err18];
+                      } else {
+                        vErrors.push(err18);
+                      }
+                      errors++;
+                    }
+                    var valid4 = _errs27 === errors;
+                  } else {
+                    var valid4 = true;
+                  }
+                }
+              }
+            }
+          } else {
+            const err19 = { instancePath, schemaPath: "#/anyOf/3/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+            if (vErrors === null) {
+              vErrors = [err19];
+            } else {
+              vErrors.push(err19);
+            }
+            errors++;
+          }
+        }
+        var _valid0 = _errs22 === errors;
+        valid0 = valid0 || _valid0;
+      }
+    }
+  }
+  if (!valid0) {
+    const err20 = { instancePath, schemaPath: "#/anyOf", keyword: "anyOf", params: {}, message: "must match a schema in anyOf" };
+    if (vErrors === null) {
+      vErrors = [err20];
+    } else {
+      vErrors.push(err20);
+    }
+    errors++;
+    validate98.errors = vErrors;
+    return false;
+  } else {
+    errors = _errs0;
+    if (vErrors !== null) {
+      if (_errs0) {
+        vErrors.length = _errs0;
+      } else {
+        vErrors = null;
+      }
+    }
+  }
+  validate98.errors = vErrors;
+  return errors === 0;
+}
 export {
   validateBackendStatusOutcome,
   validateCatalogSearchOutcome,
@@ -11554,5 +11886,6 @@ export {
   validateStartConversionSetupParams,
   validateSuccessOutcome,
   validateSupportedQuantTypesOutcome,
-  validateUpdateInferenceSettingsParams
+  validateUpdateInferenceSettingsParams,
+  validateUpdateModelNotesParams
 };

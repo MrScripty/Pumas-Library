@@ -20,6 +20,14 @@
 
 ## Slice Log
 
+### 2026-09-08 — Model-notes request admission accepted
+
+- FE-I33 rejects malformed notes before they can become accidental clears,
+  preserving exact text and supported omitted/null/blank clears.
+- The [frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-08--model-notes-mutation-admission)
+  records parser, persistence and bundled-preload/renderer evidence. Core and
+  mutation response behavior are unchanged; overall M4 remains open.
+
 ### 2026-09-05 — Duplicate library download rows corrected
 
 - The admitted user bug now has an exact producer-to-current-catalog association,

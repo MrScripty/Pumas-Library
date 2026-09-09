@@ -39,6 +39,7 @@ import {
   decodeInferenceSettingsOutcome,
   decodeLibraryModelMetadataOutcome,
   decodeUpdateInferenceSettingsParams,
+  decodeUpdateModelNotesParams,
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
@@ -761,8 +762,12 @@ const electronAPI = {
     }), 'update_inference_settings');
     return apiCall('update_inference_settings', params);
   },
-  update_model_notes: (modelId: string, notes?: string | null) =>
-    apiCall('update_model_notes', { model_id: modelId, notes }),
+  update_model_notes: async (modelId: string, notes?: string | null) => {
+    const params = requireDecoded(decodeUpdateModelNotesParams({
+      model_id: modelId, ...(notes === undefined ? {} : { notes }),
+    }), 'update_model_notes');
+    return apiCall('update_model_notes', params);
+  },
 
   // HuggingFace Authentication
   set_hf_token: (token: string) => apiCall('set_hf_token', { token }),

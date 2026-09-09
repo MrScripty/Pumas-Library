@@ -1,5 +1,31 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Model-Notes Mutation Admission
+
+Accepted FE-I33 request admission. Typed RPC parameters reject non-string notes,
+duplicate aliases and extra fields before persistence. Omitted/null and blank
+notes still clear intentionally; exact nonblank Markdown, whitespace and Unicode
+remain intact. Core persistence and response serialization are unchanged. Four
+closed schema alternatives project existing aliases without new generator rules.
+root_capability owned Rust admission/export and persistence regressions; root
+integrated preload, generated contracts, renderer coverage and verification.
+The codebase-design skill kept JSON admission outside the typed handler and
+normalization inside the existing core API.
+
+The bundled-preload regression first failed with `Missing expected rejection`.
+Two focused RPC tests pass with default and no-default features. They prove
+invalid requests leave metadata bytes unchanged and seed notes before each
+supported clear. Minimal-feature fixture setup initially hit sandbox permission
+denial; the same tests passed with elevated fixture permissions. Twenty decoder
+tests agree with actual Rust parser fixtures; 22 renderer tests pass, including
+exact notes and null-clear submissions through bundled preload. That renderer
+test captures IPC with controlled responses, not persistent GUI saves.
+Twenty-one preload tests pass; one real-Electron sandbox test remains gated.
+Electron build, frontend types, affected lint, seven generator tests, generation
+freshness, strict RPC Clippy, formatting and canonical plan checks pass.
+No live-library writes, GUI workflow or other-OS claim. Mutation responses and
+remaining M4 consumers are not accepted by this request-only slice.
+
 ## 2026-09-08 — Inference-Settings Mutation Admission
 
 Accepted FE-I31 request admission. A typed RPC command now carries validated

@@ -314,6 +314,10 @@ pub(crate) enum RpcCommand {
         model_id: String,
         settings: Vec<pumas_library::models::InferenceParamSchema>,
     },
+    UpdateModelNotes {
+        model_id: String,
+        notes: Option<String>,
+    },
     SearchCatalog {
         query: String,
         limit: usize,
@@ -384,6 +388,7 @@ impl RpcCommand {
             Self::SearchCatalog { .. } => "search_models_fts",
             Self::GetHfDownloadDetails { .. } => "get_hf_download_details",
             Self::UpdateInferenceSettings { .. } => "update_inference_settings",
+            Self::UpdateModelNotes { .. } => "update_model_notes",
             Self::RefreshModelIndex => "refresh_model_index",
             Self::Legacy { method, .. } => method,
         }
@@ -2370,6 +2375,94 @@ fn invalid_domain_outcome(name: &str) -> PumasError {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct UpdateModelNotesParams {
+    #[serde(alias = "modelId")]
+    model_id: String,
+    #[serde(default, alias = "model_notes")]
+    notes: Option<String>,
+}
+
+#[cfg(any(test, feature = "export-contract"))]
+fn update_model_notes_requests() -> Vec<(Value, bool)> {
+    use serde_json::json;
+    let mut cases = Vec::new();
+    for model in ["model_id", "modelId"] {
+        cases.push((json!({model:" Exact model "}), true));
+        for notes in ["notes", "model_notes"] {
+            for text in [
+                Value::Null,
+                json!(""),
+                json!(" \n\t "),
+                json!("  # λ notes\n**exact**  "),
+            ] {
+                cases.push((json!({model:" Exact model ",notes:text}), true));
+            }
+            for invalid in [json!(true), json!(42), json!([]), json!({})] {
+                cases.push((json!({model:"model",notes:invalid}), false));
+            }
+        }
+    }
+    cases.extend([
+        (json!({"model_id":""}), true),
+        (json!({}), false),
+        (Value::Null, false),
+        (json!([]), false),
+        (json!({"model_id":null}), false),
+        (json!({"modelId":42}), false),
+        (json!({"model_id":"m","modelId":"m"}), false),
+        (
+            json!({"model_id":"m","notes":null,"model_notes":null}),
+            false,
+        ),
+        (json!({"modelId":"m","notes":"a","model_notes":"b"}), false),
+        (json!({"model_id":"m","notes":"text","extra":true}), false),
+    ]);
+    cases
+}
+
+#[cfg(test)]
+mod update_model_notes_tests {
+    use super::*;
+    #[test]
+    fn update_model_notes_admission_preserves_text_and_explicit_clear_semantics() {
+        assert!(parse_command("update_model_notes", None).is_err());
+        for (params, expected) in update_model_notes_requests() {
+            let parsed = parse_command("update_model_notes", Some(&params));
+            assert_eq!(parsed.is_ok(), expected, "{params}");
+            if expected {
+                let command = parsed.unwrap();
+                assert_eq!(command.method(), "update_model_notes");
+                let RpcCommand::UpdateModelNotes { model_id, notes } = command else {
+                    panic!("typed notes expected");
+                };
+                assert_eq!(
+                    model_id,
+                    params
+                        .get("model_id")
+                        .or_else(|| params.get("modelId"))
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                );
+                let expected: Option<String> = serde_json::from_value(
+                    params
+                        .get("notes")
+                        .or_else(|| params.get("model_notes"))
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                )
+                .unwrap();
+                assert_eq!(notes, expected);
+            } else {
+                assert_eq!(parsed.err().unwrap().code, -32602);
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct UpdateInferenceSettingsParams {
     #[serde(alias = "modelId")]
     model_id: String,
@@ -3188,6 +3281,12 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             })
         }
         "get_models" => empty().map(|()| RpcCommand::GetModels),
+        "update_model_notes" => parse_params::<UpdateModelNotesParams>(params).map(|params| {
+            RpcCommand::UpdateModelNotes {
+                model_id: params.model_id,
+                notes: params.notes,
+            }
+        }),
         "update_inference_settings" => parse_params::<UpdateInferenceSettingsParams>(params)
             .and_then(|params| {
                 Ok(RpcCommand::UpdateInferenceSettings {

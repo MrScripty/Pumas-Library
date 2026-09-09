@@ -28,14 +28,11 @@ pub async fn update_inference_settings(
     }))
 }
 
-pub async fn update_model_notes(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
-    let model_id = require_str_param(params, "model_id", "modelId")?;
-    let notes = params
-        .get("notes")
-        .or_else(|| params.get("model_notes"))
-        .and_then(|value| value.as_str())
-        .map(ToOwned::to_owned);
-
-    let response = state.api.update_model_notes(&model_id, notes).await?;
+pub async fn update_model_notes(
+    state: &AppState,
+    model_id: &str,
+    notes: Option<String>,
+) -> pumas_library::Result<Value> {
+    let response = state.api.update_model_notes(model_id, notes).await?;
     Ok(serde_json::to_value(response)?)
 }

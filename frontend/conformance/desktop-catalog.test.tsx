@@ -71,6 +71,9 @@ function installActualPreload(
         requests.push({ method, params: requestParams });
         if (method === 'get_inference_settings') return inferenceRead;
         if (method === 'update_inference_settings') return { success: true, model_id: 'llm/Exact Model' };
+        if (method === 'update_model_notes' && typeof params === 'object' && params !== null && 'notes' in params) {
+          return { success: true, model_id: 'llm/Exact Model', notes: params.notes };
+        }
         if (method === 'get_library_model_metadata') return metadataRead;
         if (method === 'search_hf_models' && hfReads) return { success: true, models: hfReads.models };
         if (method === 'get_hf_download_details' && hfReads) return hfReads.details;
@@ -158,6 +161,24 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('submits exact notes and intentional clears through bundled preload', async () => {
+    const requests = installActualPreload();
+    render(<ModelMetadataModal modelId="llm/Exact Model" modelName="Notes fixture" onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Notes' }));
+    const editor = await screen.findByRole('textbox');
+    const exact = '  # Exact λ\n\n**notes**  ';
+    fireEvent.change(editor, { target: { value: exact } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Notes' }));
+    await screen.findByText('Saved');
+    expect(requests.filter(request => request.method === 'update_model_notes').at(-1)?.params)
+      .toEqual({ model_id: 'llm/Exact Model', notes: exact });
+    fireEvent.change(editor, { target: { value: ' \n\t ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Notes' }));
+    await waitFor(() => expect(requests.filter(request => request.method === 'update_model_notes')).toHaveLength(2));
+    expect(requests.filter(request => request.method === 'update_model_notes').at(-1)?.params)
+      .toEqual({ model_id: 'llm/Exact Model', notes: null });
+  });
+
   it('renders actual metadata payloads and all manifest states through bundled preload', async () => {
     const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
       fixture['library_model_metadata']);

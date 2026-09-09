@@ -10,9 +10,9 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound model-notes mutation admission (FE-I33/M4): distinguish
-malformed values from the supported omitted/null clear semantics before edits,
-then prove rejected input cannot clear existing notes in temporary libraries.
+**Next slice:** Bound notes/settings mutation response validation (M4), preserving
+uncertain write outcomes without automatic retries. Model-notes request admission
+(FE-I33) is accepted below; malformed input cannot clear existing notes.
 Inference-settings mutation admission is accepted below. Metadata response decoding is accepted
 below; extraction/reconciliation behavior remains separate (FE-I32).
 Inference-settings reads and modal model-isolation are accepted below.
@@ -61,6 +61,38 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Model-Notes Mutation Admission
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--model-notes-mutation-admission).
+Operation: `continue` this canonical plan. FE-I33 owns strict
+`update_model_notes` request admission. Preserve the public optional notes
+argument: omission/null clears notes; blank-string normalization remains core
+behavior. Preserve exact nonblank strings, markdown and Unicode. Require exactly
+one model ID spelling (`model_id`/`modelId`); optional `notes`/`model_notes` accepts
+string/null only, rejecting duplicate aliases and extra fields. Malformed input
+must not become a clear. No new ID grammar, length limits, core persistence or
+response changes.
+
+root_capability owns typed RPC parameters/command, export, dispatch, handler and
+parser/no-write tests. Root owns preload/tests, existing decoder and renderer
+conformance, six generated files, README and four plan records; Cargo/generation/
+integration stay root-serialized. Preload omits undefined notes before validation,
+preserving the existing omitted-argument contract rather than coercing bad types.
+
+Acceptance: local automated focused/contract tests proving actual parser/decoder
+agreement, malformed calls rejected before IPC, real RPC invalid-request errors
+and unchanged metadata, exact valid-text persistence and supported clear variants
+against seeded temporary libraries. Real renderer/preload submission must preserve
+the notes draft. Run focused default/minimal RPC tests, strict lint/formatting,
+frontend types, existing conformance, generator tests/freshness and plan checks.
+No real GUI, live-library mutation, new response guarantee or other-OS claim.
+Composed-design review applies: typed admission owns shape/aliases, core owns
+normalization/persistence and existing AJV owns schema semantics. The handler
+loses raw JSON coercion; deleting validation restores accidental clears. No new
+framework. Re-plan if supported omission/null semantics or core behavior must
+change.
 
 ## Inference-Settings Mutation Admission
 

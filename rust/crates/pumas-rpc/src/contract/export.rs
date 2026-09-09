@@ -342,6 +342,14 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
             serde_json::json!({"method":"get_hf_download_details","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
         }).collect();
     let metadata = library_model_metadata_fixture();
+    let update_model_notes_request_probes:Vec<Value> = update_model_notes_requests().into_iter().map(|(params,_)| {
+        let parsed = parse_command("update_model_notes",Some(&params));
+        let normalized = match &parsed {
+            Ok(RpcCommand::UpdateModelNotes { model_id,notes }) => serde_json::json!({"model_id":model_id,"notes":notes}),
+            _ => Value::Null,
+        };
+        serde_json::json!({"method":"update_model_notes","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
+    }).collect();
     let update_inference_settings_request_probes:Vec<Value> = update_inference_settings_requests().into_iter().map(|(params,_)| {
         let parsed = parse_command("update_inference_settings",Some(&params));
         let normalized = match &parsed {
@@ -372,6 +380,7 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     Ok(serde_json::json!({
         "library_model_metadata":LibraryModelMetadataOutcome::new("llm/Exact Model",metadata)?,
         "update_inference_settings_request_probes":update_inference_settings_request_probes,
+        "update_model_notes_request_probes":update_model_notes_request_probes,
         "library_model_metadata_gguf":LibraryModelMetadataOutcome::new("llm/Exact Model",metadata_gguf)?,
         "library_model_metadata_empty":LibraryModelMetadataOutcome::new("llm/Exact Model",metadata_empty)?,
         "hf_download_details_request_probes":hf_download_details_request_probes,
@@ -422,6 +431,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         LibraryModelMetadataOutcome,
         GetHfDownloadDetailsParams,
         UpdateInferenceSettingsParams,
+        UpdateModelNotesParams,
         SearchCatalogParams,
         DownloadListOutcome,
         DownloadStatusOutcome,
@@ -491,7 +501,19 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
 // These named wire refinements project existing constructor invariants, not
 // authorization. The generator owns their executable TypeScript projection.
 fn refine_named(name: &str, schema: &mut Value) {
-    if name == "UpdateInferenceSettingsParams" {
+    if matches!(
+        name,
+        "UpdateInferenceSettingsParams" | "UpdateModelNotesParams"
+    ) {
+        let (canonical_field, field_aliases): (&str, &[&str]) = if name == "UpdateModelNotesParams"
+        {
+            ("notes", &["notes", "model_notes"])
+        } else {
+            (
+                "settings",
+                &["settings", "inference_settings", "inferenceSettings"],
+            )
+        };
         let mut canonical = schema.clone();
         let object = canonical.as_object_mut().expect("request object schema");
         let definitions = object.remove("definitions");
@@ -499,9 +521,9 @@ fn refine_named(name: &str, schema: &mut Value) {
         object.remove("title");
         let mut variants = Vec::new();
         for model_key in ["model_id", "modelId"] {
-            for settings_key in ["settings", "inference_settings", "inferenceSettings"] {
+            for field_key in field_aliases {
                 let mut branch = canonical.clone();
-                for (from, to) in [("model_id", model_key), ("settings", settings_key)] {
+                for (from, to) in [("model_id", model_key), (canonical_field, *field_key)] {
                     let properties = branch["properties"]
                         .as_object_mut()
                         .expect("request properties");

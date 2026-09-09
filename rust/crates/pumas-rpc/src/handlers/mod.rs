@@ -740,6 +740,11 @@ async fn dispatch_admitted_command(
                 .await
                 .map(RpcOutcome::Legacy)
         }
+        RpcCommand::UpdateModelNotes { model_id, notes } => {
+            models::update_model_notes(state, &model_id, notes)
+                .await
+                .map(RpcOutcome::Legacy)
+        }
         RpcCommand::Legacy { method, params } if method == "get_library_model_metadata" => {
             models::get_library_model_metadata(state, &params)
                 .await
@@ -1203,7 +1208,6 @@ async fn dispatch_method(
         "scan_shared_storage" => models::scan_shared_storage(state, params).await,
 
         // Inference Settings
-        "update_model_notes" => models::update_model_notes(state, params).await,
         "resolve_model_dependency_requirements" => {
             models::resolve_model_dependency_requirements(state, params).await
         }
@@ -1316,6 +1320,96 @@ async fn dispatch_method(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn update_model_notes_rpc_preserves_notes_on_invalid_input_and_applies_explicit_intent() {
+        async fn update(state: &Arc<AppState>, params: Value) -> Value {
+            let body = Bytes::from(serde_json::to_vec(&json!({"jsonrpc":"2.0","id":"notes-write","method":"update_model_notes","params":params})).unwrap());
+            let response = handle_rpc(State(state.clone()), body).await.into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            serde_json::from_slice(
+                &axum::body::to_bytes(response.into_body(), 65_536)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap()
+        }
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        let model_id = "llm/fixture/notes";
+        let directory = state.api.model_library().library_root().join(model_id);
+        std::fs::create_dir_all(&directory).unwrap();
+        let metadata = pumas_library::models::ModelMetadata {
+            model_id: Some(model_id.into()),
+            notes: Some("existing notes".into()),
+            ..Default::default()
+        };
+        state
+            .api
+            .model_library()
+            .save_metadata(&directory, &metadata)
+            .await
+            .unwrap();
+        let path = directory.join("metadata.json");
+        let before = std::fs::read(&path).unwrap();
+        for params in [
+            json!({"model_id":model_id,"notes":42}),
+            json!({"modelId":model_id,"model_notes":false}),
+            json!({"model_id":model_id,"notes":[]}),
+            json!({"model_id":model_id,"notes":{}}),
+            json!({"model_id":model_id,"notes":null,"model_notes":null}),
+            json!({"model_id":model_id,"modelId":model_id}),
+            json!({"model_id":model_id,"notes":"new","extra":true}),
+        ] {
+            assert_eq!(
+                update(&state, params).await,
+                json!({"jsonrpc":"2.0","id":"notes-write","error":{
+                    "code":-32602,"message":"Request parameters are invalid.","data":{"class":"invalid_request"},
+                }})
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+        }
+        let exact = "  # λ heading\n**markdown** and spaces  ";
+        for clear in [
+            json!({"model_id":model_id}),
+            json!({"modelId":model_id,"notes":null}),
+            json!({"model_id":model_id,"model_notes":null}),
+            json!({"model_id":model_id,"notes":""}),
+            json!({"modelId":model_id,"model_notes":" \n\t "}),
+        ] {
+            assert_eq!(
+                update(&state, json!({"modelId":model_id,"model_notes":exact})).await,
+                json!({"jsonrpc":"2.0","id":"notes-write","result":{
+                    "success":true,"model_id":model_id,"notes":exact,
+                }})
+            );
+            assert_eq!(
+                state
+                    .api
+                    .model_library()
+                    .load_metadata(&directory)
+                    .unwrap()
+                    .unwrap()
+                    .notes
+                    .as_deref(),
+                Some(exact)
+            );
+            assert_eq!(
+                update(&state, clear).await,
+                json!({"jsonrpc":"2.0","id":"notes-write","result":{
+                    "success":true,"model_id":model_id,
+                }})
+            );
+            assert!(state
+                .api
+                .model_library()
+                .load_metadata(&directory)
+                .unwrap()
+                .unwrap()
+                .notes
+                .is_none());
+        }
+    }
 
     #[tokio::test]
     async fn update_inference_settings_rpc_rejects_without_write_and_only_explicit_array_replaces()

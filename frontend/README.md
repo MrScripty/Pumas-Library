@@ -63,6 +63,11 @@ an explicit array; malformed or missing settings reject before IPC and RPC
 persistence. An explicit empty array clears stored overrides and restores the
 backend's lazy defaults. Valid strings, ordering and nested JSON remain intact.
 
+Notes updates accept text or an intentional clear (omitted, null, or blank).
+Malformed values, duplicate aliases and unknown fields reject before IPC and
+RPC persistence, rather than accidentally clearing notes. Nonblank Markdown,
+Unicode and whitespace are preserved exactly.
+
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.
 Malformed responses cannot enter the modal; nested values display without

@@ -168,6 +168,22 @@ function toPlainValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test('notes updates reject malformed values before IPC and preserve supported clears', async () => {
+  const harness = loadCompiledPreload();
+  for (const notes of [false, 0, 42, [], ['text'], {}, { text: 'notes' }]) {
+    await assert.rejects(harness.api.update_model_notes('llm/Exact Model', notes), { name: 'DesktopContractError' });
+  }
+  await assert.rejects(harness.api.update_model_notes(null, 'text'), { name: 'DesktopContractError' });
+  assert.equal(harness.invocations.length, 0);
+  harness.respondWith({ success: true, model_id: 'llm/Exact Model' });
+  for (const notes of [undefined, null, '', ' \n\t', '  # Exact λ\n\n**notes**  ']) {
+    await harness.api.update_model_notes('llm/Exact Model', notes);
+    assert.deepEqual(toPlainValue(harness.invocations.at(-1)), ['api:call', 'update_model_notes', {
+      model_id: 'llm/Exact Model', ...(notes === undefined ? {} : { notes }),
+    }]);
+  }
+});
+
 test('settings updates reject malformed replacements before IPC and preserve explicit clearing', async () => {
   const harness = loadCompiledPreload();
   const setting = { key: ' Exact key ', label: 'Label λ', param_type: 'Integer', default: null };

@@ -10,7 +10,7 @@ import type {
 import type {
   ApplyLauncherUpdateResponse,
   CheckLauncherUpdatesResponse,
-  LaunchResponse,
+  RuntimeLaunchResponse,
   LauncherVersionResponse,
   RestartLauncherResponse,
 } from './api-processes';
@@ -94,7 +94,7 @@ export interface DesktopBridgeUtilityAPI {
   check_plugin_health(appId: string): Promise<PluginHealthResponse>;
 
   /** Launch an app by its plugin ID */
-  launch_app(appId: string, versionTag: string): Promise<LaunchResponse>;
+  launch_app(appId: string, versionTag: string): Promise<RuntimeLaunchResponse>;
 
   /** Stop a running app */
   stop_app(appId: string): Promise<BaseResponse>;

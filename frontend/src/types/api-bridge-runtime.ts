@@ -1,6 +1,7 @@
 import type { BaseResponse } from './api-common';
 import type {
   LaunchResponse,
+  RuntimeLaunchResponse,
   OllamaCreateModelResponse,
   OllamaListModelsResponse,
   OllamaListRunningResponse,
@@ -85,7 +86,7 @@ export interface DesktopBridgeRuntimeAPI {
   get_default_version(appId?: string): Promise<GetDefaultVersionResponse>;
   set_default_version(tag?: string | null, appId?: string): Promise<SetDefaultVersionResponse>;
   get_version_status(appId?: string): Promise<VersionStatusResponse>;
-  launch_version(tag: string, extraArgs?: string[], appId?: string): Promise<LaunchResponse>;
+  launch_version(tag: string, extraArgs?: string[], appId?: string): Promise<RuntimeLaunchResponse>;
   check_version_dependencies(tag: string, appId: string): Promise<CheckVersionDependenciesResponse>;
   get_release_dependencies(tag: string, appId: string): Promise<GetReleaseDependenciesResponse>;
   install_version_dependencies(tag: string, appId: string): Promise<InstallVersionDependenciesResponse>;
@@ -106,7 +107,7 @@ export interface DesktopBridgeRuntimeAPI {
   // ========================================
   // Process Management
   // ========================================
-  launch_ollama(): Promise<LaunchResponse>;
+  launch_ollama(): Promise<RuntimeLaunchResponse>;
   stop_ollama(): Promise<StopOllamaResponse>;
 
   // Local Runtime Profiles
@@ -185,7 +186,7 @@ export interface DesktopBridgeRuntimeAPI {
   ): Promise<OllamaListRunningResponse>;
 
   // Torch Inference Server
-  launch_torch(): Promise<LaunchResponse>;
+  launch_torch(): Promise<RuntimeLaunchResponse>;
   stop_torch(): Promise<StopTorchResponse>;
   torch_list_slots(connectionUrl?: string): Promise<TorchListSlotsResponse>;
   torch_load_model(

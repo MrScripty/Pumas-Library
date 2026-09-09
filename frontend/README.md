@@ -197,6 +197,18 @@ confirmations cannot refresh or launch a runtime, and later refresh or launch
 failures never repeat selection. Success means the backend selection writes
 completed; it does not establish that a runtime process is running or ready.
 
+Runtime launch validates an exact generated outcome with `success` and optional
+non-null `error`, `log_path`, and `ready` fields. Direct Ollama/Torch launch and
+the composed version-selection adapter share that decoder. A successful launch
+means process creation and the producer's bounded readiness observation
+completed; `ready: false` remains a successful launch, and readiness is not
+proof of process or version identity or continuing health. The active process
+hook uses its later status observation, rather than `ready`, to clear starting
+state. A decoded false outcome updates or clears the log from that failure;
+malformed and transport outcomes preserve the prior log. All surface failure and
+never retry launch. Composed selection is not transactional:
+a successful switch remains applied if the later launch fails or is uncertain.
+
 Default runtime-version selection shares one generated request contract across
 preload, Electron main and standalone Rust RPC. Omitted/null tags clear the
 selection; exact strings are preserved and malformed values reject before any

@@ -214,6 +214,12 @@ test('default selection validates nullable requests and exact confirmations with
 
 test('runtime switching rejects malformed confirmation without retry', async () => {
   const harness = loadCompiledPreload();
+  for (const [tag, appId] of [[null, 'ollama'], ['v1', undefined], ['v1', null],
+    [42, 'ollama'], ['v1', 42]]) {
+    const before = harness.invocations.length;
+    assert.throws(() => harness.api.switch_version(tag, appId), { name: 'DesktopContractError' });
+    assert.equal(harness.invocations.length, before);
+  }
   for (const response of [null, true, false, {}, { success: null }, { success: 'true' },
     { success: true, error: 'invented' }, { success: false, result: false }]) {
     harness.respondWith(response);
@@ -225,6 +231,30 @@ test('runtime switching rejects malformed confirmation without retry', async () 
     assert.deepEqual(toPlainValue(await harness.api.switch_version('v1.2.3', 'ollama')), response);
   }
   assert.equal(harness.invocations.filter(invocation => invocation[1] === 'switch_version').length, 10);
+});
+
+test('direct runtime launches decode exact outcomes without retry', async () => {
+  const harness = loadCompiledPreload();
+  for (const method of ['launch_ollama', 'launch_torch']) {
+    for (const response of [
+      { success: true },
+      { success: true, log_path: ' fixture/λ.log ', ready: false },
+      { success: false, error: ' exact λ error ', log_path: '', ready: false },
+    ]) {
+      harness.respondWith(response);
+      assert.deepEqual(toPlainValue(await harness.api[method]()), response);
+      assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]), {});
+    }
+    for (const response of [null, true, false, {}, { success: true, error: null },
+      { success: true, log_path: null }, { success: true, ready: null },
+      { success: 'true' }, { success: true, extra: true }]) {
+      harness.respondWith(response);
+      await assert.rejects(harness.api[method](), { name: 'DesktopContractError' });
+    }
+    harness.respondWith(() => { throw new Error('runtime launch transport unavailable'); });
+    await assert.rejects(harness.api[method](), /runtime launch transport unavailable/);
+    assert.equal(harness.invocations.filter(invocation => invocation[1] === method).length, 13);
+  }
 });
 
 test('composed launch validates switching before launching and never retries selection', async () => {
@@ -242,14 +272,45 @@ test('composed launch validates switching before launching and never retries sel
   assert.equal(harness.invocations.filter(invocation => invocation[1] === 'switch_version').length, 2);
   assert.equal(harness.invocations.filter(invocation => invocation[1] === 'launch_ollama').length, 0);
 
-  harness.respondWith((_, method) => method === 'switch_version'
-    ? { success: true }
-    : { success: false, error: 'launch failed' });
-  assert.deepEqual(toPlainValue(await harness.api.launch_version('v1.2.3', undefined, 'ollama')), {
-    success: false, error: 'launch failed',
+  for (const [args, expected] of [
+    [[undefined, 'v1'], { success: false, error: 'An inference plugin app id is required' }],
+    [['', 'v1'], { success: false, error: 'An inference plugin app id is required' }],
+  ]) {
+    assert.deepEqual(toPlainValue(await harness.api.launch_app(...args)), expected);
+  }
+  assert.deepEqual(
+    toPlainValue(await harness.api.launch_version('v1', ['--unsupported'], 'ollama')),
+    { success: false, error: 'Extra launch arguments are not supported by the desktop RPC bridge' }
+  );
+  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'switch_version').length, 2);
+
+  const beforeInvalid = harness.invocations.length;
+  await assert.rejects(harness.api.launch_app('ollama', null), { name: 'DesktopContractError' });
+  assert.equal(harness.invocations.length, beforeInvalid);
+
+  harness.respondWith({ success: true });
+  assert.deepEqual(toPlainValue(await harness.api.launch_app('unsupported', 'v1')), {
+    success: false, error: 'Unsupported app launch target: unsupported',
   });
   assert.equal(harness.invocations.filter(invocation => invocation[1] === 'switch_version').length, 3);
+
+  harness.respondWith((_, method) => method === 'switch_version'
+    ? { success: true }
+    : { success: false, error: 'launch failed', ready: false });
+  assert.deepEqual(toPlainValue(await harness.api.launch_version('v1.2.3', undefined, 'ollama')), {
+    success: false, error: 'launch failed', ready: false,
+  });
+  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'switch_version').length, 4);
   assert.equal(harness.invocations.filter(invocation => invocation[1] === 'launch_ollama').length, 1);
+
+  harness.respondWith((_, method) => method === 'switch_version'
+    ? { success: true }
+    : { success: true, log_path: 'launch.log', ready: false });
+  assert.deepEqual(toPlainValue(await harness.api.launch_app('ollama', 'v2')), {
+    success: true, log_path: 'launch.log', ready: false,
+  });
+  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'switch_version').length, 5);
+  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'launch_ollama').length, 2);
 });
 
 test('runtime removal rejects malformed confirmation without retry', async () => {

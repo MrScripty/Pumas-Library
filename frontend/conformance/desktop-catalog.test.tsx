@@ -20,6 +20,7 @@ import { useVersionFetching } from '../src/hooks/useVersionFetching';
 import { useInstallationAccess } from '../src/hooks/useInstallationAccess';
 import { projectInstallationProgress } from '../src/hooks/installationProgressTracking';
 import { useInstallationManager } from '../src/hooks/useInstallationManager';
+import { useOllamaProcess } from '../src/hooks/useOllamaProcess';
 import { ModelMetadataModal } from '../src/components/ModelMetadataModal';
 import type { RemoteModelInfo } from '../src/types/apps';
 import { decodeHfDownloadDetailsOutcome } from '../src/generated/desktop-contract';
@@ -67,6 +68,7 @@ function installActualPreload(
   checkVersionDependenciesResult: () => unknown = () => fixture['check_version_dependencies_populated'],
   getReleaseDependenciesResult: () => unknown = () => fixture['get_release_dependencies_populated'],
   installVersionDependenciesResult: () => unknown = () => fixture['install_version_dependencies_true'],
+  runtimeLaunchResult: () => unknown = () => fixture['runtime_launch_not_ready'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -105,6 +107,7 @@ function installActualPreload(
         if (method === 'check_version_dependencies') return checkVersionDependenciesResult();
         if (method === 'get_release_dependencies') return getReleaseDependenciesResult();
         if (method === 'install_version_dependencies') return installVersionDependenciesResult();
+        if (method === 'launch_ollama' || method === 'launch_torch') return runtimeLaunchResult();
         if (method === 'get_installed_versions') return installedVersions();
         if (method === 'get_active_version' || method === 'get_default_version') return selectedVersion();
         if (method === 'get_inference_settings') return inferenceRead;
@@ -200,6 +203,102 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('projects validated runtime-launch outcomes into the active process hook', async () => {
+    let response: unknown = fixture['runtime_launch_not_ready'];
+    const requests = installActualPreload(
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, () => {
+        if (response instanceof Error) throw response;
+        return response;
+      },
+    );
+    const { result, rerender } = renderHook(
+      ({ isRunning }: { isRunning: boolean }) => useOllamaProcess(isRunning),
+      { initialProps: { isRunning: false } },
+    );
+
+    await act(async () => { await result.current.launchOllama(); });
+    expect(result.current.launchLogPath).toBe(' fixture/λ.log ');
+    expect(result.current.launchError).toBeNull();
+    expect(result.current.isStarting).toBe(true);
+    rerender({ isRunning: true });
+    expect(result.current.isStarting).toBe(false);
+
+    rerender({ isRunning: false });
+    response = fixture['runtime_launch_omitted'];
+    await act(async () => { await result.current.launchOllama(); });
+    expect(result.current.launchLogPath).toBeNull();
+    expect(result.current.isStarting).toBe(true);
+
+    response = fixture['runtime_launch_failed'];
+    await act(async () => { await result.current.launchOllama(); });
+    expect(result.current.launchError).toBe(' exact λ error ');
+    expect(result.current.launchLogPath).toBe(' failure.log ');
+    expect(result.current.isStarting).toBe(false);
+
+    response = { success: true, ready: null };
+    await act(async () => { await result.current.launchOllama(); });
+    expect(result.current.launchError).toBe('Error trying to launch Ollama');
+    expect(result.current.launchLogPath).toBe(' failure.log ');
+    expect(result.current.isStarting).toBe(false);
+
+    response = new Error('runtime launch transport unavailable');
+    await act(async () => { await result.current.launchOllama(); });
+    expect(result.current.launchError).toBe('Error trying to launch Ollama');
+    expect(result.current.launchLogPath).toBe(' failure.log ');
+    expect(requests.filter(request => request.method === 'launch_ollama')).toHaveLength(5);
+  });
+
+  it('composes validated selection and launch outcomes without retry', async () => {
+    let switchResponse: unknown = fixture['switch_version_true'];
+    let launchResponse: unknown = fixture['runtime_launch_not_ready'];
+    const requests = installActualPreload(
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, () => switchResponse,
+      undefined, undefined, undefined, undefined, undefined, () => {
+        if (launchResponse instanceof Error) throw launchResponse;
+        return launchResponse;
+      },
+    );
+    const bridge = window.electronAPI;
+    if (!bridge) throw new ValidationError('Preload did not expose its bridge.', 'preload');
+
+    expect(await bridge.launch_app('ollama', ' vλ.1 ')).toEqual(launchResponse);
+    expect(requests.slice(-2)).toEqual([
+      { method: 'switch_version', params: { tag: ' vλ.1 ', app_id: 'ollama' } },
+      { method: 'launch_ollama', params: {} },
+    ]);
+
+    switchResponse = fixture['switch_version_false'];
+    expect(await bridge.launch_version('v2', undefined, 'ollama')).toEqual({
+      success: false, error: 'Failed to switch ollama to v2',
+    });
+    expect(requests.filter(request => request.method === 'launch_ollama')).toHaveLength(1);
+
+    switchResponse = { success: true, error: 'invented' };
+    await expect(bridge.launch_app('ollama', 'v3'))
+      .rejects.toMatchObject({ name: 'DesktopContractError' });
+    expect(requests.filter(request => request.method === 'launch_ollama')).toHaveLength(1);
+
+    const before = requests.length;
+    await expect(bridge.launch_app('ollama', null as never)).rejects.toThrow('Desktop contract invalid');
+    expect(requests.length).toBe(before);
+
+    switchResponse = fixture['switch_version_true'];
+    launchResponse = { success: true, ready: null };
+    await expect(bridge.launch_app('ollama', 'v4'))
+      .rejects.toMatchObject({ name: 'DesktopContractError' });
+    launchResponse = new Error('runtime launch transport unavailable');
+    await expect(bridge.launch_app('ollama', 'v5'))
+      .rejects.toThrow('runtime launch transport unavailable');
+    expect(requests.filter(request => request.method === 'switch_version')).toHaveLength(5);
+    expect(requests.filter(request => request.method === 'launch_ollama')).toHaveLength(3);
+  });
+
+
   it('exposes dependency-check reports through the generated preload contract', async () => {
     let response: unknown = fixture['check_version_dependencies_populated'];
     const requests = installActualPreload(

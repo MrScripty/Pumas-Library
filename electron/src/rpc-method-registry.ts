@@ -197,9 +197,7 @@ export const RPC_METHOD_PARAM_VALIDATION = {
   scan_shared_storage: 'empty-record',
   list_model_downloads: 'empty-record',
   get_hf_auth_status: 'empty-record',
-  launch_ollama: 'empty-record',
   stop_ollama: 'empty-record',
-  launch_torch: 'empty-record',
   stop_torch: 'empty-record',
   get_plugins: 'empty-record',
   get_runtime_profiles_snapshot: 'empty-record',
@@ -248,7 +246,6 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
   get_github_cache_status: OPTIONAL_APP_ID_SCHEMA,
   open_active_install: OPTIONAL_APP_ID_SCHEMA,
   remove_version: REQUIRED_TAG_OPTIONAL_APP_ID_SCHEMA,
-  switch_version: REQUIRED_TAG_OPTIONAL_APP_ID_SCHEMA,
   get_version_info: REQUIRED_TAG_OPTIONAL_APP_ID_SCHEMA,
   get_model_download_status: REQUIRED_DOWNLOAD_ID_SCHEMA,
   resolve_model_execution_descriptor: {

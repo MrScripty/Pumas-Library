@@ -1,4 +1,5 @@
 import type { BaseResponse } from './api-common';
+import type { RuntimeLaunchOutcome } from '../generated/desktop-contract';
 
 // ============================================================================
 
@@ -6,6 +7,8 @@ export interface LaunchResponse extends BaseResponse {
   log_path?: string;
   ready?: boolean;
 }
+
+export type RuntimeLaunchResponse = RuntimeLaunchOutcome;
 
 export interface StopOllamaResponse extends BaseResponse {
   // Empty body on success

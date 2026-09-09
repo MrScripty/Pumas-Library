@@ -197,6 +197,15 @@ pub(crate) struct RpcAdmissionError {
 /// names become method-not-found without reaching a domain handler.
 pub(crate) enum RpcCommand {
     #[cfg(feature = "inference-plugins")]
+    LaunchOllama,
+    #[cfg(feature = "inference-plugins")]
+    LaunchTorch,
+    #[cfg(feature = "inference-plugins")]
+    SwitchVersion {
+        app_id: String,
+        tag: String,
+    },
+    #[cfg(feature = "inference-plugins")]
     CheckVersionDependencies {
         app_id: String,
         tag: String,
@@ -359,6 +368,12 @@ impl RpcCommand {
     pub(crate) fn method(&self) -> &str {
         match self {
             #[cfg(feature = "inference-plugins")]
+            Self::LaunchOllama => "launch_ollama",
+            #[cfg(feature = "inference-plugins")]
+            Self::LaunchTorch => "launch_torch",
+            #[cfg(feature = "inference-plugins")]
+            Self::SwitchVersion { .. } => "switch_version",
+            #[cfg(feature = "inference-plugins")]
             Self::SetDefaultVersion { .. } => "set_default_version",
             #[cfg(feature = "inference-plugins")]
             Self::InstallVersion { .. } => "install_version",
@@ -483,6 +498,8 @@ pub(crate) enum RpcOutcome {
     #[cfg(feature = "inference-plugins")]
     SwitchVersion(SwitchVersionOutcome),
     #[cfg(feature = "inference-plugins")]
+    RuntimeLaunch(RuntimeLaunchOutcome),
+    #[cfg(feature = "inference-plugins")]
     SetDefaultVersion(SetDefaultVersionOutcome),
     #[cfg(feature = "inference-plugins")]
     InstallVersion(InstallVersionOutcome),
@@ -574,6 +591,8 @@ impl RpcOutcome {
             Self::RemoveVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::SwitchVersion(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::RuntimeLaunch(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::SetDefaultVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
@@ -3574,6 +3593,57 @@ pub(crate) struct InstallVersionParams {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct SwitchVersionParams {
+    #[serde(alias = "appId")]
+    app_id: String,
+    tag: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct RuntimeLaunchOutcome {
+    success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-contract", schemars(with = "String"))]
+    error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-contract", schemars(with = "String"))]
+    log_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "export-contract", schemars(with = "bool"))]
+    ready: Option<bool>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl From<pumas_library::models::LaunchResponse> for RuntimeLaunchOutcome {
+    fn from(value: pumas_library::models::LaunchResponse) -> Self {
+        Self {
+            success: value.success,
+            error: value.error,
+            log_path: value.log_path,
+            ready: value.ready,
+        }
+    }
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl RuntimeLaunchOutcome {
+    pub(crate) fn failure(error: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            error: Some(error.into()),
+            log_path: None,
+            ready: None,
+        }
+    }
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct InstallVersionDependenciesParams {
     #[serde(alias = "appId")]
     app_id: String,
@@ -3743,6 +3813,141 @@ pub(crate) fn install_version_requests() -> Vec<(Value, bool)> {
         (json!({"app_id":"a", "appId":"b", "tag":"v1"}), false),
     ]);
     cases
+}
+
+#[cfg(test)]
+mod switch_version_admission_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn switch_version_admission_preserves_exact_strings() {
+        for (params, accepted) in install_version_requests() {
+            let parsed = parse_params::<SwitchVersionParams>(Some(&params));
+            assert_eq!(parsed.is_ok(), accepted, "{params}");
+            if let Ok(parsed) = parsed {
+                assert_eq!(
+                    json!(parsed.app_id),
+                    *params
+                        .get("app_id")
+                        .or_else(|| params.get("appId"))
+                        .unwrap()
+                );
+                assert_eq!(json!(parsed.tag), params["tag"]);
+            }
+        }
+        assert!(parse_params::<SwitchVersionParams>(None).is_err());
+        assert!(parse_params::<SwitchVersionParams>(Some(
+            &json!({"tag":"v1","app_id":"torch","top_n":2})
+        ))
+        .is_err());
+    }
+}
+
+#[cfg(any(test, feature = "export-contract"))]
+pub(crate) fn runtime_launch_requests() -> Vec<(Option<Value>, bool)> {
+    use serde_json::json;
+    vec![
+        (None, true),
+        (Some(json!({})), true),
+        (Some(Value::Null), false),
+        (Some(json!([])), false),
+        (Some(json!(true)), false),
+        (Some(json!(1)), false),
+        (Some(json!("")), false),
+        (Some(json!({"app_id":"ollama"})), false),
+        (Some(json!({"tag":"v1"})), false),
+        (Some(json!({"extra":true})), false),
+    ]
+}
+
+#[cfg(any(test, feature = "export-contract"))]
+fn runtime_launch_responses() -> Vec<(&'static str, pumas_library::models::LaunchResponse)> {
+    use pumas_library::models::LaunchResponse;
+    vec![
+        (
+            "runtime_launch_omitted",
+            LaunchResponse {
+                success: true,
+                error: None,
+                log_path: None,
+                ready: None,
+            },
+        ),
+        (
+            "runtime_launch_not_ready",
+            LaunchResponse {
+                success: true,
+                error: None,
+                log_path: Some(" fixture/λ.log ".into()),
+                ready: Some(false),
+            },
+        ),
+        (
+            "runtime_launch_ready",
+            LaunchResponse {
+                success: true,
+                error: None,
+                log_path: Some("".into()),
+                ready: Some(true),
+            },
+        ),
+        (
+            "runtime_launch_failed",
+            LaunchResponse {
+                success: false,
+                error: Some(" exact λ error ".into()),
+                log_path: Some(" failure.log ".into()),
+                ready: Some(false),
+            },
+        ),
+    ]
+}
+
+#[cfg(test)]
+mod runtime_launch_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn runtime_launch_strict_empty_admission() {
+        for (params, accepted) in runtime_launch_requests() {
+            assert_eq!(
+                parse_params::<RuntimeLaunchParams>(params.as_ref()).is_ok(),
+                accepted,
+                "{params:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_launch_preserves_core_serialization_and_wrapper() {
+        let expected = [
+            json!({"success":true}),
+            json!({"success":true,"log_path":" fixture/λ.log ","ready":false}),
+            json!({"success":true,"log_path":"","ready":true}),
+            json!({"success":false,"error":" exact λ error ","log_path":" failure.log ","ready":false}),
+        ];
+        for ((_, response), expected) in runtime_launch_responses().into_iter().zip(expected) {
+            let raw = serde_json::to_value(&response).unwrap();
+            assert_eq!(raw, expected);
+            for method in ["launch_ollama", "launch_torch"] {
+                assert_eq!(crate::wrapper::wrap_response(method, raw.clone()), expected);
+            }
+            let outcome = RuntimeLaunchOutcome::from(response);
+            assert_eq!(serde_json::to_value(&outcome).unwrap(), expected);
+            #[cfg(feature = "inference-plugins")]
+            assert_eq!(
+                RpcOutcome::RuntimeLaunch(outcome).into_value().unwrap(),
+                expected
+            );
+        }
+        assert_eq!(
+            serde_json::to_value(RuntimeLaunchOutcome::failure("No active Torch version set"))
+                .unwrap(),
+            json!({"success":false,"error":"No active Torch version set"})
+        );
+    }
 }
 
 #[cfg(test)]
@@ -4444,7 +4649,8 @@ fn hf_download_details_requests() -> Vec<(Value, bool)> {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct EmptyParams {}
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+struct RuntimeLaunchParams {}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -4788,7 +4994,7 @@ fn parse_request_id(object: &Map<String, Value>) -> Result<Option<Value>, RpcAdm
 }
 
 fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, PublicError> {
-    let empty = || parse_params::<EmptyParams>(params).map(|_| ());
+    let empty = || parse_params::<RuntimeLaunchParams>(params).map(|_| ());
     let download_request = || {
         parse_params::<DownloadModelFromHfParams>(params)
             .and_then(DownloadModelFromHfParams::into_request)
@@ -4992,6 +5198,19 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                 })
             })
         }
+        #[cfg(feature = "inference-plugins")]
+        "launch_ollama" => empty().map(|()| RpcCommand::LaunchOllama),
+        #[cfg(feature = "inference-plugins")]
+        "launch_torch" => empty().map(|()| RpcCommand::LaunchTorch),
+        #[cfg(feature = "inference-plugins")]
+        "switch_version" => {
+            parse_params::<SwitchVersionParams>(params).map(|params| RpcCommand::SwitchVersion {
+                app_id: params.app_id,
+                tag: params.tag,
+            })
+        }
+        #[cfg(not(feature = "inference-plugins"))]
+        "launch_ollama" | "launch_torch" | "switch_version" => Err(PublicError::method_not_found()),
         "get_models" => empty().map(|()| RpcCommand::GetModels),
         #[cfg(feature = "inference-plugins")]
         "check_version_dependencies" => {

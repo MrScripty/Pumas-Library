@@ -16,6 +16,11 @@ test('dictionary projection preserves readonly recursive references', () => {
     '{ readonly [key: string]: JsonValue }');
 });
 
+test('closed empty objects do not project as the non-nullish empty-object type', () => {
+  assert.equal(schemaType({type:'object', additionalProperties:false}),
+    'Readonly<Record<string, never>>');
+});
+
 test('standalone validator preserves UTF8 byte bounds and closed shapes', async () => {
   const files = await generate({format:'pumas-desktop-contract-1',dialect:'http://json-schema.org/draft-07/schema#',schemas:{Example:{type:'object',additionalProperties:false,required:['text'],properties:{text:{type:'string',pumasUtf8Max:4}}}}});
   const module = await import(`data:text/javascript;base64,${Buffer.from(files['desktop-contract.validators.js']).toString('base64')}`);

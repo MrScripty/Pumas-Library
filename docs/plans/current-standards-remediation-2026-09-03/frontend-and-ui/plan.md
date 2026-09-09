@@ -10,10 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Inventory and validate `launch_app` and the composed desktop
-`launch_version` adapter as one launch-contract slice (M4) after the accepted
-dependency-installation response. Preserve optional inference-plugin builds,
-standalone backend operation and existing error behavior; do not launch a runtime.
+**Next slice:** Inventory and validate `stop_app` with the composed
+`stop_ollama`/`stop_torch` RPC routes as one stop-contract slice (M4) after the
+accepted runtime-launch response. Preserve optional inference-plugin builds,
+standalone backend operation and existing error behavior; do not stop a live runtime.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -68,6 +68,57 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Runtime Launch Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-09--runtime-launch-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Project the actual `launch_ollama` and `launch_torch` RPC routes and the composed
+desktop `launch_app`/`launch_version` adapters through generated request and
+outcome contracts. `RuntimeLaunchParams` is an exact empty record; omitted Rust
+and Electron-main parameters normalize to that record, while explicit null,
+non-record and extra fields reject before launch. `SwitchVersionParams` requires
+exact string tag and app identity, preserves `app_id`/`appId`, and rejects
+malformed, unknown and ambiguous fields before selection.
+
+The exact launch outcome is `{success:boolean,error?:string,log_path?:string,
+ready?:boolean}` with omitted or non-null optional fields. Exact strings and
+`ready:false` are preserved; explicit null and invented fields reject. The
+composed adapter first awaits generated switch confirmation, then invokes the
+selected launch route. Missing app identity and unsupported extra arguments
+retain their local false outcomes without effects. The existing unknown-app
+order remains selection followed by a false unsupported-target result.
+
+The RPC route uses the core process manager, not the app-manager version launch
+method. It derives executable, PID and log paths from the current active tag,
+spawns a detached runtime and performs a bounded endpoint readiness observation.
+Success proves process creation, not readiness: `ready:false` is valid, and even
+`ready:true` does not establish PID/version correlation or continuing health.
+FE-I42 now includes tag-derived launch path reachability. FE-I47 owns non-atomic
+selection plus launch and its concurrency gap. FE-I48 owns detached lifecycle,
+partial PID/log effects and unsafe automatic retry after uncertainty. FE-I49
+owns uncorrelated readiness evidence.
+
+The active renderer consumer is `useOllamaProcess`/`useTorchProcess` through
+`useManagedProcess`; it treats success as starting and clears that state only
+when later status reports running. A decoded false outcome updates or clears the
+log from that failure; malformed and transport failures preserve the prior log.
+Status refreshes immediately and after a delay
+are read observations, not launch retries. The composed versions API currently
+has no caller, and the plugin-process hook is dormant. Direct and composed bridge
+evidence proves exact call counts, failure sequencing and no automatic launch
+retry or state replacement. Selection is not rolled back after later failure.
+
+Acceptance: standalone/default and no-plugin RPC admission/outcome fixtures,
+strict generated Electron main/preload requests, exact producer outcomes,
+bundled direct/composed bridge behavior, active-hook projection, frontend and
+Electron gates, generator freshness, strict Rust checks and canonical-plan
+validation. The process manager is disabled in safe Rust fixtures. No live
+runtime is launched or selected, and no runtime Python/pip, network service or
+model-library mutation occurs. The evidence does not establish live lifecycle,
+readiness, concurrency, rollback, graphical behavior or other-OS process and
+filesystem behavior.
 
 ## Runtime Dependency-Installation Contract
 

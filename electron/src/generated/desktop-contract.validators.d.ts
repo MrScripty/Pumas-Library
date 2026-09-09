@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 4944454f34bf32ddf19d619c02b45d6d2838843ee5e0d6cff39343cbe3df1586. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 77f4278ad9e24b51dca2421cadbe1f5927870cfaa1826ceb139007c733feb0e9. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -38,6 +38,8 @@ export declare function validatePartialDownloadOutcome(value: unknown): boolean;
 export declare function validatePublicError(value: unknown): boolean;
 export declare function validateRecoverDownloadParams(value: unknown): boolean;
 export declare function validateRemoveVersionOutcome(value: unknown): boolean;
+export declare function validateRuntimeLaunchOutcome(value: unknown): boolean;
+export declare function validateRuntimeLaunchParams(value: unknown): boolean;
 export declare function validateSearchCatalogParams(value: unknown): boolean;
 export declare function validateSelectedVersionOutcome(value: unknown): boolean;
 export declare function validateSetDefaultVersionOutcome(value: unknown): boolean;
@@ -47,6 +49,7 @@ export declare function validateStartConversionSetupParams(value: unknown): bool
 export declare function validateSuccessOutcome(value: unknown): boolean;
 export declare function validateSupportedQuantTypesOutcome(value: unknown): boolean;
 export declare function validateSwitchVersionOutcome(value: unknown): boolean;
+export declare function validateSwitchVersionParams(value: unknown): boolean;
 export declare function validateUpdateInferenceSettingsOutcome(value: unknown): boolean;
 export declare function validateUpdateInferenceSettingsParams(value: unknown): boolean;
 export declare function validateUpdateModelNotesOutcome(value: unknown): boolean;

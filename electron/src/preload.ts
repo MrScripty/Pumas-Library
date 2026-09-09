@@ -59,6 +59,9 @@ import {
   decodeCancelInstallationOutcome,
   decodeRemoveVersionOutcome,
   decodeSwitchVersionOutcome,
+  decodeSwitchVersionParams,
+  decodeRuntimeLaunchOutcome,
+  decodeRuntimeLaunchParams,
   decodeSetDefaultVersionOutcome,
   decodeSetDefaultVersionParams,
   decodeInstallVersionOutcome,
@@ -68,6 +71,7 @@ import {
   decodeRecoverDownloadParams,
   type DecodeOutcome,
   type DownloadListOutcome,
+  type RuntimeLaunchOutcome,
 } from './generated/desktop-contract';
 
 const launcherRootPresentationTimeoutListeners = new Set<() => void>();
@@ -280,11 +284,6 @@ type BaseRpcResponse = {
   error?: string;
 };
 
-type LaunchRpcResponse = BaseRpcResponse & {
-  log_path?: string | null;
-  ready?: boolean | null;
-};
-
 type ModelLibraryUpdateNotificationPayload = {
   cursor: string;
   events?: unknown[];
@@ -471,15 +470,18 @@ function isStatusTelemetryUpdateNotificationPayload(
 async function launchAppVersion(
   appId: string | undefined,
   versionTag: string
-): Promise<LaunchRpcResponse> {
+): Promise<RuntimeLaunchOutcome> {
   if (!appId) {
     return { success: false, error: 'An inference plugin app id is required' };
   }
   const resolvedAppId = appId;
-  const switchResult = await validatedApiCall('switch_version', decodeSwitchVersionOutcome, {
-    tag: versionTag,
-    app_id: resolvedAppId,
-  });
+  const switchParams = requireDecoded(
+    decodeSwitchVersionParams({ tag: versionTag, app_id: resolvedAppId }),
+    'switch_version request'
+  );
+  const switchResult = await validatedApiCall(
+    'switch_version', decodeSwitchVersionOutcome, switchParams
+  );
 
   if (!switchResult.success) {
     return {
@@ -490,9 +492,15 @@ async function launchAppVersion(
 
   switch (resolvedAppId) {
     case 'ollama':
-      return await apiCall('launch_ollama');
+      return await validatedApiCall(
+        'launch_ollama', decodeRuntimeLaunchOutcome,
+        requireDecoded(decodeRuntimeLaunchParams({}), 'launch_ollama request')
+      );
     case 'torch':
-      return await apiCall('launch_torch');
+      return await validatedApiCall(
+        'launch_torch', decodeRuntimeLaunchOutcome,
+        requireDecoded(decodeRuntimeLaunchParams({}), 'launch_torch request')
+      );
     default:
       return {
         success: false,
@@ -544,8 +552,13 @@ const electronAPI = {
   },
   remove_version: (tag: string, appId?: string) =>
     validatedApiCall('remove_version', decodeRemoveVersionOutcome, { tag, app_id: appId }),
-  switch_version: (tag: string, appId?: string) =>
-    validatedApiCall('switch_version', decodeSwitchVersionOutcome, { tag, app_id: appId }),
+  switch_version: (tag: string, appId?: string) => {
+    const params = requireDecoded(
+      decodeSwitchVersionParams({ tag, app_id: appId }),
+      'switch_version request'
+    );
+    return validatedApiCall('switch_version', decodeSwitchVersionOutcome, params);
+  },
   validate_installations: (appId?: string) =>
     validatedApiCall('validate_installations', decodeValidateInstallationsOutcome, { app_id: appId }),
   get_version_info: (tag: string, appId?: string) =>
@@ -607,7 +620,10 @@ const electronAPI = {
   // ========================================
   // Process Management
   // ========================================
-  launch_ollama: () => apiCall('launch_ollama'),
+  launch_ollama: () => validatedApiCall(
+    'launch_ollama', decodeRuntimeLaunchOutcome,
+    requireDecoded(decodeRuntimeLaunchParams({}), 'launch_ollama request')
+  ),
   stop_ollama: () => apiCall('stop_ollama'),
   get_runtime_profiles_snapshot: () =>
     apiCall('get_runtime_profiles_snapshot'),
@@ -636,7 +652,10 @@ const electronAPI = {
     apiCall('unserve_model', { request }),
 
   // Torch Inference Server
-  launch_torch: () => apiCall('launch_torch'),
+  launch_torch: () => validatedApiCall(
+    'launch_torch', decodeRuntimeLaunchOutcome,
+    requireDecoded(decodeRuntimeLaunchParams({}), 'launch_torch request')
+  ),
   stop_torch: () => apiCall('stop_torch'),
   torch_list_slots: (connectionUrl?: string) =>
     apiCall('torch_list_slots', { connection_url: connectionUrl }),

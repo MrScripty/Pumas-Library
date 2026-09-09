@@ -532,6 +532,24 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         };
         serde_json::json!({"method":"install_version_dependencies","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
     }).collect();
+    fixtures["switch_version_request_probes"] = install_version_requests().into_iter().map(|(params, _)| {
+        let parsed = parse_params::<SwitchVersionParams>(Some(&params));
+        let normalized = match &parsed {
+            Ok(value) => serde_json::json!({"app_id":value.app_id,"tag":value.tag}),
+            Err(_) => Value::Null,
+        };
+        serde_json::json!({"method":"switch_version","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
+    }).collect();
+    for (key, value) in runtime_launch_responses() {
+        fixtures[key] = serde_json::to_value(RuntimeLaunchOutcome::from(value))?;
+    }
+    fixtures["runtime_launch_request_probes"] = runtime_launch_requests()
+        .into_iter()
+        .map(|(params, _)| {
+            let accepted = parse_params::<RuntimeLaunchParams>(params.as_ref()).is_ok();
+            serde_json::json!({"params":params,"accepted":accepted,"omitted":params.is_none()})
+        })
+        .collect();
     fixtures["install_version_dependencies_true"] =
         serde_json::to_value(InstallVersionDependenciesOutcome::new(true))?;
     fixtures["install_version_dependencies_false"] =
@@ -686,6 +704,9 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         SetDefaultVersionParams,
         InstallVersionParams,
         InstallVersionOutcome,
+        RuntimeLaunchParams,
+        RuntimeLaunchOutcome,
+        SwitchVersionParams,
         InstallVersionDependenciesParams,
         InstallVersionDependenciesOutcome,
         GetReleaseDependenciesParams,
@@ -744,6 +765,7 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "CheckVersionDependenciesParams"
             | "GetReleaseDependenciesParams"
             | "InstallVersionDependenciesParams"
+            | "SwitchVersionParams"
     ) {
         let mut canonical = schema.clone();
         let object = canonical.as_object_mut().expect("request object schema");

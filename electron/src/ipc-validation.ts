@@ -4,6 +4,8 @@ import {
   decodeCheckVersionDependenciesParams,
   decodeGetReleaseDependenciesParams,
   decodeInstallVersionDependenciesParams,
+  decodeRuntimeLaunchParams,
+  decodeSwitchVersionParams,
   decodeInstallVersionParams,
   decodeSetDefaultVersionParams,
   decodeStartBackendSetupParams,
@@ -58,6 +60,9 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
     || method === 'check_version_dependencies'
     || method === 'get_release_dependencies'
     || method === 'install_version_dependencies'
+    || method === 'launch_ollama'
+    || method === 'launch_torch'
+    || method === 'switch_version'
     || method === 'install_version'
     || method === 'set_default_version'
   ) {
@@ -71,6 +76,10 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
           ? decodeGetReleaseDependenciesParams(rawParams)
         : method === 'install_version_dependencies'
           ? decodeInstallVersionDependenciesParams(rawParams)
+        : method === 'launch_ollama' || method === 'launch_torch'
+          ? decodeRuntimeLaunchParams(rawParams === undefined ? {} : rawParams)
+        : method === 'switch_version'
+          ? decodeSwitchVersionParams(rawParams)
         : method === 'install_version'
           ? decodeInstallVersionParams(rawParams)
           : decodeSetDefaultVersionParams(rawParams);

@@ -1,5 +1,32 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-09 — Runtime Launch Contract
+
+The bounded launch slice now has exact generated empty request and optional-field
+outcome contracts for the actual `launch_ollama`/`launch_torch` RPC routes, plus
+strict generated version-selection admission for the composed desktop adapters.
+Omitted launch parameters preserve RPC/main parity; explicit null and extras
+reject. Exact false, strings and `ready:false` survive, while malformed responses
+cannot enter active process state. The active hook ignores response readiness,
+waits for external running status to clear starting, updates or clears the log
+from a decoded false response, preserves its prior log on malformed or transport
+failure and never retries launch.
+
+The core producer launches a detached process from current active-tag-derived
+paths and observes a fixed endpoint. Success proves process creation, not readiness,
+identity or continuing health. Composed selection is not atomic and does not roll
+back after later failure. FE-I42 covers path reachability; FE-I47 covers selection/
+launch atomicity and concurrency; FE-I48 covers detached lifecycle and partial
+effects; FE-I49 covers uncorrelated readiness. Safe fixtures disable process
+launch. No live runtime was selected or launched.
+
+Focused dual-feature RPC tests, strict dual-feature Clippy, formatting, generator/
+freshness, Electron build/lint and actual main/bundled-preload tests, direct and
+composed producer-to-renderer conformance, affected hooks, frontend types/lint and
+both builds pass. The frontend ledger owns exact review, repairs, routing and cost
+evidence. M4 and overall remediation remain incomplete. Next: inventory and
+validate `stop_app` with the composed `stop_ollama`/`stop_torch` routes.
+
 ## 2026-09-09 — Runtime Dependency-Installation Contract
 
 The bounded `install_version_dependencies` slice now has one strict generated

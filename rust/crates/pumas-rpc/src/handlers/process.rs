@@ -4,6 +4,8 @@
 use super::{get_version_manager, path_exists, require_str_param};
 use super::{validate_existing_local_path, validate_external_url};
 use crate::contract::OperationStatusOutcome;
+#[cfg(feature = "inference-plugins")]
+use crate::contract::RuntimeLaunchOutcome;
 use crate::server::AppState;
 #[cfg(feature = "inference-plugins")]
 use serde_json::{json, Value};
@@ -11,7 +13,7 @@ use serde_json::{json, Value};
 use tracing::{info, warn};
 
 #[cfg(feature = "inference-plugins")]
-pub async fn launch_ollama(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
+pub async fn launch_ollama(state: &AppState) -> pumas_library::Result<RuntimeLaunchOutcome> {
     // Get the active version from ollama version_manager and launch it
     info!("launch_ollama: checking for ollama version manager");
     if let Some(vm) = get_version_manager(state, "ollama").await {
@@ -30,20 +32,18 @@ pub async fn launch_ollama(state: &AppState, _params: &Value) -> pumas_library::
             info!("launch_ollama: launching active version");
             let response = state.api.launch_ollama(&tag, &version_dir).await?;
             info!("launch_ollama: result success={}", response.success);
-            Ok(serde_json::to_value(response)?)
+            Ok(response.into())
         } else {
             warn!("launch_ollama: no active version set");
-            Ok(json!({
-                "success": false,
-                "error": "No active Ollama version set"
-            }))
+            Ok(RuntimeLaunchOutcome::failure(
+                "No active Ollama version set",
+            ))
         }
     } else {
         warn!("launch_ollama: version manager not initialized");
-        Ok(json!({
-            "success": false,
-            "error": "Version manager not initialized for ollama"
-        }))
+        Ok(RuntimeLaunchOutcome::failure(
+            "Version manager not initialized for ollama",
+        ))
     }
 }
 
@@ -60,7 +60,7 @@ pub async fn is_ollama_running(state: &AppState, _params: &Value) -> pumas_libra
 }
 
 #[cfg(feature = "inference-plugins")]
-pub async fn launch_torch(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
+pub async fn launch_torch(state: &AppState) -> pumas_library::Result<RuntimeLaunchOutcome> {
     info!("launch_torch: checking for torch version manager");
     if let Some(vm) = get_version_manager(state, "torch").await {
         let active = vm.get_active_version().await?;
@@ -73,20 +73,16 @@ pub async fn launch_torch(state: &AppState, _params: &Value) -> pumas_library::R
             info!("launch_torch: launching active version");
             let response = state.api.launch_torch(&tag, &version_dir).await?;
             info!("launch_torch: result success={}", response.success);
-            Ok(serde_json::to_value(response)?)
+            Ok(response.into())
         } else {
             warn!("launch_torch: no active version set");
-            Ok(json!({
-                "success": false,
-                "error": "No active Torch version set"
-            }))
+            Ok(RuntimeLaunchOutcome::failure("No active Torch version set"))
         }
     } else {
         warn!("launch_torch: version manager not initialized");
-        Ok(json!({
-            "success": false,
-            "error": "Version manager not initialized for torch"
-        }))
+        Ok(RuntimeLaunchOutcome::failure(
+            "Version manager not initialized for torch",
+        ))
     }
 }
 

@@ -1,5 +1,119 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-09 — Runtime Launch Contract
+
+Accepted the actual `launch_ollama`/`launch_torch` RPC routes and composed
+desktop `launch_app`/`launch_version` adapters across standalone Rust, generated
+contracts, Electron main/preload and renderer boundaries. `RuntimeLaunchParams`
+is an exact empty record: omitted RPC and Electron-main parameters normalize to
+`{}`, while explicit null, non-record and extra fields reject before effects.
+Generated `SwitchVersionParams` requires exact string tag and app identity,
+preserves `app_id`/`appId`, and rejects missing, null, wrong-type, extra and
+ambiguous fields before selection.
+
+`RuntimeLaunchOutcome` is exactly `{success:boolean,error?:string,log_path?:
+string,ready?:boolean}`. Optional values are omitted or non-null; exact strings
+and `ready:false` survive unchanged, while explicit null and invented fields
+reject. The composed adapter decodes selection before launch. Missing app identity
+and nonempty extra arguments retain local false results with no call. Unknown app
+identity retains the legacy switch-then-unsupported result. Failed or malformed
+selection makes no launch call; later failed, malformed or transport launch makes
+one selection and one launch call with no retry or rollback.
+
+The routes use core `ProcessManager` launch rather than app-manager
+`VersionManager::launch_version`. They derive executable, PID and log paths from
+the current active tag, start a detached child and perform a bounded fixed-endpoint
+HTTP observation. Success proves process creation; `ready:false` remains success,
+and readiness is not correlated evidence for the launched PID/version or continuing
+health. FE-I42 includes active-tag launch-path reachability. FE-I47 records non-
+atomic selection plus launch and the mutable-active-version concurrency gap.
+FE-I48 records detached/unretained lifecycle, partial PID/log effects and unsafe
+retry after uncertainty. FE-I49 records uncorrelated readiness and ignored probe
+errors.
+
+The active renderer path is App through `useOllamaProcess`/`useTorchProcess` and
+`useManagedProcess`. It ignores the launch response's readiness flag, treats
+success as starting and waits for the external `isRunning` status prop to clear
+that state. A decoded false outcome updates or clears the log from that failure;
+malformed and transport failures preserve the prior log and expose a bounded
+error. Immediate and delayed status refreshes are
+read observations, not mutation retries. `versionsAPI.launchVersion` has no
+caller; `usePluginProcess` calls `launch_app` but has no production importer and
+remains dormant.
+
+Verification: focused `pumas-rpc` runtime-launch and switch-version tests pass
+eight with default features and eight with `--no-default-features`; safe process-
+manager fixtures disable launch. Strict Clippy passes all targets/all features and
+all targets/no default features with warnings denied; Rust formatting passes.
+Generator tests pass eight and freshness passes. Electron build/lint and its actual
+main/bundled-preload suite pass 167 with one pinned-Electron test skipped. Producer/
+generated conformance passes 38 and actual preload/renderer conformance passes 48;
+the two affected hook suites pass four tests. Frontend types, lint and normal/
+library-only builds pass. No live runtime was selected or launched, and no runtime
+Python/pip, live network service or model-library mutation ran. This evidence does
+not establish live readiness, process lifetime, rollback, concurrency, graphical
+behavior or other-OS process/filesystem behavior.
+
+Routing/review: the unchanged root session remains GPT-6 Astra medium because it
+cannot be switched in place to requested GPT-5.6 Sol low; the deviation remains
+disclosed. GPT-6 Astra medium owned semantics, consequential design and independent
+review; GPT-6 Astra low implemented Rust; GPT-5.6 Luna max completed the bounded
+frontend-consumer inventory promptly without edits; GPT-5.6 Sol low owned routine
+desktop/frontend integration, generation, gates, documentation and commit.
+Compared with the prior broad inventory, Luna's narrowed assignment produced timely
+consumer evidence; comparisons across task classes remain provisional rather than
+a controlled benchmark.
+
+Review required Electron omitted request normalization to preserve Rust parity and
+three claim-directed active-hook assertions: external running status clears starting,
+an omitted outcome projects a null log, and failures preserve the prior log. Rust
+also repaired shared test-corpus helper visibility during compilation. Integration
+repaired one test oracle that expected a synchronous throw from an async composed
+bridge, then fixed a generated empty-object TypeScript projection exposed by lint
+with a generator regression. Two command-name navigation mistakes (`check:desktop-
+contract-fresh`, `typecheck`/`build:library`) were corrected to repository scripts;
+the first broad Electron command had already passed its 11 wrapper tests. No
+production-behavior test failed. Cargo ownership remained sequential.
+
+Cost checkpoint: `/tmp/pumas-launch-costs.py` preserved the frozen dependency-
+installation JSON checkpoint and deduplicated 229 later local
+`token_usage_record` responses by `response_id`. The prior reporting tail is
+$1.673726: root GPT-6 Astra medium $0.719076 through
+`resp_04a060a0b34b4096016aa1d4b7ebc087d092bfab1f78204951`
+(`2026-09-09T21:50:58.662Z`), planning/review GPT-6 Astra medium $0.124772
+through `resp_0d89de9fd93a6b19016aa1d456322487d0b0a52de807ddbaa6`
+(`2026-09-09T21:49:14.341Z`), and desktop/frontend GPT-5.6 Sol low $0.829878
+through `resp_0b81a3105f0b5342016aa1d4b40fec87d0a1504b36aa2c7a2d`
+(`2026-09-09T21:50:52.854Z`). The current slice is $21.843563: root GPT-6
+Astra medium $8.177802 through
+`resp_04a060a0b34b4096016aa1da857cb487d094646329a23db3c4`
+(`2026-09-09T22:15:36.115Z`), planning/review GPT-6 Astra medium $6.227886
+through `resp_0d89de9fd93a6b19016aa1da40501c87d0bf975e2379df1f44`
+(`2026-09-09T22:14:28.823Z`), inventory GPT-5.6 Luna max $0.038059 through
+`resp_01eda5dd1e4769fc016aa1d6a75f1487d092c51c2deeb15660`
+(`2026-09-09T22:00:03.475Z`), Rust GPT-6 Astra low $2.204600 through
+`resp_0ffe187931010737016aa1d757d14887d0ad82257e3e084452`
+(`2026-09-09T22:02:05.456Z`), and desktop/frontend GPT-5.6 Sol low $5.195216
+through `resp_0b81a3105f0b5342016aa1da88c0e887d0807317bbd24d9b8c`
+(`2026-09-09T22:15:39.230Z`). Including the tail, this checkpoint adds
+$23.517289 and brings the cumulative API-equivalent estimate to $103.910302
+standard and $207.820605 under the separate 2x priority scenario. The helper's
+initial adaptation omitted an older session cutoff and recounted prior usage;
+this was caught before checkpointing and repaired by inheriting every frozen
+cutoff before overlaying current ones, with no accepted-total change. No request
+crossed 272,000 input tokens and recorded cache writes were zero. Requested and
+observed service tiers, tool fees and shared costs remain unknown and are not
+treated as free. Published OpenAI pages for
+[GPT-5.6 Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol),
+[GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna) and
+[GPT-6 Astra](https://developers.openai.com/api/docs/models/gpt-6-astra)
+corroborate the assumptions. These are API-equivalent estimates, not invoices.
+Work after this snapshot is an uncounted reporting/commit tail.
+
+The next slice is the independent inventory and validation of `stop_app` with the
+composed `stop_ollama`/`stop_torch` RPC routes. M4 and the overall remediation
+remain incomplete.
+
 ## 2026-09-09 — Runtime Dependency-Installation Contract
 
 Accepted `install_version_dependencies` across the standalone Rust producer,

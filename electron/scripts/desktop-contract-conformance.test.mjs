@@ -107,6 +107,11 @@ test('default-selection request admission matches Rust and response preserves ex
 });
 
 test('runtime-switch decoding preserves exact confirmation booleans', () => {
+  for (const probe of fixtures.switch_version_request_probes) {
+    const result = contract.decodeSwitchVersionParams(probe.params);
+    assert.equal(result.status, probe.accepted ? 'valid' : 'invalid', JSON.stringify(probe));
+    if (probe.accepted) assert.deepEqual(JSON.parse(JSON.stringify(result.value)), probe.params);
+  }
   for (const key of ['switch_version_true', 'switch_version_false']) {
     const result = contract.decodeSwitchVersionOutcome(fixtures[key]);
     assert.equal(result.status, 'valid', key);
@@ -115,6 +120,27 @@ test('runtime-switch decoding preserves exact confirmation booleans', () => {
   for (const value of [null, true, false, {}, { success: null }, { success: 1 },
     { success: true, error: 'invented' }, { success: false, result: false }]) {
     assert.equal(contract.decodeSwitchVersionOutcome(value).status, 'invalid', JSON.stringify(value));
+  }
+});
+
+test('runtime-launch admission and outcomes match Rust', () => {
+  for (const probe of fixtures.runtime_launch_request_probes) {
+    const value = probe.omitted ? {} : probe.params;
+    const result = contract.decodeRuntimeLaunchParams(value);
+    assert.equal(result.status, probe.accepted ? 'valid' : 'invalid', JSON.stringify(probe));
+    if (probe.accepted) assert.deepEqual(JSON.parse(JSON.stringify(result.value)), {});
+  }
+  for (const key of ['runtime_launch_omitted', 'runtime_launch_not_ready',
+    'runtime_launch_ready', 'runtime_launch_failed']) {
+    const result = contract.decodeRuntimeLaunchOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  for (const value of [null, true, false, {}, { success: null },
+    { success: true, error: null }, { success: true, log_path: null },
+    { success: true, ready: null }, { success: 'true' },
+    { success: true, extra: true }]) {
+    assert.equal(contract.decodeRuntimeLaunchOutcome(value).status, 'invalid', JSON.stringify(value));
   }
 });
 

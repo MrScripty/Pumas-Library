@@ -800,11 +800,17 @@ async fn dispatch_admitted_command(
                 .map(RpcOutcome::RemoveVersion)
         }
         #[cfg(feature = "inference-plugins")]
-        RpcCommand::Legacy { method, params } if method == "switch_version" => {
-            versions::switch_version(state, &params)
-                .await
-                .map(RpcOutcome::SwitchVersion)
-        }
+        RpcCommand::LaunchOllama => process::launch_ollama(state)
+            .await
+            .map(RpcOutcome::RuntimeLaunch),
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::LaunchTorch => process::launch_torch(state)
+            .await
+            .map(RpcOutcome::RuntimeLaunch),
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::SwitchVersion { app_id, tag } => versions::switch_version(state, &app_id, &tag)
+            .await
+            .map(RpcOutcome::SwitchVersion),
         #[cfg(feature = "inference-plugins")]
         RpcCommand::Legacy { method, params } if method == "get_installation_progress" => {
             versions::get_installation_progress(state, &params)
@@ -1297,13 +1303,9 @@ async fn dispatch_method(
 
         // Process Management
         #[cfg(feature = "inference-plugins")]
-        "launch_ollama" => process::launch_ollama(state, params).await,
-        #[cfg(feature = "inference-plugins")]
         "stop_ollama" => process::stop_ollama(state, params).await,
         #[cfg(feature = "inference-plugins")]
         "is_ollama_running" => process::is_ollama_running(state, params).await,
-        #[cfg(feature = "inference-plugins")]
-        "launch_torch" => process::launch_torch(state, params).await,
         #[cfg(feature = "inference-plugins")]
         "stop_torch" => process::stop_torch(state, params).await,
         #[cfg(feature = "inference-plugins")]
@@ -1637,6 +1639,120 @@ mod tests {
                 }}),
                 "{params}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn switch_version_admission_rpc_admission_and_errors() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        for (params, accepted) in crate::contract::install_version_requests() {
+            let request = Bytes::from(serde_json::to_vec(&json!({
+                "jsonrpc":"2.0", "id":"deps-fixture", "method":"switch_version", "params":params,
+            })).unwrap());
+            let response = handle_rpc(State(state.clone()), request)
+                .await
+                .into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(response.into_body(), 65_536)
+                .await
+                .unwrap();
+            let wire: Value = serde_json::from_slice(&body).unwrap();
+            #[cfg(feature = "inference-plugins")]
+            let error = if accepted {
+                crate::contract::PublicError::from(&pumas_library::PumasError::Config {
+                    message: "Version manager not initialized".into(),
+                })
+            } else {
+                crate::contract::PublicError::invalid_params()
+            };
+            #[cfg(not(feature = "inference-plugins"))]
+            let error = {
+                let _ = accepted;
+                crate::contract::PublicError::method_not_found()
+            };
+            assert_eq!(
+                wire,
+                json!({"jsonrpc":"2.0", "id":"deps-fixture", "error":{
+                    "code":error.code,"message":error.message,"data":{"class":error.class.as_str()},
+                }}),
+                "{params}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn runtime_launch_core_unavailable_branches_preserve_wire() {
+        let temp = TempDir::new().unwrap();
+        let api = test_support::build_test_api(temp.path()).await;
+        let missing = temp.path().join("absent-version");
+        for path in [&missing, temp.path()] {
+            let expected_error = if path == missing {
+                format!("Version directory does not exist: {}", path.display())
+            } else {
+                "Process manager not initialized".to_string()
+            };
+            for response in [
+                api.launch_ollama("fixture", path).await.unwrap(),
+                api.launch_torch("fixture", path).await.unwrap(),
+            ] {
+                let raw = serde_json::to_value(&response).unwrap();
+                assert_eq!(raw, json!({"success":false,"error":expected_error}));
+                assert_eq!(
+                    serde_json::to_value(crate::contract::RuntimeLaunchOutcome::from(response))
+                        .unwrap(),
+                    raw
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn runtime_launch_rpc_admission_and_missing_manager() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        for method in ["launch_ollama", "launch_torch"] {
+            for (params, accepted) in crate::contract::runtime_launch_requests() {
+                let mut request = json!({"jsonrpc":"2.0","id":"launch-fixture","method":method});
+                if let Some(params) = params {
+                    request["params"] = params;
+                }
+                let response = handle_rpc(
+                    State(state.clone()),
+                    Bytes::from(serde_json::to_vec(&request).unwrap()),
+                )
+                .await
+                .into_response();
+                assert_eq!(response.status(), StatusCode::OK);
+                let body = axum::body::to_bytes(response.into_body(), 65_536)
+                    .await
+                    .unwrap();
+                let wire: Value = serde_json::from_slice(&body).unwrap();
+                #[cfg(feature = "inference-plugins")]
+                if accepted {
+                    let app = if method == "launch_ollama" {
+                        "ollama"
+                    } else {
+                        "torch"
+                    };
+                    assert_eq!(
+                        wire,
+                        json!({"jsonrpc":"2.0","id":"launch-fixture","result":{"success":false,"error":format!("Version manager not initialized for {app}")}})
+                    );
+                    continue;
+                }
+                #[cfg(feature = "inference-plugins")]
+                let error = crate::contract::PublicError::invalid_params();
+                #[cfg(not(feature = "inference-plugins"))]
+                let error = {
+                    let _ = accepted;
+                    crate::contract::PublicError::method_not_found()
+                };
+                assert_eq!(
+                    wire,
+                    json!({"jsonrpc":"2.0","id":"launch-fixture","error":{"code":error.code,"message":error.message,"data":{"class":error.class.as_str()}}})
+                );
+            }
         }
     }
 

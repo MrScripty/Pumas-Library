@@ -106,6 +106,7 @@ export function schemaType(schema) {
         // mapped-type indirection makes those aliases illegal in TypeScript.
         return `{ readonly [key: string]: ${schemaType(schema.additionalProperties)} }`;
       }
+      if (!fields.length && schema.additionalProperties === false) return 'Readonly<Record<string, never>>';
       return `{ ${fields.join('; ')} }`;
     }
     default: throw new Error('Unsupported unclassified schema');

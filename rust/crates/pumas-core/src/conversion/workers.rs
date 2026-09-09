@@ -109,7 +109,24 @@ impl WorkerOwner {
         }
     }
 
-    pub(super) fn spawn<F>(
+    pub(super) fn spawn_in_environment<F>(
+        &self,
+        initial: ConversionProgress,
+        cancel: CancellationToken,
+        root: std::path::PathBuf,
+        work: F,
+    ) -> Result<()>
+    where
+        F: Future<Output = Result<()>> + Send + 'static,
+    {
+        self.spawn(
+            initial,
+            cancel.clone(),
+            super::setup::with_conversion_environment(root, cancel, work),
+        )
+    }
+
+    fn spawn<F>(
         &self,
         initial: ConversionProgress,
         cancel: CancellationToken,

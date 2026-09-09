@@ -49,8 +49,10 @@ associates the response with that selection. Null setup is an owner-local absenc
 not a readiness result. Omitted/null retry tokens attach without retrying; only a
 matching terminal operation ID can admit a successor. Reads never install and
 remain available after setup shutdown. IDs do not survive owner/process restart.
-Callers must exclude conversions and external environment use during setup;
-this execution exclusion is not enforced by the installer lock. This bridge
+Core excludes setup and managed conversions at the same stable root; contention
+becomes a failed operation, without queuing or automatic retry. Direct backend
+calls, independent readiness probes and external tools remain caller-coordinated
+(see the [core contract](../rust/crates/pumas-core/README.md)). This bridge
 contract does not add quantization controls or establish real tool/GPU readiness.
 
 ### Generated catalog and download contract

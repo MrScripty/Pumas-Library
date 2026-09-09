@@ -1,5 +1,72 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Managed Setup And Conversion Exclusion
+
+Accepted EXCL. Every managed direction now enters through WorkerOwner's
+environment wrapper, acquiring the existing exclusive physical-root setup lease
+before execution and retaining it through cleanup, output publication and
+indexing. The raw worker spawn is private, so production manager dispatch cannot
+bypass the wrapper. Setup and conversion retain their existing distinct
+operation identities, cancellation and terminal owners. Contention fails the
+admitted operation explicitly, with no queue or automatic retry. Other managed
+conversions at the same root are excluded too because base conversions deploy
+shared scripts; independent roots remain independent.
+
+The codebase-design skill kept coordination inside core. The helper uses brief
+retained blocking acquisition/release calls and carries only an owned File
+during asynchronous execution. It never parks a blocking-pool worker for the
+whole conversion or runs the setup lease's retrying destructor on the async
+thread. Work failure/panic and release failure remain observable before terminal
+progress. Caller/runtime shutdown obligations are unchanged. Independent probes,
+direct backend execution, external tools, hostile root/lock replacement and
+abrupt runtime/process destruction are excluded. The controlled panic test has
+no child process; it is not proof of arbitrary native-panic quiescence.
+
+root_diagnostics implemented the bounded conversion source/tests; root reviewed,
+integrated facade/README documentation and serialized formatting/Cargo.
+root_capability independently reviewed the frozen composition and found no
+blockers within its documented custody, failure and exclusion boundaries. Five
+new regressions plus the extended existing quiet-native fixture cover all six
+public manager directions under contention, unchanged source/index/output state,
+both contention directions, independent roots, symlink aliases and independent
+processes, cancellation with dropped shutdown observation, observed release for
+success/error/no-child panic/cancellation, and async filesystem work on a
+current-thread runtime with only one blocking thread. The actual quiet-native
+fixture also checks setup exclusion while the child is alive and reacquisition
+after child cleanup/drain. No real conversion or installation tools are invoked.
+
+Initial focused evidence found two fixture problems. The new no-output test
+incorrectly assumed one library entry; it now compares the exact pre/post entry
+set, preserving source bytes, index identity and no-script/output assertions.
+An existing manager readiness timeout fixture failed before execution with
+`ETXTBSY`; the same binary passed that test in isolation. Its helper opened the
+executable for writing inside the parallel test process, permitting another
+test's fork to inherit the writer. Root reused the existing awaited shell-writer
+pattern, keeping the writable descriptor outside that process. The original
+transient fork was not traced; this removes that inheritance path by construction,
+not by widening deadlines, retrying spawn or serializing the suite. Production
+readiness behavior is unchanged. Corrected focused conversion evidence passed
+107/107. Default core/RPC evidence passed 1,472 tests, with 22 ignored.
+The first minimal run hit the unchanged download fixture's one-second admitted-ID
+wait in `pause_after_a_worker_check_is_settled_by_the_same_generation`. The same
+binary passed that exact test in isolation in 0.15 seconds; default also passed
+it. This is FE-I28, not an environment-exclusion failure or a diagnosed download
+fix. Preserve the original `/tmp/pumas-managed-exclusion-minimal.log`; the normal
+parallel minimal recheck passed 1,432 tests with 22 ignored. Strict all-target
+all-feature and no-default clippy, formatting, whitespace and all five plan
+contracts passed. No download source, deadline or test parallelism was changed.
+The passing recheck does not resolve FE-I28 or prove its timeout cause.
+
+Commands from `rust/`: focused `cargo test --offline --locked -p pumas-library
+--no-default-features conversion::`; full `cargo test --offline --locked
+-p pumas-library -p pumas-rpc` with and without `--no-default-features`.
+Strict `cargo clippy --offline --locked -p pumas-library -p pumas-rpc
+--all-targets` uses `--all-features` and `--no-default-features`, each with
+`-- -D warnings`; formatting uses `cargo fmt --all --check`.
+Evidence logs: `/tmp/pumas-managed-exclusion-*.log`. No GUI, real package/model/GPU,
+release-artifact or Windows/macOS claim; core remains standalone and GUI-optional.
+Full-program acceptance remains partial; base-format readiness probing is next.
+
 ## 2026-09-08 — Backend Setup RPC And Desktop Projection
 
 Accepted BRPC. Added `start_backend_setup` and `get_backend_setup` to the

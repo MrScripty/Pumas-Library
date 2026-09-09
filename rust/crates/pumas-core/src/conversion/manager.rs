@@ -238,8 +238,9 @@ impl ConversionManager {
     /// retry without a selected owner-local record return `InvalidParams`.
     /// Records are not persisted across owner/process restart.
     ///
-    /// Exclude conversions and external environment use while setup runs; native
-    /// repair may clean/rebuild generated outputs. This exclusion is caller-owned.
+    /// Native repair may clean/rebuild generated outputs. The environment lease
+    /// excludes managed conversions; callers must exclude direct backend calls,
+    /// independent readiness probes and external environment users.
     /// Dropping this call does not cancel admitted work. Drain `shutdown_setup`
     /// before stopping the Tokio runtime; closed admission returns
     /// `InstallationCancelled`. Setup success is not execution readiness proof.
@@ -339,9 +340,10 @@ impl ConversionManager {
     ///
     /// # Preconditions
     /// - The backend must be registered.
-    /// - No conversion or external tool may concurrently use its environment.
-    ///   Setup may clean/rebuild generated native artifacts; installer exclusion
-    ///   does not enforce this caller-owned execution exclusion.
+    /// - Direct backend calls, independent readiness probes and external tools
+    ///   must not concurrently use its environment. Setup may clean/rebuild
+    ///   generated native artifacts. Managed conversions share its exclusive
+    ///   root lease and require no caller-provided exclusion.
     ///
     /// # Postconditions
     /// - The backend's setup recipe and dependency checks completed. Readiness
@@ -407,6 +409,10 @@ impl ConversionManager {
     /// Start a model format conversion or quantization.
     ///
     /// Returns a conversion ID that can be used to track progress.
+    /// Execution acquires the same exclusive root lease as setup and retains
+    /// it through cleanup, publication and indexing. Contention becomes terminal
+    /// failed progress without queuing or automatic retry. Keep the root and
+    /// its lock file stable until shutdown drains all managed work.
     /// Managed quantization rejects unsupported target/backend pairs, missing
     /// required calibration, and invalid supplied calibration files before
     /// admitting a worker. File inspection is not retained custody: callers
@@ -470,24 +476,29 @@ impl ConversionManager {
 
         match direction {
             // Existing Python-based format conversions
-            ConversionDirection::GgufToSafetensors | ConversionDirection::SafetensorsToGguf => self
-                .workers
-                .spawn(initial_progress, cancel_token.clone(), async move {
-                    run_conversion(
-                        &conv_id,
-                        direction,
-                        &launcher_root,
-                        &model_path,
-                        &source_model_id,
-                        target_quant.as_deref(),
-                        metadata,
-                        progress.as_ref(),
-                        &cancel_token,
-                        &library,
-                        &importer,
-                    )
-                    .await
-                })?,
+            ConversionDirection::GgufToSafetensors | ConversionDirection::SafetensorsToGguf => {
+                self.workers.spawn_in_environment(
+                    initial_progress,
+                    cancel_token.clone(),
+                    launcher_root.clone(),
+                    async move {
+                        run_conversion(
+                            &conv_id,
+                            direction,
+                            &launcher_root,
+                            &model_path,
+                            &source_model_id,
+                            target_quant.as_deref(),
+                            metadata,
+                            progress.as_ref(),
+                            &cancel_token,
+                            &library,
+                            &importer,
+                        )
+                        .await
+                    },
+                )?
+            }
             // Quantization via backend — route to the appropriate backend by direction
             ConversionDirection::SafetensorsToQuantizedGguf
             | ConversionDirection::GgufToQuantizedGguf => {
@@ -503,8 +514,11 @@ impl ConversionManager {
                     )
                     .await?;
 
-                self.workers
-                    .spawn(initial_progress, cancel_token.clone(), async move {
+                self.workers.spawn_in_environment(
+                    initial_progress,
+                    cancel_token.clone(),
+                    launcher_root.clone(),
+                    async move {
                         run_quantization(
                             &conv_id,
                             backend.as_ref(),
@@ -516,7 +530,8 @@ impl ConversionManager {
                             &library,
                         )
                         .await
-                    })?
+                    },
+                )?
             }
             ConversionDirection::SafetensorsToNvfp4 => {
                 let (backend, params) = self
@@ -531,8 +546,11 @@ impl ConversionManager {
                     )
                     .await?;
 
-                self.workers
-                    .spawn(initial_progress, cancel_token.clone(), async move {
+                self.workers.spawn_in_environment(
+                    initial_progress,
+                    cancel_token.clone(),
+                    launcher_root.clone(),
+                    async move {
                         run_quantization(
                             &conv_id,
                             backend.as_ref(),
@@ -544,7 +562,8 @@ impl ConversionManager {
                             &library,
                         )
                         .await
-                    })?
+                    },
+                )?
             }
             ConversionDirection::SafetensorsToSherryQat => {
                 let (backend, params) = self
@@ -559,8 +578,11 @@ impl ConversionManager {
                     )
                     .await?;
 
-                self.workers
-                    .spawn(initial_progress, cancel_token.clone(), async move {
+                self.workers.spawn_in_environment(
+                    initial_progress,
+                    cancel_token.clone(),
+                    launcher_root.clone(),
+                    async move {
                         run_quantization(
                             &conv_id,
                             backend.as_ref(),
@@ -572,7 +594,8 @@ impl ConversionManager {
                             &library,
                         )
                         .await
-                    })?
+                    },
+                )?
             }
         };
 
@@ -949,7 +972,6 @@ fn target_extension(direction: ConversionDirection) -> &'static str {
 #[cfg(all(test, unix))]
 mod environment_tests {
     use super::*;
-    use std::os::unix::fs::PermissionsExt;
 
     async fn manager(root: &Path) -> ConversionManager {
         let library = Arc::new(ModelLibrary::new(root.join("models")).await.unwrap());
@@ -959,8 +981,19 @@ mod environment_tests {
 
     fn executable(path: &Path, script: &str) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, script).unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        // Keep the writable executable descriptor outside the parallel test
+        // process so another test's fork cannot inherit it and cause ETXTBSY.
+        let status = std::process::Command::new("sh")
+            .args([
+                "-c",
+                "printf '%s' \"$2\" > \"$1\" && chmod 700 \"$1\"",
+                "fixture-writer",
+            ])
+            .arg(path)
+            .arg(script)
+            .status()
+            .unwrap();
+        assert!(status.success(), "fixture writer completed");
     }
 
     const FIXTURE_PYTHON: &str = "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$0.calls\"\nif [ \"$1\" = '-I' ]; then [ -f \"$0.ready\" ]; exit $?; fi\nif [ \"$1\" = '-m' ] && [ \"$2\" = 'pip' ]; then\n if [ -f \"$0.fail\" ]; then exit 1; fi\n if [ \"$4\" = '-r' ]; then touch \"$0.ready\"; fi\n exit 0\nfi\nexit 2\n";

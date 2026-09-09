@@ -12,6 +12,10 @@ impl PumasApi {
     /// Start a model format conversion (GGUF <-> Safetensors).
     ///
     /// Returns a conversion ID for tracking progress.
+    /// Managed execution excludes setup and other managed conversions at the
+    /// same stable root through cleanup, publication and indexing. Contention
+    /// becomes terminal failed progress, not an automatic retry. Direct backend
+    /// calls, independent readiness probes and external tools are caller-coordinated.
     pub async fn start_conversion(&self, request: conversion::ConversionRequest) -> Result<String> {
         self.primary()
             .conversion_manager
@@ -82,8 +86,10 @@ impl PumasApi {
     /// admits a successor; stale IDs return the selected backend's current record.
     /// Malformed IDs or retry without an owner-local record return `InvalidParams`.
     /// Records are process-local and shared with the corresponding ensure method.
-    /// Keep conversions and external environment use excluded during setup;
-    /// native repair may clean/rebuild generated outputs. Exclusion is caller-owned.
+    /// Setup excludes managed conversions at the same stable root; contention
+    /// fails the setup operation without automatic retry. Callers must still
+    /// exclude direct backend execution, independent probes and external tools:
+    /// native repair may clean/rebuild generated outputs.
     /// Dropped callers do not cancel setup; drain `shutdown_conversion_setup`
     /// before stopping the runtime. Closed admission returns `InstallationCancelled`.
     /// See [`conversion::ConversionManager::start_backend_setup`] for the contract.
@@ -141,8 +147,9 @@ impl PumasApi {
     }
 
     /// Ensure a specific quantization backend's environment is set up.
-    /// Exclude conversions and external tool use during setup: native repair
-    /// may clean/rebuild generated CMake outputs. This exclusion is caller-owned.
+    /// Setup and managed conversions share root-level exclusion. Callers must
+    /// exclude direct backend execution, independent probes and external tools:
+    /// native repair may clean/rebuild generated CMake outputs.
     /// Dropping this waiter does not release installer ownership; use
     /// `shutdown_conversion_setup` before stopping the host runtime.
     pub async fn ensure_backend_environment(

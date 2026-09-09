@@ -518,23 +518,28 @@ async fn interrupted_shutdown_still_reaps_quiet_conversion_without_publishing() 
     let task_library = library.clone();
     let task_progress = progress.clone();
     owner
-        .spawn(initial, token.clone(), async move {
-            let importer = ModelImporter::new(task_library.clone());
-            run_conversion(
-                "quiet",
-                ConversionDirection::GgufToSafetensors,
-                &task_root,
-                &source,
-                "source",
-                Some("F16"),
-                ModelMetadata::default(),
-                &task_progress,
-                &token,
-                &task_library,
-                &importer,
-            )
-            .await
-        })
+        .spawn_in_environment(
+            initial,
+            token.clone(),
+            root.path().to_path_buf(),
+            async move {
+                let importer = ModelImporter::new(task_library.clone());
+                run_conversion(
+                    "quiet",
+                    ConversionDirection::GgufToSafetensors,
+                    &task_root,
+                    &source,
+                    "source",
+                    Some("F16"),
+                    ModelMetadata::default(),
+                    &task_progress,
+                    &token,
+                    &task_library,
+                    &importer,
+                )
+                .await
+            },
+        )
         .unwrap();
 
     let pid: u32 = tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -549,6 +554,10 @@ async fn interrupted_shutdown_still_reaps_quiet_conversion_without_publishing() 
     })
     .await
     .expect("quiet native conversion started");
+    let setup = super::super::setup::SetupOwner::new(root.path().to_path_buf());
+    let busy = setup.ensure().await.unwrap_err();
+    assert!(busy.to_string().contains("environment is busy"), "{busy}");
+    assert!(setup.shutdown().await.is_err());
     let mut interrupted = Box::pin(owner.shutdown());
     assert!(futures::poll!(interrupted.as_mut()).is_pending());
     drop(interrupted);
@@ -556,6 +565,13 @@ async fn interrupted_shutdown_still_reaps_quiet_conversion_without_publishing() 
         .await
         .expect("retained shutdown cancels quiet native child")
         .expect("cancellation observed");
+    super::super::setup::with_conversion_environment(
+        root.path().to_path_buf(),
+        CancellationToken::new(),
+        async { Ok(()) },
+    )
+    .await
+    .expect("native cleanup and worker receipt released environment lease");
 
     assert!(
         !Path::new(&format!("/proc/{pid}")).exists(),

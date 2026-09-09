@@ -24,9 +24,12 @@ installation; inspect `setup.status`. A null status snapshot is not readiness.
 
 Existing base-Python setup methods remain unchanged. The server's existing
 shutdown drain closes and observes built-in installers and asynchronous readiness
-probes. Setup does not enforce exclusion of conversions or external tool users;
-callers must provide that exclusion. Setup completion is not GPU or conversion
-readiness proof.
+probes. Setup and managed conversions share exclusive root-level environment
+access through cleanup and publication. Contention fails the operation in its
+setup snapshot or conversion progress, without queuing or automatic retry.
+Direct backend execution, independent readiness probes and external tool users
+remain caller-coordinated; see the [core contract](../pumas-core/README.md).
+Setup completion is not GPU or conversion readiness proof.
 
 Contract export includes `StartBackendSetupParams`, `GetBackendSetupParams`, and
 `backend_setup_request_probes` produced by the actual Rust command parser.

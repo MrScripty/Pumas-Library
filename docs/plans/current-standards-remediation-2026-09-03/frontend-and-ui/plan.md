@@ -10,13 +10,15 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Enforce managed setup-versus-conversion exclusion (FE-I26,
-remaining FE-I23). Backend setup observation/retry is accepted through standalone
+**Next slice:** Modernize base-format readiness probing (FE-I26, remaining FE-I23).
+Managed setup-versus-conversion exclusion is accepted below. Backend setup
+observation/retry is accepted through standalone
 Rust, RPC and the optional desktop bridge below. Native llama.cpp artifact verification/guarded repair
 is accepted below; source/build revision coherence remains outside that claim.
 Installer custody, setup import verification/repair, direction-specific llama.cpp
 artifacts and public quantization import-probe lifetime are accepted below.
-Setup-versus-conversion exclusion and stronger containment remain open.
+Independent probe/direct/external-use exclusion and stronger containment remain
+outside the accepted managed-execution guarantee.
 Managed quantization target/calibration admission is accepted below; execution
 readiness and lower-level backend preconditions are not closed by it.
 NVFP4/Sherry script progress is accepted below, closing FE-I27.
@@ -41,6 +43,59 @@ cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
 
+## Managed Setup And Conversion Exclusion
+
+Status: `Accepted`; see the
+[execution ledger](execution-ledger.md#2026-09-08--managed-setup-and-conversion-exclusion).
+Continue FE-I26 by extending the existing exclusive root
+setup lease to every managed conversion worker. Acquire before execution reads
+or shared-script deployment; retain through native cleanup, output publication
+and indexing, and observe release before publishing terminal progress.
+Contention fails the admitted operation explicitly, without waiting, installing
+or automatically retrying. Conservatively exclude other managed conversions at
+the same stable physical root too: base conversions deploy shared scripts.
+Independent roots remain independent. Direct backend execution, independently
+requested readiness probes, external tools, hostile path replacement and abrupt
+runtime/process destruction remain outside this claim.
+
+Exact write set: `rust/crates/pumas-core/src/conversion/{setup.rs,workers.rs,
+manager.rs,manager/admission_tests.rs,manager/output_tests.rs}`, core
+`src/api/conversion.rs` and `README.md`, RPC `README.md`, `electron/README.md`, this plan, its ledger
+and issues, and the parent plan. root_diagnostics owns the listed conversion
+source/tests only; root owns facade documentation and plan/README records,
+serial Cargo, formatting, review and commits. No new dependencies, runtime,
+GUI mutation, real installation/model/GPU work or unrelated file edits.
+Reports use agent messages; scope changes return to root before edits.
+
+Composed-design review: applicable. Setup and conversion keep separate operation
+identities, cancellation and terminal owners; the root file lease owns only
+environment exclusion. Required interleaving is acquisition before environment
+use and release after cleanup/publication, not request lifetime. Callers retain
+the existing shutdown obligation but no longer coordinate managed setup versus
+execution. Changes to exclusion/release stay with the lease helper; conversion
+admission/terminal projection stay with WorkerOwner; recipes and public
+transports do not acquire duplicate policy. Dependencies carry an owned file
+resource and a work result, not a setup state representation. Recipes and
+conversion bodies remain independently testable; neither supplies the other's
+terminal authority. Deleting the helper would reintroduce the same acquisition,
+work-panic observation, lease release and failure composition in every dispatch branch. No second
+registry, lifecycle, scheduler or compatibility path is admitted. Brief retained
+blocking acquisition/release must not park a blocking-pool worker for the whole
+conversion, which would deadlock hosts with one blocking thread.
+
+Acceptance EXCL (satisfied): focused/integration, simulated Linux, automated;
+plus system, representative Linux local filesystem, automated for cross-process
+locking. Temporary-root evidence proves both contention directions, independent roots,
+lease retention through cancellation and dropped shutdown observation, terminal
+release after success/failure/no-child panic, and operation with one blocking thread.
+Use managed dispatch and existing worker/lease fixtures, not real model tools.
+Affected core/RPC default/minimal suites, strict lint, formatting and plan checks
+passed. FE-I28 records an unresolved unrelated download-fixture timeout from the
+initial minimal run; its unchanged recheck is not a fix claim.
+No Windows/macOS, graphical workflow, hostile-root or real tool claim.
+Re-plan if lifecycle custody, lock identity or the excluded direct-call/probe
+population must change to satisfy this bounded claim.
+
 ## Backend Setup RPC And Desktop Projection
 
 Status: `Accepted`; see the
@@ -53,7 +108,8 @@ backends and malformed tokens before dispatch. Use the existing redacted setup
 started/status outcomes; no backend echo, new lifecycle, persistence or GUI
 controls. JSON-RPC correlation binds the reply to the requested backend; callers
 retain that backend alongside its snapshot. Core remains the sole setup/retry
-owner. Setup/execution exclusion remains caller-owned, and reads do not install.
+owner. Reads do not install; managed setup/execution exclusion is tracked in the
+current exclusion slice above.
 
 Rust owns params, schemas, runtime decode and redacted output constructors.
 Generate both desktop/frontend declarations and AJV validators using the existing
@@ -101,7 +157,7 @@ Memory-only reads never install or probe. None does not retry retained results;
 only the selected owner's matching terminal ID admits a successor. Stale IDs
 return that owner's current snapshot; invalid IDs or retries without a record
 fail explicitly. Records remain readable after shutdown closes admission.
-Setup-versus-conversion exclusion remains caller-owned and documented.
+Managed setup-versus-conversion exclusion is tracked in the current slice above.
 
 The standalone Rust contract is independently usable without transport or GUI.
 RPC/desktop projection requires separate protocol/generated-consumer evidence
@@ -160,8 +216,9 @@ checkout or Python dependencies. Source/binary revision coherence, effective
 access, ABI/hardware and real upstream build behavior remain outside this claim.
 The existing managed checkout, CMake configuration and compiler discovery remain
 build inputs; no reproducibility or source-revision cache-validity claim is added.
-Callers must keep setup exclusive of conversion/external tool use and keep paths
-stable. Enforcing setup-versus-conversion exclusion remains a separate prerequisite.
+Callers must keep paths stable and exclude direct backend execution, independent
+probes and external tools from setup. Managed setup-versus-conversion exclusion
+has its own slice above.
 
 Acceptance NATIVE (satisfied): controlled Linux fixtures prove healthy skip,
 repair-triggering missing/empty/nonexecutable native artifacts, clean-build argv,

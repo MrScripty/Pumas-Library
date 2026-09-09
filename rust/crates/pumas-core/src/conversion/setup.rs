@@ -1,6 +1,6 @@
 //! Built-in conversion/quantization setup custody. The configured launcher-data directory and its
 //! lock file must not be replaced or unlinked while an owner is active. This is
-//! advisory setup exclusion, not a hostile-filesystem capability. Explicit
+//! advisory environment exclusion, not a hostile-filesystem capability. Explicit
 //! shutdown must complete before the embedding application stops its runtime.
 
 use std::fs::{File, OpenOptions};
@@ -9,6 +9,7 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use futures::FutureExt;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
@@ -420,7 +421,9 @@ fn acquire(root: &Path) -> std::result::Result<(PathBuf, SetupLease), Failure> {
         .map_err(|e| failed("Opening setup lock", e))?;
     fs2::FileExt::try_lock_exclusive(&file).map_err(|error| {
         if error.kind() == std::io::ErrorKind::WouldBlock {
-            Failure::Failed("Conversion environment setup is already running".into())
+            Failure::Failed(
+                "Conversion environment is busy (setup or conversion already running)".into(),
+            )
         } else {
             failed("Acquiring setup lock", error)
         }
@@ -430,6 +433,67 @@ fn acquire(root: &Path) -> std::result::Result<(PathBuf, SetupLease), Failure> {
         .canonicalize()
         .map_err(|e| failed("Resolving launcher root", e))?;
     Ok((root, lease))
+}
+
+/// Only retained managed workers call this wrapper. Blocking work is limited to
+/// acquiring/releasing the lease; no blocking-pool slot is held while the
+/// conversion performs asynchronous filesystem work. Explicit worker shutdown
+/// must complete before runtime shutdown; this future has no abort contract.
+pub(super) async fn with_conversion_environment<F>(
+    root: PathBuf,
+    cancel: CancellationToken,
+    work: F,
+) -> Result<()>
+where
+    F: std::future::Future<Output = Result<()>> + Send,
+{
+    if cancel.is_cancelled() {
+        return Err(PumasError::ConversionCancelled);
+    }
+    let acquire_cancel = cancel.clone();
+    let lease = tokio::task::spawn_blocking(move || {
+        if acquire_cancel.is_cancelled() {
+            return Err(Failure::Cancelled);
+        }
+        let (_, mut lease) = acquire(&root)?;
+        // The plain File carrier has no retrying/blocking Drop on the async
+        // thread. The normal retained path always finishes it off-runtime.
+        Ok(lease.0.take().expect("acquired environment lease"))
+    })
+    .await
+    .map_err(|error| PumasError::ConversionFailed {
+        message: format!("Acquiring conversion environment lease: {error}"),
+    })?
+    .map_err(|error| match error {
+        Failure::Cancelled => PumasError::ConversionCancelled,
+        other => other.public(),
+    })?;
+    let outcome = std::panic::AssertUnwindSafe(async {
+        if cancel.is_cancelled() {
+            return Err(PumasError::ConversionCancelled);
+        }
+        work.await
+    })
+    .catch_unwind()
+    .await
+    .unwrap_or_else(|_| {
+        Err(PumasError::ConversionFailed {
+            message: "Conversion worker panicked".into(),
+        })
+    });
+    let release = tokio::task::spawn_blocking(move || SetupLease(Some(lease)).finish())
+        .await
+        .map_err(|error| PumasError::ConversionFailed {
+            message: format!("Releasing conversion environment lease: {error}"),
+        })
+        .and_then(|outcome| outcome.map_err(Failure::public));
+    match (outcome, release) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+        (Err(work), Err(release)) => Err(PumasError::ConversionFailed {
+            message: format!("{work}; environment release also failed: {release}"),
+        }),
+    }
 }
 
 fn execute(
@@ -627,6 +691,217 @@ mod tests {
     use std::future::Future;
     use std::os::unix::fs::{symlink, PermissionsExt};
     use tempfile::TempDir;
+
+    fn conversion_worker() -> (
+        super::super::workers::WorkerOwner,
+        Arc<super::super::progress::ConversionProgressTracker>,
+    ) {
+        let progress = Arc::new(super::super::progress::ConversionProgressTracker::new());
+        (
+            super::super::workers::WorkerOwner::new(progress.clone(), 1),
+            progress,
+        )
+    }
+
+    fn conversion_progress() -> super::super::ConversionProgress {
+        serde_json::from_value(serde_json::json!({"conversionId":"fixture","sourceModelId":"source","direction":"gguf_to_safetensors","status":"converting"})).unwrap()
+    }
+
+    async fn conversion_terminal(
+        owner: &super::super::workers::WorkerOwner,
+        progress: &super::super::progress::ConversionProgressTracker,
+    ) -> super::super::ConversionProgress {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                owner.observe_finished();
+                let current = progress.get("fixture").unwrap();
+                if matches!(
+                    current.status,
+                    super::super::ConversionStatus::Completed
+                        | super::super::ConversionStatus::Cancelled
+                        | super::super::ConversionStatus::Error
+                ) {
+                    return current;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("conversion terminal after lease release")
+    }
+
+    #[test]
+    fn managed_environment_lease_releases_for_every_outcome_with_one_blocking_thread() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap()
+            .block_on(async {
+                for kind in ["success", "failure", "panic", "cancel"] {
+                    let root = tempfile::tempdir().unwrap();
+                    let (owner, progress) = conversion_worker();
+                    let output = root.path().join("async-filesystem-effect");
+                    owner
+                        .spawn_in_environment(
+                            conversion_progress(),
+                            CancellationToken::new(),
+                            root.path().to_path_buf(),
+                            async move {
+                                tokio::fs::write(output, "fixture").await.unwrap();
+                                match kind {
+                                    "failure" => Err(PumasError::ConversionFailed {
+                                        message: "controlled work failure".into(),
+                                    }),
+                                    "panic" => panic!("controlled managed work panic"),
+                                    "cancel" => Err(PumasError::ConversionCancelled),
+                                    _ => Ok(()),
+                                }
+                            },
+                        )
+                        .unwrap();
+                    let result = conversion_terminal(&owner, &progress).await;
+                    assert_eq!(
+                        result.status,
+                        match kind {
+                            "success" => super::super::ConversionStatus::Completed,
+                            "cancel" => super::super::ConversionStatus::Cancelled,
+                            _ => super::super::ConversionStatus::Error,
+                        }
+                    );
+                    assert!(
+                        acquire(root.path()).is_ok(),
+                        "{kind} must release before terminal receipt"
+                    );
+                    assert_eq!(
+                        owner.shutdown().await.is_err(),
+                        matches!(kind, "failure" | "panic")
+                    );
+                }
+            });
+    }
+
+    #[tokio::test]
+    async fn setup_lease_blocks_managed_work_but_not_an_independent_root() {
+        let root = tempfile::tempdir().unwrap();
+        let (_, lease) = acquire(root.path()).unwrap();
+        let (owner, progress) = conversion_worker();
+        owner
+            .spawn_in_environment(
+                conversion_progress(),
+                CancellationToken::new(),
+                root.path().to_path_buf(),
+                async { panic!("busy conversion work must never execute") },
+            )
+            .unwrap();
+        let failure = conversion_terminal(&owner, &progress).await;
+        assert!(failure.error.unwrap().contains("environment is busy"));
+        assert!(owner.shutdown().await.is_err());
+        let independent = tempfile::tempdir().unwrap();
+        let (other, progress) = conversion_worker();
+        other
+            .spawn_in_environment(
+                conversion_progress(),
+                CancellationToken::new(),
+                independent.path().to_path_buf(),
+                async { Ok(()) },
+            )
+            .unwrap();
+        assert_eq!(
+            conversion_terminal(&other, &progress).await.status,
+            super::super::ConversionStatus::Completed
+        );
+        other.shutdown().await.unwrap();
+        drop(lease);
+    }
+
+    #[tokio::test]
+    async fn conversion_excludes_setup_across_processes_and_interrupted_shutdown_until_work_returns(
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let (owner, progress) = conversion_worker();
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let (release, held) = tokio::sync::oneshot::channel();
+        owner
+            .spawn_in_environment(
+                conversion_progress(),
+                CancellationToken::new(),
+                root.path().to_path_buf(),
+                async move {
+                    entered.send(()).unwrap();
+                    held.await.unwrap();
+                    Err(PumasError::ConversionCancelled)
+                },
+            )
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), started)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            matches!(acquire(root.path()), Err(Failure::Failed(message)) if message.contains("environment is busy"))
+        );
+        let alias_root = tempfile::tempdir().unwrap();
+        let alias = alias_root.path().join("environment");
+        symlink(root.path(), &alias).unwrap();
+        assert!(acquire(&alias).is_err());
+        std::fs::remove_file(&alias).unwrap();
+        let subprocess_root = root.path().to_path_buf();
+        let process = tokio::task::spawn_blocking(move || {
+            Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "conversion::setup::tests::cross_process_lock_probe",
+                ])
+                .env("PUMAS_SETUP_LOCK_TEST_ROOT", subprocess_root)
+                .output()
+                .unwrap()
+        })
+        .await
+        .unwrap();
+        assert!(
+            process.status.success(),
+            "{}",
+            String::from_utf8_lossy(&process.stderr)
+        );
+        let mut shutdown = Box::pin(owner.shutdown());
+        assert!(futures::poll!(shutdown.as_mut()).is_pending());
+        drop(shutdown);
+        assert!(
+            acquire(root.path()).is_err(),
+            "dropped shutdown cannot release active environment"
+        );
+        release.send(()).unwrap();
+        owner.shutdown().await.unwrap();
+        assert_eq!(
+            progress.get("fixture").unwrap().status,
+            super::super::ConversionStatus::Cancelled
+        );
+        assert!(acquire(root.path()).is_ok());
+        owner.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn pre_cancelled_managed_conversion_does_not_acquire_or_execute() {
+        let root = tempfile::tempdir().unwrap();
+        let (owner, progress) = conversion_worker();
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        owner
+            .spawn_in_environment(
+                conversion_progress(),
+                cancel,
+                root.path().to_path_buf(),
+                async { panic!("cancelled work must not execute") },
+            )
+            .unwrap();
+        assert_eq!(
+            conversion_terminal(&owner, &progress).await.status,
+            super::super::ConversionStatus::Cancelled
+        );
+        assert!(!root.path().join("launcher-data").exists());
+        owner.shutdown().await.unwrap();
+    }
 
     fn fixture() -> TempDir {
         let root = tempfile::tempdir().expect("temporary setup root");

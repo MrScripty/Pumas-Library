@@ -90,10 +90,16 @@ process lifetime: it is not historical lookup, durable restart recovery or
 discovery of another manager's setup. Existing blocking
 `ensure_conversion_environment()` still waits and permits explicit retry.
 
-Concurrent requests on one manager share the active result; another manager or
+Concurrent setup requests on one manager share the active result; another manager or
 process must acquire the same physical `launcher-data/conversion-setup.lock`
-before deploying scripts or installing packages. Contention fails explicitly.
-Keep that advisory lock file and its directory stable while setup is active;
+before deploying scripts or installing packages. Managed conversions acquire
+the same exclusive lease before execution and retain it through native cleanup,
+output publication and indexing. This also excludes other managed conversions
+at the same root because base conversions deploy shared scripts; independent
+roots remain independent. Contention fails the operation explicitly: inspect
+setup status or conversion progress for the terminal failure. There is no queue
+or automatic retry. Terminal progress follows observed lease release.
+Keep that advisory lock file and its directory stable while either operation is active;
 this is not protection against hostile root replacement or abrupt host death.
 
 Call `PumasApi::shutdown_conversion_setup()` before stopping the hosting runtime.
@@ -104,12 +110,15 @@ remain errors. This also closes and drains all built-in quantization installers
 and async readiness probes, but does not shut down conversion jobs. Finish
 caller-owned synchronous readiness calls first. The RPC server includes these
 owners in its shutdown drain. Closed setup admission returns `InstallationCancelled`.
-Keep conversions and external tools excluded while their environment is being
-set up: native repair can clean/rebuild generated CMake outputs. This execution
-exclusion is caller-owned, not enforced by the installer lock. A completed setup
-is not proof that a later conversion's route, hardware or inputs are ready.
+Direct backend execution, independently requested readiness probes and external
+tools do not participate in managed execution exclusion. Callers must exclude
+these from setup: native repair can clean/rebuild generated CMake outputs.
+A completed setup is not proof that a later conversion's route, hardware or
+inputs are ready.
 Each setup operation uses one host blocking worker without nested filesystem work in that pool;
 it also supports a current-thread Tokio runtime with one blocking thread.
+Managed conversions use brief owned blocking calls for lease acquisition and
+release, leaving that pool available during asynchronous execution.
 
 Linux setup cleanup controls the installer process group and checks that no
 live members remain before lease release. Installers must remain in that group.

@@ -225,3 +225,80 @@ async fn preparation_preserves_catalog_targets_defaults_and_calibration_paths() 
     assert!(manager.list_conversions().is_empty());
     manager.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn every_managed_direction_reports_environment_busy_before_execution_effects() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = manager(root.path()).await;
+    let environment = root.path().join("launcher-data");
+    std::fs::create_dir(&environment).unwrap();
+    let lease = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(environment.join("conversion-setup.lock"))
+        .unwrap();
+    fs2::FileExt::try_lock_exclusive(&lease).unwrap();
+    let entries = || {
+        std::fs::read_dir(manager.model_library.library_root())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let before = entries();
+    for (direction, target) in [
+        (ConversionDirection::GgufToSafetensors, "F16"),
+        (ConversionDirection::SafetensorsToGguf, "F16"),
+        (ConversionDirection::GgufToQuantizedGguf, "Q4_K_M"),
+        (ConversionDirection::SafetensorsToQuantizedGguf, "Q4_K_M"),
+        (ConversionDirection::SafetensorsToNvfp4, "NVFP4"),
+        (
+            ConversionDirection::SafetensorsToSherryQat,
+            "Sherry-1.25bit",
+        ),
+    ] {
+        let id = manager
+            .start_conversion(request(direction, Some(target)))
+            .await
+            .unwrap();
+        let terminal = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let progress = manager.get_progress(&id).unwrap();
+                if progress.status == ConversionStatus::Error {
+                    return progress;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("busy worker result observed");
+        assert!(
+            terminal.error.unwrap().contains("environment is busy"),
+            "{direction:?}"
+        );
+        assert_eq!(terminal.output_model_id, None);
+        assert_eq!(
+            std::fs::read_dir(&environment).unwrap().count(),
+            1,
+            "only held lock exists; no scripts or backend environment"
+        );
+        assert_eq!(entries(), before, "no output or staging");
+        assert_eq!(manager.model_library.list_models().await.unwrap().len(), 1);
+        assert_eq!(
+            std::fs::read(root.path().join("models/source/source.gguf")).unwrap(),
+            b"source fixture"
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("models/source/source.safetensors")).unwrap(),
+            b"source fixture"
+        );
+    }
+    assert!(manager
+        .shutdown()
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("environment is busy"));
+    fs2::FileExt::unlock(&lease).unwrap();
+}

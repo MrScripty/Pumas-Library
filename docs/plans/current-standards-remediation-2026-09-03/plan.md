@@ -290,10 +290,13 @@ source-revision coherence. [Backend-specific Rust setup observation/retry](front
 is accepted, including a verification-discovered procfs disappearance correction.
 The [RPC/optional desktop projection](frontend-and-ui/plan.md#backend-setup-rpc-and-desktop-projection)
 is also accepted with generated request/response validation and controlled
-RPC/preload/typed-consumer evidence. Managed setup-versus-conversion exclusion
-is next; it is still caller-owned, not enforced.
-Stronger containment, setup
-observation/retry and preflight remain prerequisites before GUI configuration
+RPC/preload/typed-consumer evidence.
+[Managed setup-versus-conversion exclusion](frontend-and-ui/plan.md#managed-setup-and-conversion-exclusion)
+is accepted through retained cleanup/publication/indexing within a stable root.
+Base-format readiness probing is next; independent probes, direct backend calls
+and external tools still need caller coordination. FE-I28 records an unrelated
+download-fixture timeout discovered during verification, not a diagnosed fix.
+Stronger containment and remaining preflight remain prerequisites before GUI configuration
 (FE-I23).
 Managed quantization starts now reject foreign/invalid target names, missing
 required IQ/forced calibration, unsupported force flags and supplied paths

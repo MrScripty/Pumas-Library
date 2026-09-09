@@ -20,6 +20,14 @@
 
 ## Slice Log
 
+### 2026-09-08 — Installed-version list responses accepted
+
+- Installed lists now use typed RPC responses and generated preload decoding;
+  malformed replies cannot replace the hook's last valid list.
+- The [frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-08--installed-runtime-version-list-response-contract)
+  records exact-wire, consumer and feature-gate evidence. No runtime lookup or
+  installation change; active/default version reads remain next.
+
 ### 2026-09-08 — Runtime cache-status responses accepted
 
 - Typed cache snapshots now cross generated preload decoding before hook state,

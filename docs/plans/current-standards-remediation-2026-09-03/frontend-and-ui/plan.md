@@ -10,10 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound installed runtime-version list response validation (M4):
-`get_installed_versions` still crosses preload undecoded into version state.
+**Next slice:** Bound active/default runtime-version read contracts (M4):
+both selected-version reads still cross preload undecoded into version state.
 Preserve optional inference-plugin builds and standalone backend operation;
-no install/update mutations. Runtime GitHub cache-status and available-version response
+no install/update mutations. Installed-version, runtime GitHub cache-status and available-version response
 validation is accepted below. Notes/settings
 mutation response validation is accepted below. Model-notes request admission
 (FE-I33) is accepted below; malformed input cannot clear existing notes.
@@ -65,6 +65,32 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Installed Runtime-Version List Response Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--installed-runtime-version-list-response-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Project `get_installed_versions` as typed success with a required string array,
+preserving exact strings, order, duplicates and empty lists. Decode before hook
+state; malformed values must not replace the last valid list. Replace raw-list
+wrapper dispatch and handwritten response type, without changing requests,
+manager lookup, installations, refresh timing or existing error reporting.
+
+root_capability owns RPC outcome/export/dispatch/lifecycle handler and tests.
+Root owns preload/tests, frontend response alias/hook, existing decoder and
+renderer-hook conformance, generated files, README and four plan records.
+Root serializes Cargo/generation/integration. No core, GUI dependency, feature
+registration or live-library changes. No-manager empty success remains the
+FE-I34 limitation; no-plugin RPC remains unsupported. No new tag grammar.
+
+Acceptance: actual populated/empty serialized producer fixtures, decoder and
+preload malformed-list refusal, real hook exact-list consumption/retention;
+offline default/minimal RPC no-manager and feature-gate tests. Run affected hook
+tests/types/lint, existing conformance, Electron/both frontend builds, generator
+tests/freshness, strict RPC lint/format and plan checks. Local automated contract
+and integration only, not graphical/network/install or other-OS acceptance.
+Use the existing generated decoder; no parallel validation framework.
 
 ## Runtime GitHub Cache-Status Response Contract
 

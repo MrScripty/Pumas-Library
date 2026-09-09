@@ -11,6 +11,20 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('installed versions reject malformed lists and preserve exact tags', async () => {
+  const harness = loadCompiledPreload();
+  for (const response of [null, [], {}, { success: true, versions: null },
+    { success: true, versions: ['valid', 42] }, { success: false, versions: [] },
+    { success: true, versions: [], error: 'contradiction' }]) {
+    harness.respondWith(response);
+    await assert.rejects(harness.api.get_installed_versions('ollama'), { name: 'DesktopContractError' });
+  }
+  for (const versions of [[], [' vλ.1 ', 'v2', 'v2', '']]) {
+    harness.respondWith({ success: true, versions });
+    assert.deepEqual(toPlainValue(await harness.api.get_installed_versions('ollama')), { success: true, versions });
+  }
+});
+
 test('GitHub cache status rejects malformed snapshots and preserves null versus omission', async () => {
   const harness = loadCompiledPreload();
   const empty = { has_cache: false, is_valid: false, is_fetching: false };

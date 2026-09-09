@@ -87,6 +87,10 @@ no-manager response omits those fields and contains only three false flags.
 Malformed snapshots leave the last valid state intact. This does not establish
 runtime availability or change cache polling timing.
 
+Installed runtime-version lists are decoded before entering state. Exact tags,
+ordering and duplicates are preserved; malformed lists report an error and keep
+the last valid list. Runtime lookup and installation behavior are unchanged.
+
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.
 Malformed responses cannot enter the modal; nested values display without

@@ -1,5 +1,32 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Installed Runtime-Version List Response Contract
+
+Accepted typed installed-version success responses and generated preload decoding.
+The RPC handler no longer returns a raw list for legacy wrapping; its typed
+outcome preserves the same success/list shape. Exact tags, ordering, duplicates
+and empty lists are unchanged. The hook copies the validated readonly list into
+its owned state and retains the last list on decoding failure. The handwritten
+response type is replaced by a generated alias. Requests, runtime lookup,
+installations and existing error/refresh behavior are unchanged.
+
+The bundled-preload regression first failed with `Missing expected rejection`.
+Two focused RPC tests pass with default and no-default features, comparing the
+previous wrapper output and proving offline no-manager/disabled-plugin outcomes.
+Minimal fixtures used the previously established elevated setup permissions.
+Twenty-four decoder tests, 32 bundled-preload/renderer-hook tests, 25 preload
+tests and seven focused version-hook tests pass. One real-Electron sandbox test
+remains gated. Producer fixtures cover exact and empty lists; malformed mixed
+lists cannot replace populated hook state. Frontend types/affected lint,
+Electron/both frontend builds, seven generator tests/freshness, strict RPC lint,
+formatting and canonical plan checks pass.
+
+root_capability owned Rust; root integrated consumers and evidence. The
+codebase-design skill guided typed dispatch and reuse of the existing decoder,
+without new tag policy or validation machinery. No live network, GUI workflow,
+installation or other-OS acceptance. FE-I34's manager-availability limitation
+and the remaining M4 inventory stay open. Next: active/default version reads.
+
 ## 2026-09-08 — Runtime GitHub Cache-Status Response Contract
 
 Accepted generated cache-status decoding before hook state. Typed RPC outcomes

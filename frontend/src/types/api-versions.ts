@@ -1,5 +1,5 @@
 import type { BaseResponse } from './api-common';
-import type { AvailableVersionsOutcome, GithubCacheStatusOutcome } from '../generated/desktop-contract';
+import type { AvailableVersionsOutcome, GithubCacheStatusOutcome, InstalledVersionsOutcome } from '../generated/desktop-contract';
 export type { VersionReleaseAsset, VersionReleaseInfo } from '../generated/desktop-contract';
 
 // ============================================================================
@@ -8,9 +8,7 @@ export type { VersionReleaseAsset, VersionReleaseInfo } from '../generated/deskt
 
 export type GetAvailableVersionsResponse = AvailableVersionsOutcome;
 
-export interface GetInstalledVersionsResponse extends BaseResponse {
-  versions: string[];
-}
+export type GetInstalledVersionsResponse = InstalledVersionsOutcome;
 
 export interface GetActiveVersionResponse extends BaseResponse {
   version: string | null;

@@ -429,6 +429,8 @@ pub(crate) enum RpcOutcome {
     AvailableVersions(AvailableVersionsOutcome),
     #[cfg(feature = "inference-plugins")]
     GithubCacheStatus(GithubCacheStatusOutcome),
+    #[cfg(feature = "inference-plugins")]
+    InstalledVersions(InstalledVersionsOutcome),
     HfTokenMutation(SuccessOutcome),
     HfAuth(Box<HfAuthOutcome>),
     LinkHealth(Box<LinkHealthOutcome>),
@@ -493,6 +495,8 @@ impl RpcOutcome {
             Self::AvailableVersions(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::GithubCacheStatus(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::InstalledVersions(value) => serde_json::to_value(value),
             Self::HfTokenMutation(value) => serde_json::to_value(value),
             Self::HfAuth(value) => serde_json::to_value(value),
             Self::LinkHealth(value) => serde_json::to_value(value),
@@ -1260,6 +1264,49 @@ impl DownloadListOutcome {
 pub(crate) struct ModelsOutcome {
     success: bool,
     models: BTreeMap<String, CatalogModel>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct InstalledVersionsOutcome {
+    success: bool,
+    versions: Vec<String>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl InstalledVersionsOutcome {
+    pub(crate) fn new(versions: Vec<String>) -> Self {
+        Self {
+            success: true,
+            versions,
+        }
+    }
+}
+
+#[cfg(test)]
+mod installed_versions_tests {
+    use super::*;
+    #[test]
+    fn installed_versions_preserves_exact_list_and_matches_previous_wrapper() {
+        for versions in [
+            vec![" vλ.1 ".into(), "v2".into(), "v2".into(), String::new()],
+            vec![],
+        ] {
+            let previous = crate::wrapper::wrap_response(
+                "get_installed_versions",
+                serde_json::to_value(&versions).unwrap(),
+            );
+            let outcome = InstalledVersionsOutcome::new(versions);
+            assert_eq!(serde_json::to_value(&outcome).unwrap(), previous);
+            #[cfg(feature = "inference-plugins")]
+            {
+                let rpc = RpcOutcome::InstalledVersions(outcome);
+                assert!(!rpc.uses_response_wrapper());
+                assert_eq!(rpc.into_value().unwrap(), previous);
+            }
+        }
+    }
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]

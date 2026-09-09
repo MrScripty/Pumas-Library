@@ -10,14 +10,13 @@ use tracing::warn;
 pub async fn get_installed_versions(
     state: &AppState,
     params: &Value,
-) -> pumas_library::Result<Value> {
+) -> pumas_library::Result<crate::contract::InstalledVersionsOutcome> {
     let app_id_str = require_str_param(params, "app_id", "appId")?;
     if let Some(vm) = get_version_manager(state, &app_id_str).await {
         let versions = vm.get_installed_versions().await?;
-        // Return raw array - wrapper.rs will add {success, versions} wrapper
-        Ok(serde_json::to_value(versions)?)
+        Ok(crate::contract::InstalledVersionsOutcome::new(versions))
     } else {
-        Ok(json!([]))
+        Ok(crate::contract::InstalledVersionsOutcome::new(vec![]))
     }
 }
 

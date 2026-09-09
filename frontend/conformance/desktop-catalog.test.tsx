@@ -16,6 +16,7 @@ import { useModelImportPicker } from '../src/hooks/useModelImportPicker';
 import { chooseModelImportPaths } from '../../electron/src/model-import-picker';
 import { useRemoteModelSearch } from '../src/hooks/useRemoteModelSearch';
 import { useAvailableVersionState } from '../src/hooks/useAvailableVersionState';
+import { useVersionFetching } from '../src/hooks/useVersionFetching';
 import { ModelMetadataModal } from '../src/components/ModelMetadataModal';
 import type { RemoteModelInfo } from '../src/types/apps';
 import { decodeHfDownloadDetailsOutcome } from '../src/generated/desktop-contract';
@@ -49,6 +50,7 @@ function installActualPreload(
   mutationResponses: { notes?: () => unknown; settings?: () => unknown } = {},
   availableVersions: () => unknown = () => fixture['available_versions'],
   githubCacheStatus: () => unknown = () => fixture['github_cache_status_no_manager'],
+  installedVersions: () => unknown = () => fixture['installed_versions'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -75,6 +77,7 @@ function installActualPreload(
         requests.push({ method, params: requestParams });
         if (method === 'get_available_versions') return availableVersions();
         if (method === 'get_github_cache_status') return githubCacheStatus();
+        if (method === 'get_installed_versions') return installedVersions();
         if (method === 'get_inference_settings') return inferenceRead;
         if (method === 'update_inference_settings') return mutationResponses.settings ? mutationResponses.settings() : fixture['update_inference_settings'];
         if (method === 'update_model_notes' && mutationResponses.notes) return mutationResponses.notes();
@@ -168,6 +171,23 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('keeps exact installed tags and retains the last list when preload rejects malformed data', async () => {
+    let response: unknown = fixture['installed_versions'];
+    const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => response);
+    const { result } = renderHook(() => useVersionFetching({ appId: 'ollama', trackAvailableVersions: false }));
+    await act(async () => { await result.current.fetchInstalledVersions(); });
+    expect(result.current.installedVersions).toEqual([' vλ.1 ', 'v2', 'v2', '']);
+    expect(requests.at(-1)?.params).toEqual({ app_id: 'ollama' });
+    response = { success: true, versions: ['valid', 42] };
+    await act(async () => { await result.current.fetchInstalledVersions(); });
+    expect(result.current.error).toMatch(/Desktop contract/);
+    expect(result.current.installedVersions).toEqual([' vλ.1 ', 'v2', 'v2', '']);
+    response = fixture['installed_versions_empty'];
+    await act(async () => { await result.current.fetchInstalledVersions(); });
+    expect(result.current.installedVersions).toEqual([]);
+    expect(requests.filter(request => request.method === 'get_installed_versions')).toHaveLength(3);
+  });
+
   it('polls producer cache snapshots and keeps the last valid snapshot on malformed responses', async () => {
     vi.useFakeTimers();
     let unmount: (() => void) | undefined;

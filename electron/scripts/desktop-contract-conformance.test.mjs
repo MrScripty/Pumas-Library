@@ -10,6 +10,18 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('installed-list decoding preserves actual tags and rejects malformed success payloads', () => {
+  for (const key of ['installed_versions', 'installed_versions_empty']) {
+    const result = contract.decodeInstalledVersionsOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  for (const patch of [{ success: false }, { versions: null }, { versions: ['valid', {}] },
+    { versions: undefined }, { extra: true }]) {
+    assert.equal(contract.decodeInstalledVersionsOutcome({ ...fixtures.installed_versions, ...patch }).status, 'invalid');
+  }
+});
+
 test('cache-status decoding preserves actual full and compact snapshots without partial mixtures', () => {
   for (const key of ['github_cache_status_populated', 'github_cache_status_empty', 'github_cache_status_fetching', 'github_cache_status_no_manager']) {
     const result = contract.decodeGithubCacheStatusOutcome(fixtures[key]);

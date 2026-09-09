@@ -10,9 +10,14 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Native setup failure/interruption invalidation (FE-I26, remaining FE-I23).
+**Next slice:** Download lifecycle verification stability (FE-I28).
+The NINVALID default matrix exposed 18 download deadline failures; the unchanged
+group and final full recheck passed, but their cause remains unresolved. Diagnose
+that recurrence before further API/UI implementation; this is verification work,
+not admission of the separately Pending download cleanup replay.
 Successful native setup now reconfigures and rebuilds current source below;
-later-use validity after failure or external edits is not yet accepted.
+interrupted native recipe invalidation is accepted below. Later external mutation
+provenance and independent probe/setup coordination remain outside acceptance.
 Retained base-format readiness is accepted below.
 Managed setup-versus-conversion exclusion is accepted below. Backend setup
 observation/retry is accepted through standalone
@@ -46,6 +51,76 @@ cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
 
+## Native Setup Interruption Invalidation
+
+Status: `Accepted`; see the
+[execution ledger](execution-ledger.md#2026-09-08--native-setup-interruption-invalidation).
+NINVALID prevents a failed or interrupted llama.cpp recipe from
+leaving usable-looking tools eligible for subsequent reads/execution. A private
+native setup module owns `launcher-data/llama-cpp/setup-incomplete`: create the
+zero-byte regular file under the existing root lease before source/build/venv
+effects; remove it only after artifact/import verification and final cancellation
+check. No destructor clears it. Busy or pre-cancelled setup never invalidates a
+previous environment. A lease-release failure after successful publication is
+cleanup failure, not evidence that the recipe's verified environment is invalid.
+
+Any occupied marker blocks readiness and execution. Only an absent marker or an
+existing zero-byte regular marker admits an explicit repair recipe; directories,
+symlinks and nonempty files refuse mutation without removal or overwrite.
+Inspection I/O errors remain failures, not absence. Synchronous boolean helpers
+remain conservative. Only successful explicit repair clears the marker; retained
+setup receipts are operation history, not current installation validity.
+
+The persisted contract is process-exit/reopening visibility on stable local
+paths, not power-loss durability, hostile/manual marker deletion, older-binary
+overlap or positive provenance. Absence means no recorded incomplete operation
+under this contract; existing installations still undergo normal artifact/import
+checks. No migration, legacy decoder, startup repair or live-library rewrite.
+Later external mutation provenance remains open. Other installers are outside
+this native source/build invariant. Direct execution and independently requested
+probes still require caller coordination with setup; the marker is not a lock.
+
+Consumers: the retained ProbeOwner specification for sync/async status and
+availability, `has_imatrix`, and the single llama.cpp quantize entry before import,
+staging or native effects. That entry covers managed and direct GGUF/safetensors/
+IQ paths; managed execution already holds the root lease. Public path getters and
+catalog metadata remain locators/descriptions, not installation authority.
+
+Exact write set: core `src/conversion/{native_setup.rs,mod.rs,backend_setup.rs,
+readiness.rs,llama_cpp.rs,manager/setup_tests.rs,llama_cpp/readiness_tests.rs}`
+(root_diagnostics); RPC `src/handlers/mod.rs` regression (root_capability); core
+README and `src/api/conversion.rs`, RPC README, this plan, ledger/issues and parent
+plan (root). New native_setup.rs is private. Root serializes Cargo, formatting,
+integration and commits. Reports use messages; scope changes return to root.
+No GUI/generated contracts, dependencies, extra runtime, real installs/builds,
+models/GPU, live data or unrelated files.
+
+Composed-design review: applicable. Native setup owns installation-invalidity
+presence; SetupOwner owns operation receipts/lease/cancellation; ProbeOwner owns
+read lifetime. Required interleaving is marker creation before recipe effects,
+verification before removal, and managed execution checks under the lease.
+Callers gain restart-safe refusal without knowing marker paths or setup history;
+direct-use exclusion obligations are unchanged. Marker representation changes
+stay in native_setup; recipe changes stay in backend_setup; status/probe scheduling
+stays in readiness. Dependencies carry native-root identity and inspection
+results, not setup snapshot/status. The private module can be verified without
+native builds; setup and consumers share policy, not lifecycle state. Deleting
+it would spread marker path, type and failure rules across recipe/probe/execution.
+One marker replaces unsafe absence of interruption authority; no registry,
+version cache, new operation identity or runtime is added.
+
+Acceptance NINVALID (satisfied): focused/integration, automated, simulated native
+tools on Linux plus actual temporary filesystem reopening/process-exit evidence.
+Verify failed/cancelled setup retains invalidity, fresh backend reads and all
+execution routes refuse without import/staging/native effects, explicit retry
+restores eligibility, and unexpected marker entries remain untouched. Actual RPC
+dispatch must project not-ready then fresh readiness without schema changes.
+Supporting gates: core/RPC default/minimal tests, strict lint, formatting and five
+canonical plan checks passed, with initial failures and final rechecks retained
+in the ledger. FE-I28/FE-I29 remain open. No real model/tool/GUI or Windows/macOS acceptance.
+Re-plan for power-loss durability, supported old-binary overlap, broader installer
+population or new direct/probe exclusion requirements.
+
 ## Native Setup Source And Build Coherence
 
 Status: `Accepted`; see the
@@ -66,8 +141,8 @@ of source or venv. Both output-entry guards precede CMake cleaning. No cache
 authority currently covers source edits, configuration and tools: a Git HEAD
 receipt would omit material inputs. Therefore an admitted setup rebuilds; this
 is not a timestamp/HEAD cache or a reproducible-build promise. Successful setup
-does not prove provenance after later external edits or failed/cancelled setup.
-Such persistent execution invalidation remains open, not silently accepted.
+does not prove provenance after later external edits. Failed/interrupted native
+recipes are now covered by NINVALID above, within its stated persistence limits.
 
 Exact write set: core `src/conversion/backend_setup.rs` and
 `src/conversion/manager/setup_tests.rs` (root_diagnostics); core README and

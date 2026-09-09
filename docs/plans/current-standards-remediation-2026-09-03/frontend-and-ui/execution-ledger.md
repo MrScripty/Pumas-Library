@@ -1,5 +1,98 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Native Setup Interruption Invalidation
+
+Accepted NINVALID. NBUILD corrected successful setup's stale-binary shortcut,
+but failed/interrupted native recipes could leave existing artifacts usable by
+new backend owners. The native setup module now owns a zero-byte incomplete
+marker created before recipe effects under the existing root lease. It remains
+after failure/cancellation or writer process exit, and only verified explicit
+repair removes it. It is not removed on Drop. Contention/pre-cancellation cannot
+invalidate another environment before lease acquisition; a release error after
+verified publication does not make the already-verified recipe contents invalid.
+
+Root and root_capability reviewed the complete native consumer population before
+implementation. The retained probe specification covers sync/async readiness,
+status and availability; `has_imatrix` and the single quantize entry additionally
+enforce invalidity. That entry covers both managed directions and direct GGUF,
+safetensors and IQ calls. Locators/catalog metadata do not authorize execution.
+Other installers remain outside this native source/build invariant.
+
+The codebase-design skill kept path/type/error policy inside a private native
+setup module, independent of retained SetupOwner receipts and ProbeOwner tasks.
+No cached success, revision receipt, runtime, registry or GUI-owned state is
+introduced. Any occupied marker blocks use; repair/removal requires the exact
+zero-byte regular representation and refuses symlinks/directories/nonempty files
+without destructive fallback. Inspection errors are not absent-marker success.
+
+Persistence claim: process-exit/reopening on stable local paths. Power-loss
+durability, old-binary overlap, hostile/manual edits and positive source/build
+provenance are excluded. No marker means no recorded incomplete operation under
+this contract, not a certification of earlier installs. Direct calls and probes
+remain caller-coordinated with setup; only managed execution carries root lease
+exclusion. No migration, startup repair or live-library modification is performed.
+
+root_diagnostics owns native policy/producer/consumer source and core regressions;
+root_capability owns actual RPC dispatch regression. Root owns docs, serial Cargo,
+formatting, integration and acceptance. Independent production/docs review by
+root_capability found no blockers. Root tightened the marker inspection-error
+assertions to require marker-specific context: generic I/O/ConversionFailed
+assertions could otherwise pass on a later unrelated artifact failure.
+
+Initial focused verification failed the existing
+`safetensors_preflight_requires_converter_python_and_requested_imatrix_before_spawn`
+boolean readiness assertion (117 passed, one failed). Its original probe error
+was masked by that boolean. The unchanged isolated test passed; one diagnostic
+parallel run and five bounded repeats passed after exposing the fallible internal
+probe result. No exact failing cause was captured. Read-only review confirmed
+the fixture's parent-process script writer had the writable-descriptor inheritance
+hazard already removed from other fixtures. Root replaced it with the existing
+awaited positional child-writer pattern, preserving 700/600 permission semantics.
+The converter-permission assertion now uses public fallible async readiness to
+preserve future diagnostics; other tests retain synchronous boolean coverage.
+No production retry, deadline or test parallelism change. FE-I29 retains the
+unresolved original occurrence; eliminating a concrete fixture hazard is not
+proof it caused that failure. No temporary production instrumentation was added.
+
+Focused recheck passed 118/118 top-level conversion tests plus the spawned marker
+writer invocation. Actual `handle_rpc` regression passed: a fresh AppState reads
+persisted invalidity as llama.cpp not ready without imports; fixture-only marker
+removal permits a fresh read with the same successful payload shape. That test
+is a consumer projection check, not proof of recipe completion; core setup tests
+own producer verification and removal. Core tests also cover process-exit/reopen,
+unexpected-entry preservation, failure/cancellation persistence and direct route
+refusal; managed enforcement follows the reviewed shared quantize entry under
+the existing worker lease.
+
+Commands from `rust/`: `cargo test --offline --locked -p pumas-library
+--no-default-features conversion::`; actual RPC adds `-p pumas-rpc
+--no-default-features --bin pumas-rpc
+handlers::tests::backend_status_rpc_blocks_incomplete_setup_then_observes_fresh_readiness`.
+Full tests use `cargo test --offline --locked -p pumas-library -p pumas-rpc`
+with and without `--no-default-features`. Strict lint uses `cargo clippy --offline
+--locked -p pumas-library -p pumas-rpc --all-targets` with `--all-features` or
+`--no-default-features`, each followed by `-- -D warnings`.
+Formatting: `cargo fmt --all --check`. Final minimal and default-recheck suites
+passed: 1,446 and 1,486 test executions respectively (each count includes the one
+additional child-helper invocation), with 22 ignored and no failures. Both strict
+lint configurations, formatting and all five canonical plan checks passed.
+The first full default unit suite failed 18 unchanged download-lifecycle tests
+(1,228 passed, four ignored), mostly bounded admission/cleanup waits, including
+the exact prior FE-I28 admitted-ID case. All conversion tests passed in that run.
+The unchanged default download group then passed all 148 tests at normal
+parallelism in 24.03 seconds. Read-only review found no shared marker/runtime
+path; the marker writer child had already completed in 0.00 seconds. Post-failure
+resource samples cannot establish pressure during the failures. No cause or fix
+is claimed; FE-I28 retains this broader recurrence. No download code, deadline
+or parallelism changed. Removing an unused fixture import was the only subsequent
+source change before independent minimal/lint gates and one full default recheck.
+The successful recheck does not establish the cause. Next slice is FE-I28 download
+lifecycle verification stability before further API/UI implementation, prompted
+by this broader recurrence; Pending cleanup replay remains separately unadmitted.
+FE-I29 and the remaining native/external/probe prerequisites remain open.
+Logs: `/tmp/pumas-native-invalidation-*.log`. No live package/model/GPU,
+graphical workflow, release-artifact or Windows/macOS acceptance is inferred.
+
 ## 2026-09-08 — Native Setup Source And Build Coherence
 
 Accepted NBUILD. Read-only inspection found that llama.cpp setup pulled source

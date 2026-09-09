@@ -133,8 +133,26 @@ No revision cache is trusted: Git HEAD alone misses local edits and build inputs
 CUDA configuration explicitly follows the compiler check instead of inheriting
 a previous CMake ON value. Generated output directories/symlinks refuse cleaning;
 source and Python environments are not reset. Retained operation observation
-does not run the recipe again. A failed/cancelled setup or later external edits
-can leave usable-looking outputs: readiness is not durable build provenance.
+does not run the recipe again.
+
+Native setup creates `launcher-data/llama-cpp/setup-incomplete` before changing
+source/build/Python state under the root lease. A failed or cancelled recipe
+leaves that marker in place across process restart. All llama.cpp readiness
+checks, `has_imatrix`, and direct/managed quantization refuse it before import,
+staging or native execution. Explicit successful setup verifies the environment
+and removes the marker; status reads never repair it. The normal marker is a
+zero-byte regular file. Unexpected occupied entries block use and refuse setup
+without deletion; inspection errors remain errors on fallible surfaces.
+Do not manually remove the marker to bypass repair. A retained setup receipt is
+historical operation state, not current installation validity.
+
+This protects process-exit/reopen on stable local paths, not power-loss ordering,
+hostile edits, manual deletion or overlapping older binaries. No marker means no
+recorded incomplete recipe, not certified provenance of preexisting tools or
+later external edits. Managed execution retains root exclusion; direct execution
+and independent probes still need caller coordination with setup. A release
+failure after verified marker removal is a lease-cleanup failure, not invalid
+recipe contents.
 A completed setup is not proof that a later conversion's route, hardware or
 inputs are ready.
 Each setup operation uses one host blocking worker without nested filesystem work in that pool;

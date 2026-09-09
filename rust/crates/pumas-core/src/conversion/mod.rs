@@ -14,6 +14,7 @@ mod linux_group;
 pub mod llama_cpp;
 mod manager;
 mod native_process;
+mod native_setup;
 pub mod nvfp4;
 mod outputs;
 pub(crate) mod pipeline;

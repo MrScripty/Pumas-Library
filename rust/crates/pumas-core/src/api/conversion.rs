@@ -157,8 +157,10 @@ impl PumasApi {
     /// Setup and managed conversions share root-level exclusion. Callers must
     /// exclude direct backend execution, independent probes and external tools:
     /// each admitted llama.cpp recipe reconfigures and clean-builds both targets.
-    /// Retained observation does not rebuild; readiness is not build provenance
-    /// after failed setup or subsequent external source changes.
+    /// Failed/interrupted native recipes retain an on-disk incomplete marker;
+    /// readiness and quantization refuse it until explicit setup succeeds.
+    /// Retained observation does not rebuild or certify current installation
+    /// validity. Subsequent external source changes are not detected.
     /// Dropping this waiter does not release installer ownership; use
     /// `shutdown_conversion_setup` before stopping the host runtime.
     pub async fn ensure_backend_environment(

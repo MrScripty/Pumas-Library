@@ -68,16 +68,19 @@ impl LlamaCppBackend {
         let base_dir = launcher_root.join("launcher-data").join("llama-cpp");
         let python = base_dir.join("venv/bin/python");
         Self {
-            readiness: std::sync::Arc::new(super::readiness::ProbeOwner::new(
-                python.clone(),
-                "llama.cpp",
-                super::backend_setup::LLAMA_IMPORTS,
-                vec![
-                    (base_dir.join("build/bin/llama-quantize"), true),
-                    (base_dir.join("source/convert_hf_to_gguf.py"), false),
-                    (python, true),
-                ],
-            )),
+            readiness: std::sync::Arc::new(
+                super::readiness::ProbeOwner::new(
+                    python.clone(),
+                    "llama.cpp",
+                    super::backend_setup::LLAMA_IMPORTS,
+                    vec![
+                        (base_dir.join("build/bin/llama-quantize"), true),
+                        (base_dir.join("source/convert_hf_to_gguf.py"), false),
+                        (python, true),
+                    ],
+                )
+                .with_native_setup(super::native_setup::NativeSetup::new(&base_dir)),
+            ),
             setup: std::sync::Arc::new(super::setup::SetupOwner::for_backend(
                 launcher_root.to_path_buf(),
                 QuantBackend::LlamaCpp,
@@ -122,9 +125,13 @@ impl LlamaCppBackend {
     }
 
     /// Whether `llama-imatrix` is a nonempty regular file with Unix execute bits.
+    /// A persisted incomplete-setup marker vetoes this advisory result.
     /// This advisory check does not prove loader compatibility or effective access.
     pub fn has_imatrix(&self) -> bool {
-        artifact_present(&self.imatrix_binary(), true)
+        super::native_setup::NativeSetup::new(&self.base_dir)
+            .incomplete()
+            .is_ok_and(|incomplete| !incomplete)
+            && artifact_present(&self.imatrix_binary(), true)
     }
 
     /// Returns the backend status summary.
@@ -159,6 +166,7 @@ impl QuantizationBackend for LlamaCppBackend {
 
     /// Advisory aggregate for the basic safetensors-to-quantized-GGUF route.
     /// Checks artifacts and required imports, not GPU/ABI or optional imatrix.
+    /// Any persisted incomplete-setup marker vetoes readiness before imports.
     /// GGUF-only requests do not require this aggregate to be true.
     fn is_ready(&self) -> bool {
         self.readiness.check_blocking().unwrap_or(false)
@@ -182,6 +190,18 @@ impl QuantizationBackend for LlamaCppBackend {
         progress: &ConversionProgressTracker,
         cancel_token: &CancellationToken,
     ) -> Result<PathBuf> {
+        if super::native_setup::NativeSetup::new(&self.base_dir)
+            .incomplete_async()
+            .await
+            .map_err(|error| {
+                PumasError::io("checking llama.cpp setup marker", &self.base_dir, error)
+            })?
+        {
+            return Err(PumasError::QuantizationEnvNotReady {
+                backend: "llama.cpp".into(),
+                message: "Native setup is incomplete. Complete an explicit backend setup repair before retrying.".into(),
+            });
+        }
         // -- PHASE 1: GATHER (read-only, fail early) --
         let is_safetensors_source = has_safetensors_files(&params.model_path);
         let is_gguf_source = has_gguf_files(&params.model_path);

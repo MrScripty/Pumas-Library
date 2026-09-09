@@ -1,16 +1,22 @@
 //! Public backend artifact contracts using tiny local shell fixtures only.
 
 use super::*;
-use std::os::unix::fs::PermissionsExt;
 
 fn artifact(path: &Path, content: &str, executable: bool) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, content).unwrap();
-    std::fs::set_permissions(
-        path,
-        std::fs::Permissions::from_mode(if executable { 0o700 } else { 0o600 }),
-    )
-    .unwrap();
+    // Keep writable script descriptors out of unrelated parallel test forks.
+    let status = std::process::Command::new("/bin/sh")
+        .args([
+            "-c",
+            "printf '%s' \"$2\" > \"$1\" && chmod \"$3\" \"$1\"",
+            "fixture-writer",
+        ])
+        .arg(path)
+        .arg(content)
+        .arg(if executable { "700" } else { "600" })
+        .status()
+        .unwrap();
+    assert!(status.success(), "fixture writer failed: {status}");
 }
 
 fn params(root: &Path, extension: &str) -> QuantizeParams {
@@ -33,6 +39,76 @@ fn params(root: &Path, extension: &str) -> QuantizeParams {
 
 const QUANTIZER: &str = "#!/bin/sh\ntouch \"$0.started\"\nif test \"$1\" = '--imatrix'; then shift 2; fi\nprintf 'quantized fixture' > \"$2\"\n";
 const CONVERTER: &str = "#!/bin/sh\nif test \"$1\" = '-I'; then exit 0; fi\ntouch \"$0.started\"\nwhile test $# -gt 0; do\n if test \"$1\" = '--outfile'; then printf 'converted fixture' > \"$2\"; exit 0; fi\n shift\ndone\nexit 2\n";
+
+#[tokio::test]
+async fn incomplete_setup_vetoes_every_route_and_read_before_imports_or_staging() {
+    for (extension, quant, force) in [
+        ("gguf", "Q4_K_M", false),
+        ("safetensors", "Q4_K_M", false),
+        ("gguf", "IQ3_XXS", false),
+        ("safetensors", "Q4_K_M", true),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let backend = LlamaCppBackend::new(root.path());
+        let mut params = params(root.path(), extension);
+        params.target_quant = quant.into();
+        params.force_imatrix = force;
+        let calibration = root.path().join("calibration.txt");
+        std::fs::write(&calibration, "fixture calibration").unwrap();
+        params.calibration_file = Some(calibration);
+        artifact(&backend.quantize_binary(), QUANTIZER, true);
+        artifact(&backend.imatrix_binary(), QUANTIZER, true);
+        artifact(&backend.convert_script(), "fixture script", false);
+        // This marker would expose even an import probe. No executable is run
+        // in this test; all routes must stop at the persisted setup veto.
+        artifact(
+            &backend.venv_python(),
+            "#!/bin/sh\ntouch \"$0.started\"\nexit 0\n",
+            true,
+        );
+        std::fs::write(backend.base_dir.join("setup-incomplete"), "").unwrap();
+        let reopened = LlamaCppBackend::new(root.path());
+        assert!(!reopened.is_ready());
+        assert!(!reopened.is_ready_async().await.unwrap());
+        assert!(!reopened.has_imatrix());
+        rejected(&reopened, &params, "setup is incomplete").await;
+        assert!(!started(&reopened.imatrix_binary()).exists());
+        assert!(reopened.base_dir.join("setup-incomplete").exists());
+        reopened.shutdown_setup().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn marker_inspection_io_errors_are_not_readiness_absence() {
+    let root = tempfile::tempdir().unwrap();
+    let backend = LlamaCppBackend::new(root.path());
+    let params = params(root.path(), "gguf");
+    std::fs::create_dir_all(backend.base_dir.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&backend.base_dir, &backend.base_dir).unwrap();
+    assert!(!backend.is_ready());
+    assert!(!backend.has_imatrix());
+    assert!(matches!(
+        backend.is_ready_async().await,
+        Err(PumasError::ConversionFailed { message }) if message.contains("Checking native setup marker")
+    ));
+    assert!(matches!(
+        backend
+            .quantize(
+                &params,
+                &ConversionProgressTracker::new(),
+                &CancellationToken::new()
+            )
+            .await,
+        Err(PumasError::Io { message, .. }) if message.contains("checking llama.cpp setup marker")
+    ));
+    assert_eq!(
+        std::fs::read_dir(params.model_path.parent().unwrap())
+            .unwrap()
+            .count(),
+        1
+    );
+    assert!(backend.shutdown_setup().await.is_err());
+}
 
 fn started(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_os_string();
@@ -106,7 +182,10 @@ async fn safetensors_preflight_requires_converter_python_and_requested_imatrix_b
     rejected(&backend, &params, "python").await;
     artifact(&backend.venv_python(), CONVERTER, true);
     assert!(
-        backend.is_ready(),
+        backend
+            .is_ready_async()
+            .await
+            .expect("fixture readiness inspection"),
         "converter need not have execute permission"
     );
     let calibration = root.path().join("calibration.txt");

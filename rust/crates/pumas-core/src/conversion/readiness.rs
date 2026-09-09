@@ -46,11 +46,20 @@ struct Specification {
     name: &'static str,
     imports: &'static str,
     artifacts: Vec<(PathBuf, bool)>,
+    native_setup: Option<super::native_setup::NativeSetup>,
 }
 
 impl Specification {
     fn execute(&self, cancel: &CancellationToken) -> Outcome {
         super::setup::check_cancel(cancel)?;
+        if let Some(native_setup) = &self.native_setup {
+            if native_setup
+                .incomplete()
+                .map_err(|error| super::setup::failed("Checking native setup marker", error))?
+            {
+                return Ok(false);
+            }
+        }
         for (path, executable) in &self.artifacts {
             let metadata = match std::fs::metadata(path) {
                 Ok(metadata) => metadata,
@@ -148,9 +157,18 @@ impl ProbeOwner {
                 name,
                 imports,
                 artifacts,
+                native_setup: None,
             },
             state: Mutex::new(State::default()),
         }
+    }
+
+    pub(super) fn with_native_setup(
+        mut self,
+        native_setup: super::native_setup::NativeSetup,
+    ) -> Self {
+        self.spec.native_setup = Some(native_setup);
+        self
     }
 
     fn start(&self) -> Arc<Operation> {

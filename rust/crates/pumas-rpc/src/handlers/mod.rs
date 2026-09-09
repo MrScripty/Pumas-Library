@@ -1300,6 +1300,112 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
+    async fn backend_status_rpc_blocks_incomplete_setup_then_observes_fresh_readiness() {
+        async fn status(state: &Arc<AppState>, id: &str) -> Value {
+            let request = Bytes::from(
+                serde_json::to_vec(&json!({
+                    "jsonrpc":"2.0", "id":id,
+                    "method":"get_backend_status", "params":{},
+                }))
+                .unwrap(),
+            );
+            let response = handle_rpc(State(state.clone()), request)
+                .await
+                .into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), 65_536)
+                .await
+                .unwrap();
+            serde_json::from_slice(&bytes).unwrap()
+        }
+
+        let temp = TempDir::new().unwrap();
+        let base = temp.path().join("launcher-data/llama-cpp");
+        let python = base.join("venv/bin/python");
+        let probe = python.with_file_name("python.probes");
+        let marker = base.join("setup-incomplete");
+        let interpreter = r#"#!/bin/sh
+if test "$#" = 4 && test "$1" = '-I' && test "$2" = '-B' && test "$3" = '-c' && test "$4" = 'import torch, transformers, gguf, sentencepiece, numpy, google.protobuf, safetensors'; then
+ printf 'probe\n' >> "$0.probes"
+ exit 0
+fi
+printf 'rejected\n' >> "$0.rejected"
+exit 9
+"#;
+        for (relative, contents) in [
+            ("venv/bin/python", interpreter),
+            ("build/bin/llama-quantize", "#!/bin/sh\nexit 9\n"),
+            ("build/bin/llama-imatrix", "#!/bin/sh\nexit 9\n"),
+            (
+                "source/convert_hf_to_gguf.py",
+                "fixture conversion script\n",
+            ),
+        ] {
+            let path = base.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            // Keep writable executable descriptors out of parallel test forks.
+            let written = std::process::Command::new("/bin/sh")
+                .args([
+                    "-c",
+                    "printf '%s' \"$2\" > \"$1\" && chmod 700 \"$1\"",
+                    "fixture",
+                ])
+                .arg(path)
+                .arg(contents)
+                .output()
+                .unwrap();
+            assert!(written.status.success());
+        }
+        std::fs::write(&marker, []).unwrap();
+        // Construct the API after persisted invalidation: no old owner state
+        // may be required to keep this otherwise usable environment blocked.
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        let blocked = status(&state, "incomplete-setup").await;
+        assert_eq!(blocked["jsonrpc"], "2.0");
+        assert_eq!(blocked["id"], "incomplete-setup");
+        assert!(blocked.get("error").is_none());
+        assert_eq!(blocked["result"]["success"], true);
+        let backends = blocked["result"]["backends"].as_array().unwrap();
+        assert_eq!(backends.len(), 3);
+        let llama = backends
+            .iter()
+            .position(|backend| backend["backend"] == "llama_cpp")
+            .unwrap();
+        assert_eq!(backends[llama]["ready"], false);
+        assert!(!probe.exists(), "incomplete setup must not run imports");
+        assert_eq!(std::fs::metadata(&marker).unwrap().len(), 0);
+
+        // Fixture-only completion simulates the producer's publication. This
+        // read must obtain a fresh answer, without changing the RPC payload.
+        std::fs::remove_file(&marker).unwrap();
+        let ready = status(&state, "completed-setup").await;
+        let mut expected = blocked.clone();
+        expected["id"] = json!("completed-setup");
+        expected["result"]["backends"][llama]["ready"] = json!(true);
+        assert_eq!(ready, expected);
+        assert_eq!(std::fs::read_to_string(&probe).unwrap(), "probe\n");
+        assert!(!python.with_file_name("python.rejected").exists());
+        for response in [blocked, ready] {
+            assert!(!response
+                .to_string()
+                .contains(temp.path().to_string_lossy().as_ref()));
+        }
+        state.api.shutdown_conversion_setup().await.unwrap();
+        for effect in [
+            "conversion-setup.lock",
+            "converter-venv",
+            "converter-scripts",
+            "nvfp4",
+            "sherry",
+        ] {
+            assert!(!temp.path().join("launcher-data").join(effect).exists());
+        }
+        assert!(!base.join("source/.git").exists());
+        assert!(!base.join("build/CMakeCache.txt").exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
     async fn base_readiness_rpc_distinguishes_not_ready_failure_and_closed_without_setup() {
         async fn check(state: &Arc<AppState>, id: &str) -> Value {
             let request = Bytes::from(

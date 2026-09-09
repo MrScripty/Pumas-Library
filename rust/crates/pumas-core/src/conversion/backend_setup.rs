@@ -261,6 +261,10 @@ fn python_backend(
 fn llama_cpp(base: &Path, cancel: &CancellationToken, programs: &Programs) -> Outcome {
     check_cancel(cancel)?;
     fs::create_dir_all(base).map_err(|error| failed("Creating llama.cpp directory", error))?;
+    let native_setup = super::native_setup::NativeSetup::new(base);
+    native_setup
+        .begin()
+        .map_err(|error| failed("Marking llama.cpp setup incomplete", error))?;
     let source = base.join("source");
     if exists(&source.join(".git"), "Checking llama.cpp checkout")? {
         optional(
@@ -364,7 +368,10 @@ fn llama_cpp(base: &Path, cancel: &CancellationToken, programs: &Programs) -> Ou
         cancel,
         programs,
     )?;
-    check_cancel(cancel)
+    check_cancel(cancel)?;
+    native_setup
+        .complete()
+        .map_err(|error| failed("Completing llama.cpp setup marker", error))
 }
 
 #[cfg(all(test, target_os = "linux"))]

@@ -56,6 +56,7 @@ touch "$0.installed"
     executable(
         &git,
         r#"#!/bin/sh
+printf '%s\n' "$@" >> "$0.args"
 if test "$1" = 'clone'; then
  for destination do :; done
  mkdir -p "$destination/.git"
@@ -385,6 +386,9 @@ async fn successful_pip_exit_cannot_complete_setup_with_failed_imports() {
             owner.snapshot().unwrap().status,
             super::super::ConversionSetupStatus::Failed
         );
+        if id == QuantBackend::LlamaCpp {
+            assert_reopened_native_setup_incomplete(root.path()).await;
+        }
         // Repair the fixture's package source, not its venv; an explicit retry
         // rechecks imports and runs installation again.
         std::fs::remove_file(marker(root.path(), directory, "broken")).unwrap();
@@ -394,6 +398,12 @@ async fn successful_pip_exit_cannot_complete_setup_with_failed_imports() {
             owner.snapshot().unwrap().status,
             super::super::ConversionSetupStatus::Completed
         );
+        if id == QuantBackend::LlamaCpp {
+            assert!(!root
+                .path()
+                .join("launcher-data/llama-cpp/setup-incomplete")
+                .exists());
+        }
         assert_eq!(
             std::fs::read_to_string(marker(root.path(), directory, "starts")).unwrap(),
             "start\nstart\n"
@@ -420,6 +430,96 @@ fn native_fixture(root: &Path, tools: &Programs) -> PathBuf {
     );
     std::fs::write(marker(root, "llama-cpp", "release"), "").unwrap();
     base
+}
+
+async fn assert_reopened_native_setup_incomplete(root: &Path) {
+    let path = root.join("launcher-data/llama-cpp/setup-incomplete");
+    let metadata = std::fs::symlink_metadata(path).unwrap();
+    assert!(metadata.is_file());
+    assert_eq!(metadata.len(), 0);
+    let probes = marker(root, "llama-cpp", "probes");
+    let before = std::fs::read(&probes).ok();
+    let reopened = LlamaCppBackend::new(root);
+    assert!(!reopened.is_ready());
+    assert!(!reopened.is_ready_async().await.unwrap());
+    assert!(!reopened.has_imatrix());
+    assert_eq!(
+        std::fs::read(probes).ok(),
+        before,
+        "marker rejects before imports"
+    );
+    reopened.shutdown_setup().await.unwrap();
+}
+
+#[tokio::test]
+async fn occupied_native_setup_marker_preserves_data_and_refuses_all_commands() {
+    for state in ["nonempty", "directory", "symlink", "dangling_symlink"] {
+        let root = tempfile::tempdir().unwrap();
+        let tools = programs(root.path());
+        let base = native_fixture(root.path(), &tools);
+        let path = base.join("setup-incomplete");
+        let outside = root.path().join("outside-marker");
+        match state {
+            "nonempty" => std::fs::write(&path, "preserve marker data").unwrap(),
+            "directory" => {
+                std::fs::create_dir(&path).unwrap();
+                std::fs::write(path.join("keep"), "preserve directory").unwrap();
+            }
+            _ => {
+                if state == "symlink" {
+                    std::fs::write(&outside, "preserve target").unwrap();
+                }
+                std::os::unix::fs::symlink(&outside, &path).unwrap();
+            }
+        }
+        let git_log = tools.git.with_file_name("git.args");
+        let cmake_log = tools.cmake.with_file_name("cmake.args");
+        let (backend, owner, probes) = backend(root.path(), QuantBackend::LlamaCpp, tools);
+        assert!(!backend.is_ready());
+        assert!(!backend.is_ready_async().await.unwrap());
+        let error = backend.ensure_environment().await.unwrap_err();
+        assert!(error.to_string().contains("setup marker"), "{error}");
+        assert_eq!(
+            owner.snapshot().unwrap().status,
+            super::super::ConversionSetupStatus::Failed
+        );
+        assert!(!git_log.exists());
+        assert!(!cmake_log.exists());
+        assert!(!marker(root.path(), "llama-cpp", "starts").exists());
+        assert!(!marker(root.path(), "llama-cpp", "probes").exists());
+        match state {
+            "nonempty" => assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                "preserve marker data"
+            ),
+            "directory" => assert_eq!(
+                std::fs::read_to_string(path.join("keep")).unwrap(),
+                "preserve directory"
+            ),
+            _ => {
+                assert_eq!(std::fs::read_link(&path).unwrap(), outside);
+                if state == "symlink" {
+                    assert_eq!(
+                        std::fs::read_to_string(&outside).unwrap(),
+                        "preserve target"
+                    );
+                } else {
+                    assert!(!outside.exists());
+                }
+            }
+        }
+        let first = super::super::readiness::shutdown_backend(&owner, &probes)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            super::super::readiness::shutdown_backend(&owner, &probes)
+                .await
+                .unwrap_err()
+                .to_string(),
+            first
+        );
+    }
 }
 
 #[tokio::test]
@@ -541,6 +641,7 @@ async fn llama_setup_does_not_complete_after_updated_source_build_failure_and_ca
         );
         assert!(!marker(root.path(), "llama-cpp", "starts").exists());
         assert!(!marker(root.path(), "llama-cpp", "probes").exists());
+        assert_reopened_native_setup_incomplete(root.path()).await;
         let arguments = std::fs::read_to_string(args).unwrap();
         assert_eq!(
             arguments.lines().any(|arg| arg == "--build"),
@@ -555,6 +656,7 @@ async fn llama_setup_does_not_complete_after_updated_source_build_failure_and_ca
             completed.status,
             super::super::ConversionSetupStatus::Completed
         );
+        assert!(!base.join("setup-incomplete").exists());
         super::super::readiness::shutdown_backend(&owner, &probes)
             .await
             .unwrap();
@@ -603,6 +705,7 @@ async fn llama_rebuild_survives_dropped_waiter_and_shutdown_drains_before_cancel
         owner.snapshot().unwrap().status,
         super::super::ConversionSetupStatus::Cancelled
     );
+    assert_reopened_native_setup_incomplete(root.path()).await;
     assert!(!marker(root.path(), "llama-cpp", "starts").exists());
     assert!(!marker(root.path(), "llama-cpp", "probes").exists());
 }

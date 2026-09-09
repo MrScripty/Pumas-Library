@@ -31,6 +31,13 @@ Direct backend execution, independent readiness probes and external tool users
 remain caller-coordinated; see the [core contract](../pumas-core/README.md).
 Setup completion is not GPU or conversion readiness proof.
 
+`get_backend_status` reports llama.cpp not ready while a recorded incomplete
+native setup remains, including after process restart. Quantization also refuses
+that environment. Only successful explicit setup clears invalidity; reading
+status does not install or repair. Payloads and setup receipt semantics are
+unchanged. See the [core contract](../pumas-core/README.md) for marker ownership,
+inspection errors, direct-use coordination and persistence limits.
+
 `check_conversion_environment` uses the retained base Python readiness owner.
 Missing interpreter and normal nonzero import exit produce `ready: false`;
 infrastructure, signal, deadline and cleanup failures produce the existing

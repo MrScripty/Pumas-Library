@@ -17,6 +17,8 @@ import {
   decodeConversionProgressResponse,
   decodeConversionSetupStartedOutcome,
   decodeConversionSetupStatusOutcome,
+  decodeStartBackendSetupParams,
+  decodeGetBackendSetupParams,
   decodeConversionListOutcome,
   decodeConversionStartedOutcome,
   decodeConversionCancelledOutcome,
@@ -853,6 +855,12 @@ const electronAPI = {
   setup_conversion_environment: () => validatedApiCall('setup_conversion_environment', decodeSuccessOutcome),
   start_conversion_setup: (expectedPreviousOperationId?: string | null) => validatedApiCall('start_conversion_setup', decodeConversionSetupStartedOutcome, { expected_previous_operation_id: expectedPreviousOperationId ?? null }),
   get_conversion_setup: () => validatedApiCall('get_conversion_setup', decodeConversionSetupStatusOutcome),
+  start_backend_setup: (backend: QuantBackend, expectedPreviousOperationId?: string | null) =>
+    validatedApiCall('start_backend_setup', decodeConversionSetupStartedOutcome,
+      requireDecoded(decodeStartBackendSetupParams({ backend, expected_previous_operation_id: expectedPreviousOperationId ?? null }), 'start_backend_setup request')),
+  get_backend_setup: (backend: QuantBackend) =>
+    validatedApiCall('get_backend_setup', decodeConversionSetupStatusOutcome,
+      requireDecoded(decodeGetBackendSetupParams({ backend }), 'get_backend_setup request')),
   get_supported_quant_types: () => validatedApiCall('get_supported_quant_types', decodeSupportedQuantTypesOutcome),
   get_backend_status: () => validatedApiCall('get_backend_status', decodeBackendStatusOutcome),
   setup_quantization_backend: (backend: QuantBackend) =>

@@ -264,6 +264,13 @@ pub(crate) enum RpcCommand {
         expected_previous_operation_id: Option<String>,
     },
     GetConversionSetup,
+    StartBackendSetup {
+        backend: QuantBackend,
+        expected_previous_operation_id: Option<String>,
+    },
+    GetBackendSetup {
+        backend: QuantBackend,
+    },
     GetSupportedQuantTypes,
     GetBackendStatus,
     SetupQuantizationBackend {
@@ -350,6 +357,8 @@ impl RpcCommand {
             Self::SetupConversionEnvironment => "setup_conversion_environment",
             Self::StartConversionSetup { .. } => "start_conversion_setup",
             Self::GetConversionSetup => "get_conversion_setup",
+            Self::StartBackendSetup { .. } => "start_backend_setup",
+            Self::GetBackendSetup { .. } => "get_backend_setup",
             Self::GetSupportedQuantTypes => "get_supported_quant_types",
             Self::GetBackendStatus => "get_backend_status",
             Self::SetupQuantizationBackend { .. } => "setup_quantization_backend",
@@ -2024,6 +2033,77 @@ struct StartConversionSetupParams {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+struct StartBackendSetupParams {
+    backend: QuantBackend,
+    #[serde(default)]
+    expected_previous_operation_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+struct GetBackendSetupParams {
+    backend: QuantBackend,
+}
+
+#[cfg(any(test, feature = "export-contract"))]
+fn backend_setup_requests() -> Vec<(&'static str, Value, bool)> {
+    let mut requests = Vec::new();
+    for backend in ["python_conversion", "llama_cpp", "nvfp4", "sherry"] {
+        requests.push((
+            "get_backend_setup",
+            serde_json::json!({"backend":backend}),
+            true,
+        ));
+        requests.push((
+            "start_backend_setup",
+            serde_json::json!({"backend":backend}),
+            true,
+        ));
+        requests.push((
+            "start_backend_setup",
+            serde_json::json!({"backend":backend,"expected_previous_operation_id":null}),
+            true,
+        ));
+        requests.push(("start_backend_setup", serde_json::json!({"backend":backend,"expected_previous_operation_id":"00112233-4455-4677-8899-aabbccddeeff"}), true));
+    }
+    for method in ["start_backend_setup", "get_backend_setup"] {
+        for params in [
+            serde_json::json!({}),
+            serde_json::json!(null),
+            serde_json::json!([]),
+            serde_json::json!({"backend":"LlamaCpp"}),
+            serde_json::json!({"backend":"unknown"}),
+            serde_json::json!({"backend":null}),
+            serde_json::json!({"backend":7}),
+            serde_json::json!({"backend":"llama_cpp","extra":true}),
+        ] {
+            requests.push((method, params, false));
+        }
+    }
+    for token in [
+        serde_json::json!("bad"),
+        serde_json::json!("00112233-4455-4677-8899-AABBCCDDEEFF"),
+        serde_json::json!(7),
+        serde_json::json!({}),
+    ] {
+        requests.push((
+            "start_backend_setup",
+            serde_json::json!({"backend":"llama_cpp","expected_previous_operation_id":token}),
+            false,
+        ));
+    }
+    requests.push((
+        "get_backend_setup",
+        serde_json::json!({"backend":"llama_cpp","expected_previous_operation_id":null}),
+        false,
+    ));
+    requests
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SetupQuantizationBackendParams {
     backend: String,
 }
@@ -2305,6 +2385,26 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
         "check_conversion_environment" => empty().map(|()| RpcCommand::CheckConversionEnvironment),
         "setup_conversion_environment" => empty().map(|()| RpcCommand::SetupConversionEnvironment),
         "get_conversion_setup" => empty().map(|()| RpcCommand::GetConversionSetup),
+        "get_backend_setup" => parse_params::<GetBackendSetupParams>(params).map(|params| {
+            RpcCommand::GetBackendSetup {
+                backend: params.backend,
+            }
+        }),
+        "start_backend_setup" => {
+            parse_params::<StartBackendSetupParams>(params).and_then(|params| {
+                if params
+                    .expected_previous_operation_id
+                    .as_deref()
+                    .is_some_and(|id| !canonical_setup_id(id))
+                {
+                    return Err(PublicError::invalid_params());
+                }
+                Ok(RpcCommand::StartBackendSetup {
+                    backend: params.backend,
+                    expected_previous_operation_id: params.expected_previous_operation_id,
+                })
+            })
+        }
         "start_conversion_setup" => {
             parse_params::<StartConversionSetupParams>(params).and_then(|params| {
                 if params
@@ -2971,6 +3071,32 @@ mod tests {
             assert_eq!(encoded["quant_types"][0]["imatrixRecommended"], true);
             assert!(encoded["quant_types"][0].get("bitsPerWeight").is_some());
             assert!(encoded["quant_types"][0].get("bits_per_weight").is_none());
+        }
+    }
+
+    #[test]
+    fn backend_setup_requests_preserve_selection_and_reject_undeclared_inputs() {
+        for (method, params, expected) in backend_setup_requests() {
+            assert_eq!(
+                parse_command(method, Some(&params)).is_ok(),
+                expected,
+                "{method}: {params}"
+            );
+        }
+        let id = "00112233-4455-4677-8899-aabbccddeeff";
+        for (wire, backend) in [
+            ("python_conversion", QuantBackend::PythonConversion),
+            ("llama_cpp", QuantBackend::LlamaCpp),
+            ("nvfp4", QuantBackend::Nvfp4),
+            ("sherry", QuantBackend::Sherry),
+        ] {
+            let params = json!({"backend":wire,"expected_previous_operation_id":id});
+            assert!(
+                matches!(parse_command("start_backend_setup", Some(&params)).unwrap(), RpcCommand::StartBackendSetup { backend: selected, expected_previous_operation_id: Some(token) } if selected == backend && token == id)
+            );
+            assert!(
+                matches!(parse_command("get_backend_setup", Some(&json!({"backend":wire}))).unwrap(), RpcCommand::GetBackendSetup { backend: selected } if selected == backend)
+            );
         }
     }
 

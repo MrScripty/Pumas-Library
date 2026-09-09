@@ -1,5 +1,5 @@
-// Generated from pumas-rpc contract.rs; SHA256 17edaf803c5a0a9d43443a36270646ee2fbb4f65da377b4618393a502864ecfd. DO NOT EDIT.
-import { validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateStartConversionSetupParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome } from './desktop-contract.validators.js';
+// Generated from pumas-rpc contract.rs; SHA256 a7b330d7cc76690bedf21e34f0c4e98c630876798997a4c57f7cfd6aa64bd1fe. DO NOT EDIT.
+import { validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateGetBackendSetupParams, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateStartBackendSetupParams, validateStartConversionSetupParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome } from './desktop-contract.validators.js';
 export type BackendStatus = { "backend": (QuantBackend); "name": string; "ready": boolean };
 export type BackendStatusOutcome = { "backends": ReadonlyArray<BackendStatus>; "success": true };
 export type CatalogArtifactState = ({ "state": "complete" }) | ({ "downloadProgressFraction"?: number; "reasons": ReadonlyArray<CatalogPartialReason>; "recovery"?: CatalogRecoveryIdentity; "state": "partial" });
@@ -31,6 +31,7 @@ export type DownloadStatus = "queued" | "downloading" | "pausing" | "paused" | "
 export type DownloadStatusFoundOutcome = { "downloadId": string; "downloadedBytes": number | null; "error": string | null; "etaSeconds": number | null; "libraryModelId": string | null; "modelName": string | null; "modelType": string | null; "nextRetryDelaySeconds": number | null; "progress": number | null; "repoId": string | null; "retryAttempt": number | null; "retryLimit": number | null; "retrying": boolean | null; "selectedArtifactId": string | null; "speed": number | null; "status": DownloadStatus; "success": true; "totalBytes": number | null };
 export type DownloadStatusMissingOutcome = { "error": string; "success": false };
 export type DownloadStatusOutcome = (DownloadStatusFoundOutcome) | (DownloadStatusMissingOutcome);
+export type GetBackendSetupParams = { "backend": QuantBackend };
 export type LinkHealthOutcome = (LinkHealthResponse);
 export type LinkHealthResponse = { "broken_links": ReadonlyArray<string>; "error"?: null; "errors": ReadonlyArray<string>; "healthy_links": number; "orphaned_links": ReadonlyArray<string>; "status": "healthy" | "degraded"; "success": true; "total_links": number; "warnings": ReadonlyArray<string> };
 export type ModelIndexRefreshOutcome = { "indexed_count": number; "success": true };
@@ -44,6 +45,7 @@ export type QuantBackend = ("python_conversion") | ("llama_cpp") | ("nvfp4") | (
 export type QuantOption = { "backend": (QuantBackend) | (null); "bitsPerWeight": number; "description": string; "imatrixRecommended": boolean; "name": string; "recommended": boolean };
 export type RecoverDownloadParams = { "modelId": string; "recoveryToken": string };
 export type SearchCatalogParams = { "limit"?: number | null; "offset"?: number | null; "query": string };
+export type StartBackendSetupParams = { "backend": QuantBackend; "expected_previous_operation_id"?: string | null };
 export type StartConversionSetupParams = { "expected_previous_operation_id"?: string | null };
 export type SuccessOutcome = { "success": true };
 export type SupportedQuantTypesOutcome = { "quant_types": ReadonlyArray<QuantOption>; "success": true };
@@ -95,6 +97,7 @@ export function decodeDownloadListOutcome(input: unknown): DecodeOutcome<Downloa
 export function decodeDownloadMutationOutcome(input: unknown): DecodeOutcome<DownloadMutationOutcome> { return decode(input, validateDownloadMutationOutcome); }
 export function decodeDownloadStartedOutcome(input: unknown): DecodeOutcome<DownloadStartedOutcome> { return decode(input, validateDownloadStartedOutcome); }
 export function decodeDownloadStatusOutcome(input: unknown): DecodeOutcome<DownloadStatusOutcome> { return decode(input, validateDownloadStatusOutcome); }
+export function decodeGetBackendSetupParams(input: unknown): DecodeOutcome<GetBackendSetupParams> { return decode(input, validateGetBackendSetupParams); }
 export function decodeLinkHealthOutcome(input: unknown): DecodeOutcome<LinkHealthOutcome> { return decode(input, validateLinkHealthOutcome); }
 export function decodeModelIndexRefreshOutcome(input: unknown): DecodeOutcome<ModelIndexRefreshOutcome> { return decode(input, validateModelIndexRefreshOutcome); }
 export function decodeModelsOutcome(input: unknown): DecodeOutcome<ModelsOutcome> { return decode(input, validateModelsOutcome); }
@@ -102,6 +105,7 @@ export function decodePartialDownloadOutcome(input: unknown): DecodeOutcome<Part
 export function decodePublicError(input: unknown): DecodeOutcome<PublicError> { return decode(input, validatePublicError); }
 export function decodeRecoverDownloadParams(input: unknown): DecodeOutcome<RecoverDownloadParams> { return decode(input, validateRecoverDownloadParams); }
 export function decodeSearchCatalogParams(input: unknown): DecodeOutcome<SearchCatalogParams> { return decode(input, validateSearchCatalogParams); }
+export function decodeStartBackendSetupParams(input: unknown): DecodeOutcome<StartBackendSetupParams> { return decode(input, validateStartBackendSetupParams); }
 export function decodeStartConversionSetupParams(input: unknown): DecodeOutcome<StartConversionSetupParams> { return decode(input, validateStartConversionSetupParams); }
 export function decodeSuccessOutcome(input: unknown): DecodeOutcome<SuccessOutcome> { return decode(input, validateSuccessOutcome); }
 export function decodeSupportedQuantTypesOutcome(input: unknown): DecodeOutcome<SupportedQuantTypesOutcome> { return decode(input, validateSupportedQuantTypesOutcome); }

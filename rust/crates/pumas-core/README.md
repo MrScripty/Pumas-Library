@@ -117,9 +117,9 @@ On other targets, cancellation drains the foreground command naturally before
 releasing custody, so shutdown can wait for it. Full process-tree evidence is
 Linux-only. If Linux cleanup cannot establish quiescence, it retains custody
 rather than report a completed shutdown. RPC and desktop currently expose base
-Python setup observation with redacted failures. Backend-specific observation
-is currently a Rust library contract; its RPC/desktop projection remains a
-separate follow-up.
+Python and backend-specific setup observation with redacted failures. Rust
+callers remain independent of RPC and the optional desktop bridge; the bridge
+does not own setup state or retry admission.
 
 The crate builds and runs independently of the optional GUI and RPC process.
 For registered-link inspection, `PumasApi::get_link_health(None)` exposes the

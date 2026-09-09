@@ -641,6 +641,19 @@ async fn dispatch_admitted_command(
         RpcCommand::GetConversionSetup => {
             conversion::get_conversion_setup(state).map(RpcOutcome::ConversionSetupStatus)
         }
+        RpcCommand::StartBackendSetup {
+            backend,
+            expected_previous_operation_id,
+        } => conversion::start_backend_setup(
+            state,
+            backend,
+            expected_previous_operation_id.as_deref(),
+        )
+        .await
+        .map(RpcOutcome::ConversionSetupStarted),
+        RpcCommand::GetBackendSetup { backend } => {
+            conversion::get_backend_setup(state, backend).map(RpcOutcome::ConversionSetupStatus)
+        }
         RpcCommand::GetSupportedQuantTypes => conversion::get_supported_quant_types(state)
             .await
             .map(Box::new)
@@ -1284,6 +1297,179 @@ async fn dispatch_method(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn backend_setup_rpc_admission_reuses_receipts_and_requires_explicit_retry() {
+        async fn rpc(state: &Arc<AppState>, method: &str, params: Value) -> Value {
+            let body = Bytes::from(
+                serde_json::to_vec(
+                    &json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}),
+                )
+                .unwrap(),
+            );
+            let response = handle_rpc(State(state.clone()), body).await.into_response();
+            let bytes = axum::body::to_bytes(response.into_body(), 65_536)
+                .await
+                .unwrap();
+            serde_json::from_slice(&bytes).unwrap()
+        }
+        async fn completed(state: &Arc<AppState>) -> Value {
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let response =
+                        rpc(state, "get_backend_setup", json!({"backend":"nvfp4"})).await;
+                    assert!(response.get("error").is_none(), "{response}");
+                    let setup = &response["result"]["setup"];
+                    match setup["status"].as_str() {
+                        Some("completed") => return setup.clone(),
+                        Some("in_progress") => {
+                            tokio::time::sleep(std::time::Duration::from_millis(5)).await
+                        }
+                        _ => panic!("unexpected setup outcome: {response}"),
+                    }
+                }
+            })
+            .await
+            .expect("controlled RPC setup completed")
+        }
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        let python = temp.path().join("launcher-data/nvfp4/venv/bin/python");
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        let fixture = r#"#!/bin/sh
+if test "$#" = 4 && test "$1" = '-I' && test "$2" = '-B' && test "$3" = '-c' && test "$4" = 'import torch; from transformers import AutoModelForCausalLM, AutoTokenizer; import modelopt.torch.quantization; from modelopt.torch.export import export_tensorrt_llm_checkpoint'; then
+ printf 'probe\n' >> "$0.probes"
+ exit 0
+fi
+printf 'rejected\n' >> "$0.rejected"
+exit 9
+"#;
+        // The writer child owns the executable's writable descriptor, avoiding
+        // inheritance by unrelated forks in the multithreaded Rust test host.
+        let written = std::process::Command::new("/bin/sh")
+            .args([
+                "-c",
+                "printf '%s' \"$2\" > \"$1\" && chmod 700 \"$1\"",
+                "fixture",
+            ])
+            .arg(&python)
+            .arg(fixture)
+            .output()
+            .unwrap();
+        assert!(
+            written.status.success(),
+            "{}",
+            String::from_utf8_lossy(&written.stderr)
+        );
+        let admitted = rpc(&state, "start_backend_setup", json!({"backend":"nvfp4"})).await;
+        assert_eq!(admitted["result"]["success"], true, "{admitted}");
+        let first = completed(&state).await;
+        assert_eq!(
+            admitted["result"]["setup"]["operationId"],
+            first["operationId"]
+        );
+        assert_eq!(first["error"], Value::Null);
+        let attached = rpc(&state, "start_backend_setup", json!({"backend":"nvfp4"})).await;
+        assert_eq!(attached["result"]["setup"], first);
+        let next = rpc(
+            &state,
+            "start_backend_setup",
+            json!({"backend":"nvfp4","expected_previous_operation_id":first["operationId"]}),
+        )
+        .await;
+        let successor = completed(&state).await;
+        assert_ne!(successor["operationId"], first["operationId"]);
+        assert_eq!(
+            next["result"]["setup"]["operationId"],
+            successor["operationId"]
+        );
+        let stale = rpc(
+            &state,
+            "start_backend_setup",
+            json!({"backend":"nvfp4","expected_previous_operation_id":first["operationId"]}),
+        )
+        .await;
+        assert_eq!(stale["result"]["setup"], successor);
+        assert_eq!(
+            std::fs::read_to_string(python.with_file_name("python.probes")).unwrap(),
+            "probe\nprobe\n"
+        );
+        assert!(
+            !python.with_file_name("python.rejected").exists(),
+            "fixture never received an installer command"
+        );
+        state.api.shutdown_conversion_setup().await.unwrap();
+        let retained = rpc(&state, "get_backend_setup", json!({"backend":"nvfp4"})).await;
+        assert_eq!(retained["result"]["setup"], successor);
+        let closed = rpc(&state, "start_backend_setup", json!({"backend":"nvfp4"})).await;
+        assert_eq!(closed["error"]["code"], -32004);
+    }
+
+    #[tokio::test]
+    async fn backend_setup_rpc_idle_invalid_obsolete_and_closed_admission_do_not_install() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        for closed in [false, true] {
+            if closed {
+                state.api.shutdown_conversion_setup().await.unwrap();
+            }
+            for backend in ["python_conversion", "llama_cpp", "nvfp4", "sherry"] {
+                let mut requests = vec![
+                    ("get_backend_setup", json!({"backend":backend}), true),
+                    (
+                        "start_backend_setup",
+                        json!({"backend":backend,"expected_previous_operation_id":"00112233-4455-4677-8899-aabbccddeeff"}),
+                        false,
+                    ),
+                    (
+                        "start_backend_setup",
+                        json!({"backend":backend,"force":true}),
+                        false,
+                    ),
+                    ("get_backend_setup", json!({"backend":backend}), true),
+                ];
+                if closed {
+                    requests.push(("start_backend_setup", json!({"backend":backend}), false));
+                }
+                for (method, params, success) in requests {
+                    let body = Bytes::from(
+                        serde_json::to_vec(
+                            &json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}),
+                        )
+                        .unwrap(),
+                    );
+                    let response = handle_rpc(State(state.clone()), body).await.into_response();
+                    let bytes = axum::body::to_bytes(response.into_body(), 65_536)
+                        .await
+                        .unwrap();
+                    let value: Value = serde_json::from_slice(&bytes).unwrap();
+                    if success {
+                        assert_eq!(value["result"], json!({"success":true,"setup":null}));
+                    } else {
+                        assert!(value.get("error").is_some(), "{value}");
+                        assert!(value.get("result").is_none(), "{value}");
+                        let expected_code = if closed && params.get("force").is_none() {
+                            -32004
+                        } else {
+                            -32602
+                        };
+                        assert_eq!(value["error"]["code"], expected_code, "{value}");
+                    }
+                }
+            }
+        }
+        for path in [
+            "converter-venv",
+            "converter-scripts",
+            "conversion-setup.lock",
+            "llama-cpp",
+            "nvfp4",
+            "sherry",
+        ] {
+            assert!(!temp.path().join("launcher-data").join(path).exists());
+        }
+    }
 
     #[tokio::test]
     async fn conversion_setup_rpc_idle_and_obsolete_token_do_not_install() {

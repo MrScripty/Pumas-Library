@@ -86,6 +86,23 @@ test('setup decoders reject contradictory status, malformed identity and raw dia
   }
 });
 
+test('backend setup request decoders preserve the actual RPC parser contract', () => {
+  const probes = fixtures.backend_setup_request_probes;
+  assert.ok(Array.isArray(probes) && probes.length > 0);
+  for (const {method, params, accepted} of probes) {
+    assert.ok(['start_backend_setup', 'get_backend_setup'].includes(method));
+    const decode = method === 'start_backend_setup'
+      ? contract.decodeStartBackendSetupParams
+      : contract.decodeGetBackendSetupParams;
+    const result = decode(params);
+    assert.equal(result.status, accepted ? 'valid' : 'invalid', JSON.stringify({method,params}));
+    if (accepted) {
+      assert.deepEqual(JSON.parse(JSON.stringify(result.value)), params);
+      assert.ok(Object.isFrozen(result.value));
+    }
+  }
+});
+
 test('conversion operation outcomes preserve producer readiness, cancellation and quant metadata', () => {
   const pairs = [
     ['conversion_started',contract.decodeConversionStartedOutcome],

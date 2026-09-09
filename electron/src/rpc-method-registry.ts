@@ -153,6 +153,8 @@ export const RPC_METHOD_REGISTRY = {
     'setup_conversion_environment',
     'start_conversion_setup',
     'get_conversion_setup',
+    'start_backend_setup',
+    'get_backend_setup',
     'get_supported_quant_types',
     'get_backend_status',
     'setup_quantization_backend',

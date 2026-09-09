@@ -124,6 +124,11 @@ export interface DesktopBridgeLinkMappingAPI {
   start_conversion_setup(expectedPreviousOperationId?: string | null): Promise<ConversionSetupStartedResponse>;
   /** Latest setup in this backend owner; null is not an environment-readiness claim. */
   get_conversion_setup(): Promise<ConversionSetupStatusResponse>;
+  /** Start/attach selected setup; only a matching terminal ID permits retry.
+   * Keep the backend alongside its snapshot and exclude environment use during setup. */
+  start_backend_setup(backend: QuantBackend, expectedPreviousOperationId?: string | null): Promise<ConversionSetupStartedResponse>;
+  /** Memory-only owner-local status, not readiness. Reads never install. */
+  get_backend_setup(backend: QuantBackend): Promise<ConversionSetupStatusResponse>;
   get_supported_quant_types(): Promise<SupportedQuantTypesResponse>;
   get_backend_status(): Promise<ConversionBackendStatusResponse>;
   setup_quantization_backend(backend: QuantBackend): Promise<ConversionSetupResponse>;

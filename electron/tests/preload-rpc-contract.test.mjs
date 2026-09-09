@@ -168,6 +168,46 @@ function toPlainValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test('backend setup preload preserves selection and retry tokens without automatic retry', async () => {
+  const harness = loadCompiledPreload();
+  const token = '2e038924-e0e3-4266-95ef-f7a02997b7b6';
+  const setup = {operationId:token, status:'completed', error:null};
+  harness.respondWith({success:true, setup});
+  for (const backend of ['python_conversion', 'llama_cpp', 'nvfp4', 'sherry']) {
+    for (const previous of [undefined, null, token]) {
+      const before = harness.invocations.length;
+      assert.deepEqual(toPlainValue(await harness.api.start_backend_setup(backend, previous)), {success:true, setup});
+      assert.equal(harness.invocations.length, before + 1);
+      assert.deepEqual(toPlainValue(harness.invocations.at(-1)), ['api:call', 'start_backend_setup', {backend, expected_previous_operation_id:previous ?? null}]);
+    }
+    assert.deepEqual(toPlainValue(await harness.api.get_backend_setup(backend)), {success:true, setup});
+    assert.deepEqual(toPlainValue(harness.invocations.at(-1)), ['api:call', 'get_backend_setup', {backend}]);
+  }
+  harness.respondWith({success:true, setup:null});
+  assert.deepEqual(toPlainValue(await harness.api.get_backend_setup('nvfp4')), {success:true, setup:null});
+  await assert.rejects(harness.api.start_backend_setup('nvfp4'), {status:'invalid'});
+  for (const response of [{success:false, setup}, {success:true, setup:{...setup, status:'failed', error:'/private/setup'}}, {success:true, setup:{...setup, status:'failed', error:null}}]) {
+    harness.respondWith(response);
+    const before = harness.invocations.length;
+    await assert.rejects(harness.api.get_backend_setup('sherry'), {status:'invalid'});
+    await assert.rejects(harness.api.start_backend_setup('sherry', token), {status:'invalid'});
+    assert.equal(harness.invocations.length, before + 2, 'invalid responses never trigger fallback or retry');
+  }
+  const beforeRejection = harness.invocations.length;
+  harness.respondWith(Promise.reject(new Error('RPC method unavailable')));
+  await assert.rejects(harness.api.start_backend_setup('nvfp4'), /RPC method unavailable/);
+  assert.equal(harness.invocations.length, beforeRejection + 1, 'unsupported RPC never falls back to blocking setup');
+  const before = harness.invocations.length;
+  for (const backend of [undefined, null, false, 'LlamaCpp', 'unknown']) {
+    assert.throws(() => harness.api.get_backend_setup(backend), {status:'invalid'});
+    assert.throws(() => harness.api.start_backend_setup(backend), {status:'invalid'});
+  }
+  for (const previous of ['', token.toUpperCase(), `${token}\n`, 42]) {
+    assert.throws(() => harness.api.start_backend_setup('llama_cpp', previous), {status:'invalid'});
+  }
+  assert.equal(harness.invocations.length, before, 'invalid arguments never reach IPC');
+});
+
 test('model import selection crosses the bundled preload as a closed desktop outcome', async () => {
   const { chooseModelImportPaths } = await import('../dist/model-import-picker.js');
   const harness = loadCompiledPreload();

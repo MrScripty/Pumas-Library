@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 17edaf803c5a0a9d43443a36270646ee2fbb4f65da377b4618393a502864ecfd. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 a7b330d7cc76690bedf21e34f0c4e98c630876798997a4c57f7cfd6aa64bd1fe. DO NOT EDIT.
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCatalogSearchOutcome(value: unknown): boolean;
 export declare function validateConversionCancelledOutcome(value: unknown): boolean;
@@ -13,6 +13,7 @@ export declare function validateDownloadListOutcome(value: unknown): boolean;
 export declare function validateDownloadMutationOutcome(value: unknown): boolean;
 export declare function validateDownloadStartedOutcome(value: unknown): boolean;
 export declare function validateDownloadStatusOutcome(value: unknown): boolean;
+export declare function validateGetBackendSetupParams(value: unknown): boolean;
 export declare function validateLinkHealthOutcome(value: unknown): boolean;
 export declare function validateModelIndexRefreshOutcome(value: unknown): boolean;
 export declare function validateModelsOutcome(value: unknown): boolean;
@@ -20,6 +21,7 @@ export declare function validatePartialDownloadOutcome(value: unknown): boolean;
 export declare function validatePublicError(value: unknown): boolean;
 export declare function validateRecoverDownloadParams(value: unknown): boolean;
 export declare function validateSearchCatalogParams(value: unknown): boolean;
+export declare function validateStartBackendSetupParams(value: unknown): boolean;
 export declare function validateStartConversionSetupParams(value: unknown): boolean;
 export declare function validateSuccessOutcome(value: unknown): boolean;
 export declare function validateSupportedQuantTypesOutcome(value: unknown): boolean;

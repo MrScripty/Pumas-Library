@@ -63,7 +63,7 @@ function installActualPreload(
         const requestParams: unknown = JSON.parse(JSON.stringify(params));
         requests.push({ method, params: requestParams });
         if (method === 'get_conversion_progress') return conversionResponse;
-        if (method === 'get_conversion_setup' || method === 'start_conversion_setup') return setupResponse;
+        if (['get_conversion_setup', 'start_conversion_setup', 'get_backend_setup', 'start_backend_setup'].includes(method)) return setupResponse;
         if (method === 'list_model_conversions') return fixture['conversion_list'];
         const conversionOperations: Record<string, unknown> = {
           start_model_conversion: fixture['conversion_started'],
@@ -167,6 +167,29 @@ describe('actual Rust catalog through bundled preload and renderer', () => {
     installActualPreload();
     expect(await window.electronAPI?.get_conversion_setup()).toEqual({success:true,setup:null});
     await expect(window.electronAPI?.start_conversion_setup()).rejects.toMatchObject({status:'invalid'});
+  });
+
+  it('preserves backend selection and all producer setup states for typed standalone consumers', async () => {
+    const snapshots = fixture['conversion_setup_started'];
+    if (!Array.isArray(snapshots)) throw new ValidationError('Missing setup snapshots', 'producer-fixtures');
+    for (const backend of ['python_conversion', 'llama_cpp', 'nvfp4', 'sherry'] as const) {
+      for (const snapshot of snapshots) {
+        const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, snapshot);
+        const bridge = window.electronAPI;
+        if (!bridge) throw new ValidationError('Missing compiled bridge', 'producer-fixtures');
+        const started = await bridge.start_backend_setup(backend);
+        expect(started).toEqual(snapshot);
+        expect(await bridge.get_backend_setup(backend)).toEqual(snapshot);
+        expect(await bridge.start_backend_setup(backend, started.setup.operationId)).toEqual(snapshot);
+        expect(requests).toEqual([
+          {method:'start_backend_setup', params:{backend, expected_previous_operation_id:null}},
+          {method:'get_backend_setup', params:{backend}},
+          {method:'start_backend_setup', params:{backend, expected_previous_operation_id:started.setup.operationId}},
+        ]);
+      }
+    }
+    installActualPreload();
+    expect(await window.electronAPI?.get_backend_setup('sherry')).toEqual({success:true, setup:null});
   });
 
   it('rejects malformed setup state before exposing it to typed consumers', async () => {

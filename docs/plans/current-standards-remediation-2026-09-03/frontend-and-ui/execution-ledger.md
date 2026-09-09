@@ -1,5 +1,60 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Backend Setup RPC And Desktop Projection
+
+Accepted BRPC. Added `start_backend_setup` and `get_backend_setup` to the
+closed Rust command decoder/dispatch and optional desktop bridge. Request
+schemas derive exact snake_case backend variants from QuantBackend and reuse
+the canonical UUID constraint; unknown fields, aliases and malformed values
+fail before dispatch. The accepted core owner retains setup, retry CAS and
+shutdown; these adapters do not create state, retry automatically or fall back
+to blocking setup. Existing base commands are unchanged and the new commands
+remain available without inference plugins. Rust library use needs no GUI/RPC.
+
+Responses reuse the validated/redacted setup started/status constructors.
+`success: true` acknowledges the observation, not successful installation.
+Request correlation carries backend selection; callers keep it alongside the
+latest-only snapshot. Core/wire/desktop documentation preserves caller-owned
+setup/execution exclusion, readable records after shutdown, and no readiness
+inference from idle or completed setup.
+
+The codebase-design skill kept lifecycle semantics in core and reused the
+existing generated adapters. Rust params/schema/dispatch/test changes were
+delegated to root_diagnostics; root integrated the IPC/preload/typed consumer
+surface, regenerated all six contract artifacts, reviewed and serialized Cargo.
+Review confirmed main IPC forwards the generated decoder's copied value rather
+than a validation flag plus the original renderer object. Main and preload
+share the same request schemas; no independent enum/token validator or generator
+vocabulary was introduced. Build trust/dialect remain the existing offline,
+locked Rust exporter and AJV Draft7 pipeline. Generated outputs were regenerated
+and checked for freshness, never edited independently.
+
+Evidence: three focused Rust tests passed. The actual handle_rpc fixture
+exercises NVFP4 start, terminal read, None attachment, identity-bound successor,
+stale-token attachment and shutdown using a probe-only shell interpreter; no
+package installation/import occurs. All four backends also have dispatch idle,
+invalid/obsolete-token and closed-admission checks. The real Rust parser produces
+37 request probes consumed by generated decoder conformance. Producer snapshots
+for every state cross the bundled preload to typed frontend callers for all four
+backends. Main IPC and compiled preload reject malformed requests/responses;
+unknown-method rejection never falls back or retries.
+
+Generator tests passed 6/6, producer/decoder conformance 13/13, typed renderer
+contract tests 13/13, and full desktop tests 135 passed with one environment-gated
+real-Electron oracle skipped. Desktop/frontend lint and types passed, as did both
+frontend builds; the default output was rebuilt after library-only verification.
+No graphical workflow or OS-sandbox/runtime acceptance is inferred from VM-based
+preload or jsdom contract tests. No real tools/models/GPU, release, live library
+mutation, network installation or Windows/macOS execution claim.
+
+Final core/RPC suites passed 1,467 default and 1,427 no-default tests (22 ignored
+in each), with strict all-target/all-feature and all-target/no-default clippy,
+cargo fmt, whitespace and all five canonical plan contracts passing. Logs use
+`/tmp/pumas-backend-rpc-*.log`; focused Cargo uses `-p pumas-rpc
+--no-default-features backend_setup`, full suites use `-p pumas-library
+-p pumas-rpc`, all offline/locked. Full-program acceptance remains partial;
+managed setup-versus-conversion exclusion is the next backend prerequisite.
+
 ## 2026-09-08 — Backend-Specific Rust Setup Observation
 
 Accepted BSETUP. Standalone PumasApi/ConversionManager callers can select

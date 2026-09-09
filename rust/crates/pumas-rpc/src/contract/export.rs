@@ -290,6 +290,13 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
             })
             .collect(),
     );
+    let backend_setup_request_probes: Vec<Value> = backend_setup_requests()
+        .into_iter()
+        .map(|(method, params, _)| {
+            let accepted = parse_command(method, Some(&params)).is_ok();
+            serde_json::json!({"method":method,"params":params,"accepted":accepted})
+        })
+        .collect();
     Ok(serde_json::json!({
         "models":models, "search":search, "recovery_request":recovery_request,
         "link_health_healthy":link_health_healthy, "link_health_degraded":link_health_degraded,
@@ -302,6 +309,7 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         "conversion_setup_started":setup_started,
         "conversion_setup_status":setup_status,
         "conversion_setup_idle":ConversionSetupStatusOutcome::new(None)?,
+        "backend_setup_request_probes":backend_setup_request_probes,
         "conversion_quant_types":conversion_quant_types,
         "conversion_quant_types_nullable_backend":conversion_quant_types_nullable_backend,
         "conversion_backend_status":conversion_backend_status,
@@ -346,6 +354,8 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         ConversionSetupStartedOutcome,
         ConversionSetupStatusOutcome,
         StartConversionSetupParams,
+        StartBackendSetupParams,
+        GetBackendSetupParams,
         SupportedQuantTypesOutcome,
         BackendStatusOutcome,
         SuccessOutcome,
@@ -433,7 +443,7 @@ fn refine_named(name: &str, schema: &mut Value) {
                 properties["operationId"]["maxLength"] = 36.into();
                 properties["error"]["enum"] = serde_json::json!([null, SETUP_FAILURE_MESSAGE]);
             }
-            "StartConversionSetupParams" => {
+            "StartConversionSetupParams" | "StartBackendSetupParams" => {
                 properties["expected_previous_operation_id"]["pattern"] =
                     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$".into();
                 properties["expected_previous_operation_id"]["minLength"] = 36.into();

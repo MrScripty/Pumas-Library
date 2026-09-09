@@ -63,6 +63,26 @@ pub fn get_conversion_setup(
     ConversionSetupStatusOutcome::new(state.api.get_conversion_setup())
 }
 
+pub async fn start_backend_setup(
+    state: &AppState,
+    backend: QuantBackend,
+    expected_previous_operation_id: Option<&str>,
+) -> pumas_library::Result<ConversionSetupStartedOutcome> {
+    ConversionSetupStartedOutcome::new(
+        state
+            .api
+            .start_backend_setup(backend, expected_previous_operation_id)
+            .await?,
+    )
+}
+
+pub fn get_backend_setup(
+    state: &AppState,
+    backend: QuantBackend,
+) -> pumas_library::Result<ConversionSetupStatusOutcome> {
+    ConversionSetupStatusOutcome::new(state.api.get_backend_setup(backend)?)
+}
+
 pub async fn get_supported_quant_types(
     state: &AppState,
 ) -> pumas_library::Result<SupportedQuantTypesOutcome> {

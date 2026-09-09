@@ -19,6 +19,29 @@ test('RPC method registry has stable unique method names', () => {
   assert.ok(ALLOWED_RPC_METHODS.includes('torch_configure'));
 });
 
+test('backend setup IPC validates exact backend and retry identity before forwarding', () => {
+  const token = '2e038924-e0e3-4266-95ef-f7a02997b7b6';
+  for (const backend of ['python_conversion', 'llama_cpp', 'nvfp4', 'sherry']) {
+    for (const params of [{backend}, {backend, expected_previous_operation_id:null}, {backend, expected_previous_operation_id:token}]) {
+      const decoded = validateApiCallPayload('start_backend_setup', params);
+      assert.deepEqual(JSON.parse(JSON.stringify(decoded.params)), params);
+      assert.notEqual(decoded.params, params);
+      assert.ok(Object.isFrozen(decoded.params));
+    }
+    assert.equal(validateApiCallPayload('get_backend_setup', {backend}).params.backend, backend);
+    assert.throws(() => validateApiCallPayload('get_backend_setup', {backend, expected_previous_operation_id:token}));
+  }
+  for (const method of ['start_backend_setup', 'get_backend_setup']) {
+    for (const params of [undefined, null, {}, [], {backend:null}, {backend:42}, {backend:'LlamaCpp'}, {backend:'unknown'}, {backend:'llama_cpp', force:true}]) {
+      assert.throws(() => validateApiCallPayload(method, params), /Invalid API params/);
+    }
+  }
+  for (const params of [
+    {backend:'llama_cpp', expectedPreviousOperationId:token},
+    ...['', token.toUpperCase(), `${token}\n`, 42, false].map(expected_previous_operation_id => ({backend:'llama_cpp', expected_previous_operation_id})),
+  ]) assert.throws(() => validateApiCallPayload('start_backend_setup', params), /Invalid API params/);
+});
+
 test('partial recovery admits model tickets and rejects retired recovery requests', () => {
   const params = { modelId: 'llm/example', recoveryToken: `v1:${'a'.repeat(64)}` };
   assert.deepEqual(validateApiCallPayload('resume_partial_download', params), {

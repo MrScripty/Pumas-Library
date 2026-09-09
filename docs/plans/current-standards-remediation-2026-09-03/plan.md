@@ -288,8 +288,10 @@ verifies outputs before Python setup/success. Occupied output directories and
 symlinks refuse cleaning. This is controlled recipe evidence, not real build or
 source-revision coherence. [Backend-specific Rust setup observation/retry](frontend-and-ui/plan.md#backend-specific-rust-setup-observation)
 is accepted, including a verification-discovered procfs disappearance correction.
-RPC/optional desktop projection remains next;
-setup-versus-conversion exclusion is still caller-owned, not enforced.
+The [RPC/optional desktop projection](frontend-and-ui/plan.md#backend-setup-rpc-and-desktop-projection)
+is also accepted with generated request/response validation and controlled
+RPC/preload/typed-consumer evidence. Managed setup-versus-conversion exclusion
+is next; it is still caller-owned, not enforced.
 Stronger containment, setup
 observation/retry and preflight remain prerequisites before GUI configuration
 (FE-I23).

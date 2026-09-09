@@ -10,9 +10,9 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Project backend-specific setup observation/retry through RPC and
-the optional desktop bridge (FE-I26, remaining FE-I23). The standalone Rust
-surface is accepted below. Native llama.cpp artifact verification/guarded repair
+**Next slice:** Enforce managed setup-versus-conversion exclusion (FE-I26,
+remaining FE-I23). Backend setup observation/retry is accepted through standalone
+Rust, RPC and the optional desktop bridge below. Native llama.cpp artifact verification/guarded repair
 is accepted below; source/build revision coherence remains outside that claim.
 Installer custody, setup import verification/repair, direction-specific llama.cpp
 artifacts and public quantization import-probe lifetime are accepted below.
@@ -40,6 +40,53 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Backend Setup RPC And Desktop Projection
+
+Status: `Accepted`; see the
+[execution ledger](execution-ledger.md#2026-09-08--backend-setup-rpc-and-desktop-projection).
+Continue FE-I26/FE-I23 with `start_backend_setup` and
+`get_backend_setup` on the existing RPC and optional desktop bridge. Require
+an exact snake_case QuantBackend value; start additionally accepts omitted/null
+or canonical `expected_previous_operation_id`. Reject extras, aliases, unknown
+backends and malformed tokens before dispatch. Use the existing redacted setup
+started/status outcomes; no backend echo, new lifecycle, persistence or GUI
+controls. JSON-RPC correlation binds the reply to the requested backend; callers
+retain that backend alongside its snapshot. Core remains the sole setup/retry
+owner. Setup/execution exclusion remains caller-owned, and reads do not install.
+
+Rust owns params, schemas, runtime decode and redacted output constructors.
+Generate both desktop/frontend declarations and AJV validators using the existing
+Draft7 generator; keep its dialect/vocabulary and current-format discriminator.
+New commands are additive; existing base setup commands and independently usable
+Rust methods are unchanged. Preload validates new requests and responses; the
+same RPC methods are registered with or without inference plugins. Older RPC
+servers reject new methods; no fallback to the blocking setup command.
+
+Exact write set: `rust/crates/pumas-rpc/src/{contract.rs,contract/export.rs,
+handlers/conversion.rs,handlers/mod.rs}`, `rust/crates/pumas-rpc/README.md`,
+`rust/crates/pumas-core/README.md`, `electron/src/{preload.ts,rpc-method-registry.ts,ipc-validation.ts}`,
+`frontend/src/types/api-bridge-links.ts`, the six files in
+`{electron,frontend}/src/generated/desktop-contract{.ts,.validators.js,.validators.d.ts}`,
+`electron/scripts/desktop-contract-conformance.test.mjs`,
+`electron/tests/{preload-rpc-contract.test.mjs,ipc-validation.test.mjs}`,
+`frontend/conformance/desktop-catalog.test.tsx`, `electron/README.md`, this plan,
+its ledger/issues, and the parent plan. root_diagnostics owns only the listed RPC
+files and RPC README, reporting through messages and escalating scope changes.
+Root owns desktop/frontend/generated/docs, serial Cargo/fmt/generation/commits.
+No real installs, models, GPU work, release builds, live library mutation or
+unrelated file edits. Composed-design review is not applicable: this adds
+selection to existing adapters without changing state/lifecycle composition.
+
+Acceptance BRPC (satisfied): actual RPC dispatch proves backend routing and idle,
+invalid/obsolete token, retained setup and shutdown outcomes with controlled
+temporary environments; producer request probes and generated decoders agree on
+all selected variants and reject malformed cases. Built preload and main IPC tests prove
+backend/token forwarding, response validation, no automatic retry and rejection
+before IPC. Core/RPC default/minimal suites, strict lint, generation freshness,
+desktop tests and frontend types/lint/builds support this contract. No graphical
+workflow, real package/GPU, release-artifact or Windows/macOS claim. Re-plan for
+new lifecycle, outcome authority or required GUI mutation.
 
 ## Backend-Specific Rust Setup Observation
 

@@ -34,6 +34,25 @@ messages. A contract change must update the receiver decoder, producer,
 consumer, and negative tests together. Treat sidecar logs as sensitive: they
 can contain backend diagnostics and must not expose credentials.
 
+### Backend setup observation
+
+`start_backend_setup(backend, expectedPreviousOperationId?)` and
+`get_backend_setup(backend)` expose the retained Rust setup owner for
+`python_conversion`, `llama_cpp`, `nvfp4` and `sherry`, independently of inference
+plugin support. Preload and main IPC validate requests with the Rust-generated
+decoders; preload validates the existing redacted setup outcomes. Neither layer
+installs, retries or falls back automatically. A missing/unsupported RPC method
+remains an error, not a request to use blocking setup instead.
+
+Keep the selected backend alongside its snapshot; JSON-RPC request correlation
+associates the response with that selection. Null setup is an owner-local absence,
+not a readiness result. Omitted/null retry tokens attach without retrying; only a
+matching terminal operation ID can admit a successor. Reads never install and
+remain available after setup shutdown. IDs do not survive owner/process restart.
+Callers must exclude conversions and external environment use during setup;
+this execution exclusion is not enforced by the installer lock. This bridge
+contract does not add quantization controls or establish real tool/GPU readiness.
+
 ### Generated catalog and download contract
 
 The selected catalog, FTS, download, and recovery declarations remain in Rust

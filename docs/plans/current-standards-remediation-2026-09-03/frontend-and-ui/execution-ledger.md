@@ -1,5 +1,59 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Runtime-Version Info Response Contract
+
+Accepted `get_version_info` typed RPC output and generated preload decoding.
+The exact existing wire is required success/info with an exact tag string,
+installed boolean and null-only size. Operation inventory found no production
+field-level consumer: the API and installation hooks only forward or expose the
+record. The prior handwritten frontend types falsely promised path, installation
+date, release tag and other absent metadata. Generated aliases now replace both
+copies; the hook returns the decoded object directly. Malformed or invented
+responses reject before renderer exposure with no automatic retry.
+
+Evidence: two focused RPC tests pass in default and no-default feature modes,
+covering literal prior-wrapper equivalence, exact unusual tag text, actual
+no-manager installed-false output and disabled-plugin method-not-found. Producer
+fixtures cover installed and uninstalled records. Twenty-seven decoder tests and
+36 bundled-preload/renderer-hook conformance tests pass; 28 of 29 bundled-preload
+tests pass with the existing real-Electron sandbox test gated. Negative cases
+reject null/missing info, wrong tag/installed types, non-null or missing size,
+false success, extra fields and the former invented path. Nineteen focused
+frontend tests, TypeScript, affected lint, Electron and both frontend builds,
+seven generator tests/freshness, strict RPC Clippy and formatting pass. Canonical
+plan checks and final diff checks pass below. No live library, install, network,
+graphical or other-OS behavior was exercised; fixtures prove serialization, not
+a populated live runtime manager.
+
+One Astra-medium agent supplied the read-only consumer inventory and substantive
+independent review. It found no blocking defect and additionally probed the
+generated decoder's empty-tag success plus eight malformed shapes; root owned
+implementation, integration, Cargo/generation, checks and reporting. Spark was unavailable in the exposed
+model identifiers, so no substitution was labeled Spark. No repair delegation or
+rescue was needed. FE-I34 now explicitly includes version-info's no-manager
+installed-false default. Overall remediation and M4 remain incomplete. Next:
+runtime installation-validation response (`validate_installations`).
+
+Cost records are deduplicated by `response_id`. Current root
+`01a084bf-3ff2-77d3-bdf4-714d30c2173d`, turn
+`01a084bf-4ff6-7652-9819-caa321a89c72`: root gpt-5.6-sol low used 6,633,601
+input tokens (6,487,552 cached) and 18,624 output tokens (2,506 reasoning), but
+its price is unknown and is not treated as free. `/root/version_info_inventory`
+gpt-6-astra medium used 748,675 input (687,360 cached) and 3,131 output (178
+reasoning), estimated at $1.4571 standard / $2.9141 priority scenario. The
+previous checkpoint's uncounted Astra-low reporting tail used 537,035 input
+(528,128 cached) and 1,836 output (257 reasoning), estimated separately at
+$0.7090 / $1.4180 rather than allocated to this slice. Thus newly priced work is
+$1.4571 / $2.9141 plus unpriced root usage; the carried priceable tail plus new
+work is $2.1661 / $4.3321. This checkpoint includes usage through
+2026-09-09T06:14:15.238Z and excludes later commit/reporting tail. These are API-equivalent estimates, not invoices,
+using the prior Astra 10/1/12.5/50 USD-per-million uncached/cached/cache-write/
+output assumption and a 2x priority scenario. No cache writes or requests above
+the assumed 272,000-input threshold were observed; delivered tier remains
+unexposed. PostgreSQL on port 5433 was unavailable, so no operational cost row
+could be written; temporary deduplicating helpers are
+`/tmp/pumas-version-info-costs.{py,json}`.
+
 ## 2026-09-08 — Comprehensive Runtime-Version Status Response Contract
 
 Accepted `get_version_status` typed RPC outcomes and generated preload decoding.

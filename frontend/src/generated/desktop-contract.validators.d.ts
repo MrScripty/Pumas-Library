@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 c03a8e1a408ecf0d362504f4d3a325134b894c86ce88146a5e7feec1122805d5. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 d1eb81ca3d0c56442eb58d2deda3208731a6da880621f0ec64ffe53c166f1fc9. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCatalogSearchOutcome(value: unknown): boolean;
@@ -37,4 +37,5 @@ export declare function validateUpdateInferenceSettingsOutcome(value: unknown): 
 export declare function validateUpdateInferenceSettingsParams(value: unknown): boolean;
 export declare function validateUpdateModelNotesOutcome(value: unknown): boolean;
 export declare function validateUpdateModelNotesParams(value: unknown): boolean;
+export declare function validateVersionInfoOutcome(value: unknown): boolean;
 export declare function validateVersionStatusOutcome(value: unknown): boolean;

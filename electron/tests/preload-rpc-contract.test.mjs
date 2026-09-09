@@ -32,6 +32,22 @@ test('comprehensive version status rejects malformed nested facts before exposur
   }
 });
 
+test('version info rejects invented metadata and preserves exact producer facts', async () => {
+  const harness = loadCompiledPreload();
+  const valid = { success: true, info: { tag: ' vλ.1 ', installed: true, size: null } };
+  for (const response of [null, {}, { success: true, info: null },
+    { success: false, info: valid.info }, { success: true, info: { ...valid.info, tag: 42 } },
+    { success: true, info: { ...valid.info, installed: 'true' } },
+    { success: true, info: { ...valid.info, size: 0 } },
+    { success: true, info: { ...valid.info, path: '/invented' } },
+    { ...valid, error: 'contradiction' }]) {
+    harness.respondWith(response);
+    await assert.rejects(harness.api.get_version_info(' vλ.1 ', 'ollama'), { name: 'DesktopContractError' });
+  }
+  harness.respondWith(valid);
+  assert.deepEqual(toPlainValue(await harness.api.get_version_info(' vλ.1 ', 'ollama')), valid);
+});
+
 test('selected versions reject malformed values and preserve empty-string absence', async () => {
   const harness = loadCompiledPreload();
   for (const method of ['get_active_version', 'get_default_version']) {

@@ -43,6 +43,22 @@ test('comprehensive status preserves producer snapshots and rejects malformed ne
   }
 });
 
+test('version-info decoding preserves actual null-only facts and rejects invented metadata', () => {
+  for (const key of ['version_info_installed', 'version_info_uninstalled']) {
+    const result = contract.decodeVersionInfoOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  const valid = fixtures.version_info_installed;
+  for (const patch of [{ tag: undefined }, { tag: 42 }, { installed: 'true' },
+    { size: undefined }, { size: 0 }, { path: '/invented' }]) {
+    assert.equal(contract.decodeVersionInfoOutcome({ success: true, info: { ...valid.info, ...patch } }).status, 'invalid', JSON.stringify(patch));
+  }
+  for (const patch of [{ info: null }, { success: false }, { extra: true }, { error: 'bad' }]) {
+    assert.equal(contract.decodeVersionInfoOutcome({ ...valid, ...patch }).status, 'invalid');
+  }
+});
+
 test('selected-version decoding preserves producer text and empty absence', () => {
   for (const key of ['selected_version', 'selected_version_empty']) {
     const result = contract.decodeSelectedVersionOutcome(fixtures[key]);

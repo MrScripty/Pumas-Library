@@ -74,23 +74,18 @@ pub async fn get_version_status(
     })
 }
 
-pub async fn get_version_info(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
+pub async fn get_version_info(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<crate::contract::VersionInfoOutcome> {
     let tag = require_str_param(params, "tag", "tag")?;
     let app_id_str = require_str_param(params, "app_id", "appId")?;
     if let Some(vm) = get_version_manager(state, app_id_str).await {
         let installed = vm.get_installed_versions().await?;
         let is_installed = installed.contains(&tag);
-        Ok(json!({
-            "tag": tag,
-            "installed": is_installed,
-            "size": null
-        }))
+        Ok(crate::contract::VersionInfoOutcome::new(tag, is_installed))
     } else {
-        Ok(json!({
-            "tag": tag,
-            "installed": false,
-            "size": null
-        }))
+        Ok(crate::contract::VersionInfoOutcome::new(tag, false))
     }
 }
 

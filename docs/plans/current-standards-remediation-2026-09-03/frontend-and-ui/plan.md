@@ -10,11 +10,12 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound runtime-version info response validation (M4):
-`get_version_info` still crosses preload undecoded and its handwritten frontend
-shape differs from the current RPC producer. Preserve actual wire semantics,
-optional inference-plugin builds and standalone backend operation; no runtime
-mutations. Comprehensive status, active/default, installed-version, runtime
+**Next slice:** Bound runtime installation-validation responses (M4):
+`validate_installations` still crosses preload undecoded with a handwritten
+frontend response. Inventory its producer and actual consumers before selecting
+the projection. Preserve optional inference-plugin builds, standalone backend
+operation and existing mutation semantics; use temporary libraries only.
+Runtime-version info, comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
 validation is accepted below. Notes/settings
 mutation response validation is accepted below. Model-notes request admission
@@ -67,6 +68,33 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Runtime-Version Info Response Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--runtime-version-info-response-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Project `get_version_info` as the exact existing success/info response: required
+tag string, installed boolean and required null-only size. No production consumer
+reads individual fields, so do not invent installation path/date/release metadata
+or numeric size semantics. Decode before renderer exposure; the hook returns the
+validated info object, and malformed replies reject without automatic retry.
+
+Root owns the RPC outcome/export/dispatch/release handler, preload/tests,
+frontend generated aliases/hook/tests, existing producer/decoder/renderer-hook
+conformance, six generated files, README and four plan records. No core, request,
+lookup, install, mutation, runtime registration or live-library change. The
+no-manager installed-false result remains part of FE-I34 and does not establish
+runtime availability. No-plugin RPC remains unsupported.
+
+Acceptance: literal prior-wrapper equivalence, actual no-manager/default and
+no-plugin/minimal RPC responses, populated/uninstalled producer fixtures,
+generated negative shapes, bundled-preload rejection and real hook exact-value
+consumption with one call. Focused frontend tests/types/lint, Electron and both
+frontend builds, existing conformance, generator tests/freshness, strict RPC
+lint/format and plan checks. Local automated contract/integration only, not a
+populated live manager, graphical workflow, install, network or other-OS claim.
+The existing Rust schema and generated decoder remain the sole wire authority.
 
 ## Comprehensive Runtime-Version Status Response Contract
 

@@ -115,7 +115,7 @@ describe('useVersions', () => {
       installVersion: vi.fn().mockResolvedValue(true),
       cancelInstallation: vi.fn().mockResolvedValue(true),
       removeVersion: vi.fn().mockResolvedValue(true),
-      getVersionInfo: vi.fn().mockResolvedValue({ path: '/tmp/v1.2.3' } as VersionInfo),
+      getVersionInfo: vi.fn().mockResolvedValue({ tag: 'v1.2.3', installed: true, size: null } as VersionInfo),
       openPath: vi.fn().mockResolvedValue(true),
       openActiveInstall: vi.fn().mockResolvedValue(true),
     });

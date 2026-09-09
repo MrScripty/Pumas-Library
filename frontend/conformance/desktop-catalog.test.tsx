@@ -17,6 +17,7 @@ import { chooseModelImportPaths } from '../../electron/src/model-import-picker';
 import { useRemoteModelSearch } from '../src/hooks/useRemoteModelSearch';
 import { useAvailableVersionState } from '../src/hooks/useAvailableVersionState';
 import { useVersionFetching } from '../src/hooks/useVersionFetching';
+import { useInstallationAccess } from '../src/hooks/useInstallationAccess';
 import { ModelMetadataModal } from '../src/components/ModelMetadataModal';
 import type { RemoteModelInfo } from '../src/types/apps';
 import { decodeHfDownloadDetailsOutcome } from '../src/generated/desktop-contract';
@@ -53,6 +54,7 @@ function installActualPreload(
   installedVersions: () => unknown = () => fixture['installed_versions'],
   selectedVersion: () => unknown = () => fixture['selected_version'],
   versionStatus: () => unknown = () => fixture['version_status'],
+  versionInfo: () => unknown = () => fixture['version_info_installed'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -80,6 +82,7 @@ function installActualPreload(
         if (method === 'get_available_versions') return availableVersions();
         if (method === 'get_github_cache_status') return githubCacheStatus();
         if (method === 'get_version_status') return versionStatus();
+        if (method === 'get_version_info') return versionInfo();
         if (method === 'get_installed_versions') return installedVersions();
         if (method === 'get_active_version' || method === 'get_default_version') return selectedVersion();
         if (method === 'get_inference_settings') return inferenceRead;
@@ -175,6 +178,20 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('returns exact version info and rejects malformed replies without retrying', async () => {
+    let response: unknown = fixture['version_info_installed'];
+    const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => response);
+    const { result } = renderHook(() => useInstallationAccess({ isEnabled: true, resolvedAppId: 'ollama' }));
+
+    await expect(result.current.getVersionInfo(' vλ.1 ')).resolves.toEqual({
+      tag: ' vλ.1 ', installed: true, size: null,
+    });
+    expect(requests.at(-1)?.params).toEqual({ tag: ' vλ.1 ', app_id: 'ollama' });
+    response = { success: true, info: { tag: ' vλ.1 ', installed: true, size: 0 } };
+    await expect(result.current.getVersionInfo(' vλ.1 ')).rejects.toMatchObject({ name: 'DesktopContractError' });
+    expect(requests.filter(request => request.method === 'get_version_info')).toHaveLength(2);
+  });
+
   it('retains comprehensive status and default selection on malformed replies without retrying', async () => {
     let response: unknown = fixture['version_status'];
     const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => response);

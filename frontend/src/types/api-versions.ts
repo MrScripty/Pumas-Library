@@ -1,5 +1,5 @@
 import type { BaseResponse } from './api-common';
-import type { AvailableVersionsOutcome, GithubCacheStatusOutcome, InstalledVersionsOutcome, SelectedVersionOutcome, VersionStatusOutcome } from '../generated/desktop-contract';
+import type { AvailableVersionsOutcome, GithubCacheStatusOutcome, InstalledVersionsOutcome, SelectedVersionOutcome, VersionInfoOutcome, VersionStatusOutcome } from '../generated/desktop-contract';
 export type { VersionReleaseAsset, VersionReleaseInfo } from '../generated/desktop-contract';
 
 // ============================================================================
@@ -24,16 +24,7 @@ export interface ValidateInstallationsResponse extends BaseResponse {
   };
 }
 
-export interface GetVersionInfoResponse extends BaseResponse {
-  info: {
-    path: string;
-    installedDate: string;
-    releaseTag: string;
-    pythonVersion?: string;
-    downloadUrl?: string;
-    size?: number;
-  } | null;
-}
+export type GetVersionInfoResponse = VersionInfoOutcome;
 
 export type GetDefaultVersionResponse = SelectedVersionOutcome;
 

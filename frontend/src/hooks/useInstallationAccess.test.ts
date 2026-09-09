@@ -27,10 +27,9 @@ vi.mock('../api/adapter', () => ({
 import { useInstallationAccess } from './useInstallationAccess';
 
 const versionInfo: VersionInfo = {
-  path: '/tmp/pumas/torch/v1.2.3',
-  installedDate: '2026-04-12T00:00:00Z',
-  releaseTag: 'v1.2.3',
-  pythonVersion: '3.12.2',
+  tag: 'v1.2.3',
+  installed: true,
+  size: null,
 };
 
 describe('useInstallationAccess', () => {
@@ -105,10 +104,7 @@ describe('useInstallationAccess', () => {
       success: false,
       error: 'Permission denied',
     });
-    getVersionInfoMock.mockResolvedValueOnce({
-      success: false,
-      error: 'Version missing',
-    });
+    getVersionInfoMock.mockRejectedValueOnce(new APIError('Version missing', 'get_version_info'));
 
     const { result } = renderHook(() => useInstallationAccess({
       isEnabled: true,

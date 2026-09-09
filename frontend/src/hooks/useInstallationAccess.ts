@@ -78,10 +78,7 @@ export function useInstallationAccess({
 
     try {
       const result = await api.get_version_info(tag, resolvedAppId);
-      if (result.success) {
-        return result.info || null;
-      }
-      throw new APIError(result.error || 'Failed to get version info', 'get_version_info');
+      return result.info;
     } catch (error) {
       if (error instanceof APIError) {
         logger.error('API error getting version info', {

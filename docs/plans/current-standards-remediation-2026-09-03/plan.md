@@ -313,10 +313,13 @@ prefer existing runtime/tool capabilities when revisited; Sherry is not required
 are accepted through generated decoding and the hydration consumer. Its
 [request admission](frontend-and-ui/plan.md#hugging-face-download-details-request-admission)
 is also accepted, as are [inference-settings reads and modal isolation](frontend-and-ui/plan.md#inference-settings-read-contract-and-modal-isolation).
-[Library-model metadata response decoding](frontend-and-ui/plan.md#library-model-metadata-read-contract)
-is accepted, as is [inference-settings mutation admission](frontend-and-ui/plan.md#inference-settings-mutation-admission).
-Next, bound model-notes mutation admission (FE-I33), verified only against
-temporary libraries. This does not admit
+[Library-model metadata response decoding](frontend-and-ui/plan.md#library-model-metadata-read-contract),
+[inference-settings mutation admission](frontend-and-ui/plan.md#inference-settings-mutation-admission),
+model-notes admission and the selected runtime-version read contracts are accepted.
+Latest is the exact [runtime-version info response](frontend-and-ui/plan.md#runtime-version-info-response-contract),
+which removes false path/date/release metadata without inventing numeric size.
+Next, bound runtime installation-validation responses against temporary libraries.
+This does not admit
 Pending cleanup replay. FE-I29 retains a separate
 intermittent preflight-test failure despite fixture hardening.
 Independent probes, direct backend calls

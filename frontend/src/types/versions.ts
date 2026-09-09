@@ -20,14 +20,7 @@ export interface VersionRelease {
 
 export type VersionStatus = import('../generated/desktop-contract').VersionStatusOutcome['status'];
 
-export interface VersionInfo {
-  path: string;
-  installedDate: string;
-  releaseTag: string;
-  pythonVersion?: string;
-  downloadUrl?: string;
-  size?: number;
-}
+export type VersionInfo = import('../generated/desktop-contract').VersionInfoOutcome['info'];
 
 export interface InstallationProgress {
   tag: string;

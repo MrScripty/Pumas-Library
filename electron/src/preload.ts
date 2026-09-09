@@ -47,6 +47,7 @@ import {
   decodeInstalledVersionsOutcome,
   decodeSelectedVersionOutcome,
   decodeVersionStatusOutcome,
+  decodeVersionInfoOutcome,
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
@@ -528,7 +529,7 @@ const electronAPI = {
   validate_installations: (appId?: string) =>
     apiCall('validate_installations', { app_id: appId }),
   get_version_info: (tag: string, appId?: string) =>
-    apiCall('get_version_info', { tag, app_id: appId }),
+    validatedApiCall('get_version_info', decodeVersionInfoOutcome, { tag, app_id: appId }),
   get_default_version: (appId?: string) => validatedApiCall('get_default_version', decodeSelectedVersionOutcome, { app_id: appId }),
   set_default_version: (tag?: string | null, appId?: string) =>
     apiCall('set_default_version', { tag, app_id: appId }),

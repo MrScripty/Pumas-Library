@@ -435,6 +435,8 @@ pub(crate) enum RpcOutcome {
     SelectedVersion(SelectedVersionOutcome),
     #[cfg(feature = "inference-plugins")]
     VersionStatus(VersionStatusOutcome),
+    #[cfg(feature = "inference-plugins")]
+    VersionInfo(VersionInfoOutcome),
     HfTokenMutation(SuccessOutcome),
     HfAuth(Box<HfAuthOutcome>),
     LinkHealth(Box<LinkHealthOutcome>),
@@ -505,6 +507,8 @@ impl RpcOutcome {
             Self::SelectedVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::VersionStatus(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::VersionInfo(value) => serde_json::to_value(value),
             Self::HfTokenMutation(value) => serde_json::to_value(value),
             Self::HfAuth(value) => serde_json::to_value(value),
             Self::LinkHealth(value) => serde_json::to_value(value),
@@ -1401,6 +1405,58 @@ mod version_status_tests {
                 ..RuntimeVersionStatus::default()
             })
             .is_err());
+        }
+    }
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct VersionInfoOutcome {
+    success: bool,
+    info: RuntimeVersionInfo,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct RuntimeVersionInfo {
+    tag: String,
+    installed: bool,
+    size: (),
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl VersionInfoOutcome {
+    pub(crate) fn new(tag: String, installed: bool) -> Self {
+        Self {
+            success: true,
+            info: RuntimeVersionInfo {
+                tag,
+                installed,
+                size: (),
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod version_info_tests {
+    use super::*;
+
+    #[test]
+    fn version_info_matches_previous_wrapper_and_preserves_exact_facts() {
+        for (tag, installed) in [(" vλ.1 ", true), ("", false)] {
+            let raw = serde_json::json!({"tag": tag, "installed": installed, "size": null});
+            let previous = crate::wrapper::wrap_response("get_version_info", raw);
+            let outcome = VersionInfoOutcome::new(tag.into(), installed);
+            assert_eq!(serde_json::to_value(&outcome).unwrap(), previous);
+            #[cfg(feature = "inference-plugins")]
+            {
+                let rpc = RpcOutcome::VersionInfo(outcome);
+                assert!(!rpc.uses_response_wrapper());
+                assert_eq!(rpc.into_value().unwrap(), previous);
+            }
         }
     }
 }

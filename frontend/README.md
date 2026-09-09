@@ -102,6 +102,12 @@ no-manager empty snapshots and failed dependency checks represented as empty
 lists remain limitations; validation does not establish runtime or dependency
 availability.
 
+Runtime-version info preserves the backend's exact tag and installed flag with
+its current required null size. It does not expose installation paths, dates,
+release metadata or a computed size. The generated preload decoder rejects
+missing fields, non-null size and invented metadata before the hook receives the
+record. A no-manager installed-false result does not prove runtime availability.
+
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.
 Malformed responses cannot enter the modal; nested values display without

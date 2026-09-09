@@ -501,7 +501,7 @@ describe('useInstallationManager', () => {
     const onRefreshVersions = vi.fn().mockResolvedValue(undefined);
     openActiveInstallMock.mockResolvedValue(true);
     openPathMock.mockResolvedValue(true);
-    getVersionInfoMock.mockResolvedValue({ path: '/tmp/v1.2.3' });
+    getVersionInfoMock.mockResolvedValue({ tag: 'v1.2.3', installed: true, size: null });
 
     const { result } = renderHook(() => useInstallationManager({
       appId: 'torch',

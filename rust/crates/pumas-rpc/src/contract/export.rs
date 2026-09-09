@@ -470,6 +470,10 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         fixtures[key] =
             serde_json::to_value(VersionStatusOutcome::new(RuntimeVersionStatus::default())?)?;
     }
+    fixtures["version_info_installed"] =
+        serde_json::to_value(VersionInfoOutcome::new(" vλ.1 ".into(), true))?;
+    fixtures["version_info_uninstalled"] =
+        serde_json::to_value(VersionInfoOutcome::new("v2".into(), false))?;
     fixtures["installed_versions"] = serde_json::to_value(InstalledVersionsOutcome::new(vec![
         " vλ.1 ".into(),
         "v2".into(),
@@ -525,6 +529,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         InstalledVersionsOutcome,
         SelectedVersionOutcome,
         VersionStatusOutcome,
+        VersionInfoOutcome,
         UpdateModelNotesOutcome,
         LibraryModelMetadataOutcome,
         GetHfDownloadDetailsParams,
@@ -986,6 +991,7 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "InstalledVersionsOutcome"
             | "SelectedVersionOutcome"
             | "VersionStatusOutcome"
+            | "VersionInfoOutcome"
             | "UpdateModelNotesSuccess"
             | "LibraryModelMetadataOutcome"
             | "LibraryModelMetadataResponse"

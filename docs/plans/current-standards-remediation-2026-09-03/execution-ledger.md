@@ -1,5 +1,33 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-09 — Runtime Release-Dependency Listing Contract
+
+The bounded `get_release_dependencies` slice now has one strict generated
+request and exact `{success:true,dependencies:string[]}` outcome across standalone
+RPC, Electron main/preload and the direct renderer bridge. Required exact tag/app
+identity preserves the existing snake/camel alias pair; malformed, unknown,
+ambiguous and former unused `top_n` inputs reject before manager lookup. This
+coordinated internal correction replaces the preload's unusable tag/optional-
+number signature with the app identity the Rust producer always required.
+
+The filesystem-only producer inspects and reads the tag-derived
+`requirements.txt` and applies its existing approximate textual extraction. It
+does not invoke runtime Python/pip, install dependencies, access the network or
+write caches. Missing versions/files remain successful empty lists, so success
+does not establish version existence, dependency completeness or readiness.
+FE-I42 includes the unbounded tag-derived file reachability; FE-I44 tracks
+ambiguous absence and parser limitations. Listing remains distinct from installed/
+missing checking, comprehensive status and dependency installation.
+
+Focused default/no-default RPC tests, strict dual-feature all-target Clippy,
+formatting, generator/freshness, Electron build/lint and actual main/bundled-
+preload tests, populated/empty producer-to-decoder-to-direct-bridge conformance,
+frontend types/lint and both builds pass. No live runtime or Python/pip
+subprocess, dependency installation, network service, cache or model-library
+mutation ran. The frontend ledger owns exact review, repair, routing and cost
+evidence. M4 and the overall remediation remain incomplete. Next: inventory and validate
+`install_version_dependencies`.
+
 ## 2026-09-09 — Runtime Dependency-Check Response Contract
 
 The bounded runtime dependency-check slice now has one generated request and

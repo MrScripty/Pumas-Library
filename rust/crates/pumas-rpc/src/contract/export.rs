@@ -516,6 +516,23 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         };
         serde_json::json!({"method":"check_version_dependencies","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
     }).collect();
+    fixtures["get_release_dependencies_request_probes"] = install_version_requests().into_iter().map(|(params, _)| {
+        let parsed = parse_params::<GetReleaseDependenciesParams>(Some(&params));
+        let normalized = match &parsed {
+            Ok(value) => serde_json::json!({"app_id":value.app_id,"tag":value.tag}),
+            Err(_) => Value::Null,
+        };
+        serde_json::json!({"method":"get_release_dependencies","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
+    }).collect();
+    fixtures["get_release_dependencies_empty"] =
+        serde_json::to_value(GetReleaseDependenciesOutcome::new(vec![]))?;
+    fixtures["get_release_dependencies_populated"] =
+        serde_json::to_value(GetReleaseDependenciesOutcome::new(vec![
+            " torch λ ".into(),
+            "numpy".into(),
+            "numpy".into(),
+            "".into(),
+        ]))?;
     fixtures["install_version_started"] =
         serde_json::to_value(InstallVersionOutcome::started("fixture-version"))?;
     fixtures["install_version_failed"] =
@@ -657,6 +674,8 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         SetDefaultVersionParams,
         InstallVersionParams,
         InstallVersionOutcome,
+        GetReleaseDependenciesParams,
+        GetReleaseDependenciesOutcome,
         CheckVersionDependenciesParams,
         CheckVersionDependenciesOutcome,
     );
@@ -706,7 +725,10 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
 fn refine_named(name: &str, schema: &mut Value) {
     if matches!(
         name,
-        "SetDefaultVersionParams" | "InstallVersionParams" | "CheckVersionDependenciesParams"
+        "SetDefaultVersionParams"
+            | "InstallVersionParams"
+            | "CheckVersionDependenciesParams"
+            | "GetReleaseDependenciesParams"
     ) {
         let mut canonical = schema.clone();
         let object = canonical.as_object_mut().expect("request object schema");
@@ -1102,7 +1124,8 @@ fn refine_named(name: &str, schema: &mut Value) {
             _ => {}
         }
         let success = match name {
-            "CheckVersionDependenciesOutcome"
+            "GetReleaseDependenciesOutcome"
+            | "CheckVersionDependenciesOutcome"
             | "InstallVersionStarted"
             | "ModelsOutcome"
             | "CatalogSearchOutcome"

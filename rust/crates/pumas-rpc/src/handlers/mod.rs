@@ -747,6 +747,12 @@ async fn dispatch_admitted_command(
                 .map(RpcOutcome::CheckVersionDependencies)
         }
         #[cfg(feature = "inference-plugins")]
+        RpcCommand::GetReleaseDependencies { app_id, tag } => {
+            versions::get_release_dependencies(state, &app_id, &tag)
+                .await
+                .map(RpcOutcome::GetReleaseDependencies)
+        }
+        #[cfg(feature = "inference-plugins")]
         RpcCommand::InstallVersion { app_id, tag } => {
             versions::install_version(state, &app_id, &tag)
                 .await
@@ -1225,8 +1231,6 @@ async fn dispatch_method(
         "install_version_dependencies" => {
             versions::install_version_dependencies(state, params).await
         }
-        #[cfg(feature = "inference-plugins")]
-        "get_release_dependencies" => versions::get_release_dependencies(state, params).await,
 
         // Model Library
         "import_model" => models::import_model(state, params).await,
@@ -1524,6 +1528,45 @@ mod tests {
         for (params, accepted) in crate::contract::install_version_requests() {
             let request = Bytes::from(serde_json::to_vec(&json!({
                 "jsonrpc":"2.0", "id":"deps-fixture", "method":"check_version_dependencies", "params":params,
+            })).unwrap());
+            let response = handle_rpc(State(state.clone()), request)
+                .await
+                .into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(response.into_body(), 65_536)
+                .await
+                .unwrap();
+            let wire: Value = serde_json::from_slice(&body).unwrap();
+            #[cfg(feature = "inference-plugins")]
+            let error = if accepted {
+                crate::contract::PublicError::from(&pumas_library::PumasError::Config {
+                    message: "Version manager not initialized".into(),
+                })
+            } else {
+                crate::contract::PublicError::invalid_params()
+            };
+            #[cfg(not(feature = "inference-plugins"))]
+            let error = {
+                let _ = accepted;
+                crate::contract::PublicError::method_not_found()
+            };
+            assert_eq!(
+                wire,
+                json!({"jsonrpc":"2.0", "id":"deps-fixture", "error":{
+                    "code":error.code,"message":error.message,"data":{"class":error.class.as_str()},
+                }}),
+                "{params}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn get_release_dependencies_rpc_admission_and_errors() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        for (params, accepted) in crate::contract::install_version_requests() {
+            let request = Bytes::from(serde_json::to_vec(&json!({
+                "jsonrpc":"2.0", "id":"deps-fixture", "method":"get_release_dependencies", "params":params,
             })).unwrap());
             let response = handle_rpc(State(state.clone()), request)
                 .await

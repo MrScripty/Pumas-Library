@@ -118,6 +118,22 @@ boundary; malformed responses and transport failures reject without becoming
 empty data or triggering retries. FE-I42 and FE-I43 track tag-derived path
 reachability and flattened package-list failures.
 
+The dedicated `get_release_dependencies` bridge method uses the generated
+request/outcome contract and requires both a runtime tag and app id. It reads
+the selected release's `requirements.txt` and preserves the backend's extracted
+strings, ordering and duplicates exactly; the wire also preserves all admitted
+strings, including empty values. The earlier preload
+signature accepted an optional numeric `topN`, omitted the required app identity
+and sent an unused `top_n` field; the coordinated internal bridge now sends the
+actual Rust request instead. Missing versions or requirements files remain
+successful empty lists, so success proves only that the current textual
+extraction completed or the file was absent. It does not establish dependency
+completeness, installation or runtime readiness. There is no current hook or UI
+state consumer: malformed responses and transport failures reject at the direct
+bridge without retries, state replacement or dependency installation. FE-I42
+tracks tag-derived path reachability and FE-I44 tracks ambiguous empty results
+and the approximate parser.
+
 Runtime-version info preserves the backend's exact tag and installed flag with
 its current required null size. It does not expose installation paths, dates,
 release metadata or a computed size. The generated preload decoder rejects

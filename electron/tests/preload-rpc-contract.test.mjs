@@ -92,6 +92,53 @@ test('dependency checking validates the required request and outcome without ret
   );
 });
 
+test('release dependency listing validates the required request and outcome without retry', async () => {
+  const harness = loadCompiledPreload();
+  for (const [tag, appId] of [[null, 'ollama'], ['v1', undefined], ['v1', null],
+    [42, 'ollama'], ['v1', 42]]) {
+    const before = harness.invocations.length;
+    assert.throws(
+      () => harness.api.get_release_dependencies(tag, appId),
+      { name: 'DesktopContractError' }
+    );
+    assert.equal(harness.invocations.length, before);
+  }
+
+  const valid = { success: true, dependencies: [' torch λ ', 'numpy', 'numpy', ''] };
+  harness.respondWith(valid);
+  assert.deepEqual(
+    toPlainValue(await harness.api.get_release_dependencies(' vλ.1 ', 'ollama')),
+    valid
+  );
+  assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]), {
+    tag: ' vλ.1 ', app_id: 'ollama',
+  });
+
+  for (const response of [null, true, false, {}, { success: true },
+    { success: true, dependencies: null }, { success: true, dependencies: {} },
+    { success: true, dependencies: [42] },
+    { success: false, error: 'dependency listing failed' },
+    { success: true, dependencies: valid.dependencies, extra: true }]) {
+    harness.respondWith(response);
+    await assert.rejects(
+      harness.api.get_release_dependencies('v1', 'ollama'),
+      { name: 'DesktopContractError' }
+    );
+  }
+
+  harness.respondWith(() => {
+    throw new Error('dependency transport unavailable');
+  });
+  await assert.rejects(
+    harness.api.get_release_dependencies('v1', 'ollama'),
+    /dependency transport unavailable/
+  );
+  assert.equal(
+    harness.invocations.filter(invocation => invocation[1] === 'get_release_dependencies').length,
+    12
+  );
+});
+
 test('default selection validates nullable requests and exact confirmations without retry', async () => {
   const harness = loadCompiledPreload();
   for (const tag of [false, 42, [], {}]) {

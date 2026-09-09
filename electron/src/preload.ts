@@ -50,6 +50,8 @@ import {
   decodeVersionInfoOutcome,
   decodeCheckVersionDependenciesOutcome,
   decodeCheckVersionDependenciesParams,
+  decodeGetReleaseDependenciesOutcome,
+  decodeGetReleaseDependenciesParams,
   decodeValidateInstallationsOutcome,
   decodeInstallationProgressOutcome,
   decodeCancelInstallationOutcome,
@@ -939,8 +941,17 @@ const electronAPI = {
   get_release_size_info: (tag: string, archiveSize: number) =>
     apiCall('get_release_size_info', { tag, archive_size: archiveSize }),
   get_release_size_breakdown: (tag: string) => apiCall('get_release_size_breakdown', { tag }),
-  get_release_dependencies: (tag: string, topN?: number) =>
-    apiCall('get_release_dependencies', { tag, top_n: topN }),
+  get_release_dependencies: (tag: string, appId: string) => {
+    const params = requireDecoded(
+      decodeGetReleaseDependenciesParams({ tag, app_id: appId }),
+      'get_release_dependencies request'
+    );
+    return validatedApiCall(
+      'get_release_dependencies',
+      decodeGetReleaseDependenciesOutcome,
+      params
+    );
+  },
 
   // ========================================
   // Launcher Updates

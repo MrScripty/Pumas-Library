@@ -10,8 +10,8 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Inventory and validate `get_release_dependencies` (M4) after
-the accepted runtime dependency-check response. Preserve optional inference-
+**Next slice:** Inventory and validate `install_version_dependencies` (M4) after
+the accepted release-dependency listing response. Preserve optional inference-
 plugin builds, standalone backend operation and existing error behavior; do not
 install dependencies.
 Installation progress, installation validation, runtime-version info,
@@ -68,6 +68,54 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Runtime Release-Dependency Listing Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-09--runtime-release-dependency-listing-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Project `get_release_dependencies` through one generated request and outcome
+across standalone Rust RPC, Electron main admission, preload and the exposed
+frontend bridge. The request requires exact string `tag` and app identity,
+preserves the existing `app_id`/`appId` aliases, and rejects missing, null,
+wrong-type, unknown and ambiguous fields before manager lookup. This intentionally
+corrects the coordinated internal preload signature, which omitted the required
+app identity, accepted an optional number and sent an unused `top_n` field.
+
+The raw producer is an ordered string array. The typed desktop outcome is exactly
+`{success:true,dependencies:string[]}` and preserves admitted strings, ordering,
+duplicates and empty lists without inventing defaults. Unknown app identities
+remain missing-manager errors, disabled inference-plugin builds remain method-
+not-found, and filesystem inspection/read/UTF-8 errors remain propagated errors.
+An absent version directory or requirements file remains a successful empty list.
+
+The operation is a filesystem-only observation: it joins the request tag to the
+version root, inspects and reads `requirements.txt`, and applies the existing
+simple textual extraction. It makes no runtime subprocess, cache, network or
+dependency-installation call. Success means only that textual extraction
+completed or the file was absent; it does not prove that the version is installed,
+the list is complete, dependencies are ready, or the syntax was interpreted as
+a requirements standard. FE-I42 now also tracks this route's unbounded tag-derived
+file reachability. FE-I44 tracks the ambiguous empty result and approximate parser,
+including ignored include/options and divergence from dependency checking.
+
+There is no current hook or UI state consumer. The direct exposed bridge is the
+actual frontend boundary: populated and empty reports pass only after generated
+decoding; malformed reports and transport errors reject without state replacement,
+automatic retry or dependency installation. This route lists textual release
+requirements and remains semantically distinct from installed/missing dependency
+checking, comprehensive status and dependency installation.
+
+Acceptance: raw producer/wrapper/typed-wire equivalence, strict request admission
+through Rust, generated decoder and Electron main, missing-manager/no-plugin error
+behavior, filesystem/parser unit evidence, populated and empty producer fixtures,
+bundled preload and direct renderer-bridge conformance with exact call counts,
+frontend/Electron builds and lint, generator freshness, strict Rust checks and
+canonical-plan validation. Temporary files and serialization fixtures only; no
+live runtime, Python/pip process, dependency install, network request, cache write
+or model-library mutation occurs. The evidence does not establish parser
+completeness, live manager availability, dependency correctness, graphical
+behavior or other-OS filesystem behavior.
 
 ## Runtime Installation-Start Contract
 

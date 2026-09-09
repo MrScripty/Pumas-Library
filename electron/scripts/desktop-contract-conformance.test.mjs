@@ -51,6 +51,26 @@ test('dependency-check admission and outcomes match Rust', () => {
   }
 });
 
+test('release-dependency admission and outcomes match Rust', () => {
+  for (const probe of fixtures.get_release_dependencies_request_probes) {
+    const result = contract.decodeGetReleaseDependenciesParams(probe.params);
+    assert.equal(result.status, probe.accepted ? 'valid' : 'invalid', JSON.stringify(probe));
+    if (probe.accepted) assert.deepEqual(JSON.parse(JSON.stringify(result.value)), probe.params);
+  }
+  for (const key of ['get_release_dependencies_empty', 'get_release_dependencies_populated']) {
+    const result = contract.decodeGetReleaseDependenciesOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  const valid = fixtures.get_release_dependencies_populated;
+  for (const value of [null, true, false, {}, { success: false },
+    { success: true }, { success: true, dependencies: null },
+    { success: true, dependencies: {} }, { success: true, dependencies: [42] },
+    { success: true, dependencies: valid.dependencies, extra: true }]) {
+    assert.equal(contract.decodeGetReleaseDependenciesOutcome(value).status, 'invalid', JSON.stringify(value));
+  }
+});
+
 test('default-selection request admission matches Rust and response preserves exact booleans', () => {
   for (const probe of fixtures.set_default_version_request_probes) {
     const result = contract.decodeSetDefaultVersionParams(probe.params);

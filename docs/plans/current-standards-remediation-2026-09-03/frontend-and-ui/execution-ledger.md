@@ -1,5 +1,119 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-09 — Runtime Release-Dependency Listing Contract
+
+Accepted the bounded `get_release_dependencies` slice across the standalone
+Rust producer, typed RPC dispatch, Electron main admission, bundled preload and
+direct renderer bridge. `GetReleaseDependenciesParams` requires exact string
+`tag` and app identity, accepts either existing `app_id`/`appId` alias, and
+rejects missing, null, wrong-type, unknown and ambiguous fields before manager
+lookup. This intentionally corrects the coordinated internal preload signature:
+it previously omitted the required app identity, accepted an optional number and
+sent an unused `top_n` field, making the exposed route unusable against Rust.
+
+The producer returns an ordered string array; the typed desktop wire is exactly
+`{success:true,dependencies:string[]}`. Raw producer, existing wrapper and typed
+outcome preserve admitted strings, ordering, duplicates and empty lists without
+invented fields or defaults. Unknown app identities remain missing-manager errors,
+disabled inference-plugin builds remain method-not-found, and filesystem
+inspection/read/UTF-8 errors propagate. An absent version directory or
+`requirements.txt` remains a successful empty list.
+
+This is a filesystem-only observation. It joins the exact tag to the version
+root, inspects and reads `requirements.txt`, and uses the existing simple textual
+extraction. It does not execute runtime Python/pip, install dependencies, contact
+the network or write a cache. Success proves only that extraction completed or
+the file was absent; it does not prove an installed version, dependency
+completeness, standards-compliant requirements parsing or readiness. FE-I42 now
+also owns this route's unbounded tag-derived file reachability. FE-I44 records
+ambiguous successful absence and the approximate parser, including ignored
+include/options and divergence from dependency checking.
+
+There is no current hook or UI state consumer. The direct exposed bridge is the
+actual renderer boundary. Populated and empty producer fixtures pass only after
+generated decoding; malformed and transport responses reject with one request,
+without authoritative empty replacement, automatic retry, dependency installation
+or another mutation. Release listing therefore remains distinct from subprocess-
+backed installed/missing checking, comprehensive version status and dependency
+installation.
+
+Verification: focused `pumas-rpc` tests pass four release-dependency tests with
+default features and three with `--no-default-features`. Strict Clippy passes for
+all targets/all features and all targets/no default features with warnings denied;
+`cargo fmt --all -- --check` passes. Electron generator tests pass 7, freshness,
+lint and build pass, and the actual main/bundled-preload suite passes 162 with one
+pinned-Electron test skipped. Producer/generated conformance passes 36 and
+frontend conformance passes 45, including exact populated, empty, malformed,
+transport and invalid-request bridge behavior. Frontend type checking, lint and
+normal/library-only builds pass. Diff checking and the unchanged pure external
+`validate_plan` contract pass. Temporary filesystem and serialization fixtures
+do not establish live manager availability, parser completeness, package
+correctness, graphical behavior or other-OS filesystem behavior. Verification
+invokes no live runtime process.
+
+Routing/review: the root session ran GPT-6 Astra medium because the requested
+GPT-5.6 Sol low root model could not be changed in place; this deviation is
+recorded rather than silently substituted. GPT-6 Astra medium owned the plan,
+consequential contract decisions and independent review. GPT-5.6 Luna max
+performed the read-only inventory, GPT-6 Astra low implemented settled Rust
+changes, and GPT-5.6 Sol low owned routine desktop/frontend integration,
+generation, verification and documentation. The inventory completed after most
+useful implementation overlap and supplied no new design issue, so its routing
+efficiency is provisionally weaker for this slice. Review found no production or
+schema blocker and caught three evidence/documentation refinements: direct empty-
+result bridge consumption, producer-versus-wire empty-string wording, and a richer
+non-essential/Unicode parser fixture. Different task classes are not a controlled
+benchmark.
+
+Repairs: Rust corrected a test-only `PumasError::Io` tuple assumption to its
+actual struct shape and removed an orphan feature gate that would have accidentally
+gated the following model-import dispatch arm. The known sandbox restriction at
+`handlers/test_support.rs` initially produced `Operation not permitted`; focused
+RPC fixtures passed when rerun with their established permission. Accounting-only
+work first invoked unavailable `python` before using `python3`, then replaced an
+invalid concatenated prior-output JSON parse with cumulative usage reconstruction.
+None of these repairs changed production semantics. All Cargo ownership after
+handoff remained sequential.
+
+Cost checkpoint: `/tmp/pumas-release-dependencies-costs.py` read current local
+`token_usage_record` entries and deduplicated 220 responses by `response_id`.
+The uncounted prior root reporting tail through response
+`resp_0edcf31b3141cb94016aa1cd5d016487d08b565e7dde201bec` at
+`2026-09-09T21:21:18.646Z` is $0.630314. The current slice is $12.687547:
+root GPT-6 Astra medium $4.873910 (`01a0880c-8ce6-74e2-afec-f69e0fc6f1e0`),
+planning/review GPT-6 Astra medium $3.115458
+(`01a0880d-7a28-7941-8cbd-a03c6976da34`), inventory GPT-5.6 Luna max
+$0.194600 (`01a0880d-4af5-7c30-8541-1d5df8c68b54`), Rust GPT-6 Astra low
+$1.871798 (`01a0880f-3a70-7411-9f7e-eea3fee60e9f`), and desktop/frontend
+GPT-5.6 Sol low $2.631782 (`01a0880e-84b2-7863-b341-97085f3fa049`). Including
+the carried tail, this checkpoint adds $13.317862 and brings the cumulative
+API-equivalent estimate to
+$68.833242 standard and $137.666484 under the separately reported 2x priority
+scenario. The current root session is `01a0880c-8ce6-74e2-afec-f69e0fc6f1e0`
+and ends this snapshot at
+`resp_04a060a0b34b4096016aa1d106b5a087d0ad8ff5a643c5c85f`
+(`2026-09-09T21:35:07.603Z`). The inventory ends at
+`resp_01eda5dd1e4769fc016aa1d007b51887d0bb095ccc99ff08cc`
+(`2026-09-09T21:31:17.343Z`), planning/review at
+`resp_0d89de9fd93a6b19016aa1d0fb30ac87d0bb9cae42ad8e902c`
+(`2026-09-09T21:34:56.847Z`), desktop/frontend integration at
+`resp_0b81a3105f0b5342016aa1d104745487d0a28f4d8e44f528d8`
+(`2026-09-09T21:35:12.432Z`), and Rust at
+`resp_0ffe187931010737016aa1d01eec0087d0a7e7eb6e333e892c`
+(`2026-09-09T21:31:14.220Z`). No request crossed 272,000 input tokens and
+recorded cache writes were zero. Requested and observed service tiers,
+tool fees and other shared costs remain unknown and are not allocated as free.
+The published OpenAI model pages for
+[GPT-5.6 Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol),
+[GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna) and
+[GPT-6 Astra](https://developers.openai.com/api/docs/models/gpt-6-astra)
+corroborated the recorded per-token assumptions. These are API-equivalent
+estimates, not invoices. Reporting and commit work after this snapshot remains
+an uncounted tail for the next checkpoint.
+
+The next slice is the independent inventory and validation of
+`install_version_dependencies`. M4 and the overall remediation remain incomplete.
+
 ## 2026-09-09 — Runtime Dependency-Check Response Contract
 
 Accepted the bounded `check_version_dependencies` response slice across the

@@ -139,6 +139,53 @@ test('release dependency listing validates the required request and outcome with
   );
 });
 
+test('dependency installation validates the required request and exact confirmation without retry', async () => {
+  const harness = loadCompiledPreload();
+  for (const [tag, appId] of [[null, 'ollama'], ['v1', undefined], ['v1', null],
+    [42, 'ollama'], ['v1', 42]]) {
+    const before = harness.invocations.length;
+    assert.throws(
+      () => harness.api.install_version_dependencies(tag, appId),
+      { name: 'DesktopContractError' }
+    );
+    assert.equal(harness.invocations.length, before);
+  }
+
+  for (const success of [true, false]) {
+    const valid = { success };
+    harness.respondWith(valid);
+    assert.deepEqual(
+      toPlainValue(await harness.api.install_version_dependencies(' vλ.1 ', 'ollama')),
+      valid
+    );
+    assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]), {
+      tag: ' vλ.1 ', app_id: 'ollama',
+    });
+  }
+
+  for (const response of [null, true, false, {}, { success: null },
+    { success: 'true' }, { success: 1 }, { success: true, error: 'invented' },
+    { success: false, result: false }]) {
+    harness.respondWith(response);
+    await assert.rejects(
+      harness.api.install_version_dependencies('v1', 'ollama'),
+      { name: 'DesktopContractError' }
+    );
+  }
+
+  harness.respondWith(() => {
+    throw new Error('dependency installation transport unavailable');
+  });
+  await assert.rejects(
+    harness.api.install_version_dependencies('v1', 'ollama'),
+    /dependency installation transport unavailable/
+  );
+  assert.equal(
+    harness.invocations.filter(invocation => invocation[1] === 'install_version_dependencies').length,
+    12
+  );
+});
+
 test('default selection validates nullable requests and exact confirmations without retry', async () => {
   const harness = loadCompiledPreload();
   for (const tag of [false, 42, [], {}]) {

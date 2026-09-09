@@ -134,6 +134,21 @@ bridge without retries, state replacement or dependency installation. FE-I42
 tracks tag-derived path reachability and FE-I44 tracks ambiguous empty results
 and the approximate parser.
 
+The dedicated `install_version_dependencies` bridge method requires a runtime
+tag and app id through the generated request contract, then validates the exact
+`{success:boolean}` confirmation. The awaited backend operation may create a
+virtual environment, run `ensurepip`, upgrade pip, install requirements, read or
+write constraint/cache data, create a pip-cache directory and contact package
+services. A true response means either no requirements file was found after any
+virtual-environment setup or the final pip install exited successfully; it does
+not prove dependency readiness, prerequisite command success or that constraints
+were applied. There is no current hook or UI state consumer, so the direct bridge
+is the renderer boundary. False confirmations pass through; malformed responses
+and transport errors reject after one mutation request without an automatic
+retry. FE-I42 tracks tag-derived process and mutation reachability, FE-I45 tracks
+the unbounded/cancellation-free subprocess lifecycle and unsafe uncertain retry,
+and FE-I46 tracks ignored prerequisite and constraint/cache failures.
+
 Runtime-version info preserves the backend's exact tag and installed flag with
 its current required null size. It does not expose installation paths, dates,
 release metadata or a computed size. The generated preload decoder rejects

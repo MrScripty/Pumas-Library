@@ -71,6 +71,24 @@ test('release-dependency admission and outcomes match Rust', () => {
   }
 });
 
+test('dependency-installation admission and outcomes match Rust', () => {
+  for (const probe of fixtures.install_version_dependencies_request_probes) {
+    const result = contract.decodeInstallVersionDependenciesParams(probe.params);
+    assert.equal(result.status, probe.accepted ? 'valid' : 'invalid', JSON.stringify(probe));
+    if (probe.accepted) assert.deepEqual(JSON.parse(JSON.stringify(result.value)), probe.params);
+  }
+  for (const key of ['install_version_dependencies_true', 'install_version_dependencies_false']) {
+    const result = contract.decodeInstallVersionDependenciesOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  for (const value of [null, true, false, {}, { success: null }, { success: 1 },
+    { success: 'true' }, { success: true, error: 'invented' },
+    { success: false, result: false }]) {
+    assert.equal(contract.decodeInstallVersionDependenciesOutcome(value).status, 'invalid', JSON.stringify(value));
+  }
+});
+
 test('default-selection request admission matches Rust and response preserves exact booleans', () => {
   for (const probe of fixtures.set_default_version_request_probes) {
     const result = contract.decodeSetDefaultVersionParams(probe.params);

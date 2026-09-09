@@ -1,5 +1,109 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-09 — Runtime Dependency-Installation Contract
+
+Accepted `install_version_dependencies` across the standalone Rust producer,
+typed RPC dispatch, Electron main admission, bundled preload and direct renderer
+bridge. `InstallVersionDependenciesParams` requires exact string `tag` and app
+identity, accepts either existing `app_id`/`appId` alias, and rejects missing,
+null, wrong-type, unknown and ambiguous fields before manager lookup or effects.
+The handwritten Electron optional-app schema was removed. The preload and
+frontend bridge now also require the app identity.
+
+The exact typed outcome is `{success:boolean}`. Raw manager, existing wrapper and
+typed dispatch agree on the boolean envelope without invented error, message or
+result fields. The manager currently returns true or an error; false remains
+valid legacy wire. Unknown app identities remain missing-manager errors, missing
+versions remain errors and disabled inference-plugin builds remain method-not-
+found.
+
+This is an awaited mutation, not an asynchronous installation-start admission.
+The manager may create a virtual environment, execute its Python through
+`ensurepip`, pip upgrade and pip install, install `setproctitle`, read or write
+constraint-cache data, create a pip-cache directory and contact package services.
+True means either no requirements file existed after optional venv creation, or
+the final pip install returned zero. It does not establish readiness, dependency
+completeness, prerequisite success or applied constraints. FE-I42 now includes
+tag-derived dependency/cache process and mutation reachability. FE-I45 records
+sequential pipe draining, absent cancellation/deadline/kill-on-drop/per-runtime
+admission and no RPC progress observer, including unsafe retry after an uncertain
+response. FE-I46 records ignored prerequisite and constraint/cache failures.
+
+No hook or UI state owner calls this operation. `DependencyStatusSection` has a
+generic callback prop but no installation route is wired to it. The direct bridge
+is the actual renderer boundary: true and false pass only after generated
+decoding; malformed or transport responses reject after exactly one mutation
+request, with no retry or state replacement; malformed requests make zero calls.
+This remains separate from textual release listing, installed/missing checking,
+comprehensive status and asynchronous runtime installation start.
+
+Verification: focused `pumas-rpc` tests pass four dependency-installation tests
+with default features and three with `--no-default-features`; the safe producer
+fixture reaches missing-version, absent-requirements and UTF-8 failure branches
+before any process execution. Strict Clippy passes for all targets/all features
+and all targets/no default features with warnings denied; `cargo fmt --all --
+--check` passes. Electron generator tests pass 7, freshness, lint and build pass,
+and the actual main/bundled-preload suite passes 164 with one pinned-Electron test
+skipped. Producer/generated conformance passes 37 and frontend conformance passes
+46. Frontend type checking, lint and normal/library-only builds pass. Diff checks
+and the unchanged pure external `validate_plan` contract pass. No live runtime,
+Python/pip, dependency installation, network, cache or model-library mutation ran.
+This evidence does not establish live effects, readiness, cancellation, timeout,
+rollback, concurrency, graphical behavior or other-OS process/filesystem behavior.
+
+Routing/review: the unchanged root session remains GPT-6 Astra medium because it
+cannot be switched in place to the requested GPT-5.6 Sol low; the deviation is
+disclosed. GPT-6 Astra medium owned producer semantics, the consequential plan
+and independent review; GPT-6 Astra low implemented settled Rust changes;
+GPT-5.6 Luna max performed only the bounded frontend-consumer inventory; and
+GPT-5.6 Sol low owned routine desktop/frontend integration, generation, gates,
+documentation and commit. Narrowing Luna to the requested consumer inventory
+completed promptly and was more cost-effective than the previous oversized
+inventory, while comparisons across different task classes remain provisional
+rather than a controlled benchmark. Review found no source, schema, test or
+documentation blocker.
+
+Repairs were navigation-only: the Rust agent first ran `cargo fmt` from the
+repository root before using the actual `rust/` workspace, and looked for a
+nonexistent `app_config.rs` before reading `config.rs`. There were no production,
+compile, test or review failures and no source repair. Cargo ownership remained
+sequential. Cost accounting preserved the frozen prior release-dependency JSON
+checkpoint and adapted the new helper without failed attempts.
+
+Cost checkpoint: `/tmp/pumas-install-dependencies-costs.py` preserved the frozen
+release-dependency checkpoint and deduplicated 124 later local
+`token_usage_record` responses by `response_id`. The prior reporting tail is
+$2.359844: root GPT-6 Astra medium $0.973262 through
+`resp_04a060a0b34b4096016aa1d203e1b487d09fce997b7ed7793a`
+(`2026-09-09T21:39:26.926Z`) and desktop/frontend GPT-5.6 Sol low $1.386582
+through `resp_0b81a3105f0b5342016aa1d200456487d0ac3dd6a7aa6cc925`
+(`2026-09-09T21:39:22.359Z`). The current slice is $9.199927: root GPT-6 Astra
+medium $2.920316 through
+`resp_04a060a0b34b4096016aa1d434e6ac87d0919ad4517c089440`
+(`2026-09-09T21:48:41.972Z`), planning/review GPT-6 Astra medium $2.592860
+through `resp_0d89de9fd93a6b19016aa1d450d3c887d0ab852cb5c50872db`
+(`2026-09-09T21:49:09.929Z`), inventory GPT-5.6 Luna max $0.013715 through
+`resp_01eda5dd1e4769fc016aa1d2e7ccf487d0acd5acb3f22ff333`
+(`2026-09-09T21:43:41.808Z`), Rust GPT-6 Astra low $1.569302 through
+`resp_0ffe187931010737016aa1d3725d0087d0812f751e01cc0993`
+(`2026-09-09T21:45:27.838Z`), and desktop/frontend GPT-5.6 Sol low $2.103734
+through `resp_0b81a3105f0b5342016aa1d44d425087d098924c1bdb62db61`
+(`2026-09-09T21:49:04.301Z`). Including the tail, this checkpoint adds
+$11.559771 and brings the cumulative API-equivalent estimate to $80.393013
+standard and $160.786026 under the separate 2x priority scenario. No request
+crossed 272,000 input tokens and recorded cache writes were zero. Requested and
+observed service tiers, tool fees and other shared costs remain unknown and are
+not allocated as free. Published OpenAI pages for
+[GPT-5.6 Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol),
+[GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna) and
+[GPT-6 Astra](https://developers.openai.com/api/docs/models/gpt-6-astra)
+corroborate the pricing assumptions. These are API-equivalent estimates, not
+invoices. Work after this snapshot is an uncounted reporting/commit tail.
+
+The next slice is the independent inventory and validation of `launch_app` and
+the composed desktop `launch_version` adapter as one launch-contract slice. M4
+and the overall remediation remain incomplete.
+
 ## 2026-09-09 — Runtime Release-Dependency Listing Contract
 
 Accepted the bounded `get_release_dependencies` slice across the standalone

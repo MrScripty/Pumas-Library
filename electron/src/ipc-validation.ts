@@ -3,6 +3,7 @@ import {
   decodeGetBackendSetupParams,
   decodeCheckVersionDependenciesParams,
   decodeGetReleaseDependenciesParams,
+  decodeInstallVersionDependenciesParams,
   decodeInstallVersionParams,
   decodeSetDefaultVersionParams,
   decodeStartBackendSetupParams,
@@ -56,6 +57,7 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
     || method === 'get_backend_setup'
     || method === 'check_version_dependencies'
     || method === 'get_release_dependencies'
+    || method === 'install_version_dependencies'
     || method === 'install_version'
     || method === 'set_default_version'
   ) {
@@ -67,6 +69,8 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
           ? decodeCheckVersionDependenciesParams(rawParams)
         : method === 'get_release_dependencies'
           ? decodeGetReleaseDependenciesParams(rawParams)
+        : method === 'install_version_dependencies'
+          ? decodeInstallVersionDependenciesParams(rawParams)
         : method === 'install_version'
           ? decodeInstallVersionParams(rawParams)
           : decodeSetDefaultVersionParams(rawParams);

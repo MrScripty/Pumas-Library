@@ -1,5 +1,33 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-09 — Runtime Dependency-Installation Contract
+
+The bounded `install_version_dependencies` slice now has one strict generated
+request and exact `{success:boolean}` outcome across standalone RPC, Electron
+main/preload and the direct renderer bridge. Required exact tag/app identity
+preserves the snake/camel alias pair and rejects malformed, unknown or ambiguous
+requests before manager lookup or effects. False remains valid legacy wire;
+missing managers/versions and disabled inference plugins retain errors.
+
+This awaited mutation may create a venv, execute Python/ensurepip/pip, install
+requirements and `setproctitle`, access constraint/cache data, create cache
+directories and use the network. True means only absent requirements after
+optional venv creation or final pip zero exit. FE-I42 covers tag-derived effect
+reachability; FE-I45 covers unbounded/cancellation-free process lifecycle and
+unsafe uncertain retry; FE-I46 covers ignored prerequisite and cache/constraint
+failures. No hook/UI consumer exists, and malformed/transport responses do not
+retry the mutation.
+
+Focused default/no-default RPC tests, strict dual-feature all-target Clippy,
+formatting, generator/freshness, Electron build/lint and actual main/bundled-
+preload tests, true/false producer-to-decoder-to-direct-bridge conformance,
+frontend types/lint and both builds pass. Safe fixtures reach no runtime process
+or dependency effect. No live runtime, Python/pip, dependency installation,
+network, cache or model-library mutation ran. The frontend ledger owns exact
+review, routing, repairs and cost evidence. M4 and overall remediation remain
+incomplete. Next: inventory and validate `launch_app` with the composed desktop
+`launch_version` adapter.
+
 ## 2026-09-09 — Runtime Release-Dependency Listing Contract
 
 The bounded `get_release_dependencies` slice now has one strict generated

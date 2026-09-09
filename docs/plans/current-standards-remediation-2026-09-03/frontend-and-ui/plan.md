@@ -10,10 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Inventory and validate `install_version_dependencies` (M4) after
-the accepted release-dependency listing response. Preserve optional inference-
-plugin builds, standalone backend operation and existing error behavior; do not
-install dependencies.
+**Next slice:** Inventory and validate `launch_app` and the composed desktop
+`launch_version` adapter as one launch-contract slice (M4) after the accepted
+dependency-installation response. Preserve optional inference-plugin builds,
+standalone backend operation and existing error behavior; do not launch a runtime.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -68,6 +68,55 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Runtime Dependency-Installation Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-09--runtime-dependency-installation-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Project `install_version_dependencies` through one generated request and outcome
+across standalone Rust RPC, Electron main admission, preload and the exposed
+frontend bridge. The request requires exact string `tag` and app identity,
+preserves the existing `app_id`/`appId` aliases, rejects missing, null, wrong-
+type, unknown and ambiguous fields before manager lookup or effects, and does
+not normalize tags.
+
+The exact outcome is `{success:boolean}`. The manager currently returns true or
+an error; false remains valid legacy wire. Unknown app identities remain missing-
+manager errors, missing versions remain errors and disabled inference-plugin
+builds remain method-not-found. The existing wrapper's boolean envelope matches
+the typed outcome without adding an error, message or result field.
+
+This is an awaited dependency mutation, not an installation-start admission.
+The producer can create a virtual environment; execute its Python through
+`ensurepip`, pip upgrade and pip install; install `setproctitle`; read or write
+constraint-cache data; create a pip-cache directory; and contact package services.
+True means either the requirements file was absent after any optional venv
+creation, or the final pip install exited successfully. It does not prove runtime
+readiness, dependency completeness, prerequisite command success or that cached
+constraints were read and applied. FE-I42 now also tracks tag-derived process
+and mutation reachability. FE-I45 owns the unbounded, cancellation-free subprocess
+lifecycle and unsafe retry after an uncertain response. FE-I46 owns ignored
+prerequisite and constraint/cache failures.
+
+There is no current hook or UI state consumer. The direct exposed bridge is the
+actual renderer boundary. Exact true and false confirmations pass through;
+malformed responses and transport errors reject after one mutation request and
+never trigger retry or state replacement. Malformed requests are rejected before
+IPC. This operation remains distinct from textual release listing, subprocess-
+backed dependency checking, comprehensive version status and asynchronous runtime
+installation start.
+
+Acceptance: raw manager/wrapper/typed outcome equivalence, strict request
+admission through Rust/generated/Electron main, actual missing-manager/no-plugin
+errors, safe no-subprocess producer branches, true/false fixtures, bundled preload
+and direct renderer-bridge conformance with exact mutation counts, frontend/
+Electron builds and lint, generator freshness, strict Rust checks and canonical-
+plan validation. Temporary/serialization fixtures only; no live runtime, Python/
+pip subprocess, dependency installation, network request, cache write or model-
+library mutation occurs. The evidence does not establish live installation,
+dependency readiness, cancellation, timeout, concurrency, rollback, graphical
+behavior or other-OS process/filesystem behavior.
 
 ## Runtime Release-Dependency Listing Contract
 

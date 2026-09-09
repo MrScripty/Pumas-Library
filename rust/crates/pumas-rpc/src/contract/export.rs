@@ -524,6 +524,18 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         };
         serde_json::json!({"method":"get_release_dependencies","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
     }).collect();
+    fixtures["install_version_dependencies_request_probes"] = install_version_requests().into_iter().map(|(params, _)| {
+        let parsed = parse_params::<InstallVersionDependenciesParams>(Some(&params));
+        let normalized = match &parsed {
+            Ok(value) => serde_json::json!({"app_id":value.app_id,"tag":value.tag}),
+            Err(_) => Value::Null,
+        };
+        serde_json::json!({"method":"install_version_dependencies","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
+    }).collect();
+    fixtures["install_version_dependencies_true"] =
+        serde_json::to_value(InstallVersionDependenciesOutcome::new(true))?;
+    fixtures["install_version_dependencies_false"] =
+        serde_json::to_value(InstallVersionDependenciesOutcome::new(false))?;
     fixtures["get_release_dependencies_empty"] =
         serde_json::to_value(GetReleaseDependenciesOutcome::new(vec![]))?;
     fixtures["get_release_dependencies_populated"] =
@@ -674,6 +686,8 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         SetDefaultVersionParams,
         InstallVersionParams,
         InstallVersionOutcome,
+        InstallVersionDependenciesParams,
+        InstallVersionDependenciesOutcome,
         GetReleaseDependenciesParams,
         GetReleaseDependenciesOutcome,
         CheckVersionDependenciesParams,
@@ -729,6 +743,7 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "InstallVersionParams"
             | "CheckVersionDependenciesParams"
             | "GetReleaseDependenciesParams"
+            | "InstallVersionDependenciesParams"
     ) {
         let mut canonical = schema.clone();
         let object = canonical.as_object_mut().expect("request object schema");

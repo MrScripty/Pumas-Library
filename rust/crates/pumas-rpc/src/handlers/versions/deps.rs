@@ -1,8 +1,7 @@
 //! Version dependency handlers.
 
-use crate::handlers::{path_exists, read_utf8_file, require_str_param, require_version_manager};
+use crate::handlers::{path_exists, read_utf8_file, require_version_manager};
 use crate::server::AppState;
-use serde_json::Value;
 
 pub async fn check_version_dependencies(
     state: &AppState,
@@ -18,13 +17,13 @@ pub async fn check_version_dependencies(
 
 pub async fn install_version_dependencies(
     state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
-    let tag = require_str_param(params, "tag", "tag")?;
-    let app_id_str = require_str_param(params, "app_id", "appId")?;
-    let vm = require_version_manager(state, app_id_str).await?;
-    let result = vm.install_dependencies(&tag, None).await?;
-    Ok(serde_json::to_value(result)?)
+    app_id: &str,
+    tag: &str,
+) -> pumas_library::Result<crate::contract::InstallVersionDependenciesOutcome> {
+    let vm = require_version_manager(state, app_id).await?;
+    vm.install_dependencies(tag, None)
+        .await
+        .map(crate::contract::InstallVersionDependenciesOutcome::new)
 }
 
 pub async fn get_release_dependencies(
@@ -68,6 +67,56 @@ async fn read_release_dependencies(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn install_version_dependencies_preserves_safe_producer_branches() {
+        use pumas_app_manager::version_manager::{ConstraintsManager, DependencyManager};
+        use pumas_library::config::AppId;
+        use pumas_library::PumasError;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let manager = DependencyManager::new(
+            temp.path().to_path_buf(),
+            AppId::Torch,
+            temp.path().join("pip-cache"),
+        );
+        let constraints = ConstraintsManager::new(temp.path().join("constraints"));
+        assert!(matches!(
+            manager.install_dependencies("missing", &constraints, None).await,
+            Err(PumasError::VersionNotFound { tag }) if tag == "missing"
+        ));
+
+        let version_path = temp
+            .path()
+            .join(AppId::Torch.versions_dir_name())
+            .join("fixture");
+        let python = version_path.join("venv/bin/python");
+        tokio::fs::create_dir_all(python.parent().unwrap())
+            .await
+            .unwrap();
+        // Inert, non-executable marker admits only branches before process creation.
+        let marker = b"inert fixture: never execute";
+        tokio::fs::write(&python, marker).await.unwrap();
+        let raw = manager
+            .install_dependencies("fixture", &constraints, None)
+            .await
+            .unwrap();
+        assert!(raw);
+        assert_eq!(
+            serde_json::to_value(crate::contract::InstallVersionDependenciesOutcome::new(raw))
+                .unwrap(),
+            serde_json::json!({"success":true})
+        );
+        let requirements = version_path.join("requirements.txt");
+        tokio::fs::write(&requirements, [0xff]).await.unwrap();
+        assert!(matches!(
+            manager.install_dependencies("fixture", &constraints, None).await,
+            Err(PumasError::Io { path: Some(path), .. }) if path == requirements
+        ));
+        assert_eq!(tokio::fs::read(&python).await.unwrap(), marker);
+        assert!(!temp.path().join("pip-cache").exists());
+        assert!(!temp.path().join("constraints").exists());
+    }
 
     #[tokio::test]
     async fn get_release_dependencies_preserves_filesystem_and_parser_semantics() {

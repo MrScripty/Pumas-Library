@@ -66,6 +66,7 @@ function installActualPreload(
   installResult: () => unknown = () => fixture['install_version_started'],
   checkVersionDependenciesResult: () => unknown = () => fixture['check_version_dependencies_populated'],
   getReleaseDependenciesResult: () => unknown = () => fixture['get_release_dependencies_populated'],
+  installVersionDependenciesResult: () => unknown = () => fixture['install_version_dependencies_true'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -103,6 +104,7 @@ function installActualPreload(
         if (method === 'install_version') return installResult();
         if (method === 'check_version_dependencies') return checkVersionDependenciesResult();
         if (method === 'get_release_dependencies') return getReleaseDependenciesResult();
+        if (method === 'install_version_dependencies') return installVersionDependenciesResult();
         if (method === 'get_installed_versions') return installedVersions();
         if (method === 'get_active_version' || method === 'get_default_version') return selectedVersion();
         if (method === 'get_inference_settings') return inferenceRead;
@@ -273,6 +275,44 @@ describe('actual Rust catalog through bundled preload and renderer', () => {
       .toThrow('Desktop contract invalid');
     expect(requests.length).toBe(before);
     expect(requests.filter(request => request.method === 'get_release_dependencies')).toHaveLength(4);
+  });
+
+  it('exposes dependency-installation confirmations without automatic retry', async () => {
+    let response: unknown = fixture['install_version_dependencies_true'];
+    const requests = installActualPreload(
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, () => {
+        if (response instanceof Error) throw response;
+        return response;
+      },
+    );
+    const bridge = window.electronAPI;
+    if (!bridge) throw new ValidationError('Preload did not expose its bridge.', 'preload');
+
+    expect(await bridge.install_version_dependencies(' vλ.1 ', 'ollama')).toEqual(response);
+    expect(requests.at(-1)).toEqual({
+      method: 'install_version_dependencies',
+      params: { tag: ' vλ.1 ', app_id: 'ollama' },
+    });
+
+    response = fixture['install_version_dependencies_false'];
+    expect(await bridge.install_version_dependencies('v1', 'ollama')).toEqual(response);
+
+    response = { success: true, error: 'invented' };
+    await expect(bridge.install_version_dependencies('v1', 'ollama'))
+      .rejects.toMatchObject({ name: 'DesktopContractError' });
+
+    response = new Error('dependency installation transport unavailable');
+    await expect(bridge.install_version_dependencies('v1', 'ollama'))
+      .rejects.toThrow('dependency installation transport unavailable');
+
+    const before = requests.length;
+    expect(() => bridge.install_version_dependencies('v1', undefined as never))
+      .toThrow('Desktop contract invalid');
+    expect(requests.length).toBe(before);
+    expect(requests.filter(request => request.method === 'install_version_dependencies')).toHaveLength(4);
   });
 
   it('starts installation polling only after a validated producer confirmation', async () => {

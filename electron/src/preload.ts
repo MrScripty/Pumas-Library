@@ -52,6 +52,8 @@ import {
   decodeCheckVersionDependenciesParams,
   decodeGetReleaseDependenciesOutcome,
   decodeGetReleaseDependenciesParams,
+  decodeInstallVersionDependenciesOutcome,
+  decodeInstallVersionDependenciesParams,
   decodeValidateInstallationsOutcome,
   decodeInstallationProgressOutcome,
   decodeCancelInstallationOutcome,
@@ -574,8 +576,17 @@ const electronAPI = {
       params
     );
   },
-  install_version_dependencies: (tag: string, appId?: string) =>
-    apiCall('install_version_dependencies', { tag, app_id: appId }),
+  install_version_dependencies: (tag: string, appId: string) => {
+    const params = requireDecoded(
+      decodeInstallVersionDependenciesParams({ tag, app_id: appId }),
+      'install_version_dependencies request'
+    );
+    return validatedApiCall(
+      'install_version_dependencies',
+      decodeInstallVersionDependenciesOutcome,
+      params
+    );
+  },
 
   // ========================================
   // Installation & Progress

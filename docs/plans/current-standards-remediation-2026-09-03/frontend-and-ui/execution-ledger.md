@@ -1,5 +1,48 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Download Timeout Reproduction
+
+FE-I28 remains open; no source fix or verification-stability acceptance. Root
+continued the canonical frontend plan with a bounded reproduction attempt.
+root_diagnostics reviewed preserved failure locations read-only; root owned
+serial test execution and this plan/ledger/issues update. No source, fixture,
+timeout, default concurrency, dependency or live-library changes were made.
+
+From `rust/`, `cargo test --offline --locked -p pumas-library --lib` passed
+1,246 tests with four ignored in 27.74 seconds. A planned three-repeat loop using
+the same command plus `-- --quiet` stopped on its first failure: 1,222 passed,
+24 failed, four ignored. That run reported localhost bind `Operation not
+permitted`, an independent database-open error and poisoned-lock follow-ons,
+not the prior elapsed-time failures. It is not a reproduction of FE-I28.
+Log: `/tmp/pumas-download-stability-core-1.log`.
+
+With localhost fixture permissions, the original combined invocation
+`cargo test --offline --locked -p pumas-library -p pumas-rpc -- --quiet` passed
+1,486 executions, including one additional marker-child invocation, with 22
+ignored and no failures. Log: `/tmp/pumas-download-stability-default.log`.
+The core-only binary is `pumas_library-74a3a1e3f9916b12`; the combined invocation
+uses `pumas_library-465347b82b0b66a6`, matching the prior failing configuration.
+Earlier core-only/group passes must not be described as identical-build controls.
+
+Two diagnostic runs of that combined-build binary, each invoked as
+`./target/debug/deps/pumas_library-465347b82b0b66a6 --quiet --test-threads=N`
+with localhost permissions, passed all 1,246 top-level tests (four ignored):
+N=64 in 29.08 seconds and N=128 in 26.30 seconds. Logs:
+`/tmp/pumas-download-stability-stress-64.log` and
+`/tmp/pumas-download-stability-stress-128.log`. Elevated concurrency was a
+reproduction stimulus only, not an accepted runner configuration or timing fix.
+Host pressure samples during successful runs cannot explain earlier failures.
+
+The diagnosing-bugs skill stopped the investigation before speculative fixes:
+no repeatable failing loop or minimized failing scenario was established.
+Existing failures identify one-second admitted-ID waits, held projection/effect
+seams and stalled-response pause/drain waits, but do not identify the pending
+admission phase or effect at timeout. Next observation must capture that state
+at a failing wait and retain the exact build/permission context; repeated green
+suites alone add no deciding evidence. No production instrumentation was added.
+FE-I29 is also still open. This result does not accept Pending cleanup replay,
+new API/UI mutations, native tools, GUI workflows or other platforms.
+
 ## 2026-09-08 — Native Setup Interruption Invalidation
 
 Accepted NINVALID. NBUILD corrected successful setup's stale-binary shortcut,

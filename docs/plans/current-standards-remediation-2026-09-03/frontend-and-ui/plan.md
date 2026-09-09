@@ -11,10 +11,13 @@ checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
 **Next slice:** Download lifecycle verification stability (FE-I28).
-The NINVALID default matrix exposed 18 download deadline failures; the unchanged
-group and final full recheck passed, but their cause remains unresolved. Diagnose
-that recurrence before further API/UI implementation; this is verification work,
-not admission of the separately Pending download cleanup replay.
+The NINVALID default matrix exposed 18 download deadline failures. The bounded
+[reproduction pass](execution-ledger.md#2026-09-08--download-timeout-reproduction)
+did not reproduce them, including the original build configuration and elevated
+test concurrency. FE-I28 remains open: capture admission/effect state at a failing
+wait before selecting a fix. Do not repeat passing suites without a new deciding
+observation. This is verification work, not admission of the separately Pending
+download cleanup replay.
 Successful native setup now reconfigures and rebuilds current source below;
 interrupted native recipe invalidation is accepted below. Later external mutation
 provenance and independent probe/setup coordination remain outside acceptance.

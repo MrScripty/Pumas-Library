@@ -43,71 +43,10 @@ mod setup_tests;
 #[cfg(all(test, target_os = "linux"))]
 mod probe_tests;
 
-/// Readiness must fit within interactive status requests even for a stuck interpreter.
-const ENVIRONMENT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-const ENVIRONMENT_PROBE_IMPORTS: &str = "import numpy, sentencepiece; from gguf import GGUFReader, GGUFWriter; from safetensors import safe_open; from safetensors.numpy import save_file";
-
-pub(super) fn probe_conversion_environment(
-    python: &Path,
-    timeout: std::time::Duration,
-) -> Result<bool> {
-    use std::process::Stdio;
-    let mut child = match std::process::Command::new(python)
-        .args(["-I", "-B", "-c", ENVIRONMENT_PROBE_IMPORTS])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => {
-            return Err(PumasError::io(
-                "probing conversion environment",
-                python,
-                error,
-            ))
-        }
-    };
-    let started = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return Ok(status.success()),
-            Ok(None) if started.elapsed() < timeout => {
-                std::thread::sleep(
-                    std::time::Duration::from_millis(20)
-                        .min(timeout.saturating_sub(started.elapsed())),
-                );
-            }
-            Ok(None) => {
-                let stopped = child.kill();
-                let reaped = child.wait();
-                stopped.map_err(|error| {
-                    PumasError::io("stopping conversion readiness probe", python, error)
-                })?;
-                reaped.map_err(|error| {
-                    PumasError::io("reaping conversion readiness probe", python, error)
-                })?;
-                return Ok(false);
-            }
-            Err(error) => {
-                // Retain process ownership through cleanup before reporting the
-                // original observation error; never leave a probe running.
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(PumasError::io(
-                    "observing conversion readiness probe",
-                    python,
-                    error,
-                ));
-            }
-        }
-    }
-}
-
 /// Orchestrates model format conversions and quantization.
 pub struct ConversionManager {
     setup: super::setup::SetupOwner,
+    base_readiness: super::readiness::ProbeOwner,
     backend_setups: Vec<Arc<super::setup::SetupOwner>>,
     backend_probes: Vec<Arc<super::readiness::ProbeOwner>>,
     launcher_root: PathBuf,
@@ -146,6 +85,12 @@ impl ConversionManager {
         let progress = Arc::new(ConversionProgressTracker::new());
         Self {
             setup: super::setup::SetupOwner::new(launcher_root.clone()),
+            base_readiness: super::readiness::ProbeOwner::new(
+                scripts::venv_python(&launcher_root),
+                "base conversion",
+                super::readiness::BASE_CONVERSION_IMPORTS,
+                Vec::new(),
+            ),
             backend_setups,
             backend_probes,
             launcher_root,
@@ -162,32 +107,19 @@ impl ConversionManager {
     // Python conversion environment (existing)
     // -----------------------------------------------------------------------
 
-    /// Probe required imports with the conversion interpreter (bounded to five seconds).
-    /// This boolean surface reports unavailable inspection as not ready.
+    /// Caller-owned blocking import probe. Its five-second execution deadline
+    /// does not bound fail-closed cleanup. Finish synchronous calls before shutdown.
+    /// This boolean surface conservatively reports probe errors as not ready.
     pub fn is_environment_ready(&self) -> bool {
-        probe_conversion_environment(
-            &scripts::venv_python(&self.launcher_root),
-            ENVIRONMENT_PROBE_TIMEOUT,
-        )
-        .unwrap_or(false)
+        self.base_readiness.check_blocking().unwrap_or(false)
     }
 
-    /// Check if the Python conversion environment is ready on a blocking task.
+    /// Retained base import probe: overlapping callers share active work, later
+    /// reads are fresh. Missing interpreter/imports return false; execution,
+    /// signal, timeout and cleanup failures remain errors. Shutdown closes
+    /// admission with ConversionCancelled and drains admitted probes.
     pub async fn is_environment_ready_async(&self) -> Result<bool> {
-        let launcher_root = self.launcher_root.clone();
-        tokio::task::spawn_blocking(move || {
-            probe_conversion_environment(
-                &scripts::venv_python(&launcher_root),
-                ENVIRONMENT_PROBE_TIMEOUT,
-            )
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join conversion environment readiness task: {}",
-                err
-            ))
-        })?
+        self.base_readiness.check().await
     }
 
     /// Ensure the Python conversion environment is set up.
@@ -274,6 +206,7 @@ impl ConversionManager {
         // Close every owner before the first suspension; a held installer must
         // not leave other backends open to new setup while shutdown drains.
         self.setup.close();
+        self.base_readiness.close();
         for setup in &self.backend_setups {
             setup.close();
         }
@@ -281,6 +214,9 @@ impl ConversionManager {
             probe.close();
         }
         let mut failures = Vec::new();
+        if let Err(error) = self.base_readiness.shutdown().await {
+            failures.push(error.to_string());
+        }
         if let Err(error) = self.setup.shutdown().await {
             failures.push(error.to_string());
         }
@@ -1050,13 +986,17 @@ mod environment_tests {
     fn readiness_probe_times_out_and_reaps_the_interpreter() {
         let root = tempfile::TempDir::new().unwrap();
         let python = root.path().join("python");
-        executable(
-            &python,
-            "#!/bin/sh\necho $$ > \"$0.pid\"\nwhile :; do :; done\n",
-        );
-        assert!(
-            !probe_conversion_environment(&python, std::time::Duration::from_millis(100)).unwrap()
-        );
+        executable(&python, "#!/bin/sh\necho $$ > \"$0.pid\"\nexec sleep 10\n");
+        assert!(matches!(
+            super::super::backend_setup::imports_ready(
+                &python,
+                "base conversion",
+                super::super::readiness::BASE_CONVERSION_IMPORTS,
+                &CancellationToken::new(),
+                std::time::Duration::from_millis(100)
+            ),
+            Err(super::super::setup::Failure::Failed(_))
+        ));
         #[cfg(target_os = "linux")]
         {
             let pid = std::fs::read_to_string(root.path().join("python.pid")).unwrap();
@@ -1065,14 +1005,14 @@ mod environment_tests {
     }
 
     #[tokio::test]
-    async fn readiness_preserves_interpreter_spawn_io_failure() {
+    async fn readiness_preserves_interpreter_spawn_failure() {
         let root = tempfile::TempDir::new().unwrap();
         let manager = manager(root.path()).await;
         let python = scripts::venv_python(root.path());
         std::fs::create_dir_all(&python).unwrap();
         assert!(matches!(
             manager.is_environment_ready_async().await,
-            Err(PumasError::Io { .. })
+            Err(PumasError::ConversionFailed { .. })
         ));
         assert!(!manager.is_environment_ready());
     }

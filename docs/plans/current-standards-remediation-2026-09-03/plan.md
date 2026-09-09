@@ -293,7 +293,9 @@ is also accepted with generated request/response validation and controlled
 RPC/preload/typed-consumer evidence.
 [Managed setup-versus-conversion exclusion](frontend-and-ui/plan.md#managed-setup-and-conversion-exclusion)
 is accepted through retained cleanup/publication/indexing within a stable root.
-Base-format readiness probing is next; independent probes, direct backend calls
+[Retained base-format readiness](frontend-and-ui/plan.md#retained-base-format-readiness)
+is accepted with explicit probe failures and aggregate shutdown. Native source/build
+revision coherence is next; independent probes, direct backend calls
 and external tools still need caller coordination. FE-I28 records an unrelated
 download-fixture timeout discovered during verification, not a diagnosed fix.
 Stronger containment and remaining preflight remain prerequisites before GUI configuration

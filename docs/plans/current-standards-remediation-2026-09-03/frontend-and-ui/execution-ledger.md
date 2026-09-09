@@ -1,5 +1,70 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Retained Base-Format Readiness
+
+Accepted BPROBE. Base Python readiness now uses the same retained ProbeOwner
+mechanism as quantization readiness. Overlapping reads share active work, later
+reads refresh and aggregate setup shutdown closes/drains the base probe along
+with every setup/quantization probe owner before runtime shutdown. The raw child
+poll/kill loop and per-request detached blocking path were removed. The existing
+synchronous boolean remains caller-owned and conservative on error.
+
+The unchanged base import specification is owned once in readiness. Base setup
+uses it through the existing synchronous import runner inside its retained
+blocking installer, with setup cancellation and its own named five-second
+budget. It does not enter the public ProbeOwner or occupy a nested blocking-pool
+slot. Shared runner cleanup now applies during setup probes as well as public
+reads; cancellation cannot proceed to pip after a held import check.
+
+Missing-command/ENOENT and normal nonzero import exits remain false. Signal,
+deadline, other spawn and cleanup failures now remain `ConversionFailed`, rather
+than false or an internal I/O error; closed/cancelled async reads return
+`ConversionCancelled`. The existing RPC envelope projects redacted operation
+failure (`-32003`) or cancellation (`-32004`), without changing method names,
+schemas or successful boolean payloads. This is an intentional classification
+correction, not compatibility fallback. Reads still do not install or acquire
+setup exclusion; independent setup/read coordination remains caller-owned.
+Cleanup can outlive the command budget. No new GUI or runtime dependency.
+
+The codebase-design skill kept lifecycle knowledge in the existing core owners.
+root_diagnostics implemented core; root_capability added the RPC dispatch
+regression; root integrated public docs, named the unchanged base setup budget,
+reviewed consumers and serialized formatting/Cargo. Independent core review by
+root_capability found no blockers in retained ownership, close-before-await
+shutdown, direct setup probing or failure classification. Three new public manager
+fixtures cover overlap/dropped readers and fresh imports; base read/setup held
+imports with dropped shutdown observation and all-owner closure on a one-thread
+blocking pool; and signal-failure retention. Existing timeout/spawn assertions
+now require explicit errors; Unix timeout coverage is retained. Linux fixtures
+also check foreground reaping, group quiescence and absence of pip continuation.
+Controlled shell interpreters do not execute real package imports or installs.
+
+Focused conversion tests passed 110/110, and actual RPC dispatch passed missing,
+normal nonzero, invalid executable, directory, signal and closed cases with
+exact correlated/redacted envelopes and no setup effects. Read-only inspection
+confirmed the optional conversion workflow catches readiness rejection and
+blocks mutation while its error is present; its existing hook/dialog tests
+passed 21/21. No GUI source or generated artifact changed, and no graphical
+workflow acceptance is inferred from these tests. Full core/RPC suites passed:
+1,476 default and 1,436 minimal tests, with 22 ignored in each configuration.
+Strict all-feature and minimal lint, workspace formatting and all five canonical
+plan checks passed. The existing unrelated FE-I28 download timeout remains open;
+these successful runs do not establish its cause or fix.
+
+Commands from `rust/`: focused `cargo test --offline --locked -p pumas-library
+--no-default-features conversion::`, RPC `cargo test --offline --locked
+-p pumas-rpc --no-default-features base_readiness_rpc`. Full tests use
+`cargo test --offline --locked -p pumas-library -p pumas-rpc` with and without
+`--no-default-features`. Strict `cargo clippy --offline --locked -p pumas-library
+-p pumas-rpc --all-targets` uses `--all-features` and `--no-default-features`,
+each with `-- -D warnings`; formatting uses `cargo fmt --all --check`.
+UI supporting check: `pnpm --dir frontend exec vitest run
+src/hooks/useModelConversionWorkflow.test.ts src/components/ModelConversionDialog.test.tsx`.
+Logs: `/tmp/pumas-base-readiness-*.log`. No real model/package/GPU, live library,
+release-artifact or Windows/macOS execution claim. Program acceptance stays partial.
+Next slice: native source/build revision coherence, before new quantization GUI
+mutations; independent probe/setup coordination remains outside this acceptance.
+
 ## 2026-09-08 — Managed Setup And Conversion Exclusion
 
 Accepted EXCL. Every managed direction now enters through WorkerOwner's

@@ -81,6 +81,19 @@ a canonical UUID and `in_progress`, `completed`, `failed` or `cancelled` state;
 terminal state follows owned cleanup. `None` means this manager has no recorded
 setup, not that Python is ready. Check readiness separately.
 
+`is_conversion_environment_ready()` shares an active base Python import probe
+between overlapping callers; later reads probe again. Missing interpreter or
+normal nonzero import exit returns `false`. Spawn, signal, deadline and cleanup
+failures return `ConversionFailed`; cancellation/closed admission returns
+`ConversionCancelled`. These are inspection failures, not authoritative
+not-ready answers. This replaces the former false-on-timeout/signal and internal
+I/O-error behavior. The five-second command budget does not bound cleanup time.
+Dropped readers leave work retained until observation or setup shutdown drains
+it. The synchronous manager boolean remains conservative on error and its
+caller must finish the invocation before shutdown. Neither read installs or
+acquires setup exclusion. Base setup uses the same import specification and
+command runner within its existing installer worker, not the public read owner.
+
 Starting without a previous ID returns retained work/results without retrying.
 To explicitly retry, pass the last observed terminal operation ID. Only that
 matching terminal record can be replaced; replaying the same retry request

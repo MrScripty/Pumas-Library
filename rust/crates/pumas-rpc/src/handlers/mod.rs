@@ -1300,6 +1300,127 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[tokio::test]
+    async fn base_readiness_rpc_distinguishes_not_ready_failure_and_closed_without_setup() {
+        async fn check(state: &Arc<AppState>, id: &str) -> Value {
+            let request = Bytes::from(
+                serde_json::to_vec(&json!({
+                    "jsonrpc": "2.0", "id": id,
+                    "method": "check_conversion_environment", "params": {},
+                }))
+                .unwrap(),
+            );
+            let response = handle_rpc(State(state.clone()), request)
+                .await
+                .into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(response.into_body(), 65_536)
+                .await
+                .unwrap();
+            serde_json::from_slice(&body).unwrap()
+        }
+
+        for kind in ["missing", "nonzero", "invalid", "directory", "signal"] {
+            let temp = TempDir::new().unwrap();
+            let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+            let python = temp.path().join("launcher-data/converter-venv/bin/python");
+            if kind == "directory" {
+                std::fs::create_dir_all(&python).unwrap();
+            } else if kind != "missing" {
+                std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+                let script = if kind == "invalid" {
+                    "private-invalid-executable".to_string()
+                } else {
+                    let terminal = if kind == "signal" {
+                        "kill -TERM $$"
+                    } else {
+                        "exit 3"
+                    };
+                    format!(
+                        r#"#!/bin/sh
+if test "$#" = 4 && test "$1" = '-I' && test "$2" = '-B' && test "$3" = '-c' && test "$4" = 'import numpy, sentencepiece; from gguf import GGUFReader, GGUFWriter; from safetensors import safe_open; from safetensors.numpy import save_file'; then
+ printf 'probe\n' >> "$0.probes"
+ printf 'private-probe-diagnostic\n' >&2
+ {terminal}
+fi
+printf 'rejected\n' >> "$0.rejected"
+exit 9
+"#
+                    )
+                };
+                // A separate writer owns the writable executable descriptor;
+                // unrelated parallel test forks cannot inherit it (ETXTBSY).
+                let written = std::process::Command::new("/bin/sh")
+                    .args([
+                        "-c",
+                        "printf '%s' \"$2\" > \"$1\" && chmod 700 \"$1\"",
+                        "fixture",
+                    ])
+                    .arg(&python)
+                    .arg(script)
+                    .output()
+                    .unwrap();
+                assert!(
+                    written.status.success(),
+                    "fixture executable writer completed"
+                );
+            }
+            let request_id = format!("base-probe-{kind}");
+            let response = check(&state, &request_id).await;
+            let failed = matches!(kind, "invalid" | "directory" | "signal");
+            let expected = if failed {
+                json!({"jsonrpc":"2.0", "id":request_id, "error": {
+                    "code":-32003, "message":"The requested operation failed.",
+                    "data":{"class":"operation_failed"},
+                }})
+            } else {
+                json!({"jsonrpc":"2.0", "id":request_id, "result":{"success":true,"ready":false}})
+            };
+            assert_eq!(response, expected, "{kind}");
+            assert!(!response.to_string().contains("private-"));
+            assert!(!response
+                .to_string()
+                .contains(&temp.path().to_string_lossy().to_string()));
+            if matches!(kind, "nonzero" | "signal") {
+                assert_eq!(
+                    std::fs::read_to_string(python.with_file_name("python.probes")).unwrap(),
+                    "probe\n"
+                );
+                assert!(
+                    !python.with_file_name("python.rejected").exists(),
+                    "only the import probe may run"
+                );
+            }
+            assert_eq!(state.api.shutdown_conversion_setup().await.is_err(), failed);
+            let closed_id = format!("closed-{kind}");
+            assert_eq!(
+                check(&state, &closed_id).await,
+                json!({
+                    "jsonrpc":"2.0", "id":closed_id, "error": {
+                        "code":-32004, "message":"The requested operation did not complete.",
+                        "data":{"class":"cancelled"},
+                    },
+                })
+            );
+            for effect in [
+                "converter-scripts",
+                "conversion-setup.lock",
+                "llama-cpp",
+                "nvfp4",
+                "sherry",
+            ] {
+                assert!(
+                    !temp.path().join("launcher-data").join(effect).exists(),
+                    "probe must not create setup effect {effect}"
+                );
+            }
+            if kind == "missing" {
+                assert!(!temp.path().join("launcher-data/converter-venv").exists());
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
     async fn backend_setup_rpc_admission_reuses_receipts_and_requires_explicit_retry() {
         async fn rpc(state: &Arc<AppState>, method: &str, params: Value) -> Value {
             let body = Bytes::from(

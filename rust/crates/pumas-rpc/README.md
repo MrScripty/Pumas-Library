@@ -31,6 +31,13 @@ Direct backend execution, independent readiness probes and external tool users
 remain caller-coordinated; see the [core contract](../pumas-core/README.md).
 Setup completion is not GPU or conversion readiness proof.
 
+`check_conversion_environment` uses the retained base Python readiness owner.
+Missing interpreter and normal nonzero import exit produce `ready: false`;
+infrastructure, signal, deadline and cleanup failures produce the existing
+redacted operation-failure error (`-32003`), not successful false or an internal
+I/O error. Closed/cancelled reads produce `-32004`. Successful payload shape is
+unchanged. Server shutdown drains these probes even if their request was dropped.
+
 Contract export includes `StartBackendSetupParams`, `GetBackendSetupParams`, and
 `backend_setup_request_probes` produced by the actual Rust command parser.
 Desktop decoding and user-interface integration require their own consumer evidence.

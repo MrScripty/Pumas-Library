@@ -15,6 +15,7 @@ use crate::{PumasError, Result};
 
 type Outcome = std::result::Result<bool, Failure>;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+pub(super) const BASE_CONVERSION_IMPORTS: &str = "import numpy, sentencepiece; from gguf import GGUFReader, GGUFWriter; from safetensors import safe_open; from safetensors.numpy import save_file";
 
 pub(super) fn usable_artifact(metadata: &std::fs::Metadata, executable: bool) -> bool {
     if !metadata.is_file() || metadata.len() == 0 {

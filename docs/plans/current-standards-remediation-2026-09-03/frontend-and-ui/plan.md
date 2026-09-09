@@ -10,7 +10,8 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Modernize base-format readiness probing (FE-I26, remaining FE-I23).
+**Next slice:** Native source/build revision coherence (FE-I26, remaining FE-I23).
+Retained base-format readiness is accepted below.
 Managed setup-versus-conversion exclusion is accepted below. Backend setup
 observation/retry is accepted through standalone
 Rust, RPC and the optional desktop bridge below. Native llama.cpp artifact verification/guarded repair
@@ -42,6 +43,60 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Retained Base-Format Readiness
+
+Status: `Accepted`; see the
+[execution ledger](execution-ledger.md#2026-09-08--retained-base-format-readiness).
+Replace the base Python probe's raw child loop and unretained
+blocking task with the existing ProbeOwner mechanism. Overlapping reads share
+active work; later reads refresh, and setup shutdown closes/drains the base
+probe alongside quantization probes before runtime shutdown. The synchronous
+boolean surface remains caller-owned and conservative on inspection failure.
+Missing interpreter or normal nonzero import exit means not ready; signal,
+timeout, spawn and cleanup failures become `ConversionFailed`, not false.
+Closed/cancelled async reads return `ConversionCancelled`. This intentionally
+aligns base error classification with quantization probes, including RPC
+operation-failure/cancellation codes instead of an internal I/O error or false.
+No payload schema, method name or boolean-success shape changes.
+
+Base setup invokes the shared synchronous import runner directly inside its
+retained setup worker, with its cancellation token and existing five-second
+budget. It does not enter the public probe owner or nest blocking-pool work.
+Keep one unchanged base import specification, no independent installer/probe
+state projection, no installs from reads and no new setup/probe exclusion claim.
+
+Exact write set: core `src/conversion/{manager.rs,readiness.rs,setup.rs,
+manager/probe_tests.rs}`, `src/api/conversion.rs`, `README.md`; RPC
+`src/handlers/mod.rs` and `README.md`; this plan, its ledger/issues and parent
+plan. root_diagnostics owns the conversion source/tests; root_capability may own
+only the RPC dispatch regression. Root owns facade/README/plan records, serial
+Cargo/fmt, review and commits. Reports use messages; scope changes return to root.
+No GUI/generated output, dependencies, real packages/models/GPU, live data,
+release work or unrelated file edits.
+
+Composed-design review: applicable. Public read lifecycle belongs to ProbeOwner;
+installer repair belongs to SetupOwner. Only imports and the existing command
+runner are shared. Admission/cleanup order is required; observation request
+lifetime is not process lifetime. Callers retain the same aggregate shutdown
+obligation and need no new runtime or manager handle. Probe lifecycle changes
+stay in readiness; installation changes stay in setup; import changes have one
+specification owner. Dependencies carry import text, paths and cancellation,
+not another owner's state. Read and setup results remain independently testable
+and cannot authorize one another. Deleting retained base ownership would return
+cleanup/observation obligations to every caller. Reusing the current owner and
+runner replaces the raw loop without adding a registry, scheduler or fallback.
+
+Acceptance BPROBE (satisfied): automated focused/integration simulated Linux
+fixtures through public manager reads prove overlap/drop/fresh results,
+signal/timeout/spawn error distinctions, shutdown cancellation and closed
+admission, no installation effects and observed process cleanup. Existing owner
+and setup tests support one-blocking-thread and retained setup cancellation.
+Actual RPC dispatch proves false versus redacted failure/cancellation rather
+than successful false on infrastructure failure. Core/RPC default/minimal tests,
+strict lint, formatting and plan checks passed as supporting gates. No real imports,
+GUI or Windows/macOS acceptance. Re-plan for changed imports, new lifecycle
+machinery, setup/probe locking or an incompatible downstream error consumer.
 
 ## Managed Setup And Conversion Exclusion
 

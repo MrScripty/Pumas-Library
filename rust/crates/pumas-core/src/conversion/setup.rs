@@ -13,13 +13,12 @@ use futures::FutureExt;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use super::{
-    manager::probe_conversion_environment, scripts, ConversionSetupSnapshot, ConversionSetupStatus,
-};
+use super::{scripts, ConversionSetupSnapshot, ConversionSetupStatus};
 use crate::cancel::CancellationToken;
 use crate::{PumasError, Result};
 
 pub(super) const COMMAND_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const BASE_IMPORT_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 #[derive(Clone, Debug)]
@@ -523,9 +522,13 @@ fn execute_with_lease(root: &Path, cancel: &CancellationToken) -> Outcome {
     scripts::ensure_scripts_deployed_blocking(root)
         .map_err(|e| failed("Deploying conversion scripts", e))?;
     let python = scripts::venv_python(root);
-    if probe_conversion_environment(&python, Duration::from_secs(5))
-        .map_err(|e| failed("Checking conversion imports", e))?
-    {
+    if super::backend_setup::imports_ready(
+        &python,
+        "base conversion",
+        super::readiness::BASE_CONVERSION_IMPORTS,
+        cancel,
+        BASE_IMPORT_PROBE_TIMEOUT,
+    )? {
         return check_cancel(cancel);
     }
     check_cancel(cancel)?;
@@ -556,9 +559,13 @@ fn execute_with_lease(root: &Path, cancel: &CancellationToken) -> Outcome {
         ));
     }
     check_cancel(cancel)?;
-    if !probe_conversion_environment(&python, Duration::from_secs(5))
-        .map_err(|e| failed("Checking conversion imports", e))?
-    {
+    if !super::backend_setup::imports_ready(
+        &python,
+        "base conversion",
+        super::readiness::BASE_CONVERSION_IMPORTS,
+        cancel,
+        BASE_IMPORT_PROBE_TIMEOUT,
+    )? {
         return Err(Failure::Failed(
             "Conversion dependencies were installed but required imports are not ready".into(),
         ));

@@ -49,6 +49,13 @@ impl PumasApi {
     }
 
     /// Check if the Python conversion environment is ready.
+    /// Overlapping reads share a retained probe; later reads refresh its result.
+    /// Missing interpreter or normal nonzero import exit returns false. Probe
+    /// infrastructure, signal, deadline or cleanup failure returns `ConversionFailed`;
+    /// closed/cancelled admission returns `ConversionCancelled`. Dropped callers
+    /// do not detach work; `shutdown_conversion_setup` drains it before runtime
+    /// shutdown. The five-second command budget does not bound cleanup time.
+    /// Reads do not install and callers must coordinate them with setup.
     pub async fn is_conversion_environment_ready(&self) -> Result<bool> {
         self.primary()
             .conversion_manager
@@ -114,7 +121,7 @@ impl PumasApi {
         self.primary().conversion_manager.get_backend_setup(backend)
     }
 
-    /// Close base Python setup and built-in quantization setup/probe admission,
+    /// Close base Python and built-in quantization setup/probe admission,
     /// then await cleanup. Finish caller-owned synchronous readiness calls first.
     /// Invoke before stopping the hosting runtime. Successful cancellation and
     /// cleanup return success; repeated calls preserve setup/probe failures.

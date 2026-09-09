@@ -10,11 +10,11 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound runtime-version removal responses (M4): inventory the exact
-`remove_version` boolean producer, filesystem/metadata mutation boundary and
-frontend confirmation consumer before selecting the projection. Preserve optional
-inference-plugin builds, standalone backend operation and existing refresh/error
-behavior; no runtime removal.
+**Next slice:** Bound runtime-version switching responses (M4): independently
+inventory the active-selection mutation, exact boolean producer and actual
+frontend refresh consumer before selecting the projection. Preserve optional
+inference-plugin builds, standalone backend operation and existing error behavior;
+do not switch a live runtime.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -69,6 +69,41 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Runtime-Version Removal Response Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-09--runtime-version-removal-response-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Project `remove_version` as its own exact required success-boolean record. The
+manager currently returns only true or an error; retain false as valid legacy
+wire without conflating removal with cancellation. Do not add error/message/result
+fields. Missing managers remain unavailable RPC errors rather than FE-I34 empty
+facts. Missing and active versions also remain errors.
+
+True means the manager awaited directory inspection/removal, installed-metadata
+removal and state refresh. It does not prove atomicity, crash durability, process
+shutdown or absence of partial effects when a later step errors. The refresh can
+also normalize legacy llama.cpp SYCL state. FE-I36 retains the separate active-
+check race and nontransactional partial-effect risk; this response slice changes
+no app-manager algorithm or live runtime.
+
+The typed RPC outcome owns serialization and generated schema; preload decodes
+before exposing the interface. The hook removes its invented error field, treats
+false as the existing generic removal failure, and awaits its existing versions
+refresh after true. False, malformed and transport failures do not refresh.
+A rejecting supplied refresh callback after accepted removal propagates without
+retrying the mutation. The current
+`useVersions` refresh readers catch their own failures, retain prior state and
+set error state, so true does not prove every refreshed read succeeded.
+
+Acceptance: literal true/false prior-wrapper parity; actual missing-manager and
+no-plugin RPC errors; producer true/false serialization fixtures; generated
+decoder, bundled preload and actual hook conformance with exact one-call evidence;
+deferred refresh, false and post-removal refresh-failure hook tests; frontend,
+Electron, generator, Rust static/toolchain and canonical-plan checks. Automated
+local contract/integration only, not live removal, graphical, concurrent, crash,
+filesystem-failure, process-stop, network or other-OS evidence.
 
 ## Runtime Installation-Cancellation Response Contract
 

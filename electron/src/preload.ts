@@ -51,6 +51,7 @@ import {
   decodeValidateInstallationsOutcome,
   decodeInstallationProgressOutcome,
   decodeCancelInstallationOutcome,
+  decodeRemoveVersionOutcome,
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
@@ -526,7 +527,7 @@ const electronAPI = {
   install_version: (tag: string, appId?: string) =>
     apiCall('install_version', { tag, app_id: appId }),
   remove_version: (tag: string, appId?: string) =>
-    apiCall('remove_version', { tag, app_id: appId }),
+    validatedApiCall('remove_version', decodeRemoveVersionOutcome, { tag, app_id: appId }),
   switch_version: (tag: string, appId?: string) =>
     apiCall('switch_version', { tag, app_id: appId }),
   validate_installations: (appId?: string) =>

@@ -11,6 +11,21 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('runtime removal rejects malformed confirmation without retry', async () => {
+  const harness = loadCompiledPreload();
+  for (const response of [null, true, false, {}, { success: null }, { success: 'true' },
+    { success: true, error: 'invented' }, { success: false, result: false }]) {
+    harness.respondWith(response);
+    await assert.rejects(harness.api.remove_version('v1.2.3', 'ollama'), { name: 'DesktopContractError' });
+  }
+  for (const success of [true, false]) {
+    const response = { success };
+    harness.respondWith(response);
+    assert.deepEqual(toPlainValue(await harness.api.remove_version('v1.2.3', 'ollama')), response);
+  }
+  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'remove_version').length, 10);
+});
+
 test('installation cancellation rejects malformed confirmation without retry', async () => {
   const harness = loadCompiledPreload();
   for (const response of [null, true, false, {}, { success: null }, { success: 'true' },

@@ -476,6 +476,8 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         serde_json::to_value(CancelInstallationOutcome::new(true))?;
     fixtures["cancel_installation_false"] =
         serde_json::to_value(CancelInstallationOutcome::new(false))?;
+    fixtures["remove_version_true"] = serde_json::to_value(RemoveVersionOutcome::new(true))?;
+    fixtures["remove_version_false"] = serde_json::to_value(RemoveVersionOutcome::new(false))?;
     fixtures["validate_installations_populated"] =
         serde_json::to_value(validate_installations_fixture())?;
     fixtures["installation_progress_populated"] = serde_json::to_value(
@@ -594,6 +596,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         BackendStatusOutcome,
         SuccessOutcome,
         CancelInstallationOutcome,
+        RemoveVersionOutcome,
     );
     Ok(serde_json::json!({
         "format": "pumas-desktop-contract-1",

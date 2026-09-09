@@ -1,5 +1,63 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-09 — Runtime-Version Removal Response Contract
+
+Accepted `remove_version` as a dedicated generated success-boolean record. The
+app manager currently returns only true or an error; literal false remains valid
+legacy wrapped wire without borrowing cancellation semantics. Missing managers
+remain unavailable RPC errors, missing installed tags remain not-found errors and
+active versions remain rejected. True follows awaited directory inspection/
+deletion, metadata removal (including matching default/last-selected clearing)
+and state refresh, but does not prove atomicity, crash
+durability, process shutdown or rollback after a later failure.
+
+Typed RPC dispatch now owns serialization and the generated decoder rejects
+malformed or invented fields before renderer exposure. The hook removed its
+invented optional error field, awaits its supplied refresh callback after true,
+and never refreshes after false or malformed replies. A rejecting callback
+propagates without repeating removal. The actual `useVersions` readers catch
+their own failures, retain prior values and expose error state, so a true hook
+result does not prove every follow-up read succeeded. The current callback reads
+installed, active and comprehensive status; it does not call the separate default-
+version reader directly.
+
+Evidence: two focused RPC tests pass with default and no-default features,
+covering literal wrapper parity plus actual unavailable/method-not-supported
+outcomes. Thirty-one generated-decoder tests and 40 actual bundled-preload/
+renderer conformance tests pass. Thirty-two of 33 bundled-preload tests pass,
+with the existing real-Electron sandbox test skipped. Sixteen focused hook tests,
+TypeScript, affected lint, Electron and both frontend builds, seven generator
+tests/freshness, strict RPC Clippy in both feature modes, formatting and diff
+checks pass. No runtime was removed; fixtures prove serialization only.
+
+FE-I36 records the existing active-check race and sequential partial-effect risk.
+FE-I37 records unbounded tag/path request admission before recursive deletion.
+Neither producer issue is changed in this response-only slice. PostgreSQL port
+5433 remained unavailable, so cost deduplication used `/tmp` artifacts rather
+than a repository journal. Model-routing records include an initial full-history
+fork mistake whose requested overrides did not apply; those helpers are charged
+as actual Sol low, not mislabeled. Correct bounded Astra medium and Luna max
+checks followed. Spark was not exposed. Current official rate pages corroborate
+the recorded Sol/Luna/Astra token rates, cache-write multiplier and Astra
+high-context threshold; estimates remain API-equivalent, not invoices.
+
+Deduplicated `token_usage_record` checkpoint through the root record at
+`2026-09-09T19:05` carries the prior uncounted reporting tail and this slice:
+Sol low `$11.5853` (including `$1.8801` prior tail and `$5.6878` from four
+misrouted helpers), Astra medium `$0.8556`, and Luna max `$0.0897`; subtotal
+`$12.5307` standard API-equivalent or `$25.0613` under the separately requested
+2x priority scenario. Added to the prior accepted `$5.3591` checkpoint, the
+cumulative estimate is `$17.8898` standard / `$35.7795` priority scenario.
+No request crossed 272,000 input tokens and cache writes were zero. Requested
+service tier was not recorded; corrected Astra/Luna responses report observed
+`default`, while Sol records omit an observed tier. Tool/search fees and actual
+invoice treatment remain unknown shared costs, not zero or arbitrarily allocated.
+
+Independent review found no code blocker and prompted the refresh-propagation
+precision repair above. Astra made the contract decision; Luna independently
+confirmed the operation inventory. Next: independently inventory and validate
+`switch_version`; M4 and overall remediation remain incomplete.
+
 ## 2026-09-09 — Runtime Installation-Cancellation Response Contract
 
 Accepted `cancel_installation` as the exact existing success-boolean record with

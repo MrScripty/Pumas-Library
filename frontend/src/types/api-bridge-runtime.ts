@@ -47,6 +47,7 @@ import type {
   GetInstalledVersionsResponse,
   GetVersionInfoResponse,
   InstallationProgressResponse,
+  RemoveVersionResponse,
   ResetBackgroundFetchFlagResponse,
   SetDefaultVersionResponse,
   ValidateInstallationsResponse,
@@ -73,7 +74,7 @@ export interface DesktopBridgeRuntimeAPI {
   get_installed_versions(appId?: string): Promise<GetInstalledVersionsResponse>;
   get_active_version(appId?: string): Promise<GetActiveVersionResponse>;
   install_version(tag: string, appId?: string): Promise<VersionActionResponse>;
-  remove_version(tag: string, appId?: string): Promise<VersionActionResponse>;
+  remove_version(tag: string, appId?: string): Promise<RemoveVersionResponse>;
   switch_version(tag: string, appId?: string): Promise<VersionActionResponse>;
   validate_installations(appId?: string): Promise<ValidateInstallationsResponse>;
   get_version_info(tag: string, appId?: string): Promise<GetVersionInfoResponse>;

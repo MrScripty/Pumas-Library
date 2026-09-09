@@ -1,5 +1,16 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-09 — Runtime-Version Removal Response Contract
+
+The frontend plan accepts a dedicated typed/generated `remove_version` outcome
+through RPC, preload and the actual hook. True follows the existing sequential
+manager removal and refresh; malformed, false and post-confirmation refresh
+failures do not retry the destructive request. Missing managers remain errors.
+See the [frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-09--runtime-version-removal-response-contract)
+for verification, review, routing/cost evidence and the separate FE-I36/FE-I37
+producer risks. No live runtime was removed. This does not close M4 or the
+remediation program. Next: runtime-version switching response validation.
+
 ## 2026-09-08 — Comprehensive Runtime-Version Status Response Contract
 
 The frontend plan accepts generated `get_version_status` decoding from typed RPC

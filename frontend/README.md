@@ -127,6 +127,15 @@ worker has stopped. False confirmations remain visible failures; malformed
 confirmations reject after one request and are never retried. A false no-manager
 result does not establish runtime availability.
 
+Runtime-version removal validates its own generated success-boolean outcome.
+Success is returned only after the backend removal method completes and the hook
+awaits its version refresh. False or malformed confirmations do not refresh, and
+a rejecting refresh callback after accepted removal never retries the destructive
+request. Current refresh readers can retain prior values and expose their own
+error state without rejecting, so success does not prove every read refreshed.
+Backend removal is sequential rather than transactional, so an error must not be
+interpreted as proof that no removal effect occurred.
+
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.
 Malformed responses cannot enter the modal; nested values display without

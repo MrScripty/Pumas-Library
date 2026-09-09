@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 9c8c7e1f6d9ce2c76c2fce17f220569458881bf9574734e36db8317a4039da71. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 5b3ef3a95fbbdb34c15e10e334f6409e4efecbd07a62ac6adb6ff689367330cd. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -29,6 +29,7 @@ export declare function validateModelsOutcome(value: unknown): boolean;
 export declare function validatePartialDownloadOutcome(value: unknown): boolean;
 export declare function validatePublicError(value: unknown): boolean;
 export declare function validateRecoverDownloadParams(value: unknown): boolean;
+export declare function validateRemoveVersionOutcome(value: unknown): boolean;
 export declare function validateSearchCatalogParams(value: unknown): boolean;
 export declare function validateSelectedVersionOutcome(value: unknown): boolean;
 export declare function validateStartBackendSetupParams(value: unknown): boolean;

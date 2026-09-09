@@ -407,7 +407,7 @@ export function useInstallationManager({
     try {
       const result = await api.remove_version(tag, resolvedAppId);
       if (!result.success) {
-        throw new APIError(result.error || 'Failed to remove version', 'remove_version');
+        throw new APIError('Failed to remove version', 'remove_version');
       }
       await onRefreshVersions();
       return true;

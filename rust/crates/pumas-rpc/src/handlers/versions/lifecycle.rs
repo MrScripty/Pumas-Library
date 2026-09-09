@@ -93,12 +93,15 @@ pub async fn install_version(state: &AppState, params: &Value) -> pumas_library:
     }
 }
 
-pub async fn remove_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
+pub async fn remove_version(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<crate::contract::RemoveVersionOutcome> {
     let tag = require_str_param(params, "tag", "tag")?;
     let app_id_str = require_str_param(params, "app_id", "appId")?;
     let vm = require_version_manager(state, app_id_str).await?;
     let result = vm.remove_version(&tag).await?;
-    Ok(serde_json::to_value(result)?)
+    Ok(crate::contract::RemoveVersionOutcome::new(result))
 }
 
 pub async fn cancel_installation(

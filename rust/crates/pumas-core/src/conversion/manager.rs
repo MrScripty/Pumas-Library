@@ -573,12 +573,7 @@ impl ConversionManager {
                 message: format!("No {} backend registered", backend_name),
             })?;
 
-        super::targets::validate_target(backend.as_ref(), &quant_type)?;
-        if force_imatrix && backend_id != QuantBackend::LlamaCpp {
-            return Err(PumasError::InvalidParams {
-                message: "force_imatrix is only supported by llama.cpp".into(),
-            });
-        }
+        super::options::validate_options(backend.as_ref(), &quant_type, force_imatrix)?;
         if backend_id == QuantBackend::LlamaCpp
             && (force_imatrix || quant_type.starts_with("IQ"))
             && calibration_file.is_none()

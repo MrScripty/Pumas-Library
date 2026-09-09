@@ -107,7 +107,7 @@ impl QuantizationBackend for Nvfp4Backend {
         progress: &ConversionProgressTracker,
         cancel_token: &CancellationToken,
     ) -> Result<PathBuf> {
-        super::targets::validate_target(self, &params.target_quant)?;
+        super::options::validate_options(self, &params.target_quant, params.force_imatrix)?;
         let conversion_id = &params.conversion_id;
 
         // -- PHASE 1: GATHER --

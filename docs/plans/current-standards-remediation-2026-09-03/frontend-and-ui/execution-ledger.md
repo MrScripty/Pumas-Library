@@ -1,5 +1,48 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Direct Importance-Matrix Option Validation
+
+Accepted direct importance-matrix option validation. The shared check now rejects `force_imatrix=true` outside llama.cpp,
+using the existing managed `InvalidParams` message. It validates the exact
+backend-qualified target first, preserving error precedence. NVFP4 and Sherry
+can no longer ignore forced-matrix requests; false remains accepted. llama.cpp
+IQ/forced calibration requirements and supplied-file/execution policy are
+unchanged. All three direct entries validate first; managed admission invokes
+the same check after backend resolution and before its calibration checks.
+
+Root renamed the private `targets` Module to `options` and extended its existing
+Interface rather than creating a separate flag validator, following the
+codebase-design skill. Catalog providers retain authority. No new public trait,
+schema, GUI, runtime or dependency. root_diagnostics supplied focused tests;
+root_capability reviewed actual call sites, policy ordering and evidence without
+blockers. Root owned source integration, docs and serial verification.
+
+Before repair, `cargo test --offline --locked -p pumas-library --lib
+forced_imatrix` failed: NVFP4 reported an environment error instead of rejecting
+the unsupported option. The llama.cpp control passed. After repair,
+`cargo test --offline --locked -p pumas-library --lib imatrix` passed all three
+selected tests, including the existing successful simulated llama.cpp pipeline.
+New tests cover both rejecting backends with/without calibration and unchanged
+files/progress. The positive llama.cpp option test reaches existing source
+validation; it alone does not prove native execution. Existing all-catalog tests
+cover nonforced acceptance. Target-first precedence follows the pure check's
+branch ordering, rather than a new combined-invalid-input test.
+
+From `rust/`, `cargo test --offline --locked -p pumas-library
+--no-default-features conversion::` passed 126 top-level tests plus the marker
+child invocation. `cargo test --offline --locked -p pumas-library -p pumas-rpc
+-- --quiet` passed 1,495 executions (including that extra child), with 22 ignored
+and zero failures. Logs: `/tmp/pumas-direct-imatrix-{minimal,default}.log`.
+Strict lint passed with `cargo clippy --offline --locked -p pumas-library -p
+pumas-rpc --all-targets --all-features -- -D warnings`. Formatting and all five
+canonical plan checks passed. FE-I28/FE-I29 did not recur.
+
+No model, live tool/GPU, GUI workflow or Windows/macOS evidence is inferred.
+Next is source-file discovery: extension-only matching currently accepts
+directories as candidates, and llama.cpp's boolean discovery masks inspection
+errors. Bound shared consumers before repair. FE-I28/FE-I29 and remaining FE-I26
+claims stay open; Pending download cleanup replay remains unadmitted.
+
 ## 2026-09-08 — Direct Quantization Target Validation
 
 Accepted direct target validation. The managed exact, backend-qualified catalog check is now shared with

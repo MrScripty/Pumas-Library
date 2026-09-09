@@ -10,10 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Direct importance-matrix option validation (FE-I26, remaining FE-I23).
-Align direct option handling with managed rejection of `force_imatrix` outside
-llama.cpp; direct NVFP4/Sherry currently ignore it. Exact target validation and
-shared supplied-calibration preflight are accepted below;
+**Next slice:** Quantization source-file discovery (FE-I26, remaining FE-I23).
+Bound shared discovery consumers, reject extension-matching directories as model
+files, and preserve inspection errors instead of reporting absence. Direct
+importance-matrix options, exact targets and supplied-calibration preflight are accepted below;
 content quality and immutable input custody remain outside that bounded check.
 FE-I28 remains open on recurrence: accepted test-only admission
 diagnostics below improve the next failing wait, without establishing its cause.
@@ -54,6 +54,33 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Direct Importance-Matrix Option Validation
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--direct-importance-matrix-option-validation).
+Move managed `force_imatrix` backend applicability into the
+shared pure option check: valid targets on NVFP4/Sherry with `force_imatrix=true`
+return the existing `InvalidParams` before direct filesystem/probe/progress
+effects. False remains accepted; llama.cpp retains its existing IQ/forced
+calibration requirements and execution behavior. Target rejection keeps precedence.
+
+Root owns core `src/conversion/{targets.rs -> options.rs,mod.rs,manager.rs,
+llama_cpp.rs,nvfp4.rs,sherry.rs,types.rs}`, core README and four plan documents.
+root_diagnostics owns `src/conversion/target_tests.rs`. Root serializes verification
+and commits. No public type/schema/GUI/runtime/dependency changes. Direct option
+regressions must fail before repair and pass after; existing managed checks and
+valid llama.cpp and nonforced catalog paths remain accepted. Run minimal
+conversion/full core-RPC tests, strict lint, formatting and plan checks; all passed.
+
+Composed-design review: applicable. Extend the existing private check to
+`validate_options(backend, target, force_imatrix)` rather than adding a separate
+one-flag Module. It owns target/applicability ordering and errors; catalogs stay
+with providers and calibration file/lifecycle policy stays with existing owners.
+Four callers gain the same pure policy, with no retained state or interleaving.
+Deleting it would restore duplicated policy. Re-plan for additional option
+semantics or native calibration/execution requirements. Acceptance is local
+automated fixtures, not real tools/models/hardware.
 
 ## Direct Quantization Target Validation
 

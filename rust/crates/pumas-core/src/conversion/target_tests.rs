@@ -1,4 +1,4 @@
-//! Direct backend target admission only; no native tools or model execution.
+//! Direct backend option admission only; no native tools or model execution.
 
 use std::path::Path;
 
@@ -134,6 +134,92 @@ async fn direct_backends_reject_invalid_targets_before_environment_progress_or_f
             );
         }
     }
+}
+
+#[tokio::test]
+async fn direct_non_llama_backends_reject_forced_imatrix_before_effects() {
+    for (id, target) in [
+        (QuantBackend::Nvfp4, "NVFP4"),
+        (QuantBackend::Sherry, "Sherry-1.25bit"),
+    ] {
+        for supplied in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let backend = backend(root.path(), id);
+            let mut params = params(root.path(), target);
+            params.force_imatrix = true;
+            std::fs::create_dir_all(&params.model_path).unwrap();
+            let source = params.model_path.join("weights.safetensors");
+            std::fs::write(&source, "fixture source").unwrap();
+            let calibration = root.path().join("calibration.txt");
+            if supplied {
+                std::fs::write(&calibration, "fixture calibration").unwrap();
+                params.calibration_file = Some(calibration.clone());
+            }
+            let progress = ConversionProgressTracker::new();
+            let initial = initial_progress(&params, id);
+            let expected_progress = serde_json::to_value(&initial).unwrap();
+            progress.insert(initial);
+            let error = backend
+                .quantize(&params, &progress, &CancellationToken::new())
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(&error, PumasError::InvalidParams { message } if message == "force_imatrix is only supported by llama.cpp"),
+                "{id:?}/calibration={supplied}: {error}"
+            );
+            assert!(!root.path().join("launcher-data").exists());
+            assert_eq!(
+                std::fs::read_dir(params.model_path.parent().unwrap())
+                    .unwrap()
+                    .count(),
+                1,
+                "no staging or published output"
+            );
+            assert_eq!(
+                std::fs::read_dir(root.path()).unwrap().count(),
+                if supplied { 2 } else { 1 }
+            );
+            assert_eq!(std::fs::read_dir(&params.model_path).unwrap().count(), 1);
+            assert_eq!(std::fs::read(source).unwrap(), b"fixture source");
+            if supplied {
+                assert_eq!(std::fs::read(calibration).unwrap(), b"fixture calibration");
+            }
+            assert_eq!(
+                serde_json::to_value(progress.get(&params.conversion_id).unwrap()).unwrap(),
+                expected_progress
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn llama_forced_imatrix_passes_options_and_reaches_missing_source_validation() {
+    let root = tempfile::tempdir().unwrap();
+    let backend = LlamaCppBackend::new(root.path());
+    let mut params = params(root.path(), "Q4_K_M");
+    params.force_imatrix = true;
+    let calibration = root.path().join("calibration.txt");
+    std::fs::write(&calibration, "fixture calibration").unwrap();
+    params.calibration_file = Some(calibration.clone());
+    let error = backend
+        .quantize(
+            &params,
+            &ConversionProgressTracker::new(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap_err();
+    let expected = format!(
+        "No safetensors or GGUF files found in {}",
+        params.model_path.display()
+    );
+    assert!(
+        matches!(&error, PumasError::ConversionFailed { message } if message == &expected),
+        "{error}"
+    );
+    assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+    assert_eq!(std::fs::read(calibration).unwrap(), b"fixture calibration");
+    backend.shutdown_setup().await.unwrap();
 }
 
 #[tokio::test]

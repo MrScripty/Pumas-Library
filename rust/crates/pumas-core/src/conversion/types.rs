@@ -371,6 +371,8 @@ pub trait QuantizationBackend: Send + Sync {
     /// backend-qualified catalog with `InvalidParams` before file inspection,
     /// readiness probes or execution effects. No aliases or case normalization
     /// are applied. Catalog membership does not establish tool/hardware support.
+    /// After target validation, built-ins also reject `force_imatrix=true`
+    /// outside llama.cpp with `InvalidParams`, before those same effects.
     ///
     /// # Preconditions
     /// - The selected route's environment must be available; `is_ready()` is

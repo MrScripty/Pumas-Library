@@ -304,8 +304,9 @@ are accepted; FE-I28 stays open on recurrence without a diagnosed cause.
 [Calibration-file preflight](frontend-and-ui/plan.md#calibration-file-preflight)
 is accepted for shared classification and a bounded open/read probe, not content
 quality or immutable custody. [Direct target validation](frontend-and-ui/plan.md#direct-quantization-target-validation)
-is accepted across built-in backends. Direct importance-matrix option validation
-is next under FE-I26. This does not admit Pending cleanup replay. FE-I29 retains a separate
+is accepted across built-in backends, as is [direct importance-matrix option validation](frontend-and-ui/plan.md#direct-importance-matrix-option-validation).
+Quantization source-file discovery is next under FE-I26. This does not admit
+Pending cleanup replay. FE-I29 retains a separate
 intermittent preflight-test failure despite fixture hardening.
 Independent probes, direct backend calls
 and external tools still need caller coordination. FE-I28 records an unrelated

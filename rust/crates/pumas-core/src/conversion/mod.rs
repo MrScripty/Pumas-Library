@@ -17,6 +17,7 @@ mod manager;
 mod native_process;
 mod native_setup;
 pub mod nvfp4;
+mod options;
 mod outputs;
 pub(crate) mod pipeline;
 pub(crate) mod progress;
@@ -27,7 +28,6 @@ mod setup;
 pub mod sherry;
 #[cfg(test)]
 mod target_tests;
-mod targets;
 mod types;
 mod workers;
 

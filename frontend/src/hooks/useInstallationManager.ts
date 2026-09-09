@@ -344,7 +344,7 @@ export function useInstallationManager({
     try {
       const result = await api.switch_version(tag, resolvedAppId);
       if (!result.success) {
-        throw new APIError(result.error || 'Failed to switch version', 'switch_version');
+        throw new APIError('Failed to switch version', 'switch_version');
       }
       await onRefreshVersions();
       return true;

@@ -54,12 +54,15 @@ pub async fn set_default_version(state: &AppState, params: &Value) -> pumas_libr
     Ok(serde_json::to_value(result)?)
 }
 
-pub async fn switch_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
+pub async fn switch_version(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<crate::contract::SwitchVersionOutcome> {
     let tag = require_str_param(params, "tag", "tag")?;
     let app_id_str = require_str_param(params, "app_id", "appId")?;
     let vm = require_version_manager(state, app_id_str).await?;
     let result = vm.set_active_version(&tag).await?;
-    Ok(serde_json::to_value(result)?)
+    Ok(crate::contract::SwitchVersionOutcome::new(result))
 }
 
 pub async fn install_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {

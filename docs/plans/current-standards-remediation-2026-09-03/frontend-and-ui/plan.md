@@ -10,11 +10,11 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound runtime-version switching responses (M4): independently
-inventory the active-selection mutation, exact boolean producer and actual
-frontend refresh consumer before selecting the projection. Preserve optional
-inference-plugin builds, standalone backend operation and existing error behavior;
-do not switch a live runtime.
+**Next slice:** Bound default runtime-version selection responses (M4): inventory
+the nullable-tag admission, metadata mutation, exact boolean producer and actual
+frontend consumer before selecting the projection. Preserve optional inference-
+plugin builds, standalone backend operation and existing error behavior; do not
+change a live default selection.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -69,6 +69,42 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Runtime-Version Switching Response Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-09--runtime-version-switching-response-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Project `switch_version` as its own exact required success-boolean record. The
+manager currently returns only true or an error; retain false as valid legacy
+wire without borrowing removal or cancellation semantics. Do not add error,
+message or result fields. Missing managers remain unavailable RPC errors;
+missing installed tags remain not-found errors.
+
+True means the state owner held its write lock while setting the in-memory active
+tag, writing the shared launcher-root `.active-version` marker and persisting the
+app-specific last-selected tag. It does not mean a runtime process was stopped,
+started, healthy or ready, and it does not prove atomicity, rollback or crash
+durability. FE-I38 retains the separate sequential partial-effect and shared-
+marker identity risk. This slice changes no app-manager algorithm or live runtime.
+
+The typed RPC outcome owns serialization and generated schema. Both the exposed
+preload method and its composed launch adapter decode the same outcome before
+use. False or malformed switching cannot proceed to launch or refresh and never
+retries selection; a later launch failure also does not retry. The hook removes
+its invented error field, uses the existing generic false error and awaits its
+refresh callback after true. A rejecting callback propagates without retry. The
+current refresh readers catch their own failures, retain prior state and expose
+error state, so true does not prove every follow-up read succeeded.
+
+Acceptance: literal true/false prior-wrapper parity; actual missing-manager and
+no-plugin RPC errors; true/false producer fixtures; generated decoder, bundled
+preload, composed-launch and actual hook conformance with exact call evidence;
+deferred refresh, false and post-switch refresh-failure hook tests; frontend,
+Electron, generator, Rust static/toolchain and canonical-plan checks. Automated
+local contract/integration only, not live switching, graphical, persistence-
+failure, concurrency, crash, process, runtime-readiness, network or other-OS
+evidence.
 
 ## Runtime-Version Removal Response Contract
 

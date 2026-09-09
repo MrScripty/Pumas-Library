@@ -52,6 +52,7 @@ import {
   decodeInstallationProgressOutcome,
   decodeCancelInstallationOutcome,
   decodeRemoveVersionOutcome,
+  decodeSwitchVersionOutcome,
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
@@ -465,7 +466,7 @@ async function launchAppVersion(
     return { success: false, error: 'An inference plugin app id is required' };
   }
   const resolvedAppId = appId;
-  const switchResult = await apiCall<BaseRpcResponse>('switch_version', {
+  const switchResult = await validatedApiCall('switch_version', decodeSwitchVersionOutcome, {
     tag: versionTag,
     app_id: resolvedAppId,
   });
@@ -473,7 +474,7 @@ async function launchAppVersion(
   if (!switchResult.success) {
     return {
       success: false,
-      error: switchResult.error ?? `Failed to switch ${resolvedAppId} to ${versionTag}`,
+      error: `Failed to switch ${resolvedAppId} to ${versionTag}`,
     };
   }
 
@@ -529,7 +530,7 @@ const electronAPI = {
   remove_version: (tag: string, appId?: string) =>
     validatedApiCall('remove_version', decodeRemoveVersionOutcome, { tag, app_id: appId }),
   switch_version: (tag: string, appId?: string) =>
-    apiCall('switch_version', { tag, app_id: appId }),
+    validatedApiCall('switch_version', decodeSwitchVersionOutcome, { tag, app_id: appId }),
   validate_installations: (appId?: string) =>
     validatedApiCall('validate_installations', decodeValidateInstallationsOutcome, { app_id: appId }),
   get_version_info: (tag: string, appId?: string) =>

@@ -11,6 +11,46 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('runtime switching rejects malformed confirmation without retry', async () => {
+  const harness = loadCompiledPreload();
+  for (const response of [null, true, false, {}, { success: null }, { success: 'true' },
+    { success: true, error: 'invented' }, { success: false, result: false }]) {
+    harness.respondWith(response);
+    await assert.rejects(harness.api.switch_version('v1.2.3', 'ollama'), { name: 'DesktopContractError' });
+  }
+  for (const success of [true, false]) {
+    const response = { success };
+    harness.respondWith(response);
+    assert.deepEqual(toPlainValue(await harness.api.switch_version('v1.2.3', 'ollama')), response);
+  }
+  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'switch_version').length, 10);
+});
+
+test('composed launch validates switching before launching and never retries selection', async () => {
+  const harness = loadCompiledPreload();
+  for (const response of [{ success: false }, { success: true, error: 'invented' }]) {
+    harness.respondWith(response);
+    if (response.success && 'error' in response) {
+      await assert.rejects(harness.api.launch_app('ollama', 'v1.2.3'), { name: 'DesktopContractError' });
+    } else {
+      assert.deepEqual(toPlainValue(await harness.api.launch_app('ollama', 'v1.2.3')), {
+        success: false, error: 'Failed to switch ollama to v1.2.3',
+      });
+    }
+  }
+  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'switch_version').length, 2);
+  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'launch_ollama').length, 0);
+
+  harness.respondWith((_, method) => method === 'switch_version'
+    ? { success: true }
+    : { success: false, error: 'launch failed' });
+  assert.deepEqual(toPlainValue(await harness.api.launch_version('v1.2.3', undefined, 'ollama')), {
+    success: false, error: 'launch failed',
+  });
+  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'switch_version').length, 3);
+  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'launch_ollama').length, 1);
+});
+
 test('runtime removal rejects malformed confirmation without retry', async () => {
   const harness = loadCompiledPreload();
   for (const response of [null, true, false, {}, { success: null }, { success: 'true' },
@@ -325,7 +365,9 @@ function loadCompiledPreload() {
       },
       invoke: async (...args) => {
         invocations.push(args);
-        return invocationResult;
+        return typeof invocationResult === 'function'
+          ? invocationResult(...args)
+          : invocationResult;
       },
       on: (channel, listener) => {
         const channelListeners = listeners.get(channel) ?? new Set();

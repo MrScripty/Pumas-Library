@@ -1,5 +1,15 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-09 — Runtime-Version Switching Response Contract
+
+The frontend plan accepts a dedicated typed/generated `switch_version` outcome
+through RPC, both preload consumers and the actual hook. False or malformed
+selection cannot proceed to launch or refresh, and later failures do not retry
+the mutation. See the [frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-09--runtime-version-switching-response-contract)
+for verification, review and FE-I38's separate producer risk. No live runtime
+was switched or launched. This does not close M4 or the remediation program.
+Next: default runtime-version selection response validation.
+
 ## 2026-09-09 — Runtime-Version Removal Response Contract
 
 The frontend plan accepts a dedicated typed/generated `remove_version` outcome

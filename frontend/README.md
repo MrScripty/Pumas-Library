@@ -136,6 +136,12 @@ error state without rejecting, so success does not prove every read refreshed.
 Backend removal is sequential rather than transactional, so an error must not be
 interpreted as proof that no removal effect occurred.
 
+Runtime-version switching validates its own generated success-boolean outcome in
+both the direct bridge method and the composed launch path. False or malformed
+confirmations cannot refresh or launch a runtime, and later refresh or launch
+failures never repeat selection. Success means the backend selection writes
+completed; it does not establish that a runtime process is running or ready.
+
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.
 Malformed responses cannot enter the modal; nested values display without

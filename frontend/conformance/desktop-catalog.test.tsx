@@ -61,6 +61,7 @@ function installActualPreload(
   installationProgress: () => unknown = () => fixture['installation_progress_populated'],
   cancellationResult: () => unknown = () => fixture['cancel_installation_true'],
   removalResult: () => unknown = () => fixture['remove_version_true'],
+  switchResult: () => unknown = () => fixture['switch_version_true'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -93,6 +94,7 @@ function installActualPreload(
         if (method === 'get_installation_progress') return installationProgress();
         if (method === 'cancel_installation') return cancellationResult();
         if (method === 'remove_version') return removalResult();
+        if (method === 'switch_version') return switchResult();
         if (method === 'get_installed_versions') return installedVersions();
         if (method === 'get_active_version' || method === 'get_default_version') return selectedVersion();
         if (method === 'get_inference_settings') return inferenceRead;
@@ -188,6 +190,32 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('consumes exact switch confirmations and never retries malformed mutation replies', async () => {
+    let response: unknown = fixture['switch_version_true'];
+    const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      () => response);
+    const onRefreshVersions = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() => useInstallationManager({
+      appId: 'ollama', availableVersions: [], onRefreshVersions,
+    }));
+
+    await expect(result.current.switchVersion('v1.2.3')).resolves.toBe(true);
+    expect(onRefreshVersions).toHaveBeenCalledTimes(1);
+    response = fixture['switch_version_false'];
+    await expect(result.current.switchVersion('v1.2.3')).rejects.toMatchObject({
+      name: 'APIError', endpoint: 'switch_version',
+    });
+    response = { success: true, error: 'invented' };
+    await expect(result.current.switchVersion('v1.2.3')).rejects.toMatchObject({
+      name: 'DesktopContractError',
+    });
+    expect(onRefreshVersions).toHaveBeenCalledTimes(1);
+    expect(requests.filter(request => request.method === 'switch_version')).toHaveLength(3);
+    expect(requests.at(-1)?.params).toEqual({ tag: 'v1.2.3', app_id: 'ollama' });
+  });
+
   it('consumes exact removal confirmations and never retries malformed mutation replies', async () => {
     let response: unknown = fixture['remove_version_true'];
     const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined,

@@ -1,5 +1,5 @@
 import type { BaseResponse } from './api-common';
-import type { AvailableVersionsOutcome, CancelInstallationOutcome, GithubCacheStatusOutcome, InstallationProgressOutcome, InstalledVersionsOutcome, RemoveVersionOutcome, SelectedVersionOutcome, ValidateInstallationsOutcome, VersionInfoOutcome, VersionStatusOutcome } from '../generated/desktop-contract';
+import type { AvailableVersionsOutcome, CancelInstallationOutcome, GithubCacheStatusOutcome, InstallationProgressOutcome, InstalledVersionsOutcome, RemoveVersionOutcome, SelectedVersionOutcome, SwitchVersionOutcome, ValidateInstallationsOutcome, VersionInfoOutcome, VersionStatusOutcome } from '../generated/desktop-contract';
 export type { VersionReleaseAsset, VersionReleaseInfo } from '../generated/desktop-contract';
 
 // ============================================================================
@@ -13,10 +13,12 @@ export type GetInstalledVersionsResponse = InstalledVersionsOutcome;
 export type GetActiveVersionResponse = SelectedVersionOutcome;
 
 export interface VersionActionResponse extends BaseResponse {
-  // Used for install and switch operations
+  // Used for install operations
 }
 
 export type RemoveVersionResponse = RemoveVersionOutcome;
+
+export type SwitchVersionResponse = SwitchVersionOutcome;
 
 export type ValidateInstallationsResponse = ValidateInstallationsOutcome;
 

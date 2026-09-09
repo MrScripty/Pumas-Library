@@ -1,5 +1,57 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-09 — Runtime-Version Switching Response Contract
+
+Accepted `switch_version` as a dedicated generated success-boolean record. The
+app manager currently returns only true or an error; literal false remains valid
+legacy wrapped wire without borrowing cancellation or removal semantics. Missing
+managers remain unavailable RPC errors and missing installed tags remain not-
+found errors.
+
+True follows the state-write-locked in-memory selection, shared launcher-root
+`.active-version` write and app-specific last-selected metadata write. It does
+not establish runtime process activation, readiness, atomicity, rollback or crash
+durability. FE-I38 records the existing partial-effect ordering and shared-marker
+identity risk; no producer algorithm or live selection changed.
+
+Typed RPC dispatch owns serialization and the generated decoder now serves both
+the exposed preload method and the composed launch adapter. False or malformed
+switch confirmations cannot launch or refresh, and a later launch or refresh
+failure never retries selection. The hook removed its invented optional switch
+error field and retains the existing generic false error. Actual refresh readers
+can retain prior values and expose their own error state, so hook success does
+not prove every follow-up read succeeded.
+
+Evidence: two focused RPC tests pass in default and no-default feature modes,
+covering literal wrapper parity and actual unavailable/method-not-supported
+outcomes. Thirty-two generated-decoder tests and 41 actual bundled-preload/
+renderer conformance tests pass. Thirty-four of 35 bundled-preload tests pass,
+with the existing real-Electron sandbox test skipped. Nineteen focused hook tests,
+TypeScript, affected lint, Electron and both frontend builds, seven generator
+tests/freshness, strict RPC Clippy in both feature modes, formatting, canonical
+plan and diff checks pass. Fixtures prove serialization only; no runtime was
+switched or launched.
+
+Astra medium owned the contract decision and substantive independent review;
+Luna max independently inventoried the operation. Astra low implemented the
+settled Rust contract. Review found no blocker. The codebase-design guidance kept
+the generated outcome as the single deep interface used by both preload adapters,
+rather than duplicating validators. Spark remains unavailable. Next: independently
+inventory and validate `set_default_version`; M4 and overall remediation remain
+incomplete.
+
+Deduplicated local `token_usage_record` checkpoint carries the reporting tail
+after `2026-09-09T19:05` and this slice: root Sol low `$3.7563`, Luna max
+`$0.1759`, Astra medium `$1.8043`, and Astra low `$1.1507`; subtotal `$6.8872`
+standard API-equivalent or `$13.7744` under the separate 2x priority scenario.
+Added to the prior recorded `$17.8898` checkpoint, the cumulative estimate is
+`$24.7770` standard / `$49.5540` priority scenario. No request crossed 272,000
+input tokens and cache writes were zero. Requested service tier was not recorded;
+delegated responses report observed `default`, while root records omit an
+observed tier. Actual invoices and shared tool/search fees remain unknown, not
+free or arbitrarily allocated. Different task classes are not a controlled
+benchmark and routing conclusions remain provisional.
+
 ## 2026-09-09 — Runtime-Version Removal Response Contract
 
 Accepted `remove_version` as a dedicated generated success-boolean record. The

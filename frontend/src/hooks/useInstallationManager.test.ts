@@ -29,7 +29,7 @@ const {
   normalizeInstallationProgressMock: vi.fn(),
   resetInstallationProgressTrackingMock: vi.fn<(_state: unknown) => void>(),
   removeVersionApiMock: vi.fn<(_tag: string, _appId: string) => Promise<{ success: boolean }>>(),
-  switchVersionApiMock: vi.fn<(_tag: string, _appId: string) => Promise<{ success: boolean; error?: string }>>(),
+  switchVersionApiMock: vi.fn<(_tag: string, _appId: string) => Promise<{ success: boolean }>>(),
 }));
 
 vi.mock('../api/adapter', () => ({
@@ -579,6 +579,54 @@ describe('useInstallationManager', () => {
     expect(openActiveInstallMock).toHaveBeenCalledTimes(1);
     expect(openPathMock).toHaveBeenCalledWith('/tmp/v1.2.3');
     expect(getVersionInfoMock).toHaveBeenCalledWith('v1.2.3');
+  });
+
+  it('awaits the version refresh after a confirmed switch', async () => {
+    const refresh = deferred<undefined>();
+    const onRefreshVersions = vi.fn(() => refresh.promise);
+    const { result } = renderHook(() => useInstallationManager({
+      appId: 'torch', availableVersions, onRefreshVersions,
+    }));
+
+    let settled = false;
+    const switching = result.current.switchVersion('v1.2.3').then(value => {
+      settled = true;
+      return value;
+    });
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+    expect(switchVersionApiMock).toHaveBeenCalledTimes(1);
+    expect(onRefreshVersions).toHaveBeenCalledTimes(1);
+
+    refresh.resolve(undefined);
+    await expect(switching).resolves.toBe(true);
+  });
+
+  it('rejects a false switch confirmation without refreshing or retrying', async () => {
+    switchVersionApiMock.mockResolvedValue({ success: false });
+    const onRefreshVersions = vi.fn();
+    const { result } = renderHook(() => useInstallationManager({
+      appId: 'torch', availableVersions, onRefreshVersions,
+    }));
+
+    await expect(result.current.switchVersion('v1.2.3')).rejects.toMatchObject({
+      name: 'APIError', endpoint: 'switch_version', message: 'Failed to switch version',
+    });
+    expect(switchVersionApiMock).toHaveBeenCalledTimes(1);
+    expect(onRefreshVersions).not.toHaveBeenCalled();
+  });
+
+  it('propagates a post-switch refresh failure without repeating selection', async () => {
+    const refreshError = new Error('refresh failed');
+    const onRefreshVersions = vi.fn().mockRejectedValue(refreshError);
+    const { result } = renderHook(() => useInstallationManager({
+      appId: 'torch', availableVersions, onRefreshVersions,
+    }));
+
+    await expect(result.current.switchVersion('v1.2.3')).rejects.toBe(refreshError);
+    expect(switchVersionApiMock).toHaveBeenCalledTimes(1);
+    expect(onRefreshVersions).toHaveBeenCalledTimes(1);
   });
 
   it('awaits the version refresh after a confirmed removal', async () => {

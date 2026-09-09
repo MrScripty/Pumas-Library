@@ -445,6 +445,8 @@ pub(crate) enum RpcOutcome {
     CancelInstallation(CancelInstallationOutcome),
     #[cfg(feature = "inference-plugins")]
     RemoveVersion(RemoveVersionOutcome),
+    #[cfg(feature = "inference-plugins")]
+    SwitchVersion(SwitchVersionOutcome),
     HfTokenMutation(SuccessOutcome),
     HfAuth(Box<HfAuthOutcome>),
     LinkHealth(Box<LinkHealthOutcome>),
@@ -525,6 +527,8 @@ impl RpcOutcome {
             Self::CancelInstallation(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::RemoveVersion(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::SwitchVersion(value) => serde_json::to_value(value),
             Self::HfTokenMutation(value) => serde_json::to_value(value),
             Self::HfAuth(value) => serde_json::to_value(value),
             Self::LinkHealth(value) => serde_json::to_value(value),
@@ -1883,6 +1887,47 @@ mod remove_version_tests {
             #[cfg(feature = "inference-plugins")]
             {
                 let rpc = RpcOutcome::RemoveVersion(outcome);
+                assert!(!rpc.uses_response_wrapper());
+                assert_eq!(rpc.into_value().unwrap(), expected);
+            }
+        }
+    }
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct SwitchVersionOutcome {
+    success: bool,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl SwitchVersionOutcome {
+    /// Preserve the manager's active-selection result, not runtime readiness.
+    pub(crate) const fn new(success: bool) -> Self {
+        Self { success }
+    }
+}
+
+#[cfg(test)]
+mod switch_version_tests {
+    use super::*;
+
+    #[test]
+    fn switch_version_preserves_literal_boolean_outcomes_and_wrapper() {
+        for (success, expected) in [
+            (true, serde_json::json!({"success": true})),
+            (false, serde_json::json!({"success": false})),
+        ] {
+            let outcome = SwitchVersionOutcome::new(success);
+            assert_eq!(serde_json::to_value(&outcome).unwrap(), expected);
+            assert_eq!(
+                crate::wrapper::wrap_response("switch_version", success.into()),
+                expected
+            );
+            #[cfg(feature = "inference-plugins")]
+            {
+                let rpc = RpcOutcome::SwitchVersion(outcome);
                 assert!(!rpc.uses_response_wrapper());
                 assert_eq!(rpc.into_value().unwrap(), expected);
             }

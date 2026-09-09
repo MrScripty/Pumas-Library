@@ -48,6 +48,7 @@ function installActualPreload(
   metadataRead: unknown = fixture['library_model_metadata_empty'],
   mutationResponses: { notes?: () => unknown; settings?: () => unknown } = {},
   availableVersions: () => unknown = () => fixture['available_versions'],
+  githubCacheStatus: () => unknown = () => fixture['github_cache_status_no_manager'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -73,6 +74,7 @@ function installActualPreload(
         const requestParams: unknown = JSON.parse(JSON.stringify(params));
         requests.push({ method, params: requestParams });
         if (method === 'get_available_versions') return availableVersions();
+        if (method === 'get_github_cache_status') return githubCacheStatus();
         if (method === 'get_inference_settings') return inferenceRead;
         if (method === 'update_inference_settings') return mutationResponses.settings ? mutationResponses.settings() : fixture['update_inference_settings'];
         if (method === 'update_model_notes' && mutationResponses.notes) return mutationResponses.notes();
@@ -166,6 +168,32 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('polls producer cache snapshots and keeps the last valid snapshot on malformed responses', async () => {
+    vi.useFakeTimers();
+    let unmount: (() => void) | undefined;
+    try {
+      let response: unknown = fixture['github_cache_status_populated'];
+      const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => response);
+      const hook = renderHook(() => useAvailableVersionState({ isEnabled: true, resolvedAppId: 'ollama', trackAvailableVersions: true }));
+      unmount = hook.unmount;
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(hook.result.current.cacheStatus).toEqual(response);
+      expect(requests.at(-1)?.params).toEqual({ app_id: 'ollama' });
+      for (const key of ['github_cache_status_empty', 'github_cache_status_fetching', 'github_cache_status_no_manager', 'github_cache_status_populated']) {
+        response = fixture[key];
+        await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+        expect(hook.result.current.cacheStatus).toEqual(response);
+      }
+      response = { has_cache: 'bad', is_valid: false, is_fetching: false };
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+      expect(hook.result.current.cacheStatus).toEqual(fixture['github_cache_status_populated']);
+      expect(requests.filter(request => request.method === 'get_github_cache_status')).toHaveLength(6);
+    } finally {
+      unmount?.();
+      vi.useRealTimers();
+    }
+  });
+
   it('consumes producer releases and rate limits without reading absent versions or dropping valid rows', async () => {
     let response: unknown = fixture['available_versions'];
     const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => response);

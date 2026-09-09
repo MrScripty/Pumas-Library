@@ -427,6 +427,8 @@ pub(crate) enum RpcOutcome {
     AppStatus(AppStatusOutcome),
     #[cfg(feature = "inference-plugins")]
     AvailableVersions(AvailableVersionsOutcome),
+    #[cfg(feature = "inference-plugins")]
+    GithubCacheStatus(GithubCacheStatusOutcome),
     HfTokenMutation(SuccessOutcome),
     HfAuth(Box<HfAuthOutcome>),
     LinkHealth(Box<LinkHealthOutcome>),
@@ -489,6 +491,8 @@ impl RpcOutcome {
             Self::AppStatus(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::AvailableVersions(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::GithubCacheStatus(value) => serde_json::to_value(value),
             Self::HfTokenMutation(value) => serde_json::to_value(value),
             Self::HfAuth(value) => serde_json::to_value(value),
             Self::LinkHealth(value) => serde_json::to_value(value),
@@ -1256,6 +1260,107 @@ impl DownloadListOutcome {
 pub(crate) struct ModelsOutcome {
     success: bool,
     models: BTreeMap<String, CatalogModel>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(untagged)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum GithubCacheStatusOutcome {
+    Snapshot(GithubCacheStatusSnapshot),
+    NoManager(GithubCacheStatusNoManager),
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct GithubCacheStatusSnapshot {
+    has_cache: bool,
+    is_valid: bool,
+    is_fetching: bool,
+    age_seconds: Option<u64>,
+    last_fetched: Option<String>,
+    releases_count: Option<u32>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct GithubCacheStatusNoManager {
+    has_cache: bool,
+    is_valid: bool,
+    is_fetching: bool,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl GithubCacheStatusOutcome {
+    pub(crate) fn snapshot(status: pumas_library::models::CacheStatus) -> Result<Self, PumasError> {
+        if status
+            .age_seconds
+            .is_some_and(|age| age > MAX_JS_SAFE_INTEGER)
+        {
+            return Err(invalid_domain_outcome("GitHub cache status"));
+        }
+        Ok(Self::Snapshot(GithubCacheStatusSnapshot {
+            has_cache: status.has_cache,
+            is_valid: status.is_valid,
+            is_fetching: status.is_fetching,
+            age_seconds: status.age_seconds,
+            last_fetched: status.last_fetched,
+            releases_count: status.releases_count,
+        }))
+    }
+    pub(crate) fn no_manager() -> Self {
+        Self::NoManager(GithubCacheStatusNoManager {
+            has_cache: false,
+            is_valid: false,
+            is_fetching: false,
+        })
+    }
+}
+
+#[cfg(test)]
+mod github_cache_status_tests {
+    use super::*;
+    #[test]
+    fn github_cache_status_preserves_full_nulls_and_compact_omission() {
+        for populated in [false, true] {
+            let snapshot = pumas_library::models::CacheStatus {
+                has_cache: populated,
+                is_valid: !populated,
+                is_fetching: true,
+                age_seconds: populated.then_some(MAX_JS_SAFE_INTEGER),
+                last_fetched: populated.then(|| " Exact timestamp λ ".into()),
+                releases_count: populated.then_some(u32::MAX),
+            };
+            assert_eq!(
+                serde_json::to_value(GithubCacheStatusOutcome::snapshot(snapshot).unwrap())
+                    .unwrap(),
+                serde_json::json!({
+                    "has_cache":populated,"is_valid":!populated,"is_fetching":true,
+                    "age_seconds":populated.then_some(MAX_JS_SAFE_INTEGER),"last_fetched":populated.then_some(" Exact timestamp λ "),"releases_count":populated.then_some(u32::MAX),
+                })
+            );
+        }
+        assert_eq!(
+            serde_json::to_value(GithubCacheStatusOutcome::no_manager()).unwrap(),
+            serde_json::json!({"has_cache":false,"is_valid":false,"is_fetching":false})
+        );
+    }
+    #[test]
+    fn github_cache_status_rejects_unsafe_age() {
+        assert!(
+            GithubCacheStatusOutcome::snapshot(pumas_library::models::CacheStatus {
+                has_cache: true,
+                is_valid: true,
+                is_fetching: false,
+                age_seconds: Some(MAX_JS_SAFE_INTEGER + 1),
+                last_fetched: None,
+                releases_count: Some(0),
+            })
+            .is_err()
+        );
+    }
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]

@@ -43,6 +43,7 @@ import {
   decodeUpdateModelNotesOutcome,
   decodeUpdateInferenceSettingsOutcome,
   decodeAvailableVersionsOutcome,
+  decodeGithubCacheStatusOutcome,
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
@@ -552,7 +553,7 @@ const electronAPI = {
   // Cache & Background Fetch
   // ========================================
   get_github_cache_status: (appId?: string) =>
-    apiCall('get_github_cache_status', { app_id: appId }),
+    validatedApiCall('get_github_cache_status', decodeGithubCacheStatusOutcome, { app_id: appId }),
   should_update_ui_from_background_fetch: () => apiCall('has_background_fetch_completed'),
   reset_background_fetch_flag: () => apiCall('reset_background_fetch_flag'),
 

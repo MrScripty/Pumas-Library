@@ -10,10 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound runtime GitHub cache-status response validation (M4):
-`get_github_cache_status` still crosses preload undecoded into the version hook.
-Preserve cache/refresh timing, optional inference-plugin builds and standalone
-backend operation; no install/update mutations. Available-version response
+**Next slice:** Bound installed runtime-version list response validation (M4):
+`get_installed_versions` still crosses preload undecoded into version state.
+Preserve optional inference-plugin builds and standalone backend operation;
+no install/update mutations. Runtime GitHub cache-status and available-version response
 validation is accepted below. Notes/settings
 mutation response validation is accepted below. Model-notes request admission
 (FE-I33) is accepted below; malformed input cannot clear existing notes.
@@ -65,6 +65,35 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Runtime GitHub Cache-Status Response Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--runtime-github-cache-status-response-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Decode `get_github_cache_status` before it reaches hook state. Preserve the
+snake_case adapter's full snapshot with three required booleans and required
+nullable age/timestamp/count, versus compact all-false no-manager output without
+those details. Reject partial mixtures, bad types and unsafe numeric facts;
+do not infer new relationships among full-snapshot flags or rewrite timestamps.
+Requests, cache behavior, polling lifetime/timing and manager availability remain
+unchanged. FE-I34's no-manager limitation and FE-I09's async follow-up stay open.
+
+root_capability owns RPC typed outcomes/export/dispatch/release handler/tests.
+Root owns preload/tests, frontend response/state type aliases, existing decoder
+and hook conformance, affected hook fixture updates, generated files, README and four plan records. Root
+serializes Cargo/generation/verification. No core, GUI dependency, install,
+network or feature-registration change. The explicit adapter remains necessary
+because core serialization is camelCase while this RPC wire is snake_case.
+
+Acceptance: actual serialized populated/empty/fetching/compact fixtures, decoder
+negative shapes and numeric bounds, bundled preload refusal and actual polling
+hook consumption. Default/minimal RPC tests prove no-manager and no-plugin
+behavior; types, affected lint, focused hook tests, existing conformance,
+generator tests/freshness, both frontend builds, strict RPC lint/format and plan
+checks. Local automated contract/integration only, not live upstream, graphical
+or other-OS evidence. Reuse typed outcomes and standard JSON Schema; no new
+framework or consumer coercion. Retain last valid hook state on decoding failure.
 
 ## Available Runtime-Version Read Contract
 

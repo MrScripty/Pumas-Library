@@ -1,5 +1,5 @@
 import type { BaseResponse } from './api-common';
-import type { AvailableVersionsOutcome } from '../generated/desktop-contract';
+import type { AvailableVersionsOutcome, GithubCacheStatusOutcome } from '../generated/desktop-contract';
 export type { VersionReleaseAsset, VersionReleaseInfo } from '../generated/desktop-contract';
 
 // ============================================================================
@@ -103,14 +103,7 @@ export interface CancelInstallationResponse extends BaseResponse {
 // Cache & Background Fetch Types
 // ============================================================================
 
-export interface CacheStatusResponse {
-  has_cache: boolean;
-  is_valid: boolean;
-  is_fetching: boolean;
-  age_seconds?: number;
-  last_fetched?: string;
-  releases_count?: number;
-}
+export type CacheStatusResponse = GithubCacheStatusOutcome;
 
 export interface BackgroundFetchCompletedResponse extends BaseResponse {
   completed: boolean;

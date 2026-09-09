@@ -427,6 +427,45 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     });
     fixtures["update_inference_settings"] =
         serde_json::to_value(UpdateInferenceSettingsOutcome::new("llm/Exact Model"))?;
+    for (key, status) in [
+        (
+            "github_cache_status_populated",
+            pumas_library::models::CacheStatus {
+                has_cache: true,
+                is_valid: true,
+                is_fetching: false,
+                age_seconds: Some(MAX_JS_SAFE_INTEGER),
+                last_fetched: Some(" 2026-09-08T00:00:00Z λ ".into()),
+                releases_count: Some(u32::MAX),
+            },
+        ),
+        (
+            "github_cache_status_empty",
+            pumas_library::models::CacheStatus {
+                has_cache: false,
+                is_valid: false,
+                is_fetching: false,
+                age_seconds: None,
+                last_fetched: None,
+                releases_count: None,
+            },
+        ),
+        (
+            "github_cache_status_fetching",
+            pumas_library::models::CacheStatus {
+                has_cache: true,
+                is_valid: false,
+                is_fetching: true,
+                age_seconds: Some(42),
+                last_fetched: Some("2026-09-08T00:00:00Z".into()),
+                releases_count: Some(3),
+            },
+        ),
+    ] {
+        fixtures[key] = serde_json::to_value(GithubCacheStatusOutcome::snapshot(status)?)?;
+    }
+    fixtures["github_cache_status_no_manager"] =
+        serde_json::to_value(GithubCacheStatusOutcome::no_manager())?;
     fixtures["available_versions"] = serde_json::to_value(AvailableVersionsOutcome::available(
         available_versions_fixture(),
     )?)?;
@@ -465,6 +504,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         InferenceSettingsOutcome,
         UpdateInferenceSettingsOutcome,
         AvailableVersionsOutcome,
+        GithubCacheStatusOutcome,
         UpdateModelNotesOutcome,
         LibraryModelMetadataOutcome,
         GetHfDownloadDetailsParams,
@@ -612,6 +652,24 @@ fn refine_named(name: &str, schema: &mut Value) {
     let Some(object) = schema.as_object_mut() else {
         return;
     };
+    if name == "GithubCacheStatusSnapshot" {
+        object.insert(
+            "required".into(),
+            serde_json::json!([
+                "has_cache",
+                "is_valid",
+                "is_fetching",
+                "age_seconds",
+                "last_fetched",
+                "releases_count"
+            ]),
+        );
+    }
+    if name == "GithubCacheStatusNoManager" {
+        for field in ["has_cache", "is_valid", "is_fetching"] {
+            object["properties"][field]["const"] = false.into();
+        }
+    }
     if name == "VersionReleaseInfo" {
         object.insert(
             "required".into(),

@@ -205,24 +205,13 @@ pub async fn reset_background_fetch_flag(
 pub async fn get_github_cache_status(
     state: &AppState,
     params: &Value,
-) -> pumas_library::Result<Value> {
+) -> pumas_library::Result<crate::contract::GithubCacheStatusOutcome> {
     let app_id_str = require_str_param(params, "app_id", "appId")?;
     // Return cache status in format expected by frontend
     if let Some(vm) = get_version_manager(state, app_id_str).await {
         let cache_status = vm.get_github_cache_status().await;
-        Ok(json!({
-            "has_cache": cache_status.has_cache,
-            "is_valid": cache_status.is_valid,
-            "is_fetching": cache_status.is_fetching,
-            "age_seconds": cache_status.age_seconds,
-            "last_fetched": cache_status.last_fetched,
-            "releases_count": cache_status.releases_count
-        }))
+        crate::contract::GithubCacheStatusOutcome::snapshot(cache_status)
     } else {
-        Ok(json!({
-            "has_cache": false,
-            "is_valid": false,
-            "is_fetching": false
-        }))
+        Ok(crate::contract::GithubCacheStatusOutcome::no_manager())
     }
 }

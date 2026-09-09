@@ -55,6 +55,8 @@ describe('useAvailableVersionState', () => {
       is_valid: true,
       is_fetching: false,
       age_seconds: 10,
+      last_fetched: null,
+      releases_count: null,
     });
     shouldUpdateUiFromBackgroundFetchMock.mockResolvedValue(false);
     resetBackgroundFetchFlagMock.mockResolvedValue({ success: true });

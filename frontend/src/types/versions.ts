@@ -69,11 +69,4 @@ export interface InstallationProgress {
 
 export type InstallNetworkStatus = 'idle' | 'downloading' | 'stalled' | 'failed';
 
-export interface CacheStatus {
-  has_cache: boolean;
-  is_valid: boolean;
-  is_fetching: boolean;
-  age_seconds?: number;
-  last_fetched?: string;
-  releases_count?: number;
-}
+export type CacheStatus = import('../generated/desktop-contract').GithubCacheStatusOutcome;

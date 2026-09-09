@@ -61,6 +61,9 @@ const cacheStatus: CacheStatus = {
   has_cache: true,
   is_valid: true,
   is_fetching: false,
+  age_seconds: null,
+  last_fetched: null,
+  releases_count: null,
 };
 
 const installationProgress: InstallationProgress = {

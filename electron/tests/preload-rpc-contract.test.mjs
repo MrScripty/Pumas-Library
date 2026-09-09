@@ -11,6 +11,22 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('GitHub cache status rejects malformed snapshots and preserves null versus omission', async () => {
+  const harness = loadCompiledPreload();
+  const empty = { has_cache: false, is_valid: false, is_fetching: false };
+  for (const response of [null, { ...empty, has_cache: 'false' },
+    { ...empty, age_seconds: 12 }, { ...empty, is_fetching: true },
+    { ...empty, age_seconds: -1, last_fetched: null, releases_count: null },
+    { ...empty, age_seconds: null, last_fetched: null, releases_count: 4294967296 }]) {
+    harness.respondWith(response);
+    await assert.rejects(harness.api.get_github_cache_status('ollama'), { name: 'DesktopContractError' });
+  }
+  for (const response of [empty, { ...empty, age_seconds: null, last_fetched: null, releases_count: null }]) {
+    harness.respondWith(response);
+    assert.deepEqual(toPlainValue(await harness.api.get_github_cache_status('ollama')), response);
+  }
+});
+
 test('available versions decode rate limits without invented rows and reject malformed releases', async () => {
   const harness = loadCompiledPreload();
   for (const retry_after_secs of [null, 120]) {

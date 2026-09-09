@@ -20,6 +20,14 @@
 
 ## Slice Log
 
+### 2026-09-08 — Runtime cache-status responses accepted
+
+- Typed cache snapshots now cross generated preload decoding before hook state,
+  preserving nullable full snapshots versus compact no-manager output.
+- The [frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-08--runtime-github-cache-status-response-contract)
+  records polling-path conformance and default/minimal RPC evidence. No polling,
+  manager lookup or installation change; installed-version reads remain next.
+
 ### 2026-09-08 — Available-version responses accepted
 
 - Generated release decoding and success discrimination fix the rate-limit

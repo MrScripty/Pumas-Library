@@ -751,6 +751,12 @@ async fn dispatch_admitted_command(
                 .await
                 .map(RpcOutcome::AvailableVersions)
         }
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::Legacy { method, params } if method == "get_github_cache_status" => {
+            versions::get_github_cache_status(state, &params)
+                .await
+                .map(RpcOutcome::GithubCacheStatus)
+        }
         RpcCommand::Legacy { method, params } if method == "get_library_model_metadata" => {
             models::get_library_model_metadata(state, &params)
                 .await
@@ -1162,8 +1168,6 @@ async fn dispatch_method(
         #[cfg(feature = "inference-plugins")]
         "reset_background_fetch_flag" => versions::reset_background_fetch_flag(state, params).await,
         #[cfg(feature = "inference-plugins")]
-        "get_github_cache_status" => versions::get_github_cache_status(state, params).await,
-        #[cfg(feature = "inference-plugins")]
         "check_version_dependencies" => versions::check_version_dependencies(state, params).await,
         #[cfg(feature = "inference-plugins")]
         "install_version_dependencies" => {
@@ -1324,6 +1328,37 @@ async fn dispatch_method(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn github_cache_status_rpc_preserves_no_manager_and_feature_gate() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        let request = Bytes::from(
+            serde_json::to_vec(&json!({
+                "jsonrpc":"2.0","id":"cache-status-fixture","method":"get_github_cache_status",
+                "params":{"app_id":"unregistered-runtime"},
+            }))
+            .unwrap(),
+        );
+        let response = handle_rpc(State(state), request).await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 65_536)
+            .await
+            .unwrap();
+        let wire: Value = serde_json::from_slice(&body).unwrap();
+        #[cfg(feature = "inference-plugins")]
+        assert_eq!(
+            wire,
+            json!({"jsonrpc":"2.0","id":"cache-status-fixture","result":{"has_cache":false,"is_valid":false,"is_fetching":false}})
+        );
+        #[cfg(not(feature = "inference-plugins"))]
+        assert_eq!(
+            wire,
+            json!({"jsonrpc":"2.0","id":"cache-status-fixture","error":{
+                "code":-32601,"message":"The requested method is not supported.","data":{"class":"not_found"},
+            }})
+        );
+    }
 
     #[tokio::test]
     async fn available_versions_rpc_preserves_unregistered_runtime_and_feature_gate() {

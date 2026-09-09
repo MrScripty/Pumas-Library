@@ -81,6 +81,12 @@ have no version list; the UI keeps its last releases and records the known or
 unknown retry delay. Malformed responses reject rather than dropping individual
 rows or accepting legacy field spellings. Existing refresh timing is unchanged.
 
+Runtime GitHub cache snapshots are decoded before entering hook state. Full
+snapshots preserve nullable age, timestamp and release count; the existing
+no-manager response omits those fields and contains only three false flags.
+Malformed snapshots leave the last valid state intact. This does not establish
+runtime availability or change cache polling timing.
+
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.
 Malformed responses cannot enter the modal; nested values display without

@@ -10,6 +10,22 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('cache-status decoding preserves actual full and compact snapshots without partial mixtures', () => {
+  for (const key of ['github_cache_status_populated', 'github_cache_status_empty', 'github_cache_status_fetching', 'github_cache_status_no_manager']) {
+    const result = contract.decodeGithubCacheStatusOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  for (const patch of [{ has_cache: 'true' }, { hasCache: true }, { age_seconds: undefined },
+    { last_fetched: undefined }, { releases_count: undefined }, { last_fetched: [] },
+    { age_seconds: -1 }, { age_seconds: 9007199254740992 }, { releases_count: 4294967296 }]) {
+    assert.equal(contract.decodeGithubCacheStatusOutcome({ ...fixtures.github_cache_status_populated, ...patch }).status, 'invalid', JSON.stringify(patch));
+  }
+  for (const patch of [{ has_cache: true }, { is_valid: true }, { is_fetching: true }, { age_seconds: null }]) {
+    assert.equal(contract.decodeGithubCacheStatusOutcome({ ...fixtures.github_cache_status_no_manager, ...patch }).status, 'invalid');
+  }
+});
+
 test('available-version decoding preserves actual camelCase/null facts and rejects invented or unsafe shapes', () => {
   for (const key of ['available_versions', 'available_versions_empty', 'available_versions_rate_limited', 'available_versions_rate_limited_unknown']) {
     const result = contract.decodeAvailableVersionsOutcome(fixtures[key]);

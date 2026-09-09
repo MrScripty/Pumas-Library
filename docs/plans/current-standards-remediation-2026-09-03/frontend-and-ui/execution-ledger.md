@@ -1,5 +1,35 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Runtime GitHub Cache-Status Response Contract
+
+Accepted generated cache-status decoding before hook state. Typed RPC outcomes
+preserve full snake_case snapshots with nullable age/timestamp/count and the
+compact three-false no-manager shape with those details omitted. Partial mixtures,
+malformed types and out-of-range numeric facts reject. Full flags and timestamp
+text remain exact, without new cache-state interpretation. Frontend response and
+state aliases derive from one generated contract; affected fixtures now include
+the producer's required nulls. Requests, manager lookup, cache behavior, polling
+timing and feature registration remain unchanged. No core edits were needed.
+
+The bundled-preload regression first failed with `Missing expected rejection`.
+Three focused RPC tests pass with default and no-default features, including an
+actual offline no-manager request and the plugin-disabled method-not-found
+response. Minimal fixture verification used elevated setup permissions already
+established by preceding slices. Twenty-three decoder tests, 31 bundled-preload/
+renderer-hook tests, 24 preload tests and 12 focused hook tests pass. One real
+Electron sandbox test remains gated. Controlled timers exercise the actual hook's
+existing polling path through producer snapshots and a malformed reply; the last
+populated valid snapshot is retained, rather than reset to empty.
+
+Frontend types/affected lint, Electron build, both frontend builds, seven
+generator tests/freshness, strict RPC Clippy, formatting and canonical plan checks
+pass. root_capability owned Rust; root integrated consumers and evidence. The
+codebase-design skill kept the necessary snake_case RPC adapter explicit while
+removing duplicate frontend wire definitions. No live network, graphical UI,
+installation or other-OS claim. Manager availability (FE-I34) and async-lifetime
+follow-up (FE-I09) remain separate; overall M4 stays open. Next: installed-version
+list response validation.
+
 ## 2026-09-08 — Available Runtime-Version Read Contract
 
 Accepted available-version response projection and decoding. Core release/asset

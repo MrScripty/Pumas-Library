@@ -83,6 +83,49 @@ test('validateApiCallPayload rejects unknown methods and non-record params', () 
   );
 });
 
+test('default selection IPC uses the generated request contract', () => {
+  for (const appKey of ['app_id', 'appId']) {
+    for (const appId of ['', ' runtime λ ']) {
+      for (const params of [
+        { [appKey]: appId },
+        { [appKey]: appId, tag: null },
+        { [appKey]: appId, tag: '' },
+        { [appKey]: appId, tag: ' \n\t ' },
+        { [appKey]: appId, tag: ' vλ.1 ' },
+      ]) {
+        const decoded = validateApiCallPayload('set_default_version', params);
+        assert.deepEqual(JSON.parse(JSON.stringify(decoded.params)), params);
+        assert.notEqual(decoded.params, params);
+        assert.ok(Object.isFrozen(decoded.params));
+      }
+    }
+  }
+
+  for (const params of [
+    undefined,
+    null,
+    {},
+    [],
+    true,
+    42,
+    'runtime',
+    { tag: 'v1' },
+    { app_id: null },
+    { app_id: 42 },
+    { app_id: 'runtime', tag: true },
+    { app_id: 'runtime', tag: 42 },
+    { app_id: 'runtime', tag: [] },
+    { app_id: 'runtime', tag: {} },
+    { app_id: 'runtime', extra: true },
+    { app_id: 'a', appId: 'a' },
+  ]) {
+    assert.throws(
+      () => validateApiCallPayload('set_default_version', params),
+      /Invalid API params/
+    );
+  }
+});
+
 test('validateApiCallPayload enforces method request schemas', () => {
   assert.deepEqual(validateApiCallPayload('install_version', {
     tag: 'v1.2.3',
@@ -92,16 +135,6 @@ test('validateApiCallPayload enforces method request schemas', () => {
     params: {
       tag: 'v1.2.3',
       app_id: 'ollama',
-    },
-  });
-  assert.deepEqual(validateApiCallPayload('set_default_version', {
-    tag: null,
-    app_id: undefined,
-  }), {
-    method: 'set_default_version',
-    params: {
-      tag: null,
-      app_id: undefined,
     },
   });
   assert.deepEqual(validateApiCallPayload('call_plugin_endpoint', {

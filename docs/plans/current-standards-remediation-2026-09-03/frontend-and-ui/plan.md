@@ -10,11 +10,11 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound default runtime-version selection responses (M4): inventory
-the nullable-tag admission, metadata mutation, exact boolean producer and actual
-frontend consumer before selecting the projection. Preserve optional inference-
-plugin builds, standalone backend operation and existing error behavior; do not
-change a live default selection.
+**Next slice:** Bound runtime installation-start responses (M4): inventory the
+structured `install_version` producer, admission and worker-start boundary plus
+the actual frontend consumer before selecting a projection. Preserve optional
+inference-plugin builds, standalone backend operation and existing error behavior;
+do not install a live runtime.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -69,6 +69,39 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Default Runtime-Version Selection Response Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-09--default-runtime-version-selection-response-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Project `set_default_version` through one generated request and response contract.
+The request requires an app identifier, accepts its existing snake/camel aliases,
+preserves exact strings and treats omitted or null tag as clear. Wrong tag types,
+unknown fields and ambiguous aliases now reject before manager lookup or mutation;
+they can no longer silently clear the default. Electron main uses the same
+generated admission instead of a divergent handwritten schema.
+
+The exact response is `{success:boolean}` with no error/message/result fields.
+The manager currently returns only true or an error; false remains valid legacy
+wire. Missing managers remain unavailable RPC errors, missing installed tags
+remain not-found errors and no-plugin builds remain method-not-supported.
+
+True means the state owner changed its in-memory default and awaited app-specific
+metadata persistence. It does not activate or launch a runtime, establish
+readiness, atomicity, rollback or crash durability. A persistence error can follow
+the in-memory change; FE-I38 retains that separate producer risk. The hook applies
+the confirmed default and performs one status refresh. False and malformed
+confirmations preserve state and do not refresh; a caught refresh failure retains
+the confirmed selection, exposes error state and never repeats the mutation.
+
+Acceptance: request corpus parity across Rust/generated/main IPC, literal true/
+false prior-wrapper parity, unavailable/no-plugin RPC behavior, generated decoder,
+bundled preload and actual-hook conformance with exact mutation/refresh counts,
+focused hook tests, frontend/Electron builds and lint, generator freshness, Rust
+static/toolchain and canonical-plan checks. Temporary/serialization fixtures only;
+no live default changed. Persistence-failure, concurrency, crash, runtime-readiness,
+network, graphical and other-OS behavior remain outside this evidence.
 
 ## Runtime-Version Switching Response Contract
 

@@ -1,6 +1,7 @@
 import type { OpenDialogOptions } from 'electron';
 import {
   decodeGetBackendSetupParams,
+  decodeSetDefaultVersionParams,
   decodeStartBackendSetupParams,
 } from './generated/desktop-contract';
 import {
@@ -47,10 +48,16 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
   const method = rawMethod as RpcMethodName;
   // These side-effect-capable requests share Rust's complete generated contract.
   // Return its copied proof-bearing value, never the original renderer object.
-  if (method === 'start_backend_setup' || method === 'get_backend_setup') {
+  if (
+    method === 'start_backend_setup'
+    || method === 'get_backend_setup'
+    || method === 'set_default_version'
+  ) {
     const decoded = method === 'start_backend_setup'
       ? decodeStartBackendSetupParams(rawParams)
-      : decodeGetBackendSetupParams(rawParams);
+      : method === 'get_backend_setup'
+        ? decodeGetBackendSetupParams(rawParams)
+        : decodeSetDefaultVersionParams(rawParams);
     if (decoded.status !== 'valid') {
       throw new Error(`Invalid API params for method: ${method}`);
     }

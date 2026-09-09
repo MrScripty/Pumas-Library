@@ -1,5 +1,17 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-09 — Default Runtime-Version Selection Response Contract
+
+The frontend plan accepts one generated `set_default_version` request/response
+contract across standalone RPC, preload, Electron main and the actual hook.
+Malformed tags reject before mutation instead of clearing the default; false or
+malformed confirmations do not refresh or retry. True follows the existing
+in-memory then metadata-persistence sequence, whose partial-effect risk remains
+FE-I38. See the [frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-09--default-runtime-version-selection-response-contract)
+for verification, review and cost evidence. No live default changed. This does
+not close M4 or the remediation program. Next: runtime installation-start response
+validation.
+
 ## 2026-09-09 — Runtime-Version Switching Response Contract
 
 The frontend plan accepts a dedicated typed/generated `switch_version` outcome

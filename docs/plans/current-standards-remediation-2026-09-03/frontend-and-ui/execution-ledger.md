@@ -1,5 +1,60 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-09 — Default Runtime-Version Selection Response Contract
+
+Accepted `set_default_version` as one generated request/response contract across
+standalone Rust RPC, preload, Electron main and the actual hook. The required app
+identifier retains its existing snake/camel aliases, omitted or null tag clears
+the selection and exact strings remain exact. Wrong tag types, unknown fields and
+ambiguous aliases now reject before manager lookup or mutation instead of silently
+clearing the default. Review found and prompted removal of Electron main's
+divergent handwritten admission schema.
+
+The response is exactly `{success:boolean}` with no invented error/message/result
+fields. The manager currently returns true or an error; false remains valid legacy
+wire. Missing managers remain unavailable errors, missing installed tags remain
+not-found and disabled inference-plugin builds remain method-not-supported. True
+follows the write-locked in-memory update and awaited app-specific metadata save;
+it does not establish activation, readiness, atomicity, rollback or crash
+durability. FE-I38 now also records the existing default-selection partial-effect
+risk. No app-manager algorithm or live selection changed.
+
+The hook applies a validated true selection and performs one status refresh.
+False and malformed confirmations retain selection and do not refresh; if the
+status reader catches a refresh failure, the confirmed selection remains, error
+state is exposed and the mutation is not repeated. Generated/main-IPC corpus
+tests cover omission, null, exact/empty/whitespace strings, aliases, wrong types,
+missing identity, duplicate aliases and unknown fields.
+
+Evidence: three focused RPC tests pass in default and no-default feature modes.
+Thirty-three generated-decoder tests and 42 actual renderer conformance tests
+pass. Forty-three of 44 combined main-IPC/bundled-preload tests pass, with the
+existing real-Electron sandbox test skipped. Seven focused hook tests, TypeScript,
+affected lint, Electron and both frontend builds, seven generator tests/freshness,
+strict RPC Clippy in both feature modes, formatting, canonical-plan and diff
+checks pass. Fixtures prove admission/serialization and temporary manager behavior
+only; no live runtime default changed.
+
+Astra medium owned the contract decision and substantive review; Luna max
+independently inventoried the operation; Astra low implemented the settled Rust
+contract. Review's blocking IPC-drift finding was repaired and its follow-up exact
+refresh-count assertion was added. The codebase-design guidance produced one
+generated request/response interface rather than duplicate validators. Spark is
+not an available collaboration model. Next: independently inventory and validate
+the structured `install_version` response; M4 and overall remediation remain
+incomplete.
+
+Deduplicated local `token_usage_record` accounting carries only root records after
+the prior switch checkpoint artifact plus this slice's delegated sessions: root
+Sol low `$5.6878`, Luna max `$0.2927`, Astra low `$0.9410`, and Astra medium
+`$1.9091`; subtotal `$8.8305` standard API-equivalent or `$17.6610` under the
+separate 2x priority scenario. Added to the prior recorded `$24.7770` checkpoint,
+the cumulative estimate is `$33.6075` standard / `$67.2150` priority scenario.
+No request crossed 272,000 input tokens and cache writes were zero. Requested and
+observed service tiers were not recorded. Actual invoices and shared tool fees
+remain unknown, not free or arbitrarily allocated. Different task classes are not
+a controlled benchmark and routing conclusions remain provisional.
+
 ## 2026-09-09 — Runtime-Version Switching Response Contract
 
 Accepted `switch_version` as a dedicated generated success-boolean record. The

@@ -10,6 +10,23 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('default-selection request admission matches Rust and response preserves exact booleans', () => {
+  for (const probe of fixtures.set_default_version_request_probes) {
+    const result = contract.decodeSetDefaultVersionParams(probe.params);
+    assert.equal(result.status, probe.accepted ? 'valid' : 'invalid', JSON.stringify(probe));
+    if (probe.accepted) assert.deepEqual(JSON.parse(JSON.stringify(result.value)), probe.params);
+  }
+  for (const key of ['set_default_version_true', 'set_default_version_false']) {
+    const result = contract.decodeSetDefaultVersionOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  for (const value of [null, true, false, {}, { success: null }, { success: 1 },
+    { success: true, error: 'invented' }, { success: false, result: false }]) {
+    assert.equal(contract.decodeSetDefaultVersionOutcome(value).status, 'invalid', JSON.stringify(value));
+  }
+});
+
 test('runtime-switch decoding preserves exact confirmation booleans', () => {
   for (const key of ['switch_version_true', 'switch_version_false']) {
     const result = contract.decodeSwitchVersionOutcome(fixtures[key]);

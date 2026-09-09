@@ -1,8 +1,6 @@
 //! Version lifecycle handlers.
 
-use crate::handlers::{
-    get_str_param, get_version_manager, require_str_param, require_version_manager,
-};
+use crate::handlers::{get_version_manager, require_str_param, require_version_manager};
 use crate::server::AppState;
 use serde_json::{json, Value};
 use tracing::warn;
@@ -46,12 +44,14 @@ pub async fn get_default_version(
     }
 }
 
-pub async fn set_default_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
-    let tag = get_str_param(params, "tag", "tag");
-    let app_id_str = require_str_param(params, "app_id", "appId")?;
-    let vm = require_version_manager(state, app_id_str).await?;
+pub async fn set_default_version(
+    state: &AppState,
+    app_id: &str,
+    tag: Option<&str>,
+) -> pumas_library::Result<crate::contract::SetDefaultVersionOutcome> {
+    let vm = require_version_manager(state, app_id).await?;
     let result = vm.set_default_version(tag).await?;
-    Ok(serde_json::to_value(result)?)
+    Ok(crate::contract::SetDefaultVersionOutcome::new(result))
 }
 
 pub async fn switch_version(

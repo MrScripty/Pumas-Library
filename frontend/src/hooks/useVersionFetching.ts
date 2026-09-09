@@ -182,7 +182,7 @@ export function useVersionFetching({
         setDefaultVersionState(tag);
         await fetchVersionStatus();
       } else {
-        throw new APIError(result.error || 'Failed to set default version', 'set_default_version');
+        throw new APIError('Failed to set default version', 'set_default_version');
       }
     } catch (error) {
       if (error instanceof APIError) {

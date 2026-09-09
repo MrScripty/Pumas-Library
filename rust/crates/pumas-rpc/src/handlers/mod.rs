@@ -740,6 +740,12 @@ async fn dispatch_admitted_command(
                 .await
                 .map(RpcOutcome::UpdateInferenceSettings)
         }
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::SetDefaultVersion { app_id, tag } => {
+            versions::set_default_version(state, &app_id, tag.as_deref())
+                .await
+                .map(RpcOutcome::SetDefaultVersion)
+        }
         RpcCommand::UpdateModelNotes { model_id, notes } => {
             models::update_model_notes(state, &model_id, notes)
                 .await
@@ -1190,8 +1196,6 @@ async fn dispatch_method(
 
         // Version Management
         #[cfg(feature = "inference-plugins")]
-        "set_default_version" => versions::set_default_version(state, params).await,
-        #[cfg(feature = "inference-plugins")]
         "install_version" => versions::install_version(state, params).await,
         #[cfg(feature = "inference-plugins")]
         "get_release_size_info" => versions::get_release_size_info(state, params).await,
@@ -1466,6 +1470,43 @@ mod tests {
                 "code":-32601,"message":"The requested method is not supported.","data":{"class":"not_found"},
             }})
         );
+    }
+
+    #[tokio::test]
+    async fn set_default_version_rpc_admits_before_manager_and_preserves_feature_gate() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        for (params, accepted) in crate::contract::set_default_version_requests() {
+            let request = Bytes::from(serde_json::to_vec(&json!({
+                "jsonrpc":"2.0", "id":"default-fixture", "method":"set_default_version", "params":params,
+            })).unwrap());
+            let response = handle_rpc(State(state.clone()), request)
+                .await
+                .into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(response.into_body(), 65_536)
+                .await
+                .unwrap();
+            let wire: Value = serde_json::from_slice(&body).unwrap();
+            #[cfg(feature = "inference-plugins")]
+            let error = if accepted {
+                crate::contract::PublicError::unavailable()
+            } else {
+                crate::contract::PublicError::invalid_params()
+            };
+            #[cfg(not(feature = "inference-plugins"))]
+            let error = {
+                let _ = accepted;
+                crate::contract::PublicError::method_not_found()
+            };
+            assert_eq!(
+                wire,
+                json!({"jsonrpc":"2.0", "id":"default-fixture", "error":{
+                    "code":error.code,"message":error.message,"data":{"class":error.class.as_str()},
+                }}),
+                "{params}"
+            );
+        }
     }
 
     #[tokio::test]

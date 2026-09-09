@@ -11,6 +11,32 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('default selection validates nullable requests and exact confirmations without retry', async () => {
+  const harness = loadCompiledPreload();
+  for (const tag of [false, 42, [], {}]) {
+    const before = harness.invocations.length;
+    assert.throws(() => harness.api.set_default_version(tag, 'ollama'), { name: 'DesktopContractError' });
+    assert.equal(harness.invocations.length, before);
+  }
+  for (const [args, expectedParams] of [
+    [[undefined, 'ollama'], { app_id: 'ollama' }],
+    [[null, 'ollama'], { tag: null, app_id: 'ollama' }],
+    [[' exact λ ', 'ollama'], { tag: ' exact λ ', app_id: 'ollama' }],
+  ]) {
+    harness.respondWith({ success: true });
+    assert.deepEqual(toPlainValue(await harness.api.set_default_version(...args)), { success: true });
+    assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]), expectedParams);
+  }
+  for (const response of [null, true, false, {}, { success: null }, { success: 'true' },
+    { success: true, error: 'invented' }, { success: false, result: false }]) {
+    harness.respondWith(response);
+    await assert.rejects(harness.api.set_default_version(null, 'ollama'), { name: 'DesktopContractError' });
+  }
+  harness.respondWith({ success: false });
+  assert.deepEqual(toPlainValue(await harness.api.set_default_version(null, 'ollama')), { success: false });
+  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'set_default_version').length, 12);
+});
+
 test('runtime switching rejects malformed confirmation without retry', async () => {
   const harness = loadCompiledPreload();
   for (const response of [null, true, false, {}, { success: null }, { success: 'true' },

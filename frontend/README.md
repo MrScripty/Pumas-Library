@@ -142,6 +142,15 @@ confirmations cannot refresh or launch a runtime, and later refresh or launch
 failures never repeat selection. Success means the backend selection writes
 completed; it does not establish that a runtime process is running or ready.
 
+Default runtime-version selection shares one generated request contract across
+preload, Electron main and standalone Rust RPC. Omitted/null tags clear the
+selection; exact strings are preserved and malformed values reject before any
+mutation. Its exact success boolean is decoded before hook state changes. True
+applies the confirmed selection and performs one status refresh; false or
+malformed replies do neither, and refresh failure never repeats the mutation.
+Backend persistence follows the in-memory change, so an error is not proof that
+no selection effect occurred.
+
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.
 Malformed responses cannot enter the modal; nested values display without

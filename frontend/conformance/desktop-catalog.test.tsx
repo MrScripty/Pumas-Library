@@ -62,6 +62,7 @@ function installActualPreload(
   cancellationResult: () => unknown = () => fixture['cancel_installation_true'],
   removalResult: () => unknown = () => fixture['remove_version_true'],
   switchResult: () => unknown = () => fixture['switch_version_true'],
+  defaultResult: () => unknown = () => fixture['set_default_version_true'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -95,6 +96,7 @@ function installActualPreload(
         if (method === 'cancel_installation') return cancellationResult();
         if (method === 'remove_version') return removalResult();
         if (method === 'switch_version') return switchResult();
+        if (method === 'set_default_version') return defaultResult();
         if (method === 'get_installed_versions') return installedVersions();
         if (method === 'get_active_version' || method === 'get_default_version') return selectedVersion();
         if (method === 'get_inference_settings') return inferenceRead;
@@ -190,6 +192,30 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('validates default selection before applying actual hook state without retry', async () => {
+    let response: unknown = fixture['set_default_version_true'];
+    const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, () => response);
+    const { result } = renderHook(() => useVersionFetching({ appId: 'ollama' }));
+
+    await act(async () => result.current.setDefaultVersion(' exact λ '));
+    const refreshedDefault = (fixture['version_status'] as { status: { defaultVersion: string | null } }).status.defaultVersion;
+    expect(result.current.defaultVersion).toBe(refreshedDefault);
+    response = fixture['set_default_version_false'];
+    await expect(result.current.setDefaultVersion(null)).rejects.toMatchObject({
+      name: 'APIError', endpoint: 'set_default_version',
+    });
+    response = { success: true, error: 'invented' };
+    await expect(result.current.setDefaultVersion(null)).rejects.toMatchObject({
+      name: 'DesktopContractError',
+    });
+    expect(result.current.defaultVersion).toBe(refreshedDefault);
+    expect(requests.filter(request => request.method === 'set_default_version')).toHaveLength(3);
+    expect(requests.filter(request => request.method === 'get_version_status')).toHaveLength(1);
+  });
+
   it('consumes exact switch confirmations and never retries malformed mutation replies', async () => {
     let response: unknown = fixture['switch_version_true'];
     const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined,

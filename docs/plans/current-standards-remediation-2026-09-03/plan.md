@@ -247,8 +247,8 @@ Phase custody, idle handoff, canonical admission validation, and busy consumer
 behavior pass Linux gates. The existing desktop diagnostic enum and generated
 validators migrated together; no persistence schema or live data changed.
 
-**Next slice:** Continue API/UI contracts with default runtime-version selection
-response validation under the user's 2026-09-06 priority,
+**Next slice:** Continue API/UI contracts with runtime installation-start response
+validation under the user's 2026-09-06 priority,
 following the accepted [standalone backend/link-health slice](frontend-and-ui/plan.md#standalone-backend-and-link-health-contract-admission).
 Import-picker, conversion progress reads and remaining conversion operation
 contracts (FE-I24) are also accepted. The basic GUI format-conversion workflow

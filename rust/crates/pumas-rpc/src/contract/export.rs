@@ -480,6 +480,18 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     fixtures["remove_version_false"] = serde_json::to_value(RemoveVersionOutcome::new(false))?;
     fixtures["switch_version_true"] = serde_json::to_value(SwitchVersionOutcome::new(true))?;
     fixtures["switch_version_false"] = serde_json::to_value(SwitchVersionOutcome::new(false))?;
+    fixtures["set_default_version_true"] =
+        serde_json::to_value(SetDefaultVersionOutcome::new(true))?;
+    fixtures["set_default_version_false"] =
+        serde_json::to_value(SetDefaultVersionOutcome::new(false))?;
+    fixtures["set_default_version_request_probes"] = set_default_version_requests().into_iter().map(|(params, _)| {
+        let parsed = parse_params::<SetDefaultVersionParams>(Some(&params));
+        let normalized = match &parsed {
+            Ok(value) => serde_json::json!({"app_id":value.app_id,"tag":value.tag}),
+            Err(_) => Value::Null,
+        };
+        serde_json::json!({"method":"set_default_version","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
+    }).collect();
     fixtures["validate_installations_populated"] =
         serde_json::to_value(validate_installations_fixture())?;
     fixtures["installation_progress_populated"] = serde_json::to_value(
@@ -600,6 +612,8 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         CancelInstallationOutcome,
         RemoveVersionOutcome,
         SwitchVersionOutcome,
+        SetDefaultVersionOutcome,
+        SetDefaultVersionParams,
     );
     Ok(serde_json::json!({
         "format": "pumas-desktop-contract-1",
@@ -645,6 +659,22 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
 // These named wire refinements project existing constructor invariants, not
 // authorization. The generator owns their executable TypeScript projection.
 fn refine_named(name: &str, schema: &mut Value) {
+    if name == "SetDefaultVersionParams" {
+        let mut canonical = schema.clone();
+        let object = canonical.as_object_mut().expect("request object schema");
+        object.remove("$schema");
+        object.remove("title");
+        let mut alias = canonical.clone();
+        let property = alias["properties"]
+            .as_object_mut()
+            .unwrap()
+            .remove("app_id")
+            .unwrap();
+        alias["properties"]["appId"] = property;
+        alias["required"] = serde_json::json!(["appId"]);
+        *schema = serde_json::json!({"anyOf":[canonical, alias]});
+        return;
+    }
     if matches!(
         name,
         "UpdateInferenceSettingsParams" | "UpdateModelNotesParams"

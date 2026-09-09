@@ -196,6 +196,11 @@ pub(crate) struct RpcAdmissionError {
 /// Its method is still resolved by the producer dispatcher, where unknown
 /// names become method-not-found without reaching a domain handler.
 pub(crate) enum RpcCommand {
+    #[cfg(feature = "inference-plugins")]
+    SetDefaultVersion {
+        app_id: String,
+        tag: Option<String>,
+    },
     HealthCheck,
     Shutdown,
     GetStatus,
@@ -333,6 +338,8 @@ pub(crate) enum RpcCommand {
 impl RpcCommand {
     pub(crate) fn method(&self) -> &str {
         match self {
+            #[cfg(feature = "inference-plugins")]
+            Self::SetDefaultVersion { .. } => "set_default_version",
             Self::HealthCheck => "health_check",
             Self::Shutdown => "shutdown",
             Self::GetStatus => "get_status",
@@ -447,6 +454,8 @@ pub(crate) enum RpcOutcome {
     RemoveVersion(RemoveVersionOutcome),
     #[cfg(feature = "inference-plugins")]
     SwitchVersion(SwitchVersionOutcome),
+    #[cfg(feature = "inference-plugins")]
+    SetDefaultVersion(SetDefaultVersionOutcome),
     HfTokenMutation(SuccessOutcome),
     HfAuth(Box<HfAuthOutcome>),
     LinkHealth(Box<LinkHealthOutcome>),
@@ -529,6 +538,8 @@ impl RpcOutcome {
             Self::RemoveVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::SwitchVersion(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::SetDefaultVersion(value) => serde_json::to_value(value),
             Self::HfTokenMutation(value) => serde_json::to_value(value),
             Self::HfAuth(value) => serde_json::to_value(value),
             Self::LinkHealth(value) => serde_json::to_value(value),
@@ -3505,6 +3516,115 @@ fn invalid_domain_outcome(name: &str) -> PumasError {
     PumasError::Other(format!("invalid {name} returned by domain"))
 }
 
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct SetDefaultVersionParams {
+    #[serde(alias = "appId")]
+    app_id: String,
+    #[serde(default)]
+    tag: Option<String>,
+}
+
+#[cfg(any(test, feature = "export-contract"))]
+pub(crate) fn set_default_version_requests() -> Vec<(Value, bool)> {
+    use serde_json::json;
+    let mut cases = vec![];
+    for key in ["app_id", "appId"] {
+        for app in ["", " runtime λ "] {
+            cases.push((json!({key: app}), true));
+            for tag in [Value::Null, json!(""), json!(" \n\t "), json!(" vλ.1 ")] {
+                cases.push((json!({key: app, "tag": tag}), true));
+            }
+        }
+        for invalid in [json!(true), json!(42), json!([]), json!({})] {
+            cases.push((json!({key:"runtime", "tag":invalid}), false));
+            cases.push((json!({key:invalid}), false));
+        }
+        cases.push((json!({key:null}), false));
+        cases.push((json!({key:"runtime", "extra":true}), false));
+    }
+    cases.extend([
+        (json!({}), false),
+        (Value::Null, false),
+        (json!([]), false),
+        (json!(true), false),
+        (json!(42), false),
+        (json!("runtime"), false),
+        (json!({"tag":"v1"}), false),
+        (json!({"app_id":"a", "appId":"a"}), false),
+        (json!({"app_id":"a", "appId":"b"}), false),
+    ]);
+    cases
+}
+
+#[cfg(test)]
+mod set_default_version_tests {
+    use super::*;
+
+    #[test]
+    fn set_default_version_request_corpus_and_exact_values() {
+        for (params, accepted) in set_default_version_requests() {
+            let parsed = parse_params::<SetDefaultVersionParams>(Some(&params));
+            assert_eq!(parsed.is_ok(), accepted, "{params}");
+            if let Ok(parsed) = parsed {
+                assert_eq!(
+                    parsed.app_id,
+                    params
+                        .get("app_id")
+                        .or_else(|| params.get("appId"))
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                );
+                assert_eq!(
+                    parsed.tag,
+                    serde_json::from_value::<Option<String>>(
+                        params.get("tag").cloned().unwrap_or(Value::Null)
+                    )
+                    .unwrap()
+                );
+            }
+            let command = parse_command("set_default_version", Some(&params));
+            #[cfg(feature = "inference-plugins")]
+            assert_eq!(command.is_ok(), accepted, "{params}");
+            #[cfg(not(feature = "inference-plugins"))]
+            assert_eq!(command.err().unwrap().code, -32601);
+        }
+        assert!(parse_params::<SetDefaultVersionParams>(None).is_err());
+    }
+
+    #[test]
+    fn set_default_version_preserves_boolean_wrapper_parity() {
+        for success in [true, false] {
+            let outcome = SetDefaultVersionOutcome::new(success);
+            let expected = crate::wrapper::wrap_response("set_default_version", success.into());
+            assert_eq!(serde_json::to_value(&outcome).unwrap(), expected);
+            #[cfg(feature = "inference-plugins")]
+            {
+                let rpc = RpcOutcome::SetDefaultVersion(outcome);
+                assert!(!rpc.uses_response_wrapper());
+                assert_eq!(rpc.into_value().unwrap(), expected);
+            }
+        }
+    }
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct SetDefaultVersionOutcome {
+    success: bool,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl SetDefaultVersionOutcome {
+    pub(crate) const fn new(success: bool) -> Self {
+        Self { success }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -4414,6 +4534,15 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             })
         }
         "get_models" => empty().map(|()| RpcCommand::GetModels),
+        #[cfg(feature = "inference-plugins")]
+        "set_default_version" => parse_params::<SetDefaultVersionParams>(params).map(|params| {
+            RpcCommand::SetDefaultVersion {
+                app_id: params.app_id,
+                tag: params.tag,
+            }
+        }),
+        #[cfg(not(feature = "inference-plugins"))]
+        "set_default_version" => Err(PublicError::method_not_found()),
         "update_model_notes" => parse_params::<UpdateModelNotesParams>(params).map(|params| {
             RpcCommand::UpdateModelNotes {
                 model_id: params.model_id,

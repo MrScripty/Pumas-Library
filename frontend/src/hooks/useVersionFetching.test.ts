@@ -16,7 +16,7 @@ const {
   fetchAvailableVersionsMock: vi.fn<(_forceRefresh?: boolean) => Promise<void>>(),
   isApiAvailableMock: vi.fn<() => boolean>(),
   setDefaultVersionApiMock: vi.fn<
-    (_tag: string | null, _appId: string) => Promise<{ success: boolean; error?: string }>
+    (_tag: string | null, _appId: string) => Promise<{ success: boolean }>
   >(),
   getActiveVersionMock: vi.fn<
     (_appId: string) => Promise<{ success: boolean; version?: string | null; error?: string }>
@@ -168,6 +168,45 @@ describe('useVersionFetching', () => {
     expect(getVersionStatusMock).toHaveBeenCalledTimes(2);
     expect(result.current.defaultVersion).toBe('v2.0.0');
     expect(result.current.versionStatus).toEqual(updatedStatus);
+  });
+
+  it('clears the default version and refreshes status after confirmation', async () => {
+    getVersionStatusMock.mockResolvedValue({
+      success: true,
+      status: { ...versionStatus, defaultVersion: null },
+    });
+    const { result } = renderHook(() => useVersionFetching({ appId: 'torch' }));
+
+    await act(async () => result.current.setDefaultVersion(null));
+
+    expect(setDefaultVersionApiMock).toHaveBeenCalledWith(null, 'torch');
+    expect(getVersionStatusMock).toHaveBeenCalledTimes(1);
+    expect(result.current.defaultVersion).toBeNull();
+  });
+
+  it('rejects a false default confirmation without changing state or refreshing', async () => {
+    setDefaultVersionApiMock.mockResolvedValue({ success: false });
+    const { result } = renderHook(() => useVersionFetching({ appId: 'torch' }));
+
+    await expect(result.current.setDefaultVersion('v2.0.0')).rejects.toMatchObject({
+      name: 'APIError', endpoint: 'set_default_version', message: 'Failed to set default version',
+    });
+
+    expect(setDefaultVersionApiMock).toHaveBeenCalledTimes(1);
+    expect(getVersionStatusMock).not.toHaveBeenCalled();
+    expect(result.current.defaultVersion).toBeNull();
+  });
+
+  it('keeps a confirmed default when the status refresh fails without retrying', async () => {
+    getVersionStatusMock.mockRejectedValue(new Error('status unavailable'));
+    const { result } = renderHook(() => useVersionFetching({ appId: 'torch' }));
+
+    await act(async () => result.current.setDefaultVersion('v2.0.0'));
+
+    expect(setDefaultVersionApiMock).toHaveBeenCalledTimes(1);
+    expect(getVersionStatusMock).toHaveBeenCalledTimes(1);
+    expect(result.current.defaultVersion).toBe('v2.0.0');
+    expect(result.current.error).toBe('status unavailable');
   });
 
   it('surfaces available-version fetch errors during refresh without leaving loading stuck', async () => {

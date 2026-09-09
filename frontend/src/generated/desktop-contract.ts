@@ -1,7 +1,9 @@
-// Generated from pumas-rpc contract.rs; SHA256 860c21e5455db063e373b1b2e996503dd4985abad8456e80fec38bf4bfd94baf. DO NOT EDIT.
-import { validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateGetBackendSetupParams, validateGetHfDownloadDetailsParams, validateHfDownloadDetailsOutcome, validateInferenceSettingsOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateStartBackendSetupParams, validateStartConversionSetupParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome } from './desktop-contract.validators.js';
+// Generated from pumas-rpc contract.rs; SHA256 9d1f6b615694e1207669676a156752d906b3d2e43770359e48c250f7b3a02e1e. DO NOT EDIT.
+import { validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateGetBackendSetupParams, validateGetHfDownloadDetailsParams, validateHfDownloadDetailsOutcome, validateInferenceSettingsOutcome, validateLibraryModelMetadataOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateStartBackendSetupParams, validateStartConversionSetupParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome } from './desktop-contract.validators.js';
 export type BackendStatus = { "backend": (QuantBackend); "name": string; "ready": boolean };
 export type BackendStatusOutcome = { "backends": ReadonlyArray<BackendStatus>; "success": true };
+export type BundleComponentManifestEntry = { "class_name": string | null; "name": string; "relative_path": string; "source_library": string | null; "state": BundleComponentState };
+export type BundleComponentState = "present" | "missing" | "unreadable" | "path_escape";
 export type CatalogArtifactState = ({ "state": "complete" }) | ({ "downloadProgressFraction"?: number; "reasons": ReadonlyArray<CatalogPartialReason>; "recovery"?: CatalogRecoveryIdentity; "state": "partial" });
 export type CatalogIntegrityState = ({ "state": "clean" }) | ({ "count": number; "otherModelIds": ReadonlyArray<string>; "state": "duplicate" });
 export type CatalogModel = { "artifact": CatalogArtifactState; "dependencyCount": number; "displayDate"?: string; "displayName": string; "format"?: string; "id": string; "integrity": CatalogIntegrityState; "modelDir": string; "modelType": string; "quantization"?: string; "relatedAvailable": boolean; "sizeBytes"?: number };
@@ -20,6 +22,7 @@ export type ConversionSetupStatus = ("in_progress") | ("completed") | ("failed")
 export type ConversionSetupStatusOutcome = { "setup": (ConversionSetupSnapshotOutcome) | (null); "success": true };
 export type ConversionStartedOutcome = { "conversion_id": string; "success": true };
 export type ConversionStatus = ("setting_up") | ("validating") | ("converting") | ("writing") | ("importing") | ("completed") | ("cancelled") | ("error") | ("building_toolchain") | ("generating_f16_gguf") | ("computing_imatrix") | ("quantizing") | ("calibrating") | ("training");
+export type DesktopJsonValue = (null) | (boolean) | (string) | (number) | (ReadonlyArray<DesktopJsonValue>) | ({ readonly [key: string]: DesktopJsonValue });
 export type DownloadIdParams = { "download_id": string };
 export type DownloadListOutcome = { "downloads": ReadonlyArray<DownloadProgressOutcome>; "success": true };
 export type DownloadMutationOutcome = { "error"?: string; "success": boolean };
@@ -32,6 +35,7 @@ export type DownloadStatus = "queued" | "downloading" | "pausing" | "paused" | "
 export type DownloadStatusFoundOutcome = { "downloadId": string; "downloadedBytes": number | null; "error": string | null; "etaSeconds": number | null; "libraryModelId": string | null; "modelName": string | null; "modelType": string | null; "nextRetryDelaySeconds": number | null; "progress": number | null; "repoId": string | null; "retryAttempt": number | null; "retryLimit": number | null; "retrying": boolean | null; "selectedArtifactId": string | null; "speed": number | null; "status": DownloadStatus; "success": true; "totalBytes": number | null };
 export type DownloadStatusMissingOutcome = { "error": string; "success": false };
 export type DownloadStatusOutcome = (DownloadStatusFoundOutcome) | (DownloadStatusMissingOutcome);
+export type EmbeddedMetadataResponse = { "file_type": string; "metadata": { readonly [key: string]: DesktopJsonValue } };
 export type FileGroup = { "filenames": ReadonlyArray<string>; "label": string; "shardCount": number };
 export type GetBackendSetupParams = { "backend": QuantBackend };
 export type GetHfDownloadDetailsParams = ({ "quants"?: ReadonlyArray<string> | null; "repo_id": string }) | ({ "quants"?: ReadonlyArray<string> | null; "repoId": string });
@@ -39,14 +43,14 @@ export type HfDownloadDetails = { "downloadOptions": ReadonlyArray<DownloadOptio
 export type HfDownloadDetailsFailure = { "error": string; "success": false };
 export type HfDownloadDetailsOutcome = (HfDownloadDetailsSuccess) | (HfDownloadDetailsFailure);
 export type HfDownloadDetailsSuccess = { "details": HfDownloadDetails; "success": true };
-export type InferenceParamSchema = { "constraints": (ParamConstraints) | (null); "default": InferenceSettingsJsonValue; "description": string | null; "key": string; "label": string; "param_type": (ParamType) };
-export type InferenceSettingsJsonValue = (null) | (boolean) | (string) | (number) | (ReadonlyArray<InferenceSettingsJsonValue>) | ({ readonly [key: string]: InferenceSettingsJsonValue });
+export type InferenceParamSchema = { "constraints": (ParamConstraints) | (null); "default": DesktopJsonValue; "description": string | null; "key": string; "label": string; "param_type": (ParamType) };
 export type InferenceSettingsOutcome = { "inference_settings": ReadonlyArray<InferenceParamSchema>; "model_id": string; "success": true };
+export type LibraryModelMetadataOutcome = { "component_manifest"?: ReadonlyArray<BundleComponentManifestEntry>; "effective_metadata"?: { readonly [key: string]: DesktopJsonValue }; "embedded_metadata"?: EmbeddedMetadataResponse; "model_id": string; "primary_file"?: string; "stored_metadata"?: { readonly [key: string]: DesktopJsonValue }; "success": true };
 export type LinkHealthOutcome = (LinkHealthResponse);
 export type LinkHealthResponse = { "broken_links": ReadonlyArray<string>; "error"?: null; "errors": ReadonlyArray<string>; "healthy_links": number; "orphaned_links": ReadonlyArray<string>; "status": "healthy" | "degraded"; "success": true; "total_links": number; "warnings": ReadonlyArray<string> };
 export type ModelIndexRefreshOutcome = { "indexed_count": number; "success": true };
 export type ModelsOutcome = { "models": { readonly [key: string]: CatalogModel }; "success": true };
-export type ParamConstraints = { "allowed_values": (null) | (ReadonlyArray<InferenceSettingsJsonValue>); "max": number | null; "min": number | null };
+export type ParamConstraints = { "allowed_values": (null) | (ReadonlyArray<DesktopJsonValue>); "max": number | null; "min": number | null };
 export type ParamType = "Number" | "Integer" | "String" | "Boolean";
 export type PartialDownloadActionName = "resume" | "recover" | "attach" | "none";
 export type PartialDownloadOutcome = { "action": PartialDownloadActionName; "download_id": string | null; "error": string | null; "reason_code": (PartialDownloadReason) | (null); "status": (DownloadStatus) | (null); "success": boolean };
@@ -113,6 +117,7 @@ export function decodeGetBackendSetupParams(input: unknown): DecodeOutcome<GetBa
 export function decodeGetHfDownloadDetailsParams(input: unknown): DecodeOutcome<GetHfDownloadDetailsParams> { return decode(input, validateGetHfDownloadDetailsParams); }
 export function decodeHfDownloadDetailsOutcome(input: unknown): DecodeOutcome<HfDownloadDetailsOutcome> { return decode(input, validateHfDownloadDetailsOutcome); }
 export function decodeInferenceSettingsOutcome(input: unknown): DecodeOutcome<InferenceSettingsOutcome> { return decode(input, validateInferenceSettingsOutcome); }
+export function decodeLibraryModelMetadataOutcome(input: unknown): DecodeOutcome<LibraryModelMetadataOutcome> { return decode(input, validateLibraryModelMetadataOutcome); }
 export function decodeLinkHealthOutcome(input: unknown): DecodeOutcome<LinkHealthOutcome> { return decode(input, validateLinkHealthOutcome); }
 export function decodeModelIndexRefreshOutcome(input: unknown): DecodeOutcome<ModelIndexRefreshOutcome> { return decode(input, validateModelIndexRefreshOutcome); }
 export function decodeModelsOutcome(input: unknown): DecodeOutcome<ModelsOutcome> { return decode(input, validateModelsOutcome); }

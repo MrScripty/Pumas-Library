@@ -203,6 +203,7 @@ pub struct ImportBatchResponse {
 
 /// Embedded metadata payload for model detail surfaces.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct EmbeddedMetadataResponse {
     pub file_type: String,
@@ -211,6 +212,7 @@ pub struct EmbeddedMetadataResponse {
 
 /// Detailed metadata response for a single library model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub struct LibraryModelMetadataResponse {
     pub success: bool,

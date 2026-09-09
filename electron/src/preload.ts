@@ -37,6 +37,7 @@ import {
   decodeLinkHealthOutcome,
   decodeHfDownloadDetailsOutcome,
   decodeInferenceSettingsOutcome,
+  decodeLibraryModelMetadataOutcome,
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
@@ -736,7 +737,7 @@ const electronAPI = {
     validatedApiCall('resume_partial_download', decodePartialDownloadOutcome,
       requireDecoded(decodeRecoverDownloadParams({ modelId, recoveryToken }), 'resume_partial_download request')),
   get_library_model_metadata: (modelId: string) =>
-    apiCall('get_library_model_metadata', { model_id: modelId }),
+    validatedApiCall('get_library_model_metadata', decodeLibraryModelMetadataOutcome, { model_id: modelId }),
   refetch_model_metadata_from_hf: (modelId: string) =>
     apiCall('refetch_model_metadata_from_hf', { model_id: modelId }),
   resolve_model_package_facts: (modelId: string) =>

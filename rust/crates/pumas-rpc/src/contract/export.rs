@@ -341,7 +341,30 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
             };
             serde_json::json!({"method":"get_hf_download_details","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
         }).collect();
+    let metadata = library_model_metadata_fixture();
+    let mut metadata_gguf = library_model_metadata_fixture();
+    metadata_gguf.embedded_metadata = Some(pumas_library::EmbeddedMetadataResponse {
+        file_type: "gguf".into(),
+        metadata: serde_json::json!({
+            "general.name":"Exact GGUF",
+            "custom":{"nested":[null,{"value":"λ"}]},
+            "general.base_model.0.repo_url":{"not":"a URL"},
+            "general.basename":"Exact base",
+        }),
+    });
+    let metadata_empty = pumas_library::LibraryModelMetadataResponse {
+        success: true,
+        model_id: "llm/Exact Model".into(),
+        stored_metadata: None,
+        effective_metadata: None,
+        embedded_metadata: None,
+        primary_file: None,
+        component_manifest: None,
+    };
     Ok(serde_json::json!({
+        "library_model_metadata":LibraryModelMetadataOutcome::new("llm/Exact Model",metadata)?,
+        "library_model_metadata_gguf":LibraryModelMetadataOutcome::new("llm/Exact Model",metadata_gguf)?,
+        "library_model_metadata_empty":LibraryModelMetadataOutcome::new("llm/Exact Model",metadata_empty)?,
         "hf_download_details_request_probes":hf_download_details_request_probes,
         "inference_settings":InferenceSettingsOutcome::new("llm/Exact Model".into(), inference_settings_fixture())?,
         "inference_settings_empty":InferenceSettingsOutcome::new("llm/empty".into(), vec![])?,
@@ -387,6 +410,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         CatalogSearchOutcome,
         HfDownloadDetailsOutcome,
         InferenceSettingsOutcome,
+        LibraryModelMetadataOutcome,
         GetHfDownloadDetailsParams,
         SearchCatalogParams,
         DownloadListOutcome,
@@ -428,13 +452,16 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
         settings.for_serialize()
     };
     let mut schema = serde_json::to_value(settings.into_generator().into_root_schema_for::<T>())?;
-    if T::schema_name() == "InferenceSettingsOutcome" {
-        schema["definitions"]["InferenceSettingsJsonValue"] = serde_json::json!({
+    if matches!(
+        T::schema_name().as_ref(),
+        "InferenceSettingsOutcome" | "LibraryModelMetadataOutcome" | "LibraryModelMetadataResponse"
+    ) {
+        schema["definitions"]["DesktopJsonValue"] = serde_json::json!({
             "anyOf":[
                 {"type":"null"}, {"type":"boolean"}, {"type":"string"},
                 {"type":"number","minimum":-(MAX_JS_SAFE_INTEGER as i64),"maximum":MAX_JS_SAFE_INTEGER},
-                {"type":"array","items":{"$ref":"#/definitions/InferenceSettingsJsonValue"}},
-                {"type":"object","additionalProperties":{"$ref":"#/definitions/InferenceSettingsJsonValue"}},
+                {"type":"array","items":{"$ref":"#/definitions/DesktopJsonValue"}},
+                {"type":"object","additionalProperties":{"$ref":"#/definitions/DesktopJsonValue"}},
             ]
         });
     }
@@ -493,7 +520,7 @@ fn refine_named(name: &str, schema: &mut Value) {
         if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
             properties.insert(
                 "default".into(),
-                serde_json::json!({"$ref":"#/definitions/InferenceSettingsJsonValue"}),
+                serde_json::json!({"$ref":"#/definitions/DesktopJsonValue"}),
             );
         }
     }
@@ -504,7 +531,7 @@ fn refine_named(name: &str, schema: &mut Value) {
         );
         if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
             properties.insert("allowed_values".into(), serde_json::json!({"anyOf":[
-                {"type":"null"}, {"type":"array","items":{"$ref":"#/definitions/InferenceSettingsJsonValue"}},
+                {"type":"null"}, {"type":"array","items":{"$ref":"#/definitions/DesktopJsonValue"}},
             ]}));
         }
     }
@@ -512,6 +539,47 @@ fn refine_named(name: &str, schema: &mut Value) {
         object.insert(
             "required".into(),
             serde_json::json!(["repoId", "downloadOptions", "totalSizeBytes"]),
+        );
+    }
+    if matches!(
+        name,
+        "LibraryModelMetadataOutcome" | "LibraryModelMetadataResponse"
+    ) {
+        object.insert(
+            "required".into(),
+            serde_json::json!(["success", "model_id"]),
+        );
+        if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
+            for field in ["stored_metadata", "effective_metadata"] {
+                properties.insert(field.into(),serde_json::json!({"type":"object","additionalProperties":{"$ref":"#/definitions/DesktopJsonValue"}}));
+            }
+            properties.insert(
+                "embedded_metadata".into(),
+                serde_json::json!({"$ref":"#/definitions/EmbeddedMetadataResponse"}),
+            );
+            properties.insert("primary_file".into(), serde_json::json!({"type":"string"}));
+            properties.insert("component_manifest".into(),serde_json::json!({"type":"array","items":{"$ref":"#/definitions/BundleComponentManifestEntry"}}));
+        }
+    }
+    if name == "EmbeddedMetadataResponse" {
+        object.insert(
+            "required".into(),
+            serde_json::json!(["file_type", "metadata"]),
+        );
+        if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
+            properties.insert("metadata".into(),serde_json::json!({"type":"object","additionalProperties":{"$ref":"#/definitions/DesktopJsonValue"}}));
+        }
+    }
+    if name == "BundleComponentManifestEntry" {
+        object.insert(
+            "required".into(),
+            serde_json::json!([
+                "name",
+                "relative_path",
+                "source_library",
+                "class_name",
+                "state"
+            ]),
         );
     }
     if name == "DownloadOption" {
@@ -672,6 +740,8 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "DownloadStatusFoundOutcome"
             | "HfDownloadDetailsSuccess"
             | "InferenceSettingsOutcome"
+            | "LibraryModelMetadataOutcome"
+            | "LibraryModelMetadataResponse"
             | "ModelIndexRefreshOutcome" => Some(true),
             "DownloadStartedFailure"
             | "DownloadStatusMissingOutcome"

@@ -58,8 +58,14 @@ Inference-settings reads use backend-generated decoding, including nullable
 constraints and structured JSON defaults. The modal keeps drafts and read
 results scoped to one model and rejects mismatched identities. Failed settings
 reads show an unavailable state, not an editable empty list; close and reopen
-to retry. Structured defaults display as read-only JSON. The full metadata
-response and settings-write admission remain separate contract work.
+to retry. Structured defaults display as read-only JSON. Settings-write admission
+remains separate contract work.
+
+Library metadata reads preserve omitted optional payloads and validate present
+metadata as objects, including nested JSON and component-manifest states.
+Malformed responses cannot enter the modal; nested values display without
+object coercion, and non-string link fields remain plain text. This does not
+change metadata extraction or its existing handling of unavailable metadata.
 
 Complete current GGUF and safetensors rows offer format conversion to the other
 format (F16). The dialog requires explicit tool-installation consent, observes

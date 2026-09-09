@@ -10,6 +10,29 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('library metadata decoding preserves actual producer optionality and nested JSON', () => {
+  for (const name of ['library_model_metadata', 'library_model_metadata_empty', 'library_model_metadata_gguf']) {
+    const result = contract.decodeLibraryModelMetadataOutcome(fixtures[name]);
+    assert.equal(result.status, 'valid', name);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[name]);
+  }
+  const valid = fixtures.library_model_metadata;
+  for (const patch of [
+    { success: false }, { extra: true }, { model_id: 42 },
+    { stored_metadata: null }, { stored_metadata: [] }, { effective_metadata: 'text' },
+    { embedded_metadata: null }, { embedded_metadata: { file_type: 'gguf', metadata: 42 } },
+    { embedded_metadata: { file_type: 'gguf' } }, { embedded_metadata: { metadata: {} } },
+    { stored_metadata: { nested: [-9007199254740992] } },
+    { primary_file: null }, { component_manifest: null },
+    { component_manifest: [{ ...valid.component_manifest[0], state: 'unknown' }] },
+  ]) assert.equal(contract.decodeLibraryModelMetadataOutcome({ ...valid, ...patch }).status, 'invalid', JSON.stringify(patch));
+  for (const key of ['source_library', 'class_name']) {
+    const incomplete = { ...valid.component_manifest[0] };
+    delete incomplete[key];
+    assert.equal(contract.decodeLibraryModelMetadataOutcome({ ...valid, component_manifest: [incomplete] }).status, 'invalid', key);
+  }
+});
+
 test('inference settings preserve actual producer values and reject malformed nested facts', () => {
   for (const name of ['inference_settings', 'inference_settings_empty']) {
     const result = contract.decodeInferenceSettingsOutcome(fixtures[name]);

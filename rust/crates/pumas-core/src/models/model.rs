@@ -294,6 +294,7 @@ pub struct AssetValidationError {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub enum BundleComponentState {
     Present,
     Missing,
@@ -305,6 +306,7 @@ pub enum BundleComponentState {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub struct BundleComponentManifestEntry {
     pub name: String,
     pub relative_path: String,

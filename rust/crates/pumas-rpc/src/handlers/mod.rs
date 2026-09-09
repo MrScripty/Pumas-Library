@@ -735,6 +735,12 @@ async fn dispatch_admitted_command(
                 .map(Box::new)
                 .map(RpcOutcome::HfDownloadDetails)
         }
+        RpcCommand::Legacy { method, params } if method == "get_library_model_metadata" => {
+            models::get_library_model_metadata(state, &params)
+                .await
+                .map(Box::new)
+                .map(RpcOutcome::LibraryModelMetadata)
+        }
         RpcCommand::Legacy { method, params } if method == "get_inference_settings" => {
             models::get_inference_settings(state, &params)
                 .await
@@ -1168,7 +1174,6 @@ async fn dispatch_method(
         "detect_sharded_sets" => models::detect_sharded_sets(state, params).await,
         "validate_file_type" => models::validate_file_type(state, params).await,
         "get_embedded_metadata" => models::get_embedded_metadata(state, params).await,
-        "get_library_model_metadata" => models::get_library_model_metadata(state, params).await,
         "resolve_model_execution_descriptor" => {
             models::resolve_model_execution_descriptor(state, params).await
         }
@@ -1307,6 +1312,103 @@ async fn dispatch_method(
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn library_model_metadata_rpc_projects_objects_and_rejects_malformed_embedded_metadata() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        let model_id = "llm/fixture/Exact Model";
+        let directory = state.api.model_library().library_root().join(model_id);
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("Exact Model.safetensors");
+        let metadata = pumas_library::models::ModelMetadata {
+            model_id: Some(model_id.into()),
+            model_type: Some("llm".into()),
+            notes: Some(" Exact notes ".into()),
+            ..Default::default()
+        };
+        state
+            .api
+            .model_library()
+            .save_metadata(&directory, &metadata)
+            .await
+            .unwrap();
+        for embedded in [
+            json!({"architecture":"fixture","nested":[null,0.5]}),
+            Value::Null,
+            json!([1]),
+            json!("invalid shape"),
+        ] {
+            let header = serde_json::to_vec(&json!({"__metadata__":embedded})).unwrap();
+            let mut file = (header.len() as u64).to_le_bytes().to_vec();
+            file.extend_from_slice(&header);
+            std::fs::write(&source, &file).unwrap();
+            // Admit the fixture's current file snapshot before the response
+            // read. Otherwise opportunistic reconciliation can reclassify this
+            // deliberately tiny, non-model header and relocate its directory.
+            state
+                .api
+                .model_library()
+                .index_model_dir(&directory)
+                .await
+                .unwrap();
+            assert_eq!(
+                state.api.model_library().get_primary_model_file(model_id),
+                Some(source.clone())
+            );
+            assert!(state
+                .api
+                .model_library()
+                .model_scope_is_current(&directory)
+                .await
+                .unwrap());
+            let before = std::fs::read(directory.join("metadata.json")).unwrap();
+            let request = Bytes::from(
+                serde_json::to_vec(&json!({
+                    "jsonrpc":"2.0","id":"metadata-read","method":"get_library_model_metadata",
+                    "params":{"model_id":model_id},
+                }))
+                .unwrap(),
+            );
+            let response = handle_rpc(State(state.clone()), request)
+                .await
+                .into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), 65_536)
+                .await
+                .unwrap();
+            let wire: Value = serde_json::from_slice(&bytes).unwrap();
+            if embedded.is_object() {
+                assert_eq!(wire["id"], "metadata-read");
+                assert_eq!(wire["jsonrpc"], "2.0");
+                assert_eq!(wire["result"]["success"], true);
+                assert_eq!(wire["result"]["model_id"], model_id);
+                assert_eq!(
+                    wire["result"]["embedded_metadata"],
+                    json!({"file_type":"safetensors","metadata":embedded})
+                );
+                assert_eq!(
+                    wire["result"]["primary_file"],
+                    source.to_string_lossy().as_ref()
+                );
+                assert!(wire["result"]["stored_metadata"].is_object());
+                assert!(wire["result"]["effective_metadata"].is_object());
+                assert!(wire["result"].get("component_manifest").is_none());
+            } else {
+                assert_eq!(
+                    wire,
+                    json!({"jsonrpc":"2.0","id":"metadata-read","error":{
+                        "code":-32603,"message":"The request could not be completed due to an internal error.","data":{"class":"internal"},
+                    }})
+                );
+            }
+            assert_eq!(std::fs::read(&source).unwrap(), file);
+            assert_eq!(
+                std::fs::read(directory.join("metadata.json")).unwrap(),
+                before
+            );
+        }
+    }
 
     #[tokio::test]
     async fn inference_settings_rpc_reads_temporary_library_and_preserves_redacted_errors() {

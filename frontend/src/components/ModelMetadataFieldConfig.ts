@@ -65,7 +65,10 @@ export function formatFieldName(key: string): string {
 /** Format metadata value for display */
 export function formatMetadataValue(key: string, value: unknown): string {
   if (value == null) return '';
-  if (Array.isArray(value)) return value.join(', ');
+  if (Array.isArray(value)) return value.map((item: unknown) => (
+    item !== null && typeof item === 'object' ? JSON.stringify(item) : String(item ?? '')
+  )).join(', ');
+  if (typeof value === 'object') return JSON.stringify(value);
   if (key === 'match_confidence' && typeof value === 'number') {
     return `${Math.round(value * 100)}%`;
   }
@@ -125,7 +128,7 @@ export function isHiddenGgufField(key: string, value: unknown): boolean {
   const lowerKey = key.toLowerCase();
   if (HIDDEN_GGUF_FIELDS.has(lowerKey)) return true;
   if (URL_TARGET_FIELDS.has(lowerKey)) return true;
-  const stringValue = String(value ?? '');
+  const stringValue = formatMetadataValue(key, value);
   if (stringValue.length > 500) return true;
   return false;
 }

@@ -352,7 +352,7 @@ pub async fn get_embedded_metadata(
 pub async fn get_library_model_metadata(
     state: &AppState,
     params: &Value,
-) -> pumas_library::Result<Value> {
+) -> pumas_library::Result<crate::contract::LibraryModelMetadataOutcome> {
     let model_id = require_str_param(params, "model_id", "modelId")?;
 
     // Get the library
@@ -415,14 +415,14 @@ pub async fn get_library_model_metadata(
 
     let response = pumas_library::LibraryModelMetadataResponse {
         success: true,
-        model_id,
+        model_id: model_id.clone(),
         stored_metadata: stored_metadata.map(serde_json::to_value).transpose()?,
         effective_metadata: effective_metadata.map(serde_json::to_value).transpose()?,
         embedded_metadata,
         primary_file: primary_file_str,
         component_manifest,
     };
-    Ok(serde_json::to_value(response)?)
+    crate::contract::LibraryModelMetadataOutcome::new(&model_id, response)
 }
 
 pub async fn resolve_model_execution_descriptor(

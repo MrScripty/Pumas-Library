@@ -1,5 +1,48 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Library-Model Metadata Read Contract
+
+Accepted response projection and consumer decoding for library-model metadata.
+Core response/manifest types supply feature-gated schemas. The RPC outcome
+requires successful exact-model identity and object-shaped stored, effective
+and embedded metadata with representable nested JSON. Absent optional payloads
+remain omitted, not null; manifest order, all four states, exact paths and
+required nullable class/source fields remain intact. Inference and metadata
+reuse one `DesktopJsonValue` representation without new generator semantics.
+Extraction, reconciliation, requests and mutations are unchanged.
+
+Preload consumes the generated decoder; the modal uses generated optionality
+and retains its per-model lifetime checks. Nested object/array display no longer
+depends on prototype coercion; non-string linked fields remain text. Actual
+producer fixtures exercise both safetensors structured expansion and GGUF
+display, empty optional payloads, manifest states and mismatch/malformed refusal.
+root_capability implemented Rust; root integrated consumer changes and evidence.
+The codebase-design skill guided shared representation ownership and reuse of
+the existing generator rather than another handwritten response validator.
+
+The preload regression failed before implementation with `Missing expected
+rejection`; focused display tests reproduced object-coercion failure. Generation
+initially exposed the transparent wrapper's delegated core schema name; adding
+that source name to shared-definition projection resolved the dangling reference.
+The first RPC fixture failed to extract embedded data because an unindexed tiny
+file could be relocated by opportunistic reconciliation. The fixture now indexes
+and proves its current primary-file snapshot before the read. FE-I32 records the
+separate ordering concern; this does not prove general extraction availability.
+
+Three metadata RPC tests pass with default and no-default features, including
+real temporary-library reads, malformed safetensors metadata projection and
+unchanged fixture bytes after the read. Four inference regressions pass after
+sharing JSON policy. Standalone core no-default compilation, strict all-targets/
+all-features RPC Clippy and formatting pass. Eighteen actual-producer decoder
+tests, 21 preload/renderer conformance tests, 19 preload tests (one real-Electron
+test gated), ten focused frontend tests and all 592 frontend tests pass. Types,
+affected lint, Electron build, both frontend build variants, seven generator
+tests, freshness and canonical plan checks pass. Logs:
+`/tmp/pumas-metadata-read-frontend.log`, `/tmp/pumas-metadata-read-build.log`,
+`/tmp/pumas-metadata-read-library-only.log`. No live-library mutation, real GUI,
+remote-service or other-OS acceptance is claimed. Next: FE-I31 strict mutation
+request admission with no-write evidence against temporary libraries.
+
 ## 2026-09-08 — Inference-Settings Reads And Modal Isolation
 
 Accepted the response-only inference-settings contract and per-model modal

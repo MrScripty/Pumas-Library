@@ -10,10 +10,12 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Complete the library-model metadata response contract (FE-I01/M4),
-including omitted optional fields and arbitrary-JSON versus object consumers.
+**Next slice:** Strict inference-settings mutation request admission (FE-I31/M4):
+reject malformed settings before an empty replacement can reach persistence,
+with temporary-library no-write regressions. Metadata response decoding is accepted
+below; extraction/reconciliation behavior remains separate (FE-I32).
 Inference-settings reads and modal model-isolation are accepted below.
-Read-only contract work does not admit settings writes.
+No live-library writes are authorized by contract verification.
 Hugging Face download-details request and response contracts below are accepted.
 The user's conversion-priority decision below supersedes source-root follow-up.
 Source-file classification and llama.cpp discovery are accepted below. Direct
@@ -58,6 +60,44 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Library-Model Metadata Read Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--library-model-metadata-read-contract).
+Operation: `continue` this canonical plan. Project the existing
+core metadata response through a typed RPC outcome and generated preload decoder.
+Preserve exact model identity, omitted absent optional fields, path strings,
+manifest order/all states and its required nullable source/class fields. Present
+stored/effective/embedded metadata must be JSON objects; nested JSON retains the
+existing desktop numeric representation policy. Share that recursive JSON schema
+and constructor check with inference reads under `DesktopJsonValue`, without
+changing the inference contract or generator semantics.
+
+The safetensors extractor can currently return nonobject JSON. Reject that
+invalid response shape instead of claiming the extractor guarantees objects or
+inventing empty metadata. Extraction/absence policy, requests, writes and core
+semantics stay unchanged. The modal consumes generated optionality and safely
+displays nested immutable JSON; linked fields are links only when strings.
+
+Write set: root_capability owns core metadata/manifest schema derives, RPC
+contract/export/dispatch/import handler and tests. Root owns preload/test,
+six generated files, frontend read aliases/modal, metadata field/grid rendering,
+focused tests, existing producer-to-renderer conformance, README and four plan
+records. Root serializes generation, Cargo and integration. Acceptance is local
+automated focused/contract evidence: actual RPC temporary-library reads and
+redacted failures, real serialized fixtures through decoder/preload/modal,
+omitted optionals, malformed nested payloads, identity and safe structured
+rendering. Run affected types/lint, focused default/minimal RPC tests, standalone
+core check, generator freshness/tests, formatting and plan checks. No real GUI,
+remote service, model mutation, settings-write or other-OS claim.
+
+Composed-design review applies: core retains response types, RPC owns the
+destination object/numeric proof, AJV owns schema interpretation, and the modal
+retains per-model state lifetime. Reuse the now-shared JSON representation rather
+than parallel policies. Removing the change would restore unchecked optional
+and nested shape assumptions; no new framework. Re-plan for any required change
+to extraction semantics, persisted data, or backend capability availability.
 
 ## Inference-Settings Read Contract And Modal Isolation
 

@@ -30,9 +30,6 @@ describe('ModelMetadataModal', () => {
     getLibraryModelMetadataMock.mockResolvedValue({
       success: true,
       model_id: 'model-1',
-      stored_metadata: null,
-      embedded_metadata: null,
-      primary_file: null,
       component_manifest: [],
     });
     getInferenceSettingsMock.mockResolvedValue({
@@ -62,8 +59,6 @@ describe('ModelMetadataModal', () => {
       success: true,
       model_id: 'model-1',
       stored_metadata: { model_id: 'model-1' },
-      embedded_metadata: null,
-      primary_file: null,
       component_manifest: [],
     });
     getInferenceSettingsMock.mockResolvedValue({
@@ -158,7 +153,7 @@ describe('ModelMetadataModal', () => {
 });
 
 function metadata(modelId: string) {
-  return { success: true, model_id: modelId, stored_metadata: null, embedded_metadata: null, primary_file: null, component_manifest: [] };
+  return { success: true, model_id: modelId };
 }
 
 function deferred() {

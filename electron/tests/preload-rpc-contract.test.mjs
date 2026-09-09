@@ -168,6 +168,25 @@ function toPlainValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test('library metadata preserves omission and rejects invalid nested payloads in preload', async () => {
+  const harness = loadCompiledPreload();
+  const empty = { success: true, model_id: 'llm/Exact Model' };
+  for (const malformed of [
+    { ...empty, success: false }, { ...empty, stored_metadata: null },
+    { ...empty, stored_metadata: [] }, { ...empty, effective_metadata: 'text' },
+    { ...empty, embedded_metadata: { file_type: 'gguf', metadata: [] } },
+    { ...empty, stored_metadata: { nested: [9007199254740992] } },
+    { ...empty, primary_file: null }, { ...empty, component_manifest: null },
+    { ...empty, component_manifest: [{ name: 'unet', relative_path: 'unet', state: 'unknown', source_library: null, class_name: null }] },
+  ]) {
+    harness.respondWith(malformed);
+    await assert.rejects(harness.api.get_library_model_metadata('llm/Exact Model'), { name: 'DesktopContractError' });
+  }
+  harness.respondWith(empty);
+  assert.deepEqual(toPlainValue(await harness.api.get_library_model_metadata('llm/Exact Model')), empty);
+  assert.deepEqual(toPlainValue(harness.invocations.at(-1)), ['api:call', 'get_library_model_metadata', { model_id: 'llm/Exact Model' }]);
+});
+
 test('inference settings are decoded before the bundled preload exposes them', async () => {
   const harness = loadCompiledPreload();
   const valid = { success: true, model_id: 'model-1', inference_settings: [{

@@ -44,6 +44,7 @@ function installActualPreload(
   setupResponse: unknown = fixture['conversion_setup_idle'],
   hfReads?: { models: RemoteModelInfo[]; details: unknown },
   inferenceRead: unknown = fixture['inference_settings'],
+  metadataRead: unknown = fixture['library_model_metadata_empty'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -69,7 +70,7 @@ function installActualPreload(
         const requestParams: unknown = JSON.parse(JSON.stringify(params));
         requests.push({ method, params: requestParams });
         if (method === 'get_inference_settings') return inferenceRead;
-        if (method === 'get_library_model_metadata') return { success: true, model_id: 'llm/Exact Model' };
+        if (method === 'get_library_model_metadata') return metadataRead;
         if (method === 'search_hf_models' && hfReads) return { success: true, models: hfReads.models };
         if (method === 'get_hf_download_details' && hfReads) return hfReads.details;
         if (method === 'get_conversion_progress') return conversionResponse;
@@ -156,6 +157,44 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('renders actual metadata payloads and all manifest states through bundled preload', async () => {
+    const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      fixture['library_model_metadata']);
+    render(<ModelMetadataModal modelId="llm/Exact Model" modelName="Metadata fixture" onClose={() => undefined} />);
+    expect(await screen.findByText('exact')).toBeInTheDocument();
+    expect(screen.getByText('/Exact Library/λ/model.safetensors')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Components \(4\)/ }));
+    for (const state of ['Present', 'Missing', 'Unreadable', 'Invalid Path']) {
+      expect(screen.getByText(state)).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Stored' }));
+    expect(screen.getByText('Array (4)')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand' }));
+    expect(screen.getByText(/"edge": 9007199254740991/)).toBeInTheDocument();
+    expect(requests.find(request => request.method === 'get_library_model_metadata')?.params)
+      .toEqual({ model_id: 'llm/Exact Model' });
+  });
+
+  it('renders decoded GGUF objects without coercing a structured URL into a link', async () => {
+    installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      fixture['library_model_metadata_gguf']);
+    render(<ModelMetadataModal modelId="llm/Exact Model" modelName="GGUF fixture" onClose={() => undefined} />);
+    expect(await screen.findByText('Exact GGUF')).toBeInTheDocument();
+    expect(screen.getByText('{"nested":[null,{"value":"λ"}]}')).toBeInTheDocument();
+    expect(screen.getByText('Exact base')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Exact base' })).not.toBeInTheDocument();
+  });
+
+  it.each(['invalid-shape', 'wrong-model'] as const)('does not display %s metadata from preload', async (kind) => {
+    const metadata = kind === 'invalid-shape'
+      ? { success: true, model_id: 'llm/Exact Model', stored_metadata: [] }
+      : { success: true, model_id: 'different-model', stored_metadata: { name: 'Wrong content' } };
+    installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, metadata);
+    render(<ModelMetadataModal modelId="llm/Exact Model" modelName="Metadata fixture" onClose={() => undefined} />);
+    expect(await screen.findByText('Failed to load metadata')).toBeInTheDocument();
+    expect(screen.queryByText('Wrong content')).not.toBeInTheDocument();
+  });
+
   it('renders producer inference settings through the bundled preload and preserves editable drafts', async () => {
     const requests = installActualPreload();
     render(<ModelMetadataModal modelId="llm/Exact Model" modelName="Fixture" onClose={() => undefined} />);

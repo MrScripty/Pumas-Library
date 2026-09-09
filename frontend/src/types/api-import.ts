@@ -1,5 +1,5 @@
 import type { BaseResponse } from './api-common';
-import type { CatalogSearchOutcome } from '../generated/desktop-contract';
+import type { CatalogSearchOutcome, LibraryModelMetadataOutcome } from '../generated/desktop-contract';
 
 // ============================================================================
 // Model Library Types (Phase 1A - Part 6)
@@ -149,20 +149,9 @@ export interface BundleComponentManifestEntry {
   state: BundleComponentState;
 }
 
-export interface LibraryEmbeddedMetadataResponse {
-  file_type: string;
-  metadata: Record<string, unknown>;
-}
+export type LibraryEmbeddedMetadataResponse = NonNullable<LibraryModelMetadataOutcome['embedded_metadata']>;
 
-export interface LibraryModelMetadataResponse {
-  success: boolean;
-  model_id: string;
-  stored_metadata: Record<string, unknown> | null;
-  effective_metadata?: Record<string, unknown> | null;
-  embedded_metadata: LibraryEmbeddedMetadataResponse | null;
-  primary_file: string | null;
-  component_manifest?: BundleComponentManifestEntry[] | null;
-}
+export type LibraryModelMetadataResponse = LibraryModelMetadataOutcome;
 
 export interface ModelExecutionDescriptor {
   execution_contract_version: number;

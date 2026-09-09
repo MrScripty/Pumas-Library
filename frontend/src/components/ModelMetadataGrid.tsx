@@ -37,7 +37,8 @@ function getStructuredValueSummary(key: string, value: unknown): string {
   }
   if (lowerKey === 'hashes' && isRecordValue(value)) {
     const hashKinds = Object.keys(value).filter(
-      (candidate) => value[candidate] != null && String(value[candidate]).trim() !== ''
+      (candidate) => value[candidate] != null
+        && (typeof value[candidate] !== 'string' || value[candidate].trim() !== '')
     );
     if (hashKinds.length === 0) return 'Hashes (empty)';
     const preview = hashKinds.slice(0, 3).join(', ');
@@ -111,7 +112,8 @@ export function ModelMetadataGrid({
         <div className="grid max-h-80 grid-cols-2 gap-x-4 gap-y-1 overflow-y-auto text-sm">
           {displayEntries.map(([key, value]) => {
             const linkedUrl = linkedGgufFields[key.toLowerCase()];
-            const urlValue = linkedUrl ? (metadata[linkedUrl] as string) : null;
+            const linkedValue = linkedUrl ? metadata[linkedUrl] : null;
+            const urlValue = typeof linkedValue === 'string' ? linkedValue : null;
 
             return (
               <React.Fragment key={key}>

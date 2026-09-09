@@ -445,6 +445,7 @@ pub(crate) enum RpcOutcome {
     CatalogSearch(Box<CatalogSearchOutcome>),
     HfDownloadDetails(Box<HfDownloadDetailsOutcome>),
     InferenceSettings(Box<InferenceSettingsOutcome>),
+    LibraryModelMetadata(Box<LibraryModelMetadataOutcome>),
     ModelIndexRefresh(ModelIndexRefreshOutcome),
     Legacy(Value),
 }
@@ -502,6 +503,7 @@ impl RpcOutcome {
             Self::CatalogSearch(value) => serde_json::to_value(value),
             Self::HfDownloadDetails(value) => serde_json::to_value(value),
             Self::InferenceSettings(value) => serde_json::to_value(value),
+            Self::LibraryModelMetadata(value) => serde_json::to_value(value),
             Self::ModelIndexRefresh(value) => serde_json::to_value(value),
             Self::Legacy(value) => return Ok(value),
         };
@@ -1252,7 +1254,7 @@ impl InferenceSettingsOutcome {
         inference_settings: Vec<pumas_library::models::InferenceParamSchema>,
     ) -> Result<Self, PumasError> {
         for setting in &inference_settings {
-            if !inference_json_representable(&setting.default)
+            if !desktop_json_representable(&setting.default)
                 || setting.constraints.as_ref().is_some_and(|constraints| {
                     [constraints.min, constraints.max]
                         .into_iter()
@@ -1261,7 +1263,7 @@ impl InferenceSettingsOutcome {
                         || constraints.allowed_values.as_ref().is_some_and(|values| {
                             values
                                 .iter()
-                                .any(|value| !inference_json_representable(value))
+                                .any(|value| !desktop_json_representable(value))
                         })
                 })
             {
@@ -1276,14 +1278,140 @@ impl InferenceSettingsOutcome {
     }
 }
 
-fn inference_json_representable(value: &Value) -> bool {
+fn desktop_json_representable(value: &Value) -> bool {
     match value {
         Value::Number(number) => number
             .as_f64()
             .is_some_and(|number| number.is_finite() && number.abs() <= MAX_JS_SAFE_INTEGER as f64),
-        Value::Array(values) => values.iter().all(inference_json_representable),
-        Value::Object(values) => values.values().all(inference_json_representable),
+        Value::Array(values) => values.iter().all(desktop_json_representable),
+        Value::Object(values) => values.values().all(desktop_json_representable),
         Value::Null | Value::Bool(_) | Value::String(_) => true,
+    }
+}
+
+#[derive(Serialize)]
+#[serde(transparent)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct LibraryModelMetadataOutcome(pumas_library::LibraryModelMetadataResponse);
+
+impl LibraryModelMetadataOutcome {
+    pub(crate) fn new(
+        requested_model_id: &str,
+        response: pumas_library::LibraryModelMetadataResponse,
+    ) -> Result<Self, PumasError> {
+        if !response.success || response.model_id != requested_model_id {
+            return Err(invalid_domain_outcome("library model metadata"));
+        }
+        for value in response
+            .stored_metadata
+            .iter()
+            .chain(response.effective_metadata.iter())
+            .chain(
+                response
+                    .embedded_metadata
+                    .iter()
+                    .map(|embedded| &embedded.metadata),
+            )
+        {
+            if !value.is_object() || !desktop_json_representable(value) {
+                return Err(invalid_domain_outcome("library model metadata"));
+            }
+        }
+        Ok(Self(response))
+    }
+}
+
+#[cfg(any(test, feature = "export-contract"))]
+fn library_model_metadata_fixture() -> pumas_library::LibraryModelMetadataResponse {
+    use pumas_library::models::{BundleComponentManifestEntry, BundleComponentState};
+    pumas_library::LibraryModelMetadataResponse {
+        success: true,
+        model_id: "llm/Exact Model".into(),
+        stored_metadata: Some(
+            serde_json::json!({"notes":" Exact notes ","nested":[null,true,0.25,{"edge":MAX_JS_SAFE_INTEGER}]}),
+        ),
+        effective_metadata: Some(serde_json::json!({"override":false,"nested":{"list":["λ",-1]}})),
+        embedded_metadata: Some(pumas_library::EmbeddedMetadataResponse {
+            file_type: "safetensors".into(),
+            metadata: serde_json::json!({"architecture":"exact","nested":[null,{"shape":[1,2]}]}),
+        }),
+        primary_file: Some("/Exact Library/λ/model.safetensors".into()),
+        component_manifest: Some(
+            [
+                BundleComponentState::Present,
+                BundleComponentState::Missing,
+                BundleComponentState::Unreadable,
+                BundleComponentState::PathEscape,
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, state)| BundleComponentManifestEntry {
+                name: format!("component {index}"),
+                relative_path: format!("Exact Parts/λ/{index}"),
+                source_library: (index == 0).then(|| "diffusers".into()),
+                class_name: (index == 0).then(|| "ExactClass".into()),
+                state,
+            })
+            .collect(),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod library_model_metadata_tests {
+    use super::*;
+
+    #[test]
+    fn library_model_metadata_preserves_emitted_values_and_omission() {
+        let response = library_model_metadata_fixture();
+        let expected = serde_json::to_value(&response).unwrap();
+        let outcome = RpcOutcome::LibraryModelMetadata(Box::new(
+            LibraryModelMetadataOutcome::new("llm/Exact Model", response).unwrap(),
+        ));
+        assert!(!outcome.uses_response_wrapper());
+        assert_eq!(outcome.into_value().unwrap(), expected);
+        let mut empty = library_model_metadata_fixture();
+        empty.stored_metadata = None;
+        empty.effective_metadata = None;
+        empty.embedded_metadata = None;
+        empty.primary_file = None;
+        empty.component_manifest = None;
+        assert_eq!(
+            serde_json::to_value(
+                LibraryModelMetadataOutcome::new("llm/Exact Model", empty).unwrap()
+            )
+            .unwrap(),
+            serde_json::json!({"success":true,"model_id":"llm/Exact Model"})
+        );
+    }
+
+    #[test]
+    fn library_model_metadata_rejects_uncorrelated_failed_and_invalid_json_shapes() {
+        assert!(
+            LibraryModelMetadataOutcome::new("llm/other", library_model_metadata_fixture())
+                .is_err()
+        );
+        let mut failed = library_model_metadata_fixture();
+        failed.success = false;
+        assert!(LibraryModelMetadataOutcome::new("llm/Exact Model", failed).is_err());
+        for invalid in [
+            Value::Null,
+            serde_json::json!([]),
+            serde_json::json!("text"),
+            serde_json::json!(true),
+            serde_json::json!(42),
+            serde_json::json!({"nested":[MAX_JS_SAFE_INTEGER+1]}),
+        ] {
+            for field in 0..3 {
+                let mut response = library_model_metadata_fixture();
+                match field {
+                    0 => response.stored_metadata = Some(invalid.clone()),
+                    1 => response.effective_metadata = Some(invalid.clone()),
+                    _ => response.embedded_metadata.as_mut().unwrap().metadata = invalid.clone(),
+                }
+                assert!(LibraryModelMetadataOutcome::new("llm/Exact Model", response).is_err());
+            }
+        }
     }
 }
 

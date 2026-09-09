@@ -103,15 +103,15 @@ const ModelMetadataModalSession: React.FC<ModelMetadataModalProps> = ({
         }
         const metaResult = metadataRead.value;
 
-        if (metaResult.success && metaResult.model_id === modelId) {
+        if (metaResult.model_id === modelId) {
           setStoredMetadata(metaResult.stored_metadata ?? null);
-          setNotesDraft(getStoredNotes(metaResult.stored_metadata));
+          setNotesDraft(getStoredNotes(metaResult.stored_metadata ?? null));
           if (metaResult.embedded_metadata) {
             setEmbeddedMetadata(metaResult.embedded_metadata.metadata);
             setEmbeddedFileType(metaResult.embedded_metadata.file_type);
           }
           setPrimaryFile(metaResult.primary_file ?? null);
-          setComponentManifest(metaResult.component_manifest || []);
+          setComponentManifest([...(metaResult.component_manifest ?? [])]);
         } else {
           setError('Failed to load metadata');
         }

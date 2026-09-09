@@ -66,7 +66,7 @@ a controlled benchmark.
 
 Review required Electron omitted request normalization to preserve Rust parity and
 three claim-directed active-hook assertions: external running status clears starting,
-an omitted outcome projects a null log, and malformed/transport failures preserve
+an omitted outcome projects a null log, and malformed and transport failures preserve
 the prior log. Rust
 also repaired shared test-corpus helper visibility during compilation. Integration
 repaired one test oracle that expected a synchronous throw from an async composed

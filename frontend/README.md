@@ -49,6 +49,11 @@ or an invalid nested payload cannot replace the current row's details; failures
 leave the existing projection intact and allow retry. This does not validate
 all search responses or prove remote files are downloadable.
 
+Download-details requests accept omitted/null quant selection or an array of
+strings. Malformed selections are rejected before IPC and at RPC admission,
+not replaced with an empty selection. RPC accepts either `repo_id` or `repoId`,
+but not both or extra fields; exact string contents and ordering are preserved.
+
 Complete current GGUF and safetensors rows offer format conversion to the other
 format (F16). The dialog requires explicit tool-installation consent, observes
 backend progress and requests cancellation without assuming it has completed.

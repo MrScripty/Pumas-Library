@@ -1,5 +1,37 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Hugging Face Download-Details Request Admission
+
+Accepted typed RPC admission and generated preload request validation. Exactly
+one repository spelling (`repo_id` or `repoId`) is accepted; duplicate aliases,
+extra fields and malformed quant selections reject instead of silently becoming
+an empty selection. Null/omitted selection still means empty selection. Exact
+strings, empty strings, Unicode, order and duplicates survive admission. The
+handler now consumes typed fields; the standalone core operation and previously
+accepted response contract are unchanged. No new repository grammar or download
+policy is introduced. The separate core internal JSON dispatcher is unchanged.
+
+root_capability implemented Rust admission, dispatch, schema and parser probes;
+root integrated preload, generated files, tests and documentation. root_store
+reviewed the request policy without blockers. The codebase-design skill guided
+reuse of the existing typed command boundary and standard schema alternatives,
+without a new validator framework.
+
+The new bundled-preload regression failed before implementation with `Missing
+expected rejection`, then passed after generation/build. Five focused RPC tests
+pass with default and no-default features. The latter initially hit a sandbox
+permission error constructing its fixture and passed with fixture permissions;
+this is not evidence of an application failure. Strict all-targets/all-features
+RPC Clippy and workspace formatting pass. Seventeen bundled-preload tests pass,
+one real-Electron sandbox test remains gated. Sixteen decoder conformance tests
+include agreement with all 16 actual Rust request-parser probes; 15 existing
+producer/preload/renderer conformance tests and 11 hydration tests pass.
+Frontend types, Electron build, affected lint and six generator tests pass.
+Generation freshness and canonical plan checks complete the recorded acceptance.
+No live HF access, actual download, GUI workflow or other-OS acceptance is claimed.
+Next: bound read-only metadata/inference-settings contracts and stale modal reads;
+conversion remains deferred and whole M4 remains open.
+
 ## 2026-09-08 — Hugging Face Download-Details Contract
 
 Accepted response validation. Core `HfDownloadDetails`,

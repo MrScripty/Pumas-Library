@@ -729,8 +729,8 @@ async fn dispatch_admitted_command(
         RpcCommand::RefreshModelIndex => models::refresh_model_index(state)
             .await
             .map(RpcOutcome::ModelIndexRefresh),
-        RpcCommand::Legacy { method, params } if method == "get_hf_download_details" => {
-            models::get_hf_download_details(state, &params)
+        RpcCommand::GetHfDownloadDetails { repo_id, quants } => {
+            models::get_hf_download_details(state, &repo_id, &quants)
                 .await
                 .map(Box::new)
                 .map(RpcOutcome::HfDownloadDetails)
@@ -1307,26 +1307,34 @@ mod tests {
     async fn hf_download_details_rpc_preserves_request_error_without_network() {
         let temp = TempDir::new().unwrap();
         let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
-        let body = Bytes::from(
-            serde_json::to_vec(&json!({
-                "jsonrpc":"2.0", "id":"details-invalid-request",
-                "method":"get_hf_download_details", "params":{},
-            }))
-            .unwrap(),
-        );
-        let response = handle_rpc(State(state), body).await.into_response();
-        assert_eq!(response.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(response.into_body(), 65_536)
-            .await
-            .unwrap();
-        let value: Value = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(
-            value,
-            json!({
-                "jsonrpc":"2.0", "id":"details-invalid-request",
-                "error":{"code":-32602,"message":"Request parameters are invalid.","data":{"class":"invalid_request"}},
-            })
-        );
+        for params in [
+            json!({}),
+            json!({"repo_id":"private/repo","repoId":"private/repo"}),
+            json!({"repo_id":"private/repo","quants":["Q4",42]}),
+            json!({"repoId":"private/repo","quants":false}),
+            json!({"repo_id":"private/repo","unexpected":"private-value"}),
+        ] {
+            let body = Bytes::from(
+                serde_json::to_vec(&json!({
+                    "jsonrpc":"2.0", "id":"details-invalid-request",
+                    "method":"get_hf_download_details", "params":params,
+                }))
+                .unwrap(),
+            );
+            let response = handle_rpc(State(state.clone()), body).await.into_response();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), 65_536)
+                .await
+                .unwrap();
+            let value: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                value,
+                json!({
+                    "jsonrpc":"2.0", "id":"details-invalid-request",
+                    "error":{"code":-32602,"message":"Request parameters are invalid.","data":{"class":"invalid_request"}},
+                })
+            );
+        }
     }
 
     #[cfg(target_os = "linux")]

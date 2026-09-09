@@ -10,6 +10,16 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('HF download-details request decoding agrees with the actual Rust parser', () => {
+  const probes = fixtures.hf_download_details_request_probes;
+  assert.ok(Array.isArray(probes) && probes.length > 0);
+  for (const { params, accepted } of probes) {
+    const result = contract.decodeGetHfDownloadDetailsParams(params);
+    assert.equal(result.status, accepted ? 'valid' : 'invalid', JSON.stringify(params));
+    if (accepted) assert.deepEqual(JSON.parse(JSON.stringify(result.value)), params);
+  }
+});
+
 test('HF download details preserve producer identities, groups and unknown sizes', () => {
   for (const name of ['hf_download_details_success', 'hf_download_details_empty', 'hf_download_details_failure']) {
     const result = contract.decodeHfDownloadDetailsOutcome(fixtures[name]);

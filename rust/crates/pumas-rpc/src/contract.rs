@@ -306,6 +306,10 @@ pub(crate) enum RpcCommand {
         recovery_token: DownloadRecoveryToken,
     },
     GetModels,
+    GetHfDownloadDetails {
+        repo_id: String,
+        quants: Vec<String>,
+    },
     SearchCatalog {
         query: String,
         limit: usize,
@@ -374,6 +378,7 @@ impl RpcCommand {
             Self::ResumePartialDownload { .. } => "resume_partial_download",
             Self::GetModels => "get_models",
             Self::SearchCatalog { .. } => "search_models_fts",
+            Self::GetHfDownloadDetails { .. } => "get_hf_download_details",
             Self::RefreshModelIndex => "refresh_model_index",
             Self::Legacy { method, .. } => method,
         }
@@ -1289,6 +1294,35 @@ mod hf_download_details_tests {
     use super::*;
     use pumas_library::models::{DownloadOption, FileGroup, HfDownloadDetails};
 
+    #[test]
+    fn hf_download_details_request_admission_preserves_exact_strings_and_rejects_ambiguity() {
+        for (params, expected) in hf_download_details_requests() {
+            let result = parse_command("get_hf_download_details", Some(&params));
+            assert_eq!(result.is_ok(), expected, "{params}");
+            if expected {
+                let command = result.unwrap();
+                assert_eq!(command.method(), "get_hf_download_details");
+                let RpcCommand::GetHfDownloadDetails { repo_id, quants } = command else {
+                    panic!("details admission must select a typed command");
+                };
+                let expected_repo = params
+                    .get("repo_id")
+                    .or_else(|| params.get("repoId"))
+                    .unwrap()
+                    .as_str()
+                    .unwrap();
+                assert_eq!(repo_id, expected_repo);
+                let expected_quants: Option<Vec<String>> =
+                    serde_json::from_value(params.get("quants").cloned().unwrap_or(Value::Null))
+                        .unwrap();
+                assert_eq!(quants, expected_quants.unwrap_or_default());
+            } else {
+                assert_eq!(result.err().unwrap().code, -32602);
+            }
+        }
+        assert!(parse_command("get_hf_download_details", None).is_err());
+    }
+
     fn details() -> HfDownloadDetails {
         HfDownloadDetails {
             repo_id: "Owner/Exact.Repo".into(),
@@ -2055,6 +2089,42 @@ fn invalid_domain_outcome(name: &str) -> PumasError {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct GetHfDownloadDetailsParams {
+    #[serde(alias = "repoId")]
+    repo_id: String,
+    #[serde(default)]
+    quants: Option<Vec<String>>,
+}
+
+#[cfg(any(test, feature = "export-contract"))]
+fn hf_download_details_requests() -> Vec<(Value, bool)> {
+    use serde_json::json;
+    vec![
+        (json!({"repo_id":"Owner/Exact.Repo"}), true),
+        (json!({"repoId":"Owner/Exact.Repo","quants":null}), true),
+        (json!({"repo_id":"","quants":[]}), true),
+        (
+            json!({"repoId":" 空 / Repo ","quants":[" Q4 ","", "量化", " Q4 "]}),
+            true,
+        ),
+        (json!({"repo_id":"a/b","repoId":"a/b"}), false),
+        (json!({"repo_id":"a/b","extra":true}), false),
+        (json!({"repoId":"a/b","extra":true}), false),
+        (json!({}), false),
+        (json!({"repo_id":null}), false),
+        (json!({"repoId":42}), false),
+        (json!({"repo_id":"a/b","quants":"Q4"}), false),
+        (json!({"repoId":"a/b","quants":["Q4",null]}), false),
+        (json!({"repo_id":"a/b","quants":[1]}), false),
+        (json!({"repo_id":"a/b","quants":{}}), false),
+        (json!([]), false),
+        (Value::Null, false),
+    ]
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct EmptyParams {}
 
 #[derive(Deserialize)]
@@ -2604,6 +2674,14 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             })
         }
         "get_models" => empty().map(|()| RpcCommand::GetModels),
+        "get_hf_download_details" => {
+            parse_params::<GetHfDownloadDetailsParams>(params).map(|params| {
+                RpcCommand::GetHfDownloadDetails {
+                    repo_id: params.repo_id,
+                    quants: params.quants.unwrap_or_default(),
+                }
+            })
+        }
         "search_models_fts" => parse_params::<SearchCatalogParams>(params).and_then(|params| {
             // An empty query is the core's supported paginated catalog listing.
             if params.query.len() > MAX_IDENTIFIER_BYTES {

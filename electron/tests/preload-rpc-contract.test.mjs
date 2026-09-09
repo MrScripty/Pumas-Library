@@ -168,6 +168,31 @@ function toPlainValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test('HF download-details requests reject malformed selections before IPC', async () => {
+  const harness = loadCompiledPreload();
+  harness.respondWith({ success: false, error: 'Operation failed.' });
+  for (const [repo, quants] of [
+    [42, []], [null, []], ['acme/Model', 'Q4_K_M'],
+    ['acme/Model', [42]], ['acme/Model', ['Q4_K_M', null]],
+    ['acme/Model', { quant: 'Q4_K_M' }],
+  ]) {
+    await assert.rejects(harness.api.get_hf_download_details(repo, quants), error => {
+      assert.equal(error.name, 'DesktopContractError');
+      assert.equal(error.status, 'invalid');
+      return true;
+    });
+  }
+  assert.equal(harness.invocations.length, 0);
+  for (const quants of [undefined, null, [], [' Q4_K_M ', 'Q4_K_M', 'Q4_K_M', 'é']]) {
+    await harness.api.get_hf_download_details('Owner/Exact.Repo', quants);
+    assert.deepEqual(toPlainValue(harness.invocations.at(-1)), [
+      'api:call', 'get_hf_download_details', {
+        repo_id: 'Owner/Exact.Repo', ...(quants === undefined ? {} : { quants }),
+      },
+    ]);
+  }
+});
+
 test('HF download details are decoded before the bundled preload exposes them', async () => {
   const harness = loadCompiledPreload();
   const details = {

@@ -331,7 +331,18 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
             total_size_bytes: None,
         },
     )?;
+    let hf_download_details_request_probes: Vec<Value> = hf_download_details_requests()
+        .into_iter()
+        .map(|(params, _)| {
+            let parsed = parse_command("get_hf_download_details", Some(&params));
+            let normalized = match &parsed {
+                Ok(RpcCommand::GetHfDownloadDetails { repo_id, quants }) => serde_json::json!({"repo_id":repo_id,"quants":quants}),
+                _ => Value::Null,
+            };
+            serde_json::json!({"method":"get_hf_download_details","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
+        }).collect();
     Ok(serde_json::json!({
+        "hf_download_details_request_probes":hf_download_details_request_probes,
         "hf_download_details_success":hf_details,
         "hf_download_details_empty":hf_empty,
         "hf_download_details_failure":HfDownloadDetailsOutcome::failed(&PumasError::Other("private upstream detail".into())),
@@ -373,6 +384,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         ModelsOutcome,
         CatalogSearchOutcome,
         HfDownloadDetailsOutcome,
+        GetHfDownloadDetailsParams,
         SearchCatalogParams,
         DownloadListOutcome,
         DownloadStatusOutcome,
@@ -426,6 +438,30 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
 // These named wire refinements project existing constructor invariants, not
 // authorization. The generator owns their executable TypeScript projection.
 fn refine_named(name: &str, schema: &mut Value) {
+    if name == "GetHfDownloadDetailsParams" {
+        // Serde accepts either spelling but rejects duplicate aliases. Both
+        // closed branches project that existing parser policy without a keyword.
+        let mut canonical = schema.clone();
+        if let Some(object) = canonical.as_object_mut() {
+            object.remove("$schema");
+            object.remove("title");
+        }
+        let mut alias = canonical.clone();
+        if let Some(properties) = alias.get_mut("properties").and_then(Value::as_object_mut) {
+            if let Some(repo) = properties.remove("repo_id") {
+                properties.insert("repoId".into(), repo);
+            }
+        }
+        if let Some(required) = alias.get_mut("required").and_then(Value::as_array_mut) {
+            for field in required {
+                if field == "repo_id" {
+                    *field = "repoId".into();
+                }
+            }
+        }
+        *schema = serde_json::json!({"anyOf":[canonical,alias]});
+        return;
+    }
     let Some(object) = schema.as_object_mut() else {
         return;
     };

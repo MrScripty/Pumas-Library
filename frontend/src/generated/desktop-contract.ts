@@ -1,5 +1,5 @@
-// Generated from pumas-rpc contract.rs; SHA256 4c02f8c0f2fcccfd776df5a98c94094c8edeb3937162d5c129727ab25c92d4c7. DO NOT EDIT.
-import { validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateGetBackendSetupParams, validateHfDownloadDetailsOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateStartBackendSetupParams, validateStartConversionSetupParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome } from './desktop-contract.validators.js';
+// Generated from pumas-rpc contract.rs; SHA256 5f8e39c53eb20e09b3e8dc15c3b96ccf5bcf508c93dae6360017350239a22bce. DO NOT EDIT.
+import { validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateGetBackendSetupParams, validateGetHfDownloadDetailsParams, validateHfDownloadDetailsOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateStartBackendSetupParams, validateStartConversionSetupParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome } from './desktop-contract.validators.js';
 export type BackendStatus = { "backend": (QuantBackend); "name": string; "ready": boolean };
 export type BackendStatusOutcome = { "backends": ReadonlyArray<BackendStatus>; "success": true };
 export type CatalogArtifactState = ({ "state": "complete" }) | ({ "downloadProgressFraction"?: number; "reasons": ReadonlyArray<CatalogPartialReason>; "recovery"?: CatalogRecoveryIdentity; "state": "partial" });
@@ -34,6 +34,7 @@ export type DownloadStatusMissingOutcome = { "error": string; "success": false }
 export type DownloadStatusOutcome = (DownloadStatusFoundOutcome) | (DownloadStatusMissingOutcome);
 export type FileGroup = { "filenames": ReadonlyArray<string>; "label": string; "shardCount": number };
 export type GetBackendSetupParams = { "backend": QuantBackend };
+export type GetHfDownloadDetailsParams = ({ "quants"?: ReadonlyArray<string> | null; "repo_id": string }) | ({ "quants"?: ReadonlyArray<string> | null; "repoId": string });
 export type HfDownloadDetails = { "downloadOptions": ReadonlyArray<DownloadOption>; "repoId": string; "totalSizeBytes": number | null };
 export type HfDownloadDetailsFailure = { "error": string; "success": false };
 export type HfDownloadDetailsOutcome = (HfDownloadDetailsSuccess) | (HfDownloadDetailsFailure);
@@ -104,6 +105,7 @@ export function decodeDownloadMutationOutcome(input: unknown): DecodeOutcome<Dow
 export function decodeDownloadStartedOutcome(input: unknown): DecodeOutcome<DownloadStartedOutcome> { return decode(input, validateDownloadStartedOutcome); }
 export function decodeDownloadStatusOutcome(input: unknown): DecodeOutcome<DownloadStatusOutcome> { return decode(input, validateDownloadStatusOutcome); }
 export function decodeGetBackendSetupParams(input: unknown): DecodeOutcome<GetBackendSetupParams> { return decode(input, validateGetBackendSetupParams); }
+export function decodeGetHfDownloadDetailsParams(input: unknown): DecodeOutcome<GetHfDownloadDetailsParams> { return decode(input, validateGetHfDownloadDetailsParams); }
 export function decodeHfDownloadDetailsOutcome(input: unknown): DecodeOutcome<HfDownloadDetailsOutcome> { return decode(input, validateHfDownloadDetailsOutcome); }
 export function decodeLinkHealthOutcome(input: unknown): DecodeOutcome<LinkHealthOutcome> { return decode(input, validateLinkHealthOutcome); }
 export function decodeModelIndexRefreshOutcome(input: unknown): DecodeOutcome<ModelIndexRefreshOutcome> { return decode(input, validateModelIndexRefreshOutcome); }

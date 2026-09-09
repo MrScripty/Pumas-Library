@@ -10,11 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Hugging Face download-details request admission (FE-I01/M4).
-The response contract below is accepted. Replace malformed `quants` being
-silently treated as an empty list with explicit parameter rejection, preserving
-valid repo IDs and null/omitted selection semantics. Bound the existing inbound
-parser and callers before edits; do not broaden into search or download policy.
+**Next slice:** Bound metadata and inference-settings reads in the model metadata
+modal (FE-I01/M4): inventory backend response ownership, decoding and stale-model
+completion before edits. Read-only contract work does not admit settings writes.
+Hugging Face download-details request and response contracts below are accepted.
 The user's conversion-priority decision below supersedes source-root follow-up.
 Source-file classification and llama.cpp discovery are accepted below. Direct
 importance-matrix options, exact targets and supplied-calibration preflight are accepted below;
@@ -58,6 +57,40 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Hugging Face Download-Details Request Admission
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--hugging-face-download-details-request-admission).
+Operation: `continue` this canonical plan. Replace this method's
+raw parameter parsing with typed RPC admission and generated preload decoding.
+Require exactly one string repository field (`repo_id` or existing `repoId`);
+reject simultaneous spellings and unknown fields. Omitted/null `quants` and an
+empty list retain empty-selection behavior; supplied lists must contain strings.
+Preserve exact strings, order, duplicates and existing core interpretation. No
+new repository grammar, quant catalog checks or arbitrary bounds are introduced.
+Malformed requests fail before backend invocation; no network/download changes.
+
+root_capability owns RPC contract/export, model-search handler, dispatch and
+their focused tests. Root owns preload and existing preload/conformance tests,
+six generated desktop-contract files, frontend documentation and four plan
+records; root_store independently reviews. Generation and verification remain
+root-serialized. The core typed operation and accepted response stay unchanged.
+
+Acceptance: actual Rust parser probes agree with generated request decoding;
+bundled preload rejects invalid calls without IPC and preserves valid parameters;
+RPC invalid-request tests preserve correlated public errors without HF access;
+affected RPC tests/minimal feature build, strict lint, formatting, frontend types
+and hydration tests, existing cross-language conformance and generation freshness.
+No live HF, GUI workflow or other-OS claim.
+
+Composed-design review: applicable. Existing request admission owns one typed
+command, schema projection and exact error semantics. The handler no longer
+knows JSON aliases/defaulting, preload consumes generated validation, and no new
+runtime/validator framework is added. Deletion would restore malformed-selection
+fallback. Re-plan for new core selection semantics or request compatibility
+beyond the explicitly retained aliases; ordinary response behavior stays owned
+by the accepted response contract below.
 
 ## Hugging Face Download-Details Contract
 

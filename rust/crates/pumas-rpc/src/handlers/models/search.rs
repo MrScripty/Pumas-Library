@@ -50,16 +50,11 @@ pub async fn get_related_models(state: &AppState, params: &Value) -> pumas_libra
 
 pub async fn get_hf_download_details(
     state: &AppState,
-    params: &Value,
+    repo_id: &str,
+    quants: &[String],
 ) -> pumas_library::Result<crate::contract::HfDownloadDetailsOutcome> {
-    let repo_id = require_str_param(params, "repo_id", "repoId")?;
-    let quants: Vec<String> = params
-        .get("quants")
-        .and_then(|value| serde_json::from_value(value.clone()).ok())
-        .unwrap_or_default();
-
-    match state.api.get_hf_download_details(&repo_id, &quants).await {
-        Ok(details) => crate::contract::HfDownloadDetailsOutcome::found(&repo_id, details),
+    match state.api.get_hf_download_details(repo_id, quants).await {
+        Ok(details) => crate::contract::HfDownloadDetailsOutcome::found(repo_id, details),
         Err(e) => Ok(crate::contract::HfDownloadDetailsOutcome::failed(&e)),
     }
 }

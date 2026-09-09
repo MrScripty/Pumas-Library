@@ -36,6 +36,7 @@ import {
   decodeModelsOutcome,
   decodeLinkHealthOutcome,
   decodeHfDownloadDetailsOutcome,
+  decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
   type DecodeOutcome,
@@ -668,8 +669,12 @@ const electronAPI = {
     hydrateLimit?: number
   ) =>
     apiCall('search_hf_models', { query, kind, limit, hydrate_limit: hydrateLimit }),
-  get_hf_download_details: (repoId: string, quants?: string[] | null) =>
-    validatedApiCall('get_hf_download_details', decodeHfDownloadDetailsOutcome, { repo_id: repoId, quants }),
+  get_hf_download_details: async (repoId: string, quants?: string[] | null) => {
+    const params = requireDecoded(decodeGetHfDownloadDetailsParams({
+      repo_id: repoId, ...(quants === undefined ? {} : { quants }),
+    }), 'get_hf_download_details');
+    return validatedApiCall('get_hf_download_details', decodeHfDownloadDetailsOutcome, params);
+  },
   get_related_models: (modelId: string, limit?: number) =>
     apiCall('get_related_models', { model_id: modelId, limit }),
   start_model_download_from_hf: (

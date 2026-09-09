@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 4c02f8c0f2fcccfd776df5a98c94094c8edeb3937162d5c129727ab25c92d4c7. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 5f8e39c53eb20e09b3e8dc15c3b96ccf5bcf508c93dae6360017350239a22bce. DO NOT EDIT.
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCatalogSearchOutcome(value: unknown): boolean;
 export declare function validateConversionCancelledOutcome(value: unknown): boolean;
@@ -14,6 +14,7 @@ export declare function validateDownloadMutationOutcome(value: unknown): boolean
 export declare function validateDownloadStartedOutcome(value: unknown): boolean;
 export declare function validateDownloadStatusOutcome(value: unknown): boolean;
 export declare function validateGetBackendSetupParams(value: unknown): boolean;
+export declare function validateGetHfDownloadDetailsParams(value: unknown): boolean;
 export declare function validateHfDownloadDetailsOutcome(value: unknown): boolean;
 export declare function validateLinkHealthOutcome(value: unknown): boolean;
 export declare function validateModelIndexRefreshOutcome(value: unknown): boolean;

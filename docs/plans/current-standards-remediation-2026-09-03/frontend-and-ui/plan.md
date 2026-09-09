@@ -10,11 +10,11 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Calibration-file preflight (FE-I26, remaining FE-I23).
-Bound the managed/direct llama.cpp input checks before native effects; manager
-admission currently checks metadata while direct calls only require a supplied
-path. Content/readability and execution-custody claims need explicit scope before
-implementation. FE-I28 remains open on recurrence: accepted test-only admission
+**Next slice:** Direct quantization target validation (FE-I26, remaining FE-I23).
+Align direct backend target checks with the managed catalog contract before
+native effects. Shared supplied-calibration preflight is accepted below;
+content quality and immutable input custody remain outside that bounded check.
+FE-I28 remains open on recurrence: accepted test-only admission
 diagnostics below improve the next failing wait, without establishing its cause.
 Do not repeat passing suites without a new deciding observation. Pending download
 cleanup replay remains separately unadmitted.
@@ -53,6 +53,40 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Calibration File Preflight
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--calibration-file-preflight).
+Share supplied-file validation between managed quantization
+admission and direct llama.cpp execution, before imports, staging or native
+effects. Preserve existing required-path rules and managed error messages.
+Every supplied path, including optional calibration, must identify a nonempty
+regular file that can be opened and yield a byte. Recheck the opened handle's
+metadata; do not read whole calibration datasets or infer text/content quality.
+Missing/nonfile/empty inputs return `InvalidParams`; other inspection/open/read
+errors retain contextual `Io`. Valid symlink paths keep existing semantics.
+Callers must keep paths and contents stable/readable throughout preflight and
+execution; this is not immutable custody or protection against concurrent path
+replacement. No new native format/content constraint is invented.
+
+Root owns core `src/conversion/{calibration.rs,mod.rs,manager.rs,llama_cpp.rs}`,
+core README and four plan documents. root_diagnostics owns direct
+tests in `src/conversion/llama_cpp/readiness_tests.rs`; root serializes Cargo,
+formatting, review and commits. No GUI, schema, dependencies or live-model work.
+Focused helper and direct-call tests plus existing manager admission tests prove
+supplied-file rejection and valid input acceptance. Run core/RPC default tests,
+minimal conversion tests, affected strict lint and formatting; all passed. Acceptance is
+automated local-filesystem/simulated-tools evidence, not real-model quality.
+
+Composed-design review: applicable. A private `validate_file(path)` Interface
+owns file classification, bounded read and error policy; callers only decide
+whether calibration is required and when preflight occurs. Manager admission
+and direct execution use the same Module, with a fresh read at each invocation.
+No receipt, cache, new runtime or retained state is added. Deleting it would
+duplicate file/error policy in both callers; policy changes remain local while
+worker lifetime and native execution stay with their existing owners. Re-plan
+before immutable custody, content parsing or broader native execution changes.
 
 ## Download Admission Wait Diagnostics
 

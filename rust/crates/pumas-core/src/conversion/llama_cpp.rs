@@ -226,6 +226,10 @@ impl QuantizationBackend for LlamaCppBackend {
             });
         }
 
+        if let Some(path) = &params.calibration_file {
+            super::calibration::validate_file(path).await?;
+        }
+
         // -- PHASE 2: VALIDATE --
         let needs_f16_conversion = is_safetensors_source && !is_gguf_source;
         require_artifact(&self.quantize_binary(), "llama-quantize", true).await?;

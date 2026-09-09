@@ -115,6 +115,15 @@ or automatic retry. Terminal progress follows observed lease release.
 Keep that advisory lock file and its directory stable while either operation is active;
 this is not protection against hostile root replacement or abrupt host death.
 
+Managed quantization admission and direct llama.cpp calls validate every supplied
+calibration path, even when optional: it must name a nonempty regular file that
+can be opened and yield a byte. Missing/nonfile/empty inputs are `InvalidParams`;
+other inspection/open/read failures retain contextual `Io` errors. Validation
+precedes imports, staging and native execution. Symlinks to valid files remain
+supported. This bounded probe does not validate text/content quality or retain
+an immutable input: keep paths and contents stable/readable during preflight and
+execution. Later native reads can still fail after successful preflight.
+
 Call `PumasApi::shutdown_conversion_setup()` before stopping the hosting runtime.
 It closes setup admission and waits for owned cleanup; abandoning a setup or
 shutdown waiter does not release the environment lease. Expected cancellation

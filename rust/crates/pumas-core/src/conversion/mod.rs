@@ -9,6 +9,7 @@
 //! specific implementations (e.g. `LlamaCppBackend` for GGUF quantization).
 
 mod backend_setup;
+mod calibration;
 #[cfg(target_os = "linux")]
 mod linux_group;
 pub mod llama_cpp;

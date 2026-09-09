@@ -351,8 +351,9 @@ impl ConversionManager {
     /// its lock file stable until shutdown drains all managed work.
     /// Managed quantization rejects unsupported target/backend pairs, missing
     /// required calibration, and invalid supplied calibration files before
-    /// admitting a worker. File inspection is not retained custody: callers
-    /// must keep calibration files stable and readable through execution.
+    /// admitting a worker. Supplied files must be nonempty regular files that
+    /// can be opened and yield a byte. This is not content validation or retained
+    /// custody: keep paths and contents stable/readable during preflight and execution.
     pub async fn start_conversion(&self, request: ConversionRequest) -> Result<String> {
         self.workers.observe_finished();
 
@@ -596,22 +597,7 @@ impl ConversionManager {
             });
         }
         if let Some(path) = &calibration_file {
-            let metadata = match fs::metadata(path).await {
-                Ok(metadata) => metadata,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    return Err(PumasError::InvalidParams {
-                        message: "Calibration file does not exist".into(),
-                    });
-                }
-                Err(error) => {
-                    return Err(PumasError::io("inspecting calibration file", path, error))
-                }
-            };
-            if !metadata.is_file() || metadata.len() == 0 {
-                return Err(PumasError::InvalidParams {
-                    message: "Calibration must be a nonempty regular file".into(),
-                });
-            }
+            super::calibration::validate_file(path).await?;
         }
 
         let params = QuantizeParams {

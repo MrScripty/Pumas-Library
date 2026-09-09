@@ -1,5 +1,51 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Calibration File Preflight
+
+Accepted bounded calibration preflight. Shared validation now covers managed quantization admission
+and direct llama.cpp execution before imports, staging and native effects.
+The private calibration Module owns nonempty-regular-file classification,
+open/handle inspection, a one-byte read and contextual error policy. Required
+path rules remain with callers. Valid symlinks and existing managed missing,
+empty and nonfile errors are preserved. Other inspection/open/read failures
+remain `Io`; neither success nor an error is converted into cached readiness.
+
+The codebase-design skill kept this policy in one private Interface rather than
+duplicating it across managed and direct callers. No public type, schema,
+dependency, GUI, runtime or live-library change. Caller-stable paths and contents
+remain required through preflight/execution. The static nonregular guard
+precedes open; concurrent replacement is outside that contract. A byte probe
+does not validate all content, text suitability or immutable input custody.
+
+root_diagnostics supplied the direct-call regression; root implemented the
+helper/call sites/docs and serialized verification. Before wiring the validator,
+`cargo test --offline --locked -p pumas-library --lib supplied_calibration`
+failed the direct optional-Q4 case: it produced a quantized output despite the
+missing supplied file; the managed check passed. After wiring, the calibration
+group passed all seven tests. The direct matrix covers 18 combinations of source
+format, optional/IQ/forced calibration and missing/empty/directory inputs,
+asserting exact errors, no imports/native effects/staging, and intact source.
+Existing successful forced-imatrix execution and manager path-preservation tests
+remain positive evidence. Helper tests cover readable non-text bytes, valid
+symlinks and real symlink inspection errors. Permission evidence tests the error
+mapper, not an actual denied open. No dedicated FIFO regression was added; the
+pre-open metadata guard supplies the construction argument for static special
+files. root_capability's independent read-only review found no blockers.
+
+From `rust/`, `cargo test --offline --locked -p pumas-library
+--no-default-features conversion::` passed 122 top-level conversion tests plus
+the additional marker-child invocation. The original combined command,
+`cargo test --offline --locked -p pumas-library -p pumas-rpc -- --quiet`, passed
+1,491 executions (including that extra child), with 22 ignored and zero failures.
+Logs: `/tmp/pumas-calibration-preflight-{minimal,default}.log`.
+Strict lint passed: `cargo clippy --offline --locked -p pumas-library -p
+pumas-rpc --all-targets --all-features -- -D warnings`. Formatting and all five
+canonical plan checks passed.
+FE-I28/FE-I29 did not recur and remain open. No real native tool/model/GPU,
+GUI-workflow or Windows/macOS acceptance is inferred. Next is direct target
+validation under FE-I26; calibration content/custody and other prerequisites
+remain open, and Pending download cleanup replay remains unadmitted.
+
 ## 2026-09-08 — Download Admission Wait Diagnostics
 
 Accepted diagnostic fidelity only; FE-I28 remains open. root_diagnostics added

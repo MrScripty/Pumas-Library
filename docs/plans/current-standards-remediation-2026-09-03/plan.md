@@ -301,7 +301,10 @@ is accepted for the successful-setup path.
 is accepted for process-exit/reopen and explicit repair. Later external mutation
 provenance remains open. Test-only [admission wait diagnostics](frontend-and-ui/plan.md#download-admission-wait-diagnostics)
 are accepted; FE-I28 stays open on recurrence without a diagnosed cause.
-Calibration-file preflight is next under FE-I26. This does not admit Pending cleanup replay. FE-I29 retains a separate
+[Calibration-file preflight](frontend-and-ui/plan.md#calibration-file-preflight)
+is accepted for shared classification and a bounded open/read probe, not content
+quality or immutable custody. Direct quantization target validation is next under
+FE-I26. This does not admit Pending cleanup replay. FE-I29 retains a separate
 intermittent preflight-test failure despite fixture hardening.
 Independent probes, direct backend calls
 and external tools still need caller coordination. FE-I28 records an unrelated

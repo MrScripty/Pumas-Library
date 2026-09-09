@@ -41,6 +41,80 @@ const QUANTIZER: &str = "#!/bin/sh\ntouch \"$0.started\"\nif test \"$1\" = '--im
 const CONVERTER: &str = "#!/bin/sh\nif test \"$1\" = '-I'; then exit 0; fi\ntouch \"$0.started\"\nwhile test $# -gt 0; do\n if test \"$1\" = '--outfile'; then printf 'converted fixture' > \"$2\"; exit 0; fi\n shift\ndone\nexit 2\n";
 
 #[tokio::test]
+async fn supplied_calibration_is_validated_before_every_direct_route_has_effects() {
+    for extension in ["gguf", "safetensors"] {
+        for (quant, force) in [("Q4_K_M", false), ("IQ3_XXS", false), ("Q4_K_M", true)] {
+            let root = tempfile::tempdir().unwrap();
+            let backend = LlamaCppBackend::new(root.path());
+            let mut params = params(root.path(), extension);
+            params.target_quant = quant.into();
+            params.force_imatrix = force;
+            artifact(&backend.quantize_binary(), QUANTIZER, true);
+            artifact(
+                &backend.convert_script(),
+                "fixture converter passed to python",
+                false,
+            );
+            artifact(
+                &backend.venv_python(),
+                &CONVERTER.replacen("#!/bin/sh", "#!/bin/sh\ntouch \"$0.started\"", 1),
+                true,
+            );
+            artifact(&backend.imatrix_binary(), "#!/bin/sh\ntouch \"$0.started\"\nwhile test $# -gt 0; do\n if test \"$1\" = '-o'; then printf 'matrix fixture' > \"$2\"; exit 0; fi\n shift\ndone\nexit 2\n", true);
+            let empty = root.path().join("empty.txt");
+            std::fs::write(&empty, "").unwrap();
+            let directory = root.path().join("calibration-directory");
+            std::fs::create_dir(&directory).unwrap();
+            for (path, expected) in [
+                (
+                    root.path().join("missing.txt"),
+                    "Calibration file does not exist",
+                ),
+                (empty, "Calibration must be a nonempty regular file"),
+                (directory, "Calibration must be a nonempty regular file"),
+            ] {
+                params.calibration_file = Some(path);
+                let error = backend
+                    .quantize(
+                        &params,
+                        &ConversionProgressTracker::new(),
+                        &CancellationToken::new(),
+                    )
+                    .await
+                    .unwrap_err();
+                assert!(
+                    matches!(&error, PumasError::InvalidParams { message } if message == expected),
+                    "{extension}/{quant}/force={force}: {error}"
+                );
+                for tool in [
+                    backend.venv_python(),
+                    backend.quantize_binary(),
+                    backend.imatrix_binary(),
+                ] {
+                    assert!(
+                        !started(&tool).exists(),
+                        "invalid calibration must reject before imports or native execution"
+                    );
+                }
+                assert_eq!(
+                    std::fs::read_dir(params.model_path.parent().unwrap())
+                        .unwrap()
+                        .count(),
+                    1,
+                    "invalid calibration must reject before staging"
+                );
+                assert_eq!(
+                    std::fs::read_to_string(params.model_path.join(format!("weights.{extension}")))
+                        .unwrap(),
+                    "fixture input"
+                );
+            }
+            backend.shutdown_setup().await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
 async fn incomplete_setup_vetoes_every_route_and_read_before_imports_or_staging() {
     for (extension, quant, force) in [
         ("gguf", "Q4_K_M", false),

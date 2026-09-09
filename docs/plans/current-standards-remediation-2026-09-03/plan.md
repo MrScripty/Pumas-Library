@@ -309,7 +309,9 @@ is accepted across built-in backends, as is [direct importance-matrix option val
 is accepted for shared regular-file classification and llama.cpp error propagation.
 The user [deferred further conversion work](frontend-and-ui/plan.md#conversion-scope-and-priority):
 prefer existing runtime/tool capabilities when revisited; Sherry is not required.
-Hugging Face download-details runtime decoding is next under M4. This does not admit
+[Hugging Face download-details responses](frontend-and-ui/plan.md#hugging-face-download-details-contract)
+are accepted through generated decoding and the hydration consumer. Its inbound
+request admission is next under M4. This does not admit
 Pending cleanup replay. FE-I29 retains a separate
 intermittent preflight-test failure despite fixture hardening.
 Independent probes, direct backend calls

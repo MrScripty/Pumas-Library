@@ -42,6 +42,13 @@ set of files. Repository identity and artifact identity are distinct: one
 Hugging Face repository may contain multiple files or quantizations, while the
 same model published in another repository remains a separate model.
 
+Hugging Face download-details responses are decoded in preload from the
+backend-owned contract before hydration. Unknown sizes remain null, and ordered
+quant/file-group identities are preserved. A response for a different repository
+or an invalid nested payload cannot replace the current row's details; failures
+leave the existing projection intact and allow retry. This does not validate
+all search responses or prove remote files are downloadable.
+
 Complete current GGUF and safetensors rows offer format conversion to the other
 format (F16). The dialog requires explicit tool-installation consent, observes
 backend progress and requests cancellation without assuming it has completed.

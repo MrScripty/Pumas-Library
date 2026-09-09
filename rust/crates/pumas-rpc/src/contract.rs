@@ -438,6 +438,7 @@ pub(crate) enum RpcOutcome {
     PartialDownload(Box<PartialDownloadOutcome>),
     Models(Box<ModelsOutcome>),
     CatalogSearch(Box<CatalogSearchOutcome>),
+    HfDownloadDetails(Box<HfDownloadDetailsOutcome>),
     ModelIndexRefresh(ModelIndexRefreshOutcome),
     Legacy(Value),
 }
@@ -493,6 +494,7 @@ impl RpcOutcome {
             Self::PartialDownload(value) => serde_json::to_value(value),
             Self::Models(value) => serde_json::to_value(value),
             Self::CatalogSearch(value) => serde_json::to_value(value),
+            Self::HfDownloadDetails(value) => serde_json::to_value(value),
             Self::ModelIndexRefresh(value) => serde_json::to_value(value),
             Self::Legacy(value) => return Ok(value),
         };
@@ -1227,6 +1229,135 @@ impl DownloadListOutcome {
 pub(crate) struct ModelsOutcome {
     success: bool,
     models: BTreeMap<String, CatalogModel>,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum HfDownloadDetailsOutcome {
+    Found(HfDownloadDetailsSuccess),
+    Failed(HfDownloadDetailsFailure),
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct HfDownloadDetailsSuccess {
+    success: bool,
+    details: pumas_library::models::HfDownloadDetails,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct HfDownloadDetailsFailure {
+    success: bool,
+    error: &'static str,
+}
+
+impl HfDownloadDetailsOutcome {
+    pub(crate) fn found(
+        requested_repo: &str,
+        details: pumas_library::models::HfDownloadDetails,
+    ) -> Result<Self, PumasError> {
+        if details.repo_id != requested_repo
+            || details
+                .total_size_bytes
+                .is_some_and(|size| size > MAX_JS_SAFE_INTEGER)
+            || details.download_options.iter().any(|option| {
+                option
+                    .size_bytes
+                    .is_some_and(|size| size > MAX_JS_SAFE_INTEGER)
+            })
+        {
+            return Err(invalid_domain_outcome("Hugging Face download details"));
+        }
+        Ok(Self::Found(HfDownloadDetailsSuccess {
+            success: true,
+            details,
+        }))
+    }
+
+    pub(crate) fn failed(error: &PumasError) -> Self {
+        Self::Failed(HfDownloadDetailsFailure {
+            success: false,
+            error: PublicError::from(error).message,
+        })
+    }
+}
+
+#[cfg(test)]
+mod hf_download_details_tests {
+    use super::*;
+    use pumas_library::models::{DownloadOption, FileGroup, HfDownloadDetails};
+
+    fn details() -> HfDownloadDetails {
+        HfDownloadDetails {
+            repo_id: "Owner/Exact.Repo".into(),
+            total_size_bytes: Some(MAX_JS_SAFE_INTEGER),
+            download_options: vec![DownloadOption {
+                quant: " Original precision ".into(),
+                size_bytes: None,
+                file_group: Some(FileGroup {
+                    filenames: vec!["Nested/Model part.safetensors".into()],
+                    // Catalog metadata is not a file-count equality assertion.
+                    shard_count: 0,
+                    label: " Exact label ".into(),
+                }),
+            }],
+        }
+    }
+
+    #[test]
+    fn details_projection_preserves_core_wire_values_and_optional_representation() {
+        let value = details();
+        let expected = serde_json::json!({"success":true,"details":value});
+        let outcome = HfDownloadDetailsOutcome::found("Owner/Exact.Repo", value).unwrap();
+        let rpc = RpcOutcome::HfDownloadDetails(Box::new(outcome));
+        assert!(!rpc.uses_response_wrapper());
+        assert_eq!(rpc.into_value().unwrap(), expected);
+
+        let mut value = details();
+        value.total_size_bytes = None;
+        value.download_options[0].size_bytes = Some(MAX_JS_SAFE_INTEGER);
+        value.download_options[0].file_group = None;
+        let wire = serde_json::to_value(
+            HfDownloadDetailsOutcome::found("Owner/Exact.Repo", value).unwrap(),
+        )
+        .unwrap();
+        assert!(wire["details"]["totalSizeBytes"].is_null());
+        assert_eq!(
+            wire["details"]["downloadOptions"][0]["sizeBytes"],
+            MAX_JS_SAFE_INTEGER
+        );
+        assert!(wire["details"]["downloadOptions"][0]
+            .get("fileGroup")
+            .is_none());
+    }
+
+    #[test]
+    fn details_projection_rejects_uncorrelated_repo_and_unsafe_sizes() {
+        assert!(HfDownloadDetailsOutcome::found("owner/exact.repo", details()).is_err());
+        let mut total = details();
+        total.total_size_bytes = Some(MAX_JS_SAFE_INTEGER + 1);
+        assert!(HfDownloadDetailsOutcome::found("Owner/Exact.Repo", total).is_err());
+        let mut option = details();
+        option.download_options[0].size_bytes = Some(MAX_JS_SAFE_INTEGER + 1);
+        assert!(HfDownloadDetailsOutcome::found("Owner/Exact.Repo", option).is_err());
+    }
+
+    #[test]
+    fn details_failure_uses_closed_redacted_outcome() {
+        let error = PumasError::DownloadFailed {
+            url: "https://private.invalid/token".into(),
+            message: "private credential and filesystem details".into(),
+        };
+        let outcome = HfDownloadDetailsOutcome::failed(&error);
+        assert_eq!(
+            serde_json::to_value(outcome).unwrap(),
+            serde_json::json!({
+                "success":false,"error":PublicError::from(&error).message,
+            })
+        );
+    }
 }
 
 #[derive(Serialize)]

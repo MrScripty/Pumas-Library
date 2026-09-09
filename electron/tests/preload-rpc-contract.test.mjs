@@ -168,6 +168,43 @@ function toPlainValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+test('HF download details are decoded before the bundled preload exposes them', async () => {
+  const harness = loadCompiledPreload();
+  const details = {
+    repoId: 'acme/Model',
+    downloadOptions: [
+      { quant: 'Q4_K_M', sizeBytes: 4096 },
+      { quant: 'original', sizeBytes: null, fileGroup: {
+        filenames: ['weights/part-02.safetensors', 'weights/part-01.safetensors'],
+        shardCount: 2, label: 'weights',
+      } },
+    ],
+    totalSizeBytes: null,
+  };
+  const response = { success: true, details };
+  harness.respondWith(response);
+  assert.deepEqual(toPlainValue(await harness.api.get_hf_download_details(details.repoId, ['Q4_K_M'])), response);
+  assert.deepEqual(toPlainValue(harness.invocations), [
+    ['api:call', 'get_hf_download_details', { repo_id: 'acme/Model', quants: ['Q4_K_M'] }],
+  ]);
+  for (const invalid of [
+    { success: true },
+    { ...response, details: { ...details, totalSizeBytes: 9007199254740992 } },
+    { ...response, details: { ...details, downloadOptions: [{ quant: 'Q4_K_M', sizeBytes: -1 }] } },
+    { ...response, details: { ...details, downloadOptions: [{ quant: 'original', sizeBytes: null, fileGroup: {
+      filenames: [123], shardCount: 1, label: 'weights',
+    } }] } },
+    { success: false, details },
+  ]) {
+    harness.respondWith(invalid);
+    await assert.rejects(harness.api.get_hf_download_details(details.repoId), error => {
+      assert.equal(error.name, 'DesktopContractError');
+      assert.equal(error.status, 'invalid');
+      return true;
+    });
+  }
+});
+
 test('backend setup preload preserves selection and retry tokens without automatic retry', async () => {
   const harness = loadCompiledPreload();
   const token = '2e038924-e0e3-4266-95ef-f7a02997b7b6';

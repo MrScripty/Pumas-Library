@@ -10,6 +10,38 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('HF download details preserve producer identities, groups and unknown sizes', () => {
+  for (const name of ['hf_download_details_success', 'hf_download_details_empty', 'hf_download_details_failure']) {
+    const result = contract.decodeHfDownloadDetailsOutcome(fixtures[name]);
+    assert.equal(result.status, 'valid', name);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[name]);
+    assert.ok(Object.isFrozen(result.value));
+    if (result.value.success) assert.ok(Object.isFrozen(result.value.details.downloadOptions));
+  }
+});
+
+test('HF download-details decoder rejects malformed nested facts and ambiguous outcomes', () => {
+  const valid = fixtures.hf_download_details_success;
+  const option = { quant: 'Q4_K_M', sizeBytes: null };
+  for (const patch of [
+    { repoId: 42 }, { totalSizeBytes: -1 }, { totalSizeBytes: 0.5 },
+    { totalSizeBytes: 9007199254740992 }, { downloadOptions: null }, { extra: true },
+    ...[{ sizeBytes: -1 }, { sizeBytes: 9007199254740992 }, { quant: 42 }, { extra: true },
+      { fileGroup: { filenames: [123], shardCount: 1, label: 'weights' } },
+      { fileGroup: { filenames: ['weights'], shardCount: -1, label: 'weights' } },
+      { fileGroup: { filenames: ['weights'], shardCount: 4294967296, label: 'weights' } },
+      { fileGroup: { filenames: ['weights'], shardCount: 1, label: 'weights', extra: true } },
+    ].map(change => ({ downloadOptions: [{ ...option, ...change }] })),
+  ]) assert.equal(contract.decodeHfDownloadDetailsOutcome({ ...valid, details: { ...valid.details, ...patch } }).status, 'invalid', JSON.stringify(patch));
+  for (const response of [
+    { success: true }, { success: false }, { ...valid, success: false },
+    { ...valid, error: 'unexpected' }, { success: false, error: 42 },
+  ]) assert.equal(contract.decodeHfDownloadDetailsOutcome(response).status, 'invalid');
+  const missingSize = structuredClone(valid);
+  delete missingSize.details.totalSizeBytes;
+  assert.equal(contract.decodeHfDownloadDetailsOutcome(missingSize).status, 'invalid');
+});
+
 test('registered-link health preserves actual producer facts and rejects contradictory reports', () => {
   for (const name of ['link_health_healthy','link_health_degraded']) {
     const outcome = contract.decodeLinkHealthOutcome(fixtures[name]);

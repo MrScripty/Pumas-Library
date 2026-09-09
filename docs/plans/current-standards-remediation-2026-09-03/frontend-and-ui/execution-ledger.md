@@ -1,5 +1,57 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Hugging Face Download-Details Contract
+
+Accepted response validation. Core `HfDownloadDetails`,
+`DownloadOption` and `FileGroup` retain domain ownership and gain feature-gated
+schema derives. RPC adds a closed success/details or redacted failure/error
+outcome, checks exact requested repository equality and JavaScript-safe byte
+counts, and projects it through typed dispatch without the legacy response
+wrapper. Existing request parsing is unchanged. Schema export and existing AJV
+generation derive both desktop packages' types/decoders; preload rejects invalid
+nested values before exposing them. Required nullable sizes, optional omitted
+file groups, exact names/path order and u32 shard counts are preserved, without
+new filename normalization or shard-count/file-count equality rules.
+
+The hydration hook uses the generated response, refuses a different repository,
+copies readonly groups into its mutable view representation without identity
+changes, and replaces a successful unknown total with null rather than retaining
+an older size. Stale completion cannot remove a newer same-repo in-flight request;
+unmount invalidates outstanding hydration. Failure leaves existing details intact
+and permits retry. No download selection, conversion or GUI requirement is added
+to the standalone core operation.
+
+root_capability owned the Rust contract/export/handler and tests;
+root_diagnostics owned hydration/types/tests; root integrated preload,
+producer-to-renderer evidence, generation and docs. root_store independently
+reviewed source with no blockers. The codebase-design skill guided reuse of core
+domain types and the existing generator instead of a second handwritten response
+authority. Generated freshness and decoder semantics remain separate claims.
+
+The preload regression failed against the prior bundled artifact with `Missing
+expected rejection`. After regeneration/build it passed: 16 preload tests pass,
+one real-Electron sandbox test remains environment-gated. Four focused Rust tests
+pass, including actual invalid-request RPC error correlation without network.
+Eleven hook tests, frontend typecheck and affected lint pass. Actual Rust
+constructor fixtures through the generated decoder pass 15 tests; those fixtures
+through bundled preload and real renderer consumers pass 15 conformance tests,
+including successful hydration and malformed-details refusal. The handler test
+does not traverse a successful upstream HTTP request, and no live HF, download,
+GPU or graphical user workflow acceptance is claimed.
+
+`cargo check --offline --locked -p pumas-library --no-default-features` passed.
+`cargo test --offline --locked -p pumas-library -p pumas-rpc -- --quiet` passed
+1,503 executions (including the extra marker child), with zero failures and 22
+ignored. Strict core/RPC all-targets/all-features Clippy and formatting passed.
+The full frontend suite passed 584 tests; default/library-only builds passed.
+Both packages' affected lint, six generator tests, generation freshness and all
+five canonical plan checks passed. Logs: `/tmp/pumas-hf-details-default.log`,
+`/tmp/pumas-hf-details-frontend.log`, `/tmp/pumas-hf-details-build.log` and
+`/tmp/pumas-hf-details-library-only.log`. FE-I28/FE-I29 did not recur.
+The unchanged request parser still drops malformed `quants` into an empty list;
+that inbound contract is the next separate FE-I01 slice, not response acceptance.
+Conversion remains deferred by the user's scope decision.
+
 ## 2026-09-08 — Conversion Priority Re-Plan
 
 The user clarified that Sherry is experimental and need not be supported.

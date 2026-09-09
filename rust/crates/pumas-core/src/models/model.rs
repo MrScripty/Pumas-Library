@@ -595,6 +595,7 @@ pub struct HuggingFaceModel {
 
 /// Exact download details derived from a repository file tree.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HfDownloadDetails {
     pub repo_id: String,
@@ -664,6 +665,7 @@ pub fn detect_compatible_engines(formats: &[String]) -> Vec<String> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub struct FileGroup {
     /// Full repo-relative paths of all files in this group.
     pub filenames: Vec<String>,
@@ -677,6 +679,7 @@ pub struct FileGroup {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 pub struct DownloadOption {
     pub quant: String,
     #[serde(default)]

@@ -10,11 +10,11 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Hugging Face download-details contract (FE-I01/M4).
-Give `get_hf_download_details` a backend-owned outcome and generated runtime
-decoding through preload and its hydration consumer. Preserve repo/file/quant
-identity and size semantics; reject malformed results rather than projecting
-unchecked values. Bound producer/consumer tests before edits, without live downloads.
+**Next slice:** Hugging Face download-details request admission (FE-I01/M4).
+The response contract below is accepted. Replace malformed `quants` being
+silently treated as an empty list with explicit parameter rejection, preserving
+valid repo IDs and null/omitted selection semantics. Bound the existing inbound
+parser and callers before edits; do not broaden into search or download policy.
 The user's conversion-priority decision below supersedes source-root follow-up.
 Source-file classification and llama.cpp discovery are accepted below. Direct
 importance-matrix options, exact targets and supplied-calibration preflight are accepted below;
@@ -58,6 +58,46 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Hugging Face Download-Details Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--hugging-face-download-details-contract).
+Operation: `continue` this canonical plan. FE-I01/M4 owns
+`get_hf_download_details` response validation from the existing core operation
+through RPC, generated desktop decoding, preload and search hydration. Preserve
+the success/details and failure/error envelope, exact repository identity,
+ordered quant/file groups and null unknown sizes. Reject malformed nested data,
+non-JavaScript-safe byte counts and mismatched response repository identity.
+No search/download selection policy, request-parser redesign, live network or
+conversion changes. The standalone core method remains independent of GUI/RPC.
+
+root_capability owns RPC `contract.rs`, `contract/export.rs`, model-search
+handler/dispatch and focused Rust tests, with schema derives in core
+`models/model.rs`. root_diagnostics owns frontend `types/api-models.ts` and
+`hooks/useRemoteModelSearch{,.test}.ts` and its existing hydration tests. Root owns preload, its existing contract
+tests, desktop producer/decoder conformance tests, renderer conformance evidence,
+generated desktop-contract files in both packages, core/frontend documentation
+and the four plan records. Root serializes generation, Cargo, verification and
+commits. No overlapping source ownership or independent schema authority.
+
+Acceptance: Rust producer rejection/projection tests; actual producer values
+through the generated decoder, bundled preload and hydration consumer; negative
+nested payload tests; exact identity/null and stale-result behavior; affected
+core/RPC tests and feature checks, frontend tests/types, desktop build/tests,
+strict affected lint, formatting, generation freshness and canonical plans.
+Evidence is automated local/controlled IPC, not live HF or GUI workflow proof.
+
+Composed-design review: applicable. Core model structs retain domain ownership;
+the RPC outcome owns wire representability and redacted failures. Existing
+schema export and AJV generation project that authority, replacing handwritten
+response types. Preload consumes only decoded values; hydration owns request
+identity and visible stale-result exclusion. Format identity changes remain
+core-owned, wire changes regenerate consumers, and view lifecycle stays in the
+hook. No new runtime, cache, registry or generalized validator framework. Deleting
+the wire check would expose unchecked nested input; deleting the handwritten
+shape removes duplicate authority. Re-plan for new persisted/request semantics
+or changes to model/download identity rather than expanding this response slice.
 
 ## Conversion Scope And Priority
 

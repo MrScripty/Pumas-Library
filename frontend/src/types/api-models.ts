@@ -1,6 +1,6 @@
 import type { BaseResponse } from './api-common';
 import type {
-  DownloadListOutcome, DownloadProgressOutcome, DownloadStartedOutcome, DownloadStatusOutcome, ModelsOutcome, PartialDownloadOutcome,
+  DownloadListOutcome, DownloadProgressOutcome, DownloadStartedOutcome, DownloadStatusOutcome, HfDownloadDetailsOutcome, ModelsOutcome, PartialDownloadOutcome,
 } from '../generated/desktop-contract';
 
 // ============================================================================
@@ -139,15 +139,9 @@ export interface RelatedModelsResponse extends BaseResponse {
   models: HuggingFaceModel[];
 }
 
-export interface HFDownloadDetails {
-  repoId: string;
-  downloadOptions: HuggingFaceModel['downloadOptions'];
-  totalSizeBytes?: number | null;
-}
+export type HFDownloadDetails = Extract<HfDownloadDetailsOutcome, { success: true }>['details'];
 
-export interface GetHFDownloadDetailsResponse extends BaseResponse {
-  details?: HFDownloadDetails;
-}
+export type GetHFDownloadDetailsResponse = HfDownloadDetailsOutcome;
 
 export type ModelDownloadResponse = DownloadStartedOutcome;
 export type ModelDownloadStatusResponse = DownloadStatusOutcome;

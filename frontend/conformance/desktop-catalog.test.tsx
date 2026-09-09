@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { useState } from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LauncherRootRecoveryProvider } from '../src/hooks/useLauncherRootRecovery';
 import { useModels } from '../src/hooks/useModels';
@@ -14,6 +14,9 @@ import { LinkHealthStatus } from '../src/components/LinkHealthStatus';
 import { ValidationError } from '../src/errors';
 import { useModelImportPicker } from '../src/hooks/useModelImportPicker';
 import { chooseModelImportPaths } from '../../electron/src/model-import-picker';
+import { useRemoteModelSearch } from '../src/hooks/useRemoteModelSearch';
+import type { RemoteModelInfo } from '../src/types/apps';
+import { decodeHfDownloadDetailsOutcome } from '../src/generated/desktop-contract';
 
 const fixturePath = process.env['PUMAS_DESKTOP_CONTRACT_FIXTURES'];
 if (!fixturePath) throw new ValidationError('Actual desktop producer fixtures are required; run test:desktop-contract.', 'producer-fixtures');
@@ -38,6 +41,7 @@ function installActualPreload(
   picker: () => Promise<unknown> = async () => { throw new ValidationError('No picker fixture', 'producer-fixtures'); },
   conversionResponse: unknown = fixture['conversion_missing'],
   setupResponse: unknown = fixture['conversion_setup_idle'],
+  hfReads?: { models: RemoteModelInfo[]; details: unknown },
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -62,6 +66,8 @@ function installActualPreload(
         expect(channel).toBe('api:call');
         const requestParams: unknown = JSON.parse(JSON.stringify(params));
         requests.push({ method, params: requestParams });
+        if (method === 'search_hf_models' && hfReads) return { success: true, models: hfReads.models };
+        if (method === 'get_hf_download_details' && hfReads) return hfReads.details;
         if (method === 'get_conversion_progress') return conversionResponse;
         if (['get_conversion_setup', 'start_conversion_setup', 'get_backend_setup', 'start_backend_setup'].includes(method)) return setupResponse;
         if (method === 'list_model_conversions') return fixture['conversion_list'];
@@ -146,6 +152,48 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('hydrates exact producer download details through bundled preload and the real search hook', async () => {
+    const produced = fixture['hf_download_details_success'];
+    const decoded = decodeHfDownloadDetailsOutcome(produced);
+    if (decoded.status !== 'valid' || !decoded.value.success) {
+      throw new ValidationError('Missing successful HF producer fixture', 'producer-fixtures');
+    }
+    const details = decoded.value.details;
+    const model: RemoteModelInfo = {
+      repoId: details.repoId, name: 'Fixture model', developer: 'fixture',
+      kind: 'text-generation', formats: ['gguf'], quants: ['Q4_K_M'],
+      url: 'https://huggingface.co/fixture/model',
+    };
+    const requests = installActualPreload(undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, { models: [model], details: produced });
+    const { result } = renderHook(() => useRemoteModelSearch({ enabled: true, searchQuery: 'fixture', debounceMs: 0 }));
+    await waitFor(() => expect(result.current.results).toHaveLength(1));
+    await act(async () => { await result.current.hydrateModelDetails(model); });
+    expect(result.current.results[0]?.repoId).toBe(details.repoId);
+    expect(result.current.results[0]?.downloadOptions).toEqual(details.downloadOptions);
+    expect(result.current.results[0]?.totalSizeBytes).toBe(details.totalSizeBytes);
+    expect(requests.find(request => request.method === 'get_hf_download_details')?.params)
+      .toEqual({ repo_id: details.repoId, quants: ['Q4_K_M'] });
+  });
+
+  it('does not project malformed download details received through the bundled preload', async () => {
+    const model: RemoteModelInfo = {
+      repoId: 'fixture/model', name: 'Fixture model', developer: 'fixture',
+      kind: 'text-generation', formats: ['gguf'], quants: ['Q4_K_M'],
+      url: 'https://huggingface.co/fixture/model', totalSizeBytes: null,
+    };
+    installActualPreload(undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, { models: [model], details: {
+        success: true, details: { repoId: model.repoId,
+          downloadOptions: [{ quant: 'Q4_K_M', sizeBytes: -1 }], totalSizeBytes: null },
+      } });
+    const { result } = renderHook(() => useRemoteModelSearch({ enabled: true, searchQuery: 'fixture', debounceMs: 0 }));
+    await waitFor(() => expect(result.current.results).toHaveLength(1));
+    await act(async () => { await result.current.hydrateModelDetails(model); });
+    expect(result.current.results).toEqual([model]);
+    expect(result.current.hydratingRepoIds.size).toBe(0);
+  });
+
   it('preserves setup identity, terminal states and retry tokens through the bundled preload', async () => {
     const snapshots = fixture['conversion_setup_started'];
     if (!Array.isArray(snapshots)) throw new ValidationError('Missing setup snapshots', 'producer-fixtures');

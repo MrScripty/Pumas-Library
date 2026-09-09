@@ -297,7 +297,44 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
             serde_json::json!({"method":method,"params":params,"accepted":accepted})
         })
         .collect();
+    let hf_details = HfDownloadDetailsOutcome::found(
+        "example/model",
+        pumas_library::models::HfDownloadDetails {
+            repo_id: "example/model".into(),
+            total_size_bytes: Some(MAX_JS_SAFE_INTEGER),
+            download_options: vec![
+                pumas_library::models::DownloadOption {
+                    quant: "Q4_K_M".into(),
+                    size_bytes: Some(42),
+                    file_group: None,
+                },
+                pumas_library::models::DownloadOption {
+                    quant: "Original precision".into(),
+                    size_bytes: None,
+                    file_group: Some(pumas_library::models::FileGroup {
+                        filenames: vec![
+                            "nested/model-00001.safetensors".into(),
+                            "nested/model-00002.safetensors".into(),
+                        ],
+                        shard_count: 2,
+                        label: "nested/model.safetensors".into(),
+                    }),
+                },
+            ],
+        },
+    )?;
+    let hf_empty = HfDownloadDetailsOutcome::found(
+        "example/empty",
+        pumas_library::models::HfDownloadDetails {
+            repo_id: "example/empty".into(),
+            download_options: vec![],
+            total_size_bytes: None,
+        },
+    )?;
     Ok(serde_json::json!({
+        "hf_download_details_success":hf_details,
+        "hf_download_details_empty":hf_empty,
+        "hf_download_details_failure":HfDownloadDetailsOutcome::failed(&PumasError::Other("private upstream detail".into())),
         "models":models, "search":search, "recovery_request":recovery_request,
         "link_health_healthy":link_health_healthy, "link_health_degraded":link_health_degraded,
         "conversion_progress":conversion_progress, "conversion_missing":conversion_missing,
@@ -335,6 +372,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
     export!(
         ModelsOutcome,
         CatalogSearchOutcome,
+        HfDownloadDetailsOutcome,
         SearchCatalogParams,
         DownloadListOutcome,
         DownloadStatusOutcome,
@@ -391,6 +429,22 @@ fn refine_named(name: &str, schema: &mut Value) {
     let Some(object) = schema.as_object_mut() else {
         return;
     };
+    if name == "HfDownloadDetails" {
+        object.insert(
+            "required".into(),
+            serde_json::json!(["repoId", "downloadOptions", "totalSizeBytes"]),
+        );
+    }
+    if name == "DownloadOption" {
+        object.insert("required".into(), serde_json::json!(["quant", "sizeBytes"]));
+        // Serde omits None; the producer never emits a null fileGroup.
+        if let Some(properties) = object.get_mut("properties").and_then(Value::as_object_mut) {
+            properties.insert(
+                "fileGroup".into(),
+                serde_json::json!({"$ref":"#/definitions/FileGroup"}),
+            );
+        }
+    }
     match name {
         "LinkHealthOutcome" | "LinkHealthResponse" => {
             object.insert("pumasLinkHealth".into(), true.into());
@@ -537,8 +591,11 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "DownloadListOutcome"
             | "DownloadStartedSuccess"
             | "DownloadStatusFoundOutcome"
+            | "HfDownloadDetailsSuccess"
             | "ModelIndexRefreshOutcome" => Some(true),
-            "DownloadStartedFailure" | "DownloadStatusMissingOutcome" => Some(false),
+            "DownloadStartedFailure"
+            | "DownloadStatusMissingOutcome"
+            | "HfDownloadDetailsFailure" => Some(false),
             _ => None,
         };
         if let Some(success) = success {

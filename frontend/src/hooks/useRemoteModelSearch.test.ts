@@ -51,6 +51,7 @@ describe('useRemoteModelSearch', () => {
     getHfDownloadDetailsMock.mockResolvedValue({
       success: true,
       details: {
+        repoId: 'acme/model-a',
         downloadOptions: [
           {
             quant: 'Q4_K_M',

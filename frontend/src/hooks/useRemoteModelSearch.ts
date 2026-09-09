@@ -46,6 +46,11 @@ export function useRemoteModelSearch({
   const resultsRef = useRef<RemoteModelInfo[]>([]);
   const inFlightHydrationsRef = useRef<Map<string, Promise<void>>>(new Map());
 
+  useEffect(() => () => {
+    generationRef.current += 1;
+    inFlightHydrationsRef.current.clear();
+  }, []);
+
   useEffect(() => {
     resultsRef.current = results;
   }, [results]);
@@ -155,20 +160,30 @@ export function useRemoteModelSearch({
 
       try {
         const response = await api.get_hf_download_details(repoId, model.quants);
-        if (!response.success || !response.details) {
-          throw new APIError(response.error || 'Failed to load download details.', 'get_hf_download_details');
+        if (!response.success) {
+          throw new APIError(response.error, 'get_hf_download_details');
         }
         if (generation !== generationRef.current) {
           return;
         }
+        const details = response.details;
+        if (details.repoId !== repoId) {
+          throw new APIError('Download details did not match the requested repository.', 'get_hf_download_details');
+        }
+        const downloadOptions = details.downloadOptions.map((option) => ({
+          ...option,
+          fileGroup: option.fileGroup
+            ? { ...option.fileGroup, filenames: [...option.fileGroup.filenames] }
+            : option.fileGroup,
+        }));
 
         setResults((prev) =>
           prev.map((entry) =>
             entry.repoId === repoId
               ? {
                   ...entry,
-                  downloadOptions: response.details?.downloadOptions ?? entry.downloadOptions,
-                  totalSizeBytes: response.details?.totalSizeBytes ?? entry.totalSizeBytes,
+                  downloadOptions,
+                  totalSizeBytes: details.totalSizeBytes,
                 }
               : entry
           )
@@ -184,8 +199,8 @@ export function useRemoteModelSearch({
           error: hydrateError instanceof Error ? hydrateError.message : hydrateError,
         });
       } finally {
-        inFlightHydrationsRef.current.delete(repoId);
         if (generation === generationRef.current) {
+          inFlightHydrationsRef.current.delete(repoId);
           setHydratingRepoIds((prev) => {
             const next = new Set(prev);
             next.delete(repoId);

@@ -2,11 +2,11 @@ import type { BaseResponse } from './api-common';
 import type {
   LaunchResponse,
   RuntimeLaunchResponse,
+  RuntimeStopResponse,
   OllamaCreateModelResponse,
   OllamaListModelsResponse,
   OllamaListRunningResponse,
   StopOllamaResponse,
-  StopTorchResponse,
   TorchComputeDevice,
   TorchConfigureResponse,
   TorchGetStatusResponse,
@@ -108,7 +108,7 @@ export interface DesktopBridgeRuntimeAPI {
   // Process Management
   // ========================================
   launch_ollama(): Promise<RuntimeLaunchResponse>;
-  stop_ollama(): Promise<StopOllamaResponse>;
+  stop_ollama(): Promise<RuntimeStopResponse>;
 
   // Local Runtime Profiles
   get_runtime_profiles_snapshot(): Promise<RuntimeProfilesSnapshotResponse>;
@@ -187,7 +187,7 @@ export interface DesktopBridgeRuntimeAPI {
 
   // Torch Inference Server
   launch_torch(): Promise<RuntimeLaunchResponse>;
-  stop_torch(): Promise<StopTorchResponse>;
+  stop_torch(): Promise<RuntimeStopResponse>;
   torch_list_slots(connectionUrl?: string): Promise<TorchListSlotsResponse>;
   torch_load_model(
     modelId: string,

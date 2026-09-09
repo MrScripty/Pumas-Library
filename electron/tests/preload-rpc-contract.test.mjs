@@ -257,6 +257,47 @@ test('direct runtime launches decode exact outcomes without retry', async () => 
   }
 });
 
+test('direct and composed runtime stops decode exact outcomes without retry', async () => {
+  const harness = loadCompiledPreload();
+  for (const method of ['stop_ollama', 'stop_torch']) {
+    for (const success of [true, false]) {
+      const response = { success };
+      harness.respondWith(response);
+      assert.deepEqual(toPlainValue(await harness.api[method]()), response);
+      assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]), {});
+    }
+    for (const response of [null, true, false, {}, { success: null },
+      { success: 'true' }, { success: true, error: 'invented' }]) {
+      harness.respondWith(response);
+      await assert.rejects(harness.api[method](), { name: 'DesktopContractError' });
+    }
+    harness.respondWith(() => { throw new Error('runtime stop transport unavailable'); });
+    await assert.rejects(harness.api[method](), /runtime stop transport unavailable/);
+    assert.equal(harness.invocations.filter(invocation => invocation[1] === method).length, 10);
+  }
+
+  for (const [appId, method, success] of [
+    ['ollama', 'stop_ollama', true], ['torch', 'stop_torch', false],
+  ]) {
+    harness.respondWith({ success });
+    assert.deepEqual(toPlainValue(await harness.api.stop_app(appId)), { success });
+    assert.equal(harness.invocations.at(-1)?.[1], method);
+    let before = harness.invocations.filter(invocation => invocation[1] === method).length;
+    harness.respondWith({ success: 'true' });
+    await assert.rejects(harness.api.stop_app(appId), { name: 'DesktopContractError' });
+    assert.equal(harness.invocations.filter(invocation => invocation[1] === method).length, before + 1);
+    before += 1;
+    harness.respondWith(() => { throw new Error(`stop ${appId} transport unavailable`); });
+    await assert.rejects(harness.api.stop_app(appId), new RegExp(`stop ${appId} transport unavailable`));
+    assert.equal(harness.invocations.filter(invocation => invocation[1] === method).length, before + 1);
+  }
+  const beforeUnsupported = harness.invocations.length;
+  assert.deepEqual(toPlainValue(await harness.api.stop_app('unsupported')), {
+    success: false, error: 'Unsupported app stop target: unsupported',
+  });
+  assert.equal(harness.invocations.length, beforeUnsupported);
+});
+
 test('composed launch validates switching before launching and never retries selection', async () => {
   const harness = loadCompiledPreload();
   for (const response of [{ success: false }, { success: true, error: 'invented' }]) {

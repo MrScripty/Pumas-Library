@@ -69,6 +69,7 @@ function installActualPreload(
   getReleaseDependenciesResult: () => unknown = () => fixture['get_release_dependencies_populated'],
   installVersionDependenciesResult: () => unknown = () => fixture['install_version_dependencies_true'],
   runtimeLaunchResult: () => unknown = () => fixture['runtime_launch_not_ready'],
+  runtimeStopResult: () => unknown = () => fixture['runtime_stop_true'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -108,6 +109,7 @@ function installActualPreload(
         if (method === 'get_release_dependencies') return getReleaseDependenciesResult();
         if (method === 'install_version_dependencies') return installVersionDependenciesResult();
         if (method === 'launch_ollama' || method === 'launch_torch') return runtimeLaunchResult();
+        if (method === 'stop_ollama' || method === 'stop_torch') return runtimeStopResult();
         if (method === 'get_installed_versions') return installedVersions();
         if (method === 'get_active_version' || method === 'get_default_version') return selectedVersion();
         if (method === 'get_inference_settings') return inferenceRead;
@@ -205,6 +207,7 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 describe('actual Rust catalog through bundled preload and renderer', () => {
   it('projects validated runtime-launch outcomes into the active process hook', async () => {
     let response: unknown = fixture['runtime_launch_not_ready'];
+    let stopResponse: unknown = fixture['runtime_stop_true'];
     const requests = installActualPreload(
       undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
       undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
@@ -212,6 +215,10 @@ describe('actual Rust catalog through bundled preload and renderer', () => {
       undefined, undefined, undefined, () => {
         if (response instanceof Error) throw response;
         return response;
+      },
+      () => {
+        if (stopResponse instanceof Error) throw stopResponse;
+        return stopResponse;
       },
     );
     const { result, rerender } = renderHook(
@@ -249,6 +256,33 @@ describe('actual Rust catalog through bundled preload and renderer', () => {
     expect(result.current.launchError).toBe('Error trying to launch Ollama');
     expect(result.current.launchLogPath).toBe(' failure.log ');
     expect(requests.filter(request => request.method === 'launch_ollama')).toHaveLength(5);
+
+    rerender({ isRunning: true });
+    await act(async () => { await result.current.stopOllama(); });
+    expect(result.current.isStopping).toBe(true);
+    expect(result.current.launchError).toBeNull();
+    expect(result.current.launchLogPath).toBe(' failure.log ');
+    rerender({ isRunning: false });
+    expect(result.current.isStopping).toBe(false);
+
+    rerender({ isRunning: true });
+    stopResponse = fixture['runtime_stop_false'];
+    await act(async () => { await result.current.stopOllama(); });
+    expect(result.current.isStopping).toBe(false);
+    expect(result.current.launchError).toBe('Failed to stop Ollama');
+    expect(result.current.launchLogPath).toBe(' failure.log ');
+
+    stopResponse = { success: 'true' };
+    await act(async () => { await result.current.stopOllama(); });
+    expect(result.current.isStopping).toBe(false);
+    expect(result.current.launchError).toBe('Error trying to stop Ollama');
+    expect(result.current.launchLogPath).toBe(' failure.log ');
+    stopResponse = new Error('runtime stop transport unavailable');
+    await act(async () => { await result.current.stopOllama(); });
+    expect(result.current.isStopping).toBe(false);
+    expect(result.current.launchError).toBe('Error trying to stop Ollama');
+    expect(result.current.launchLogPath).toBe(' failure.log ');
+    expect(requests.filter(request => request.method === 'stop_ollama')).toHaveLength(4);
   });
 
   it('composes validated selection and launch outcomes without retry', async () => {

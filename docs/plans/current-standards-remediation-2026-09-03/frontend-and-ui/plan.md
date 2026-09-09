@@ -10,10 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Inventory and validate `stop_app` with the composed
-`stop_ollama`/`stop_torch` RPC routes as one stop-contract slice (M4) after the
-accepted runtime-launch response. Preserve optional inference-plugin builds,
-standalone backend operation and existing error behavior; do not stop a live runtime.
+**Next slice:** Inventory and validate `is_ollama_running` and
+`is_torch_running` as one runtime-liveness read-contract slice (M4) after the
+accepted runtime-stop response. Preserve optional inference-plugin builds,
+standalone backend operation and existing error behavior; do not probe a live runtime.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -69,6 +69,47 @@ cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
 
+## Runtime Stop Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-09--runtime-stop-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Project the actual `stop_ollama` and `stop_torch` RPC routes and supported
+branches of the composed desktop `stop_app` adapter through the generated exact
+`{success:boolean}` outcome. Reuse `RuntimeLaunchParams` as the existing strict
+empty process-control request authority: omitted RPC and Electron-main parameters
+normalize to `{}`, while explicit null, non-record and extra fields reject before
+effects. `stop_app` remains a local adapter; its unsupported-target false/error
+result is not a fabricated Rust route or broadened RPC outcome.
+
+The producer executes a blocking process-stop operation. It can signal PID-file
+targets and Unix process groups, remove PID files, scan global processes by command
+substring and update cached running state. True is the producer's existing
+aggregate report, not proof of complete shutdown: it can include an already-dead
+PID, can coexist with failed stop attempts and does not establish target identity.
+False can mean no manager, no candidates or no reported termination. FE-I50 owns
+unverified/reused PID and global fallback target reachability. FE-I51 owns swallowed
+inspection failures, eager cleanup/cache projection and incomplete boolean truth.
+FE-I48 now also covers unbounded aggregate stop lifecycle, partial effects and
+unsafe retry after uncertainty.
+
+The active renderer path is App through `useOllamaProcess`/`useTorchProcess` and
+`useManagedProcess`. True clears the prior error but retains stopping until external
+status reports not running; false clears stopping with `Failed to stop`, and
+malformed/transport failure clears it with `Error trying to stop`. Every branch
+preserves the existing launch log. Immediate and delayed status refreshes are read
+observations, not mutation retries. The plugin `stop_app` consumer is dormant, and
+the active runtime-profile stop route remains outside this contract with its legacy
+type and UI.
+
+Acceptance: exact raw/wrapper/typed bool parity, strict shared empty request,
+default/no-plugin RPC fixtures with the process manager disabled, bundled direct
+and composed preload behavior, active-hook state projection, frontend/Electron
+gates, generator freshness, strict Rust checks and canonical-plan validation.
+No live stop, kill, signal, process scan or runtime probe occurs. The evidence does
+not establish live target identity, full shutdown, bounded aggregate cancellation,
+rollback, graphical behavior or other-OS process behavior.
+
 ## Runtime Launch Contract
 
 Status: `Accepted`; see the
@@ -92,7 +133,7 @@ order remains selection followed by a false unsupported-target result.
 
 The RPC route uses the core process manager, not the app-manager version launch
 method. It derives executable, PID and log paths from the current active tag,
-spawns a detached runtime and performs a bounded endpoint readiness observation.
+spawns a detached runtime and performs a bounded TCP-connect readiness observation.
 Success proves process creation, not readiness: `ready:false` is valid, and even
 `ready:true` does not establish PID/version correlation or continuing health.
 FE-I42 now includes tag-derived launch path reachability. FE-I47 owns non-atomic

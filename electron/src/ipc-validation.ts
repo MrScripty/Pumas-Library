@@ -62,6 +62,8 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
     || method === 'install_version_dependencies'
     || method === 'launch_ollama'
     || method === 'launch_torch'
+    || method === 'stop_ollama'
+    || method === 'stop_torch'
     || method === 'switch_version'
     || method === 'install_version'
     || method === 'set_default_version'
@@ -77,6 +79,7 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
         : method === 'install_version_dependencies'
           ? decodeInstallVersionDependenciesParams(rawParams)
         : method === 'launch_ollama' || method === 'launch_torch'
+          || method === 'stop_ollama' || method === 'stop_torch'
           ? decodeRuntimeLaunchParams(rawParams === undefined ? {} : rawParams)
         : method === 'switch_version'
           ? decodeSwitchVersionParams(rawParams)

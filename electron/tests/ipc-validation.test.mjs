@@ -216,8 +216,8 @@ test('dependency-installation IPC uses the generated request contract with a req
   }
 });
 
-test('runtime launch IPC uses the generated empty request contract', () => {
-  for (const method of ['launch_ollama', 'launch_torch']) {
+test('runtime process-control IPC uses the generated empty request contract', () => {
+  for (const method of ['launch_ollama', 'launch_torch', 'stop_ollama', 'stop_torch']) {
     for (const params of [undefined, {}]) {
       const decoded = validateApiCallPayload(method, params);
       assert.deepEqual(JSON.parse(JSON.stringify(decoded.params)), {});

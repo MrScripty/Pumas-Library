@@ -199,6 +199,10 @@ pub(crate) enum RpcCommand {
     #[cfg(feature = "inference-plugins")]
     LaunchOllama,
     #[cfg(feature = "inference-plugins")]
+    StopOllama,
+    #[cfg(feature = "inference-plugins")]
+    StopTorch,
+    #[cfg(feature = "inference-plugins")]
     LaunchTorch,
     #[cfg(feature = "inference-plugins")]
     SwitchVersion {
@@ -370,6 +374,10 @@ impl RpcCommand {
             #[cfg(feature = "inference-plugins")]
             Self::LaunchOllama => "launch_ollama",
             #[cfg(feature = "inference-plugins")]
+            Self::StopOllama => "stop_ollama",
+            #[cfg(feature = "inference-plugins")]
+            Self::StopTorch => "stop_torch",
+            #[cfg(feature = "inference-plugins")]
             Self::LaunchTorch => "launch_torch",
             #[cfg(feature = "inference-plugins")]
             Self::SwitchVersion { .. } => "switch_version",
@@ -500,6 +508,8 @@ pub(crate) enum RpcOutcome {
     #[cfg(feature = "inference-plugins")]
     RuntimeLaunch(RuntimeLaunchOutcome),
     #[cfg(feature = "inference-plugins")]
+    RuntimeStop(RuntimeStopOutcome),
+    #[cfg(feature = "inference-plugins")]
     SetDefaultVersion(SetDefaultVersionOutcome),
     #[cfg(feature = "inference-plugins")]
     InstallVersion(InstallVersionOutcome),
@@ -593,6 +603,8 @@ impl RpcOutcome {
             Self::SwitchVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::RuntimeLaunch(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::RuntimeStop(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::SetDefaultVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
@@ -3603,6 +3615,21 @@ pub(crate) struct SwitchVersionParams {
 #[derive(Serialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct RuntimeStopOutcome {
+    success: bool,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl RuntimeStopOutcome {
+    pub(crate) fn new(success: bool) -> Self {
+        Self { success }
+    }
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct RuntimeLaunchOutcome {
     success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -3902,6 +3929,37 @@ fn runtime_launch_responses() -> Vec<(&'static str, pumas_library::models::Launc
             },
         ),
     ]
+}
+
+#[cfg(test)]
+mod runtime_stop_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn runtime_stop_preserves_boolean_handler_and_wrapper_wire() {
+        for (raw, expected) in [
+            (true, json!({"success":true})),
+            (false, json!({"success":false})),
+        ] {
+            // The old handler wrapped the core bool before the passthrough wrapper.
+            let handler_wire = json!({"success":raw});
+            assert_eq!(handler_wire, expected);
+            for method in ["stop_ollama", "stop_torch"] {
+                assert_eq!(
+                    crate::wrapper::wrap_response(method, handler_wire.clone()),
+                    expected
+                );
+            }
+            let outcome = RuntimeStopOutcome::new(raw);
+            assert_eq!(serde_json::to_value(&outcome).unwrap(), expected);
+            #[cfg(feature = "inference-plugins")]
+            assert_eq!(
+                RpcOutcome::RuntimeStop(outcome).into_value().unwrap(),
+                expected
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -5198,6 +5256,12 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
                 })
             })
         }
+        #[cfg(feature = "inference-plugins")]
+        "stop_ollama" => empty().map(|()| RpcCommand::StopOllama),
+        #[cfg(feature = "inference-plugins")]
+        "stop_torch" => empty().map(|()| RpcCommand::StopTorch),
+        #[cfg(not(feature = "inference-plugins"))]
+        "stop_ollama" | "stop_torch" => Err(PublicError::method_not_found()),
         #[cfg(feature = "inference-plugins")]
         "launch_ollama" => empty().map(|()| RpcCommand::LaunchOllama),
         #[cfg(feature = "inference-plugins")]

@@ -197,8 +197,6 @@ export const RPC_METHOD_PARAM_VALIDATION = {
   scan_shared_storage: 'empty-record',
   list_model_downloads: 'empty-record',
   get_hf_auth_status: 'empty-record',
-  stop_ollama: 'empty-record',
-  stop_torch: 'empty-record',
   get_plugins: 'empty-record',
   get_runtime_profiles_snapshot: 'empty-record',
   get_serving_status: 'empty-record',

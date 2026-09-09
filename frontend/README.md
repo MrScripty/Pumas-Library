@@ -200,7 +200,7 @@ completed; it does not establish that a runtime process is running or ready.
 Runtime launch validates an exact generated outcome with `success` and optional
 non-null `error`, `log_path`, and `ready` fields. Direct Ollama/Torch launch and
 the composed version-selection adapter share that decoder. A successful launch
-means process creation and the producer's bounded readiness observation
+means process creation and the producer's bounded TCP-connect readiness observation
 completed; `ready: false` remains a successful launch, and readiness is not
 proof of process or version identity or continuing health. The active process
 hook uses its later status observation, rather than `ready`, to clear starting
@@ -208,6 +208,16 @@ state. A decoded false outcome updates or clears the log from that failure;
 malformed and transport outcomes preserve the prior log. All surface failure and
 never retry launch. Composed selection is not transactional:
 a successful switch remains applied if the later launch fails or is uncertain.
+
+Runtime stop validates an exact generated `{success:boolean}` result for the
+direct Ollama/Torch routes and supported branches of the composed `stop_app`
+adapter. True and false are preserved; malformed and transport responses reject
+after one stop request and never retry. The active process hook keeps its log,
+uses false and rejected responses as distinct generic failures, and retains
+stopping state after true until external status reports the process stopped.
+Immediate and delayed status refreshes are observations, not stop retries.
+The boolean is the producer's current report and does not prove complete process-
+tree shutdown; scanning and PID identity remain documented backend limitations.
 
 Default runtime-version selection shares one generated request contract across
 preload, Electron main and standalone Rust RPC. Omitted/null tags clear the

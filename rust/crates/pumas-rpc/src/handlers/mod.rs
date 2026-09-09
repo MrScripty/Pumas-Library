@@ -800,6 +800,14 @@ async fn dispatch_admitted_command(
                 .map(RpcOutcome::RemoveVersion)
         }
         #[cfg(feature = "inference-plugins")]
+        RpcCommand::StopOllama => process::stop_ollama(state)
+            .await
+            .map(RpcOutcome::RuntimeStop),
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::StopTorch => process::stop_torch(state)
+            .await
+            .map(RpcOutcome::RuntimeStop),
+        #[cfg(feature = "inference-plugins")]
         RpcCommand::LaunchOllama => process::launch_ollama(state)
             .await
             .map(RpcOutcome::RuntimeLaunch),
@@ -1303,11 +1311,7 @@ async fn dispatch_method(
 
         // Process Management
         #[cfg(feature = "inference-plugins")]
-        "stop_ollama" => process::stop_ollama(state, params).await,
-        #[cfg(feature = "inference-plugins")]
         "is_ollama_running" => process::is_ollama_running(state, params).await,
-        #[cfg(feature = "inference-plugins")]
-        "stop_torch" => process::stop_torch(state, params).await,
         #[cfg(feature = "inference-plugins")]
         "is_torch_running" => process::is_torch_running(state, params).await,
         #[cfg(feature = "inference-plugins")]
@@ -1753,6 +1757,67 @@ mod tests {
                     json!({"jsonrpc":"2.0","id":"launch-fixture","error":{"code":error.code,"message":error.message,"data":{"class":error.class.as_str()}}})
                 );
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn runtime_stop_rpc_admission_without_process_manager() {
+        let temp = TempDir::new().unwrap();
+        let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        for method in ["stop_ollama", "stop_torch"] {
+            for (params, accepted) in crate::contract::runtime_launch_requests() {
+                let mut request = json!({"jsonrpc":"2.0","id":"stop-fixture","method":method});
+                if let Some(params) = params {
+                    request["params"] = params;
+                }
+                let response = handle_rpc(
+                    State(state.clone()),
+                    Bytes::from(serde_json::to_vec(&request).unwrap()),
+                )
+                .await
+                .into_response();
+                assert_eq!(response.status(), StatusCode::OK);
+                let body = axum::body::to_bytes(response.into_body(), 65_536)
+                    .await
+                    .unwrap();
+                let wire: Value = serde_json::from_slice(&body).unwrap();
+                #[cfg(feature = "inference-plugins")]
+                if accepted {
+                    assert_eq!(
+                        wire,
+                        json!({"jsonrpc":"2.0","id":"stop-fixture","result":{"success":false}})
+                    );
+                    continue;
+                }
+                #[cfg(feature = "inference-plugins")]
+                let error = crate::contract::PublicError::invalid_params();
+                #[cfg(not(feature = "inference-plugins"))]
+                let error = {
+                    let _ = accepted;
+                    crate::contract::PublicError::method_not_found()
+                };
+                assert_eq!(
+                    wire,
+                    json!({"jsonrpc":"2.0","id":"stop-fixture","error":{"code":error.code,"message":error.message,"data":{"class":error.class.as_str()}}})
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn runtime_stop_core_without_process_manager_returns_false() {
+        let temp = TempDir::new().unwrap();
+        // This helper explicitly disables process management; never use a real stop manager.
+        let api = test_support::build_test_api(temp.path()).await;
+        for raw in [
+            api.stop_ollama().await.unwrap(),
+            api.stop_torch().await.unwrap(),
+        ] {
+            assert!(!raw);
+            assert_eq!(
+                serde_json::to_value(crate::contract::RuntimeStopOutcome::new(raw)).unwrap(),
+                json!({"success":false})
+            );
         }
     }
 

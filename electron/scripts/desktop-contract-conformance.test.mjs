@@ -144,6 +144,24 @@ test('runtime-launch admission and outcomes match Rust', () => {
   }
 });
 
+test('runtime-stop admission and outcomes match Rust', () => {
+  for (const probe of fixtures.runtime_launch_request_probes) {
+    const value = probe.omitted ? {} : probe.params;
+    const result = contract.decodeRuntimeLaunchParams(value);
+    assert.equal(result.status, probe.accepted ? 'valid' : 'invalid', JSON.stringify(probe));
+    if (probe.accepted) assert.deepEqual(JSON.parse(JSON.stringify(result.value)), {});
+  }
+  for (const key of ['runtime_stop_true', 'runtime_stop_false']) {
+    const result = contract.decodeRuntimeStopOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  for (const value of [null, true, false, {}, { success: null },
+    { success: 'true' }, { success: true, error: 'invented' }]) {
+    assert.equal(contract.decodeRuntimeStopOutcome(value).status, 'invalid', JSON.stringify(value));
+  }
+});
+
 test('runtime-removal decoding preserves exact confirmation booleans', () => {
   for (const key of ['remove_version_true', 'remove_version_false']) {
     const result = contract.decodeRemoveVersionOutcome(fixtures[key]);

@@ -1,5 +1,27 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-09 — Runtime Stop Contract
+
+The bounded runtime-stop slice now has one generated strict empty process-control
+request and exact `{success:boolean}` outcome for `stop_ollama`/`stop_torch`,
+including supported branches of the local composed `stop_app` adapter. Direct and
+composed malformed/transport responses reject after one request without retry.
+The active hook preserves its log, clears stopping on false or rejection, and
+waits for external not-running status after true. Profile stop remains separate.
+
+The producer may signal PID-file/global-scan targets, clean PID files and change
+cached state. Neither boolean proves complete shutdown or target identity. FE-I50
+owns unsafe target identity, FE-I51 owns incomplete/swallowed stop evidence, and
+FE-I48 includes blocking aggregate lifecycle and partial effects. Safe fixtures
+disable the process manager; no live signal, scan or runtime probe occurred.
+
+Focused dual-feature RPC tests, strict dual-feature Clippy, formatting, generator/
+freshness, Electron build/lint and actual main/bundled-preload tests, direct and
+composed producer-to-renderer conformance, affected hooks, frontend types/lint and
+both builds pass. The frontend ledger owns exact review, repairs, routing and cost
+evidence. M4 and overall remediation remain incomplete. Next: inventory and
+validate `is_ollama_running`/`is_torch_running`.
+
 ## 2026-09-09 — Runtime Launch Contract
 
 The bounded launch slice now has exact generated empty request and optional-field
@@ -13,7 +35,7 @@ from a decoded false response, preserves its prior log on malformed or transport
 failure and never retries launch.
 
 The core producer launches a detached process from current active-tag-derived
-paths and observes a fixed endpoint. Success proves process creation, not readiness,
+paths and observes fixed-endpoint TCP connectivity. Success proves process creation, not readiness,
 identity or continuing health. Composed selection is not atomic and does not roll
 back after later failure. FE-I42 covers path reachability; FE-I47 covers selection/
 launch atomicity and concurrency; FE-I48 covers detached lifecycle and partial

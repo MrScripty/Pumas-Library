@@ -1,5 +1,101 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-09 — Runtime Stop Contract
+
+Accepted `stop_ollama` and `stop_torch` across standalone Rust, typed RPC,
+Electron main/preload and the active renderer path. `RuntimeStopOutcome` is
+exactly `{success:boolean}`. Raw core API, prior wrapper and typed dispatch agree
+without invented error/message fields. Direct and supported composed `stop_app`
+branches decode that exact outcome; the adapter's unsupported-target false/error
+remains local and does not invent a Rust route. Runtime-profile stop remains a
+separate unvalidated producer/type/UI contract.
+
+Stop reuses generated `RuntimeLaunchParams` as the strict empty process-control
+request. Omitted Rust and Electron-main params normalize to `{}`; explicit null,
+non-record and extra fields reject before effects. True and false pass exactly.
+Malformed and transport responses reject after one request. Direct and composed
+supported paths make exactly one matching stop call with no automatic retry;
+unsupported composition makes none.
+
+The producer can signal PID-file targets and Unix groups, remove PID files, scan
+global command substrings and change cached running state. True does not prove all
+targets stopped: already-dead PIDs count, failure of other candidates can coexist,
+and identity is not established. False also represents no manager, no candidates
+or no reported termination. FE-I50 records unsafe/unverified PID and global scan
+target identity. FE-I51 records swallowed inspection failures, eager PID/cache
+projection and incomplete boolean truth. FE-I48 now includes stop's blocking,
+non-serialized aggregate lifecycle, partial effects and unsafe uncertain retry.
+
+The active App path uses `useManagedProcess`. True clears error and retains
+stopping until external `isRunning` becomes false. False clears stopping with
+`Failed to stop`; malformed and transport failure clear it with `Error trying to
+stop`. All preserve the launch log. The outer action's immediate and delayed
+status refreshes run after settled hook paths and are observations, not mutation
+retries. The plugin `stop_app` hook has no production importer and remains dormant.
+
+Verification: focused RPC stop tests pass three with default features and three
+with `--no-default-features`; fixtures explicitly disable the process manager.
+Strict all-target/all-feature and no-default Clippy pass with warnings denied;
+Rust formatting passes. Generator tests pass eight and freshness passes. Electron
+build/lint and actual main/bundled-preload tests pass 168 with one pinned-Electron
+test skipped. Producer/generated conformance passes 39 and actual preload/renderer
+conformance passes 48; two affected hook suites pass four tests. Frontend types,
+lint and normal/library-only builds pass. No live stop, kill, signal, process scan,
+runtime probe, Python/pip, network service or model-library mutation ran. This
+does not establish target identity, complete shutdown, bounded aggregate lifecycle,
+graphical behavior or other-OS process behavior.
+
+Routing/review: the unchanged root remains GPT-6 Astra medium because it cannot
+be switched in place to requested GPT-5.6 Sol low. GPT-6 Astra medium owned
+producer semantics, consequential design and substantive review; GPT-6 Astra low
+implemented settled Rust; GPT-5.6 Luna max performed the bounded frontend-only
+inventory; GPT-5.6 Sol low owned desktop/frontend integration, generation, gates,
+documentation and commit. Luna completed promptly without edits or errors. Review
+required independent malformed/transport evidence through each composed supported
+target and explicit stopping-state assertions; both were added without production
+change. Source review also corrected prior launch documentation from HTTP readiness
+to its actual TCP-connect observation.
+
+Repairs: integration first invoked `cargo fmt` from `electron/` in a chained gate,
+then reran it from the Rust workspace; no source or test failed. The preceding
+launch reporting tail needed two tiny documentation commits after duplicated root
+instructions crossed the commit boundary; this is coordination inefficiency in
+the carried tail, not stop production work. Rust and inventory reported no repairs.
+Cargo ownership remained sequential.
+
+Cost checkpoint: `/tmp/pumas-stop-costs.py` preserved the frozen launch JSON
+checkpoint and deduplicated 153 later `token_usage_record` responses. The carried
+reporting tail is $2.079024: root GPT-6 Astra medium $1.314790 through
+`resp_04a060a0b34b4096016aa1db3cbcc087d092730c593df77896`
+(`2026-09-09T22:18:49.904Z`) and desktop/frontend GPT-5.6 Sol low $0.764234
+through `resp_0b81a3105f0b5342016aa1db3618ac87d0965189c7430b3a90`
+(`2026-09-09T22:18:33.958Z`). The stop slice is $15.044661: root GPT-6 Astra
+medium $5.756172 through
+`resp_04a060a0b34b4096016aa1de27941487d0a40a21fdacfe43d4`
+(`2026-09-09T22:31:07.721Z`), design/review GPT-6 Astra medium $4.255812
+through `resp_0d89de9fd93a6b19016aa1de3238e487d0a96ebcfb13ca4c94`
+(`2026-09-09T22:31:23.134Z`), inventory GPT-5.6 Luna max $0.014827 through
+`resp_01eda5dd1e4769fc016aa1db951e7487d0ba590d8e8ae79c91`
+(`2026-09-09T22:21:04.357Z`), Rust GPT-6 Astra low $1.533286 through
+`resp_0ffe187931010737016aa1dc13d18087d08e5a39e1c3af5c63`
+(`2026-09-09T22:22:15.242Z`), and desktop/frontend GPT-5.6 Sol low $3.484564
+through `resp_0b81a3105f0b5342016aa1de3483f487d0872ef151e52da7c1`
+(`2026-09-09T22:31:19.411Z`). Including the tail, this adds $17.123685 and
+brings the cumulative API-equivalent estimate to $121.033987 standard and
+$242.067974 under the separate 2x priority scenario. No request crossed 272,000
+input tokens and recorded cache writes were zero. Requested/observed service
+tiers, tool fees and shared costs remain unknown and are not treated as free.
+Published OpenAI pages for
+[GPT-5.6 Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol),
+[GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna) and
+[GPT-6 Astra](https://developers.openai.com/api/docs/models/gpt-6-astra)
+corroborate the assumptions. These are API-equivalent estimates, not invoices.
+Work after this snapshot is an uncounted reporting/commit tail.
+
+The next slice is the independent inventory and validation of
+`is_ollama_running` and `is_torch_running` as one runtime-liveness read contract.
+M4 and the overall remediation remain incomplete.
+
 ## 2026-09-09 — Runtime Launch Contract
 
 Accepted the actual `launch_ollama`/`launch_torch` RPC routes and composed
@@ -23,7 +119,7 @@ one selection and one launch call with no retry or rollback.
 The routes use core `ProcessManager` launch rather than app-manager
 `VersionManager::launch_version`. They derive executable, PID and log paths from
 the current active tag, start a detached child and perform a bounded fixed-endpoint
-HTTP observation. Success proves process creation; `ready:false` remains success,
+TCP-connect observation. Success proves process creation; `ready:false` remains success,
 and readiness is not correlated evidence for the launched PID/version or continuing
 health. FE-I42 includes active-tag launch-path reachability. FE-I47 records non-
 atomic selection plus launch and the mutable-active-version concurrency gap.

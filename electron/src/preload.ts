@@ -62,6 +62,7 @@ import {
   decodeSwitchVersionParams,
   decodeRuntimeLaunchOutcome,
   decodeRuntimeLaunchParams,
+  decodeRuntimeStopOutcome,
   decodeSetDefaultVersionOutcome,
   decodeSetDefaultVersionParams,
   decodeInstallVersionOutcome,
@@ -512,9 +513,15 @@ async function launchAppVersion(
 async function stopApp(appId: string): Promise<BaseRpcResponse> {
   switch (appId) {
     case 'ollama':
-      return await apiCall('stop_ollama');
+      return await validatedApiCall(
+        'stop_ollama', decodeRuntimeStopOutcome,
+        requireDecoded(decodeRuntimeLaunchParams({}), 'stop_ollama request')
+      );
     case 'torch':
-      return await apiCall('stop_torch');
+      return await validatedApiCall(
+        'stop_torch', decodeRuntimeStopOutcome,
+        requireDecoded(decodeRuntimeLaunchParams({}), 'stop_torch request')
+      );
     default:
       return {
         success: false,
@@ -624,7 +631,10 @@ const electronAPI = {
     'launch_ollama', decodeRuntimeLaunchOutcome,
     requireDecoded(decodeRuntimeLaunchParams({}), 'launch_ollama request')
   ),
-  stop_ollama: () => apiCall('stop_ollama'),
+  stop_ollama: () => validatedApiCall(
+    'stop_ollama', decodeRuntimeStopOutcome,
+    requireDecoded(decodeRuntimeLaunchParams({}), 'stop_ollama request')
+  ),
   get_runtime_profiles_snapshot: () =>
     apiCall('get_runtime_profiles_snapshot'),
   list_runtime_profile_updates_since: (cursor?: string | null, limit?: number) =>
@@ -656,7 +666,10 @@ const electronAPI = {
     'launch_torch', decodeRuntimeLaunchOutcome,
     requireDecoded(decodeRuntimeLaunchParams({}), 'launch_torch request')
   ),
-  stop_torch: () => apiCall('stop_torch'),
+  stop_torch: () => validatedApiCall(
+    'stop_torch', decodeRuntimeStopOutcome,
+    requireDecoded(decodeRuntimeLaunchParams({}), 'stop_torch request')
+  ),
   torch_list_slots: (connectionUrl?: string) =>
     apiCall('torch_list_slots', { connection_url: connectionUrl }),
   torch_load_model: (modelId: string, device?: string, connectionUrl?: string) =>

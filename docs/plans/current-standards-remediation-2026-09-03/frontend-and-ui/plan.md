@@ -10,11 +10,11 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound runtime installation-cancellation responses (M4): inventory
-the exact `cancel_installation` boolean producer and the frontend consumer's
-handwritten success envelope before selecting the projection. Preserve optional
-inference-plugin builds, standalone backend operation and the existing polling/
-cancellation lifecycle; no runtime installation or cancellation execution.
+**Next slice:** Bound runtime-version removal responses (M4): inventory the exact
+`remove_version` boolean producer, filesystem/metadata mutation boundary and
+frontend confirmation consumer before selecting the projection. Preserve optional
+inference-plugin builds, standalone backend operation and existing refresh/error
+behavior; no runtime removal.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -69,6 +69,33 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Runtime Installation-Cancellation Response Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-09--runtime-installation-cancellation-response-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Project `cancel_installation` as the exact existing required success boolean
+record. Preserve true as cooperative cancellation requested—not terminal worker
+completion—and false as no active installation or no version manager. Do not add
+error/message/result fields or infer progress completion from acceptance.
+
+The RPC typed outcome owns serialization and generated schema; preload decodes
+before exposing the API. The installation manager retains its existing false
+confirmation error, polling and terminal-progress behavior. Malformed response
+rejection makes one cancellation request and never retries this mutation. No
+app-manager cancellation algorithm, flag lifetime, progress transition, request,
+installation, removal, runtime registration or live-library change. Existing
+no-manager false output remains FE-I34 and does not establish availability.
+Optional inference plugins and standalone backend composition remain unchanged.
+
+Acceptance: literal true/false prior-wrapper parity; actual no-manager false and
+no-plugin/minimal RPC results; producer true/false fixtures; generated decoder,
+bundled preload and actual manager-hook rejection/consumption with exact one-call
+evidence; focused hook/dialog tests; frontend types/lint, Electron and both
+frontend builds, generator tests/freshness, strict RPC lint/format and canonical
+plan checks. Automated local contract/integration only, not graphical, network,
+installation, cancellation, worker-stop, cleanup or other-OS evidence.
 
 ## Runtime Installation-Progress Response Contract
 

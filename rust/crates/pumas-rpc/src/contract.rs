@@ -441,6 +441,8 @@ pub(crate) enum RpcOutcome {
     ValidateInstallations(ValidateInstallationsOutcome),
     #[cfg(feature = "inference-plugins")]
     InstallationProgress(Box<InstallationProgressOutcome>),
+    #[cfg(feature = "inference-plugins")]
+    CancelInstallation(CancelInstallationOutcome),
     HfTokenMutation(SuccessOutcome),
     HfAuth(Box<HfAuthOutcome>),
     LinkHealth(Box<LinkHealthOutcome>),
@@ -517,6 +519,8 @@ impl RpcOutcome {
             Self::ValidateInstallations(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::InstallationProgress(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::CancelInstallation(value) => serde_json::to_value(value),
             Self::HfTokenMutation(value) => serde_json::to_value(value),
             Self::HfAuth(value) => serde_json::to_value(value),
             Self::LinkHealth(value) => serde_json::to_value(value),
@@ -1796,6 +1800,47 @@ mod validate_installations_tests {
         }
         if let Ok(count) = usize::try_from(MAX_JS_SAFE_INTEGER + 1) {
             assert!(ValidateInstallationsOutcome::new(vec![], vec![], count).is_err());
+        }
+    }
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct CancelInstallationOutcome {
+    success: bool,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl CancelInstallationOutcome {
+    /// Preserve whether the manager accepted a cancellation request.
+    pub(crate) const fn new(success: bool) -> Self {
+        Self { success }
+    }
+}
+
+#[cfg(test)]
+mod cancel_installation_tests {
+    use super::*;
+
+    #[test]
+    fn cancel_installation_preserves_literal_boolean_outcomes_and_wrapper() {
+        for (success, expected) in [
+            (true, serde_json::json!({"success": true})),
+            (false, serde_json::json!({"success": false})),
+        ] {
+            let outcome = CancelInstallationOutcome::new(success);
+            assert_eq!(serde_json::to_value(&outcome).unwrap(), expected);
+            assert_eq!(
+                crate::wrapper::wrap_response("cancel_installation", success.into()),
+                expected
+            );
+            #[cfg(feature = "inference-plugins")]
+            {
+                let rpc = RpcOutcome::CancelInstallation(outcome);
+                assert!(!rpc.uses_response_wrapper());
+                assert_eq!(rpc.into_value().unwrap(), expected);
+            }
         }
     }
 }

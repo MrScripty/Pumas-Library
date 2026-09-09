@@ -121,6 +121,12 @@ items are preserved; malformed reads keep the last progress, mark network state
 failed and continue scheduled polling without repeating the installation
 mutation. A null no-manager/no-progress result does not establish availability.
 
+Runtime installation cancellation validates the backend's exact success boolean.
+Success means a cooperative cancellation request was accepted, not that the
+worker has stopped. False confirmations remain visible failures; malformed
+confirmations reject after one request and are never retried. A false no-manager
+result does not establish runtime availability.
+
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.
 Malformed responses cannot enter the modal; nested values display without

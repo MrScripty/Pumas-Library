@@ -509,6 +509,29 @@ describe('useInstallationManager', () => {
     expect(result.current.installationProgress?.error).toContain('cancel');
   });
 
+  it('keeps polling after cancellation is requested until progress becomes terminal', async () => {
+    getInstallationProgressMock.mockResolvedValue(activeProgress);
+    const { result } = renderHook(() => useInstallationManager({
+      appId: 'torch',
+      availableVersions,
+      onRefreshVersions: vi.fn(),
+    }));
+
+    await act(async () => {
+      await result.current.installVersion('v1.2.3');
+      await Promise.resolve();
+      await result.current.cancelInstallation();
+    });
+
+    expect(result.current.installingTag).toBe('v1.2.3');
+    expect(result.current.installationProgress?.completed_at).toBeUndefined();
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+      await Promise.resolve();
+    });
+    expect(getInstallationProgressMock).toHaveBeenCalledTimes(2);
+  });
+
   it('resets transient state when the install request fails', async () => {
     const pendingProgress = deferred<InstallationProgress | null>();
     getInstallationProgressMock.mockReturnValueOnce(pendingProgress.promise);

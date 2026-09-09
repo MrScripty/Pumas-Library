@@ -10,6 +10,18 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('installation-cancellation decoding preserves exact confirmation booleans', () => {
+  for (const key of ['cancel_installation_true', 'cancel_installation_false']) {
+    const result = contract.decodeCancelInstallationOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  for (const value of [null, true, false, {}, { success: null }, { success: 1 },
+    { success: true, error: 'invented' }, { success: false, result: false }]) {
+    assert.equal(contract.decodeCancelInstallationOutcome(value).status, 'invalid', JSON.stringify(value));
+  }
+});
+
 test('installation-progress decoding preserves nullable producer snapshots and camelCase facts', () => {
   for (const key of ['installation_progress_populated', 'installation_progress_null',
     'installation_progress_no_manager', 'installation_progress_success', 'installation_progress_failure']) {

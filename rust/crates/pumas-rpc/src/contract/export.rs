@@ -472,6 +472,10 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     }
     fixtures["version_info_installed"] =
         serde_json::to_value(VersionInfoOutcome::new(" vλ.1 ".into(), true))?;
+    fixtures["cancel_installation_true"] =
+        serde_json::to_value(CancelInstallationOutcome::new(true))?;
+    fixtures["cancel_installation_false"] =
+        serde_json::to_value(CancelInstallationOutcome::new(false))?;
     fixtures["validate_installations_populated"] =
         serde_json::to_value(validate_installations_fixture())?;
     fixtures["installation_progress_populated"] = serde_json::to_value(
@@ -589,6 +593,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         SupportedQuantTypesOutcome,
         BackendStatusOutcome,
         SuccessOutcome,
+        CancelInstallationOutcome,
     );
     Ok(serde_json::json!({
         "format": "pumas-desktop-contract-1",

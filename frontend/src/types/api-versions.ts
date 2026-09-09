@@ -1,5 +1,5 @@
 import type { BaseResponse } from './api-common';
-import type { AvailableVersionsOutcome, GithubCacheStatusOutcome, InstallationProgressOutcome, InstalledVersionsOutcome, SelectedVersionOutcome, ValidateInstallationsOutcome, VersionInfoOutcome, VersionStatusOutcome } from '../generated/desktop-contract';
+import type { AvailableVersionsOutcome, CancelInstallationOutcome, GithubCacheStatusOutcome, InstallationProgressOutcome, InstalledVersionsOutcome, SelectedVersionOutcome, ValidateInstallationsOutcome, VersionInfoOutcome, VersionStatusOutcome } from '../generated/desktop-contract';
 export type { VersionReleaseAsset, VersionReleaseInfo } from '../generated/desktop-contract';
 
 // ============================================================================
@@ -34,9 +34,7 @@ export type VersionStatusResponse = VersionStatusOutcome;
 
 export type InstallationProgressResponse = InstallationProgressOutcome;
 
-export interface CancelInstallationResponse extends BaseResponse {
-  // Empty body on success
-}
+export type CancelInstallationResponse = CancelInstallationOutcome;
 
 // ============================================================================
 // Cache & Background Fetch Types

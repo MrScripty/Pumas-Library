@@ -1,5 +1,63 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-09 — Runtime Installation-Cancellation Response Contract
+
+Accepted `cancel_installation` as the exact existing success-boolean record with
+typed RPC ownership and generated preload decoding. The app manager returns false
+without mutation when no installation is active; an unregistered manager also
+maps to false. True means the cooperative cancellation flag and transient
+progress error were set. It does not mean the installation worker has stopped,
+cleaned up or published terminal progress. The existing worker later owns those
+transitions, which this response-only slice does not change.
+
+The generated contract has one required boolean and no error/message/result
+fields. The installation manager preserves false as an `APIError` and otherwise
+leaves polling/terminal state to progress observation. A malformed confirmation
+rejects after one cancellation call; neither preload nor the hook retries the
+mutation. No-manager false remains FE-I34 and is not proof of availability.
+
+Evidence: two focused RPC tests pass in default and no-default feature modes,
+covering literal true/false legacy-wrapper parity, typed dispatch, real no-manager
+false and disabled-plugin method-not-found. Producer fixtures cover true and
+false. Thirty decoder tests and 39 actual bundled-preload/renderer conformance
+tests pass. Thirty-one of 32 bundled-preload tests pass with the existing
+real-Electron sandbox test gated. Eighteen focused manager/dialog tests,
+TypeScript and affected lint, Electron and both frontend builds, seven generator
+tests/freshness, strict RPC Clippy and formatting pass. Canonical plan checks and
+final diff checks pass below. Fixtures prove serialization, not active cancellation.
+No graphical, network, installation, cancellation, worker-stop, cleanup or
+other-OS claim.
+
+Luna max performed the read-only inventory and substantive independent review.
+It found no blocker; root added its suggested active-lifecycle proof that an
+accepted cancellation keeps polling until terminal progress. The unavailable
+populated-manager true RPC remains inside the explicit no-live-cancellation limit.
+Astra low implemented the settled four-file Rust projection; root Sol owned
+consumer integration, generation, verification, review disposition and reporting.
+Spark remains absent from the exposed model identifiers, with no silent
+substitution. Overall M4 and remediation remain incomplete. Next: runtime-version
+removal response (`remove_version`).
+
+Cost checkpoint, deduplicated by `response_id`: current root
+`01a084bf-3ff2-77d3-bdf4-714d30c2173d`, turn
+`01a08502-f847-79a1-8c7a-e6b7cb7aada7`, plus the prior reporting tail after
+`2026-09-09T07:05:42.428Z`. Root Sol low used 8,925,283 input tokens (8,874,496
+cached) and 12,646 output (1,899 reasoning), estimated at $4.0059 standard /
+$8.0117 priority scenario. Luna max used 10,126,814 input (9,735,680 cached) and
+29,457 output (10,498 reasoning), estimated at $0.3083 / $0.6166. Astra low used
+576,343 input (544,640 cached) and 3,666 output (zero reasoning), estimated at
+$1.0450 / $2.0899. Priced subtotal: $5.3591 / $10.7183. No cache writes or
+above-threshold requests were observed; this checkpoint reaches
+`2026-09-09T07:25:11.251Z` and excludes later commit/reporting tail.
+API-equivalent estimates, not invoices: Sol 4/0.4/5/20, Luna
+0.2/0.02/0.25/1.2 and Astra 10/1/12.5/50 USD per
+million uncached/cached/cache-write/output tokens; inputs above 272,000 use 2x
+input and 1.5x output multipliers, and the separately shown priority scenario is
+2x. Cached input is included in input; reasoning is included in output. Delivered
+service tier is unexposed. PostgreSQL port 5433 remained absent, so no operational
+row could be written. Temporary deduplication artifacts:
+`/tmp/pumas-cancel-installation-costs.{py,json}`.
+
 ## 2026-09-09 — Runtime Installation-Progress Response Contract
 
 Accepted `get_installation_progress` as the exact raw nullable RPC response with

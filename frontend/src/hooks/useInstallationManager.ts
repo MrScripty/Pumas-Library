@@ -394,7 +394,7 @@ export function useInstallationManager({
 
     const result = await api.cancel_installation(resolvedAppId);
     if (!result.success) {
-      throw new APIError(result.error || 'Failed to cancel installation', 'cancel_installation');
+      throw new APIError('Failed to cancel installation', 'cancel_installation');
     }
     return true;
   }, [isEnabled, resolvedAppId]);

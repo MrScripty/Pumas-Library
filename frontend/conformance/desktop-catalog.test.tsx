@@ -19,6 +19,7 @@ import { useAvailableVersionState } from '../src/hooks/useAvailableVersionState'
 import { useVersionFetching } from '../src/hooks/useVersionFetching';
 import { useInstallationAccess } from '../src/hooks/useInstallationAccess';
 import { projectInstallationProgress } from '../src/hooks/installationProgressTracking';
+import { useInstallationManager } from '../src/hooks/useInstallationManager';
 import { ModelMetadataModal } from '../src/components/ModelMetadataModal';
 import type { RemoteModelInfo } from '../src/types/apps';
 import { decodeHfDownloadDetailsOutcome } from '../src/generated/desktop-contract';
@@ -58,6 +59,7 @@ function installActualPreload(
   versionInfo: () => unknown = () => fixture['version_info_installed'],
   validationResult: () => unknown = () => fixture['validate_installations_populated'],
   installationProgress: () => unknown = () => fixture['installation_progress_populated'],
+  cancellationResult: () => unknown = () => fixture['cancel_installation_true'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -88,6 +90,7 @@ function installActualPreload(
         if (method === 'get_version_info') return versionInfo();
         if (method === 'validate_installations') return validationResult();
         if (method === 'get_installation_progress') return installationProgress();
+        if (method === 'cancel_installation') return cancellationResult();
         if (method === 'get_installed_versions') return installedVersions();
         if (method === 'get_active_version' || method === 'get_default_version') return selectedVersion();
         if (method === 'get_inference_settings') return inferenceRead;
@@ -183,6 +186,28 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('consumes exact cancellation confirmations without retrying the mutation', async () => {
+    let response: unknown = fixture['cancel_installation_true'];
+    const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, () => response);
+    const { result } = renderHook(() => useInstallationManager({
+      appId: 'ollama', availableVersions: [], onRefreshVersions: vi.fn(),
+    }));
+
+    await expect(result.current.cancelInstallation()).resolves.toBe(true);
+    response = fixture['cancel_installation_false'];
+    await expect(result.current.cancelInstallation()).rejects.toMatchObject({
+      name: 'APIError', endpoint: 'cancel_installation',
+    });
+    response = { success: true, error: 'invented' };
+    await expect(result.current.cancelInstallation()).rejects.toMatchObject({
+      name: 'DesktopContractError',
+    });
+    expect(requests.filter(request => request.method === 'cancel_installation')).toHaveLength(3);
+    expect(requests.at(-1)?.params).toEqual({ app_id: 'ollama' });
+  });
+
   it('validates installation progress and projects actual camelCase facts once for UI state', async () => {
     let response: unknown = fixture['installation_progress_success'];
     const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined,

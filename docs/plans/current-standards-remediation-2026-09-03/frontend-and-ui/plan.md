@@ -10,9 +10,13 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Quantization source-file discovery (FE-I26, remaining FE-I23).
-Bound shared discovery consumers, reject extension-matching directories as model
-files, and preserve inspection errors instead of reporting absence. Direct
+**Next slice:** Hugging Face download-details contract (FE-I01/M4).
+Give `get_hf_download_details` a backend-owned outcome and generated runtime
+decoding through preload and its hydration consumer. Preserve repo/file/quant
+identity and size semantics; reject malformed results rather than projecting
+unchecked values. Bound producer/consumer tests before edits, without live downloads.
+The user's conversion-priority decision below supersedes source-root follow-up.
+Source-file classification and llama.cpp discovery are accepted below. Direct
 importance-matrix options, exact targets and supplied-calibration preflight are accepted below;
 content quality and immutable input custody remain outside that bounded check.
 FE-I28 remains open on recurrence: accepted test-only admission
@@ -54,6 +58,55 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Conversion Scope And Priority
+
+The user confirms that Sherry is experimental and is not required support.
+Conversion remains desirable, but existing runtimes/tools should own its
+functionality wherever practical. Further conversion/quantization development,
+including remaining FE-I26 prerequisites and FE-I23 quantization controls, is
+`Deferred`; it is not an immediate requirement or a blocker for unrelated M4
+contracts. Revisit only for a concrete requested conversion workflow, first
+assessing an existing runtime/tool operation instead of adding Pumas-owned
+format-specific implementation. The backend remains independently usable;
+the GUI and inference-plugin presentation remain optional.
+
+Preserve the verified shared-discovery correction and existing basic conversion
+workflow. No Sherry removal or runtime migration is claimed by this decision:
+current registration/schema/installer surfaces still exist. Track their coherent
+withdrawal as FE-I30, rather than treating unused support as production-ready or
+silently removing caller-owned model files/environments. No native/tool/GPU
+acceptance is inferred from the existing simulated tests.
+
+## Quantization Source-File Discovery
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--quantization-source-file-discovery).
+Shared asynchronous discovery now returns sorted, exact-extension regular files.
+Follow symlinks to preserve valid linked
+inputs; exclude matching directories and special files without opening them.
+Directory enumeration and matching-entry metadata failures return contextual
+`Io`, not an empty result, including broken matching links alongside valid files.
+llama.cpp replaces its error-masking boolean scans
+with this helper and selects its first sorted GGUF before staging, retaining
+GGUF preference when both source formats exist. Missing llama.cpp roots now
+report the existing contextual directory-read `Io` rather than format absence.
+NVFP4/Sherry root prechecks and base-format lifecycle ordering remain unchanged.
+
+Root owns core `src/conversion/{pipeline.rs,llama_cpp.rs,llama_cpp/readiness_tests.rs}`, core README and four
+plan documents. root_diagnostics owns `src/conversion/pipeline/discovery_tests.rs`
+and `src/conversion/target_tests.rs`; root_capability reviews callers and the
+integrated diff. Root serializes tests, formatting and commits. Acceptance:
+focused real-filesystem helper/direct-entry regressions, minimal conversion and
+full core/RPC tests, strict lint, formatting and canonical plan checks all passed. No live
+models, native installs, GUI/schema/dependency changes or other-OS acceptance.
+
+Composed-design review: applicable. Extend the existing discovery Interface to
+own classification and error propagation for its current consumers; remove
+llama.cpp's duplicate policy and late rediscovery. Deletion would duplicate
+filesystem policy across consumers. Retained selection is not immutable input
+custody, readability or content validation; caller-owned paths must stay stable.
+Re-plan for those stronger claims or changes to base-format lifecycle ordering.
 
 ## Direct Importance-Matrix Option Validation
 

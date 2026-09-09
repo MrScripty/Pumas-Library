@@ -12,11 +12,18 @@ use crate::model_library::ModelLibrary;
 use crate::models::ModelMetadata;
 use crate::{PumasError, Result};
 
+#[cfg(test)]
+mod discovery_tests;
+
 // ---------------------------------------------------------------------------
-// Output directory management
+// Source-file discovery
 // ---------------------------------------------------------------------------
 
-/// List files with a matching extension from a model directory.
+/// List sorted regular files with an exact extension from a model directory.
+///
+/// Follow symlinks, but do not open files or validate contents. Matching-entry
+/// inspection failures are errors, not absence. Callers must keep input paths
+/// stable through discovery and execution; returned paths do not retain custody.
 pub async fn list_files_with_extension(model_path: &Path, ext: &str) -> Result<Vec<PathBuf>> {
     let mut entries = fs::read_dir(model_path)
         .await
@@ -30,7 +37,12 @@ pub async fn list_files_with_extension(model_path: &Path, ext: &str) -> Result<V
     {
         let path = entry.path();
         if path.extension().and_then(|entry_ext| entry_ext.to_str()) == Some(ext) {
-            files.push(path);
+            let metadata = fs::metadata(&path)
+                .await
+                .map_err(|e| PumasError::io("inspecting model file", &path, e))?;
+            if metadata.is_file() {
+                files.push(path);
+            }
         }
     }
 

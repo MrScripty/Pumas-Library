@@ -126,6 +126,14 @@ After target validation, managed and built-in direct calls reject
 not silently ignore it. False remains accepted. llama.cpp retains its IQ/forced
 calibration requirements and supplied-file preflight.
 
+Conversion source discovery accepts only regular files with exact, lowercase
+format extensions, including symlinks to regular files. Matching directories
+and special files are excluded; enumeration and matching-entry inspection
+failures remain contextual `Io` errors, including dangling matching symlinks.
+llama.cpp now reports missing/uninspectable source directories as `Io`, selects
+the first sorted GGUF before staging, and prefers GGUF when both formats exist.
+This is file classification, not content validation or immutable input custody.
+
 Managed quantization admission and direct llama.cpp calls validate every supplied
 calibration path, even when optional: it must name a nonempty regular file that
 can be opened and yield a byte. Missing/nonfile/empty inputs are `InvalidParams`;

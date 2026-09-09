@@ -209,12 +209,8 @@ async fn llama_forced_imatrix_passes_options_and_reaches_missing_source_validati
         )
         .await
         .unwrap_err();
-    let expected = format!(
-        "No safetensors or GGUF files found in {}",
-        params.model_path.display()
-    );
     assert!(
-        matches!(&error, PumasError::ConversionFailed { message } if message == &expected),
+        matches!(&error, PumasError::Io { message, path: Some(path), .. } if path == &params.model_path && message.starts_with("reading model directory:")),
         "{error}"
     );
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
@@ -243,24 +239,84 @@ async fn catalog_targets_pass_target_admission_and_reach_missing_source_validati
                 )
                 .await
                 .unwrap_err();
-            let expected = if id == QuantBackend::LlamaCpp {
-                format!(
-                    "No safetensors or GGUF files found in {}",
-                    params.model_path.display()
-                )
+            if id == QuantBackend::LlamaCpp {
+                assert!(
+                    matches!(&error, PumasError::Io { message, path: Some(path), .. } if path == &params.model_path && message.starts_with("reading model directory:")),
+                    "{:?}/{}: {error}",
+                    id,
+                    option.name
+                );
             } else {
-                format!(
+                let expected = format!(
                     "Source model path is not a directory: {}",
                     params.model_path.display()
-                )
-            };
-            assert!(
-                matches!(&error, PumasError::ConversionFailed { message } if message == &expected),
-                "{:?}/{}: {error}",
-                id,
-                option.name
-            );
+                );
+                assert!(
+                    matches!(&error, PumasError::ConversionFailed { message } if message == &expected),
+                    "{:?}/{}: {error}",
+                    id,
+                    option.name
+                );
+            }
             assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
         }
+    }
+}
+
+#[tokio::test]
+async fn matching_source_directories_are_rejected_before_backend_effects() {
+    for (id, target, extension) in [
+        (QuantBackend::LlamaCpp, "Q4_K_M", "gguf"),
+        (QuantBackend::LlamaCpp, "Q4_K_M", "safetensors"),
+        (QuantBackend::Nvfp4, "NVFP4", "safetensors"),
+        (QuantBackend::Sherry, "Sherry-1.25bit", "safetensors"),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let backend = backend(root.path(), id);
+        let params = params(root.path(), target);
+        let impostor = params.model_path.join(format!("weights.{extension}"));
+        std::fs::create_dir_all(&impostor).unwrap();
+        std::fs::write(impostor.join("keep"), "preserve source directory").unwrap();
+        let progress = ConversionProgressTracker::new();
+        let initial = initial_progress(&params, id);
+        let expected_progress = serde_json::to_value(&initial).unwrap();
+        progress.insert(initial);
+        let error = backend
+            .quantize(&params, &progress, &CancellationToken::new())
+            .await
+            .unwrap_err();
+        let expected = if id == QuantBackend::LlamaCpp {
+            format!(
+                "No safetensors or GGUF files found in {}",
+                params.model_path.display()
+            )
+        } else {
+            "No safetensors files found in source model directory".into()
+        };
+        assert!(
+            matches!(&error, PumasError::ConversionFailed { message } if message == &expected),
+            "{id:?}/{extension}: {error}"
+        );
+        assert!(
+            !root.path().join("launcher-data").exists(),
+            "no environment or probe effects"
+        );
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+        assert_eq!(
+            std::fs::read_dir(params.model_path.parent().unwrap())
+                .unwrap()
+                .count(),
+            1,
+            "no staging"
+        );
+        assert_eq!(std::fs::read_dir(&params.model_path).unwrap().count(), 1);
+        assert_eq!(
+            std::fs::read_to_string(impostor.join("keep")).unwrap(),
+            "preserve source directory"
+        );
+        assert_eq!(
+            serde_json::to_value(progress.get(&params.conversion_id).unwrap()).unwrap(),
+            expected_progress
+        );
     }
 }

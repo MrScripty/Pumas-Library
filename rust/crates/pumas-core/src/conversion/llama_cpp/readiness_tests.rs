@@ -222,7 +222,13 @@ async fn gguf_requantization_does_not_require_converter_or_python_even_for_mixed
         if mixed {
             std::fs::write(params.model_path.join("weights.safetensors"), "fixture").unwrap();
         }
-        artifact(&backend.quantize_binary(), QUANTIZER, true);
+        std::fs::create_dir(params.model_path.join("00-directory.gguf")).unwrap();
+        std::fs::write(params.model_path.join("a-first.gguf"), "selected input").unwrap();
+        artifact(
+            &backend.quantize_binary(),
+            "#!/bin/sh\ncp \"$1\" \"$2\"\n",
+            true,
+        );
         assert!(!backend.is_ready());
         let output = backend
             .quantize(
@@ -234,7 +240,7 @@ async fn gguf_requantization_does_not_require_converter_or_python_even_for_mixed
             .unwrap();
         assert_eq!(
             std::fs::read(output.join("model-q4_k_m.gguf")).unwrap(),
-            b"quantized fixture"
+            b"selected input"
         );
         assert!(!backend.convert_script().exists());
         assert!(!backend.venv_python().exists());

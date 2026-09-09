@@ -204,10 +204,16 @@ impl QuantizationBackend for LlamaCppBackend {
             });
         }
         // -- PHASE 1: GATHER (read-only, fail early) --
-        let is_safetensors_source = has_safetensors_files(&params.model_path);
-        let is_gguf_source = has_gguf_files(&params.model_path);
+        let is_safetensors_source =
+            !pipeline::list_files_with_extension(&params.model_path, "safetensors")
+                .await?
+                .is_empty();
+        let source_gguf = pipeline::list_files_with_extension(&params.model_path, "gguf")
+            .await?
+            .into_iter()
+            .next();
 
-        if !is_safetensors_source && !is_gguf_source {
+        if !is_safetensors_source && source_gguf.is_none() {
             return Err(PumasError::ConversionFailed {
                 message: format!(
                     "No safetensors or GGUF files found in {}",
@@ -232,7 +238,7 @@ impl QuantizationBackend for LlamaCppBackend {
         }
 
         // -- PHASE 2: VALIDATE --
-        let needs_f16_conversion = is_safetensors_source && !is_gguf_source;
+        let needs_f16_conversion = source_gguf.is_none();
         require_artifact(&self.quantize_binary(), "llama-quantize", true).await?;
         if needs_f16_conversion {
             require_artifact(&self.convert_script(), "convert_hf_to_gguf.py", false).await?;
@@ -310,11 +316,7 @@ impl QuantizationBackend for LlamaCppBackend {
         }
 
         // Determine the GGUF file to feed into quantize.
-        let source_gguf = if needs_f16_conversion {
-            f16_gguf.clone()
-        } else {
-            find_gguf_file(&params.model_path).await?
-        };
+        let source_gguf = source_gguf.unwrap_or_else(|| f16_gguf.clone());
 
         // Step: importance matrix generation
         if needs_imatrix {
@@ -659,43 +661,6 @@ fn determine_quantized_output_dir(model_path: &Path, quant_type: &str) -> Result
         })?;
 
     Ok(parent.join(format!("{}-gguf-{}", dir_name, quant_type.to_lowercase())))
-}
-
-/// Check if a directory contains `.safetensors` files.
-fn has_safetensors_files(path: &Path) -> bool {
-    path.is_dir()
-        && std::fs::read_dir(path)
-            .ok()
-            .map(|entries| {
-                entries.filter_map(|e| e.ok()).any(|e| {
-                    e.path().extension().and_then(|ext| ext.to_str()) == Some("safetensors")
-                })
-            })
-            .unwrap_or(false)
-}
-
-/// Check if a directory contains `.gguf` files.
-fn has_gguf_files(path: &Path) -> bool {
-    path.is_dir()
-        && std::fs::read_dir(path)
-            .ok()
-            .map(|entries| {
-                entries
-                    .filter_map(|e| e.ok())
-                    .any(|e| e.path().extension().and_then(|ext| ext.to_str()) == Some("gguf"))
-            })
-            .unwrap_or(false)
-}
-
-/// Find the first `.gguf` file in a model directory.
-async fn find_gguf_file(model_path: &Path) -> Result<PathBuf> {
-    pipeline::list_files_with_extension(model_path, "gguf")
-        .await?
-        .into_iter()
-        .next()
-        .ok_or_else(|| PumasError::ConversionFailed {
-            message: format!("No GGUF file found in {}", model_path.display()),
-        })
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,78 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Conversion Priority Re-Plan
+
+The user clarified that Sherry is experimental and need not be supported.
+Conversion remains desirable through existing runtimes/tools where practical,
+but is not immediately required. Defer further format-specific development and
+new quantization UI; supersede the proposed NVFP4/Sherry root-admission follow-up
+with non-conversion M4 work. Keep existing basic
+conversion and the verified shared-discovery fix; no runtime migration or
+Sherry surface withdrawal has been implemented. FE-I30 tracks that withdrawal.
+FE-I23/FE-I26 remain unresolved deferred work, not whole-program blockers or
+accepted real-tool capabilities. Revisit conversion for a concrete requested
+workflow with runtime/tool ownership assessed first. This changes scheduling
+and product scope, not the accepted discovery composition or source evidence.
+
+The bounded read-only inventory by root_capability/root_diagnostics found
+`get_hf_download_details` still uses raw `apiCall` in preload, a handwritten
+bridge result, and unchecked option/size projection in `useRemoteModelSearch`.
+Root confirmed this path and selected backend-owned download-details outcome,
+generated runtime decoding and hydration-consumer evidence as the next slice.
+No repo/file/quant identity merging or download behavior change is intended.
+Other inventory findings are retained under FE-I01: metadata/settings modal read
+failure and stale-result handling, available-version failure discrimination,
+and runtime-profile/serving handwritten responses. This is not a complete M4
+inventory or M5 built-variant acceptance; those claims remain pending.
+
+## 2026-09-08 — Quantization Source-File Discovery
+
+Accepted source-file discovery. Shared discovery now returns sorted regular files
+with exact extensions, follows valid file symlinks, and excludes matching
+directories and special files without opening them. Enumeration and matching
+metadata errors remain contextual `Io`; broken matching links are errors even
+alongside valid candidates. llama.cpp uses the shared asynchronous discovery,
+preserves GGUF preference, and selects its first sorted GGUF before staging.
+Its missing-root outcome is now directory-read `Io` instead of format absence.
+The two boolean scans and late GGUF rediscovery were removed.
+
+Caller inventory found only base conversion in manager, NVFP4, Sherry and
+llama.cpp. The helper owns classification/error policy, not consumer lifecycle
+or file custody. NVFP4/Sherry still have synchronous `is_dir` root prechecks;
+base conversion still deploys scripts before discovery. These ordering/error
+limits are not closed by this slice. No GUI, schema, dependency or runtime change.
+
+Root integrated production changes, the existing mixed-source execution fixture
+and docs. root_diagnostics supplied helper and direct-entry regressions;
+root_capability reviewed the inventory and integrated diff without blockers.
+The codebase-design skill guided consolidation into the existing discovery
+Module rather than retaining llama.cpp-specific policy.
+
+Before repair, `cargo test --offline --locked -p pumas-library --lib discovery`
+failed two of three tests: ordinary and symlinked directories appeared as model
+files. The root-error control passed. After repair, `cargo test --offline
+--locked -p pumas-library --lib conversion::` passed 130 tests. Helper fixtures
+cover exact extensions, sorting, nonrecursive discovery, Unix socket exclusion,
+symlinks and contextual errors. Four direct cases reject extension-matching
+directories with unchanged source/progress and no staging/environment effects.
+The simulated native mixed-source route copies the actual selected input,
+proving sorted regular-file handoff and GGUF preference without converter/Python.
+
+From `rust/`, `cargo test --offline --locked -p pumas-library
+--no-default-features conversion::` passed 130 top-level tests plus the marker
+child invocation. `cargo test --offline --locked -p pumas-library -p pumas-rpc
+-- --quiet` passed 1,499 executions (including that extra child), with 22 ignored
+and zero failures. Logs: `/tmp/pumas-source-discovery-{minimal,default}.log`.
+`cargo clippy --offline --locked -p pumas-library -p pumas-rpc --all-targets
+--all-features -- -D warnings`, formatting and five canonical plan checks passed.
+Evidence uses local filesystem and tiny
+shell fixtures, not real models/GPU, GUI workflows or Windows/macOS. It does not
+prove full readability, contents, immutable custody or concurrent replacement
+safety. FE-I28/FE-I29 did not recur and remain open on recurrence. The proposed
+NVFP4/Sherry source-root follow-up is superseded by the user's priority re-plan
+above; Hugging Face download-details runtime decoding is next. Pending
+download cleanup replay remains unadmitted.
+
 ## 2026-09-08 — Direct Importance-Matrix Option Validation
 
 Accepted direct importance-matrix option validation. The shared check now rejects `force_imatrix=true` outside llama.cpp,

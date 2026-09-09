@@ -11,6 +11,34 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('mutation responses reject malformed and mismatched confirmations without retry', async () => {
+  const harness = loadCompiledPreload();
+  for (const method of ['update_model_notes', 'update_inference_settings']) {
+    const argument = method === 'update_model_notes' ? 'text' : [];
+    for (const response of [null, {}, { success: 'true', model_id: 'model' },
+      { success: true, model_id: 'other' }, { success: true, model_id: 'model', error: 'contradiction' },
+      { success: true, model_id: 'model', extra: true }]) {
+      harness.respondWith(response);
+      const before = harness.invocations.length;
+      await assert.rejects(harness.api[method]('model', argument), { name: 'DesktopContractError' });
+      assert.equal(harness.invocations.length, before + 1);
+    }
+  }
+  for (const response of [{ success: true, model_id: 'model', notes: null },
+    { success: true, model_id: 'model', notes: 42 },
+    { success: false, model_id: 'model' },
+    { success: false, model_id: 'model', error: 'missing', notes: 'text' }]) {
+    harness.respondWith(response);
+    await assert.rejects(harness.api.update_model_notes('model', 'text'), { name: 'DesktopContractError' });
+  }
+  for (const response of [{ success: true, model_id: 'model', notes: ' Exact λ ' },
+    { success: true, model_id: 'model' },
+    { success: false, model_id: 'model', error: 'Model not found: model' }]) {
+    harness.respondWith(response);
+    assert.deepEqual(toPlainValue(await harness.api.update_model_notes('model', 'text')), response);
+  }
+});
+
 const PRELOAD_SOURCE = readFileSync(new URL('../src/preload.ts', import.meta.url), 'utf8');
 const MAIN_SOURCE = readFileSync(new URL('../src/main.ts', import.meta.url), 'utf8');
 const COMPILED_PRELOAD_SOURCE = readFileSync(

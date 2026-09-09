@@ -20,6 +20,15 @@
 
 ## Slice Log
 
+### 2026-09-08 — Notes/settings save confirmations accepted
+
+- Typed mutation responses and generated preload decoding now reject malformed
+  or wrong-model confirmations; the UI preserves drafts on unconfirmed saves
+  and does not retry writes automatically.
+- The [frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-08--notes-and-settings-mutation-response-contracts)
+  records producer/consumer and minimal-backend evidence. Core persistence and
+  optional GUI/plugin composition remain unchanged. M4 remains open.
+
 ### 2026-09-08 — Model-notes request admission accepted
 
 - FE-I33 rejects malformed notes before they can become accidental clears,

@@ -738,12 +738,12 @@ async fn dispatch_admitted_command(
         RpcCommand::UpdateInferenceSettings { model_id, settings } => {
             models::update_inference_settings(state, &model_id, settings)
                 .await
-                .map(RpcOutcome::Legacy)
+                .map(RpcOutcome::UpdateInferenceSettings)
         }
         RpcCommand::UpdateModelNotes { model_id, notes } => {
             models::update_model_notes(state, &model_id, notes)
                 .await
-                .map(RpcOutcome::Legacy)
+                .map(RpcOutcome::UpdateModelNotes)
         }
         RpcCommand::Legacy { method, params } if method == "get_library_model_metadata" => {
             models::get_library_model_metadata(state, &params)
@@ -1336,6 +1336,28 @@ mod tests {
         }
         let temp = TempDir::new().unwrap();
         let state = Arc::new(test_support::build_test_app_state(temp.path()).await);
+        let missing_id = "private/missing/model";
+        let missing = update(
+            &state,
+            json!({"model_id":missing_id,"notes":"not persisted"}),
+        )
+        .await;
+        assert_eq!(
+            missing,
+            json!({"jsonrpc":"2.0","id":"notes-write","result":{
+                "success":false,"model_id":missing_id,"error":"The requested operation failed.",
+            }})
+        );
+        assert!(!missing["result"]["error"]
+            .as_str()
+            .unwrap()
+            .contains(missing_id));
+        assert!(!state
+            .api
+            .model_library()
+            .library_root()
+            .join(missing_id)
+            .exists());
         let model_id = "llm/fixture/notes";
         let directory = state.api.model_library().library_root().join(model_id);
         std::fs::create_dir_all(&directory).unwrap();

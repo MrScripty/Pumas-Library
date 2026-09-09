@@ -342,6 +342,17 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
             serde_json::json!({"method":"get_hf_download_details","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
         }).collect();
     let metadata = library_model_metadata_fixture();
+    let notes_outcome = |success, notes: Option<&str>, error: Option<&str>| {
+        UpdateModelNotesOutcome::new(
+            "llm/Exact Model",
+            pumas_library::models::UpdateModelNotesResponse {
+                success,
+                model_id: "llm/Exact Model".into(),
+                notes: notes.map(str::to_owned),
+                error: error.map(str::to_owned),
+            },
+        )
+    };
     let update_model_notes_request_probes:Vec<Value> = update_model_notes_requests().into_iter().map(|(params,_)| {
         let parsed = parse_command("update_model_notes",Some(&params));
         let normalized = match &parsed {
@@ -377,7 +388,7 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         primary_file: None,
         component_manifest: None,
     };
-    Ok(serde_json::json!({
+    let mut fixtures = serde_json::json!({
         "library_model_metadata":LibraryModelMetadataOutcome::new("llm/Exact Model",metadata)?,
         "update_inference_settings_request_probes":update_inference_settings_request_probes,
         "update_model_notes_request_probes":update_model_notes_request_probes,
@@ -413,7 +424,21 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         "download_list":DownloadListOutcome::new(vec![progress])?,
         "download_started":DownloadStartedOutcome::started("fixture-download".into(),Some("example/model::Q4".into())),
         "download_mutation":DownloadMutationOutcome::completed(true),
-    }))
+    });
+    fixtures["update_inference_settings"] =
+        serde_json::to_value(UpdateInferenceSettingsOutcome::new("llm/Exact Model"))?;
+    fixtures["update_model_notes_text"] = serde_json::to_value(notes_outcome(
+        true,
+        Some("  # Exact λ\n\n**notes**  "),
+        None,
+    )?)?;
+    fixtures["update_model_notes_clear"] = serde_json::to_value(notes_outcome(true, None, None)?)?;
+    fixtures["update_model_notes_missing"] = serde_json::to_value(notes_outcome(
+        false,
+        None,
+        Some("Model not found: private model details"),
+    )?)?;
+    Ok(fixtures)
 }
 
 pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
@@ -428,6 +453,8 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         CatalogSearchOutcome,
         HfDownloadDetailsOutcome,
         InferenceSettingsOutcome,
+        UpdateInferenceSettingsOutcome,
+        UpdateModelNotesOutcome,
         LibraryModelMetadataOutcome,
         GetHfDownloadDetailsParams,
         UpdateInferenceSettingsParams,
@@ -674,6 +701,13 @@ fn refine_named(name: &str, schema: &mut Value) {
             );
         }
     }
+    if name == "UpdateModelNotesSuccess" {
+        object.insert(
+            "required".into(),
+            serde_json::json!(["success", "model_id"]),
+        );
+        object["properties"]["notes"] = serde_json::json!({"type":"string"});
+    }
     match name {
         "LinkHealthOutcome" | "LinkHealthResponse" => {
             object.insert("pumasLinkHealth".into(), true.into());
@@ -822,12 +856,15 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "DownloadStatusFoundOutcome"
             | "HfDownloadDetailsSuccess"
             | "InferenceSettingsOutcome"
+            | "UpdateInferenceSettingsOutcome"
+            | "UpdateModelNotesSuccess"
             | "LibraryModelMetadataOutcome"
             | "LibraryModelMetadataResponse"
             | "ModelIndexRefreshOutcome" => Some(true),
             "DownloadStartedFailure"
             | "DownloadStatusMissingOutcome"
-            | "HfDownloadDetailsFailure" => Some(false),
+            | "HfDownloadDetailsFailure"
+            | "UpdateModelNotesFailure" => Some(false),
             _ => None,
         };
         if let Some(success) = success {

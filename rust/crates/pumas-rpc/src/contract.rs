@@ -455,6 +455,8 @@ pub(crate) enum RpcOutcome {
     CatalogSearch(Box<CatalogSearchOutcome>),
     HfDownloadDetails(Box<HfDownloadDetailsOutcome>),
     InferenceSettings(Box<InferenceSettingsOutcome>),
+    UpdateInferenceSettings(UpdateInferenceSettingsOutcome),
+    UpdateModelNotes(UpdateModelNotesOutcome),
     LibraryModelMetadata(Box<LibraryModelMetadataOutcome>),
     ModelIndexRefresh(ModelIndexRefreshOutcome),
     Legacy(Value),
@@ -513,6 +515,8 @@ impl RpcOutcome {
             Self::CatalogSearch(value) => serde_json::to_value(value),
             Self::HfDownloadDetails(value) => serde_json::to_value(value),
             Self::InferenceSettings(value) => serde_json::to_value(value),
+            Self::UpdateInferenceSettings(value) => serde_json::to_value(value),
+            Self::UpdateModelNotes(value) => serde_json::to_value(value),
             Self::LibraryModelMetadata(value) => serde_json::to_value(value),
             Self::ModelIndexRefresh(value) => serde_json::to_value(value),
             Self::Legacy(value) => return Ok(value),
@@ -1256,6 +1260,128 @@ pub(crate) struct InferenceSettingsOutcome {
     success: bool,
     model_id: String,
     inference_settings: Vec<pumas_library::models::InferenceParamSchema>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct UpdateInferenceSettingsOutcome {
+    success: bool,
+    model_id: String,
+}
+
+impl UpdateInferenceSettingsOutcome {
+    pub(crate) fn new(requested_model_id: &str) -> Self {
+        Self {
+            success: true,
+            model_id: requested_model_id.into(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum UpdateModelNotesOutcome {
+    Updated(UpdateModelNotesSuccess),
+    Failed(UpdateModelNotesFailure),
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct UpdateModelNotesSuccess {
+    success: bool,
+    model_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    notes: Option<String>,
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct UpdateModelNotesFailure {
+    success: bool,
+    model_id: String,
+    error: &'static str,
+}
+
+impl UpdateModelNotesOutcome {
+    pub(crate) fn new(
+        requested_model_id: &str,
+        response: pumas_library::models::UpdateModelNotesResponse,
+    ) -> Result<Self, PumasError> {
+        if response.model_id != requested_model_id {
+            return Err(invalid_domain_outcome("updated model notes"));
+        }
+        match (response.success, response.error, response.notes) {
+            (true, None, notes) => Ok(Self::Updated(UpdateModelNotesSuccess {
+                success: true,
+                model_id: response.model_id,
+                notes,
+            })),
+            (false, Some(_), None) => Ok(Self::Failed(UpdateModelNotesFailure {
+                success: false,
+                model_id: response.model_id,
+                error: "The requested operation failed.",
+            })),
+            _ => Err(invalid_domain_outcome("updated model notes")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod metadata_mutation_outcome_tests {
+    use super::*;
+    fn response(
+        success: bool,
+        notes: Option<&str>,
+        error: Option<&str>,
+    ) -> pumas_library::models::UpdateModelNotesResponse {
+        pumas_library::models::UpdateModelNotesResponse {
+            success,
+            model_id: " Exact model ".into(),
+            notes: notes.map(str::to_owned),
+            error: error.map(str::to_owned),
+        }
+    }
+    #[test]
+    fn mutation_outcomes_preserve_identity_text_and_omitted_clear_without_legacy_wrapper() {
+        let settings = RpcOutcome::UpdateInferenceSettings(UpdateInferenceSettingsOutcome::new(
+            " Exact model ",
+        ));
+        assert!(!settings.uses_response_wrapper());
+        assert_eq!(
+            settings.into_value().unwrap(),
+            serde_json::json!({"success":true,"model_id":" Exact model "})
+        );
+        for notes in [None, Some("  # λ notes\n**exact**  ")] {
+            let core = response(true, notes, None);
+            let expected = serde_json::to_value(&core).unwrap();
+            let notes = RpcOutcome::UpdateModelNotes(
+                UpdateModelNotesOutcome::new(" Exact model ", core).unwrap(),
+            );
+            assert!(!notes.uses_response_wrapper());
+            assert_eq!(notes.into_value().unwrap(), expected);
+        }
+    }
+    #[test]
+    fn notes_mutation_rejects_contradictory_outcomes_and_redacts_failure() {
+        assert!(UpdateModelNotesOutcome::new("different", response(true, None, None)).is_err());
+        for invalid in [
+            response(true, None, Some("private")),
+            response(false, None, None),
+            response(false, Some("notes"), Some("private")),
+        ] {
+            assert!(UpdateModelNotesOutcome::new(" Exact model ", invalid).is_err());
+        }
+        let failure = UpdateModelNotesOutcome::new(
+            " Exact model ",
+            response(false, None, Some("private path /secret and credential")),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(failure).unwrap(),
+            serde_json::json!({"success":false,"model_id":" Exact model ","error":"The requested operation failed."})
+        );
+    }
 }
 
 impl InferenceSettingsOutcome {

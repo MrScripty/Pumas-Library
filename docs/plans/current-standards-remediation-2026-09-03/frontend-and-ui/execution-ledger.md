@@ -1,5 +1,36 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Notes and Settings Mutation Response Contracts
+
+Accepted generated notes/settings mutation responses and exact requested-model
+correlation in preload. Typed RPC outcomes replace legacy value dispatch for both
+writes. Settings success carries true/model ID; notes discriminate success with
+optional omitted text from failure with an error and no notes. Notes failure
+diagnostics become static public text at RPC; core persistence and wire shapes
+are unchanged. Frontend response aliases now derive from generated types.
+Unconfirmed responses preserve drafts and show uncertainty without auto-retry;
+confirmed missing-model failure is distinct. Reopening checks stored state; a
+transport failure never establishes that a write did not occur.
+
+root_capability owned Rust types/export and regressions; root integrated preload,
+UI, generation and evidence. The codebase-design skill guided validation at the
+existing typed RPC/preload seam instead of per-consumer JSON parsing. The preload
+regression first failed with `Missing expected rejection`. Generation exceeded
+the fixture export's JSON macro recursion limit; splitting fixture construction
+fixed it without increasing compiler limits or changing generator semantics.
+
+Six focused RPC tests pass with default and no-default features, including actual
+temporary-library writes, intentional clears, missing models, contradictory
+outcome rejection and error redaction. Minimal fixture setup initially hit a
+sandbox permission denial; rerunning those tests with fixture permissions passed.
+Twenty-one decoder conformance tests, 29 bundled-preload/renderer tests, 22 preload
+tests and ten focused modal tests pass. One real-Electron sandbox test remains
+gated. Renderer tests use producer-serialized fixtures and controlled transport
+failures, not persistent GUI writes. Frontend types/affected lint, Electron build,
+both frontend build modes, seven generator tests/freshness, strict RPC Clippy,
+formatting and canonical plan checks pass. No live-library, graphical workflow,
+other-OS or whole-M4 acceptance claim. Next: available-runtime-version read contract.
+
 ## 2026-09-08 — Model-Notes Mutation Admission
 
 Accepted FE-I33 request admission. Typed RPC parameters reject non-string notes,

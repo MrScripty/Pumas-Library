@@ -10,6 +10,27 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('mutation response decoding preserves producer confirmations and rejects contradictory payloads', () => {
+  for (const [key, decode] of [
+    ['update_inference_settings', contract.decodeUpdateInferenceSettingsOutcome],
+    ['update_model_notes_text', contract.decodeUpdateModelNotesOutcome],
+    ['update_model_notes_clear', contract.decodeUpdateModelNotesOutcome],
+    ['update_model_notes_missing', contract.decodeUpdateModelNotesOutcome],
+  ]) {
+    const value = fixtures[key];
+    assert.equal(decode(value).status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(decode(value).value)), value);
+    for (const patch of [{ success: null }, { model_id: null }, { extra: true }]) {
+      assert.equal(decode({ ...value, ...patch }).status, 'invalid', `${key} ${JSON.stringify(patch)}`);
+    }
+  }
+  for (const patch of [{ notes: null }, { notes: [] }, { error: 'contradiction' }, { success: false }]) {
+    assert.equal(contract.decodeUpdateModelNotesOutcome({ ...fixtures.update_model_notes_text, ...patch }).status, 'invalid');
+  }
+  assert.equal(contract.decodeUpdateModelNotesOutcome({ ...fixtures.update_model_notes_missing, notes: 'contradiction' }).status, 'invalid');
+  assert.equal(contract.decodeUpdateInferenceSettingsOutcome({ ...fixtures.update_inference_settings, success: false }).status, 'invalid');
+});
+
 test('notes mutation decoding agrees with actual Rust request admission', () => {
   const probes = fixtures.update_model_notes_request_probes;
   assert.ok(Array.isArray(probes) && probes.length > 0);

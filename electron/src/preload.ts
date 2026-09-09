@@ -40,6 +40,8 @@ import {
   decodeLibraryModelMetadataOutcome,
   decodeUpdateInferenceSettingsParams,
   decodeUpdateModelNotesParams,
+  decodeUpdateModelNotesOutcome,
+  decodeUpdateInferenceSettingsOutcome,
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
@@ -760,13 +762,21 @@ const electronAPI = {
     const params = requireDecoded(decodeUpdateInferenceSettingsParams({
       model_id: modelId, settings: inferenceSettings,
     }), 'update_inference_settings');
-    return apiCall('update_inference_settings', params);
+    const result = await validatedApiCall('update_inference_settings', decodeUpdateInferenceSettingsOutcome, params);
+    if (result.model_id !== modelId) {
+      throw new DesktopContractError('update_inference_settings', { status: 'invalid', message: 'Response model identity does not match the request.' });
+    }
+    return result;
   },
   update_model_notes: async (modelId: string, notes?: string | null) => {
     const params = requireDecoded(decodeUpdateModelNotesParams({
       model_id: modelId, ...(notes === undefined ? {} : { notes }),
     }), 'update_model_notes');
-    return apiCall('update_model_notes', params);
+    const result = await validatedApiCall('update_model_notes', decodeUpdateModelNotesOutcome, params);
+    if (result.model_id !== modelId) {
+      throw new DesktopContractError('update_model_notes', { status: 'invalid', message: 'Response model identity does not match the request.' });
+    }
+    return result;
   },
 
   // HuggingFace Authentication

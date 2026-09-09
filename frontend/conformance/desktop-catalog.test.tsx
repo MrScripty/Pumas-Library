@@ -45,6 +45,7 @@ function installActualPreload(
   hfReads?: { models: RemoteModelInfo[]; details: unknown },
   inferenceRead: unknown = fixture['inference_settings'],
   metadataRead: unknown = fixture['library_model_metadata_empty'],
+  mutationResponses: { notes?: () => unknown; settings?: () => unknown } = {},
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -70,9 +71,10 @@ function installActualPreload(
         const requestParams: unknown = JSON.parse(JSON.stringify(params));
         requests.push({ method, params: requestParams });
         if (method === 'get_inference_settings') return inferenceRead;
-        if (method === 'update_inference_settings') return { success: true, model_id: 'llm/Exact Model' };
+        if (method === 'update_inference_settings') return mutationResponses.settings ? mutationResponses.settings() : fixture['update_inference_settings'];
+        if (method === 'update_model_notes' && mutationResponses.notes) return mutationResponses.notes();
         if (method === 'update_model_notes' && typeof params === 'object' && params !== null && 'notes' in params) {
-          return { success: true, model_id: 'llm/Exact Model', notes: params.notes };
+          return params.notes === null ? fixture['update_model_notes_clear'] : fixture['update_model_notes_text'];
         }
         if (method === 'get_library_model_metadata') return metadataRead;
         if (method === 'search_hf_models' && hfReads) return { success: true, models: hfReads.models };
@@ -161,6 +163,45 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it.each(['malformed', 'wrong-model', 'transport', 'missing'] as const)('preserves notes draft on %s save response without retry', async (kind) => {
+    const response = () => {
+      if (kind === 'transport') throw new ValidationError('private transport detail', 'producer-fixtures');
+      if (kind === 'missing') return fixture['update_model_notes_missing'];
+      if (kind === 'wrong-model') return { success: true, model_id: 'other', notes: 'wrong notes' };
+      return { success: true, model_id: 'llm/Exact Model', notes: 42 };
+    };
+    const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, { notes: response });
+    render(<ModelMetadataModal modelId="llm/Exact Model" modelName="Notes fixture" onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Notes' }));
+    const editor = await screen.findByRole('textbox');
+    fireEvent.change(editor, { target: { value: ' My unsaved λ draft ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Notes' }));
+    await screen.findByText(kind === 'missing' ? /Notes were not saved/ : /Save could not be confirmed/);
+    expect(editor).toHaveValue(' My unsaved λ draft ');
+    expect(screen.queryByText('Saved')).not.toBeInTheDocument();
+    expect(screen.queryByText(/private transport detail/)).not.toBeInTheDocument();
+    expect(requests.filter(request => request.method === 'update_model_notes')).toHaveLength(1);
+  });
+
+  it.each(['malformed', 'wrong-model', 'transport'] as const)('preserves settings draft on %s save response without retry', async (kind) => {
+    const response = () => {
+      if (kind === 'transport') throw new ValidationError('private transport detail', 'producer-fixtures');
+      return kind === 'wrong-model' ? { success: true, model_id: 'other' } : { success: 'true', model_id: 'llm/Exact Model' };
+    };
+    const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, { settings: response });
+    render(<ModelMetadataModal modelId="llm/Exact Model" modelName="Settings fixture" onClose={() => undefined} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Inference' }));
+    const numeric = screen.getAllByRole('spinbutton')[0];
+    if (!numeric) throw new ValidationError('Missing inference editor', 'producer-fixtures');
+    fireEvent.change(numeric, { target: { value: '2048' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }));
+    await screen.findByText(/Save could not be confirmed/);
+    expect(numeric).toHaveValue(2048);
+    expect(screen.queryByText('Saved')).not.toBeInTheDocument();
+    expect(screen.queryByText(/private transport detail/)).not.toBeInTheDocument();
+    expect(requests.filter(request => request.method === 'update_inference_settings')).toHaveLength(1);
+  });
+
   it('submits exact notes and intentional clears through bundled preload', async () => {
     const requests = installActualPreload();
     render(<ModelMetadataModal modelId="llm/Exact Model" modelName="Notes fixture" onClose={() => undefined} />);
@@ -177,6 +218,7 @@ describe('actual Rust catalog through bundled preload and renderer', () => {
     await waitFor(() => expect(requests.filter(request => request.method === 'update_model_notes')).toHaveLength(2));
     expect(requests.filter(request => request.method === 'update_model_notes').at(-1)?.params)
       .toEqual({ model_id: 'llm/Exact Model', notes: null });
+    await waitFor(() => expect(editor).toHaveValue(''));
   });
 
   it('renders actual metadata payloads and all manifest states through bundled preload', async () => {
@@ -231,6 +273,7 @@ describe('actual Rust catalog through bundled preload and renderer', () => {
     expect(numeric).toHaveValue(2048);
     fireEvent.click(screen.getByRole('button', { name: /Save/ }));
     await waitFor(() => expect(requests.some(request => request.method === 'update_inference_settings')).toBe(true));
+    expect(await screen.findByText('Saved')).toBeInTheDocument();
     const updated = requests.find(request => request.method === 'update_inference_settings')?.params;
     expect(updated).toMatchObject({ model_id: 'llm/Exact Model', settings: [
       { key: ' Exact key 0 ', default: { nested: [null, true, ' λ ', 0.25, { edge: 9007199254740991 }] } },

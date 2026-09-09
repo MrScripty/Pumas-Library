@@ -1,6 +1,6 @@
 import type { BaseResponse } from './api-common';
 import type {
-  DownloadListOutcome, DownloadProgressOutcome, DownloadStartedOutcome, DownloadStatusOutcome, HfDownloadDetailsOutcome, InferenceSettingsOutcome, ModelsOutcome, PartialDownloadOutcome,
+  DownloadListOutcome, DownloadProgressOutcome, DownloadStartedOutcome, DownloadStatusOutcome, HfDownloadDetailsOutcome, InferenceSettingsOutcome, ModelsOutcome, PartialDownloadOutcome, UpdateInferenceSettingsOutcome, UpdateModelNotesOutcome,
 } from '../generated/desktop-contract';
 
 // ============================================================================
@@ -119,14 +119,9 @@ export type InferenceSettingsResponse = InferenceSettingsOutcome;
 /**
  * Response after updating inference settings.
  */
-export interface UpdateInferenceSettingsResponse extends BaseResponse {
-  model_id: string;
-}
+export type UpdateInferenceSettingsResponse = UpdateInferenceSettingsOutcome;
 
-export interface UpdateModelNotesResponse extends BaseResponse {
-  model_id: string;
-  notes?: string | null;
-}
+export type UpdateModelNotesResponse = UpdateModelNotesOutcome;
 
 export interface SearchHFModelsResponse extends BaseResponse {
   models: HuggingFaceModel[];

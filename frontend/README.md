@@ -68,6 +68,13 @@ Malformed values, duplicate aliases and unknown fields reject before IPC and
 RPC persistence, rather than accidentally clearing notes. Nonblank Markdown,
 Unicode and whitespace are preserved exactly.
 
+Notes/settings save confirmations use generated response decoding and must
+match the requested model. Notes clears omit the returned text; missing-model
+failures are distinct from successful saves. Malformed responses or transport
+errors leave drafts intact and display an unconfirmed-save warning, without
+automatic retries. Reopen the model to check persisted values before retrying:
+an unconfirmed response does not prove that the backend write failed.
+
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.
 Malformed responses cannot enter the modal; nested values display without

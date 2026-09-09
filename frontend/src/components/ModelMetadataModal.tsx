@@ -202,15 +202,11 @@ const ModelMetadataModalSession: React.FC<ModelMetadataModalProps> = ({
     setSaveError(null);
     setSaveSuccess(false);
     try {
-      const result = await modelsAPI.updateInferenceSettings(modelId, inferenceSettings);
-      if (result.success) {
-        setSaveSuccess(true);
-        setTimeout(() => setSaveSuccess(false), 2000);
-      } else {
-        setSaveError('Failed to save settings');
-      }
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : 'Unknown error');
+      await modelsAPI.updateInferenceSettings(modelId, inferenceSettings);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2000);
+    } catch {
+      setSaveError('Save could not be confirmed. Your settings draft is preserved; reopen the model to check stored values before retrying.');
     } finally {
       setSaving(false);
     }
@@ -238,10 +234,10 @@ const ModelMetadataModalSession: React.FC<ModelMetadataModalProps> = ({
         setNotesSaveSuccess(true);
         setTimeout(() => setNotesSaveSuccess(false), 2000);
       } else {
-        setNotesSaveError(result.error || 'Failed to save notes');
+        setNotesSaveError('Notes were not saved. Your draft is preserved.');
       }
-    } catch (e) {
-      setNotesSaveError(e instanceof Error ? e.message : 'Unknown error');
+    } catch {
+      setNotesSaveError('Save could not be confirmed. Your notes draft is preserved; reopen the model to check stored values before retrying.');
     } finally {
       setNotesSaving(false);
     }

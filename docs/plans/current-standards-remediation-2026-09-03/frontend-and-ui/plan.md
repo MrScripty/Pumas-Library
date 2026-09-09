@@ -10,8 +10,11 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound notes/settings mutation response validation (M4), preserving
-uncertain write outcomes without automatic retries. Model-notes request admission
+**Next slice:** Bound available-runtime-version read response validation (M4):
+`get_available_versions` is still raw and its consumer reads `versions.length`
+before success discrimination. Preserve optional inference-plugin builds and
+standalone backend operation; no install/update mutations. Notes/settings
+mutation response validation is accepted below. Model-notes request admission
 (FE-I33) is accepted below; malformed input cannot clear existing notes.
 Inference-settings mutation admission is accepted below. Metadata response decoding is accepted
 below; extraction/reconciliation behavior remains separate (FE-I32).
@@ -61,6 +64,36 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Notes and Settings Mutation Response Contracts
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--notes-and-settings-mutation-response-contracts).
+Operation: `continue` this canonical plan, remaining M4.
+Project actual notes/settings mutation responses into generated contracts and
+decode before renderer exposure. Settings success requires true and exact model
+identity. Notes success carries optional omitted (not null) text; missing-model
+failure carries false, exact identity and an error, without success payload.
+Reject contradictory/malformed responses and mismatched requested identities.
+Keep core persistence, intentional clears and existing wire shapes unchanged;
+replace the RPC missing-model error's interpolated diagnostic with public text.
+Unconfirmed writes must preserve drafts, show uncertainty and never auto-retry.
+
+root_capability owns RPC outcome types, export, dispatch, handlers and focused
+tests. Root owns preload/tests, frontend response aliases/modal/tests, existing
+decoder/renderer conformance, six generated files, README and four plan records.
+Cargo, generation, formatting and commits remain root-serialized. No core, live
+library, native install, new GUI dependency or runtime feature changes.
+
+Acceptance: actual RPC success/text/clear/missing-model fixtures and regressions;
+generated decoder negative cases; bundled preload wrong-identity refusal; real
+renderer confirmation and malformed/transport failure draft preservation with
+one request and no automatic retry. Run default/minimal RPC checks, strict lint,
+types, affected frontend tests/conformance, generator freshness/tests and plan
+checks. No graphical workflow or other-OS acceptance. Existing typed outcomes,
+standard schema alternatives and preload validation own this behavior; no new
+validation framework or parallel handwritten wire definitions. Mutation response
+decoding cannot prove a failed/unknown transport means the write did not occur.
 
 ## Model-Notes Mutation Admission
 

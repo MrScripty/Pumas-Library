@@ -1,5 +1,5 @@
 import type { BaseResponse } from './api-common';
-import type { AvailableVersionsOutcome, GithubCacheStatusOutcome, InstalledVersionsOutcome, SelectedVersionOutcome } from '../generated/desktop-contract';
+import type { AvailableVersionsOutcome, GithubCacheStatusOutcome, InstalledVersionsOutcome, SelectedVersionOutcome, VersionStatusOutcome } from '../generated/desktop-contract';
 export type { VersionReleaseAsset, VersionReleaseInfo } from '../generated/desktop-contract';
 
 // ============================================================================
@@ -41,22 +41,7 @@ export interface SetDefaultVersionResponse extends BaseResponse {
   // Empty body on success
 }
 
-export interface VersionStatusResponse extends BaseResponse {
-  status: {
-    installedCount: number;
-    activeVersion: string | null;
-    defaultVersion?: string | null;
-    versions: {
-      [tag: string]: {
-        isActive: boolean;
-        dependencies: {
-          installed: string[];
-          missing: string[];
-        };
-      };
-    };
-  } | null;
-}
+export type VersionStatusResponse = VersionStatusOutcome;
 
 // ============================================================================
 // Installation & Progress Types

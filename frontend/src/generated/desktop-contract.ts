@@ -1,5 +1,5 @@
-// Generated from pumas-rpc contract.rs; SHA256 7ff6bf01e754156377746b029651ffee38648be389ea6afd70d283bcc24eb716. DO NOT EDIT.
-import { validateAvailableVersionsOutcome, validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateGetBackendSetupParams, validateGetHfDownloadDetailsParams, validateGithubCacheStatusOutcome, validateHfDownloadDetailsOutcome, validateInferenceSettingsOutcome, validateInstalledVersionsOutcome, validateLibraryModelMetadataOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateSelectedVersionOutcome, validateStartBackendSetupParams, validateStartConversionSetupParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome, validateUpdateInferenceSettingsOutcome, validateUpdateInferenceSettingsParams, validateUpdateModelNotesOutcome, validateUpdateModelNotesParams } from './desktop-contract.validators.js';
+// Generated from pumas-rpc contract.rs; SHA256 c03a8e1a408ecf0d362504f4d3a325134b894c86ce88146a5e7feec1122805d5. DO NOT EDIT.
+import { validateAvailableVersionsOutcome, validateBackendStatusOutcome, validateCatalogSearchOutcome, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateGetBackendSetupParams, validateGetHfDownloadDetailsParams, validateGithubCacheStatusOutcome, validateHfDownloadDetailsOutcome, validateInferenceSettingsOutcome, validateInstalledVersionsOutcome, validateLibraryModelMetadataOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateSearchCatalogParams, validateSelectedVersionOutcome, validateStartBackendSetupParams, validateStartConversionSetupParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome, validateUpdateInferenceSettingsOutcome, validateUpdateInferenceSettingsParams, validateUpdateModelNotesOutcome, validateUpdateModelNotesParams, validateVersionStatusOutcome } from './desktop-contract.validators.js';
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
 export type AvailableVersionsRateLimited = { "error": string; "rate_limited": true; "retry_after_secs": number | null; "success": false };
 export type AvailableVersionsSuccess = { "success": true; "versions": ReadonlyArray<VersionReleaseInfo> };
@@ -69,6 +69,9 @@ export type PublicErrorClass = "invalid_request" | "not_found" | "conflict" | "c
 export type QuantBackend = ("python_conversion") | ("llama_cpp") | ("nvfp4") | ("sherry");
 export type QuantOption = { "backend": (QuantBackend) | (null); "bitsPerWeight": number; "description": string; "imatrixRecommended": boolean; "name": string; "recommended": boolean };
 export type RecoverDownloadParams = { "modelId": string; "recoveryToken": string };
+export type RuntimeVersionDependencies = { "installed": ReadonlyArray<string>; "missing": ReadonlyArray<string> };
+export type RuntimeVersionEntry = { "dependencies": RuntimeVersionDependencies; "isActive": boolean };
+export type RuntimeVersionStatus = { "activeVersion": string | null; "defaultVersion": string | null; "installedCount": number; "versions": { readonly [key: string]: RuntimeVersionEntry } };
 export type SearchCatalogParams = { "limit"?: number | null; "offset"?: number | null; "query": string };
 export type SelectedVersionOutcome = { "success": true; "version": string };
 export type StartBackendSetupParams = { "backend": QuantBackend; "expected_previous_operation_id"?: string | null };
@@ -83,6 +86,7 @@ export type UpdateModelNotesParams = ({ "model_id": string; "notes"?: string | n
 export type UpdateModelNotesSuccess = { "model_id": string; "notes"?: string; "success": true };
 export type VersionReleaseAsset = { "downloadUrl": string; "name": string; "size": number };
 export type VersionReleaseInfo = { "archiveSize": number | null; "assets": ReadonlyArray<VersionReleaseAsset>; "body": string | null; "dependenciesSize": number | null; "htmlUrl": string; "installing": boolean | null; "name": string; "prerelease": boolean; "publishedAt": string; "tagName": string; "totalSize": number | null };
+export type VersionStatusOutcome = { "status": RuntimeVersionStatus; "success": true };
 
 export type DecodeOutcome<T> = { readonly status: 'valid'; readonly value: T } | { readonly status: 'invalid' | 'unsupported' | 'unavailable'; readonly message: string };
 
@@ -155,3 +159,4 @@ export function decodeUpdateInferenceSettingsOutcome(input: unknown): DecodeOutc
 export function decodeUpdateInferenceSettingsParams(input: unknown): DecodeOutcome<UpdateInferenceSettingsParams> { return decode(input, validateUpdateInferenceSettingsParams); }
 export function decodeUpdateModelNotesOutcome(input: unknown): DecodeOutcome<UpdateModelNotesOutcome> { return decode(input, validateUpdateModelNotesOutcome); }
 export function decodeUpdateModelNotesParams(input: unknown): DecodeOutcome<UpdateModelNotesParams> { return decode(input, validateUpdateModelNotesParams); }
+export function decodeVersionStatusOutcome(input: unknown): DecodeOutcome<VersionStatusOutcome> { return decode(input, validateVersionStatusOutcome); }

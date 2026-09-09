@@ -36,47 +36,42 @@ pub async fn get_available_versions(
     }
 }
 
-pub async fn get_version_status(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
+pub async fn get_version_status(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<crate::contract::VersionStatusOutcome> {
+    use crate::contract::{
+        RuntimeVersionDependencies, RuntimeVersionEntry, RuntimeVersionStatus, VersionStatusOutcome,
+    };
+
     let app_id_str = require_str_param(params, "app_id", "appId")?;
-    if let Some(vm) = get_version_manager(state, app_id_str).await {
-        // Return version status combining active/default/installed
-        let active = vm.get_active_version().await?;
-        let default = vm.get_default_version().await?;
-        let installed = vm.get_installed_versions().await?;
-
-        // Build versions map with isActive and dependencies for each installed version
-        let mut versions_map = serde_json::Map::new();
-        for tag in &installed {
-            let is_active = active.as_ref() == Some(tag);
-            // Get dependency status if available
-            let deps = vm.check_dependencies(tag).await.ok();
-            versions_map.insert(
-                tag.clone(),
-                json!({
-                    "isActive": is_active,
-                    "dependencies": {
-                        "installed": deps.as_ref().map(|d| &d.installed).unwrap_or(&vec![]),
-                        "missing": deps.as_ref().map(|d| &d.missing).unwrap_or(&vec![])
-                    }
-                }),
-            );
-        }
-
-        // Return raw status object - wrapper.rs will add {success, status} wrapper
-        Ok(json!({
-            "installedCount": installed.len(),
-            "activeVersion": active,
-            "defaultVersion": default,
-            "versions": versions_map
-        }))
-    } else {
-        Ok(json!({
-            "installedCount": 0,
-            "activeVersion": null,
-            "defaultVersion": null,
-            "versions": {}
-        }))
+    let Some(vm) = get_version_manager(state, app_id_str).await else {
+        return VersionStatusOutcome::new(RuntimeVersionStatus::default());
+    };
+    let active = vm.get_active_version().await?;
+    let default = vm.get_default_version().await?;
+    let installed = vm.get_installed_versions().await?;
+    let mut versions = std::collections::BTreeMap::new();
+    for tag in &installed {
+        // Preserve the existing empty dependency lists when a check fails.
+        let deps = vm.check_dependencies(tag).await.ok().unwrap_or_default();
+        versions.insert(
+            tag.clone(),
+            RuntimeVersionEntry {
+                is_active: active.as_ref() == Some(tag),
+                dependencies: RuntimeVersionDependencies {
+                    installed: deps.installed,
+                    missing: deps.missing,
+                },
+            },
+        );
     }
+    VersionStatusOutcome::new(RuntimeVersionStatus {
+        installed_count: installed.len(),
+        active_version: active,
+        default_version: default,
+        versions,
+    })
 }
 
 pub async fn get_version_info(state: &AppState, params: &Value) -> pumas_library::Result<Value> {

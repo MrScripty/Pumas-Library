@@ -10,10 +10,12 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound comprehensive runtime-version status response validation
-(M4): `get_version_status` still crosses preload undecoded into version state.
-Preserve optional inference-plugin builds and standalone backend operation;
-no install/update mutations. Active/default, installed-version, runtime GitHub cache-status and available-version response
+**Next slice:** Bound runtime-version info response validation (M4):
+`get_version_info` still crosses preload undecoded and its handwritten frontend
+shape differs from the current RPC producer. Preserve actual wire semantics,
+optional inference-plugin builds and standalone backend operation; no runtime
+mutations. Comprehensive status, active/default, installed-version, runtime
+GitHub cache-status and available-version response
 validation is accepted below. Notes/settings
 mutation response validation is accepted below. Model-notes request admission
 (FE-I33) is accepted below; malformed input cannot clear existing notes.
@@ -65,6 +67,37 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Comprehensive Runtime-Version Status Response Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--comprehensive-runtime-version-status-response-contract).
+Operation: `continue` this canonical plan, remaining M4.
+One typed RPC outcome owns the existing success/status envelope, required nullable
+active/default strings, safe nonnegative installed count and version-keyed map
+of active flags and installed/missing dependency string lists. Preserve exact
+strings, list order/duplicates and empty snapshots; do not invent count/map or
+selection consistency rules. Preload decodes before frontend state; malformed
+responses retain previous status and default selection and report an error.
+
+rust_status owns RPC outcome/export/dispatch/release handler and focused tests.
+Root owns preload/tests, frontend aliases/hook, existing decoder and renderer-hook
+conformance, six generated files, README and four plan records. Root serializes
+Cargo, formatting, generation and commit. No core, request, lookup, mutation,
+feature registration, runtime install or live-library change. Missing-manager
+empty status remains FE-I34; swallowed dependency-check errors remain separately
+recorded as FE-I35 and do not prove dependency availability. FE-I09 remains separate.
+
+Acceptance: populated/empty/no-manager serialized producer fixtures and prior
+wrapper equivalence; offline default/minimal RPC tests; malformed nested and
+numeric decoder/preload rejection; actual hook retention with no automatic retry.
+Focused frontend tests/types/lint, Electron and both frontend builds, existing
+conformance, generator tests/freshness, strict RPC lint/format and plan checks.
+Independent medium review covers contract fidelity and standards. These are
+local automated contract/integration claims, not graphical or other-OS evidence.
+The existing JSON Schema/AJV generator remains the executable decoder authority;
+typed wire records remove handwritten consumer shape and raw handler JSON without
+adding a second validator or changing domain policy.
 
 ## Active and Default Runtime-Version Read Contracts
 

@@ -95,6 +95,13 @@ Active/default version reads share a validated string response. Empty strings
 retain the existing wire meaning of no selection and display as null; other
 tags remain exact. Invalid replies leave the previous selection intact.
 
+Comprehensive runtime status validates required nullable selections, the installed
+count and each version's dependency lists before entering state. Invalid replies
+report an error and retain the previous status and default selection. Existing
+no-manager empty snapshots and failed dependency checks represented as empty
+lists remain limitations; validation does not establish runtime or dependency
+availability.
+
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.
 Malformed responses cannot enter the modal; nested values display without

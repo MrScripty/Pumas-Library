@@ -464,6 +464,12 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     ] {
         fixtures[key] = serde_json::to_value(GithubCacheStatusOutcome::snapshot(status)?)?;
     }
+    fixtures["version_status"] =
+        serde_json::to_value(VersionStatusOutcome::new(version_status_fixture())?)?;
+    for key in ["version_status_empty", "version_status_no_manager"] {
+        fixtures[key] =
+            serde_json::to_value(VersionStatusOutcome::new(RuntimeVersionStatus::default())?)?;
+    }
     fixtures["installed_versions"] = serde_json::to_value(InstalledVersionsOutcome::new(vec![
         " vλ.1 ".into(),
         "v2".into(),
@@ -518,6 +524,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         GithubCacheStatusOutcome,
         InstalledVersionsOutcome,
         SelectedVersionOutcome,
+        VersionStatusOutcome,
         UpdateModelNotesOutcome,
         LibraryModelMetadataOutcome,
         GetHfDownloadDetailsParams,
@@ -698,6 +705,17 @@ fn refine_named(name: &str, schema: &mut Value) {
                 "archiveSize",
                 "dependenciesSize",
                 "installing"
+            ]),
+        );
+    }
+    if name == "RuntimeVersionStatus" {
+        object.insert(
+            "required".into(),
+            serde_json::json!([
+                "installedCount",
+                "activeVersion",
+                "defaultVersion",
+                "versions"
             ]),
         );
     }
@@ -967,6 +985,7 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "AvailableVersionsSuccess"
             | "InstalledVersionsOutcome"
             | "SelectedVersionOutcome"
+            | "VersionStatusOutcome"
             | "UpdateModelNotesSuccess"
             | "LibraryModelMetadataOutcome"
             | "LibraryModelMetadataResponse"

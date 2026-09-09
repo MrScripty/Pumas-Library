@@ -1,5 +1,15 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-08 — Comprehensive Runtime-Version Status Response Contract
+
+The frontend plan accepts generated `get_version_status` decoding from typed RPC
+through preload and actual hook state, preserving required nulls and nested facts.
+See its [ledger](frontend-and-ui/execution-ledger.md#2026-09-08--comprehensive-runtime-version-status-response-contract)
+for verification, independent review and cost evidence. Missing-manager defaults
+(FE-I34) and swallowed dependency errors (FE-I35) remain separate. This does not
+close M4 or the remediation program. Next: runtime-version info response validation.
+
+
 ## Baseline
 
 - Planning code: `d84e2b3520ce3da3f39cc3df953301fa9d6d3d50`.

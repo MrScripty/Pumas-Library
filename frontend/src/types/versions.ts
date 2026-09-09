@@ -18,20 +18,7 @@ export interface VersionRelease {
   installing?: boolean;
 }
 
-export interface VersionStatus {
-  installedCount: number;
-  activeVersion: string | null;
-  defaultVersion?: string | null;
-  versions: {
-    [tag: string]: {
-      isActive: boolean;
-      dependencies: {
-        installed: string[];
-        missing: string[];
-      };
-    };
-  };
-}
+export type VersionStatus = import('../generated/desktop-contract').VersionStatusOutcome['status'];
 
 export interface VersionInfo {
   path: string;

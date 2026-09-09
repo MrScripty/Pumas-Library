@@ -154,14 +154,8 @@ export function useVersionFetching({
 
     try {
       const result = await api.get_version_status(resolvedAppId);
-      if (result.success) {
-        setVersionStatus(result.status || null);
-        if (result.status?.defaultVersion !== undefined) {
-          setDefaultVersionState(result.status.defaultVersion || null);
-        }
-      } else {
-        setError(result.error || 'Failed to fetch version status');
-      }
+      setVersionStatus(result.status);
+      setDefaultVersionState(result.status.defaultVersion || null);
     } catch (error) {
       if (error instanceof APIError) {
         logger.error('API error fetching version status', { error: error.message, endpoint: error.endpoint });

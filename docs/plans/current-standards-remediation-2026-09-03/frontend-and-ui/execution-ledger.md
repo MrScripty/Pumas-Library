@@ -1,5 +1,85 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Comprehensive Runtime-Version Status Response Contract
+
+Accepted `get_version_status` typed RPC outcomes and generated preload decoding.
+The existing success/status wire keeps required nullable active/default strings,
+a safe nonnegative installed count, and version-keyed active/dependency records.
+Exact strings, dependency order/duplicates and empty snapshots survive unchanged.
+Frontend response/state aliases derive from the generator; the hook accepts only
+decoded status and retains both status and default selection on malformed replies,
+with an error and no automatic retry. No cross-field snapshot consistency is
+invented. No core, request, runtime lookup, feature or mutation changes.
+
+Operation inventory: one handler-produced status shape, legacy success/status
+wrapper, undecoded preload call and `useVersionFetching` consumer. The prior
+frontend optional default tag contradicted the producer's required nullability.
+Rust DTOs plus the existing schema exporter/AJV replace raw JSON and handwritten
+wire types. JSON Schema vocabulary/generator ownership and coordinated current
+artifact compatibility remain unchanged; no new validator or version policy.
+
+Evidence: the new bundled-preload regression first failed with `Missing expected
+rejection`. Three focused RPC tests pass in default and no-default modes, with
+literal prior-wire and wrapper equivalence, unsafe count rejection and real
+offline no-manager/disabled-plugin calls. A final rerun hit `Operation not
+permitted` in temporary fixture setup; the same checks passed with required
+permissions. Populated fixtures exercise actual serialization, not a populated
+live manager. Twenty-six decoder tests and 35 bundled-preload/renderer-hook tests
+pass; 27 preload tests pass with one real-Electron sandbox test gated. Positive
+decoder boundaries cover maximum-safe count, special map keys and deliberately
+unrelated count/selection/map facts; malformed nested fields reject. Sixteen
+focused frontend tests, types/affected lint, Electron and both frontend builds,
+seven generator tests/freshness, strict RPC Clippy and formatting pass.
+Canonical frontend/program pure `validate_plan` and diff checks pass. The full
+verifier import lacked local `jsonschema`; its unchanged pure plan validator
+was executed directly without importing unrelated CLI dependencies.
+
+Astra low implemented the Rust write set; root owned consumer implementation,
+serialized Cargo/generation and integrated verification. Luna max ran bounded
+frontend checks. Independent Astra medium review found no blocking defect; root
+added its boundary cases, strengthened literal wire evidence and recorded FE-I35.
+FE-I34 now also tracks no-manager status defaults. Failed dependency checks still
+look empty (FE-I35); sequential reads are not an atomic snapshot. FE-I09 remains
+separate. Local automated evidence does not establish graphical, installed-runtime,
+network or other-OS behavior. Overall remediation and M4 remain incomplete.
+Next: runtime-version info response validation (`get_version_info`).
+
+### Delegation Cost Checkpoint
+
+API-equivalent estimates, not invoices. Current-session records only:
+root `01a084ab-eaad-7013-ab27-3dff280ac963`, turn
+`01a084ab-f808-7161-b6c6-9fba94f70087`; deduplicated by `response_id`.
+
+| Owned work | Input | Cached input (included) | Output (reasoning included) | Standard assumption | Priority/fast 2× scenario |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| /root/frontend_checks (gpt-5.6-luna max) | 88,384 | 62,464 | 1,465 | $0.0082 | $0.0164 |
+| /root/rust_status (gpt-6-astra low) | 549,548 | 511,360 | 4,390 | $1.1127 | $2.2255 |
+| Shared automatic approval review (codex-auto-review low) | 20,742 | 4,864 | 180 | unpriced | unpriced |
+| root shared implementation/integration/coordination (gpt-6-astra low) | 3,525,094 | 3,426,944 | 12,665 | $5.0417 | $10.0834 |
+| /root/status_review (gpt-6-astra medium) | 264,418 | 229,888 | 1,453 | $0.6478 | $1.2957 |
+
+Priced subtotal: $6.8105 standard / $13.6209
+priority scenario, plus unpriced automatic approval review. Shared root costs
+include implementation, standards reading, integration, review repairs,
+verification, coordination and reporting; they are not allocated to children.
+Auto-review is recorded separately, not treated as free. No implementation rescue
+was needed. This is one accepted change across different task classes, not a
+controlled model benchmark; Luna's bounded verification cost does not estimate
+Rust implementation cost.
+
+Rate assumptions carried from the supplied reference, USD/million
+uncached/cached/cache-write/output: Astra 10/1/12.5/50;
+Luna 0.2/0.02/0.25/1.2. These are assumptions, not freshly verified price claims.
+No cache writes were reported. No request exceeded the assumed 272,000-input
+threshold (2× input, 1.5× output above it). Delivered service tier and invoice
+are not exposed by these records, so the priority multiplier is a scenario.
+The checkpoint includes root records through
+2026-09-09T05:46:52.986Z; later commit/reporting tail is uncounted
+and should be carried forward when practical. The independent session selector
+and checkpoint are `/tmp/pumas-version-status-costs.py` and
+`/tmp/pumas-version-status-costs.json`; no prior-session checkpoint was reused.
+
+
 ## 2026-09-08 — Active and Default Runtime-Version Read Contracts
 
 Accepted a shared typed selected-version response for both matching read

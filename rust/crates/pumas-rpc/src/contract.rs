@@ -433,6 +433,8 @@ pub(crate) enum RpcOutcome {
     InstalledVersions(InstalledVersionsOutcome),
     #[cfg(feature = "inference-plugins")]
     SelectedVersion(SelectedVersionOutcome),
+    #[cfg(feature = "inference-plugins")]
+    VersionStatus(VersionStatusOutcome),
     HfTokenMutation(SuccessOutcome),
     HfAuth(Box<HfAuthOutcome>),
     LinkHealth(Box<LinkHealthOutcome>),
@@ -501,6 +503,8 @@ impl RpcOutcome {
             Self::InstalledVersions(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::SelectedVersion(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::VersionStatus(value) => serde_json::to_value(value),
             Self::HfTokenMutation(value) => serde_json::to_value(value),
             Self::HfAuth(value) => serde_json::to_value(value),
             Self::LinkHealth(value) => serde_json::to_value(value),
@@ -1268,6 +1272,137 @@ impl DownloadListOutcome {
 pub(crate) struct ModelsOutcome {
     success: bool,
     models: BTreeMap<String, CatalogModel>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct VersionStatusOutcome {
+    success: bool,
+    status: RuntimeVersionStatus,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct RuntimeVersionStatus {
+    pub(crate) installed_count: usize,
+    pub(crate) active_version: Option<String>,
+    pub(crate) default_version: Option<String>,
+    pub(crate) versions: BTreeMap<String, RuntimeVersionEntry>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct RuntimeVersionEntry {
+    pub(crate) is_active: bool,
+    pub(crate) dependencies: RuntimeVersionDependencies,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize, Default)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct RuntimeVersionDependencies {
+    pub(crate) installed: Vec<String>,
+    pub(crate) missing: Vec<String>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl VersionStatusOutcome {
+    pub(crate) fn new(status: RuntimeVersionStatus) -> pumas_library::Result<Self> {
+        if status.installed_count as u128 > MAX_JS_SAFE_INTEGER as u128 {
+            return Err(invalid_domain_outcome("runtime version status"));
+        }
+        Ok(Self {
+            success: true,
+            status,
+        })
+    }
+}
+
+#[cfg(any(feature = "export-contract", test))]
+fn version_status_fixture() -> RuntimeVersionStatus {
+    RuntimeVersionStatus {
+        installed_count: 2,
+        active_version: Some(" vλ.1 ".into()),
+        default_version: Some("v2".into()),
+        versions: BTreeMap::from([
+            (
+                " vλ.1 ".into(),
+                RuntimeVersionEntry {
+                    is_active: true,
+                    dependencies: RuntimeVersionDependencies {
+                        installed: vec![
+                            " exact dependency λ ".into(),
+                            "torch".into(),
+                            "torch".into(),
+                        ],
+                        missing: vec!["missing>=1".into()],
+                    },
+                },
+            ),
+            (
+                "v2".into(),
+                RuntimeVersionEntry {
+                    is_active: false,
+                    dependencies: RuntimeVersionDependencies::default(),
+                },
+            ),
+        ]),
+    }
+}
+
+#[cfg(test)]
+mod version_status_tests {
+    use super::*;
+
+    #[test]
+    fn version_status_matches_previous_wrapper_and_preserves_nulls() {
+        let previous_populated = serde_json::json!({
+            "installedCount": 2,
+            "activeVersion": " vλ.1 ",
+            "defaultVersion": "v2",
+            "versions": {
+                " vλ.1 ": {"isActive": true, "dependencies": {
+                    "installed": [" exact dependency λ ", "torch", "torch"],
+                    "missing": ["missing>=1"]
+                }},
+                "v2": {"isActive": false, "dependencies": {"installed": [], "missing": []}}
+            }
+        });
+        let previous_empty = serde_json::json!({
+            "installedCount": 0, "activeVersion": null, "defaultVersion": null, "versions": {}
+        });
+        for (status, previous_raw) in [
+            (version_status_fixture(), previous_populated),
+            (RuntimeVersionStatus::default(), previous_empty),
+        ] {
+            assert_eq!(serde_json::to_value(&status).unwrap(), previous_raw);
+            let previous = crate::wrapper::wrap_response("get_version_status", previous_raw);
+            let outcome = VersionStatusOutcome::new(status).unwrap();
+            assert_eq!(serde_json::to_value(&outcome).unwrap(), previous);
+            #[cfg(feature = "inference-plugins")]
+            {
+                let rpc = RpcOutcome::VersionStatus(outcome);
+                assert!(!rpc.uses_response_wrapper());
+                assert_eq!(rpc.into_value().unwrap(), previous);
+            }
+        }
+    }
+
+    #[test]
+    fn version_status_rejects_unrepresentable_count() {
+        if let Ok(installed_count) = usize::try_from(MAX_JS_SAFE_INTEGER + 1) {
+            assert!(VersionStatusOutcome::new(RuntimeVersionStatus {
+                installed_count,
+                ..RuntimeVersionStatus::default()
+            })
+            .is_err());
+        }
+    }
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]

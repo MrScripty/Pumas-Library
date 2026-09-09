@@ -10,6 +10,39 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('comprehensive status preserves producer snapshots and rejects malformed nested facts', () => {
+  for (const key of ['version_status', 'version_status_empty', 'version_status_no_manager']) {
+    const result = contract.decodeVersionStatusOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  const valid = fixtures.version_status;
+  const specialKeys = JSON.parse('{"__proto__":{"isActive":false,"dependencies":{"installed":[" exact λ ","dup","dup"],"missing":[]}},"constructor":{"isActive":true,"dependencies":{"installed":[],"missing":[""]}},"":{"isActive":false,"dependencies":{"installed":[],"missing":[]}}}');
+  const boundary = { success: true, status: { installedCount: Number.MAX_SAFE_INTEGER, activeVersion: '', defaultVersion: ' exact λ ', versions: specialKeys } };
+  const decodedBoundary = contract.decodeVersionStatusOutcome(boundary);
+  assert.equal(decodedBoundary.status, 'valid');
+  assert.deepEqual(JSON.parse(JSON.stringify(decodedBoundary.value)), boundary);
+
+  const invalidStatuses = [null, {}, [],
+    ...[-1, 0.5, Number.MAX_SAFE_INTEGER + 1, '1'].map(installedCount => ({ ...valid.status, installedCount })),
+    ...[undefined, 42, []].map(activeVersion => ({ ...valid.status, activeVersion })),
+    ...[undefined, false].map(defaultVersion => ({ ...valid.status, defaultVersion })),
+    ...[null, [], { tag: null }, { tag: { isActive: 'true', dependencies: { installed: [], missing: [] } } },
+      { tag: { isActive: true, dependencies: { installed: ['ok', 42], missing: [] } } },
+      { tag: { isActive: true, dependencies: { installed: [] } } },
+      { tag: { isActive: true, dependencies: { installed: [], missing: [], extra: true } } },
+      { tag: { isActive: true, dependencies: { installed: [], missing: [] }, extra: true } },
+    ].map(versions => ({ ...valid.status, versions })),
+    { ...valid.status, extra: true },
+  ];
+  for (const status of invalidStatuses) {
+    assert.equal(contract.decodeVersionStatusOutcome({ success: true, status }).status, 'invalid', JSON.stringify(status));
+  }
+  for (const patch of [{ status: undefined }, { success: false }, { extra: true }, { error: 'bad' }]) {
+    assert.equal(contract.decodeVersionStatusOutcome({ ...valid, ...patch }).status, 'invalid');
+  }
+});
+
 test('selected-version decoding preserves producer text and empty absence', () => {
   for (const key of ['selected_version', 'selected_version_empty']) {
     const result = contract.decodeSelectedVersionOutcome(fixtures[key]);

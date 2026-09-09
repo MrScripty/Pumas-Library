@@ -11,6 +11,27 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('comprehensive version status rejects malformed nested facts before exposure', async () => {
+  const harness = loadCompiledPreload();
+  const status = {
+    installedCount: 1, activeVersion: ' vλ.1 ', defaultVersion: null,
+    versions: { ' vλ.1 ': { isActive: true, dependencies: { installed: [' dep ', ' dep '], missing: [] } } },
+  };
+  for (const response of [null, {}, { success: true, status: null },
+    { success: false, status }, { success: true, status, error: 'bad' },
+    { success: true, status: { ...status, defaultVersion: undefined } },
+    { success: true, status: { ...status, installedCount: -1 } },
+    { success: true, status: { ...status, versions: { v1: { isActive: true, dependencies: { installed: ['ok', 42], missing: [] } } } } }]) {
+    harness.respondWith(response);
+    await assert.rejects(harness.api.get_version_status('ollama'), { name: 'DesktopContractError' });
+  }
+  for (const value of [status, { installedCount: 0, activeVersion: null, defaultVersion: null, versions: {} }]) {
+    const response = { success: true, status: value };
+    harness.respondWith(response);
+    assert.deepEqual(toPlainValue(await harness.api.get_version_status('ollama')), response);
+  }
+});
+
 test('selected versions reject malformed values and preserve empty-string absence', async () => {
   const harness = loadCompiledPreload();
   for (const method of ['get_active_version', 'get_default_version']) {

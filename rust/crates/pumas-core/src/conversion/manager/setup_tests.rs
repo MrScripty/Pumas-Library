@@ -6,8 +6,17 @@ use std::time::Duration;
 
 fn executable(path: &Path, content: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, content).unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let status = std::process::Command::new("/bin/sh")
+        .args([
+            "-c",
+            "printf '%s' \"$2\" > \"$1\" && chmod 700 \"$1\"",
+            "fixture-writer",
+        ])
+        .arg(path)
+        .arg(content)
+        .status()
+        .unwrap();
+    assert!(status.success());
 }
 
 fn programs(root: &Path) -> Programs {
@@ -52,6 +61,9 @@ if test "$1" = 'clone'; then
  mkdir -p "$destination/.git"
  printf 'fixture converter\n' > "$destination/convert_hf_to_gguf.py"
 fi
+if test "$1" = 'pull' && test -f "$0.update"; then
+ cp "$0.update" source-version
+fi
 "#,
     );
     let cmake = tools.join("cmake");
@@ -60,11 +72,26 @@ fi
         r#"#!/bin/sh
 printf '%s\n' "$@" >> "$0.args"
 if test "$1" = '--build'; then
+ if test -f "$0.fail-build"; then exit 7; fi
+ if test -f "$0.hold"; then echo $$ > "$0.pid"; exec sleep 10; fi
  if test -f "$0.omit"; then exit 0; fi
  mkdir -p "$2/bin"
  printf '#!/bin/sh\nexit 0\n' > "$2/bin/llama-quantize"
  printf '#!/bin/sh\nexit 0\n' > "$2/bin/llama-imatrix"
  chmod 700 "$2/bin/llama-quantize" "$2/bin/llama-imatrix"
+ if test -f "$2/../source/source-version"; then
+  for binary in llama-quantize llama-imatrix; do
+   printf '# source: ' >> "$2/bin/$binary"
+   cat "$2/../source/source-version" >> "$2/bin/$binary"
+  done
+ fi
+else
+ if test -f "$0.fail-configure"; then exit 6; fi
+ for arg do
+  case "$arg" in -S*)
+   if test -f "${arg#-S}/source-version"; then cat "${arg#-S}/source-version" >> "$0.sources"; fi
+  esac
+ done
 fi
 "#,
     );
@@ -396,7 +423,7 @@ fn native_fixture(root: &Path, tools: &Programs) -> PathBuf {
 }
 
 #[tokio::test]
-async fn llama_setup_repairs_each_unusable_native_artifact_and_skips_healthy_pair() {
+async fn llama_setup_rebuilds_healthy_pair_and_repairs_each_unusable_native_artifact() {
     for binary in ["llama-quantize", "llama-imatrix"] {
         for state in ["healthy", "missing", "empty", "not_executable"] {
             let root = tempfile::tempdir().unwrap();
@@ -419,12 +446,10 @@ async fn llama_setup_repairs_each_unusable_native_artifact_and_skips_healthy_pai
                 owner.snapshot().unwrap().status,
                 super::super::ConversionSetupStatus::Completed
             );
-            assert_eq!(cmake_log.exists(), state != "healthy");
-            if state != "healthy" {
-                let arguments = std::fs::read_to_string(cmake_log).unwrap();
-                assert!(arguments.lines().any(|arg| arg == "--clean-first"));
-                assert!(arguments.lines().any(|arg| arg == "--build"));
-            }
+            let arguments = std::fs::read_to_string(cmake_log).unwrap();
+            assert!(arguments.lines().any(|arg| arg == "--clean-first"));
+            assert!(arguments.lines().any(|arg| arg == "--build"));
+            assert!(arguments.lines().any(|arg| arg == "-DGGML_CUDA=OFF"));
             assert!(backend.is_ready_async().await.unwrap());
             assert_eq!(
                 std::fs::read_to_string(base.join("source/keep")).unwrap(),
@@ -435,6 +460,151 @@ async fn llama_setup_repairs_each_unusable_native_artifact_and_skips_healthy_pai
                 .unwrap();
         }
     }
+}
+
+#[tokio::test]
+async fn llama_setup_builds_updated_and_unchanged_source_despite_usable_outputs() {
+    let root = tempfile::tempdir().unwrap();
+    let tools = programs(root.path());
+    let base = native_fixture(root.path(), &tools);
+    std::fs::write(base.join("source/source-version"), "old\n").unwrap();
+    std::fs::write(tools.git.with_file_name("git.update"), "updated\n").unwrap();
+    let args = tools.cmake.with_file_name("cmake.args");
+    let sources = tools.cmake.with_file_name("cmake.sources");
+    let (backend, owner, probes) = backend(root.path(), QuantBackend::LlamaCpp, tools);
+    for attempt in 1..=2 {
+        backend.ensure_environment().await.unwrap();
+        assert_eq!(
+            owner.snapshot().unwrap().status,
+            super::super::ConversionSetupStatus::Completed
+        );
+        assert_eq!(
+            std::fs::read_to_string(&sources).unwrap(),
+            "updated\n".repeat(attempt)
+        );
+        let arguments = std::fs::read_to_string(&args).unwrap();
+        for expected in [
+            "--clean-first",
+            "--build",
+            "llama-quantize",
+            "llama-imatrix",
+            "-DGGML_CUDA=OFF",
+        ] {
+            assert_eq!(
+                arguments.lines().filter(|line| *line == expected).count(),
+                attempt
+            );
+        }
+        for binary in ["llama-quantize", "llama-imatrix"] {
+            assert!(std::fs::read_to_string(base.join("build/bin").join(binary))
+                .unwrap()
+                .contains("# source: updated\n"));
+        }
+    }
+    assert_eq!(
+        std::fs::read_to_string(marker(root.path(), "llama-cpp", "starts")).unwrap(),
+        "start\n",
+        "healthy Python dependencies remain reusable"
+    );
+    super::super::readiness::shutdown_backend(&owner, &probes)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn llama_setup_does_not_complete_after_updated_source_build_failure_and_can_retry() {
+    for phase in ["configure", "build"] {
+        let root = tempfile::tempdir().unwrap();
+        let tools = programs(root.path());
+        let base = native_fixture(root.path(), &tools);
+        std::fs::write(tools.git.with_file_name("git.update"), "updated\n").unwrap();
+        let fail = tools.cmake.with_file_name(format!("cmake.fail-{phase}"));
+        std::fs::write(&fail, "").unwrap();
+        let args = tools.cmake.with_file_name("cmake.args");
+        let (backend, owner, probes) = backend(root.path(), QuantBackend::LlamaCpp, tools);
+        let error = backend.ensure_environment().await.unwrap_err();
+        assert!(
+            error.to_string().contains(if phase == "configure" {
+                "Configuring llama.cpp"
+            } else {
+                "Building llama.cpp"
+            }),
+            "{error}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(base.join("source/source-version")).unwrap(),
+            "updated\n"
+        );
+        assert_eq!(
+            owner.snapshot().unwrap().status,
+            super::super::ConversionSetupStatus::Failed
+        );
+        assert!(!marker(root.path(), "llama-cpp", "starts").exists());
+        assert!(!marker(root.path(), "llama-cpp", "probes").exists());
+        let arguments = std::fs::read_to_string(args).unwrap();
+        assert_eq!(
+            arguments.lines().any(|arg| arg == "--build"),
+            phase == "build"
+        );
+        let previous_id = owner.snapshot().unwrap().operation_id;
+        std::fs::remove_file(fail).unwrap();
+        backend.ensure_environment().await.unwrap();
+        let completed = owner.snapshot().unwrap();
+        assert_ne!(completed.operation_id, previous_id);
+        assert_eq!(
+            completed.status,
+            super::super::ConversionSetupStatus::Completed
+        );
+        super::super::readiness::shutdown_backend(&owner, &probes)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn llama_rebuild_survives_dropped_waiter_and_shutdown_drains_before_cancelled() {
+    let root = tempfile::tempdir().unwrap();
+    let tools = programs(root.path());
+    native_fixture(root.path(), &tools);
+    std::fs::write(tools.cmake.with_file_name("cmake.hold"), "").unwrap();
+    let pid_file = tools.cmake.with_file_name("cmake.pid");
+    let (backend, owner, probes) = backend(root.path(), QuantBackend::LlamaCpp, tools);
+    let mut waiter = Box::pin(backend.ensure_environment());
+    let pid: u32 = tokio::select! {
+        result = &mut waiter => panic!("rebuild returned before hold: {result:?}"),
+        pid = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(contents) = std::fs::read_to_string(&pid_file) {
+                    if let Ok(pid) = contents.trim().parse() { break pid; }
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }) => pid.expect("controlled native build reached"),
+    };
+    drop(waiter);
+    assert_eq!(
+        owner.snapshot().unwrap().status,
+        super::super::ConversionSetupStatus::InProgress
+    );
+    let mut shutdown = Box::pin(super::super::readiness::shutdown_backend(&owner, &probes));
+    let _ = futures::poll!(shutdown.as_mut());
+    drop(shutdown);
+    super::super::readiness::shutdown_backend(&owner, &probes)
+        .await
+        .unwrap();
+    super::super::readiness::shutdown_backend(&owner, &probes)
+        .await
+        .unwrap();
+    assert!(!Path::new(&format!("/proc/{pid}")).exists());
+    assert!(
+        !super::super::linux_group::group_has_live_members(i32::try_from(pid).unwrap()).unwrap()
+    );
+    assert_eq!(
+        owner.snapshot().unwrap().status,
+        super::super::ConversionSetupStatus::Cancelled
+    );
+    assert!(!marker(root.path(), "llama-cpp", "starts").exists());
+    assert!(!marker(root.path(), "llama-cpp", "probes").exists());
 }
 
 #[tokio::test]
@@ -538,14 +708,7 @@ async fn llama_setup_preserves_unexpected_native_outputs_before_cmake_clean() {
             } else {
                 executable(&outside, "#!/bin/sh\n# preserve external tool\nexit 0\n");
                 std::os::unix::fs::symlink(&outside, &target).unwrap();
-                // The link itself is usable. Another missing tool forces the
-                // clean-first decision to inspect every generated-output entry.
-                let other = if binary == "llama-quantize" {
-                    "llama-imatrix"
-                } else {
-                    "llama-quantize"
-                };
-                std::fs::remove_file(base.join("build/bin").join(other)).unwrap();
+                // Even a usable link cannot authorize cleaning its target.
             }
             let cmake_log = tools.cmake.with_file_name("cmake.args");
             let (backend, owner, probes) = backend(root.path(), QuantBackend::LlamaCpp, tools);

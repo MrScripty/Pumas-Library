@@ -125,7 +125,16 @@ caller-owned synchronous readiness calls first. The RPC server includes these
 owners in its shutdown drain. Closed setup admission returns `InstallationCancelled`.
 Direct backend execution, independently requested readiness probes and external
 tools do not participate in managed execution exclusion. Callers must exclude
-these from setup: native repair can clean/rebuild generated CMake outputs.
+these from setup: each admitted llama.cpp setup recipe reconfigures and
+clean-builds both native targets, even when existing binaries look usable.
+The current checkout after clone/update supplies the source; a normal failed
+optional pull warns and uses local source, not necessarily latest upstream.
+No revision cache is trusted: Git HEAD alone misses local edits and build inputs.
+CUDA configuration explicitly follows the compiler check instead of inheriting
+a previous CMake ON value. Generated output directories/symlinks refuse cleaning;
+source and Python environments are not reset. Retained operation observation
+does not run the recipe again. A failed/cancelled setup or later external edits
+can leave usable-looking outputs: readiness is not durable build provenance.
 A completed setup is not proof that a later conversion's route, hardware or
 inputs are ready.
 Each setup operation uses one host blocking worker without nested filesystem work in that pool;

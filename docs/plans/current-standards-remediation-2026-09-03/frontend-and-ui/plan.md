@@ -10,12 +10,14 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Native source/build revision coherence (FE-I26, remaining FE-I23).
+**Next slice:** Native setup failure/interruption invalidation (FE-I26, remaining FE-I23).
+Successful native setup now reconfigures and rebuilds current source below;
+later-use validity after failure or external edits is not yet accepted.
 Retained base-format readiness is accepted below.
 Managed setup-versus-conversion exclusion is accepted below. Backend setup
 observation/retry is accepted through standalone
 Rust, RPC and the optional desktop bridge below. Native llama.cpp artifact verification/guarded repair
-is accepted below; source/build revision coherence remains outside that claim.
+is accepted below; its former healthy-output skip is superseded by NBUILD below.
 Installer custody, setup import verification/repair, direction-specific llama.cpp
 artifacts and public quantization import-probe lifetime are accepted below.
 Independent probe/direct/external-use exclusion and stronger containment remain
@@ -43,6 +45,58 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Native Setup Source And Build Coherence
+
+Status: `Accepted`; see the
+[execution ledger](execution-ledger.md#2026-09-08--native-setup-source-and-build-coherence).
+NBUILD removes the usable-binary shortcut from the llama.cpp
+setup recipe. Every admitted recipe configures and clean-builds both targets
+against the current checkout after clone/update, then checks artifacts and
+Python imports before success. Existing retained setup observation/retry and
+root exclusion remain unchanged. A normal unsuccessful optional pull still
+warns and uses local source; this does not promise the latest upstream revision.
+CUDA configuration is explicitly ON or OFF from the existing compiler check,
+so a previous CMake ON value cannot survive absent-compiler detection.
+
+The build inputs are current checkout contents, existing declared Release/CUDA
+configuration and selected host tools/environment; outputs stay in the existing
+CMake build directory. Setup owns regeneration of those outputs, not deletion
+of source or venv. Both output-entry guards precede CMake cleaning. No cache
+authority currently covers source edits, configuration and tools: a Git HEAD
+receipt would omit material inputs. Therefore an admitted setup rebuilds; this
+is not a timestamp/HEAD cache or a reproducible-build promise. Successful setup
+does not prove provenance after later external edits or failed/cancelled setup.
+Such persistent execution invalidation remains open, not silently accepted.
+
+Exact write set: core `src/conversion/backend_setup.rs` and
+`src/conversion/manager/setup_tests.rs` (root_diagnostics); core README and
+`src/api/conversion.rs`, this plan, its ledger/issues and parent plan (root).
+root_capability provides read-only design/source review. Reports use messages;
+scope changes return to root. Root serializes Cargo, formatting, integration and
+commits. No GUI/generated output, new dependencies, runtime/receipt machinery,
+real installs/builds/models/GPU, live library or unrelated files.
+
+Composed-design review: not-applicable to this local recipe correction; no new
+module, interface, lifecycle or permanent coordination mechanism is introduced.
+Build policy stays in the recipe; command custody and exclusion stay with the
+existing setup runner/lease. The codebase-design deletion check rejected a new
+revision receipt whose policy and persistence would otherwise spread to reads
+and execution without proving all build inputs. Development decision: implement
+the reversible setup-success fix and retain interrupted/external mutation
+provenance as a separately owned FE-I26 prerequisite.
+
+Acceptance NBUILD (satisfied): focused/integration, simulated Linux, automated
+public setup fixtures prove updated-source rebuild despite usable old outputs,
+unchanged-source rebuild, explicit CUDA configuration, no success/Python work
+after configure/build failure, retry and retained cancellation cleanup. Existing
+artifact repair/refusal fixtures remain required. Supporting gates: core/RPC
+default/minimal suites, strict lint, formatting and five canonical plan checks
+passed; counts and commands are in the ledger.
+Controlled tools prove recipe ordering/effects, not real CMake, Git network,
+native ABI/GPU compatibility, release artifacts or Windows/macOS behavior.
+Re-plan if durable provenance, new readiness enforcement, source pinning or
+broader cleaning authority is needed for this setup-success claim.
 
 ## Retained Base-Format Readiness
 
@@ -249,39 +303,13 @@ see ledger for the bounded write-set expansion and evidence limits.
 
 Status: `Accepted`; see the
 [execution ledger](execution-ledger.md#2026-09-08--native-llamacpp-setup-artifacts).
-Continue FE-I26. After checkout update, require a regular
-nonempty converter script. Require both native tools to meet the shared readiness
-artifact rule. If either is unusable, configure and clean-rebuild CMake-owned
-outputs in the existing managed build directory; verify both outputs before
-Python installation or setup success. Healthy tools skip rebuilding. Zero exit
-alone is insufficient. Preserve checkout/venv and unrelated files; do not reset
-source, delete occupied paths or reclone to disguise a failed repair. An unusable
-converter fails clearly and remains available for explicit repair/retry. Before
-cleaning, require both output entries to be missing or regular files: reject
-directories, symlinks and other occupied entries without invoking CMake. Healthy
-symlinked tools may remain usable when no rebuild is required. Stable paths are
-required; this inspection is not custody against concurrent replacement.
-
-Root owns backend_setup.rs, public setup Rustdoc and plan records; agent owns manager/setup_tests.rs
-fixtures and public setup regressions. Root serializes Cargo/fmt/commits. Reuse
-the readiness metadata predicate and existing retained installer runner/lease;
-no new validator, process owner, public/wire types or GUI behavior. Clean-first
-applies only to generated outputs owned by the managed CMake build, not models,
-checkout or Python dependencies. Source/binary revision coherence, effective
-access, ABI/hardware and real upstream build behavior remain outside this claim.
-The existing managed checkout, CMake configuration and compiler discovery remain
-build inputs; no reproducibility or source-revision cache-validity claim is added.
-Callers must keep paths stable and exclude direct backend execution, independent
-probes and external tools from setup. Managed setup-versus-conversion exclusion
-has its own slice above.
-
-Acceptance NATIVE (satisfied): controlled Linux fixtures prove healthy skip,
-repair-triggering missing/empty/nonexecutable native artifacts, clean-build argv,
-post-build rejection despite zero exit, invalid converter/occupied-output preservation, and
-retained failure followed by successful explicit retry. Full default/minimal
-core/RPC tests, strict lint, formatting and five plan contracts support this
-bounded setup contract. No real git/network/build/package/model execution or
-Windows/macOS evidence. Backend-specific setup observation/retry remains next.
+The converter and both native outputs must be usable before Python setup or
+success. Output directories, symlinks and other occupied entries refuse CMake
+cleaning; source/venv and unrelated files are preserved. Stable paths remain
+required. Controlled Linux repair, invalid-artifact refusal, retry and retained
+cleanup evidence is recorded in the ledger, not real upstream build/ABI evidence.
+The former healthy-output skip policy is superseded by
+[Native Setup Source And Build Coherence](#native-setup-source-and-build-coherence).
 
 ## Retained Quantization Readiness Probes
 

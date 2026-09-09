@@ -1,5 +1,59 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Native Setup Source And Build Coherence
+
+Accepted NBUILD. Read-only inspection found that llama.cpp setup pulled source
+before deciding whether to build, but skipped CMake when both old binaries were
+usable. The setup recipe now owns configure/clean-build of both targets for
+every admitted operation, followed by artifact and import verification. It
+explicitly selects CUDA ON/OFF to avoid inheriting a prior cached ON selection.
+The previous healthy-output skip policy from NATIVE is superseded; guarded
+output cleaning, retained command custody and managed root exclusion remain.
+
+Root and root_capability bounded the decision before implementation. A HEAD
+receipt would omit working-tree edits, configuration and toolchain facts and
+would add persistence/read/execution obligations without adequate cache
+authority. The codebase-design skill therefore kept build policy in the existing
+recipe, with no new module, cache, runtime or public interface. Rebuilding is
+owned by explicit setup admission, not every status read or retained receipt
+observation. It can cost more than the old shortcut but cannot treat an old
+usable binary as evidence of rebuilding updated source.
+
+This is a setup-success guarantee under stable paths and cooperating tools,
+not persistent provenance after failed/cancelled setup or external changes.
+Normal unsuccessful optional pull still warns and builds local source; no latest
+upstream, pinned revision or reproducibility claim. FE-I26 retains interrupted
+setup/external mutation invalidation, independent probe/direct-use coordination
+and real tool/hardware prerequisites before new GUI mutations.
+
+root_diagnostics owns recipe and public setup fixtures; root owns docs, serial
+Cargo/formatting and acceptance. root_capability supplied read-only design and
+production/docs review with no blockers. Three new public setup tests cover
+updated/unchanged source with usable outputs, configure/build failure followed
+by retry, and dropped build/shutdown waiters with observed child/group cleanup
+before Cancelled. The existing artifact matrix now requires rebuilding healthy
+outputs too; the occupied-symlink case refuses cleaning even when the other tool
+is healthy. The shared fixture writer uses an awaited child to avoid writable
+executable descriptors inherited by parallel test forks. It does not introduce
+production spawn retries.
+
+Focused conversion tests passed 113/113 using `cargo test --offline --locked
+-p pumas-library --no-default-features conversion::` from `rust/`.
+Full core/RPC suites passed: 1,479 default and 1,439 minimal tests, each with
+22 ignored and no failures. Both strict lint configurations, formatting and all
+five canonical plan checks passed. The existing unrelated FE-I28 download timeout
+remains open; these passing runs do not establish its cause or fix.
+Full tests: `cargo test --offline --locked -p pumas-library -p pumas-rpc`, with
+and without `--no-default-features`. Strict lint: `cargo clippy --offline --locked
+-p pumas-library -p pumas-rpc --all-targets` with `--all-features` or
+`--no-default-features`, each followed by `-- -D warnings`.
+Formatting: `cargo fmt --all --check`.
+Logs: `/tmp/pumas-native-build-*.log`. No actual package installation, upstream clone/build,
+model/GPU, live library, graphical workflow or Windows/macOS evidence is claimed.
+Program acceptance remains partial. Next slice: native setup failure/interruption
+invalidation before managed use, while later external mutation provenance remains
+separate outstanding work.
+
 ## 2026-09-08 — Retained Base-Format Readiness
 
 Accepted BPROBE. Base Python readiness now uses the same retained ProbeOwner

@@ -291,61 +291,61 @@ fn llama_cpp(base: &Path, cancel: &CancellationToken, programs: &Programs) -> Ou
     let build = base.join("build");
     let quantizer = build.join("bin/llama-quantize");
     let imatrix = build.join("bin/llama-imatrix");
-    let quantizer_ready = artifact_ready(&quantizer, true)?;
-    let imatrix_ready = artifact_ready(&imatrix, true)?;
-    if !quantizer_ready || !imatrix_ready {
-        // CMake's clean target may recursively remove an output path. Never
-        // authorize that for a directory, symlink or other unexpected entry.
-        require_rebuildable_output(&quantizer)?;
-        require_rebuildable_output(&imatrix)?;
-        check_cancel(cancel)?;
-        fs::create_dir_all(&build)
-            .map_err(|error| failed("Creating llama.cpp build directory", error))?;
-        let has_cuda = match run_command(
-            Command::new(&programs.nvcc).arg("--version"),
-            cancel,
-            COMMAND_TIMEOUT,
-        ) {
-            // Preserve existing detection semantics: any observed nvcc exit
-            // indicates an installed compiler, independently of its exit code.
-            Ok(_) => true,
-            Err(Failure::CommandNotFound(_)) => false,
-            Err(Failure::Cancelled) => return Err(Failure::Cancelled),
-            Err(error) => return Err(failed("Detecting CUDA compiler", format!("{error:?}"))),
-        };
-        let mut configure = Command::new(&programs.cmake);
-        configure
-            .arg(format!("-B{}", build.display()))
-            .arg(format!("-S{}", source.display()))
-            .arg("-DCMAKE_BUILD_TYPE=Release");
-        if has_cuda {
-            configure.arg("-DGGML_CUDA=ON");
-        }
-        required(&mut configure, "Configuring llama.cpp build", cancel)?;
-        let parallelism = std::thread::available_parallelism()
-            .map(|count| count.get().to_string())
-            .unwrap_or_else(|_| "4".into());
-        required(
-            Command::new(&programs.cmake)
-                .arg("--build")
-                .arg(&build)
-                .args([
-                    // Invalid output can otherwise appear up-to-date to CMake.
-                    // Rebuild generated outputs, never reset the source/venv.
-                    "--clean-first",
-                    "--config",
-                    "Release",
-                    "-j",
-                    &parallelism,
-                    "--target",
-                    "llama-quantize",
-                    "--target",
-                    "llama-imatrix",
-                ]),
-            "Building llama.cpp",
-            cancel,
-        )?;
+    // Existing artifacts do not establish that current source, configuration,
+    // or toolchain inputs have been built. Every setup verifies a fresh build.
+    // CMake's clean target may recursively remove an output path. Never
+    // authorize that for a directory, symlink or other unexpected entry.
+    require_rebuildable_output(&quantizer)?;
+    require_rebuildable_output(&imatrix)?;
+    check_cancel(cancel)?;
+    fs::create_dir_all(&build)
+        .map_err(|error| failed("Creating llama.cpp build directory", error))?;
+    let has_cuda = match run_command(
+        Command::new(&programs.nvcc).arg("--version"),
+        cancel,
+        COMMAND_TIMEOUT,
+    ) {
+        // Preserve existing detection semantics: any observed nvcc exit
+        // indicates an installed compiler, independently of its exit code.
+        Ok(_) => true,
+        Err(Failure::CommandNotFound(_)) => false,
+        Err(Failure::Cancelled) => return Err(Failure::Cancelled),
+        Err(error) => return Err(failed("Detecting CUDA compiler", format!("{error:?}"))),
+    };
+    let mut configure = Command::new(&programs.cmake);
+    configure
+        .arg(format!("-B{}", build.display()))
+        .arg(format!("-S{}", source.display()))
+        .arg("-DCMAKE_BUILD_TYPE=Release");
+    if has_cuda {
+        configure.arg("-DGGML_CUDA=ON");
+    } else {
+        configure.arg("-DGGML_CUDA=OFF");
     }
+    required(&mut configure, "Configuring llama.cpp build", cancel)?;
+    let parallelism = std::thread::available_parallelism()
+        .map(|count| count.get().to_string())
+        .unwrap_or_else(|_| "4".into());
+    required(
+        Command::new(&programs.cmake)
+            .arg("--build")
+            .arg(&build)
+            .args([
+                // Rebuild generated outputs from current inputs, never
+                // reset the source checkout or virtual environment.
+                "--clean-first",
+                "--config",
+                "Release",
+                "-j",
+                &parallelism,
+                "--target",
+                "llama-quantize",
+                "--target",
+                "llama-imatrix",
+            ]),
+        "Building llama.cpp",
+        cancel,
+    )?;
     require_artifact(&quantizer, true)?;
     require_artifact(&imatrix, true)?;
     ensure_python(

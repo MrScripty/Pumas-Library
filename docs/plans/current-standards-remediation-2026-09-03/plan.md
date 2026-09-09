@@ -294,8 +294,11 @@ RPC/preload/typed-consumer evidence.
 [Managed setup-versus-conversion exclusion](frontend-and-ui/plan.md#managed-setup-and-conversion-exclusion)
 is accepted through retained cleanup/publication/indexing within a stable root.
 [Retained base-format readiness](frontend-and-ui/plan.md#retained-base-format-readiness)
-is accepted with explicit probe failures and aggregate shutdown. Native source/build
-revision coherence is next; independent probes, direct backend calls
+is accepted with explicit probe failures and aggregate shutdown.
+[Native setup source/build coherence](frontend-and-ui/plan.md#native-setup-source-and-build-coherence)
+is accepted for the successful-setup path. Native setup failure/interruption
+invalidation is next; later external mutation provenance remains open.
+Independent probes, direct backend calls
 and external tools still need caller coordination. FE-I28 records an unrelated
 download-fixture timeout discovered during verification, not a diagnosed fix.
 Stronger containment and remaining preflight remain prerequisites before GUI configuration

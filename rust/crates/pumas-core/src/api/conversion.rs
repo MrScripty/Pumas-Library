@@ -96,7 +96,7 @@ impl PumasApi {
     /// Setup excludes managed conversions at the same stable root; contention
     /// fails the setup operation without automatic retry. Callers must still
     /// exclude direct backend execution, independent probes and external tools:
-    /// native repair may clean/rebuild generated outputs.
+    /// each admitted llama.cpp recipe reconfigures and clean-builds both targets.
     /// Dropped callers do not cancel setup; drain `shutdown_conversion_setup`
     /// before stopping the runtime. Closed admission returns `InstallationCancelled`.
     /// See [`conversion::ConversionManager::start_backend_setup`] for the contract.
@@ -156,7 +156,9 @@ impl PumasApi {
     /// Ensure a specific quantization backend's environment is set up.
     /// Setup and managed conversions share root-level exclusion. Callers must
     /// exclude direct backend execution, independent probes and external tools:
-    /// native repair may clean/rebuild generated CMake outputs.
+    /// each admitted llama.cpp recipe reconfigures and clean-builds both targets.
+    /// Retained observation does not rebuild; readiness is not build provenance
+    /// after failed setup or subsequent external source changes.
     /// Dropping this waiter does not release installer ownership; use
     /// `shutdown_conversion_setup` before stopping the host runtime.
     pub async fn ensure_backend_environment(

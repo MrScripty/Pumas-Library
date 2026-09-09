@@ -1,7 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APIError } from '../errors';
-import type { RuntimeInstallationProgress } from '../generated/desktop-contract';
+import type { InstallVersionOutcome, RuntimeInstallationProgress } from '../generated/desktop-contract';
 import type { InstallationProgress, VersionRelease } from '../types/versions';
 
 const {
@@ -21,7 +21,7 @@ const {
   getInstallationProgressMock: vi.fn<(
     _appId: string
   ) => Promise<InstallationProgress | RuntimeInstallationProgress | null>>(),
-  installVersionApiMock: vi.fn<(_tag: string, _appId: string) => Promise<{ success: boolean; error?: string }>>(),
+  installVersionApiMock: vi.fn<(_tag: string, _appId: string) => Promise<InstallVersionOutcome>>(),
   isApiAvailableMock: vi.fn<() => boolean>(),
   openActiveInstallMock: vi.fn<() => Promise<boolean>>(),
   openPathMock: vi.fn<(_path: string) => Promise<boolean>>(),
@@ -147,7 +147,7 @@ describe('useInstallationManager', () => {
       networkStatus: 'downloading',
     }));
     cancelInstallationApiMock.mockResolvedValue({ success: true });
-    installVersionApiMock.mockResolvedValue({ success: true });
+    installVersionApiMock.mockResolvedValue({ success: true, message: 'Installation of v1.2.3 started' });
     switchVersionApiMock.mockResolvedValue({ success: true });
     removeVersionApiMock.mockResolvedValue({ success: true });
   });
@@ -184,7 +184,7 @@ describe('useInstallationManager', () => {
   });
 
   it('starts polling a requested install only after the backend accepts its lifecycle', async () => {
-    const installAdmission = deferred<{ success: boolean; error?: string }>();
+    const installAdmission = deferred<InstallVersionOutcome>();
     installVersionApiMock.mockReturnValue(installAdmission.promise);
     getInstallationProgressMock.mockResolvedValue(activeProgress);
 
@@ -203,7 +203,7 @@ describe('useInstallationManager', () => {
     expect(getInstallationProgressMock).not.toHaveBeenCalled();
 
     await act(async () => {
-      installAdmission.resolve({ success: true });
+      installAdmission.resolve({ success: true, message: 'Installation of v1.2.3 started' });
       await installation;
       await Promise.resolve();
     });

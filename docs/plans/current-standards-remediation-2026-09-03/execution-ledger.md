@@ -1,5 +1,17 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-09 — Runtime Installation-Start Contract
+
+The frontend plan accepts one generated `install_version` request and exact
+started/failed outcome across standalone RPC, preload, Electron main and the
+actual hook. True means a worker was spawned, not that installation completed;
+polling starts only after validated admission and failed/malformed replies do not
+retry. FE-I39 and FE-I40 retain manager custody and uncertain-start observation
+risks. See the [frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-09--runtime-installation-start-contract)
+for verification, review and cost evidence. No live release lookup or installation
+ran. This does not close M4 or the remediation program. Next: runtime dependency-
+check response validation.
+
 ## 2026-09-09 — Default Runtime-Version Selection Response Contract
 
 The frontend plan accepts one generated `set_default_version` request/response

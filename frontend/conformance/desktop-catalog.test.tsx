@@ -63,6 +63,7 @@ function installActualPreload(
   removalResult: () => unknown = () => fixture['remove_version_true'],
   switchResult: () => unknown = () => fixture['switch_version_true'],
   defaultResult: () => unknown = () => fixture['set_default_version_true'],
+  installResult: () => unknown = () => fixture['install_version_started'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -97,6 +98,7 @@ function installActualPreload(
         if (method === 'remove_version') return removalResult();
         if (method === 'switch_version') return switchResult();
         if (method === 'set_default_version') return defaultResult();
+        if (method === 'install_version') return installResult();
         if (method === 'get_installed_versions') return installedVersions();
         if (method === 'get_active_version' || method === 'get_default_version') return selectedVersion();
         if (method === 'get_inference_settings') return inferenceRead;
@@ -192,6 +194,48 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('starts installation polling only after a validated producer confirmation', async () => {
+    let response: unknown = fixture['install_version_started'];
+    const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, () => {
+        if (response instanceof Error) throw response;
+        return response;
+      });
+    const onRefreshVersions = vi.fn();
+    const { result } = renderHook(() => useInstallationManager({
+      appId: 'ollama', availableVersions: [], onRefreshVersions,
+    }));
+
+    await act(async () => {
+      await expect(result.current.installVersion('fixture-version')).resolves.toBe(true);
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(requests.filter(request => request.method === 'get_installation_progress')).toHaveLength(1);
+    response = fixture['install_version_no_manager'];
+    await act(async () => {
+      await expect(result.current.installVersion('fixture-version')).rejects.toMatchObject({
+        name: 'APIError', endpoint: 'install_version',
+        message: 'Version manager not initialized for app: unregistered-runtime',
+      });
+    });
+    response = { success: true };
+    await act(async () => {
+      await expect(result.current.installVersion('fixture-version')).rejects.toMatchObject({
+        name: 'DesktopContractError',
+      });
+    });
+    response = new Error('transport unavailable');
+    await act(async () => {
+      await expect(result.current.installVersion('fixture-version')).rejects.toThrow('transport unavailable');
+    });
+    expect(requests.filter(request => request.method === 'install_version')).toHaveLength(4);
+    expect(requests.filter(request => request.method === 'get_installation_progress')).toHaveLength(1);
+    expect(onRefreshVersions).not.toHaveBeenCalled();
+    expect(result.current.installingTag).toBeNull();
+  });
+
   it('validates default selection before applying actual hook state without retry', async () => {
     let response: unknown = fixture['set_default_version_true'];
     const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined,

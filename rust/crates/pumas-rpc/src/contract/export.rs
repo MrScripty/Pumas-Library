@@ -492,6 +492,23 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         };
         serde_json::json!({"method":"set_default_version","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
     }).collect();
+    fixtures["install_version_started"] =
+        serde_json::to_value(InstallVersionOutcome::started("fixture-version"))?;
+    fixtures["install_version_failed"] =
+        serde_json::to_value(InstallVersionOutcome::failed(&PumasError::Config {
+            message: "private diagnostic".into(),
+        }))?;
+    fixtures["install_version_no_manager"] = serde_json::to_value(
+        InstallVersionOutcome::missing_manager("unregistered-runtime"),
+    )?;
+    fixtures["install_version_request_probes"] = install_version_requests().into_iter().map(|(params, _)| {
+        let parsed = parse_params::<InstallVersionParams>(Some(&params));
+        let normalized = match &parsed {
+            Ok(value) => serde_json::json!({"app_id":value.app_id,"tag":value.tag}),
+            Err(_) => Value::Null,
+        };
+        serde_json::json!({"method":"install_version","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
+    }).collect();
     fixtures["validate_installations_populated"] =
         serde_json::to_value(validate_installations_fixture())?;
     fixtures["installation_progress_populated"] = serde_json::to_value(
@@ -614,6 +631,8 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         SwitchVersionOutcome,
         SetDefaultVersionOutcome,
         SetDefaultVersionParams,
+        InstallVersionParams,
+        InstallVersionOutcome,
     );
     Ok(serde_json::json!({
         "format": "pumas-desktop-contract-1",
@@ -659,7 +678,7 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
 // These named wire refinements project existing constructor invariants, not
 // authorization. The generator owns their executable TypeScript projection.
 fn refine_named(name: &str, schema: &mut Value) {
-    if name == "SetDefaultVersionParams" {
+    if matches!(name, "SetDefaultVersionParams" | "InstallVersionParams") {
         let mut canonical = schema.clone();
         let object = canonical.as_object_mut().expect("request object schema");
         object.remove("$schema");
@@ -671,7 +690,11 @@ fn refine_named(name: &str, schema: &mut Value) {
             .remove("app_id")
             .unwrap();
         alias["properties"]["appId"] = property;
-        alias["required"] = serde_json::json!(["appId"]);
+        for required in alias["required"].as_array_mut().unwrap() {
+            if required == "app_id" {
+                *required = "appId".into();
+            }
+        }
         *schema = serde_json::json!({"anyOf":[canonical, alias]});
         return;
     }
@@ -1050,7 +1073,8 @@ fn refine_named(name: &str, schema: &mut Value) {
             _ => {}
         }
         let success = match name {
-            "ModelsOutcome"
+            "InstallVersionStarted"
+            | "ModelsOutcome"
             | "CatalogSearchOutcome"
             | "DownloadListOutcome"
             | "DownloadStartedSuccess"
@@ -1067,7 +1091,8 @@ fn refine_named(name: &str, schema: &mut Value) {
             | "LibraryModelMetadataOutcome"
             | "LibraryModelMetadataResponse"
             | "ModelIndexRefreshOutcome" => Some(true),
-            "DownloadStartedFailure"
+            "InstallVersionFailed"
+            | "DownloadStartedFailure"
             | "DownloadStatusMissingOutcome"
             | "HfDownloadDetailsFailure"
             | "UpdateModelNotesFailure"

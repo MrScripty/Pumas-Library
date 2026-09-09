@@ -10,6 +10,25 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('installation-start admission and discriminated outcomes match Rust', () => {
+  for (const probe of fixtures.install_version_request_probes) {
+    const result = contract.decodeInstallVersionParams(probe.params);
+    assert.equal(result.status, probe.accepted ? 'valid' : 'invalid', JSON.stringify(probe));
+    if (probe.accepted) assert.deepEqual(JSON.parse(JSON.stringify(result.value)), probe.params);
+  }
+  for (const key of ['install_version_started', 'install_version_failed', 'install_version_no_manager']) {
+    const result = contract.decodeInstallVersionOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  for (const value of [null, true, false, {}, {success:true}, {success:false},
+    {success:true,error:'wrong'}, {success:false,message:'wrong'},
+    {success:'true',message:'started'}, {success:true,message:42},
+    {success:false,error:42}, {success:true,message:'started',result:true}]) {
+    assert.equal(contract.decodeInstallVersionOutcome(value).status, 'invalid', JSON.stringify(value));
+  }
+});
+
 test('default-selection request admission matches Rust and response preserves exact booleans', () => {
   for (const probe of fixtures.set_default_version_request_probes) {
     const result = contract.decodeSetDefaultVersionParams(probe.params);

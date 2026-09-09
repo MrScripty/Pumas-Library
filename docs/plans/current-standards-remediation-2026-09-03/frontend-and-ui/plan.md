@@ -10,11 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound runtime installation-start responses (M4): inventory the
-structured `install_version` producer, admission and worker-start boundary plus
-the actual frontend consumer before selecting a projection. Preserve optional
-inference-plugin builds, standalone backend operation and existing error behavior;
-do not install a live runtime.
+**Next slice:** Bound runtime dependency-check responses (M4): inventory the
+`check_version_dependencies` producer, existing wrapper and actual consumer before
+selecting a projection. Preserve optional inference-plugin builds, standalone
+backend operation and existing error behavior; do not install dependencies.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -69,6 +68,46 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Runtime Installation-Start Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-09--runtime-installation-start-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Project `install_version` through one generated request and discriminated outcome.
+The request requires exact string tag and app identity, accepts the existing
+`app_id`/`appId` aliases and rejects missing, null, wrong-type, unknown and
+ambiguous fields before manager lookup. Empty, whitespace and Unicode strings
+retain standalone Rust admission; this slice adds no tag normalization,
+containment policy or app allowlist. Electron main and preload use the same
+generated admission instead of the prior contradictory optional-app/nonempty-tag
+schema.
+
+The exact outcomes are `{success:true,message:string}` and
+`{success:false,error:string}`. Preserve the current start message, sanitized
+domain-error text and explicit missing-manager failure. The existing wrapper
+passes both records through unchanged. A true outcome means release lookup
+completed and a detached worker was spawned; it does not mean download,
+installation, metadata refresh, readiness or completion succeeded.
+
+The hook starts optimistic lifecycle state before awaiting admission and begins
+serialized progress polling only after a validated true outcome. False,
+malformed or transport failures clear that local lifecycle and do not poll,
+refresh or retry the start request. Because a response can be lost or malformed
+after the worker starts, rejection does not prove no backend work exists. Terminal
+facts remain owned by the separately accepted progress contract. FE-I39 records
+the manager's shared-state/worker-custody risks and FE-I40 records uncertain-start
+observation behavior. FE-I41 separately owns tag-derived filesystem containment;
+this slice changes none of those algorithms.
+
+Acceptance: exact legacy pass-through parity, strict request corpus through Rust,
+generated decoder and Electron main, actual missing-manager/no-plugin RPC behavior,
+producer fixtures, bundled preload and actual-hook conformance with exact call
+counts, focused hook tests, frontend/Electron builds and lint, generator freshness,
+Rust static/toolchain and canonical-plan checks. Serialization and unregistered-
+manager fixtures only; no live release lookup, network access or runtime install.
+Concurrency, panic, stale-cleanup, cancellation interference, filesystem
+containment, graphical and other-OS behavior remain outside this evidence.
 
 ## Default Runtime-Version Selection Response Contract
 

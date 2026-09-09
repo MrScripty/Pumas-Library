@@ -1,6 +1,7 @@
 import type { OpenDialogOptions } from 'electron';
 import {
   decodeGetBackendSetupParams,
+  decodeInstallVersionParams,
   decodeSetDefaultVersionParams,
   decodeStartBackendSetupParams,
 } from './generated/desktop-contract';
@@ -51,13 +52,16 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
   if (
     method === 'start_backend_setup'
     || method === 'get_backend_setup'
+    || method === 'install_version'
     || method === 'set_default_version'
   ) {
     const decoded = method === 'start_backend_setup'
       ? decodeStartBackendSetupParams(rawParams)
       : method === 'get_backend_setup'
         ? decodeGetBackendSetupParams(rawParams)
-        : decodeSetDefaultVersionParams(rawParams);
+        : method === 'install_version'
+          ? decodeInstallVersionParams(rawParams)
+          : decodeSetDefaultVersionParams(rawParams);
     if (decoded.status !== 'valid') {
       throw new Error(`Invalid API params for method: ${method}`);
     }

@@ -126,17 +126,27 @@ test('default selection IPC uses the generated request contract', () => {
   }
 });
 
+test('installation-start IPC uses the generated request contract', () => {
+  for (const appKey of ['app_id', 'appId']) {
+    for (const value of ['', ' \n\t ', ' runtime λ ']) {
+      const params = { [appKey]: value, tag: value };
+      const decoded = validateApiCallPayload('install_version', params);
+      assert.deepEqual(JSON.parse(JSON.stringify(decoded.params)), params);
+      assert.notEqual(decoded.params, params);
+      assert.ok(Object.isFrozen(decoded.params));
+    }
+  }
+  for (const params of [undefined, null, {}, [], true, 42, 'runtime', { tag: 'v1' },
+    { app_id: 'runtime' }, { app_id: null, tag: 'v1' }, { app_id: 42, tag: 'v1' },
+    { app_id: 'runtime', tag: null }, { app_id: 'runtime', tag: true },
+    { app_id: 'runtime', tag: [] }, { app_id: 'runtime', tag: {} },
+    { app_id: 'runtime', tag: 'v1', extra: true },
+    { app_id: 'a', appId: 'a', tag: 'v1' }]) {
+    assert.throws(() => validateApiCallPayload('install_version', params), /Invalid API params/);
+  }
+});
+
 test('validateApiCallPayload enforces method request schemas', () => {
-  assert.deepEqual(validateApiCallPayload('install_version', {
-    tag: 'v1.2.3',
-    app_id: 'ollama',
-  }), {
-    method: 'install_version',
-    params: {
-      tag: 'v1.2.3',
-      app_id: 'ollama',
-    },
-  });
   assert.deepEqual(validateApiCallPayload('call_plugin_endpoint', {
     app_id: 'ollama',
     endpoint_name: 'loadModel',
@@ -190,14 +200,6 @@ test('validateApiCallPayload enforces method request schemas', () => {
     },
   });
 
-  assert.throws(
-    () => validateApiCallPayload('install_version', { app_id: 'ollama' }),
-    /Missing required API param/
-  );
-  assert.throws(
-    () => validateApiCallPayload('install_version', { tag: '' }),
-    /Invalid API param/
-  );
   assert.throws(
     () => validateApiCallPayload('get_installed_versions', { app_id: 42 }),
     /Invalid API param/

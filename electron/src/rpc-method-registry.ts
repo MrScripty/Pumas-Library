@@ -247,7 +247,6 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
   validate_installations: OPTIONAL_APP_ID_SCHEMA,
   get_github_cache_status: OPTIONAL_APP_ID_SCHEMA,
   open_active_install: OPTIONAL_APP_ID_SCHEMA,
-  install_version: REQUIRED_TAG_OPTIONAL_APP_ID_SCHEMA,
   remove_version: REQUIRED_TAG_OPTIONAL_APP_ID_SCHEMA,
   switch_version: REQUIRED_TAG_OPTIONAL_APP_ID_SCHEMA,
   get_version_info: REQUIRED_TAG_OPTIONAL_APP_ID_SCHEMA,

@@ -121,6 +121,14 @@ items are preserved; malformed reads keep the last progress, mark network state
 failed and continue scheduled polling without repeating the installation
 mutation. A null no-manager/no-progress result does not establish availability.
 
+Runtime installation start validates one generated request and the backend's
+exact discriminated started/failed records. A successful start means release
+lookup completed and a detached worker was spawned; installation completion is
+still established only by progress polling. False, malformed and transport
+failures do not start polling, refresh versions or retry the mutation. An
+uncertain response is not proof that no worker started. The backend's shared
+installation state and detached-worker lifecycle remain documented limitations.
+
 Runtime installation cancellation validates the backend's exact success boolean.
 Success means a cooperative cancellation request was accepted, not that the
 worker has stopped. False confirmations remain visible failures; malformed

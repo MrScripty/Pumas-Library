@@ -11,6 +11,31 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('installation start validates exact requests and discriminated outcomes without retry', async () => {
+  const harness = loadCompiledPreload();
+  for (const tag of [null, false, 42, [], {}]) {
+    const before = harness.invocations.length;
+    assert.throws(() => harness.api.install_version(tag, 'ollama'), { name: 'DesktopContractError' });
+    assert.equal(harness.invocations.length, before);
+  }
+  for (const [tag, response] of [
+    [' exact λ ', { success: true, message: 'Installation of  exact λ  started' }],
+    ['', { success: false, error: 'Version manager not initialized for app: ollama' }],
+  ]) {
+    harness.respondWith(response);
+    assert.deepEqual(toPlainValue(await harness.api.install_version(tag, 'ollama')), response);
+    assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]), { tag, app_id: 'ollama' });
+  }
+  for (const response of [null, true, false, {}, { success: true }, { success: false },
+    { success: true, error: 'wrong branch' }, { success: false, message: 'wrong branch' },
+    { success: 'true', message: 'started' }, { success: true, message: 42 },
+    { success: false, error: 42 }, { success: true, message: 'started', result: true }]) {
+    harness.respondWith(response);
+    await assert.rejects(harness.api.install_version('v1', 'ollama'), { name: 'DesktopContractError' });
+  }
+  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'install_version').length, 14);
+});
+
 test('default selection validates nullable requests and exact confirmations without retry', async () => {
   const harness = loadCompiledPreload();
   for (const tag of [false, 42, [], {}]) {

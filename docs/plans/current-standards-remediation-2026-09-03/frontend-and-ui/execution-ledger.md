@@ -1,5 +1,59 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-09 — Runtime Installation-Start Contract
+
+Accepted `install_version` as one generated request and exact discriminated
+started/failed outcome across standalone Rust RPC, preload, Electron main and the
+actual hook. Required exact string tag and app identity retain the existing
+snake/camel app aliases and empty/whitespace/Unicode strings. Missing, null,
+wrong-type, unknown and ambiguous fields reject before manager lookup. Electron's
+contradictory optional-app/nonempty-tag handwritten schema was removed.
+
+Started remains exactly `{success:true,message:string}`; manager/domain and
+missing-manager failure remain exactly `{success:false,error:string}` with current
+sanitization and wording. The legacy wrapper passes both records through. True
+means release lookup completed and a detached installation worker was spawned.
+It does not establish download, extraction, metadata refresh, installation,
+readiness or terminal success.
+
+The hook starts optimistic state before admission but performs no progress read
+until a validated true response. Explicit false, malformed and transport failure
+clear the current lifecycle, perform no progress read or version refresh and do
+not retry the mutation. An uncertain response can follow worker spawn and is not
+proof that no backend work exists. FE-I39 records shared admission/cancellation/
+tracker state and unretained worker custody; FE-I40 records uncertain-start
+observation; FE-I41 separately records tag-derived path containment.
+
+Evidence: three focused RPC tests pass in default and no-default feature modes.
+Thirty-four generated-decoder tests and 43 actual renderer conformance tests pass.
+Forty-five of 46 combined main-IPC/bundled-preload tests pass, with the existing
+real-Electron sandbox test skipped. Nineteen focused hook tests, TypeScript,
+affected lint, Electron and both frontend builds, seven generator tests/freshness,
+strict RPC Clippy in both feature modes, formatting, canonical-plan and diff
+checks pass. Fixtures use unregistered managers and serialization only; no live
+release lookup, network access or runtime installation occurred.
+
+Astra medium owned the contract decision and independent review; Luna max
+inventoried the operation; Astra low implemented the settled Rust contract. Review
+found no code blocker and requested the added transport-failure hook evidence.
+During integration, conformance exposed an alias schema refinement that had
+dropped the required tag and strict Clippy caught one needless borrow; both were
+repaired and their deciding gates rerun. The codebase-design guidance kept request
+admission and outcome discrimination behind one generated interface. Spark is not
+an available collaboration model. Next: independently inventory and validate
+`check_version_dependencies`; M4 and overall remediation remain incomplete.
+
+Deduplicated local `token_usage_record` accounting carries only records after the
+prior default-selection checkpoint plus this slice: root Sol low `$5.2142`, Luna
+max `$0.1862`, Astra low `$0.9961`, and Astra medium `$2.2646`; subtotal `$8.6611`
+standard API-equivalent or `$17.3223` under the separate 2x priority scenario.
+Added to the prior recorded `$33.6075` checkpoint, the cumulative estimate is
+`$42.2686` standard / `$84.5372` priority scenario. No request crossed 272,000
+input tokens and cache writes were zero. Requested and observed service tiers were
+not recorded. Actual invoices and shared tool fees remain unknown, not free or
+arbitrarily allocated. Different task classes are not a controlled benchmark and
+routing conclusions remain provisional.
+
 ## 2026-09-09 — Default Runtime-Version Selection Response Contract
 
 Accepted `set_default_version` as one generated request/response contract across

@@ -197,6 +197,11 @@ pub(crate) struct RpcAdmissionError {
 /// names become method-not-found without reaching a domain handler.
 pub(crate) enum RpcCommand {
     #[cfg(feature = "inference-plugins")]
+    InstallVersion {
+        app_id: String,
+        tag: String,
+    },
+    #[cfg(feature = "inference-plugins")]
     SetDefaultVersion {
         app_id: String,
         tag: Option<String>,
@@ -340,6 +345,8 @@ impl RpcCommand {
         match self {
             #[cfg(feature = "inference-plugins")]
             Self::SetDefaultVersion { .. } => "set_default_version",
+            #[cfg(feature = "inference-plugins")]
+            Self::InstallVersion { .. } => "install_version",
             Self::HealthCheck => "health_check",
             Self::Shutdown => "shutdown",
             Self::GetStatus => "get_status",
@@ -456,6 +463,8 @@ pub(crate) enum RpcOutcome {
     SwitchVersion(SwitchVersionOutcome),
     #[cfg(feature = "inference-plugins")]
     SetDefaultVersion(SetDefaultVersionOutcome),
+    #[cfg(feature = "inference-plugins")]
+    InstallVersion(InstallVersionOutcome),
     HfTokenMutation(SuccessOutcome),
     HfAuth(Box<HfAuthOutcome>),
     LinkHealth(Box<LinkHealthOutcome>),
@@ -540,6 +549,8 @@ impl RpcOutcome {
             Self::SwitchVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::SetDefaultVersion(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::InstallVersion(value) => serde_json::to_value(value),
             Self::HfTokenMutation(value) => serde_json::to_value(value),
             Self::HfAuth(value) => serde_json::to_value(value),
             Self::LinkHealth(value) => serde_json::to_value(value),
@@ -3520,6 +3531,157 @@ fn invalid_domain_outcome(name: &str) -> PumasError {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct InstallVersionParams {
+    #[serde(alias = "appId")]
+    app_id: String,
+    tag: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(untagged)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum InstallVersionOutcome {
+    Started(InstallVersionStarted),
+    Failed(InstallVersionFailed),
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct InstallVersionStarted {
+    success: bool,
+    message: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct InstallVersionFailed {
+    success: bool,
+    error: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl InstallVersionOutcome {
+    pub(crate) fn started(tag: &str) -> Self {
+        Self::Started(InstallVersionStarted {
+            success: true,
+            message: format!("Installation of {} started", tag),
+        })
+    }
+    pub(crate) fn failed(error: &PumasError) -> Self {
+        Self::Failed(InstallVersionFailed {
+            success: false,
+            error: PublicError::from(error).message.into(),
+        })
+    }
+    pub(crate) fn missing_manager(app_id: &str) -> Self {
+        Self::Failed(InstallVersionFailed {
+            success: false,
+            error: format!("Version manager not initialized for app: {}", app_id),
+        })
+    }
+}
+
+#[cfg(any(test, feature = "export-contract"))]
+pub(crate) fn install_version_requests() -> Vec<(Value, bool)> {
+    use serde_json::json;
+    let mut cases = vec![];
+    for key in ["app_id", "appId"] {
+        for value in ["", " \n\t ", " runtime λ "] {
+            cases.push((json!({key:value, "tag":value}), true));
+        }
+        for invalid in [Value::Null, json!(true), json!(42), json!([]), json!({})] {
+            cases.push((json!({key:"runtime", "tag":invalid}), false));
+            cases.push((json!({key:invalid, "tag":"v1"}), false));
+        }
+        cases.push((json!({key:"runtime"}), false));
+        cases.push((json!({key:"runtime", "tag":"v1", "extra":true}), false));
+    }
+    cases.extend([
+        (json!({}), false),
+        (Value::Null, false),
+        (json!([]), false),
+        (json!(true), false),
+        (json!(42), false),
+        (json!("runtime"), false),
+        (json!({"tag":"v1"}), false),
+        (json!({"app_id":"a", "appId":"a", "tag":"v1"}), false),
+        (json!({"app_id":"a", "appId":"b", "tag":"v1"}), false),
+    ]);
+    cases
+}
+
+#[cfg(test)]
+mod install_version_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn install_version_request_corpus_preserves_exact_values() {
+        for (params, accepted) in install_version_requests() {
+            let parsed = parse_params::<InstallVersionParams>(Some(&params));
+            assert_eq!(parsed.is_ok(), accepted, "{params}");
+            if let Ok(parsed) = parsed {
+                assert_eq!(
+                    parsed.app_id,
+                    params
+                        .get("app_id")
+                        .or_else(|| params.get("appId"))
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                );
+                assert_eq!(parsed.tag, params["tag"].as_str().unwrap());
+            }
+            let command = parse_command("install_version", Some(&params));
+            #[cfg(feature = "inference-plugins")]
+            assert_eq!(command.is_ok(), accepted, "{params}");
+            #[cfg(not(feature = "inference-plugins"))]
+            assert_eq!(command.err().unwrap().code, -32601);
+        }
+        assert!(parse_params::<InstallVersionParams>(None).is_err());
+    }
+
+    #[test]
+    fn install_version_exact_serialization_and_wrapper_parity() {
+        for (outcome, expected) in [
+            (
+                InstallVersionOutcome::started(" vλ "),
+                json!({"success":true,"message":"Installation of  vλ  started"}),
+            ),
+            (
+                InstallVersionOutcome::missing_manager(" λ "),
+                json!({"success":false,"error":"Version manager not initialized for app:  λ "}),
+            ),
+            (
+                InstallVersionOutcome::failed(&PumasError::Config {
+                    message: "secret /private/path https://token@example.com".into(),
+                }),
+                json!({"success":false,"error":"A required operation is currently unavailable."}),
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&outcome).unwrap(), expected);
+            assert_eq!(
+                crate::wrapper::wrap_response("install_version", expected.clone()),
+                expected
+            );
+            #[cfg(feature = "inference-plugins")]
+            assert_eq!(
+                RpcOutcome::InstallVersion(outcome).into_value().unwrap(),
+                expected
+            );
+        }
+    }
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct SetDefaultVersionParams {
     #[serde(alias = "appId")]
     app_id: String,
@@ -4534,6 +4696,15 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             })
         }
         "get_models" => empty().map(|()| RpcCommand::GetModels),
+        #[cfg(feature = "inference-plugins")]
+        "install_version" => {
+            parse_params::<InstallVersionParams>(params).map(|params| RpcCommand::InstallVersion {
+                app_id: params.app_id,
+                tag: params.tag,
+            })
+        }
+        #[cfg(not(feature = "inference-plugins"))]
+        "install_version" => Err(PublicError::method_not_found()),
         #[cfg(feature = "inference-plugins")]
         "set_default_version" => parse_params::<SetDefaultVersionParams>(params).map(|params| {
             RpcCommand::SetDefaultVersion {

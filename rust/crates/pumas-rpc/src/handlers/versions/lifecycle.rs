@@ -2,7 +2,7 @@
 
 use crate::handlers::{get_version_manager, require_str_param, require_version_manager};
 use crate::server::AppState;
-use serde_json::{json, Value};
+use serde_json::Value;
 use tracing::warn;
 
 pub async fn get_installed_versions(
@@ -65,34 +65,28 @@ pub async fn switch_version(
     Ok(crate::contract::SwitchVersionOutcome::new(result))
 }
 
-pub async fn install_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
-    let tag = require_str_param(params, "tag", "tag")?;
-    let app_id_str = require_str_param(params, "app_id", "appId")?;
+pub async fn install_version(
+    state: &AppState,
+    app_id_str: &str,
+    tag: &str,
+) -> pumas_library::Result<crate::contract::InstallVersionOutcome> {
+    use crate::contract::InstallVersionOutcome;
 
     if let Some(vm) = get_version_manager(state, &app_id_str).await {
         // Start the installation (returns a progress receiver)
-        match vm.install_version(&tag).await {
+        match vm.install_version(tag).await {
             Ok(_rx) => {
                 // Installation started successfully
                 // Progress can be monitored via get_installation_progress
-                Ok(json!({
-                    "success": true,
-                    "message": format!("Installation of {} started", tag)
-                }))
+                Ok(InstallVersionOutcome::started(tag))
             }
             Err(e) => {
                 warn!("Failed to start requested version installation");
-                Ok(json!({
-                    "success": false,
-                    "error": crate::contract::PublicError::from(&e).message
-                }))
+                Ok(InstallVersionOutcome::failed(&e))
             }
         }
     } else {
-        Ok(json!({
-            "success": false,
-            "error": format!("Version manager not initialized for app: {}", app_id_str)
-        }))
+        Ok(InstallVersionOutcome::missing_manager(app_id_str))
     }
 }
 

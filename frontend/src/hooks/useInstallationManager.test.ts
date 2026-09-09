@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APIError } from '../errors';
+import type { RuntimeInstallationProgress } from '../generated/desktop-contract';
 import type { InstallationProgress, VersionRelease } from '../types/versions';
 
 const {
@@ -17,7 +18,9 @@ const {
   switchVersionApiMock,
 } = vi.hoisted(() => ({
   cancelInstallationApiMock: vi.fn<(_appId: string) => Promise<{ success: boolean; error?: string }>>(),
-  getInstallationProgressMock: vi.fn<(_appId: string) => Promise<InstallationProgress | null>>(),
+  getInstallationProgressMock: vi.fn<(
+    _appId: string
+  ) => Promise<InstallationProgress | RuntimeInstallationProgress | null>>(),
   installVersionApiMock: vi.fn<(_tag: string, _appId: string) => Promise<{ success: boolean; error?: string }>>(),
   isApiAvailableMock: vi.fn<() => boolean>(),
   openActiveInstallMock: vi.fn<() => Promise<boolean>>(),
@@ -48,10 +51,17 @@ vi.mock('./useInstallationAccess', () => ({
   }),
 }));
 
-vi.mock('./installationProgressTracking', () => ({
-  normalizeInstallationProgress: normalizeInstallationProgressMock,
-  resetInstallationProgressTracking: resetInstallationProgressTrackingMock,
-}));
+vi.mock('./installationProgressTracking', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./installationProgressTracking')>();
+  return {
+    ...actual,
+    normalizeInstallationProgress: normalizeInstallationProgressMock,
+    projectInstallationProgress: (
+      progress: InstallationProgress | RuntimeInstallationProgress
+    ) => 'startedAt' in progress ? actual.projectInstallationProgress(progress) : progress,
+    resetInstallationProgressTracking: resetInstallationProgressTrackingMock,
+  };
+});
 
 import { useInstallationManager } from './useInstallationManager';
 
@@ -103,6 +113,26 @@ const activeProgress: InstallationProgress = {
   error: null,
 };
 
+const activeWireProgress: RuntimeInstallationProgress = {
+  tag: activeProgress.tag,
+  startedAt: activeProgress.started_at,
+  stage: activeProgress.stage,
+  stageProgress: activeProgress.stage_progress,
+  overallProgress: activeProgress.overall_progress,
+  currentItem: activeProgress.current_item,
+  downloadSpeed: activeProgress.download_speed,
+  etaSeconds: activeProgress.eta_seconds,
+  totalSize: activeProgress.total_size,
+  downloadedBytes: activeProgress.downloaded_bytes,
+  dependencyCount: activeProgress.dependency_count,
+  completedDependencies: activeProgress.completed_dependencies,
+  completedItems: [],
+  error: activeProgress.error,
+  completedAt: null,
+  success: null,
+  logPath: null,
+};
+
 function progressFor(tag: string): InstallationProgress {
   return { ...activeProgress, tag };
 }
@@ -128,7 +158,7 @@ describe('useInstallationManager', () => {
   });
 
   it('discovers manager-owned progress from an installing release hint', async () => {
-    getInstallationProgressMock.mockResolvedValue(activeProgress);
+    getInstallationProgressMock.mockResolvedValue(activeWireProgress);
 
     const { result } = renderHook(() => useInstallationManager({
       appId: 'torch',
@@ -146,6 +176,9 @@ describe('useInstallationManager', () => {
     expect(result.current.installationProgress).toEqual({
       ...activeProgress,
       eta_seconds: 15,
+      completed_at: undefined,
+      success: undefined,
+      log_path: null,
     });
     expect(result.current.installNetworkStatus).toBe('downloading');
   });

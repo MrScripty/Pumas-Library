@@ -11,6 +11,33 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('installation progress rejects malformed replies and preserves nullable camelCase facts', async () => {
+  const harness = loadCompiledPreload();
+  const valid = {
+    tag: ' vλ.1 ', startedAt: 'started', stage: 'dependencies', stageProgress: 125.5,
+    overallProgress: 107.25, currentItem: 'torch', downloadSpeed: 42.5,
+    etaSeconds: 0.5, totalSize: 1024, downloadedBytes: 512, dependencyCount: 2,
+    completedDependencies: 1,
+    completedItems: [{ name: 'torch', type: 'package', size: null, completedAt: 'done' }],
+    error: null, completedAt: null, success: null, logPath: 'runtime/install.log',
+  };
+  for (const response of [[], {}, { success: true, progress: valid },
+    { ...valid, tag: null }, { ...valid, startedAt: null }, { ...valid, stage: null },
+    { ...valid, downloadedBytes: null }, { ...valid, completedDependencies: null },
+    { ...valid, completedItems: null },
+    { ...valid, completedAt: undefined }, { ...valid, stage: 'unknown' },
+    { ...valid, totalSize: -1 }, { ...valid, downloadedBytes: Number.MAX_SAFE_INTEGER + 1 },
+    { ...valid, completedItems: [{ name: 'torch', type: 'package', size: null }] },
+    { ...valid, completed_at: 'old-wire' }, { ...valid, extra: true }]) {
+    harness.respondWith(response);
+    await assert.rejects(harness.api.get_installation_progress('ollama'), { name: 'DesktopContractError' });
+  }
+  for (const response of [null, valid]) {
+    harness.respondWith(response);
+    assert.deepEqual(toPlainValue(await harness.api.get_installation_progress('ollama')), response);
+  }
+});
+
 test('comprehensive version status rejects malformed nested facts before exposure', async () => {
   const harness = loadCompiledPreload();
   const status = {

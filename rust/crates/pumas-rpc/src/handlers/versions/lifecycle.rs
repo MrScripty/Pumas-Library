@@ -114,15 +114,13 @@ pub async fn cancel_installation(state: &AppState, params: &Value) -> pumas_libr
 pub async fn get_installation_progress(
     state: &AppState,
     params: &Value,
-) -> pumas_library::Result<Value> {
+) -> pumas_library::Result<crate::contract::InstallationProgressOutcome> {
     let app_id_str = require_str_param(params, "app_id", "appId")?;
     if let Some(vm) = get_version_manager(state, app_id_str).await {
         let progress = vm.get_installation_progress().await;
-        Ok(serde_json::to_value(progress)?)
+        crate::contract::InstallationProgressOutcome::new(progress)
     } else {
-        Ok(serde_json::to_value::<
-            Option<pumas_library::models::InstallationProgress>,
-        >(None)?)
+        crate::contract::InstallationProgressOutcome::new(None)
     }
 }
 

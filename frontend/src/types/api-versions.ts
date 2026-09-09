@@ -1,5 +1,5 @@
 import type { BaseResponse } from './api-common';
-import type { AvailableVersionsOutcome, GithubCacheStatusOutcome, InstalledVersionsOutcome, SelectedVersionOutcome, ValidateInstallationsOutcome, VersionInfoOutcome, VersionStatusOutcome } from '../generated/desktop-contract';
+import type { AvailableVersionsOutcome, GithubCacheStatusOutcome, InstallationProgressOutcome, InstalledVersionsOutcome, SelectedVersionOutcome, ValidateInstallationsOutcome, VersionInfoOutcome, VersionStatusOutcome } from '../generated/desktop-contract';
 export type { VersionReleaseAsset, VersionReleaseInfo } from '../generated/desktop-contract';
 
 // ============================================================================
@@ -32,32 +32,7 @@ export type VersionStatusResponse = VersionStatusOutcome;
 // Installation & Progress Types
 // ============================================================================
 
-export interface InstallationProgressItem {
-  name: string;
-  type: string;
-  size: number | null;
-  completed_at: string;
-}
-
-export interface InstallationProgressResponse {
-  tag?: string;
-  started_at?: string;
-  stage?: 'download' | 'extract' | 'venv' | 'dependencies' | 'setup';
-  stage_progress?: number;
-  overall_progress?: number;
-  current_item?: string | null;
-  download_speed?: number | null;
-  eta_seconds?: number | null;
-  total_size?: number | null;
-  downloaded_bytes?: number;
-  dependency_count?: number | null;
-  completed_dependencies?: number;
-  completed_items?: InstallationProgressItem[];
-  error?: string | null;
-  completed_at?: string;
-  success?: boolean;
-  log_path?: string | null;
-}
+export type InstallationProgressResponse = InstallationProgressOutcome;
 
 export interface CancelInstallationResponse extends BaseResponse {
   // Empty body on success

@@ -18,6 +18,7 @@ import { useRemoteModelSearch } from '../src/hooks/useRemoteModelSearch';
 import { useAvailableVersionState } from '../src/hooks/useAvailableVersionState';
 import { useVersionFetching } from '../src/hooks/useVersionFetching';
 import { useInstallationAccess } from '../src/hooks/useInstallationAccess';
+import { projectInstallationProgress } from '../src/hooks/installationProgressTracking';
 import { ModelMetadataModal } from '../src/components/ModelMetadataModal';
 import type { RemoteModelInfo } from '../src/types/apps';
 import { decodeHfDownloadDetailsOutcome } from '../src/generated/desktop-contract';
@@ -56,6 +57,7 @@ function installActualPreload(
   versionStatus: () => unknown = () => fixture['version_status'],
   versionInfo: () => unknown = () => fixture['version_info_installed'],
   validationResult: () => unknown = () => fixture['validate_installations_populated'],
+  installationProgress: () => unknown = () => fixture['installation_progress_populated'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -85,6 +87,7 @@ function installActualPreload(
         if (method === 'get_version_status') return versionStatus();
         if (method === 'get_version_info') return versionInfo();
         if (method === 'validate_installations') return validationResult();
+        if (method === 'get_installation_progress') return installationProgress();
         if (method === 'get_installed_versions') return installedVersions();
         if (method === 'get_active_version' || method === 'get_default_version') return selectedVersion();
         if (method === 'get_inference_settings') return inferenceRead;
@@ -180,6 +183,29 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('validates installation progress and projects actual camelCase facts once for UI state', async () => {
+    let response: unknown = fixture['installation_progress_success'];
+    const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, () => response);
+    const bridge = window.electronAPI;
+    if (!bridge) throw new ValidationError('Desktop bridge was not installed.', 'producer-fixtures');
+
+    const wire = await bridge.get_installation_progress('ollama');
+    if (!wire) throw new ValidationError('Expected populated progress.', 'producer-fixtures');
+    expect(projectInstallationProgress(wire)).toMatchObject({
+      tag: ' vλ.1 ', stage: 'dependencies', stage_progress: 125.5,
+      overall_progress: 107.25, completed_at: 'done', success: true,
+    });
+    expect(requests.at(-1)?.params).toEqual({ app_id: 'ollama' });
+
+    const populated = fixture['installation_progress_populated'];
+    if (!isFixtureRecord(populated)) throw new ValidationError('Expected progress record.', 'producer-fixtures');
+    response = { ...populated, completed_at: 'old-wire' };
+    await expect(bridge.get_installation_progress('ollama')).rejects.toMatchObject({ name: 'DesktopContractError' });
+    expect(requests.filter(request => request.method === 'get_installation_progress')).toHaveLength(2);
+  });
+
   it('exposes exact installation-validation results and rejects malformed replies without retrying', async () => {
     let response: unknown = fixture['validate_installations_populated'];
     const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, () => response);

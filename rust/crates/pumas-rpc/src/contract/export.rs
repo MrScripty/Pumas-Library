@@ -474,6 +474,25 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         serde_json::to_value(VersionInfoOutcome::new(" vλ.1 ".into(), true))?;
     fixtures["validate_installations_populated"] =
         serde_json::to_value(validate_installations_fixture())?;
+    fixtures["installation_progress_populated"] = serde_json::to_value(
+        InstallationProgressOutcome::new(Some(installation_progress_fixture()))?,
+    )?;
+    for key in [
+        "installation_progress_null",
+        "installation_progress_no_manager",
+    ] {
+        fixtures[key] = serde_json::to_value(InstallationProgressOutcome::new(None)?)?;
+    }
+    for (key, success) in [
+        ("installation_progress_success", true),
+        ("installation_progress_failure", false),
+    ] {
+        let mut progress = installation_progress_fixture();
+        progress.completed_at = Some("done".into());
+        progress.success = Some(success);
+        progress.error = (!success).then(|| "failed".into());
+        fixtures[key] = serde_json::to_value(InstallationProgressOutcome::new(Some(progress))?)?;
+    }
     for key in [
         "validate_installations_empty",
         "validate_installations_no_manager",
@@ -540,6 +559,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         VersionStatusOutcome,
         VersionInfoOutcome,
         ValidateInstallationsOutcome,
+        InstallationProgressOutcome,
         UpdateModelNotesOutcome,
         LibraryModelMetadataOutcome,
         GetHfDownloadDetailsParams,

@@ -316,11 +316,13 @@ is also accepted, as are [inference-settings reads and modal isolation](frontend
 [Library-model metadata response decoding](frontend-and-ui/plan.md#library-model-metadata-read-contract),
 [inference-settings mutation admission](frontend-and-ui/plan.md#inference-settings-mutation-admission),
 model-notes admission and the selected runtime-version read contracts are accepted.
-Latest is the exact [runtime-version info response](frontend-and-ui/plan.md#runtime-version-info-response-contract),
-which removes false path/date/release metadata without inventing numeric size.
-The raw [runtime installation-validation response](frontend-and-ui/plan.md#runtime-installation-validation-response-contract)
-is also accepted without changing its stale-metadata mutation. Next, bound
-runtime installation-progress responses without installing a runtime.
+Latest is the raw nullable
+[runtime installation-progress response](frontend-and-ui/plan.md#runtime-installation-progress-response-contract),
+including generated camelCase validation and one explicit UI-domain projection.
+The exact [runtime-version info response](frontend-and-ui/plan.md#runtime-version-info-response-contract)
+and raw [runtime installation-validation response](frontend-and-ui/plan.md#runtime-installation-validation-response-contract)
+remain accepted. Next, bound runtime installation-cancellation responses without
+installing or cancelling a runtime.
 This does not admit
 Pending cleanup replay. FE-I29 retains a separate
 intermittent preflight-test failure despite fixture hardening.

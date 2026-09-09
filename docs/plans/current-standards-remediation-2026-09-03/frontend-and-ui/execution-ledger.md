@@ -1,5 +1,74 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-09 — Runtime Installation-Progress Response Contract
+
+Accepted `get_installation_progress` as the exact raw nullable RPC response with
+generated preload decoding. Inventory established that the core record serializes
+camelCase while the handwritten frontend wire type and polling hook read
+snake_case. The RPC now owns a transparent nullable typed outcome, all populated
+record keys and nested completed items. Tracker-guaranteed identity, stage,
+counter and completed-item facts are nonnullable; genuinely optional facts remain
+explicit nulls. Byte/size fields are JavaScript-safe integers. Finite progress
+above 100 remains representable because existing download/dependency arithmetic
+can emit it; nonfinite floats retain the prior serde null wire. No speculative
+terminal, count/progress or percentage consistency rule was added.
+
+Preload rejects malformed replies before renderer exposure. One pure projection
+maps the validated camelCase snapshot into the established snake_case UI domain
+model, avoiding duplicate validation and a broad presentation rename. The
+installation manager retains its serialized 800 ms polling, lifecycle generation,
+missing-progress grace and stale-completion guards. A malformed read retains the
+current progress, marks network state failed and continues scheduled reads; it
+does not retry the install mutation. Raw null continues to mean either no manager
+or no current tracker state, extending FE-I34 without proving availability.
+
+Evidence: five focused RPC tests pass with default and no-default features,
+covering literal core/prior wire, populated/terminal/null snapshots, the six
+producer-required facts, safe nested size boundaries, nonfinite/null behavior,
+real no-manager null and disabled-plugin method-not-found. Producer fixtures cover
+populated, null/no-manager and terminal success/failure. Twenty-nine decoder tests
+and 38 actual bundled-preload/renderer conformance tests pass. Thirty of 31
+bundled-preload tests pass with the existing real-Electron sandbox test gated.
+Fourteen focused frontend projection/polling tests, TypeScript and affected lint,
+Electron and both frontend builds, seven generator tests/freshness, strict RPC
+Clippy and formatting pass. The current pure `validate_plan` owner accepts the
+canonical frontend/program plans; the full standards CLI was not run because its
+unchanged environment lacks `jsonschema`. Populated fixtures prove serialization,
+not a populated live manager. No graphical, network, installation, cancellation,
+persisted-recovery or other-OS claim.
+
+Luna max performed the read-only inventory and substantive independent review.
+Its blocking finding—that nullable producer-required fields could fabricate empty
+active state—was repaired and tested. Its numeric concern was resolved against
+the actual producer: nonfinite progress serializes null and finite out-of-range
+values are possible, so the contract preserves rather than narrows those facts.
+The manager test now uses a generated camelCase response through the real
+projection. Astra low implemented and repaired the settled Rust projection; root
+Sol owned consumer integration, generation, verification, review disposition and
+reporting. Spark remains absent from the exposed model identifiers, with no silent
+substitution. Overall M4 and remediation remain incomplete. Next: runtime
+installation-cancellation response (`cancel_installation`).
+
+Cost checkpoint, deduplicated by `response_id`: current root
+`01a084bf-3ff2-77d3-bdf4-714d30c2173d`, turn
+`01a084ea-4741-7c00-821d-09387de237da`, plus the prior reporting tail after
+`2026-09-09T06:43:08.099Z`. Root Sol low used 10,181,799 input tokens
+(10,014,464 cached) and 25,714 output (3,568 reasoning), estimated at $5.1894
+standard / $10.3788 priority scenario. Luna max used 5,712,294 input (5,490,944
+cached) and 20,358 output (11,925 reasoning), estimated at $0.1785 / $0.3570.
+Astra low used 1,180,741 input (1,133,440 cached) and 6,803 output (106
+reasoning), estimated at $1.9466 / $3.8932. Priced subtotal: $7.3145 / $14.6290.
+No cache writes or above-threshold requests were observed; this checkpoint
+reaches `2026-09-09T07:05:42.428Z` and excludes later commit/reporting tail.
+API-equivalent estimates, not invoices: Sol 4/0.4/5/20, Luna
+0.2/0.02/0.25/1.2 and Astra 10/1/12.5/50 USD per
+million uncached/cached/cache-write/output tokens; inputs above 272,000 use the
+documented 2x input and 1.5x output multipliers, and the separately shown priority
+scenario is 2x. Cached input is included in input; reasoning is included in
+output. Delivered service tier is unexposed. PostgreSQL port 5433 remained absent,
+so no operational row could be written. Temporary deduplication artifacts:
+`/tmp/pumas-installation-progress-costs.{py,json}`.
+
 ## 2026-09-08 — Runtime Installation-Validation Response Contract
 
 Accepted `validate_installations` typed RPC output and generated preload

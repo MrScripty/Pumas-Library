@@ -114,6 +114,13 @@ may remove stale installation metadata, but does not delete reported orphaned
 directories. The preload rejects malformed results without retrying the
 operation. Empty no-manager results do not establish runtime availability.
 
+Runtime installation progress is validated as the backend's raw nullable
+camelCase snapshot before one explicit projection into the UI's established
+snake_case state. Terminal success/failure facts, nullable fields and completed
+items are preserved; malformed reads keep the last progress, mark network state
+failed and continue scheduled polling without repeating the installation
+mutation. A null no-manager/no-progress result does not establish availability.
+
 Library metadata reads preserve omitted optional payloads and validate present
 metadata as objects, including nested JSON and component-manifest states.
 Malformed responses cannot enter the modal; nested values display without

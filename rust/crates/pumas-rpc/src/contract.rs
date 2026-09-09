@@ -439,6 +439,8 @@ pub(crate) enum RpcOutcome {
     VersionInfo(VersionInfoOutcome),
     #[cfg(feature = "inference-plugins")]
     ValidateInstallations(ValidateInstallationsOutcome),
+    #[cfg(feature = "inference-plugins")]
+    InstallationProgress(Box<InstallationProgressOutcome>),
     HfTokenMutation(SuccessOutcome),
     HfAuth(Box<HfAuthOutcome>),
     LinkHealth(Box<LinkHealthOutcome>),
@@ -513,6 +515,8 @@ impl RpcOutcome {
             Self::VersionInfo(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::ValidateInstallations(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::InstallationProgress(value) => serde_json::to_value(value),
             Self::HfTokenMutation(value) => serde_json::to_value(value),
             Self::HfAuth(value) => serde_json::to_value(value),
             Self::LinkHealth(value) => serde_json::to_value(value),
@@ -1460,6 +1464,239 @@ mod version_info_tests {
                 let rpc = RpcOutcome::VersionInfo(outcome);
                 assert!(!rpc.uses_response_wrapper());
                 assert_eq!(rpc.into_value().unwrap(), previous);
+            }
+        }
+    }
+}
+
+/// Raw nullable progress snapshot, retaining the core producer's camelCase wire.
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(transparent)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct InstallationProgressOutcome(Option<RuntimeInstallationProgress>);
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct RuntimeInstallationProgress {
+    tag: String,
+    started_at: String,
+    stage: RuntimeInstallationStage,
+    stage_progress: Option<f32>,
+    overall_progress: Option<f32>,
+    current_item: Option<String>,
+    download_speed: Option<f64>,
+    eta_seconds: Option<f64>,
+    total_size: Option<u64>,
+    downloaded_bytes: u64,
+    dependency_count: Option<u32>,
+    completed_dependencies: u32,
+    completed_items: Vec<RuntimeInstallationProgressItem>,
+    error: Option<String>,
+    completed_at: Option<String>,
+    success: Option<bool>,
+    log_path: Option<String>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+enum RuntimeInstallationStage {
+    Download,
+    Extract,
+    Venv,
+    Dependencies,
+    Setup,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+struct RuntimeInstallationProgressItem {
+    name: String,
+    #[serde(rename = "type")]
+    item_type: String,
+    size: Option<u64>,
+    completed_at: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl InstallationProgressOutcome {
+    pub(crate) fn new(
+        value: Option<pumas_library::models::InstallationProgress>,
+    ) -> pumas_library::Result<Self> {
+        let Some(value) = value else {
+            return Ok(Self(None));
+        };
+        if value
+            .total_size
+            .into_iter()
+            .chain(value.downloaded_bytes)
+            .chain(
+                value
+                    .completed_items
+                    .iter()
+                    .flatten()
+                    .filter_map(|item| item.size),
+            )
+            .any(|size| size > MAX_JS_SAFE_INTEGER)
+        {
+            return Err(invalid_domain_outcome("installation progress"));
+        }
+        use pumas_library::models::InstallationStage;
+        // The runtime tracker always populates these fields for an existing snapshot.
+        let missing = || invalid_domain_outcome("installation progress");
+        Ok(Self(Some(RuntimeInstallationProgress {
+            tag: value.tag.ok_or_else(missing)?,
+            started_at: value.started_at.ok_or_else(missing)?,
+            stage: match value.stage.ok_or_else(missing)? {
+                InstallationStage::Download => RuntimeInstallationStage::Download,
+                InstallationStage::Extract => RuntimeInstallationStage::Extract,
+                InstallationStage::Venv => RuntimeInstallationStage::Venv,
+                InstallationStage::Dependencies => RuntimeInstallationStage::Dependencies,
+                InstallationStage::Setup => RuntimeInstallationStage::Setup,
+            },
+            // serde_json historically represents nonfinite optional floats as null.
+            stage_progress: value.stage_progress.filter(|value| value.is_finite()),
+            overall_progress: value.overall_progress.filter(|value| value.is_finite()),
+            current_item: value.current_item,
+            download_speed: value.download_speed.filter(|value| value.is_finite()),
+            eta_seconds: value.eta_seconds.filter(|value| value.is_finite()),
+            total_size: value.total_size,
+            downloaded_bytes: value.downloaded_bytes.ok_or_else(missing)?,
+            dependency_count: value.dependency_count,
+            completed_dependencies: value.completed_dependencies.ok_or_else(missing)?,
+            completed_items: value
+                .completed_items
+                .ok_or_else(missing)?
+                .into_iter()
+                .map(|item| RuntimeInstallationProgressItem {
+                    name: item.name,
+                    item_type: item.item_type,
+                    size: item.size,
+                    completed_at: item.completed_at,
+                })
+                .collect(),
+            error: value.error,
+            completed_at: value.completed_at,
+            success: value.success,
+            log_path: value.log_path,
+        })))
+    }
+}
+
+#[cfg(any(feature = "export-contract", test))]
+fn installation_progress_fixture() -> pumas_library::models::InstallationProgress {
+    use pumas_library::models::{
+        InstallationProgress, InstallationProgressItem, InstallationStage,
+    };
+    InstallationProgress {
+        tag: Some(" vλ.1 ".into()),
+        started_at: Some("started".into()),
+        stage: Some(InstallationStage::Dependencies),
+        stage_progress: Some(125.5),
+        overall_progress: Some(107.25),
+        current_item: Some("torch".into()),
+        download_speed: Some(42.5),
+        eta_seconds: Some(0.5),
+        total_size: Some(1024),
+        downloaded_bytes: Some(512),
+        dependency_count: Some(2),
+        completed_dependencies: Some(1),
+        completed_items: Some(vec![InstallationProgressItem {
+            name: "torch".into(),
+            item_type: "package".into(),
+            size: None,
+            completed_at: "item done".into(),
+        }]),
+        error: None,
+        completed_at: None,
+        success: None,
+        log_path: Some("runtime/install.log".into()),
+    }
+}
+
+#[cfg(test)]
+mod installation_progress_contract_tests {
+    use super::*;
+
+    #[test]
+    fn installation_progress_rejects_missing_tracker_fields() {
+        for field in 0..6 {
+            let mut value = installation_progress_fixture();
+            match field {
+                0 => value.tag = None,
+                1 => value.started_at = None,
+                2 => value.stage = None,
+                3 => value.downloaded_bytes = None,
+                4 => value.completed_dependencies = None,
+                _ => value.completed_items = None,
+            }
+            assert!(
+                InstallationProgressOutcome::new(Some(value)).is_err(),
+                "field {field}"
+            );
+        }
+    }
+
+    #[test]
+    fn installation_progress_preserves_literal_wire_and_null() {
+        let value = installation_progress_fixture();
+        let expected = serde_json::json!({"tag":" vλ.1 ","startedAt":"started","stage":"dependencies","stageProgress":125.5,"overallProgress":107.25,"currentItem":"torch","downloadSpeed":42.5,"etaSeconds":0.5,"totalSize":1024,"downloadedBytes":512,"dependencyCount":2,"completedDependencies":1,"completedItems":[{"name":"torch","type":"package","size":null,"completedAt":"item done"}],"error":null,"completedAt":null,"success":null,"logPath":"runtime/install.log"});
+        assert_eq!(serde_json::to_value(&value).unwrap(), expected);
+        let outcome = InstallationProgressOutcome::new(Some(value)).unwrap();
+        assert_eq!(serde_json::to_value(&outcome).unwrap(), expected);
+        #[cfg(feature = "inference-plugins")]
+        {
+            let rpc = RpcOutcome::InstallationProgress(Box::new(outcome));
+            assert!(!rpc.uses_response_wrapper());
+            assert_eq!(rpc.into_value().unwrap(), expected);
+        }
+        assert_eq!(
+            serde_json::to_value(InstallationProgressOutcome::new(None).unwrap()).unwrap(),
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn installation_progress_preserves_terminal_and_nonfinite_wire() {
+        for success in [false, true] {
+            let mut value = installation_progress_fixture();
+            value.completed_at = Some("done".into());
+            value.success = Some(success);
+            value.error = (!success).then(|| "failed".into());
+            value.stage_progress = Some(f32::NAN);
+            value.overall_progress = Some(f32::INFINITY);
+            value.download_speed = Some(f64::NEG_INFINITY);
+            value.eta_seconds = Some(f64::NAN);
+            let previous = serde_json::to_value(&value).unwrap();
+            assert!(previous["stageProgress"].is_null());
+            assert_eq!(
+                serde_json::to_value(InstallationProgressOutcome::new(Some(value)).unwrap())
+                    .unwrap(),
+                previous
+            );
+        }
+    }
+
+    #[test]
+    fn installation_progress_checks_nested_safe_integer_boundaries() {
+        for size in [0, MAX_JS_SAFE_INTEGER, MAX_JS_SAFE_INTEGER + 1, u64::MAX] {
+            for field in 0..3 {
+                let mut value = installation_progress_fixture();
+                match field {
+                    0 => value.total_size = Some(size),
+                    1 => value.downloaded_bytes = Some(size),
+                    _ => value.completed_items.as_mut().unwrap()[0].size = Some(size),
+                }
+                assert_eq!(
+                    InstallationProgressOutcome::new(Some(value)).is_ok(),
+                    size <= MAX_JS_SAFE_INTEGER
+                );
             }
         }
     }

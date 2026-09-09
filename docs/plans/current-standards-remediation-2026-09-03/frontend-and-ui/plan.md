@@ -10,13 +10,13 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound runtime installation-progress responses (M4):
-`get_installation_progress` still crosses preload undecoded with handwritten
-frontend response/state types. Inventory its producer nullability, numeric and
-terminal semantics and actual consumers before selecting the projection. Preserve
-optional inference-plugin builds, standalone backend operation and polling
-lifecycle; no runtime installation.
-Installation validation, runtime-version info, comprehensive status, active/default, installed-version, runtime
+**Next slice:** Bound runtime installation-cancellation responses (M4): inventory
+the exact `cancel_installation` boolean producer and the frontend consumer's
+handwritten success envelope before selecting the projection. Preserve optional
+inference-plugin builds, standalone backend operation and the existing polling/
+cancellation lifecycle; no runtime installation or cancellation execution.
+Installation progress, installation validation, runtime-version info,
+comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
 validation is accepted below. Notes/settings
 mutation response validation is accepted below. Model-notes request admission
@@ -69,6 +69,44 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Runtime Installation-Progress Response Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-09--runtime-installation-progress-response-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Project `get_installation_progress` as the exact raw nullable producer snapshot,
+without a success/progress envelope. A populated snapshot has 17 required
+camelCase keys, including tracker-guaranteed identity/stage/counter/list facts
+and explicit nulls for genuinely optional facts. Preserve the closed existing
+stage vocabulary, required nested completed-item records, exact
+strings, list order, terminal fields and finite progress values above 100; impose
+no cross-field or terminal consistency rules. Bound u64 byte/size facts to safe
+JavaScript integers. Preserve producer nonfinite float serialization as null.
+
+The RPC typed outcome owns serialization and generated schema, and preload
+decodes before exposing the API. The installation manager performs one explicit
+field-name projection from the validated camelCase wire into the established
+snake_case UI domain model; presentation code is not a second wire validator.
+Malformed reads retain the current progress, mark the network state failed and
+continue the existing scheduled read polling. They do not retry the installation
+mutation. Raw null retains the existing missing-progress grace behavior.
+
+No manager and no tracker state both remain raw null, extending FE-I34 without
+establishing runtime availability. No core/app-manager algorithm, request,
+installation, cancellation, state-file cleanup, runtime registration or live
+library change. Optional inference plugins and standalone backend composition
+remain unchanged.
+
+Acceptance: literal prior/core wire parity for populated, terminal and null
+snapshots; safe nested size boundaries and nonfinite/null policy; actual
+no-manager/default and no-plugin/minimal RPC results; producer fixtures for
+populated/null/success/failure; generated-decoder, bundled-preload and actual
+renderer-projection rejection/consumption; focused projection and polling tests;
+frontend types/lint, Electron and both frontend builds, generator tests/freshness,
+strict RPC lint/format and canonical plan checks. Automated local contract/
+integration only, not graphical, network, installation, cancellation, persisted
+recovery or other-OS evidence.
 
 ## Runtime Installation-Validation Response Contract
 

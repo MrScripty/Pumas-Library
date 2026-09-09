@@ -10,6 +10,29 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('installation-progress decoding preserves nullable producer snapshots and camelCase facts', () => {
+  for (const key of ['installation_progress_populated', 'installation_progress_null',
+    'installation_progress_no_manager', 'installation_progress_success', 'installation_progress_failure']) {
+    const result = contract.decodeInstallationProgressOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  const valid = fixtures.installation_progress_populated;
+  assert.equal(contract.decodeInstallationProgressOutcome({ ...valid, stageProgress: 125.5 }).status, 'valid');
+  for (const patch of [{ tag: undefined }, { tag: null }, { startedAt: null }, { stage: null },
+    { downloadedBytes: null }, { completedDependencies: null }, { completedItems: null },
+    { startedAt: 42 }, { stage: 'unknown' },
+    { stageProgress: '1' }, { totalSize: -1 }, { downloadedBytes: Number.MAX_SAFE_INTEGER + 1 },
+    { completedItems: [{ name: 'x', type: 'package', size: null }] },
+    { completedItems: [{ name: 'x', type: 'package', size: -1, completedAt: 'done' }] },
+    { success: 'true' }, { completed_at: 'old-wire' }, { extra: true }]) {
+    assert.equal(contract.decodeInstallationProgressOutcome({ ...valid, ...patch }).status, 'invalid', JSON.stringify(patch));
+  }
+  for (const value of [[], {}, { success: true, progress: valid }]) {
+    assert.equal(contract.decodeInstallationProgressOutcome(value).status, 'invalid');
+  }
+});
+
 test('comprehensive status preserves producer snapshots and rejects malformed nested facts', () => {
   for (const key of ['version_status', 'version_status_empty', 'version_status_no_manager']) {
     const result = contract.decodeVersionStatusOutcome(fixtures[key]);

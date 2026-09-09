@@ -1,4 +1,4 @@
-import type { InstallationProgressResponse } from '../types/api';
+import type { RuntimeInstallationProgress } from '../generated/desktop-contract';
 import type {
   InstallationProgress,
   InstallNetworkStatus,
@@ -18,8 +18,6 @@ export interface InstallationProgressTrackerState {
   networkState: NetworkStatusState;
 }
 
-type InstallationProgressSource = InstallationProgressResponse | InstallationProgress;
-
 export function resetInstallationProgressTracking(
   state: InstallationProgressTrackerState
 ): void {
@@ -28,8 +26,37 @@ export function resetInstallationProgressTracking(
   state.lastStage = null;
 }
 
+export function projectInstallationProgress(
+  progress: RuntimeInstallationProgress
+): InstallationProgress {
+  return {
+    tag: progress.tag,
+    started_at: progress.startedAt,
+    stage: progress.stage,
+    stage_progress: progress.stageProgress ?? 0,
+    overall_progress: progress.overallProgress ?? 0,
+    current_item: progress.currentItem,
+    download_speed: progress.downloadSpeed,
+    eta_seconds: progress.etaSeconds,
+    total_size: progress.totalSize,
+    downloaded_bytes: progress.downloadedBytes,
+    dependency_count: progress.dependencyCount,
+    completed_dependencies: progress.completedDependencies,
+    completed_items: progress.completedItems.map((item) => ({
+      name: item.name,
+      type: item.type,
+      size: item.size,
+      completed_at: item.completedAt,
+    })),
+    error: progress.error,
+    completed_at: progress.completedAt ?? undefined,
+    success: progress.success ?? undefined,
+    log_path: progress.logPath,
+  };
+}
+
 function computeExpectedTotal(
-  progress: InstallationProgressSource,
+  progress: InstallationProgress,
   availableVersions: VersionRelease[]
 ): number | null {
   const release = availableVersions.find((candidate) => candidate.tagName === progress.tag);
@@ -50,7 +77,7 @@ function computeExpectedTotal(
 }
 
 function computeEtaSeconds(
-  progress: InstallationProgressSource,
+  progress: InstallationProgress,
   averageSpeed: number,
   expectedTotal: number | null
 ): number | null {
@@ -70,7 +97,7 @@ function computeEtaSeconds(
 }
 
 function synchronizeTrackerState(
-  progress: InstallationProgressSource,
+  progress: InstallationProgress,
   trackerState: InstallationProgressTrackerState,
   downloadedBytes: number,
   speed: number,
@@ -78,7 +105,7 @@ function synchronizeTrackerState(
 ): void {
   if (progress.tag !== trackerState.lastDownloadTag) {
     trackerState.lastDownloadTag = progress.tag || null;
-    trackerState.lastStage = progress.stage || null;
+    trackerState.lastStage = progress.stage;
     resetNetworkStatusState(trackerState.networkState);
     trackerState.networkState.lastDownload = { bytes: downloadedBytes, speed, ts: now };
     trackerState.networkState.topSpeed = speed || 0;
@@ -87,12 +114,12 @@ function synchronizeTrackerState(
 
   if (progress.stage !== trackerState.lastStage) {
     trackerState.networkState.downloadSamples = [];
-    trackerState.lastStage = progress.stage || null;
+    trackerState.lastStage = progress.stage;
   }
 }
 
 export function normalizeInstallationProgress(
-  progress: InstallationProgressSource,
+  progress: InstallationProgress,
   availableVersions: VersionRelease[],
   trackerState: InstallationProgressTrackerState,
   now: number
@@ -117,7 +144,7 @@ export function normalizeInstallationProgress(
   const adjustedProgress: InstallationProgress = {
     tag: progress.tag || '',
     started_at: progress.started_at || '',
-    stage: progress.stage || 'download',
+    stage: progress.stage,
     stage_progress: progress.stage_progress || 0,
     overall_progress: progress.overall_progress || 0,
     current_item: progress.current_item || null,
@@ -126,8 +153,8 @@ export function normalizeInstallationProgress(
     total_size: expectedTotal ?? progress.total_size ?? null,
     downloaded_bytes: downloadedBytes,
     dependency_count: progress.dependency_count ?? null,
-    completed_dependencies: progress.completed_dependencies ?? 0,
-    completed_items: progress.completed_items ?? [],
+    completed_dependencies: progress.completed_dependencies,
+    completed_items: progress.completed_items,
     error: progress.error ?? null,
     completed_at: progress.completed_at,
     success: progress.success,

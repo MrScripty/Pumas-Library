@@ -18,6 +18,7 @@ import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
 import {
   normalizeInstallationProgress,
+  projectInstallationProgress,
   resetInstallationProgressTracking,
 } from './installationProgressTracking';
 import { useInstallationAccess } from './useInstallationAccess';
@@ -189,10 +190,11 @@ export function useInstallationManager({
 
     const promise = (async () => {
       try {
-        const progress = await api.get_installation_progress(lifecycle.appId);
+        const response = await api.get_installation_progress(lifecycle.appId);
         if (!isCurrentLifecycle(lifecycle)) {
           return false;
         }
+        const progress = response ? projectInstallationProgress(response) : null;
 
         if (progress && !progress.completed_at) {
           pendingInstallTagRef.current = progress.tag || lifecycle.tag;

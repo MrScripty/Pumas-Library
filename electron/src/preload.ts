@@ -49,6 +49,7 @@ import {
   decodeVersionStatusOutcome,
   decodeVersionInfoOutcome,
   decodeValidateInstallationsOutcome,
+  decodeInstallationProgressOutcome,
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
@@ -551,7 +552,7 @@ const electronAPI = {
   // Installation & Progress
   // ========================================
   get_installation_progress: (appId?: string) =>
-    apiCall('get_installation_progress', { app_id: appId }),
+    validatedApiCall('get_installation_progress', decodeInstallationProgressOutcome, { app_id: appId }),
   cancel_installation: (appId?: string) => apiCall('cancel_installation', { app_id: appId }),
 
   // ========================================

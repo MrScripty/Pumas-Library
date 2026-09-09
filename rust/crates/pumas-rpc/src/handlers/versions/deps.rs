@@ -8,13 +8,14 @@ use serde_json::Value;
 
 pub async fn check_version_dependencies(
     state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
-    let tag = require_str_param(params, "tag", "tag")?;
-    let app_id_str = require_str_param(params, "app_id", "appId")?;
-    let vm = require_version_manager(state, app_id_str).await?;
-    let status = vm.check_dependencies(&tag).await?;
-    Ok(serde_json::to_value(status)?)
+    app_id: &str,
+    tag: &str,
+) -> pumas_library::Result<crate::contract::CheckVersionDependenciesOutcome> {
+    let vm = require_version_manager(state, app_id).await?;
+    let status = vm.check_dependencies(tag).await?;
+    Ok(crate::contract::CheckVersionDependenciesOutcome::new(
+        status,
+    ))
 }
 
 pub async fn install_version_dependencies(

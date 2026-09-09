@@ -36,6 +36,62 @@ test('installation start validates exact requests and discriminated outcomes wit
   assert.equal(harness.invocations.filter(invocation => invocation[1] === 'install_version').length, 14);
 });
 
+test('dependency checking validates the required request and outcome without retry', async () => {
+  const harness = loadCompiledPreload();
+  for (const [tag, appId] of [[null, 'ollama'], ['v1', undefined], ['v1', null],
+    [42, 'ollama'], ['v1', 42]]) {
+    const before = harness.invocations.length;
+    assert.throws(
+      () => harness.api.check_version_dependencies(tag, appId),
+      { name: 'DesktopContractError' }
+    );
+    assert.equal(harness.invocations.length, before);
+  }
+
+  const valid = {
+    success: true,
+    dependencies: {
+      installed: [' torch λ '],
+      missing: ['numpy>=1'],
+      requirementsFile: ' requirements.txt ',
+    },
+  };
+  harness.respondWith(valid);
+  assert.deepEqual(
+    toPlainValue(await harness.api.check_version_dependencies(' vλ.1 ', 'ollama')),
+    valid
+  );
+  assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]), {
+    tag: ' vλ.1 ', app_id: 'ollama',
+  });
+
+  for (const response of [null, true, false, {}, { success: true },
+    { success: true, dependencies: null },
+    { success: true, dependencies: { installed: [], missing: [] } },
+    { success: true, dependencies: { installed: [42], missing: [], requirementsFile: null } },
+    { success: true, dependencies: { installed: [], missing: ['numpy'], requirementsFile: 42 } },
+    { success: false, error: 'dependency check failed' },
+    { success: true, dependencies: valid.dependencies, extra: true }]) {
+    harness.respondWith(response);
+    await assert.rejects(
+      harness.api.check_version_dependencies('v1', 'ollama'),
+      { name: 'DesktopContractError' }
+    );
+  }
+
+  harness.respondWith(() => {
+    throw new Error('dependency transport unavailable');
+  });
+  await assert.rejects(
+    harness.api.check_version_dependencies('v1', 'ollama'),
+    /dependency transport unavailable/
+  );
+  assert.equal(
+    harness.invocations.filter(invocation => invocation[1] === 'check_version_dependencies').length,
+    13
+  );
+});
+
 test('default selection validates nullable requests and exact confirmations without retry', async () => {
   const harness = loadCompiledPreload();
   for (const tag of [false, 42, [], {}]) {

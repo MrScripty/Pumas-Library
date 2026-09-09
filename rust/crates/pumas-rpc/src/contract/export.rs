@@ -492,6 +492,30 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         };
         serde_json::json!({"method":"set_default_version","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
     }).collect();
+    for (key, status) in [
+        (
+            "check_version_dependencies_null",
+            pumas_library::models::DependencyStatus::default(),
+        ),
+        (
+            "check_version_dependencies_populated",
+            pumas_library::models::DependencyStatus {
+                installed: vec!["torch==2.0".into()],
+                missing: vec!["numpy>=1".into()],
+                requirements_file: Some("fixture/requirements.txt".into()),
+            },
+        ),
+    ] {
+        fixtures[key] = serde_json::to_value(CheckVersionDependenciesOutcome::new(status))?;
+    }
+    fixtures["check_version_dependencies_request_probes"] = install_version_requests().into_iter().map(|(params, _)| {
+        let parsed = parse_params::<CheckVersionDependenciesParams>(Some(&params));
+        let normalized = match &parsed {
+            Ok(value) => serde_json::json!({"app_id":value.app_id,"tag":value.tag}),
+            Err(_) => Value::Null,
+        };
+        serde_json::json!({"method":"check_version_dependencies","params":params,"accepted":parsed.is_ok(),"normalized":normalized})
+    }).collect();
     fixtures["install_version_started"] =
         serde_json::to_value(InstallVersionOutcome::started("fixture-version"))?;
     fixtures["install_version_failed"] =
@@ -633,6 +657,8 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         SetDefaultVersionParams,
         InstallVersionParams,
         InstallVersionOutcome,
+        CheckVersionDependenciesParams,
+        CheckVersionDependenciesOutcome,
     );
     Ok(serde_json::json!({
         "format": "pumas-desktop-contract-1",
@@ -678,7 +704,10 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
 // These named wire refinements project existing constructor invariants, not
 // authorization. The generator owns their executable TypeScript projection.
 fn refine_named(name: &str, schema: &mut Value) {
-    if matches!(name, "SetDefaultVersionParams" | "InstallVersionParams") {
+    if matches!(
+        name,
+        "SetDefaultVersionParams" | "InstallVersionParams" | "CheckVersionDependenciesParams"
+    ) {
         let mut canonical = schema.clone();
         let object = canonical.as_object_mut().expect("request object schema");
         object.remove("$schema");
@@ -1073,7 +1102,8 @@ fn refine_named(name: &str, schema: &mut Value) {
             _ => {}
         }
         let success = match name {
-            "InstallVersionStarted"
+            "CheckVersionDependenciesOutcome"
+            | "InstallVersionStarted"
             | "ModelsOutcome"
             | "CatalogSearchOutcome"
             | "DownloadListOutcome"

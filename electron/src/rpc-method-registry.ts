@@ -250,7 +250,6 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
   remove_version: REQUIRED_TAG_OPTIONAL_APP_ID_SCHEMA,
   switch_version: REQUIRED_TAG_OPTIONAL_APP_ID_SCHEMA,
   get_version_info: REQUIRED_TAG_OPTIONAL_APP_ID_SCHEMA,
-  check_version_dependencies: REQUIRED_TAG_OPTIONAL_APP_ID_SCHEMA,
   install_version_dependencies: REQUIRED_TAG_OPTIONAL_APP_ID_SCHEMA,
   get_model_download_status: REQUIRED_DOWNLOAD_ID_SCHEMA,
   resolve_model_execution_descriptor: {

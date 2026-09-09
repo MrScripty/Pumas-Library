@@ -1,6 +1,7 @@
 import type { OpenDialogOptions } from 'electron';
 import {
   decodeGetBackendSetupParams,
+  decodeCheckVersionDependenciesParams,
   decodeInstallVersionParams,
   decodeSetDefaultVersionParams,
   decodeStartBackendSetupParams,
@@ -52,6 +53,7 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
   if (
     method === 'start_backend_setup'
     || method === 'get_backend_setup'
+    || method === 'check_version_dependencies'
     || method === 'install_version'
     || method === 'set_default_version'
   ) {
@@ -59,6 +61,8 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
       ? decodeStartBackendSetupParams(rawParams)
       : method === 'get_backend_setup'
         ? decodeGetBackendSetupParams(rawParams)
+        : method === 'check_version_dependencies'
+          ? decodeCheckVersionDependenciesParams(rawParams)
         : method === 'install_version'
           ? decodeInstallVersionParams(rawParams)
           : decodeSetDefaultVersionParams(rawParams);

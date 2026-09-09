@@ -64,6 +64,7 @@ function installActualPreload(
   switchResult: () => unknown = () => fixture['switch_version_true'],
   defaultResult: () => unknown = () => fixture['set_default_version_true'],
   installResult: () => unknown = () => fixture['install_version_started'],
+  checkVersionDependenciesResult: () => unknown = () => fixture['check_version_dependencies_populated'],
 ) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const module = { exports: {} };
@@ -99,6 +100,7 @@ function installActualPreload(
         if (method === 'switch_version') return switchResult();
         if (method === 'set_default_version') return defaultResult();
         if (method === 'install_version') return installResult();
+        if (method === 'check_version_dependencies') return checkVersionDependenciesResult();
         if (method === 'get_installed_versions') return installedVersions();
         if (method === 'get_active_version' || method === 'get_default_version') return selectedVersion();
         if (method === 'get_inference_settings') return inferenceRead;
@@ -194,6 +196,45 @@ function Library({ onStarted }: { onStarted: StartDownload }) {
 }
 
 describe('actual Rust catalog through bundled preload and renderer', () => {
+  it('exposes dependency-check reports through the generated preload contract', async () => {
+    let response: unknown = fixture['check_version_dependencies_populated'];
+    const requests = installActualPreload(
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      () => {
+        if (response instanceof Error) throw response;
+        return response;
+      },
+    );
+    const bridge = window.electronAPI;
+    if (!bridge) throw new ValidationError('Preload did not expose its bridge.', 'preload');
+
+    expect(await bridge.check_version_dependencies(' vλ.1 ', 'ollama')).toEqual(response);
+    expect(requests.at(-1)).toEqual({
+      method: 'check_version_dependencies',
+      params: { tag: ' vλ.1 ', app_id: 'ollama' },
+    });
+
+    response = {
+      success: true,
+      dependencies: { installed: ['torch'], missing: [], requirementsFile: null },
+      extra: true,
+    };
+    await expect(bridge.check_version_dependencies('v1', 'ollama'))
+      .rejects.toMatchObject({ name: 'DesktopContractError' });
+
+    response = new Error('dependency transport unavailable');
+    await expect(bridge.check_version_dependencies('v1', 'ollama'))
+      .rejects.toThrow('dependency transport unavailable');
+
+    const before = requests.length;
+    expect(() => bridge.check_version_dependencies('v1', undefined as never))
+      .toThrow('Desktop contract invalid');
+    expect(requests.length).toBe(before);
+    expect(requests.filter(request => request.method === 'check_version_dependencies')).toHaveLength(3);
+  });
+
   it('starts installation polling only after a validated producer confirmation', async () => {
     let response: unknown = fixture['install_version_started'];
     const requests = installActualPreload(undefined, undefined, undefined, undefined, undefined,

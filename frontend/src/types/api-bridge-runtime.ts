@@ -41,6 +41,7 @@ import type {
 import type {
   CacheStatusResponse,
   CancelInstallationResponse,
+  CheckVersionDependenciesResponse,
   GetActiveVersionResponse,
   GetAvailableVersionsResponse,
   GetDefaultVersionResponse,
@@ -83,7 +84,7 @@ export interface DesktopBridgeRuntimeAPI {
   set_default_version(tag?: string | null, appId?: string): Promise<SetDefaultVersionResponse>;
   get_version_status(appId?: string): Promise<VersionStatusResponse>;
   launch_version(tag: string, extraArgs?: string[], appId?: string): Promise<LaunchResponse>;
-  check_version_dependencies(tag: string, appId?: string): Promise<BaseResponse>;
+  check_version_dependencies(tag: string, appId: string): Promise<CheckVersionDependenciesResponse>;
   install_version_dependencies(tag: string, appId?: string): Promise<BaseResponse>;
 
   // ========================================

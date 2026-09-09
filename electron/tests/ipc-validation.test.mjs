@@ -146,6 +146,29 @@ test('installation-start IPC uses the generated request contract', () => {
   }
 });
 
+test('dependency-check IPC uses the generated request contract with a required app id', () => {
+  for (const appKey of ['app_id', 'appId']) {
+    for (const value of ['', ' \n\t ', ' runtime λ ']) {
+      const params = { [appKey]: value, tag: value };
+      const decoded = validateApiCallPayload('check_version_dependencies', params);
+      assert.deepEqual(JSON.parse(JSON.stringify(decoded.params)), params);
+      assert.notEqual(decoded.params, params);
+      assert.ok(Object.isFrozen(decoded.params));
+    }
+  }
+  for (const params of [undefined, null, {}, [], true, 42, 'runtime',
+    { tag: 'v1' }, { app_id: null, tag: 'v1' }, { app_id: 42, tag: 'v1' },
+    { app_id: 'runtime' }, { app_id: 'runtime', tag: null },
+    { app_id: 'runtime', tag: true }, { app_id: 'runtime', tag: [] },
+    { app_id: 'runtime', tag: {} }, { app_id: 'runtime', tag: 'v1', extra: true },
+    { app_id: 'a', appId: 'a', tag: 'v1' }]) {
+    assert.throws(
+      () => validateApiCallPayload('check_version_dependencies', params),
+      /Invalid API params/
+    );
+  }
+});
+
 test('validateApiCallPayload enforces method request schemas', () => {
   assert.deepEqual(validateApiCallPayload('call_plugin_endpoint', {
     app_id: 'ollama',

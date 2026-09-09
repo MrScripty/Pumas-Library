@@ -1,5 +1,38 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-09 — Runtime Dependency-Check Response Contract
+
+The bounded runtime dependency-check slice now has one generated request and
+outcome across standalone Rust RPC, Electron main/preload and the exposed
+frontend bridge. Required tag/app identity admission preserves the existing
+snake/camel aliases and rejects malformed, unknown and ambiguous requests before
+manager lookup. The response preserves installed/missing names and nullable
+requirements-file identity in the exact `{success:true,dependencies:{...}}`
+wire. Unknown app identities remain missing-manager errors, missing versions
+remain RPC errors, and disabled inference-plugin builds remain method-not-found;
+absent venv/requirements-file cases retain their existing successful report
+semantics.
+
+The operation is subprocess-backed observation (runtime path checks,
+requirements-file read and `pip list`). Rust makes no explicit dependency-
+install, cache-write or network call, but inherited Python/pip subprocess
+effects are neither excluded nor proved absent. A successful typed report does
+not prove readiness or an authoritative subprocess check. FE-I42
+tracks unbounded tag-derived filesystem/process reachability and FE-I43 tracks
+the manager's flattening of failed package-list observation into empty installed
+facts. FE-I35 remains the separate status-route error-swallowing issue. No live
+runtime, dependency installation or network operation is authorized, and
+verification invokes no live runtime process.
+
+Focused default/no-default RPC tests, strict all-target/all-feature and library-
+only Clippy, Rust formatting, Electron build/lint/all tests, generated producer/
+decoder and bundled-preload/direct-bridge conformance, frontend type/lint and
+both builds, generator tests/freshness, diff checks and the canonical plan
+contract all pass. Review corrected overbroad no-subprocess-effect wording; no
+code or schema blocker remained. The frontend ledger owns exact routing, failed
+test-oracle repairs and cost evidence. M4 and the overall remediation remain
+incomplete. Next: inventory and validate `get_release_dependencies`.
+
 ## 2026-09-09 — Runtime Installation-Start Contract
 
 The frontend plan accepts one generated `install_version` request and exact

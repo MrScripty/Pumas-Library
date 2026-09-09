@@ -1,5 +1,5 @@
 import type { BaseResponse } from './api-common';
-import type { AvailableVersionsOutcome, CancelInstallationOutcome, GithubCacheStatusOutcome, InstallationProgressOutcome, InstalledVersionsOutcome, InstallVersionOutcome, RemoveVersionOutcome, SelectedVersionOutcome, SetDefaultVersionOutcome, SwitchVersionOutcome, ValidateInstallationsOutcome, VersionInfoOutcome, VersionStatusOutcome } from '../generated/desktop-contract';
+import type { AvailableVersionsOutcome, CancelInstallationOutcome, CheckVersionDependenciesOutcome, GithubCacheStatusOutcome, InstallationProgressOutcome, InstalledVersionsOutcome, InstallVersionOutcome, RemoveVersionOutcome, SelectedVersionOutcome, SetDefaultVersionOutcome, SwitchVersionOutcome, ValidateInstallationsOutcome, VersionInfoOutcome, VersionStatusOutcome } from '../generated/desktop-contract';
 export type { VersionReleaseAsset, VersionReleaseInfo } from '../generated/desktop-contract';
 
 // ============================================================================
@@ -27,6 +27,8 @@ export type GetDefaultVersionResponse = SelectedVersionOutcome;
 export type SetDefaultVersionResponse = SetDefaultVersionOutcome;
 
 export type VersionStatusResponse = VersionStatusOutcome;
+
+export type CheckVersionDependenciesResponse = CheckVersionDependenciesOutcome;
 
 // ============================================================================
 // Installation & Progress Types

@@ -48,6 +48,8 @@ import {
   decodeSelectedVersionOutcome,
   decodeVersionStatusOutcome,
   decodeVersionInfoOutcome,
+  decodeCheckVersionDependenciesOutcome,
+  decodeCheckVersionDependenciesParams,
   decodeValidateInstallationsOutcome,
   decodeInstallationProgressOutcome,
   decodeCancelInstallationOutcome,
@@ -559,8 +561,17 @@ const electronAPI = {
           error: 'Extra launch arguments are not supported by the desktop RPC bridge',
         })
       : launchAppVersion(appId, tag),
-  check_version_dependencies: (tag: string, appId?: string) =>
-    apiCall('check_version_dependencies', { tag, app_id: appId }),
+  check_version_dependencies: (tag: string, appId: string) => {
+    const params = requireDecoded(
+      decodeCheckVersionDependenciesParams({ tag, app_id: appId }),
+      'check_version_dependencies request'
+    );
+    return validatedApiCall(
+      'check_version_dependencies',
+      decodeCheckVersionDependenciesOutcome,
+      params
+    );
+  },
   install_version_dependencies: (tag: string, appId?: string) =>
     apiCall('install_version_dependencies', { tag, app_id: appId }),
 

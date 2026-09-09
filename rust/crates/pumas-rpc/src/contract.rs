@@ -197,6 +197,11 @@ pub(crate) struct RpcAdmissionError {
 /// names become method-not-found without reaching a domain handler.
 pub(crate) enum RpcCommand {
     #[cfg(feature = "inference-plugins")]
+    CheckVersionDependencies {
+        app_id: String,
+        tag: String,
+    },
+    #[cfg(feature = "inference-plugins")]
     InstallVersion {
         app_id: String,
         tag: String,
@@ -347,6 +352,8 @@ impl RpcCommand {
             Self::SetDefaultVersion { .. } => "set_default_version",
             #[cfg(feature = "inference-plugins")]
             Self::InstallVersion { .. } => "install_version",
+            #[cfg(feature = "inference-plugins")]
+            Self::CheckVersionDependencies { .. } => "check_version_dependencies",
             Self::HealthCheck => "health_check",
             Self::Shutdown => "shutdown",
             Self::GetStatus => "get_status",
@@ -465,6 +472,8 @@ pub(crate) enum RpcOutcome {
     SetDefaultVersion(SetDefaultVersionOutcome),
     #[cfg(feature = "inference-plugins")]
     InstallVersion(InstallVersionOutcome),
+    #[cfg(feature = "inference-plugins")]
+    CheckVersionDependencies(CheckVersionDependenciesOutcome),
     HfTokenMutation(SuccessOutcome),
     HfAuth(Box<HfAuthOutcome>),
     LinkHealth(Box<LinkHealthOutcome>),
@@ -551,6 +560,8 @@ impl RpcOutcome {
             Self::SetDefaultVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::InstallVersion(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::CheckVersionDependencies(value) => serde_json::to_value(value),
             Self::HfTokenMutation(value) => serde_json::to_value(value),
             Self::HfAuth(value) => serde_json::to_value(value),
             Self::LinkHealth(value) => serde_json::to_value(value),
@@ -3538,6 +3549,49 @@ pub(crate) struct InstallVersionParams {
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct CheckVersionDependenciesParams {
+    #[serde(alias = "appId")]
+    app_id: String,
+    tag: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct CheckVersionDependenciesOutcome {
+    success: bool,
+    dependencies: CheckedVersionDependencies,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct CheckedVersionDependencies {
+    installed: Vec<String>,
+    missing: Vec<String>,
+    requirements_file: Option<String>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl CheckVersionDependenciesOutcome {
+    pub(crate) fn new(status: pumas_library::models::DependencyStatus) -> Self {
+        Self {
+            success: true,
+            dependencies: CheckedVersionDependencies {
+                installed: status.installed,
+                missing: status.missing,
+                requirements_file: status.requirements_file,
+            },
+        }
+    }
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
 #[derive(Serialize)]
 #[serde(untagged)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
@@ -3613,6 +3667,59 @@ pub(crate) fn install_version_requests() -> Vec<(Value, bool)> {
         (json!({"app_id":"a", "appId":"b", "tag":"v1"}), false),
     ]);
     cases
+}
+
+#[cfg(test)]
+mod check_version_dependencies_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn check_version_dependencies_admission_preserves_exact_strings() {
+        for (params, accepted) in install_version_requests() {
+            let parsed = parse_params::<CheckVersionDependenciesParams>(Some(&params));
+            assert_eq!(parsed.is_ok(), accepted, "{params}");
+            if let Ok(parsed) = parsed {
+                assert_eq!(
+                    json!(parsed.app_id),
+                    params
+                        .get("app_id")
+                        .or_else(|| params.get("appId"))
+                        .unwrap()
+                        .clone()
+                );
+                assert_eq!(json!(parsed.tag), params["tag"]);
+            }
+        }
+        assert!(parse_params::<CheckVersionDependenciesParams>(None).is_err());
+    }
+
+    #[test]
+    fn check_version_dependencies_matches_actual_producer_and_wrapper() {
+        for status in [
+            pumas_library::models::DependencyStatus::default(),
+            pumas_library::models::DependencyStatus {
+                installed: vec![" torch λ ".into()],
+                missing: vec!["numpy>=1".into()],
+                requirements_file: Some(" fixture/requirements.txt ".into()),
+            },
+        ] {
+            let raw = serde_json::to_value(&status).unwrap();
+            assert!(raw.get("requirementsFile").is_some());
+            let wrapped = crate::wrapper::wrap_response("check_version_dependencies", raw);
+            let typed = serde_json::to_value(CheckVersionDependenciesOutcome::new(status)).unwrap();
+            assert_eq!(typed, wrapped);
+            #[cfg(feature = "inference-plugins")]
+            assert_eq!(
+                RpcOutcome::CheckVersionDependencies(CheckVersionDependenciesOutcome::new(
+                    serde_json::from_value(typed["dependencies"].clone()).unwrap()
+                ))
+                .into_value()
+                .unwrap(),
+                typed
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -4696,6 +4803,17 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             })
         }
         "get_models" => empty().map(|()| RpcCommand::GetModels),
+        #[cfg(feature = "inference-plugins")]
+        "check_version_dependencies" => {
+            parse_params::<CheckVersionDependenciesParams>(params).map(|params| {
+                RpcCommand::CheckVersionDependencies {
+                    app_id: params.app_id,
+                    tag: params.tag,
+                }
+            })
+        }
+        #[cfg(not(feature = "inference-plugins"))]
+        "check_version_dependencies" => Err(PublicError::method_not_found()),
         #[cfg(feature = "inference-plugins")]
         "install_version" => {
             parse_params::<InstallVersionParams>(params).map(|params| RpcCommand::InstallVersion {

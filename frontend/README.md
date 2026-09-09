@@ -102,6 +102,22 @@ no-manager empty snapshots and failed dependency checks represented as empty
 lists remain limitations; validation does not establish runtime or dependency
 availability.
 
+The dedicated `check_version_dependencies` bridge method uses the generated
+request/outcome contract and requires both a runtime tag and app id. It reports
+the backend's installed/missing names and optional `requirementsFile` after a
+subprocess-backed path/requirements/`pip list` observation. Rust makes no
+explicit dependency-install, cache-write or network call, but inherited
+Python/pip subprocess effects are not excluded or proved absent. Unknown app
+identities remain missing-manager errors, disabled inference-plugin builds are
+unsupported, and missing versions remain errors, while an absent venv or
+requirements file retains the
+backend's explicit report semantics. A valid response means the check returned a
+typed report, not that dependencies are ready. There is currently no hook or UI
+state consumer for this route, so the direct exposed bridge is the renderer
+boundary; malformed responses and transport failures reject without becoming
+empty data or triggering retries. FE-I42 and FE-I43 track tag-derived path
+reachability and flattened package-list failures.
+
 Runtime-version info preserves the backend's exact tag and installed flag with
 its current required null size. It does not expose installation paths, dates,
 release metadata or a computed size. The generated preload decoder rejects

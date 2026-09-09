@@ -1,5 +1,80 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-09 — Runtime Dependency-Check Response Contract
+
+Accepted the bounded `check_version_dependencies` response slice across the
+standalone Rust producer, typed RPC dispatch, Electron main admission, bundled
+preload and the exposed renderer bridge. The request now uses the generated
+`CheckVersionDependenciesParams` decoder: exact string `tag` and required app
+identity are admitted through either existing `app_id`/`appId` alias, while
+missing, null, wrong-type, unknown and ambiguous fields reject before manager
+lookup. The handwritten Electron request schema entry was removed because the
+generated main-admission decoder is now authoritative.
+
+The app-manager result is a subprocess-backed `DependencyStatus` projection with
+installed names, missing names and an optional requirements-file identity. The
+typed desktop wire is exactly `{success:true,dependencies:{installed,missing,
+requirementsFile}}`; the generated outcome decoder preserves exact strings,
+ordering, empty lists and explicit null. Unknown app identities remain missing-
+manager errors, disabled inference-plugin builds remain method-not-found, and
+missing version errors remain RPC errors. Missing venv and missing requirements
+file remain the producer's successful report cases. The operation checks paths,
+reads the requirements file and invokes `pip list`. Rust makes no explicit
+dependency-install, cache-write or network call, but inherited Python/pip
+subprocess effects are neither excluded nor proved absent. It does not establish
+dependency readiness or an authoritative subprocess check: the current manager
+can flatten failed `pip list` attempts to an empty installed list.
+
+There is no hook or UI state consumer for this operation. The direct exposed
+bridge is the actual current frontend boundary. Valid reports are exposed only
+after generated decoding; malformed reports and transport failures reject, do
+not become authoritative empty data, and do not trigger automatic retries. No
+hook/UI behavior or dependency installation was invented.
+
+Known open producer findings are FE-I42 (unbounded tag-derived runtime-path and
+`pip` process reachability) and FE-I43 (failed package-list attempts flattened
+into apparently successful dependency facts). FE-I35 remains the separate
+`get_version_status` error-swallowing issue, and FE-I34 remains the broader
+no-manager read-result availability issue.
+
+Verification: focused `pumas-rpc` tests pass three dependency-check tests with
+default features and three with `--no-default-features`. Strict Clippy passes
+for all targets/all features and all targets/no default features with warnings
+denied; `cargo fmt --all -- --check` passes. Electron generator tests pass 7,
+freshness, lint and build pass, and the actual bundled-preload/main suite passes
+160 with one pinned-Electron test skipped. Producer/generated conformance passes
+35 and frontend conformance passes 44. Frontend type checking, lint and normal/
+library-only builds pass. Diff checking and the unchanged pure external
+`validate_plan` contract pass. Current fixtures and tests are serialization/
+admission evidence only; they do not establish a live manager, package
+correctness, subprocess effects, network behavior or runtime mutation.
+Verification invokes no live runtime process.
+
+Routing/review: root used GPT-5.6 Sol low; Astra medium owned the operation plan
+and consequential contract decision, Luna max performed the read-only inventory,
+Astra low implemented the settled Rust changes, Luna max performed mechanical
+desktop integration and documentation, and Astra medium independently reviewed
+the result. Review found no code/schema blocker and corrected claims that had
+overstated side-effect freedom and a nonexistent unsupported-runtime outcome.
+The initial focused Electron run failed because its invocation count expected 12
+instead of the observed 13; the first generated-conformance run also placed the
+valid explicit-null response in the negative corpus. Both test-oracle mistakes
+were repaired without changing production semantics. Two focused Cargo commands
+were inadvertently launched together; Cargo serialized them with its build lock,
+both passed, and all later Cargo ownership remained sequential.
+
+Cost checkpoint: local `token_usage_record` entries were deduplicated by
+`response_id`. The previously uncounted root reporting tail is $5.897905. This
+slice adds $7.348875 through the reporting checkpoint: root Sol low $4.203042, Astra medium $1.957310,
+Luna max $0.343195, and Astra low $0.845328. The cumulative API-equivalent
+estimate is $55.515380 standard and $111.030760 under the separately requested
+2x priority scenario. No request crossed 272,000 input tokens and recorded cache
+writes were zero. Requested/observed service tiers and tool fees were not
+recorded and remain unknown; these estimates are not invoices.
+
+The next slice is the independent inventory and validation of
+`get_release_dependencies`. M4 and the overall remediation remain incomplete.
+
 ## 2026-09-09 — Runtime Installation-Start Contract
 
 Accepted `install_version` as one generated request and exact discriminated

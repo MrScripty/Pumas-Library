@@ -10,10 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Bound runtime dependency-check responses (M4): inventory the
-`check_version_dependencies` producer, existing wrapper and actual consumer before
-selecting a projection. Preserve optional inference-plugin builds, standalone
-backend operation and existing error behavior; do not install dependencies.
+**Next slice:** Inventory and validate `get_release_dependencies` (M4) after
+the accepted runtime dependency-check response. Preserve optional inference-
+plugin builds, standalone backend operation and existing error behavior; do not
+install dependencies.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -108,6 +108,54 @@ Rust static/toolchain and canonical-plan checks. Serialization and unregistered-
 manager fixtures only; no live release lookup, network access or runtime install.
 Concurrency, panic, stale-cleanup, cancellation interference, filesystem
 containment, graphical and other-OS behavior remain outside this evidence.
+
+## Runtime Dependency-Check Response Contract
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-09--runtime-dependency-check-response-contract).
+Operation: `continue` this canonical plan, remaining M4.
+Project `check_version_dependencies` through one generated request and outcome
+across standalone Rust RPC, Electron main admission, preload and the exposed
+frontend bridge. The request requires exact string `tag` and app identity,
+preserves the existing `app_id`/`appId` aliases, rejects missing/null/wrong-type,
+unknown and ambiguous fields before manager lookup, and does not normalize tags.
+
+The raw manager result is `DependencyStatus` with installed and missing package
+names plus an optional requirements-file identity. The typed desktop outcome is
+exactly `{success:true,dependencies:{installed:string[],missing:string[],requirementsFile:string|null}}`;
+the generated decoder owns this projection. The legacy wrapper's non-null shape
+matches the typed outcome; the admitted typed dispatch does not authorize a
+partial empty fallback. Unknown app identities remain missing-manager errors,
+disabled inference-plugin builds remain method-not-found, and missing versions
+remain propagated RPC errors. A missing virtual environment is a
+successful report with the manager's explicit missing marker; a missing
+requirements file is a successful empty report with a null requirements-file
+identity.
+
+The operation is subprocess-backed observation: Rust checks runtime paths, reads
+the requirements file and invokes the runtime's `pip list` command. Rust makes
+no explicit dependency-install, cache-write or network call, but inherited
+Python/pip subprocess effects are neither excluded nor proved absent. Success
+means the manager returned its current typed report; it does not prove an
+authoritative subprocess check, dependency readiness or authoritative
+empty/fallback package facts. The
+manager currently flattens failed `pip list` attempts to an empty installed list;
+FE-I43 retains that separate producer truthfulness risk. FE-I42 retains the
+unbounded tag-to-runtime-path/process reachability risk.
+
+There is no current hook or UI state consumer for this operation. The direct
+exposed bridge is therefore the actual frontend consumer boundary in this slice:
+valid reports pass through, malformed reports reject before exposure, and
+transport errors do not become empty data or trigger retries. No hook/UI is
+invented and no dependency installation or live runtime is performed.
+
+Acceptance: producer/wrapper equivalence, strict request admission and generated
+decoder conformance through Rust, Electron main and bundled preload, direct
+bridge request/response/transport evidence, focused frontend type checks and
+contract tests, optional-feature behavior, generator freshness and canonical
+plan checks. Populated fixtures prove serialization only, not live manager
+availability, package correctness, subprocess effects, network behavior or
+runtime mutation. Verification invokes no live runtime process.
 
 ## Default Runtime-Version Selection Response Contract
 

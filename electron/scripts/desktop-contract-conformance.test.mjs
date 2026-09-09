@@ -29,6 +29,28 @@ test('installation-start admission and discriminated outcomes match Rust', () =>
   }
 });
 
+test('dependency-check admission and outcomes match Rust', () => {
+  for (const probe of fixtures.check_version_dependencies_request_probes) {
+    const result = contract.decodeCheckVersionDependenciesParams(probe.params);
+    assert.equal(result.status, probe.accepted ? 'valid' : 'invalid', JSON.stringify(probe));
+    if (probe.accepted) assert.deepEqual(JSON.parse(JSON.stringify(result.value)), probe.params);
+  }
+  for (const key of ['check_version_dependencies_null', 'check_version_dependencies_populated']) {
+    const result = contract.decodeCheckVersionDependenciesOutcome(fixtures[key]);
+    assert.equal(result.status, 'valid', key);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), fixtures[key]);
+  }
+  const valid = fixtures.check_version_dependencies_populated;
+  for (const value of [null, true, false, {}, { success: false },
+    { success: true },
+    { success: true, dependencies: { installed: [42], missing: [], requirementsFile: null } },
+    { success: true, dependencies: { installed: [], missing: ['numpy'], requirementsFile: 42 } },
+    { success: true, dependencies: valid.dependencies, extra: true },
+    { success: true, dependencies: { ...valid.dependencies, requirements_file: 'legacy' } }]) {
+    assert.equal(contract.decodeCheckVersionDependenciesOutcome(value).status, 'invalid', JSON.stringify(value));
+  }
+});
+
 test('default-selection request admission matches Rust and response preserves exact booleans', () => {
   for (const probe of fixtures.set_default_version_request_probes) {
     const result = contract.decodeSetDefaultVersionParams(probe.params);

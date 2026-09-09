@@ -115,6 +115,13 @@ or automatic retry. Terminal progress follows observed lease release.
 Keep that advisory lock file and its directory stable while either operation is active;
 this is not protection against hostile root replacement or abrupt host death.
 
+Managed quantization admission and direct calls to all built-in backends require
+an exact target/backend match in that backend's advertised catalog. Unsupported
+targets return `InvalidParams` before readiness probes or execution effects;
+direct checks also precede source-file inspection. No aliases, normalization or
+fallback targets are applied.
+Catalog membership does not certify installed-tool or hardware support.
+
 Managed quantization admission and direct llama.cpp calls validate every supplied
 calibration path, even when optional: it must name a nonempty regular file that
 can be opened and yield a byte. Missing/nonfile/empty inputs are `InvalidParams`;

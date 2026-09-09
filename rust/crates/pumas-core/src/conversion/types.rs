@@ -367,6 +367,11 @@ pub trait QuantizationBackend: Send + Sync {
 
     /// Execute the quantization pipeline.
     ///
+    /// Built-in backends reject targets not exactly present in their
+    /// backend-qualified catalog with `InvalidParams` before file inspection,
+    /// readiness probes or execution effects. No aliases or case normalization
+    /// are applied. Catalog membership does not establish tool/hardware support.
+    ///
     /// # Preconditions
     /// - The selected route's environment must be available; `is_ready()` is
     ///   advisory and does not replace operation-specific validation.

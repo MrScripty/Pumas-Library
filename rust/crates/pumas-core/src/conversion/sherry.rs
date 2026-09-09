@@ -111,6 +111,7 @@ impl QuantizationBackend for SherryBackend {
         progress: &ConversionProgressTracker,
         cancel_token: &CancellationToken,
     ) -> Result<PathBuf> {
+        super::targets::validate_target(self, &params.target_quant)?;
         let conversion_id = &params.conversion_id;
 
         // -- PHASE 1: GATHER --

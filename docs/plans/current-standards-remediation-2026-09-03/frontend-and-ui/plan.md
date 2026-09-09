@@ -10,9 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Direct quantization target validation (FE-I26, remaining FE-I23).
-Align direct backend target checks with the managed catalog contract before
-native effects. Shared supplied-calibration preflight is accepted below;
+**Next slice:** Direct importance-matrix option validation (FE-I26, remaining FE-I23).
+Align direct option handling with managed rejection of `force_imatrix` outside
+llama.cpp; direct NVFP4/Sherry currently ignore it. Exact target validation and
+shared supplied-calibration preflight are accepted below;
 content quality and immutable input custody remain outside that bounded check.
 FE-I28 remains open on recurrence: accepted test-only admission
 diagnostics below improve the next failing wait, without establishing its cause.
@@ -53,6 +54,36 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Direct Quantization Target Validation
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-08--direct-quantization-target-validation).
+The existing exact backend-qualified catalog match becomes
+shared policy for managed admission and every built-in direct `quantize` entry,
+before readiness probes, progress publication or staging. Direct checks also
+precede filesystem inspection; managed source lookup remains unchanged. Unsupported
+values return the existing managed `InvalidParams` messages. No normalization,
+aliases, new targets or fallback to backend defaults. Catalog providers remain
+authoritative; this does not certify installed-tool/hardware support.
+
+Root owns core `src/conversion/{targets.rs,mod.rs,manager.rs,llama_cpp.rs,
+nvfp4.rs,sherry.rs,types.rs}`, core README and four plan documents.
+root_diagnostics owns new `src/conversion/target_tests.rs`. Root serializes
+Cargo, formatting, integration and commits. No GUI/schema/dependency changes.
+Focused actual direct-call rejections and existing managed catalog tests prove
+the contract; valid catalog values must reach later source/environment checks.
+Minimal conversion/full core-RPC tests, strict lint and formatting passed.
+Evidence is local automated fixtures, not real native/model/GPU execution.
+
+Composed-design review: applicable. Private `validate_target(backend, target)`
+owns the matching/error policy and obtains identity/catalog from the backend;
+callers only choose when to validate. Catalog changes remain with their providers,
+policy changes stay in one Module, and no public trait method or runtime is added.
+Deleting the helper would duplicate policy across four consumers. The pure check
+has no interleaving or retained-state requirement. Existing force-imatrix,
+calibration, source and execution policies are unchanged. Re-plan if external
+backend implementors require a new public contract or target aliases.
 
 ## Calibration File Preflight
 

@@ -190,6 +190,7 @@ impl QuantizationBackend for LlamaCppBackend {
         progress: &ConversionProgressTracker,
         cancel_token: &CancellationToken,
     ) -> Result<PathBuf> {
+        super::targets::validate_target(self, &params.target_quant)?;
         if super::native_setup::NativeSetup::new(&self.base_dir)
             .incomplete_async()
             .await

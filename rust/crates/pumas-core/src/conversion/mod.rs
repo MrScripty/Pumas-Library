@@ -25,6 +25,9 @@ mod script_process;
 mod scripts;
 mod setup;
 pub mod sherry;
+#[cfg(test)]
+mod target_tests;
+mod targets;
 mod types;
 mod workers;
 

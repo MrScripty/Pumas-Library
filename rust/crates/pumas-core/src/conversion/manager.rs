@@ -573,15 +573,7 @@ impl ConversionManager {
                 message: format!("No {} backend registered", backend_name),
             })?;
 
-        if !backend
-            .supported_quant_types()
-            .iter()
-            .any(|option| option.backend == Some(backend_id) && option.name == quant_type)
-        {
-            return Err(PumasError::InvalidParams {
-                message: format!("Unsupported target quantization for {backend_name}"),
-            });
-        }
+        super::targets::validate_target(backend.as_ref(), &quant_type)?;
         if force_imatrix && backend_id != QuantBackend::LlamaCpp {
             return Err(PumasError::InvalidParams {
                 message: "force_imatrix is only supported by llama.cpp".into(),

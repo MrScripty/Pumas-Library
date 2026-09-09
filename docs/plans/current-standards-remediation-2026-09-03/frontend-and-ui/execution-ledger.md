@@ -1,5 +1,50 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-08 — Direct Quantization Target Validation
+
+Accepted direct target validation. The managed exact, backend-qualified catalog check is now shared with
+the first statement of each built-in direct quantize entry: llama.cpp, NVFP4
+and Sherry. The private targets Module obtains catalog and identity from the
+backend, preserving existing managed error labels without exposing raw target
+strings in errors. No normalization, aliases or fallback defaults are added.
+Managed source lookup remains unchanged; direct checks precede filesystem reads,
+readiness, progress mutation and staging. Membership does not establish native
+tool/hardware compatibility. Custom trait implementors are not automatically
+wrapped; documentation limits this guarantee to built-in implementations.
+
+The codebase-design skill kept one policy Interface and existing catalog owners,
+without a new trait method, runtime, public type, schema or GUI requirement.
+Root owned implementation/docs and serial verification; root_diagnostics supplied
+two direct-call tests. root_capability independently reviewed policy and evidence.
+
+Before wiring, `cargo test --offline --locked -p pumas-library --lib
+conversion::target_tests::` failed the first invalid case: llama.cpp with NVFP4
+reported missing llama-quantize rather than `InvalidParams`. The valid-catalog
+control already passed. After wiring, `cargo test --offline --locked -p
+pumas-library --lib target` passed 27 tests, including both new tests and the
+existing managed catalog checks. The direct matrix covers 27 rejected inputs
+across the three built-ins and checks exact error, unchanged source/progress,
+and no staging or environment files. Every advertised target reaches its
+expected subsequent missing-source error; that control proves admission, not
+native execution. First-statement placement supplies the construction evidence
+for rejection before read-only filesystem inspection.
+
+Minimal conversion verification passed 124 top-level tests plus the additional
+marker-child invocation using `cargo test --offline --locked -p pumas-library
+--no-default-features conversion::` from `rust/`.
+The full `cargo test --offline --locked -p pumas-library -p pumas-rpc -- --quiet`
+run passed 1,493 executions (including the extra marker child), with 22 ignored
+and no failures. Strict lint passed using `cargo clippy --offline --locked -p
+pumas-library -p pumas-rpc --all-targets --all-features -- -D warnings`;
+formatting and all five canonical plan checks passed. Root verified all four
+call-site placements against the independently reviewed policy.
+Logs: `/tmp/pumas-direct-targets-{minimal,default}.log`.
+No live model/tool/GPU, GUI workflow or Windows/macOS acceptance is inferred.
+Existing importance-matrix/calibration and source policies remain unchanged;
+direct importance-matrix option consistency is the next FE-I26 prerequisite.
+FE-I28/FE-I29 and the remaining FE-I26 claims stay open. Pending download cleanup
+replay remains unadmitted.
+
 ## 2026-09-08 — Calibration File Preflight
 
 Accepted bounded calibration preflight. Shared validation now covers managed quantization admission

@@ -2,8 +2,6 @@
 
 use std::time::Duration;
 
-const LLAMA_CPP_ROUTER_READY_TIMEOUT: Duration = Duration::from_secs(2);
-const LLAMA_CPP_ROUTER_LOAD_TIMEOUT: Duration = Duration::from_secs(180);
 const LLAMA_CPP_ROUTER_UNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
@@ -29,6 +27,37 @@ pub struct LlamaCppRouterClient {
 impl LlamaCppRouterClient {
     pub fn new(http: reqwest::Client) -> Self {
         Self { http }
+    }
+
+    pub(crate) async fn router_catalog_ready(
+        &self,
+        endpoint: &str,
+        model_id: &str,
+        require_loaded: bool,
+        deadline: tokio::time::Instant,
+    ) -> Result<bool, String> {
+        let response = self
+            .http
+            .get(llama_cpp_router_models_url(endpoint))
+            .timeout(deadline.saturating_duration_since(tokio::time::Instant::now()))
+            .send()
+            .await;
+        let response = match response {
+            Ok(response) => response,
+            Err(error) if error.is_connect() || error.is_timeout() => return Ok(false),
+            Err(_) => return Err("llama.cpp router readiness request failed".into()),
+        };
+        if response.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE {
+            return Ok(false);
+        }
+        if response.status() != reqwest::StatusCode::OK {
+            return Err("llama.cpp router model endpoint returned an unexpected status".into());
+        }
+        let payload: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|_| "llama.cpp router model endpoint returned invalid JSON")?;
+        router_catalog_model_ready(&payload, model_id, require_loaded)
     }
 
     /// Prove readiness of one dedicated server against its owned launch model.
@@ -83,21 +112,16 @@ impl LlamaCppRouterClient {
         dedicated_model_identity_ready(&models, model_path)
     }
 
-    pub async fn endpoint_ready(&self, endpoint: &str) -> bool {
-        self.http
-            .get(llama_cpp_router_models_url(endpoint))
-            .timeout(LLAMA_CPP_ROUTER_READY_TIMEOUT)
-            .send()
-            .await
-            .map(|response| response.status().is_success())
-            .unwrap_or(false)
-    }
-
-    pub async fn load_model(&self, endpoint: &str, model_alias: &str) -> Result<(), String> {
+    pub async fn load_model(
+        &self,
+        endpoint: &str,
+        model_alias: &str,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), String> {
         let response = self
             .http
             .post(llama_cpp_router_model_load_url(endpoint))
-            .timeout(LLAMA_CPP_ROUTER_LOAD_TIMEOUT)
+            .timeout(deadline.saturating_duration_since(tokio::time::Instant::now()))
             .json(&serde_json::json!({ "model": model_alias }))
             .send()
             .await
@@ -133,6 +157,41 @@ impl LlamaCppRouterClient {
         } else {
             format!("llama.cpp router failed to unload model with HTTP status {status}: {body}")
         })
+    }
+}
+
+fn router_catalog_model_ready(
+    payload: &serde_json::Value,
+    model_id: &str,
+    require_loaded: bool,
+) -> Result<bool, String> {
+    let rows = payload
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("llama.cpp router model endpoint omitted its catalog")?;
+    let mut selected = rows
+        .iter()
+        .filter(|row| row.get("id").and_then(serde_json::Value::as_str) == Some(model_id));
+    let model = selected
+        .next()
+        .ok_or("llama.cpp router catalog does not contain the selected model")?;
+    if selected.next().is_some() {
+        return Err("llama.cpp router catalog contains an ambiguous model identity".into());
+    }
+    let status = model
+        .get("status")
+        .ok_or("llama.cpp router catalog omitted model status")?;
+    match status.get("failed") {
+        Some(serde_json::Value::Bool(true)) => {
+            return Err("llama.cpp router reports that the selected model failed to load".into())
+        }
+        Some(serde_json::Value::Bool(false)) | None => {}
+        _ => return Err("llama.cpp router catalog returned invalid model failure status".into()),
+    }
+    match status.get("value").and_then(serde_json::Value::as_str) {
+        Some("loaded") => Ok(true),
+        Some("unloaded" | "loading" | "sleeping") => Ok(!require_loaded),
+        _ => Err("llama.cpp router catalog returned invalid model status".into()),
     }
 }
 

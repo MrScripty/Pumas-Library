@@ -1,5 +1,94 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-10 — Managed llama.cpp Router Readiness Repair
+
+Accepted the user-prioritized managed-router repair without closing M4. The
+reported `Failed to reach llama.cpp router endpoint` path reproduced twice: the
+owned launch returned its immediate `ready:false` receipt and the caller made a
+single endpoint check before a normally starting router endpoint was ready. That
+dedicated-profile custody change had exposed a router caller that the preceding
+review and live proof did not cover.
+
+After acquiring the retained launch receipt, the router path waits within 60
+seconds for its positive owned listener and readable model catalog. It treats an unloaded exact
+selected model as distinct from readiness, sends exactly one load request, and
+waits within a 180-second total model-readiness budget for that row to report
+loaded before guarded publication. A current owned process is reused when its
+endpoint, context and retained identity agree; the requested model is verified
+separately in the catalog. Starting, stopping, uncertain or mismatched
+sessions never trigger an automatic stop or relaunch; a context mismatch requires
+an explicit stop. A terminal joined session can admit one new launch. The receipt
+now carries immutable context size so later ownership checks bind the same launch.
+
+The final release binary passed an isolated real route using official
+`b10883+cpu`, the copied Qwen3 4B Q6_K model, numeric loopback port `43829`, and
+context `4096`. `serve_model` published Loaded only after the exact router catalog
+row reported loaded. Inference through the Pumas gateway returned exact
+`ROUTER_PUMAS_OK` with fingerprint `b10883-91f6a6cf3`. Unload removed the model
+while intentionally retaining the router. Scoped `stop_runtime_profile` then
+removed owned PID `363973`; the PID and listener were absent afterward. The RPC
+owner shut down cleanly. The source model remained unchanged. The user's `b9090`
+Vulkan runtime, GPU profile and 27B model were not started or modified, so this
+evidence does not establish their execution. An already-running older Pumas app
+must restart to load the repaired binary; the repair never adopts or signals a
+stale or unowned PID.
+
+Verification: ten focused router RPC tests pass. Full inference-plugin RPC passes
+202 unit and 16 integration tests with ten ignored. No-default RPC passes 151 unit
+and 13 integration tests with ten ignored. Strict all-target RPC Clippy passes
+with all features and with no default features, warnings denied. Focused core
+custody tests and strict core lint pass; Rust formatting and diff checks pass.
+The canonical release launcher rebuilt the Rust backend, 2,385-module frontend,
+Electron TypeScript and bundled main/preload. Local HTTP fixtures initially hit
+the known sandbox `EPERM` restriction and passed unchanged with approved loopback
+access. No contract schema changed, and the generated desktop contract remains
+fresh. The current plan validates with the unchanged pure validator boundary.
+
+Review repaired two lifecycle gaps before acceptance: a joined terminal session
+must permit one new owner-admitted launch, and post-load timeout failure has a
+distinct diagnostic. Review also required the listener/receipt guard before
+HTTP evidence, exact context binding, exact loaded-row evidence and no automatic
+restart on uncertainty. The final isolated proof performed one model-load request,
+one model unload and one explicit owned stop only inside the ignored launcher
+root; no live library or user runtime was mutated.
+
+Cost checkpoint: `/tmp/pumas-router-readiness-costs.py` preserved the frozen
+hosting checkpoint and deduplicated 347 later `token_usage_record` responses.
+The carried reporting tail is $3.274082: root GPT-6 Astra medium $1.198172
+through `resp_04a060a0b34b4096016aa1f44186fc87d09b846f98baf4cb14`
+(`2026-09-10T00:05:42.991Z`) and integration GPT-5.6 Sol low $2.075910
+through `resp_0b81a3105f0b5342016aa1f431a6f887d0ab0697a14ad5793c`
+(`2026-09-10T00:05:13.291Z`). The router slice is $33.534868: root GPT-6
+Astra medium $8.432800 through
+`resp_04a060a0b34b4096016aa1fdb3bbbc87d0a3a26c7cfd8c15be`
+(`2026-09-10T00:45:44.783Z`); design/review GPT-6 Astra medium $7.520150
+through `resp_0d89de9fd93a6b19016aa1fdae3a9887d09c151647f32fcad5`
+(`2026-09-10T00:45:39.446Z`); inventory GPT-5.6 Luna max $0.024464 through
+`resp_01eda5dd1e4769fc016aa1f741cf4087d0a0fdc4e68d163f42`
+(`2026-09-10T00:18:23.532Z`); custody GPT-6 Astra low $4.763064 through
+`resp_031df41d4203cb98016aa1f8abf4ac87d08a3c1574f1acb197`
+(`2026-09-10T00:24:17.866Z`); readiness GPT-6 Astra low $5.888056 through
+`resp_00ab2130dd95350e016aa1fa72829887d082ab762326de7f79`
+(`2026-09-10T00:31:54.781Z`); and integration GPT-5.6 Sol low $6.906334
+through `resp_0b81a3105f0b5342016aa1fdccdd0487d0a9719a6ac6f205bd`
+(`2026-09-10T00:46:19.010Z`). Including the tail, this adds $36.808950 and
+brings the cumulative API-equivalent estimate to $228.623176 standard and
+$457.246352 under the separate 2x priority scenario. No request crossed 272,000
+input tokens and recorded cache writes were zero. Requested/observed service
+tiers, tool fees and shared costs remain unknown and are not treated as free.
+These remain API-equivalent estimates, not invoices. The reused large root and
+design contexts made this product repair expensive; bounded Astra-low custody/
+readiness ownership and Luna's short inventory were useful, but comparisons
+across these different task classes remain provisional. Work after this snapshot
+is an uncounted reporting/commit tail.
+
+FE-I49 remains open for legacy TCP launch readiness; the managed router subset is
+accepted. FE-I48 remains open for legacy lifecycle routes and FE-I52 remains open
+for incomplete lifecycle push publication. The next slice is the bounded
+`is_ollama_running`/`is_torch_running` producer, RPC, generated desktop and actual
+consumer read-contract inventory and validation. M4 and the overall remediation
+remain incomplete.
+
 ## 2026-09-09 — Runtime Stop Contract
 
 Accepted `stop_ollama` and `stop_torch` across standalone Rust, typed RPC,

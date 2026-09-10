@@ -74,7 +74,15 @@ pub(super) async fn launch_runtime_profile_with_receipt(
     primary
         .runtime_profile_service
         .process_owner
-        .launch(config, spec, model_path, operation_guard)
+        .launch(
+            config,
+            spec,
+            model_path,
+            overrides
+                .as_ref()
+                .and_then(|overrides| overrides.context_size),
+            operation_guard,
+        )
         .await
 }
 

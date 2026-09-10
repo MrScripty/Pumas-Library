@@ -249,9 +249,11 @@ validators migrated together; no persistence schema or live data changed.
 
 **Next slice:** Resume M4 with the bounded `is_ollama_running`/
 `is_torch_running` producer, RPC, generated desktop and actual-consumer
-read-contract inventory and validation. The Linux CPU working-build and isolated
-llama.cpp hosting checkpoint is accepted without closing remaining M4 or overall
-remediation, following the accepted runtime-stop
+read-contract inventory and validation. The reproduced managed llama.cpp router
+startup failure is repaired and accepted with isolated CPU evidence; the user's
+27B GPU model and live profile were not started or modified.
+The Linux CPU dedicated-profile hosting checkpoint remains accepted without
+closing remaining M4 or overall remediation, following the accepted runtime-stop
 response and the [standalone backend/link-health
 slice](frontend-and-ui/plan.md#standalone-backend-and-link-health-contract-admission).
 Import-picker, conversion progress reads and remaining conversion operation

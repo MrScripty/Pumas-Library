@@ -10,11 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Resume M4 with the bounded `is_ollama_running`/
-`is_torch_running` producer, RPC, generated desktop and actual-consumer
-read-contract inventory and validation. The user-prioritized working-build and
-isolated llama.cpp hosting checkpoint below is accepted; the remaining M4 and
-overall remediation are not complete.
+**Next slice:** Resume the bounded `is_ollama_running`/`is_torch_running`
+producer, RPC, generated desktop and actual-consumer read-contract inventory and
+validation. The managed llama.cpp router readiness repair below is accepted;
+the remaining M4 and overall remediation are not complete.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -69,6 +68,39 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Managed llama.cpp Router Readiness Repair
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-10--managed-llamacpp-router-readiness-repair).
+Operation: reproduce the reported Eidetic GPU router failure through an isolated
+model/profile, prove the current startup and endpoint-publication ordering, and
+repair the smallest authoritative runtime owner. Acceptance requires a current
+release build, bounded source regressions, semantic router readiness rather than
+an immediate connectivity guess, actual Pumas serve/inference/unload evidence,
+and renderer evidence that failures remain truthful without mutation retry.
+Live-library mutation and loading the user's 27B GPU model remain outside this
+checkpoint. The accepted dedicated-profile custody/readiness guarantees below
+remain unchanged.
+
+After acquiring the retained process receipt, the repair waits up to 60 seconds
+for its owned listener and readable model catalog. It distinguishes an unloaded
+selected model from a loaded one, submits exactly one load request, and waits within a 180-second
+total model-readiness budget for the exact selected row to report loaded before
+guarded publication. A current owned router is reused; uncertainty never triggers
+an automatic stop or relaunch. A different requested context requires an explicit
+stop, while a terminal joined session can admit one new launch.
+
+The reported endpoint-unreachable mechanism was reproduced twice before the
+repair. The final release binary then served the copied Qwen3 4B model through an
+isolated official `b10883+cpu` router and returned exact `ROUTER_PUMAS_OK` through
+the Pumas gateway. Unload removed the model while intentionally retaining the
+router; a scoped profile stop removed owned PID `363973` and listener `43829`.
+The user's existing GPU profile, `b9090` Vulkan runtime and 27B model were not
+started or modified, so that specific GPU execution remains unproved. A running
+older Pumas instance must restart to load the repaired binary. FE-I49 remains
+open for legacy launch readiness; its managed-router subset is accepted. FE-I48
+and FE-I52 remain open, and stale or unowned PIDs are never adopted or signalled.
 
 ## Working Build And Isolated llama.cpp Hosting
 

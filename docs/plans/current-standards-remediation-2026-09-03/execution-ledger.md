@@ -1,5 +1,30 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-10 — Managed llama.cpp Router Readiness Repair
+
+The user-reported managed-router endpoint failure reproduced twice and is
+accepted as repaired without closing M4. Router startup now waits for a retained
+process receipt, positively owned listener and readable catalog. It submits at
+most one load request per admitted serve and requires that exact catalog row
+to become loaded before guarded publication. Existing owned sessions are reused
+only when endpoint, context and retained process identity agree; the requested
+model is verified separately in the catalog. Uncertainty or mismatch never
+causes an automatic stop or relaunch. The earlier immediate owned-receipt change
+exposed the router caller's old one-shot endpoint assumption.
+
+The release build served the isolated copied Qwen3 4B model through official
+`b10883+cpu` and the Pumas gateway, returning exact `ROUTER_PUMAS_OK`. Unload kept
+the router running by design; an explicit scoped stop removed its owned PID and
+listener. The user's Vulkan runtime, GPU profile and 27B model were untouched and
+remain unverified. A running older application must restart to use the repaired
+binary. Focused/full/default and no-default Rust gates, strict all-feature and
+no-default RPC lint, formatting, release build, real inference and scoped cleanup
+pass. The frontend ledger owns exact evidence, review, limitations and costs.
+
+FE-I49 remains open outside the accepted managed-router subset; FE-I48 and FE-I52
+also remain open. Next resume the bounded `is_ollama_running`/
+`is_torch_running` M4 read-contract slice.
+
 ## 2026-09-09 — Working Build And Isolated llama.cpp Hosting
 
 The user-prioritized Linux CPU checkpoint is accepted without closing M4 or

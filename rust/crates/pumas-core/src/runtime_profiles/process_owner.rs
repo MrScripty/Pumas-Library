@@ -28,6 +28,8 @@ pub struct OwnedRuntimeProfileObservation {
     pub state: RuntimeLifecycleState,
     pub endpoint_url: RuntimeEndpointUrl,
     pub model_path: Option<PathBuf>,
+    /// Explicit launch override; absence leaves runtime default selection intact.
+    pub context_size: Option<u32>,
 }
 
 /// Receipt bound to the exact session admitted by a launch call.
@@ -55,6 +57,7 @@ struct Session {
     spec: RuntimeProfileLaunchSpec,
     generation: u64,
     model_path: Option<PathBuf>,
+    context_size: Option<u32>,
     stop: AtomicBool,
     state: Mutex<SessionState>,
 }
@@ -104,11 +107,12 @@ impl RuntimeProfileProcessOwner {
         config: BinaryLaunchConfig,
         spec: RuntimeProfileLaunchSpec,
         model_path: Option<PathBuf>,
+        context_size: Option<u32>,
         guard: RuntimeProfileOperationGuard,
     ) -> Result<OwnedRuntimeProfileLaunchReceipt> {
         #[cfg(not(target_os = "linux"))]
         {
-            let _ = (config, spec, model_path, guard);
+            let _ = (config, spec, model_path, context_size, guard);
             Err(failure(
                 "Owned binary runtime profiles are currently supported only on Linux",
             ))
@@ -142,6 +146,7 @@ impl RuntimeProfileProcessOwner {
                 let session = Arc::new(Session {
                     generation: registry.generation,
                     model_path,
+                    context_size,
                     stop: AtomicBool::new(false),
                     state: Mutex::new(SessionState {
                         status: RuntimeProfileStatus {
@@ -250,6 +255,7 @@ impl RuntimeProfileProcessOwner {
                     state: lifecycle,
                     endpoint_url: session.spec.endpoint_url.clone(),
                     model_path: session.model_path.clone(),
+                    context_size: session.context_size,
                 })
             })
             .transpose()
@@ -299,6 +305,7 @@ impl RuntimeProfileProcessOwner {
             || session.generation != expected.generation
             || state.status.pid != expected.pid
             || session.model_path != expected.model_path
+            || session.context_size != expected.context_size
             || session.spec.endpoint_url != expected.endpoint_url
         {
             return Err(failure(
@@ -385,6 +392,7 @@ impl RuntimeProfileProcessOwner {
                 state: state.status.state,
                 endpoint_url: session.spec.endpoint_url.clone(),
                 model_path: session.model_path.clone(),
+                context_size: session.context_size,
             }
         };
         Ok(Some((receipt, drain_session(&session).await)))
@@ -559,6 +567,7 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
                 state: RuntimeLifecycleState::Running,
                 endpoint_url: session.spec.endpoint_url.clone(),
                 model_path: session.model_path.clone(),
+                context_size: session.context_size,
             }));
         }
         drop(guard);
@@ -788,6 +797,7 @@ mod tests {
                 config,
                 spec,
                 Some(PathBuf::from("/fixture/model.gguf")),
+                Some(8192),
                 guard,
             )
             .await
@@ -796,6 +806,11 @@ mod tests {
         assert_eq!(result.response.ready, Some(false));
         let identity = fixture.owner.snapshot(&id).unwrap().unwrap();
         assert!(identity.pid.is_some());
+        assert_eq!(identity.context_size, Some(8192));
+        assert_eq!(
+            result.observation.as_ref().unwrap().context_size,
+            Some(8192)
+        );
         assert_eq!(
             identity.model_path,
             Some(PathBuf::from("/fixture/model.gguf"))
@@ -803,7 +818,7 @@ mod tests {
         let (config, spec, guard) = fixture.launch("exit 99");
         assert!(fixture
             .owner
-            .launch(config, spec, None, guard)
+            .launch(config, spec, None, None, guard)
             .await
             .is_err());
         assert_eq!(
@@ -840,7 +855,7 @@ mod tests {
         let id = spec.profile_id.clone();
         let result = fixture
             .owner
-            .launch(config, spec, None, guard)
+            .launch(config, spec, None, None, guard)
             .await
             .unwrap();
         assert!(!result.response.success);
@@ -860,7 +875,8 @@ mod tests {
         let (config, spec, guard) = fixture.launch("sleep 30 & wait");
         let id = spec.profile_id.clone();
         let owner = fixture.owner.clone();
-        let waiter = tokio::spawn(async move { owner.launch(config, spec, None, guard).await });
+        let waiter =
+            tokio::spawn(async move { owner.launch(config, spec, None, None, guard).await });
         tokio::time::timeout(Duration::from_secs(3), async {
             while fixture.owner.snapshot(&id).unwrap().is_none() {
                 tokio::task::yield_now().await;
@@ -883,7 +899,7 @@ mod tests {
         let (config, spec, guard) = fixture.launch("exit 99");
         assert!(fixture
             .owner
-            .launch(config, spec, None, guard)
+            .launch(config, spec, None, None, guard)
             .await
             .is_err());
     }
@@ -895,7 +911,7 @@ mod tests {
         let id = spec.profile_id.clone();
         fixture
             .owner
-            .launch(config, spec, None, guard)
+            .launch(config, spec, None, None, guard)
             .await
             .unwrap();
         tokio::time::timeout(Duration::from_secs(6), async {
@@ -925,7 +941,7 @@ mod tests {
         let id = spec.profile_id.clone();
         let receipt = fixture
             .owner
-            .launch(config, spec, None, guard)
+            .launch(config, spec, None, None, guard)
             .await
             .unwrap()
             .observation
@@ -960,12 +976,28 @@ mod tests {
         let (config, spec, guard) = listener_launch(&fixture, address);
         let receipt = fixture
             .owner
-            .launch(config, spec, None, guard)
+            .launch(config, spec, None, None, guard)
             .await
             .unwrap()
             .observation
             .unwrap();
         wait_for_listener(&receipt).await;
+        assert_eq!(receipt.context_size, None);
+        let mut mismatched_context = receipt.clone();
+        mismatched_context.context_size = Some(1024);
+        assert!(fixture
+            .owner
+            .owns_current_listener(&id, &mismatched_context)
+            .is_err());
+        assert!(serving
+            .record_loaded_model_for_owned_profile(
+                status.clone(),
+                &fixture.owner,
+                &mismatched_context
+            )
+            .await
+            .is_err());
+        assert!(serving.status().await.snapshot.served_models.is_empty());
         let loaded = serving
             .record_loaded_model_for_owned_profile(status.clone(), &fixture.owner, &receipt)
             .await
@@ -980,7 +1012,7 @@ mod tests {
         let (config, spec, guard) = listener_launch(&fixture, address);
         let replacement = fixture
             .owner
-            .launch(config, spec, None, guard)
+            .launch(config, spec, None, None, guard)
             .await
             .unwrap()
             .observation

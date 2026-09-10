@@ -9,12 +9,15 @@ use super::serving_llama_cpp_shared::{
 };
 use crate::server::AppState;
 use pumas_library::models::{
-    ModelServeError, ModelServeErrorCode, RuntimeDeviceMode, RuntimeManagementMode,
-    RuntimeProfileConfig, RuntimeProviderId, RuntimeProviderMode, ServeModelRequest,
-    ServeModelResponse, ServedModelLoadState, ServedModelStatus,
+    ModelServeError, ModelServeErrorCode, RuntimeManagementMode, RuntimeProfileConfig,
+    RuntimeProviderId, ServeModelRequest, ServeModelResponse, ServedModelLoadState,
+    ServedModelStatus,
 };
-use pumas_library::runtime_profiles::RuntimeProfileLaunchOverrides;
+use pumas_library::runtime_profiles::{
+    OwnedRuntimeProfileObservation, RuntimeProfileLaunchOverrides,
+};
 use serde_json::Value;
+use std::time::Duration;
 use tracing::warn;
 
 pub(super) async fn serve_llama_cpp_router_model(
@@ -79,80 +82,62 @@ pub(super) async fn serve_llama_cpp_router_model(
         return non_critical_failure_response(state, error).await;
     }
 
-    let profile_not_running = state
-        .api
-        .resolve_model_runtime_profile_endpoint_for_operation(
-            RuntimeProviderId::LlamaCpp,
-            &request.model_id,
-            Some(request.config.profile_id.clone()),
-        )
-        .await
-        .is_err();
-    let endpoint_unreachable = !state
-        .llama_cpp_router_client
-        .endpoint_ready(endpoint.as_str())
-        .await;
-    let should_restart_for_profile_settings = !profile_not_running
-        && !endpoint_unreachable
-        && llama_cpp_router_should_restart_for_launch_settings(state, &request, &profile).await?;
-    if should_restart_for_profile_settings
-        && state
-            .api
-            .stop_runtime_profile(request.config.profile_id.clone())
-            .await
-            .is_err()
-    {
-        warn!("failed to restart llama.cpp router profile before applying device settings");
-        return non_critical_failure_response(
-            state,
-            serving_error(
-                ModelServeErrorCode::ProviderLoadFailed,
-                "llama.cpp router profile could not be restarted to apply device settings",
-                &request,
-            ),
-        )
-        .await;
-    }
-    if profile_not_running || endpoint_unreachable || should_restart_for_profile_settings {
-        if let Some(error) = launch_llama_cpp_router_profile(state, &request, &profile).await? {
-            return non_critical_failure_response(state, error).await;
-        }
-        if !state
-            .llama_cpp_router_client
-            .endpoint_ready(endpoint.as_str())
-            .await
-        {
-            return non_critical_failure_response(
-                state,
-                serving_error(
-                    ModelServeErrorCode::ProviderLoadFailed,
-                    "llama.cpp router profile started but its model endpoint is not reachable",
-                    &request,
-                ),
-            )
-            .await;
-        }
-    }
-
-    let gateway_alias = effective_gateway_alias_from_config(&request);
     let router_model_id = provider_request_model_id(&request, &state.provider_registry);
-    if state
-        .llama_cpp_router_client
-        .load_model(endpoint.as_str(), &router_model_id)
-        .await
-        .is_err()
+    let owned = match managed_router_session(state, &request, &profile, &endpoint).await {
+        Ok(owned) => owned,
+        Err(error) => return non_critical_failure_response(state, error).await,
+    };
+    let ownership_matches = || match &owned {
+        Some(owned) => state
+            .api
+            .observe_owned_runtime_profile(&request.config.profile_id)
+            .map(|current| current.as_ref() == Some(owned))
+            .map_err(|_| "llama.cpp router ownership could not be observed".to_string()),
+        None => Ok(true),
+    };
+    let owns_listener = || match &owned {
+        Some(owned) => state
+            .api
+            .owned_runtime_profile_has_listener(&request.config.profile_id, owned)
+            .map_err(|_| {
+                "llama.cpp router listener ownership could not be established".to_string()
+            }),
+        None => Ok(true),
+    };
+    let readiness = RouterReadiness {
+        model_id: &router_model_id,
+        deadline: tokio::time::Instant::now() + Duration::from_secs(60),
+        require_loaded: false,
+    };
+    if let Err(error) = router_endpoint_after_launch(
+        &state.llama_cpp_router_client,
+        endpoint.as_str(),
+        &request,
+        readiness,
+        ownership_matches,
+        owns_listener,
+    )
+    .await
     {
-        warn!("llama.cpp router model load failed");
-        return non_critical_failure_response(
-            state,
-            serving_error(
-                ModelServeErrorCode::ProviderLoadFailed,
-                "llama.cpp router could not load the selected model",
-                &request,
-            ),
-        )
-        .await;
+        return non_critical_failure_response(state, error).await;
     }
+    if let Err(error) = load_router_model(
+        &state.llama_cpp_router_client,
+        endpoint.as_str(),
+        &request,
+        RouterReadiness {
+            model_id: &router_model_id,
+            deadline: tokio::time::Instant::now() + Duration::from_secs(180),
+            require_loaded: true,
+        },
+        ownership_matches,
+        owns_listener,
+    )
+    .await
+    {
+        return non_critical_failure_response(state, error).await;
+    }
+    let gateway_alias = effective_gateway_alias_from_config(&request);
     let status = ServedModelStatus {
         model_id: request.model_id.clone(),
         model_alias: Some(gateway_alias.clone()),
@@ -170,7 +155,29 @@ pub(super) async fn serve_llama_cpp_router_model(
         loaded_at: None,
         last_error: None,
     };
-    let mut snapshot = state.api.record_served_model(status.clone()).await?;
+    let publication = match &owned {
+        Some(owned) => {
+            state
+                .api
+                .record_served_model_for_owned_profile(status.clone(), owned)
+                .await
+        }
+        None => state.api.record_served_model(status.clone()).await,
+    };
+    let mut snapshot = match publication {
+        Ok(snapshot) => snapshot,
+        Err(_) => {
+            return non_critical_failure_response(
+                state,
+                serving_error(
+                    ModelServeErrorCode::ProviderLoadFailed,
+                    "llama.cpp router ownership changed before serving publication",
+                    &request,
+                ),
+            )
+            .await
+        }
+    };
     decorate_serving_snapshot(state, &mut snapshot);
 
     Ok(serde_json::to_value(ServeModelResponse {
@@ -182,6 +189,100 @@ pub(super) async fn serve_llama_cpp_router_model(
         load_error: None,
         snapshot: Some(snapshot),
     })?)
+}
+
+struct RouterReadiness<'a> {
+    model_id: &'a str,
+    deadline: tokio::time::Instant,
+    require_loaded: bool,
+}
+
+async fn load_router_model(
+    client: &crate::provider_clients::LlamaCppRouterClient,
+    endpoint: &str,
+    request: &ServeModelRequest,
+    readiness: RouterReadiness<'_>,
+    mut ownership_matches: impl FnMut() -> Result<bool, String>,
+    mut owns_listener: impl FnMut() -> Result<bool, String>,
+) -> Result<(), ModelServeError> {
+    let load = async {
+        if !ownership_matches()? || !owns_listener()? {
+            return Err("llama.cpp router ownership changed before model load".to_string());
+        }
+        client
+            .load_model(endpoint, readiness.model_id, readiness.deadline)
+            .await
+    };
+    if tokio::time::timeout_at(readiness.deadline, load)
+        .await
+        .map_or(true, |result| result.is_err())
+    {
+        return Err(serving_error(
+            ModelServeErrorCode::ProviderLoadFailed,
+            "llama.cpp router could not load the selected model",
+            request,
+        ));
+    }
+    router_endpoint_after_launch(
+        client,
+        endpoint,
+        request,
+        readiness,
+        ownership_matches,
+        owns_listener,
+    )
+    .await
+}
+
+async fn router_endpoint_after_launch(
+    client: &crate::provider_clients::LlamaCppRouterClient,
+    endpoint: &str,
+    request: &ServeModelRequest,
+    readiness: RouterReadiness<'_>,
+    mut ownership_matches: impl FnMut() -> Result<bool, String>,
+    mut owns_listener: impl FnMut() -> Result<bool, String>,
+) -> Result<(), ModelServeError> {
+    let deadline = readiness.deadline;
+    let result = tokio::time::timeout_at(deadline, async {
+        loop {
+            if !ownership_matches()? {
+                return Err(
+                    "llama.cpp router owned process exited or changed during startup".to_string(),
+                );
+            }
+            if owns_listener()? {
+                let ready = client
+                    .router_catalog_ready(
+                        endpoint,
+                        readiness.model_id,
+                        readiness.require_loaded,
+                        deadline,
+                    )
+                    .await?;
+                if !ownership_matches()? {
+                    return Err(
+                        "llama.cpp router owned process exited or changed during startup"
+                            .to_string(),
+                    );
+                }
+                if ready {
+                    return Ok(());
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        Err(if readiness.require_loaded {
+            "llama.cpp router selected model did not become loaded before the deadline"
+        } else {
+            "llama.cpp router profile started but its model endpoint is not reachable"
+        }
+        .into())
+    });
+    result
+        .map_err(|message| serving_error(ModelServeErrorCode::ProviderLoadFailed, message, request))
 }
 
 pub(super) async fn unserve_llama_cpp_router_model(
@@ -249,84 +350,125 @@ pub(super) async fn unserve_llama_cpp_router_model(
     )?))
 }
 
-async fn llama_cpp_router_should_restart_for_launch_settings(
+async fn managed_router_session(
     state: &AppState,
     request: &ServeModelRequest,
     profile: &RuntimeProfileConfig,
-) -> pumas_library::Result<bool> {
-    if profile.management_mode != RuntimeManagementMode::Managed
-        || profile.provider_mode != RuntimeProviderMode::LlamaCppRouter
-    {
-        return Ok(false);
+    endpoint: &pumas_library::models::RuntimeEndpointUrl,
+) -> Result<Option<OwnedRuntimeProfileObservation>, ModelServeError> {
+    if profile.management_mode != RuntimeManagementMode::Managed {
+        return Ok(None);
     }
-    let has_launch_overrides = llama_cpp_router_profile_has_explicit_device_settings(profile)
-        || request.config.context_size.is_some();
-    if !has_launch_overrides {
-        return Ok(false);
-    }
-    let snapshot = current_serving_snapshot(state).await?;
-    Ok(!snapshot.served_models.iter().any(|status| {
-        status.provider == RuntimeProviderId::LlamaCpp
-            && status.profile_id == profile.profile_id
-            && status.load_state == ServedModelLoadState::Loaded
-    }))
+    let failure =
+        |message| serving_error(ModelServeErrorCode::ProviderLoadFailed, message, request);
+    let current = state
+        .api
+        .observe_owned_runtime_profile(&request.config.profile_id)
+        .map_err(|_| failure("llama.cpp router process ownership could not be observed"))?;
+    let active_unowned = if current.is_none() {
+        let snapshot = state
+            .api
+            .get_runtime_profiles_snapshot()
+            .await
+            .map_err(|_| failure("llama.cpp router profile status could not be observed"))?;
+        snapshot.snapshot.statuses.iter().any(|status| {
+            status.profile_id == request.config.profile_id
+                && !matches!(
+                    status.state,
+                    pumas_library::models::RuntimeLifecycleState::Stopped
+                        | pumas_library::models::RuntimeLifecycleState::Failed
+                )
+        })
+    } else {
+        false
+    };
+    select_router_session(current, active_unowned, request, endpoint, || {
+        launch_llama_cpp_router_profile(state, request, profile)
+    })
+    .await
+    .map(Some)
 }
 
-fn llama_cpp_router_profile_has_explicit_device_settings(profile: &RuntimeProfileConfig) -> bool {
-    profile.device.mode != RuntimeDeviceMode::Auto
-        || profile.device.device_id.is_some()
-        || profile.device.gpu_layers.is_some()
-        || profile
-            .device
-            .tensor_split
-            .as_ref()
-            .is_some_and(|tensor_split| !tensor_split.is_empty())
+async fn select_router_session<F, Fut>(
+    current: Option<OwnedRuntimeProfileObservation>,
+    active_unowned: bool,
+    request: &ServeModelRequest,
+    endpoint: &pumas_library::models::RuntimeEndpointUrl,
+    launch: F,
+) -> Result<OwnedRuntimeProfileObservation, ModelServeError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<OwnedRuntimeProfileObservation, ModelServeError>>,
+{
+    let failure =
+        |message| serving_error(ModelServeErrorCode::ProviderLoadFailed, message, request);
+    let owned = match current {
+        Some(owned)
+            if owned.pid.is_none()
+                && matches!(
+                    owned.state,
+                    pumas_library::models::RuntimeLifecycleState::Stopped
+                        | pumas_library::models::RuntimeLifecycleState::Failed
+                ) =>
+        {
+            launch().await?
+        }
+        Some(owned) => owned,
+        None if active_unowned => {
+            return Err(failure(
+                "llama.cpp router has an active process without owned launch identity",
+            ))
+        }
+        None => launch().await?,
+    };
+    if owned.state != pumas_library::models::RuntimeLifecycleState::Running
+        || owned.pid.is_none()
+        || &owned.endpoint_url != endpoint
+    {
+        return Err(failure(
+            "llama.cpp router owned process is not running at the selected endpoint",
+        ));
+    }
+    if request.config.context_size.is_some() && request.config.context_size != owned.context_size {
+        return Err(failure(
+            "Stop the llama.cpp router profile before changing its context size",
+        ));
+    }
+    Ok(owned)
 }
 
 async fn launch_llama_cpp_router_profile(
     state: &AppState,
     request: &ServeModelRequest,
     profile: &RuntimeProfileConfig,
-) -> pumas_library::Result<Option<ModelServeError>> {
-    let Some((tag, version_dir)) = active_llama_cpp_runtime(state, request).await? else {
-        return Ok(Some(serving_error(
-            ModelServeErrorCode::MissingRuntime,
-            "llama.cpp runtime versions are not available",
-            request,
-        )));
+) -> Result<OwnedRuntimeProfileObservation, ModelServeError> {
+    let failure =
+        |message| serving_error(ModelServeErrorCode::ProviderLoadFailed, message, request);
+    let runtime = active_llama_cpp_runtime(state, request)
+        .await
+        .map_err(|_| failure("llama.cpp router runtime could not be resolved"))?;
+    let Some((tag, version_dir)) = runtime else {
+        return Err(failure("llama.cpp runtime versions are not available"));
     };
-    let launch_response = state
+    let receipt = state
         .api
-        .launch_runtime_profile_for_model_with_overrides(
+        .launch_runtime_profile_for_model_with_receipt(
             request.config.profile_id.clone(),
             &tag,
             &version_dir,
             Some(&request.model_id),
             Some(llama_cpp_router_launch_overrides(request, profile)),
         )
-        .await;
-    match launch_response {
-        Ok(response) if response.success => Ok(None),
-        Ok(response) => {
-            let message = response.error.unwrap_or_else(|| {
-                "llama.cpp router profile did not start for the selected model".to_string()
-            });
-            warn!("llama.cpp router serve launch failed");
-            Ok(Some(serving_error(
-                ModelServeErrorCode::ProviderLoadFailed,
-                message,
-                request,
-            )))
-        }
-        Err(_) => {
-            warn!("llama.cpp router serve launch failed");
-            Ok(Some(serving_error(
-                ModelServeErrorCode::MissingRuntime,
-                "llama.cpp router runtime could not be launched",
-                request,
-            )))
-        }
+        .await
+        .map_err(|_| failure("llama.cpp router runtime could not be launched"))?;
+    if !receipt.response.success {
+        return Err(failure(
+            "llama.cpp router profile did not start for the selected model",
+        ));
     }
+    receipt
+        .observation
+        .ok_or_else(|| failure("llama.cpp router launch has no owned process identity"))
 }
 
 fn llama_cpp_router_launch_overrides(
@@ -340,58 +482,5 @@ fn llama_cpp_router_launch_overrides(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use pumas_library::models::{ModelServingConfig, RuntimeProfileId};
-
-    #[test]
-    fn llama_cpp_router_profile_restart_detects_explicit_device_settings() {
-        let mut profile = RuntimeProfileConfig::default_ollama();
-        profile.provider = RuntimeProviderId::LlamaCpp;
-        profile.provider_mode = RuntimeProviderMode::LlamaCppRouter;
-        profile.management_mode = RuntimeManagementMode::Managed;
-        profile.device.mode = RuntimeDeviceMode::Auto;
-
-        assert!(!llama_cpp_router_profile_has_explicit_device_settings(
-            &profile
-        ));
-
-        profile.device.mode = RuntimeDeviceMode::Gpu;
-
-        assert!(llama_cpp_router_profile_has_explicit_device_settings(
-            &profile
-        ));
-    }
-
-    #[test]
-    fn llama_cpp_router_launch_overrides_use_profile_device_and_request_context() {
-        let mut profile = RuntimeProfileConfig::default_ollama();
-        profile.provider = RuntimeProviderId::LlamaCpp;
-        profile.provider_mode = RuntimeProviderMode::LlamaCppRouter;
-        profile.device.mode = RuntimeDeviceMode::Gpu;
-        profile.device.gpu_layers = Some(20);
-        profile.device.tensor_split = Some(vec![1.0, 1.0]);
-        let request = ServeModelRequest {
-            model_id: "models/example.gguf".to_string(),
-            config: ModelServingConfig {
-                provider: RuntimeProviderId::LlamaCpp,
-                profile_id: RuntimeProfileId::parse("llama-router").unwrap(),
-                device_mode: RuntimeDeviceMode::Gpu,
-                device_id: None,
-                gpu_layers: None,
-                tensor_split: None,
-                context_size: Some(8192),
-                keep_loaded: true,
-                model_alias: None,
-            },
-        };
-
-        let overrides = llama_cpp_router_launch_overrides(&request, &profile);
-
-        let device = overrides.device.expect("router device override");
-        assert_eq!(device.mode, RuntimeDeviceMode::Gpu);
-        assert_eq!(device.gpu_layers, Some(20));
-        assert_eq!(device.tensor_split, Some(vec![1.0, 1.0]));
-        assert_eq!(overrides.context_size, Some(8192));
-    }
-}
+#[path = "serving_llama_cpp_router_tests.rs"]
+mod tests;

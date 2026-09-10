@@ -1,5 +1,34 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-10 — Serving Draft, Current Router And Exact Target Repair
+
+Two source defects are accepted independently. The serving dialog now owns one
+draft per semantic target, preserving context `18000` and other edits when a
+same-profile snapshot object is refreshed while resetting deliberate target
+changes. FE-I53 is resolved. Managed-router startup now permits the observed
+older-router pre-load unloaded/failure-marked catalog row to reach one explicit
+load request, while post-load publication remains strict. FE-I49 remains open for
+legacy readiness and broader semantics.
+
+The exact copied 27B model, GPU `-1` and context `18000` exposed a
+separate `b9090` missing-tensor incompatibility before offload. The isolated Pumas
+root installed official `b10883+vulkan`; the same exact target then reported
+effective context `18176`; its matched process allocated 16,682 MiB while device
+GPU utilization peaked at 98% during inference, and it returned the correct
+389-screw answer through the gateway. The copied projector remained unchanged
+but was not passed to the router, so multimodal behavior is untested. Unload and
+owned cleanup passed, and source model files remained unchanged. Focused/full and
+feature-matrix Rust gates, dialog tests, frontend types/lint and the final release
+build pass. The frontend ledger owns exact evidence, review, repairs and costs.
+
+The normal root remains on its previous runtime. Automatic approval review
+rejected starting it for the live install/select because of the earlier mutation
+prohibition; no bypass or original-root mutation occurred. The immediate next
+slice is the fresh user-approved install and selection of proven
+`b10883+vulkan`, preserving `b9090`, model bytes and profile configuration. The
+liveness-read contract remains queued afterward; M4 and overall remediation are
+incomplete.
+
 ## 2026-09-10 — Managed llama.cpp Router Readiness Repair
 
 The user-reported managed-router endpoint failure reproduced twice and is

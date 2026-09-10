@@ -182,10 +182,15 @@ fn router_catalog_model_ready(
         .get("status")
         .ok_or("llama.cpp router catalog omitted model status")?;
     match status.get("failed") {
-        Some(serde_json::Value::Bool(true)) => {
+        Some(serde_json::Value::Bool(true))
+            if require_loaded
+                || status.get("value").and_then(serde_json::Value::as_str) != Some("unloaded") =>
+        {
             return Err("llama.cpp router reports that the selected model failed to load".into())
         }
-        Some(serde_json::Value::Bool(false)) | None => {}
+        // An unloaded router entry may carry failure history before this
+        // explicit load attempt. Only post-load observation proves readiness.
+        Some(serde_json::Value::Bool(_)) | None => {}
         _ => return Err("llama.cpp router catalog returned invalid model failure status".into()),
     }
     match status.get("value").and_then(serde_json::Value::as_str) {
@@ -229,6 +234,28 @@ fn llama_cpp_router_model_unload_url(endpoint: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn router_b9090_fresh_unloaded_catalog_allows_explicit_load() {
+        // Captured from b9090-5757c4dcb before any load POST; minimized to the
+        // selected identity and status fields consumed at this boundary.
+        let model_id = "llm/qwen3/qwen3-4b-instruct-2507-q6_kcopy1";
+        let catalog = serde_json::json!({"data": [{
+            "id": model_id,
+            "status": {"value": "unloaded", "exit_code": 10, "failed": true}
+        }]});
+        assert_eq!(
+            router_catalog_model_ready(&catalog, model_id, false),
+            Ok(true)
+        );
+        assert!(router_catalog_model_ready(&catalog, model_id, true).is_err());
+        for value in ["loaded", "loading", "sleeping", "invalid"] {
+            let invalid = serde_json::json!({"data": [{"id": model_id,
+                "status": {"value": value, "failed": true}}]});
+            assert!(router_catalog_model_ready(&invalid, model_id, false).is_err());
+            assert!(router_catalog_model_ready(&invalid, model_id, true).is_err());
+        }
+    }
 
     #[test]
     fn dedicated_identity_requires_one_matching_loaded_model() {

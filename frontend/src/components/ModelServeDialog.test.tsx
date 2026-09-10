@@ -477,17 +477,23 @@ describe('ModelServeDialog actions', () => {
   it.each(['false outcome', 'transport rejection'] as const)(
     'refreshes profile status once after a serve %s without retrying',
     async (scenario) => {
-      const refreshRuntimeProfiles = vi.fn().mockResolvedValue(undefined);
-      useRuntimeProfilesMock.mockReturnValue({
-        snapshot,
-        profiles: snapshot.profiles,
-        routes: snapshot.routes,
-        statuses: snapshot.statuses,
-        defaultProfileId: snapshot.default_profile_id,
-        cursor: snapshot.cursor,
-        isLoading: false,
-        error: null,
-        refreshRuntimeProfiles,
+      const refreshRuntimeProfiles = vi.fn();
+      useRuntimeProfilesMock.mockImplementation(() => {
+        const [profiles, setProfiles] = useState(snapshot.profiles);
+        refreshRuntimeProfiles.mockImplementation(async () => {
+          setProfiles((current) => current.map((profile) => ({ ...profile })));
+        });
+        return {
+          snapshot: { ...snapshot, profiles },
+          profiles,
+          routes: snapshot.routes,
+          statuses: snapshot.statuses,
+          defaultProfileId: snapshot.default_profile_id,
+          cursor: snapshot.cursor,
+          isLoading: false,
+          error: null,
+          refreshRuntimeProfiles,
+        };
       });
       const serveModel = vi.fn();
       if (scenario === 'transport rejection') {
@@ -536,14 +542,17 @@ describe('ModelServeDialog actions', () => {
             category: 'local',
             primaryFormat: 'gguf',
           }}
-          initialProfileId="emily-llama"
+          initialProfileId="router-llama"
           onClose={vi.fn()}
         />
       );
 
+      const contextInput = screen.getByRole('spinbutton', { name: /context/i });
+      fireEvent.change(contextInput, { target: { value: '8192' } });
       fireEvent.click(screen.getByRole('button', { name: 'Start serving' }));
       await waitFor(() => expect(refreshRuntimeProfiles).toHaveBeenCalledTimes(1));
       expect(serveModel).toHaveBeenCalledTimes(1);
+      expect(contextInput).toHaveValue(8192);
     }
   );
 
@@ -762,6 +771,174 @@ describe('ModelServeDialog actions', () => {
     });
     expect(validateModelServingConfig.mock.calls[0]?.[0].config.gpu_layers).toBeNull();
     expect(validateModelServingConfig.mock.calls[0]?.[0].config.tensor_split).toBeNull();
+  });
+
+  it('preserves an edited router context after the serve refresh returns the same profile', async () => {
+    const refreshRuntimeProfiles = vi.fn();
+    useRuntimeProfilesMock.mockImplementation(() => {
+      const [profiles, setProfiles] = useState(snapshot.profiles);
+      refreshRuntimeProfiles.mockImplementation(async () => {
+        setProfiles((current) => current.map((profile) => ({ ...profile })));
+      });
+      return {
+        snapshot: { ...snapshot, profiles },
+        profiles,
+        routes: snapshot.routes,
+        statuses: snapshot.statuses,
+        defaultProfileId: snapshot.default_profile_id,
+        cursor: snapshot.cursor,
+        isLoading: false,
+        error: null,
+        refreshRuntimeProfiles,
+      };
+    });
+    const validateModelServingConfig = vi.fn<
+      (_request: ServeModelRequest) => Promise<ModelServeValidationResponse>
+    >().mockResolvedValue({ success: true, valid: true, errors: [], warnings: [] });
+    const serveModel = vi.fn<(_request: ServeModelRequest) => Promise<ServeModelResponse>>()
+      .mockResolvedValue({
+        success: true,
+        loaded: true,
+        loaded_models_unchanged: false,
+        status: null,
+        load_error: null,
+        snapshot: null,
+      });
+    getElectronAPIMock.mockReturnValue({
+      get_serving_status: vi.fn().mockResolvedValue({
+        success: true,
+        snapshot: {
+          cursor: 'serving:0',
+          endpoint: { endpoint_mode: 'not_configured', model_count: 0 },
+          served_models: [],
+          recent_errors: [],
+        },
+      }),
+      validate_model_serving_config: validateModelServingConfig,
+      serve_model: serveModel,
+    });
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'model-router-context-refresh',
+          name: 'Router Context Refresh',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        initialProfileId="router-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    const contextInput = screen.getByRole('spinbutton', { name: /context/i });
+    fireEvent.change(contextInput, { target: { value: '18000' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Keep loaded' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start serving' }));
+
+    await waitFor(() => expect(refreshRuntimeProfiles).toHaveBeenCalledTimes(1));
+    expect(validateModelServingConfig.mock.calls[0]?.[0].config.context_size).toBe(18000);
+    expect(contextInput).toHaveValue(18000);
+    expect(screen.getByRole('checkbox', { name: 'Keep loaded' })).not.toBeChecked();
+  });
+
+  it('preserves dedicated-profile placement edits across a same-target snapshot clone', () => {
+    const model = {
+      id: 'model-dedicated-refresh',
+      name: 'Dedicated Refresh',
+      category: 'local' as const,
+      primaryFormat: 'gguf' as const,
+    };
+    const props = {
+      model,
+      initialProfileId: 'emily-llama',
+      onClose: vi.fn(),
+    };
+    const { rerender } = render(<ModelServeDialog {...props} />);
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model device' }), {
+      target: { value: 'hybrid' },
+    });
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Model GPU layers' }), {
+      target: { value: '47' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Model tensor split' }), {
+      target: { value: '3,1' },
+    });
+    fireEvent.change(screen.getByRole('spinbutton', { name: /context/i }), {
+      target: { value: '12288' },
+    });
+
+    const clonedProfiles = snapshot.profiles.map((profile) => ({
+      ...profile,
+      device: { ...profile.device },
+    }));
+    useRuntimeProfilesMock.mockReturnValue({
+      snapshot: { ...snapshot, profiles: clonedProfiles },
+      profiles: clonedProfiles,
+      routes: snapshot.routes,
+      statuses: snapshot.statuses,
+      defaultProfileId: snapshot.default_profile_id,
+      cursor: snapshot.cursor,
+      isLoading: false,
+      error: null,
+      refreshRuntimeProfiles: vi.fn(),
+    });
+    rerender(<ModelServeDialog {...props} />);
+
+    expect(screen.getByRole('combobox', { name: 'Model device' })).toHaveValue('hybrid');
+    expect(screen.getByRole('spinbutton', { name: 'Model GPU layers' })).toHaveValue(47);
+    expect(screen.getByRole('textbox', { name: 'Model tensor split' })).toHaveValue('3,1');
+    expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(12288);
+  });
+
+  it('initializes a fresh draft when the semantic model target changes', async () => {
+    const firstModel = {
+      id: 'model-router-target-one',
+      name: 'Router Target One',
+      category: 'local' as const,
+      primaryFormat: 'gguf' as const,
+    };
+    const { rerender } = render(
+      <ModelServeDialog
+        model={firstModel}
+        initialProfileId="router-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByRole('spinbutton', { name: /context/i }), {
+      target: { value: '8192' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Keep loaded' }));
+    expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(8192);
+    expect(screen.getByRole('checkbox', { name: 'Keep loaded' })).not.toBeChecked();
+
+    rerender(
+      <ModelServeDialog
+        model={{ ...firstModel, id: 'model-router-target-two', name: 'Router Target Two' }}
+        initialProfileId="router-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(4096)
+    );
+    expect(screen.getByRole('checkbox', { name: 'Keep loaded' })).toBeChecked();
+
+    fireEvent.change(screen.getByRole('spinbutton', { name: /context/i }), {
+      target: { value: '16384' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Keep loaded' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Runtime target' }), {
+      target: { value: 'emily-llama' },
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(4096)
+    );
+    expect(screen.getByRole('checkbox', { name: 'Keep loaded' })).toBeChecked();
   });
 
   it('requires a unique alias when the same model is served on another profile', async () => {

@@ -10,10 +10,13 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Resume the bounded `is_ollama_running`/`is_torch_running`
-producer, RPC, generated desktop and actual-consumer read-contract inventory and
-validation. The managed llama.cpp router readiness repair below is accepted;
-the remaining M4 and overall remediation are not complete.
+**Next slice:** With fresh explicit approval, install official `b10883+vulkan`
+alongside `b9090+vulkan` in the inactive original launcher root and select it
+through Pumas, preserving model bytes and profile configuration. Automatic
+approval review rejected that live-root install/select because it conflicts with
+the earlier no-runtime-mutation restriction. After that concrete user-approved
+step, resume the bounded `is_ollama_running`/`is_torch_running` contract slice.
+The remaining M4 and overall remediation are not complete.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -68,6 +71,57 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Serving Draft And Current Router Catalog Repair
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-10--serving-draft-current-router-and-exact-target-repair).
+Operation: preserve a user's local serving draft across a refreshed snapshot of
+the same semantic model/profile/provider target, while initializing current
+defaults for a deliberate target change. Independently repair current `b9090`
+router catalog parsing after the isolated no-load route returned HTTP 200/health
+OK and an exact selected row with `status:unloaded`, `failed:true` and
+`exit_code:10` before any load request. The context-reset RED proves the outgoing
+request retained `8192` even though the refreshed display returned to `4096`; it
+does not by itself explain the backend rejection. No mutation retry or inferred
+success is admitted. Target evidence first attempts the exact copied 27B model
+with its copied projector file on copied `b9090+vulkan`, then uses compatible official
+`b10883+vulkan` with context `18000` and equivalent GPU placement without
+silently reducing settings.
+
+The dialog now initializes a draft once per semantic model, profile, provider
+and provider-mode target. Snapshot clones of that same target preserve local
+placement, context, keep-loaded and alias edits across success, false and
+transport refreshes. A deliberate target change starts from current defaults.
+FE-I53 is resolved; FE-I52 lifecycle publication remains open.
+
+The router parser now treats the observed pre-load `unloaded` row with a failure
+marker as eligible for the one explicit load request. It does not special-case or
+assign meaning to exit code 10, and post-load success still requires the exact
+selected row to report loaded. FE-I49 remains open outside this managed-router
+subset. The final release build selected an isolated copied `b9090+vulkan`
+runtime, served the copied Qwen3 4B model on CPU with context `8192`, and returned
+exact `B9090_CONTEXT_OK` through the Pumas gateway. Unload and scoped owned stop
+passed. Fixture metadata registration is not installer/adoption evidence. The
+renderer regression proves submitted context `18000` survives same-target
+refresh. The exact copied 27B model then passed text inference on official
+`b10883+vulkan`: GPU `-1`, context `18000`, effective per-sequence context
+`18176`; the matched process allocated 16,682 MiB and device GPU utilization
+peaked at 98% during inference. The gateway returned
+an exact correct 389-screw gateway answer. This accepts the source repairs and
+isolated target proof, not the still-pending original-root runtime update.
+
+The exact copied 27B, GPU `-1`, context `18000` attempt
+on copied `b9090+vulkan` failed once during model compatibility loading with
+missing tensor `blk.64.ssm_conv1d.weight`. It exited before GPU offload, context
+creation or inference, so absent GPU activity was expected and is not readiness
+evidence. No fallback, lower context or GGUF modification occurred; all owned
+processes and listeners were cleaned and source files remained unchanged. The
+successful proof used a compatible current official Vulkan runtime through Pumas
+while preserving the exact model/settings. The original root remains on its prior
+runtime selection pending explicit user approval for the live-root update. The
+projector file was copied and remained unchanged, but the captured router command
+did not pass `--mmproj`; image and multimodal behavior remain untested.
 
 ## Managed llama.cpp Router Readiness Repair
 

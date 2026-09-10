@@ -54,6 +54,12 @@ export function ModelServeDialog({
   const [contextSize, setContextSize] = useState('');
   const [keepLoaded, setKeepLoaded] = useState(true);
   const [modelAlias, setModelAlias] = useState('');
+  const draftTargetRef = useRef<{
+    modelId: string;
+    profileId: string;
+    provider: string;
+    providerMode: string;
+  } | null>(null);
   const profileSelectRef = useRef<HTMLSelectElement | null>(null);
   const isDialogMode = displayMode === 'dialog';
   const servingActions = useModelServingActions(model.id, { profileId }, servingStatus.servedModels);
@@ -120,12 +126,31 @@ export function ModelServeDialog({
       return;
     }
 
+    const previousTarget = draftTargetRef.current;
+    if (
+      previousTarget?.modelId === model.id &&
+      previousTarget.profileId === selectedProfile.profile_id &&
+      previousTarget.provider === selectedProfile.provider &&
+      previousTarget.providerMode === selectedProfile.provider_mode
+    ) {
+      return;
+    }
+
+    draftTargetRef.current = {
+      modelId: model.id,
+      profileId: selectedProfile.profile_id,
+      provider: selectedProfile.provider,
+      providerMode: selectedProfile.provider_mode,
+    };
+
     setDeviceMode(selectedProfile.device.mode);
     setDeviceId(selectedProfile.device.device_id ?? '');
     setGpuLayers(selectedProfile.device.gpu_layers?.toString() ?? '');
     setTensorSplit(selectedProfile.device.tensor_split?.join(',') ?? '');
     setContextSize(defaultContextSizeForProfile(selectedProfile));
-  }, [selectedProfile]);
+    setKeepLoaded(true);
+    setModelAlias('');
+  }, [model.id, selectedProfile]);
 
   const formState: ModelServeFormState = {
     deviceMode,

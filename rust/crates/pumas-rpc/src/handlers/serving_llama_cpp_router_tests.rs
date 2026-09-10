@@ -327,6 +327,7 @@ async fn router_load_rejects_bad_catalog_and_never_retries_post() {
         r#"{"data":[]}"#,
         r#"{"data":[{"id":"wrong","status":{"value":"loaded"}}]}"#,
         r#"{"data":[{"id":"models/example.gguf","status":{"value":"loaded","failed":true}}]}"#,
+        r#"{"data":[{"id":"models/example.gguf","status":{"value":"unloaded","exit_code":10,"failed":true}}]}"#,
         r#"{"data":[{"id":"models/example.gguf","status":{"value":"unloaded"}}]}"#,
         r#"{"data":[{"id":"models/example.gguf","status":{"value":"loaded"}},{"id":"models/example.gguf","status":{"value":"loaded"}}]}"#,
     ] {
@@ -378,5 +379,96 @@ async fn router_load_timeout_distinguishes_reachable_loading_model() {
     assert_eq!(
         result.unwrap_err().message,
         "llama.cpp router selected model did not become loaded before the deadline"
+    );
+}
+
+#[tokio::test]
+async fn router_b9090_unloaded_failed_catalog_is_ready_before_explicit_load() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let posts = Arc::new(AtomicUsize::new(0));
+    let catalog_posts = posts.clone();
+    let load_posts = posts.clone();
+    let app = axum::Router::new()
+        .route(
+            "/models/load",
+            axum::routing::post(move || {
+                let posts = load_posts.clone();
+                async move {
+                    posts.fetch_add(1, Ordering::SeqCst);
+                    axum::http::StatusCode::OK
+                }
+            }),
+        )
+        .route(
+            "/v1/models",
+            axum::routing::get(move || {
+                let posts = catalog_posts.clone();
+                async move {
+                    // Exact minimized b9090 no-load identity/status, followed by
+                    // positive model readiness only after the single explicit POST.
+                    let status = if posts.load(Ordering::SeqCst) == 0 {
+                        serde_json::json!({"value": "unloaded", "failed": true, "exit_code": 10})
+                    } else {
+                        serde_json::json!({"value": "loaded"})
+                    };
+                    axum::Json(serde_json::json!({"data": [{
+                        "id": "llm/qwen3/qwen3-4b-instruct-2507-q6_kcopy1", "status": status
+                    }]}))
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = axum::serve(listener, app).with_graceful_shutdown(async {
+        let _ = stopped.await;
+    });
+    let check = async {
+        let client = crate::provider_clients::LlamaCppRouterClient::new(reqwest::Client::new());
+        let mut request = request();
+        request.model_id = "llm/qwen3/qwen3-4b-instruct-2507-q6_kcopy1".into();
+        let result = router_endpoint_after_launch(
+            &client,
+            &endpoint,
+            &request,
+            RouterReadiness {
+                model_id: &request.model_id,
+                deadline: tokio::time::Instant::now() + Duration::from_secs(1),
+                require_loaded: false,
+            },
+            || Ok(true),
+            || Ok(true),
+        )
+        .await;
+        let result = match result {
+            Ok(()) => {
+                load_router_model(
+                    &client,
+                    &endpoint,
+                    &request,
+                    RouterReadiness {
+                        model_id: &request.model_id,
+                        deadline: tokio::time::Instant::now() + Duration::from_secs(1),
+                        require_loaded: true,
+                    },
+                    || Ok(true),
+                    || Ok(true),
+                )
+                .await
+            }
+            Err(error) => Err(error),
+        };
+        stop.send(()).unwrap();
+        result
+    };
+    let (served, result) = tokio::join!(server, check);
+    served.unwrap();
+    assert_eq!(posts.load(Ordering::SeqCst), 1);
+    assert!(
+        result.is_ok(),
+        "fresh b9090 router must admit explicit load: {result:?}"
     );
 }

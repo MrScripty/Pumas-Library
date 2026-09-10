@@ -1,5 +1,106 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-10 — Serving Draft, Current Router And Exact Target Repair
+
+Accepted two independently reproduced source bugs and an exact isolated target
+proof without claiming the normal user root is updated. The dialog submitted the
+edited context correctly but reset its visible draft from `18000` to `4096` when
+the post-action snapshot returned a new object for the same profile. It now
+initializes once per semantic model/profile/provider/provider-mode target.
+Same-target snapshot clones preserve placement, context, keep-loaded and alias
+edits across successful, false and transport outcomes; a deliberate model or
+profile change initializes current defaults. FE-I53 is resolved. The preceding
+snapshot-refresh review missed this object-identity reset.
+
+Separately, copied `b9090+vulkan` returned a healthy router and an exact pre-load
+model row with `status:unloaded`, `failed:true` and `exit_code:10`. The old parser
+conflated that startup state with a completed load failure and rejected before its
+single POST. Startup parsing now admits this stage for the explicit load attempt;
+post-load publication still requires the exact selected row to report loaded.
+The code does not special-case or assign a meaning to exit code 10. FE-I49 remains
+open outside this accepted managed-router subset. The prior router review had
+incorrectly conflated admission evidence with model-load failure evidence.
+
+The exact copied Huihui Qwen3.8 27B model, GPU `-1` and
+context `18000` first failed on `b9090+vulkan` with missing tensor
+`blk.64.ssm_conv1d.weight`, before offload or context creation. No fallback,
+reduced context or GGUF modification occurred. Pumas then installed official
+`b10883+vulkan` only in the isolated root. That exact target served successfully:
+effective per-sequence context `18176`; the matching model process allocated
+16,682 MiB and device GPU utilization peaked at 98% during inference. The Pumas gateway returned HTTP 200,
+`finish_reason:stop`, and the correct 389-screw answer with 104 prompt plus 385
+completion tokens at 27.41 tokens/s. Unload produced an empty serving snapshot;
+scoped stop removed all three owned PIDs and ports. Durable evidence is under
+`tmp/llamacpp-hosting-20260909/evidence/final-answer/`, including
+`huihui27b-latest-gpu-proof.json`, `huihui27b-latest-gpu-samples.json` and
+`cleanup-confirmed.json`. Original model/projector/metadata hashes and stats
+remain unchanged. The copied projector remained unchanged, but the router command
+did not use `--mmproj`; image/multimodal behavior is untested. This proves that
+exact copied model/runtime/settings combination for text inference, not every GPU
+model or perpetual health.
+
+Verification: the dialog RED was 17 passing/one failing with outgoing `8192` and
+visible `4096`; the settled implementation passes 20 tests, including exact
+`18000`, success/false/transport same-target refresh, dedicated placement edits
+and deliberate target changes. Frontend TypeScript and affected ESLint pass.
+Router focused tests pass 12; full inference RPC passes 204 unit plus 16
+integration with ten ignored; no-default RPC passes 151 unit plus 13 integration
+with ten ignored. Strict all-target RPC Clippy passes with all features and no
+default features, warnings denied; Rust format passes. The final canonical release
+build passes for backend, 2,385-module frontend and Electron TypeScript/bundled
+preload. Local HTTP tests required the established approved loopback fixture
+access and passed unchanged.
+
+Repairs and limitations: an initial live validation probe omitted the required
+`request` wrapper and rejected before effects; the corrected request passed. Root
+inspection first used a missing hook path and accidentally ran `sed` against a
+binary, producing noisy output without execution or mutation. The first bounded
+CPU/Qwen3 4B proof showed both source fixes but did not satisfy the user's target;
+the user correctly challenged that scope, prompting the exact 27B/GPU/18000
+proof. Fixture registration copied one installed-version metadata entry and is
+not installer/adoption evidence. Model-selection context is a dialog draft, not
+a promised cross-session default.
+
+Cost checkpoint: `/tmp/pumas-serve-context-costs.py` preserved the frozen router
+checkpoint and deduplicated 500 later `token_usage_record` responses. The carried
+reporting tail is $1.139729: root GPT-6 Astra medium $0.754162 through
+`resp_04a060a0b34b4096016aa1fe47919087d0b8175c6838a672b2`
+(`2026-09-10T00:48:18.521Z`) and integration GPT-5.6 Sol low $0.385567 through
+`resp_0b81a3105f0b5342016aa1fe41348087d097017872636f29ea`
+(`2026-09-10T00:48:05.298Z`). The current slice is $61.570791: root GPT-6
+Astra medium $18.758066 through
+`resp_04a060a0b34b4096016aa20c7b1bfc87d0a965645ce7cafdc5`
+(`2026-09-10T01:49:00.217Z`); design/review GPT-6 Astra medium $14.576826
+through `resp_0d89de9fd93a6b19016aa20ca6d69887d0b9402ce847ef868c`
+(`2026-09-10T01:49:33.804Z`); inventory GPT-5.6 Luna max $0.018925 through
+`resp_01eda5dd1e4769fc016aa201de3a4487d0894728dfb87135f4`
+(`2026-09-10T01:03:40.614Z`); readiness/live proof GPT-6 Astra low
+$17.502100 through `resp_00ab2130dd95350e016aa20b498c8487d09eae744c04b13921`
+(`2026-09-10T01:43:44.556Z`); and integration GPT-5.6 Sol low $10.714874
+through `resp_0b81a3105f0b5342016aa20ca02cfc87d0b73a305810abd132`
+(`2026-09-10T01:49:25.406Z`). Including the tail, this adds $62.710520 and
+brings the cumulative API-equivalent estimate to $291.333696 standard and
+$582.667393 under the separate 2x priority scenario. No request crossed 272,000
+input tokens and recorded cache writes were zero. Requested/observed service
+tiers, tool fees and shared costs remain unknown and are not treated as free.
+These are API-equivalent estimates, not invoices. Reusing the large root/design/
+integration contexts and first proving only CPU/4B before the user-required exact
+target caused material scope churn; starting with the exact target/version would
+likely have avoided duplicated live proofs. Bounded readiness ownership produced
+the decisive evidence, while Luna's short inventory was inexpensive. These
+routing conclusions compare different task classes and remain provisional. Work
+after this snapshot is an uncounted reporting/commit tail.
+
+The normal user root still retains its prior `b9090+vulkan` selection and existing
+model/profile configuration. Starting Pumas there to install/select proven
+`b10883+vulkan` was rejected by automatic approval review because it conflicts
+with the earlier no-live-runtime-mutation restriction. No original-root RPC,
+install or selection ran after rejection and no bypass was attempted; only
+read-only inspection and `/tmp` backups of the existing version/profile metadata
+were made. Fresh explicit user approval is required for that concrete live-root
+update. The liveness-read contract remains queued after it. M4 and the overall
+remediation remain incomplete.
+
 ## 2026-09-10 — Managed llama.cpp Router Readiness Repair
 
 Accepted the user-prioritized managed-router repair without closing M4. The

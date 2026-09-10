@@ -91,8 +91,9 @@ export function ModelServeDialog({
   ]);
 
   const selectedProfile = servingProfiles.find((profile) => profile.profile_id === profileId);
-  const selectedStatus =
-    runtimeProfiles.statuses.find((status) => status.profile_id === profileId) ?? null;
+  const selectedStatus = runtimeProfiles.error
+    ? null
+    : (runtimeProfiles.statuses.find((status) => status.profile_id === profileId) ?? null);
   const aliasRequired = servingStatus.servedModels.some(
     (servedModel) =>
       servedModel.model_id === model.id &&
@@ -154,13 +155,23 @@ export function ModelServeDialog({
       onBack={onBack}
       onClose={onClose}
       onProfileIdChange={setProfileId}
-      onServe={() => {
+      onServe={async () => {
         if (aliasError) {
           return;
         }
-        void servingActions.serveModel(buildConfig());
+        try {
+          await servingActions.serveModel(buildConfig());
+        } finally {
+          await runtimeProfiles.refreshRuntimeProfiles();
+        }
       }}
-      onUnload={() => void servingActions.unloadModel()}
+      onUnload={async () => {
+        try {
+          await servingActions.unloadModel();
+        } finally {
+          await runtimeProfiles.refreshRuntimeProfiles();
+        }
+      }}
       profileId={profileId}
       profileSelectRef={profileSelectRef}
       profiles={servingProfiles}

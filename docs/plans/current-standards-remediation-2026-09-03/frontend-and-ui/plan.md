@@ -10,10 +10,11 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Inventory and validate `is_ollama_running` and
-`is_torch_running` as one runtime-liveness read-contract slice (M4) after the
-accepted runtime-stop response. Preserve optional inference-plugin builds,
-standalone backend operation and existing error behavior; do not probe a live runtime.
+**Next slice:** Resume M4 with the bounded `is_ollama_running`/
+`is_torch_running` producer, RPC, generated desktop and actual-consumer
+read-contract inventory and validation. The user-prioritized working-build and
+isolated llama.cpp hosting checkpoint below is accepted; the remaining M4 and
+overall remediation are not complete.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -68,6 +69,60 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Working Build And Isolated llama.cpp Hosting
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-09--working-build-and-isolated-llamacpp-hosting-accepted).
+Operation: user-prioritized working product proof before returning to remaining
+M4 contracts. Scope is the current Linux host and an initial CPU llama.cpp path;
+GPU device availability is not established. Preserve the existing live library,
+installed runtimes and model bytes.
+
+Stage 1 builds the canonical local release-mode application with
+`./launcher.sh --build-release`, without packaging or publishing. This baseline
+passed for the release `pumas-rpc`, frontend assets and bundled Electron main/
+preload before source repair. The final artifact must be rebuilt after accepted
+source changes and remain runnable with an explicit isolated launcher root.
+
+Stage 2 gives the core runtime-profile owner retained process identity and a
+scoped stop path that cannot fall back to global process scanning. It also makes
+serving readiness semantic for the requested model rather than treating process
+spawn or endpoint connectivity alone as completion. GPT-6 Astra medium owns the
+consequential contract and review; bounded GPT-6 Astra low owners implement
+process custody and serving-readiness repairs. Root coordinates integration;
+GPT-5.6 Sol low owns routine build, Electron/frontend integration, evidence,
+documentation and commit.
+
+Stage 3 uses Pumas with a unique ignored launcher root under `tmp/`, resolves and
+installs the official current compatible llama.cpp CPU binary release (`b10883`)
+into that root, and copies or reflinks one selected existing GGUF into the isolated
+model library. A hard link is not allowed. The source model and its live-library
+metadata remain unchanged. Upstream network/download effects and isolated runtime
+metadata are authorized for this proof; credentials and live-root mutation are not.
+
+Stage 4 drives the built Pumas serving path for the isolated model, proves a
+semantic inference response rather than port openness, observes the corresponding
+renderer workflow where practical, and stops only the retained process identity.
+Evidence must show no owned child remains, no unrelated process was signalled, and
+the isolated root remains as a concrete runnable artifact for the user. Failure or
+uncertainty must use the owned process receipt; global cleanup is prohibited.
+
+Acceptance evidence includes: final release build; focused custody/readiness regressions;
+affected strict Rust, Electron and frontend gates; official asset identity and
+digest evidence; isolated install/model-copy facts; built-Pumas launch, inference,
+status and owned-stop results; unchanged source-model evidence; runnable command
+and root; independent review; and plan validation. Evidence is Linux CPU-specific
+and cannot establish GPU or other-OS support. Managed binary profiles are
+deliberately unsupported before spawn outside Linux. Same-process retained Child
+and cooperating process-group custody does not cover external reapers or escaped
+descendants. Loaded proves receipt-correlated dedicated HTTP model readiness at
+publication, not perpetual health. Numeric loopback endpoints are required for
+the positive Linux listener-ownership proof; hostname and non-loopback profiles
+fail closed. Runtime-profile state publication remains incomplete (FE-I52), so
+the serving dialog performs exactly one snapshot refresh after serve and unload
+outcomes, including failures, and suppresses stale lifecycle labels after a
+refresh error.
 
 ## Runtime Stop Contract
 

@@ -7,16 +7,14 @@ use crate::models::{
     LaunchResponse, RuntimeDeviceMode, RuntimeDeviceSettings, RuntimeLifecycleState,
     RuntimeProfileId, RuntimeProfileStatus,
 };
-use crate::process::{BinaryLaunchConfig, ProcessLauncher};
+use crate::process::BinaryLaunchConfig;
 use crate::providers::ExecutableArtifactFormat;
 use crate::runtime_profiles::{
     generate_llama_cpp_router_catalog, RuntimeProfileBinaryLaunchKind,
     RuntimeProfileLaunchOverrides, RuntimeProfileLaunchSpec, RuntimeProfileLaunchStrategy,
 };
-use std::fs;
 use std::path::Path;
 use tokio::fs as async_fs;
-use tracing::warn;
 
 pub(super) async fn launch_runtime_profile(
     primary: &PrimaryState,
@@ -26,7 +24,27 @@ pub(super) async fn launch_runtime_profile(
     model_id: Option<String>,
     overrides: Option<RuntimeProfileLaunchOverrides>,
 ) -> std::result::Result<LaunchResponse, PumasError> {
-    let _operation_guard = primary
+    Ok(launch_runtime_profile_with_receipt(
+        primary,
+        profile_id,
+        tag,
+        version_dir,
+        model_id,
+        overrides,
+    )
+    .await?
+    .response)
+}
+
+pub(super) async fn launch_runtime_profile_with_receipt(
+    primary: &PrimaryState,
+    profile_id: RuntimeProfileId,
+    tag: &str,
+    version_dir: &Path,
+    model_id: Option<String>,
+    overrides: Option<RuntimeProfileLaunchOverrides>,
+) -> std::result::Result<crate::runtime_profiles::OwnedRuntimeProfileLaunchReceipt, PumasError> {
+    let operation_guard = primary
         .runtime_profile_service
         .begin_profile_operation(profile_id.clone())?;
     let spec = primary
@@ -34,7 +52,11 @@ pub(super) async fn launch_runtime_profile(
         .managed_profile_launch_spec(profile_id.clone())
         .await?;
 
-    let spec =
+    primary
+        .runtime_profile_service
+        .process_owner
+        .ensure_inactive(&profile_id)?;
+    let (spec, model_path) =
         prepare_runtime_profile_launch_spec(primary, spec, model_id.as_deref(), overrides.as_ref())
             .await?;
 
@@ -42,68 +64,18 @@ pub(super) async fn launch_runtime_profile(
         spec.launch_strategy,
         RuntimeProfileLaunchStrategy::InProcessRuntime(_)
     ) {
-        return launch_in_process_runtime_profile(primary, profile_id, spec).await;
+        return Ok(crate::runtime_profiles::OwnedRuntimeProfileLaunchReceipt {
+            response: launch_in_process_runtime_profile(primary, profile_id, spec).await?,
+            observation: None,
+        });
     }
 
+    let config = runtime_profile_binary_launch_config(tag, version_dir, &spec)?;
     primary
         .runtime_profile_service
-        .record_profile_lifecycle_status(RuntimeProfileStatus {
-            profile_id: profile_id.clone(),
-            state: RuntimeLifecycleState::Starting,
-            endpoint_url: Some(spec.endpoint_url.clone()),
-            pid: None,
-            log_path: Some(spec.log_file.to_string_lossy().to_string()),
-            last_error: None,
-        })?;
-
-    let tag = tag.to_string();
-    let version_dir = version_dir.to_path_buf();
-    let launch_spec = spec.clone();
-    let launch_result = tokio::task::spawn_blocking(move || {
-        stop_orphaned_managed_profile_processes(&launch_spec)?;
-        let config = runtime_profile_binary_launch_config(&tag, &version_dir, &launch_spec)?;
-        ProcessLauncher::launch_binary(&config)
-    })
-    .await
-    .map_err(|err| {
-        PumasError::Other(format!("Failed to join runtime profile launch task: {err}"))
-    })??;
-
-    let pid = launch_result.process.as_ref().map(std::process::Child::id);
-    let error = launch_result.error.clone();
-    primary
-        .runtime_profile_service
-        .record_profile_lifecycle_status(RuntimeProfileStatus {
-            profile_id: profile_id.clone(),
-            state: if launch_result.success {
-                RuntimeLifecycleState::Running
-            } else {
-                RuntimeLifecycleState::Failed
-            },
-            endpoint_url: Some(spec.endpoint_url),
-            pid,
-            log_path: launch_result
-                .log_path
-                .as_ref()
-                .map(|path| path.to_string_lossy().to_string()),
-            last_error: error.clone(),
-        })?;
-
-    if !launch_result.success {
-        primary
-            .serving_service
-            .record_profile_unavailable(&profile_id)
-            .await;
-    }
-
-    Ok(LaunchResponse {
-        success: launch_result.success,
-        error,
-        log_path: launch_result
-            .log_path
-            .map(|path| path.to_string_lossy().to_string()),
-        ready: Some(launch_result.ready),
-    })
+        .process_owner
+        .launch(config, spec, model_path, operation_guard)
+        .await
 }
 
 async fn launch_in_process_runtime_profile(
@@ -128,20 +100,6 @@ async fn launch_in_process_runtime_profile(
         log_path: None,
         ready: Some(true),
     })
-}
-
-fn stop_orphaned_managed_profile_processes(
-    launch_spec: &RuntimeProfileLaunchSpec,
-) -> std::result::Result<(), PumasError> {
-    if launch_spec.pid_file.exists() {
-        return Ok(());
-    }
-    let runtime_dir = launch_spec.runtime_dir.to_string_lossy();
-    if runtime_dir.trim().is_empty() {
-        return Ok(());
-    }
-    ProcessLauncher::stop_processes_by_pattern(&runtime_dir, 5_000)?;
-    Ok(())
 }
 
 fn runtime_profile_binary_launch_config(
@@ -198,7 +156,8 @@ async fn prepare_runtime_profile_launch_spec(
     mut launch_spec: RuntimeProfileLaunchSpec,
     model_id: Option<&str>,
     overrides: Option<&RuntimeProfileLaunchOverrides>,
-) -> std::result::Result<RuntimeProfileLaunchSpec, PumasError> {
+) -> std::result::Result<(RuntimeProfileLaunchSpec, Option<std::path::PathBuf>), PumasError> {
+    let mut selected_model_path = None;
     match launch_spec.launch_strategy {
         RuntimeProfileLaunchStrategy::BinaryProcess(
             RuntimeProfileBinaryLaunchKind::LlamaCppRouter,
@@ -244,6 +203,7 @@ async fn prepare_runtime_profile_launch_spec(
             }
             launch_spec.extra_args =
                 append_llama_cpp_model_arg(&launch_spec.extra_args, &model_path);
+            selected_model_path = Some(model_path);
             if let Some(overrides) = overrides {
                 apply_llama_cpp_launch_overrides(&mut launch_spec, overrides);
             }
@@ -255,7 +215,7 @@ async fn prepare_runtime_profile_launch_spec(
         | RuntimeProfileLaunchStrategy::ExternalOnly => {}
     }
 
-    Ok(launch_spec)
+    Ok((launch_spec, selected_model_path))
 }
 
 fn apply_llama_cpp_launch_overrides(
@@ -390,131 +350,106 @@ pub(super) async fn stop_runtime_profile(
     primary: &PrimaryState,
     profile_id: RuntimeProfileId,
 ) -> std::result::Result<bool, PumasError> {
-    let _operation_guard = primary
+    // Owned sessions are stopped from their immutable launch identity, even if
+    // a caller cancels startup or configuration is subsequently unavailable.
+    if let Some((receipt, result)) = primary
+        .runtime_profile_service
+        .process_owner
+        .stop_with_receipt(&profile_id)
+        .await?
+    {
+        primary
+            .serving_service
+            .record_profile_unavailable_for_owned_generation(
+                &profile_id,
+                receipt.generation,
+                &primary.runtime_profile_service.process_owner,
+            )
+            .await?;
+        return result;
+    }
+    let _guard = primary
         .runtime_profile_service
         .begin_profile_operation(profile_id.clone())?;
     let spec = primary
         .runtime_profile_service
         .managed_profile_launch_spec(profile_id.clone())
         .await?;
-
-    stop_runtime_profile_from_spec(primary, spec).await
+    if !matches!(
+        spec.launch_strategy,
+        RuntimeProfileLaunchStrategy::InProcessRuntime(_)
+    ) {
+        if async_fs::try_exists(&spec.pid_file)
+            .await
+            .map_err(|e| PumasError::io_with_path(e, &spec.pid_file))?
+        {
+            return Err(PumasError::Other(
+                "Runtime PID metadata is unowned; refusing to signal or remove it".to_string(),
+            ));
+        }
+        return Ok(false);
+    }
+    primary
+        .runtime_profile_service
+        .record_profile_lifecycle_status(RuntimeProfileStatus {
+            profile_id: profile_id.clone(),
+            state: RuntimeLifecycleState::Stopped,
+            endpoint_url: Some(spec.endpoint_url),
+            pid: None,
+            log_path: None,
+            last_error: None,
+        })?;
+    primary
+        .serving_service
+        .record_profile_unavailable(&profile_id)
+        .await;
+    Ok(false)
 }
 
 pub(super) async fn stop_all_managed_runtime_profiles(
     primary: &PrimaryState,
 ) -> std::result::Result<ManagedRuntimeShutdownSummary, PumasError> {
-    let specs = primary
+    let results = primary
         .runtime_profile_service
-        .list_managed_profile_launch_specs()
+        .process_owner
+        .close_and_drain()
         .await?;
     let mut summary = ManagedRuntimeShutdownSummary {
-        profiles_processed: 0,
+        profiles_processed: results.len(),
         processes_stopped: 0,
         errors: Vec::new(),
     };
-
-    for spec in specs {
-        let profile_id = spec.profile_id.clone();
-        summary.profiles_processed += 1;
-        match stop_runtime_profile_from_spec(primary, spec).await {
-            Ok(stopped) => {
-                if stopped {
-                    summary.processes_stopped += 1;
-                }
-            }
-            Err(error) => {
-                let message = format!("{}: {error}", profile_id.as_str());
-                warn!("managed runtime shutdown failed for {message}");
-                summary.errors.push(message);
-            }
+    for (profile_id, result) in results {
+        primary
+            .serving_service
+            .record_profile_unavailable(&profile_id)
+            .await;
+        match result {
+            Ok(true) => summary.processes_stopped += 1,
+            Ok(false) => {}
+            Err(error) => summary
+                .errors
+                .push(format!("{}: {error}", profile_id.as_str())),
         }
     }
-
-    Ok(summary)
-}
-
-async fn stop_runtime_profile_from_spec(
-    primary: &PrimaryState,
-    spec: RuntimeProfileLaunchSpec,
-) -> std::result::Result<bool, PumasError> {
-    let profile_id = spec.profile_id.clone();
-
-    primary
+    for spec in primary
         .runtime_profile_service
-        .record_profile_lifecycle_status(RuntimeProfileStatus {
-            profile_id: profile_id.clone(),
-            state: RuntimeLifecycleState::Stopping,
-            endpoint_url: Some(spec.endpoint_url.clone()),
-            pid: None,
-            log_path: Some(spec.log_file.to_string_lossy().to_string()),
-            last_error: None,
-        })?;
-
-    let pid_file = spec.pid_file.clone();
-    let stop_result = tokio::task::spawn_blocking(move || stop_profile_pid_file(&pid_file))
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!("Failed to join runtime profile stop task: {err}"))
-        })?;
-
-    match stop_result {
-        Ok(stopped) => {
-            primary
-                .runtime_profile_service
-                .record_profile_lifecycle_status(RuntimeProfileStatus {
-                    profile_id: profile_id.clone(),
-                    state: RuntimeLifecycleState::Stopped,
-                    endpoint_url: Some(spec.endpoint_url),
-                    pid: None,
-                    log_path: Some(spec.log_file.to_string_lossy().to_string()),
-                    last_error: None,
-                })?;
-            primary
-                .serving_service
-                .record_profile_unavailable(&profile_id)
-                .await;
-            Ok(stopped)
-        }
-        Err(error) => {
-            let error_message = error.to_string();
-            primary
-                .runtime_profile_service
-                .record_profile_lifecycle_status(RuntimeProfileStatus {
-                    profile_id: profile_id.clone(),
-                    state: RuntimeLifecycleState::Failed,
-                    endpoint_url: Some(spec.endpoint_url),
-                    pid: None,
-                    log_path: Some(spec.log_file.to_string_lossy().to_string()),
-                    last_error: Some(error_message),
-                })?;
-            primary
-                .serving_service
-                .record_profile_unavailable(&profile_id)
-                .await;
-            Err(error)
+        .list_managed_profile_launch_specs()
+        .await?
+    {
+        if matches!(
+            spec.launch_strategy,
+            RuntimeProfileLaunchStrategy::InProcessRuntime(_)
+        ) {
+            summary.profiles_processed += 1;
+            if let Err(error) = stop_runtime_profile(primary, spec.profile_id.clone()).await {
+                summary
+                    .errors
+                    .push(format!("{}: {error}", spec.profile_id.as_str()));
+            }
         }
     }
-}
-
-fn stop_profile_pid_file(pid_file: &Path) -> std::result::Result<bool, PumasError> {
-    if !pid_file.exists() {
-        return Ok(false);
-    }
-
-    let pid = fs::read_to_string(pid_file)
-        .map_err(|err| PumasError::io_with_path(err, pid_file))?
-        .trim()
-        .parse::<u32>()
-        .map_err(|err| PumasError::InvalidParams {
-            message: format!(
-                "invalid runtime profile PID file {}: {err}",
-                pid_file.display()
-            ),
-        })?;
-    let stopped = ProcessLauncher::stop_process(pid, 5_000)?;
-    ProcessLauncher::remove_pid_file(pid_file)?;
-    Ok(stopped)
+    Ok(summary)
 }
 
 #[cfg(test)]

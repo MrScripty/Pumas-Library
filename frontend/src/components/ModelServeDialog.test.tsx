@@ -443,6 +443,197 @@ describe('ModelServeDialog configuration', () => {
 });
 
 describe('ModelServeDialog actions', () => {
+  it('does not present a stale profile state after profile refresh fails', () => {
+    useRuntimeProfilesMock.mockReturnValue({
+      snapshot,
+      profiles: snapshot.profiles,
+      routes: snapshot.routes,
+      statuses: [{ profile_id: 'emily-llama', state: 'stopped' }],
+      defaultProfileId: snapshot.default_profile_id,
+      cursor: snapshot.cursor,
+      isLoading: false,
+      error: 'profile refresh unavailable',
+      refreshRuntimeProfiles: vi.fn(),
+    });
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'model-stale-status',
+          name: 'Model Stale Status',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/profile refresh unavailable/)).toBeInTheDocument();
+    expect(screen.getByText('unknown')).toBeInTheDocument();
+    expect(screen.queryByText('stopped')).not.toBeInTheDocument();
+  });
+
+  it.each(['false outcome', 'transport rejection'] as const)(
+    'refreshes profile status once after a serve %s without retrying',
+    async (scenario) => {
+      const refreshRuntimeProfiles = vi.fn().mockResolvedValue(undefined);
+      useRuntimeProfilesMock.mockReturnValue({
+        snapshot,
+        profiles: snapshot.profiles,
+        routes: snapshot.routes,
+        statuses: snapshot.statuses,
+        defaultProfileId: snapshot.default_profile_id,
+        cursor: snapshot.cursor,
+        isLoading: false,
+        error: null,
+        refreshRuntimeProfiles,
+      });
+      const serveModel = vi.fn();
+      if (scenario === 'transport rejection') {
+        serveModel.mockRejectedValue(new Error('transport unavailable'));
+      } else {
+        serveModel.mockResolvedValue({
+          success: true,
+          loaded: false,
+          loaded_models_unchanged: true,
+          status: null,
+          load_error: {
+            code: 'provider_load_failed',
+            message: 'exact load failure',
+            severity: 'non_critical',
+            provider: 'llama_cpp',
+            model_id: 'model-refresh-failure',
+            profile_id: 'emily-llama',
+          },
+          snapshot: null,
+        });
+      }
+      getElectronAPIMock.mockReturnValue({
+        get_serving_status: vi.fn().mockResolvedValue({
+          success: true,
+          snapshot: {
+            cursor: 'serving:0',
+            endpoint: { endpoint_mode: 'not_configured', model_count: 0 },
+            served_models: [],
+            recent_errors: [],
+          },
+        }),
+        validate_model_serving_config: vi.fn().mockResolvedValue({
+          success: true,
+          valid: true,
+          errors: [],
+          warnings: [],
+        }),
+        serve_model: serveModel,
+      });
+
+      render(
+        <ModelServeDialog
+          model={{
+            id: 'model-refresh-failure',
+            name: 'Model Refresh Failure',
+            category: 'local',
+            primaryFormat: 'gguf',
+          }}
+          initialProfileId="emily-llama"
+          onClose={vi.fn()}
+        />
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Start serving' }));
+      await waitFor(() => expect(refreshRuntimeProfiles).toHaveBeenCalledTimes(1));
+      expect(serveModel).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('refreshes profile status after serving and unloading', async () => {
+    const refreshRuntimeProfiles = vi.fn();
+    useRuntimeProfilesMock.mockImplementation(() => {
+      const [refreshCount, setRefreshCount] = useState(0);
+      refreshRuntimeProfiles.mockImplementation(async () => setRefreshCount((count) => count + 1));
+      return {
+        snapshot,
+        profiles: snapshot.profiles,
+        routes: snapshot.routes,
+        statuses: [
+          {
+            profile_id: 'emily-llama',
+            state: refreshCount === 1 ? 'running' : 'stopped',
+          },
+        ],
+        defaultProfileId: snapshot.default_profile_id,
+        cursor: snapshot.cursor,
+        isLoading: false,
+        error: null,
+        refreshRuntimeProfiles,
+      };
+    });
+    const serveModel = vi.fn().mockResolvedValue({
+      success: true,
+      loaded: true,
+      loaded_models_unchanged: false,
+      status: {
+        model_id: 'model-refresh',
+        model_alias: 'model-refresh',
+        provider: 'llama_cpp',
+        profile_id: 'emily-llama',
+        load_state: 'loaded',
+        device_mode: 'gpu',
+        keep_loaded: true,
+      },
+      load_error: null,
+      snapshot: null,
+    });
+    const unserveModel = vi.fn().mockResolvedValue({
+      success: true,
+      unloaded: true,
+      snapshot: null,
+    });
+    getElectronAPIMock.mockReturnValue({
+      get_serving_status: vi.fn().mockResolvedValue({
+        success: true,
+        snapshot: {
+          cursor: 'serving:0',
+          endpoint: { endpoint_mode: 'not_configured', model_count: 0 },
+          served_models: [],
+          recent_errors: [],
+        },
+      }),
+      validate_model_serving_config: vi.fn().mockResolvedValue({
+        success: true,
+        valid: true,
+        errors: [],
+        warnings: [],
+      }),
+      serve_model: serveModel,
+      unserve_model: unserveModel,
+    });
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'model-refresh',
+          name: 'Model Refresh',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('stopped')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Start serving' }));
+    await waitFor(() => expect(screen.getByText('running')).toBeInTheDocument());
+    expect(refreshRuntimeProfiles).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Unload' }));
+    await waitFor(() => expect(screen.getByText('stopped')).toBeInTheDocument());
+    expect(unserveModel).toHaveBeenCalledTimes(1);
+    expect(refreshRuntimeProfiles).toHaveBeenCalledTimes(2);
+  });
+
   it('calls serve_model when start serving is clicked', async () => {
     const validateModelServingConfig = vi.fn<
       (_request: ServeModelRequest) => Promise<ModelServeValidationResponse>

@@ -2035,12 +2035,17 @@ mod tests {
     fn llama_cpp_launch_binary_uses_wrapper_with_runtime_library_path() {
         use std::os::unix::fs::PermissionsExt;
 
-        let temp_dir = tempfile::TempDir::new().unwrap();
-        let version_dir = temp_dir.path().join("b9090+vulkan");
+        let cwd = std::env::current_dir().unwrap();
+        let temp_dir = tempfile::tempdir_in(&cwd).unwrap();
+        let relative_root = temp_dir.path().strip_prefix(&cwd).unwrap();
+        let absolute_root =
+            pumas_library::platform::paths::absolute_launcher_root(relative_root).unwrap();
+        let version_dir = absolute_root.join("b9090+vulkan");
         let archive_dir = version_dir.join("llama-b9090");
         let source = archive_dir.join("llama-server");
         std::fs::create_dir_all(&archive_dir).unwrap();
-        std::fs::write(&source, b"binary").unwrap();
+        std::fs::write(&source, b"#!/bin/sh\nprintf 'owned-wrapper-fixture'\n").unwrap();
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let launch_binary =
             VersionInstaller::install_llama_cpp_launch_binary(&version_dir, &source).unwrap();
@@ -2055,6 +2060,17 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o111, 0o111);
+        let unrelated_cwd = tempfile::tempdir().unwrap();
+        let output = std::process::Command::new(&launch_binary)
+            .current_dir(unrelated_cwd.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"owned-wrapper-fixture");
     }
 
     #[test]

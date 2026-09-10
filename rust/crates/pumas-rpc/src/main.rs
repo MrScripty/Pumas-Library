@@ -126,6 +126,8 @@ async fn run(args: Args, host: server::LoopbackHost) -> Result<()> {
         }
     };
 
+    let launcher_root = pumas_library::platform::paths::absolute_launcher_root(&launcher_root)?;
+
     info!("Launcher root configured");
 
     // Create the core API instance (model library, system utilities)

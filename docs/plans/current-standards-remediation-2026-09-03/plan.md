@@ -247,9 +247,11 @@ Phase custody, idle handoff, canonical admission validation, and busy consumer
 behavior pass Linux gates. The existing desktop diagnostic enum and generated
 validators migrated together; no persistence schema or live data changed.
 
-**Next slice:** Inventory and validate `is_ollama_running` and
-`is_torch_running` as the next API/UI runtime-liveness read-contract slice
-under the user's 2026-09-06 priority, following the accepted runtime-stop
+**Next slice:** Resume M4 with the bounded `is_ollama_running`/
+`is_torch_running` producer, RPC, generated desktop and actual-consumer
+read-contract inventory and validation. The Linux CPU working-build and isolated
+llama.cpp hosting checkpoint is accepted without closing remaining M4 or overall
+remediation, following the accepted runtime-stop
 response and the [standalone backend/link-health
 slice](frontend-and-ui/plan.md#standalone-backend-and-link-health-contract-admission).
 Import-picker, conversion progress reads and remaining conversion operation

@@ -295,7 +295,8 @@ impl PumasApiBuilder {
     }
 
     /// Build the PumasApi instance.
-    pub async fn build(self) -> Result<PumasApi> {
+    pub async fn build(mut self) -> Result<PumasApi> {
+        self.launcher_root = crate::platform::paths::absolute_launcher_root(&self.launcher_root)?;
         // Auto-create directories if requested
         if self.auto_create_dirs {
             // Create launcher_root if it doesn't exist

@@ -4,8 +4,12 @@
 mod launch_specs;
 #[path = "runtime_profiles/launch_strategy.rs"]
 mod launch_strategy;
+#[path = "runtime_profiles/process_owner.rs"]
+mod process_owner;
 #[path = "runtime_profiles/route_config.rs"]
 mod route_config;
+pub(crate) use process_owner::RuntimeProfileProcessOwner;
+pub use process_owner::{OwnedRuntimeProfileLaunchReceipt, OwnedRuntimeProfileObservation};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -349,6 +353,7 @@ pub struct RuntimeProfileService {
     event_journal: Arc<RwLock<RuntimeProfileEventJournal>>,
     updates: broadcast::Sender<RuntimeProfileUpdateFeed>,
     operation_locks: Arc<Mutex<HashSet<RuntimeProfileId>>>,
+    pub(crate) process_owner: Arc<process_owner::RuntimeProfileProcessOwner>,
     provider_registry: ProviderRegistry,
     provider_adapters: RuntimeProviderAdapters,
 }
@@ -413,6 +418,7 @@ impl RuntimeProfileService {
             event_journal: Arc::new(RwLock::new(RuntimeProfileEventJournal::default())),
             updates: broadcast::channel(RUNTIME_PROFILE_UPDATE_CHANNEL_CAPACITY).0,
             operation_locks: Arc::new(Mutex::new(HashSet::new())),
+            process_owner: Arc::new(process_owner::RuntimeProfileProcessOwner::default()),
             provider_registry,
             provider_adapters,
         }
@@ -593,11 +599,14 @@ impl RuntimeProfileService {
         &self,
         profile: RuntimeProfileConfig,
     ) -> Result<RuntimeProfileMutationResponse> {
+        let operation_guard = self.begin_profile_operation(profile.profile_id.clone())?;
+        self.process_owner.ensure_inactive(&profile.profile_id)?;
         validate_profile_config(&profile, &self.provider_registry, &self.provider_adapters).await?;
         let profile_id = profile.profile_id.clone();
         let launcher_root = self.launcher_root.clone();
         let provider_registry = self.provider_registry.clone();
         self.mutate_config(move |config| {
+            let _guard = operation_guard;
             if let Some(existing) = config
                 .profiles
                 .iter_mut()
@@ -617,7 +626,10 @@ impl RuntimeProfileService {
         &self,
         profile_id: RuntimeProfileId,
     ) -> Result<RuntimeProfileMutationResponse> {
+        let operation_guard = self.begin_profile_operation(profile_id.clone())?;
+        self.process_owner.ensure_inactive(&profile_id)?;
         self.mutate_config(move |config| {
+            let _guard = operation_guard;
             config
                 .profiles
                 .retain(|profile| profile.profile_id != profile_id);
@@ -870,6 +882,15 @@ impl RuntimeProfileService {
             return Ok(());
         }
 
+        if let Some(owned) = self.process_owner.snapshot(&resolved.profile_id)? {
+            return if owned.state == RuntimeLifecycleState::Running {
+                Ok(())
+            } else {
+                Err(PumasError::InvalidParams {
+                    message: format!("Managed runtime is not running (state={:?})", owned.state),
+                })
+            };
+        }
         let journal = self.event_journal.read().map_err(|_| {
             PumasError::Other("Failed to acquire runtime profile event journal lock".to_string())
         })?;
@@ -931,6 +952,15 @@ impl RuntimeProfileService {
         for status in &mut snapshot.statuses {
             if let Some(runtime_status) = journal.status_for(&status.profile_id) {
                 *status = runtime_status;
+            }
+        }
+        for owned in self.process_owner.statuses()? {
+            if let Some(status) = snapshot
+                .statuses
+                .iter_mut()
+                .find(|status| status.profile_id == owned.profile_id)
+            {
+                *status = owned;
             }
         }
         Ok(snapshot)

@@ -17,6 +17,29 @@ pub struct ManagedRuntimeShutdownSummary {
 }
 
 impl PumasApi {
+    /// Observe the retained process identity of a managed binary profile.
+    pub fn observe_owned_runtime_profile(
+        &self,
+        profile_id: &RuntimeProfileId,
+    ) -> Result<Option<crate::runtime_profiles::OwnedRuntimeProfileObservation>> {
+        self.primary()
+            .runtime_profile_service
+            .process_owner
+            .snapshot(profile_id)
+    }
+
+    /// Prove that the current admitted child owns its configured loopback listener.
+    pub fn owned_runtime_profile_has_listener(
+        &self,
+        profile_id: &RuntimeProfileId,
+        expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
+    ) -> Result<bool> {
+        self.primary()
+            .runtime_profile_service
+            .process_owner
+            .owns_current_listener(profile_id, expected)
+    }
+
     pub async fn get_runtime_profiles_snapshot(&self) -> Result<RuntimeProfilesSnapshotResponse> {
         self.primary().runtime_profile_service.snapshot().await
     }
@@ -171,6 +194,26 @@ impl PumasApi {
         overrides: Option<RuntimeProfileLaunchOverrides>,
     ) -> Result<LaunchResponse> {
         super::state_runtime_profiles::launch_runtime_profile(
+            self.primary(),
+            profile_id,
+            tag,
+            version_dir,
+            model_id.map(ToOwned::to_owned),
+            overrides,
+        )
+        .await
+    }
+
+    /// Launch and return the immutable identity admitted by this exact call.
+    pub async fn launch_runtime_profile_for_model_with_receipt(
+        &self,
+        profile_id: RuntimeProfileId,
+        tag: &str,
+        version_dir: &Path,
+        model_id: Option<&str>,
+        overrides: Option<RuntimeProfileLaunchOverrides>,
+    ) -> Result<crate::runtime_profiles::OwnedRuntimeProfileLaunchReceipt> {
+        super::state_runtime_profiles::launch_runtime_profile_with_receipt(
             self.primary(),
             profile_id,
             tag,

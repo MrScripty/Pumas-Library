@@ -84,7 +84,37 @@ impl ServingService {
     }
 
     pub async fn record_loaded_model(&self, status: ServedModelStatus) -> ServingStatusSnapshot {
-        let mut snapshot = self.snapshot.write().await;
+        let (snapshot, event) = {
+            let mut snapshot = self.snapshot.write().await;
+            let event = Self::record_loaded_model_locked(&mut snapshot, status);
+            (snapshot.clone(), event)
+        };
+        self.publish_event(event);
+        snapshot
+    }
+
+    pub(crate) async fn record_loaded_model_for_owned_profile(
+        &self,
+        status: ServedModelStatus,
+        owner: &crate::runtime_profiles::RuntimeProfileProcessOwner,
+        expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
+    ) -> crate::Result<ServingStatusSnapshot> {
+        let (snapshot, event) = {
+            let mut snapshot = self.snapshot.write().await;
+            let profile_id = status.profile_id.clone();
+            let event = owner.with_running_session(&profile_id, expected, || {
+                Self::record_loaded_model_locked(&mut snapshot, status)
+            })?;
+            (snapshot.clone(), event)
+        };
+        self.publish_event(event);
+        Ok(snapshot)
+    }
+
+    fn record_loaded_model_locked(
+        snapshot: &mut ServingStatusSnapshot,
+        status: ServedModelStatus,
+    ) -> ServingStatusEvent {
         snapshot
             .served_models
             .retain(|model| !same_served_model(model, &status));
@@ -95,16 +125,14 @@ impl ServingService {
             model_count: snapshot.served_models.len() as u32,
             message: Some("Use the Pumas /v1 serving gateway for loaded models".to_string()),
         };
-        bump_snapshot_cursor(&mut snapshot);
-        let event = serving_status_event(
+        bump_snapshot_cursor(snapshot);
+        serving_status_event(
             snapshot.cursor.clone(),
             ServingStatusEventKind::ModelLoaded,
             Some(status.model_id.clone()),
             Some(status.profile_id.clone()),
             Some(status.provider),
-        );
-        self.publish_event(event);
-        snapshot.clone()
+        )
     }
 
     pub async fn record_load_error(&self, error: ModelServeError) -> ServingStatusSnapshot {
@@ -177,7 +205,40 @@ impl ServingService {
         &self,
         profile_id: &RuntimeProfileId,
     ) -> Option<ServingStatusSnapshot> {
-        let mut snapshot = self.snapshot.write().await;
+        let (result, feed) = {
+            let mut snapshot = self.snapshot.write().await;
+            let feed = Self::record_profile_unavailable_locked(&mut snapshot, profile_id)?;
+            (snapshot.clone(), feed)
+        };
+        self.publish_feed(feed);
+        Some(result)
+    }
+
+    pub(crate) async fn record_profile_unavailable_for_owned_generation(
+        &self,
+        profile_id: &RuntimeProfileId,
+        generation: u64,
+        owner: &crate::runtime_profiles::RuntimeProfileProcessOwner,
+    ) -> crate::Result<Option<ServingStatusSnapshot>> {
+        let update = {
+            let mut snapshot = self.snapshot.write().await;
+            owner
+                .with_current_generation(profile_id, generation, || {
+                    Self::record_profile_unavailable_locked(&mut snapshot, profile_id)
+                        .map(|feed| (snapshot.clone(), feed))
+                })?
+                .flatten()
+        };
+        Ok(update.map(|(snapshot, feed)| {
+            self.publish_feed(feed);
+            snapshot
+        }))
+    }
+
+    fn record_profile_unavailable_locked(
+        snapshot: &mut ServingStatusSnapshot,
+        profile_id: &RuntimeProfileId,
+    ) -> Option<ServingStatusUpdateFeed> {
         let mut removed_models = Vec::new();
         snapshot.served_models.retain(|status| {
             if &status.profile_id == profile_id {
@@ -195,7 +256,7 @@ impl ServingService {
         if snapshot.served_models.is_empty() {
             snapshot.endpoint = ServingEndpointStatus::not_configured();
         }
-        bump_snapshot_cursor(&mut snapshot);
+        bump_snapshot_cursor(snapshot);
         let cursor = snapshot.cursor.clone();
         let events = removed_models
             .into_iter()
@@ -209,13 +270,12 @@ impl ServingService {
                 )
             })
             .collect();
-        self.publish_feed(ServingStatusUpdateFeed {
+        Some(ServingStatusUpdateFeed {
             cursor,
             events,
             stale_cursor: false,
             snapshot_required: false,
-        });
-        Some(snapshot.clone())
+        })
     }
 
     pub async fn find_served_model(

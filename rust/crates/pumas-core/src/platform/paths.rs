@@ -16,6 +16,12 @@ use std::sync::{Mutex, OnceLock};
 #[cfg(test)]
 static TEST_REGISTRY_DB_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 
+/// Capture a launcher root independently of later working-directory changes.
+/// This does not require the root to exist or resolve its symlink spelling.
+pub fn absolute_launcher_root(root: &Path) -> Result<PathBuf> {
+    std::path::absolute(root).map_err(|error| PumasError::io_with_path(error, root))
+}
+
 /// Get the path to the Python executable within a virtual environment.
 ///
 /// # Platform Behavior
@@ -307,6 +313,29 @@ pub fn set_test_registry_db_path(path: Option<PathBuf>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn absolute_launcher_root_captures_relative_and_preserves_absolute_paths() {
+        let relative = std::path::Path::new("pumas-absent-root-fixture").join("nested");
+        let expected = std::env::current_dir().unwrap().join(&relative);
+        assert_eq!(super::absolute_launcher_root(&relative).unwrap(), expected);
+        assert_eq!(super::absolute_launcher_root(&expected).unwrap(), expected);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn absolute_launcher_root_preserves_symlink_spelling() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target");
+        std::fs::create_dir(&target).unwrap();
+        let link = temp.path().join("chosen-root");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert_eq!(super::absolute_launcher_root(&link).unwrap(), link);
+        assert_ne!(
+            super::absolute_launcher_root(&link).unwrap(),
+            std::fs::canonicalize(link).unwrap()
+        );
+    }
+
     use super::*;
 
     #[test]

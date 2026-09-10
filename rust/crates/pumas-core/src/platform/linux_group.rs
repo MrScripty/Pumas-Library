@@ -10,7 +10,7 @@ use std::process::ExitStatus;
 use nix::sys::signal::{killpg, Signal};
 use nix::unistd::{getpgid, Pid};
 
-pub(super) fn ensure_supported() -> io::Result<()> {
+pub(crate) fn ensure_supported() -> io::Result<()> {
     if cfg!(target_env = "uclibc") {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
@@ -35,7 +35,7 @@ fn checked_pid(pid: u32) -> io::Result<Pid> {
 }
 
 /// Observe terminal status without releasing the child's PID/PGID pin.
-pub(super) fn observe_exit(pid: u32) -> io::Result<Option<ExitStatus>> {
+pub(crate) fn observe_exit(pid: u32) -> io::Result<Option<ExitStatus>> {
     ensure_supported()?;
     let pid = checked_pid(pid)?;
     #[cfg(not(target_env = "uclibc"))]
@@ -82,7 +82,7 @@ pub(super) fn observe_exit(pid: u32) -> io::Result<Option<ExitStatus>> {
 
 /// Signal only while direct-child ownership and its group identity are proven.
 /// Call synchronously while retaining Child, never queue a PID-only signal task.
-pub(super) fn signal_group(pid: u32) -> io::Result<()> {
+pub(crate) fn signal_group(pid: u32) -> io::Result<()> {
     let group = checked_pid(pid)?;
     observe_exit(pid)?;
     if getpgid(Some(group)).map_err(io::Error::from)? != group {
@@ -94,7 +94,7 @@ pub(super) fn signal_group(pid: u32) -> io::Result<()> {
     killpg(group, Signal::SIGKILL).map_err(Into::into)
 }
 
-pub(super) fn group_has_live_members(group: i32) -> io::Result<bool> {
+pub(crate) fn group_has_live_members(group: i32) -> io::Result<bool> {
     if group <= 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,

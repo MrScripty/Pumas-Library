@@ -1,5 +1,37 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-09 — Working Build And Isolated llama.cpp Hosting
+
+The user-prioritized Linux CPU checkpoint is accepted without closing M4 or
+the overall program. The canonical release build, official `b10883+cpu`
+installation in an isolated ignored root, copied 3.3 GB GGUF, Pumas gateway
+inference, retained owned-process observation and scoped unload all succeeded.
+The final repaired binary also passed from a relative launcher-root argument.
+
+Managed Linux binary profiles now retain Child/worker/generation ownership,
+exclude conflicting configuration, close admission at shutdown and clean their
+cooperating process group. Dedicated llama.cpp publication requires receipt-
+correlated `/health` and exact `/v1/models` evidence plus positive numeric-
+loopback listener ownership and a final generation guard. This is publication-
+time readiness, not perpetual health; non-Linux managed binary launch is
+unsupported before spawn, and external reapers/escaped descendants remain out
+of scope. Legacy global runtime routes remain open under FE-I48 through FE-I51.
+
+Live execution found that relative launcher roots produced unusable relative
+llama.cpp wrapper targets. Core, app-manager and RPC now anchor the root to one
+absolute lexical path. This fixes working-directory stability without resolving
+FE-I42 containment. The built Electron UI drove the same profile through
+stopped, running/Loaded, and stopped/Unloaded states. Its dialog refreshes the
+profile snapshot once after every serve/unload result and suppresses stale state
+after refresh failure; complete lifecycle push publication remains FE-I52.
+
+Focused custody/readiness suites, dual-feature strict Rust lint, formatting,
+release builds, serving frontend tests, types/lint, both frontend modes,
+Electron build and contract-generator freshness/tests pass. The detailed
+frontend ledger owns hashes, exact inference strings, environment fallbacks,
+review repairs and limitations. Next resume the bounded
+`is_ollama_running`/`is_torch_running` M4 read-contract slice.
+
 ## 2026-09-09 — Runtime Stop Contract
 
 The bounded runtime-stop slice now has one generated strict empty process-control

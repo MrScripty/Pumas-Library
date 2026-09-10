@@ -18,9 +18,13 @@
 //! - **macOS**: Architecture ready, implementation pending
 
 pub(crate) mod filesystem;
+#[cfg(target_os = "linux")]
+pub(crate) mod linux_group;
 pub mod paths;
 pub mod permissions;
 pub mod process;
+#[cfg(target_os = "linux")]
+pub(crate) mod runtime_listener;
 
 // Re-export commonly used items
 pub use paths::{

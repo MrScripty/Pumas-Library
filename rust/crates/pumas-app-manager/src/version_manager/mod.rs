@@ -140,6 +140,8 @@ impl VersionManager {
             });
         }
 
+        let launcher_root = pumas_library::platform::paths::absolute_launcher_root(&launcher_root)?;
+
         if !path_exists(&launcher_root).await? {
             return Err(PumasError::Config {
                 message: format!("Launcher root does not exist: {}", launcher_root.display()),
@@ -674,6 +676,21 @@ mod tests {
             .await
             .unwrap();
         (manager, temp_dir)
+    }
+
+    #[tokio::test]
+    async fn relative_launcher_root_is_captured_before_manager_paths() {
+        let cwd = std::env::current_dir().unwrap();
+        let temp = tempfile::tempdir_in(&cwd).unwrap();
+        let relative = temp.path().strip_prefix(&cwd).unwrap();
+        let manager = VersionManager::new(relative, AppId::LlamaCpp)
+            .await
+            .unwrap();
+        assert_eq!(manager.launcher_root, temp.path());
+        assert_eq!(
+            manager.versions_dir(),
+            temp.path().join("llama-cpp-versions")
+        );
     }
 
     #[tokio::test]

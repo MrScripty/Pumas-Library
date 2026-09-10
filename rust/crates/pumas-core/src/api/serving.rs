@@ -101,6 +101,23 @@ impl PumasApi {
             .await)
     }
 
+    /// Publish a loaded model only while the exact admitted process remains current.
+    pub async fn record_served_model_for_owned_profile(
+        &self,
+        status: ServedModelStatus,
+        expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
+    ) -> Result<ServingStatusSnapshot> {
+        let primary = self.primary();
+        primary
+            .serving_service
+            .record_loaded_model_for_owned_profile(
+                status,
+                &primary.runtime_profile_service.process_owner,
+                expected,
+            )
+            .await
+    }
+
     pub async fn record_serving_load_error(
         &self,
         error: ModelServeError,

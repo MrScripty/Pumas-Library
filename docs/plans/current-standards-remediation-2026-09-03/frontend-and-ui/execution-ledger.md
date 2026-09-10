@@ -3743,3 +3743,89 @@ M4/M5, packaged platform verification and Pending cleanup replay remain open.
   decide FE-A8. M5 still owns the
   admitted reusable renderer runner, packaged-target execution remains with
   the platform plan, and XR-S1 remains `Verifying` pending the composed gate.
+## 2026-09-09 — Working Build And Isolated llama.cpp Hosting Accepted
+
+- Built the release `pumas-rpc`, production frontend and bundled Electron
+  application with `./launcher.sh --build-release` before source changes and
+  again after the custody/readiness repairs. The root-anchoring repair then
+  received its own final release rebuild; after the dialog refresh repair, the
+  normal frontend and Electron bundle were rebuilt without repeating Cargo.
+- Managed Linux binary profiles now retain the exact Child, worker and
+  generation, reject conflicting configuration, close admission at shutdown,
+  and stop only their cooperating process group. Non-Linux managed binary
+  launch fails before spawn; external reapers and escaped descendants remain
+  outside the guarantee.
+- Dedicated llama.cpp Loaded publication now requires the exact launch receipt,
+  positive Linux socket-inode ownership on a numeric loopback endpoint,
+  successful `/health`, and `/v1/models` evidence for the requested model,
+  followed by a generation guard. This proves readiness at publication, not
+  perpetual health. Hostname and non-loopback managed profiles fail closed.
+- A live relative-root run exposed an `ENOENT` before spawn because the
+  installed wrapper embedded a relative binary directory and launch used a
+  different working directory. Launcher roots are now anchored to one absolute
+  lexical path at core, manager and RPC admission. This fixes working-directory
+  stability without claiming tag/model containment (FE-I42). Four focused
+  relative-root regressions and strict dual-feature Clippy passed.
+- Pumas installed official llama.cpp `b10883+cpu` from upstream asset
+  `llama-b10883-bin-ubuntu-x64.tar.gz` (16,813,862 bytes) in
+  ignored root `tmp/llamacpp-hosting-20260909`, selected it, and indexed a full
+  copy. The cached archive SHA-256
+  `bb7df4783b12f164a1e829d4e692c216324ad919883f9e1c8abc77262db29145`
+  exactly matched the digest published by the GitHub release API. The generated
+  isolated wrapper alone was corrected to the absolute extracted binary after
+  the relative-root failure; no reinstall or migration changed the official
+  extracted asset.
+  The model was a full
+  copy of `Qwen3-4B-Instruct-2507-Q6_Kcopy1.gguf`. Source/copy size was
+  3,306,261,600 bytes and SHA-256 was
+  `cd7b21b38b3e71400587c184b6a9b04d3beb4d13fdae6464d4075dee4f1bc5ad`;
+  distinct inodes prove the copy was not hard-linked. The unchanged source
+  size/hash evidence separately preserves the source model.
+- Built Pumas loaded that model on CPU through the managed dedicated profile.
+  Its `/v1/chat/completions` gateway returned exact `PUMAS_LLAMA_OK`, and the
+  final repaired relative-root binary returned exact `FINAL_PUMAS_OK` with
+  llama.cpp fingerprint `b10883-91f6a6cf3`. The owned PID and listener were
+  present while loaded; `unserve_model` returned unloaded and both disappeared.
+- The actual release Electron UI rendered the copied model, selected
+  `llama.cpp CPU Proof`, started it, showed `State running` and
+  `Loaded on llamacpp-proof-cpu`, then showed `State stopped` and `Unloaded`.
+  The dialog now performs exactly one profile snapshot refresh after every
+  serve/unload result, including failures, without retrying mutations; refresh
+  errors suppress stale lifecycle labels (FE-I52). Evidence is retained below
+  the ignored isolated root in `evidence/ui-final-loaded.png` and
+  `evidence/ui-final-unloaded.png`.
+- Verification passed 46 core runtime-profile, 30 platform, 27 serving and 7
+  dedicated RPC tests; strict core/app-manager/RPC all-target lint passed with
+  inference plugins and without default features. The separately required RPC
+  all-target/all-feature Clippy also passed with warnings denied. Full latest-
+  source no-default RPC verification passed 164 tests with 10 existing ignores;
+  an initial name filter selected zero tests and was replaced by this non-vacuous
+  run. Frontend serving tests pass,
+  including 17 dialog cases; TypeScript, lint, normal/library builds, Electron
+  build, 168/169 Electron tests (one explicit sandbox-preload skip), generator
+  freshness and 8/8 tests, producer 39/39 and renderer 48/48 conformance, Rust
+  formatting and diff checks pass.
+- Environment repairs: sandboxed RPC initially reported a read-only SQLite
+  database and local client connections returned EPERM; approved isolated
+  execution succeeded. Reflink was unsupported, so the model used a verified
+  full copy. One library-only UI run opened the conversion dialog through stale
+  coordinates; it was closed without installing tools or starting conversion,
+  the normal build was restored, and fresh captures drove the intended controls.
+- Independent review required listener ownership before HTTP observation,
+  rechecking custody after the probe, and generation-bound stop/unavailable
+  publication so a replacement cannot inherit an older result. It also removed
+  a redundant RPC-side clear, reviewed the live relative-root wrapper/model-path
+  repair, and required the dialog refresh after live UI evidence exposed
+  its stale status label. All were repaired and re-reviewed before acceptance.
+- Routing was provisional rather than a controlled benchmark: Astra medium
+  retained consequential planning/review, bounded Astra low agents owned core
+  custody/readiness/root anchoring, Luna performed one local inventory, and Sol
+  low integrated builds, desktop/frontend proof and documentation. The root
+  session remained Astra medium instead of the requested Sol coordination path;
+  the bounded child scopes avoided sharing Cargo but cannot isolate task-class
+  or cache differences. Cost checkpoint from `/tmp/pumas-llamacpp-hosting-costs.py`: carried reporting tail $3.3972692; current slice $67.38297032; newly checkpointed $70.78023952; cumulative API-equivalent estimate $191.81422656 standard / $383.62845312 priority scenario. Current-slice breakdown: root Astra medium $16.759490; design Astra medium $14.431022; custody Astra low $15.366376; readiness Astra low $5.447532; Sol low integration $15.2757448; Luna max inventory $0.10280552. The 806 deduplicated responses had no request above 272,000 input tokens and no recorded cache writes. Requested/observed service tiers and shared tool fees remain unknown; these are pricing-assumption estimates, not invoices. Final cutoffs: root `resp_04a060a0b34b4096016aa1f2feb75887d0b9d8a5c1a74766a0` at `2026-09-10T00:00:06.646Z`; design `resp_0d89de9fd93a6b19016aa1f2fea0d087d0b59c719b245d8ae8` at `2026-09-10T00:00:05.779Z`; integration `resp_0b81a3105f0b5342016aa1f2fe461087d0a734faa485b9197b` at `2026-09-10T00:00:07.749Z`; inventory `resp_01eda5dd1e4769fc016aa1e544ae7887d0861ae54d3d2afabe` at `2026-09-09T23:01:56.945Z`; custody `resp_031df41d4203cb98016aa1ed73c69087d0b3ba4747875a56b8` at `2026-09-09T23:36:34.983Z`; readiness `resp_00ab2130dd95350e016aa1ea26f1a087d09c709abfc959d30b` at `2026-09-09T23:22:18.383Z`. Later commit/reporting usage remains uncounted.
+- Scope is Linux CPU with numeric loopback. GPU availability, other operating
+  systems, legacy global launch/stop/liveness, arbitrary endpoint profiles,
+  escaped descendants, natural-exit push invalidation and remaining M4 are not
+  accepted. Next is the bounded `is_ollama_running`/`is_torch_running` read
+  contract slice.

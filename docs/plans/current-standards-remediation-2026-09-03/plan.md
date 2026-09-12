@@ -247,10 +247,10 @@ Phase custody, idle handoff, canonical admission validation, and busy consumer
 behavior pass Linux gates. The existing desktop diagnostic enum and generated
 validators migrated together; no persistence schema or live data changed.
 
-**Next slice:** Validate the bounded `is_ollama_running` / `is_torch_running`
-read contracts across standalone RPC, generated contracts and actual desktop
-consumers. Managed router external-load observation and library catalog
-synchronization are accepted within the documented restart policy and evidence
+**Next slice:** Validate `get_app_status` through its generated response contract,
+actual preload and `usePlugins` consumer, preserving current identifier and
+unknown-app semantics. Cached runtime-liveness RPC/main validation is accepted;
+managed router synchronization retains its documented restart policy and evidence
 limits. M4 and overall remediation remain incomplete.
 The Linux CPU dedicated-profile hosting checkpoint remains accepted without
 closing remaining M4 or overall remediation, following the accepted runtime-stop

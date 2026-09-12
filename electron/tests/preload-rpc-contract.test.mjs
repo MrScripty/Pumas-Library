@@ -1451,3 +1451,10 @@ test('deferred preload drift exceptions still describe live drift', () => {
     assert.ok(!registeredMethods.has(methodName), `${methodName} is now registered`);
   }
 });
+
+test('cached-liveness routes remain unexposed by the actual preload API', () => {
+  const harness = loadCompiledPreload();
+  assert.equal(Object.hasOwn(harness.api, 'is_ollama_running'), false);
+  assert.equal(Object.hasOwn(harness.api, 'is_torch_running'), false);
+  assert.equal(harness.invocations.length, 0);
+});

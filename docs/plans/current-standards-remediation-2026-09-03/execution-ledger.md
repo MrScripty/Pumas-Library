@@ -1,5 +1,58 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-12 — Cached Runtime Liveness Read Contracts
+
+Accepted FE-I60: `is_ollama_running` / `is_torch_running` now use typed empty RPC
+commands and a generated transparent boolean outcome. Raw/wrapped true and false
+are preserved. Electron main validates requests/results without coercion or
+retry; there is no direct preload/renderer API for these routes, and none was
+invented. Arbitrary Rust params and Electron null normalization are deliberately
+replaced by strict empty admission. Feature-disabled method-not-found remains.
+Cached producer reads, missing-manager/join-failure false and their limited
+non-readiness meaning are unchanged. FE-I48/49/50/52 remain separate.
+
+The [frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-12--cached-runtime-liveness-read-contracts)
+records producer/wrapper/consumer inventory, independent review, two test-fixture
+repairs and verification. Default/no-default focused RPC tests, both strict
+Clippy configurations, formatting, Electron build/tests (171 pass, one existing
+skip), generator/freshness (8), producer conformance (41), existing renderer
+conformance (48), TypeScript, affected lint and both frontend builds pass. Both
+canonical plans pass the external pure validator; full standards engine was not
+run. No live runtime/model operation occurred.
+
+Sole next slice: `get_app_status` through generated response, actual preload and
+`usePlugins`, preserving current identifier/unknown-app behavior. M4 and overall
+remediation remain incomplete.
+
+Cost checkpoint (API-equivalent estimates, not invoices), frozen 2026-09-12T19:05:08.429309Z:
+
+| Work | Model / effort | Standard USD |
+| --- | --- | ---: |
+| current user turn: /root | gpt-6-astra / medium | 6.645082 |
+| current user turn: /root/liveness_costs | gpt-5.6-luna / max | 0.08631440 |
+| current user turn: /root/liveness_design | gpt-6-astra / medium | 2.061876 |
+| current user turn: /root/liveness_rust | gpt-6-astra / low | 1.490950 |
+| prior reporting tail: /root | gpt-6-astra / medium | 1.023434 |
+
+Current slice $10.28422240; carried reporting tail $1.02343400; newly checkpointed $11.30765640. Cumulative $483.56044792 standard / $967.12089584 priority scenario.
+
+The inherited root is observed as Astra medium, not the requested Sol-low default; no in-place model switch was available. 138 response IDs are globally deduplicated. Cached input includes cached tokens within input, reasoning is within output, cache writes are zero, and no request exceeds 272,000 input tokens. Requested/observed tiers are unrecorded; shared tool and auto-review fees remain unknown/unallocated, not free. No usage validation/read errors.
+
+Rates per million uncached/cached/cache-write/output remain assumptions: Sol 4/0.4/5/20, Luna 0.2/0.02/0.25/1.2, Astra 10/1/12.5/50 USD. Above 272,000 input tokens: 2x input and 1.5x output; the separate priority scenario is 2x standard. These are not verified invoices.
+
+Helper `/tmp/pumas-runtime-liveness-costs.py`, frozen JSON `/tmp/pumas-runtime-liveness-costs.json`; prior router-sync helper/checkpoint left unchanged. Root `01a0880c-8ce6-74e2-afec-f69e0fc6f1e0`, current turn `01a096f9-f717-7891-bef3-756e50adff8b` at `2026-09-12T18:55:59.300Z`, discovered from the accepted 64514e00 final followed by the user's continue. Prior accepted per-thread cutoffs are inherited, not recounted. Included final cutoffs:
+
+- /root (current user turn): `2026-09-12T19:05:07.751Z`, `resp_04a060a0b34b4096016aa5a25518a087d0a20b26dd708dce80`.
+- /root/liveness_costs (current user turn): `2026-09-12T19:05:02.972Z`, `resp_02b52e4dd3e2c647016aa5a24c1e6487d0ab77a48fbb2f3f81`.
+- /root/liveness_design (current user turn): `2026-09-12T19:00:36.464Z`, `resp_0228540eb915d2ff016aa5a151868c87d0a54480b52007795c`.
+- /root/liveness_rust (current user turn): `2026-09-12T19:01:26.404Z`, `resp_05de0f6d68844f45016aa5a17ef15487d093f409f49795fe28`.
+- /root (prior reporting tail): `2026-09-12T18:54:13.476Z`, `resp_04a060a0b34b4096016aa59fcdaadc87d0bf9b3b373bd464da`.
+
+All later final-check/commit/report usage is uncounted for the next checkpoint.
+
+Routing evaluation: the narrow Astra-low Rust partition passed without production rescue; Astra-medium review requested no production repair. Root had two test-fixture repairs. Luna accounting was inexpensive in tokens but delayed the final boundary and did not provide timely status replies; root interrupted for a handoff. The helper arrived during a root fallback attempt; an existence guard prevented overwrite, and root ran the delivered helper successfully. That failed fallback attempt and coordination are counted. Prefer earlier accounting delivery/status checkpoints rather than treating low token cost as sufficient efficiency. No broader benchmark claim follows from these different task classes.
+
+
 ## 2026-09-12 — Managed Router Catalog And External Serving Observation
 
 Accepted FE-I59 within the managed router boundary. The user confirmed direct

@@ -15,7 +15,8 @@ const requireMain = createRequire(mainUrl);
 function createMainHarness({ root, bridgeRuntime } = {}) {
   const app = new EventEmitter();
   const ipcMain = new EventEmitter();
-  ipcMain.handle = () => {};
+  const handlers = new Map();
+  ipcMain.handle = (channel, handler) => { handlers.set(channel, handler); };
   const timers = new Set();
   const windows = [];
   const exits = [];
@@ -87,7 +88,7 @@ function createMainHarness({ root, bridgeRuntime } = {}) {
       return requireMain(specifier);
     },
   });
-  return { app, ipcMain, timers, windows, ready, exits, errors };
+  return { app, ipcMain, handlers, timers, windows, ready, exits, errors };
 }
 
 test('closing the native window settles presentation without accessing its destroyed getter', async () => {
@@ -194,6 +195,72 @@ test('failed backend startup stops its pending restart before application cleanu
     )), 'cleanup must preserve the original startup failure');
   } finally {
     runtime.timers.clear();
+    harness.timers.clear();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('actual main liveness IPC validates requests and scalar results without retries', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pumas-main-liveness-'));
+  mkdirSync(join(root, 'shared-resources', 'models'), { recursive: true });
+  const calls = [];
+  let response = false;
+  class FixtureBridge {
+    isRunning() { return true; }
+    async start() {}
+    async stop() {}
+    startModelLibraryUpdateStream() {}
+    startModelDownloadUpdateStream() {}
+    startRuntimeProfileUpdateStream() {}
+    startServingStatusUpdateStream() {}
+    startStatusTelemetryUpdateStream() {}
+    stopModelLibraryUpdateStream() {}
+    stopModelDownloadUpdateStream() {}
+    stopRuntimeProfileUpdateStream() {}
+    stopServingStatusUpdateStream() {}
+    stopStatusTelemetryUpdateStream() {}
+    async call(method, params) {
+      calls.push({ method, params });
+      if (response instanceof Error) throw response;
+      return response;
+    }
+  }
+  const harness = createMainHarness({ root, bridgeRuntime: { module: { PythonBridge: FixtureBridge } } });
+  try {
+    harness.ready();
+    await setImmediate();
+    const invoke = harness.handlers.get('api:call');
+    assert.equal(typeof invoke, 'function');
+    for (const method of ['is_ollama_running', 'is_torch_running']) {
+      for (const params of [undefined, {}]) {
+        for (const value of [true, false]) {
+          response = value;
+          assert.equal(await invoke({}, method, params), value);
+          assert.deepEqual(JSON.parse(JSON.stringify(calls.at(-1))), { method, params: {} });
+        }
+      }
+      const beforeInvalid = calls.length;
+      for (const params of [null, [], true, 1, '', { app_id: 'ollama' }, { extra: true }]) {
+        await assert.rejects(invoke({}, method, params), /Invalid API params/);
+      }
+      assert.equal(calls.length, beforeInvalid, 'invalid requests never reach the backend');
+      for (const invalid of [undefined, null, 0, 1, '', 'false', [], {}, { success: true }, { running: false }]) {
+        response = invalid;
+        const before = calls.length;
+        await assert.rejects(invoke({}, method, {}), /Desktop contract invalid/);
+        assert.equal(calls.length, before + 1, 'malformed reads do not retry');
+      }
+      response = new Error('liveness transport unavailable');
+      const before = calls.length;
+      await assert.rejects(invoke({}, method, {}), /liveness transport unavailable/);
+      assert.equal(calls.length, before + 1);
+    }
+    // This slice does not reinterpret responses for other routes.
+    response = { success: true, running: false };
+    assert.equal(await invoke({}, 'get_app_status', { app_id: 'ollama' }), response);
+    assert.deepEqual(harness.errors, []);
+  } finally {
+    for (const window of harness.windows) window.destroy();
     harness.timers.clear();
     rmSync(root, { recursive: true, force: true });
   }

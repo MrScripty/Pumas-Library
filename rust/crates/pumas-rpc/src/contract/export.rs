@@ -551,6 +551,8 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
             serde_json::json!({"params":params,"accepted":accepted,"omitted":params.is_none()})
         })
         .collect();
+    fixtures["runtime_running_true"] = serde_json::to_value(RuntimeRunningOutcome::new(true))?;
+    fixtures["runtime_running_false"] = serde_json::to_value(RuntimeRunningOutcome::new(false))?;
     fixtures["runtime_stop_true"] = serde_json::to_value(RuntimeStopOutcome::new(true))?;
     fixtures["runtime_stop_false"] = serde_json::to_value(RuntimeStopOutcome::new(false))?;
     fixtures["install_version_dependencies_true"] =
@@ -749,6 +751,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         RuntimeLaunchParams,
         RuntimeLaunchOutcome,
         RuntimeStopOutcome,
+        RuntimeRunningOutcome,
         SwitchVersionParams,
         InstallVersionDependenciesParams,
         InstallVersionDependenciesOutcome,

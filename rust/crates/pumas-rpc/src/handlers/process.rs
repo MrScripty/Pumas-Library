@@ -5,7 +5,7 @@ use super::{get_version_manager, path_exists, require_str_param};
 use super::{validate_existing_local_path, validate_external_url};
 use crate::contract::OperationStatusOutcome;
 #[cfg(feature = "inference-plugins")]
-use crate::contract::{RuntimeLaunchOutcome, RuntimeStopOutcome};
+use crate::contract::{RuntimeLaunchOutcome, RuntimeRunningOutcome, RuntimeStopOutcome};
 use crate::server::AppState;
 #[cfg(feature = "inference-plugins")]
 use serde_json::{json, Value};
@@ -53,9 +53,10 @@ pub async fn stop_ollama(state: &AppState) -> pumas_library::Result<RuntimeStopO
 }
 
 #[cfg(feature = "inference-plugins")]
-pub async fn is_ollama_running(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
-    let running = state.api.is_ollama_running().await;
-    Ok(serde_json::to_value(running)?)
+pub async fn is_ollama_running(state: &AppState) -> pumas_library::Result<RuntimeRunningOutcome> {
+    Ok(RuntimeRunningOutcome::new(
+        state.api.is_ollama_running().await,
+    ))
 }
 
 #[cfg(feature = "inference-plugins")]
@@ -91,9 +92,10 @@ pub async fn stop_torch(state: &AppState) -> pumas_library::Result<RuntimeStopOu
 }
 
 #[cfg(feature = "inference-plugins")]
-pub async fn is_torch_running(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
-    let running = state.api.is_torch_running().await;
-    Ok(serde_json::to_value(running)?)
+pub async fn is_torch_running(state: &AppState) -> pumas_library::Result<RuntimeRunningOutcome> {
+    Ok(RuntimeRunningOutcome::new(
+        state.api.is_torch_running().await,
+    ))
 }
 
 pub async fn open_path(

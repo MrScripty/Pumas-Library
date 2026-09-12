@@ -1,5 +1,116 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-12 — Cached Runtime Liveness Read Contracts
+
+Inventory of `is_ollama_running` and `is_torch_running` established an exact
+primitive boolean producer and desktop wire. Public standalone library methods
+in `api/process.rs` and primary IPC helpers in `api/state_process.rs` clone the
+optional process manager and dispatch a blocking cached read. The manager reads
+its mutex-protected boolean; this call does not scan processes, read PID files,
+contact a server, start runtime tools or mutate library/runtime files. Manager
+initialization and explicit refresh can scan/read processes separately, so tests
+explicitly disable process-manager initialization. No app/version-manager lookup,
+version selection, requirements parsing or model readiness check occurs here.
+
+A missing process manager or a failed blocking-task join becomes false. A true
+result means only that the legacy cached signal is true, with no profile/version
+identity, freshness, ownership, endpoint health, loaded-model or inference
+correctness guarantee. False is not authoritative proof of process absence.
+Those producer semantics remain unchanged; FE-I48/49/50/52 stay open.
+
+The original RPC handlers serialized bool directly; the legacy wrapper's default
+arm preserved it exactly. The new transparent `RuntimeRunningOutcome` retains
+both true and false without a success/running envelope or invented fields. Two
+typed RPC commands replace Legacy dispatch. Omitted params and the empty object
+remain accepted. Null, arrays, scalar params and unknown fields now reject before
+handler entry, deliberately tightening previously ignored arbitrary Rust params.
+Electron previously normalized null params to an empty object; it now rejects
+explicit null as Rust does. There are no identifier aliases. Inference-plugin-disabled HTTP routes retain
+method-not-found regardless of params; the library stays usable standalone.
+
+Electron's allowlist already contained both names, but the actual preload API,
+frontend bridge declarations, API adapters and renderer hooks did not expose or
+call them. App running state comes from separate status snapshots; `get_app_status`
+is another distinct producer/consumer route. No unused renderer API was added.
+The existing main `api:call` handler now uses the generated empty request decoder
+and generated scalar response decoder for these two names. Malformed responses
+and transport failures reject with no retry, default false or state replacement.
+There is no actual renderer state/mutation consumer to migrate or to claim as
+exercised. A bundled-preload assertion verifies that the methods remain absent.
+
+Rust fixtures independently compare raw boolean serialization, the existing
+wrapper and typed outcome; no live true process is created to obtain a fixture.
+The actual HTTP handler is exercised with process management disabled for request
+admission and false output. The actual compiled main IPC callback is exercised
+with a synthetic bridge for true/false, malformed request rejection before calls,
+malformed response rejection, transport failure and exact call counts. A separate
+producer/generated-decoder test rejects fabricated envelopes and coerced values.
+These establish wire/admission behavior, not current runtime availability.
+
+Routing: Astra medium owns the plan and consequential review, Astra low implements
+the settled four-file Rust change with sequential Cargo ownership, Luna max adapts
+bounded local rollout accounting, and root integrates Electron, generation,
+verification and documentation. Exact observed root model/effort and per-agent
+costs are recorded below. No additional frontend agent was needed because there
+is no direct frontend caller; existing main lifecycle evidence was extended rather
+than adding a new harness. Cost comparisons remain provisional across distinct
+task classes, not a controlled benchmark.
+
+Independent Astra-medium source review found no substantive blockers or required
+production corrections. Root repaired two test-only oracles after the first
+Electron run: generated empty objects have a null prototype, and the synthetic
+bridge needed stream cleanup methods. The actual callback assertions now compare
+wire data and complete fixture teardown. Both repaired focused tests and the
+full Electron suite pass. The existing malformed-SSE negative tests emitted
+expected parse diagnostics plus an EROFS attempt to write the configured log;
+no verification failed because of the sandboxed log path. No escalation, runtime
+mutation, rescue agent, overlapping Cargo or live-service verification occurred.
+
+Verification: focused RPC tests pass 3/3 with default features and 3/3 with
+`--no-default-features`. Strict RPC Clippy passes all targets/all features and
+all targets/no-default-features with warnings denied. Cargo formatting passes.
+Generation and freshness pass, generator tests pass 8, producer/generated-decoder
+conformance passes 41, and the existing actual renderer conformance passes 48.
+Electron build and bundled-preload/actual-main tests pass 171 with one existing
+explicit skip. Affected Electron ESLint, frontend TypeScript, library-only build
+and normal build pass; the normal build is restored. No frontend source changed
+beyond generated contracts. Both canonical plans pass the unchanged external
+pure `validate_plan` function and helpers; the full standards engine was not run
+because jsonschema is unavailable. Generated fixtures prove serialization only.
+
+Exactly one next slice remains: `get_app_status` generated response validation
+through the actual preload and `usePlugins` consumer, preserving current app-id
+and unknown-app behavior. M4 and overall remediation remain incomplete.
+
+Cost checkpoint (API-equivalent estimates, not invoices), frozen 2026-09-12T19:05:08.429309Z:
+
+| Work | Model / effort | Standard USD |
+| --- | --- | ---: |
+| current user turn: /root | gpt-6-astra / medium | 6.645082 |
+| current user turn: /root/liveness_costs | gpt-5.6-luna / max | 0.08631440 |
+| current user turn: /root/liveness_design | gpt-6-astra / medium | 2.061876 |
+| current user turn: /root/liveness_rust | gpt-6-astra / low | 1.490950 |
+| prior reporting tail: /root | gpt-6-astra / medium | 1.023434 |
+
+Current slice $10.28422240; carried reporting tail $1.02343400; newly checkpointed $11.30765640. Cumulative $483.56044792 standard / $967.12089584 priority scenario.
+
+The inherited root is observed as Astra medium, not the requested Sol-low default; no in-place model switch was available. 138 response IDs are globally deduplicated. Cached input includes cached tokens within input, reasoning is within output, cache writes are zero, and no request exceeds 272,000 input tokens. Requested/observed tiers are unrecorded; shared tool and auto-review fees remain unknown/unallocated, not free. No usage validation/read errors.
+
+Rates per million uncached/cached/cache-write/output remain assumptions: Sol 4/0.4/5/20, Luna 0.2/0.02/0.25/1.2, Astra 10/1/12.5/50 USD. Above 272,000 input tokens: 2x input and 1.5x output; the separate priority scenario is 2x standard. These are not verified invoices.
+
+Helper `/tmp/pumas-runtime-liveness-costs.py`, frozen JSON `/tmp/pumas-runtime-liveness-costs.json`; prior router-sync helper/checkpoint left unchanged. Root `01a0880c-8ce6-74e2-afec-f69e0fc6f1e0`, current turn `01a096f9-f717-7891-bef3-756e50adff8b` at `2026-09-12T18:55:59.300Z`, discovered from the accepted 64514e00 final followed by the user's continue. Prior accepted per-thread cutoffs are inherited, not recounted. Included final cutoffs:
+
+- /root (current user turn): `2026-09-12T19:05:07.751Z`, `resp_04a060a0b34b4096016aa5a25518a087d0a20b26dd708dce80`.
+- /root/liveness_costs (current user turn): `2026-09-12T19:05:02.972Z`, `resp_02b52e4dd3e2c647016aa5a24c1e6487d0ab77a48fbb2f3f81`.
+- /root/liveness_design (current user turn): `2026-09-12T19:00:36.464Z`, `resp_0228540eb915d2ff016aa5a151868c87d0a54480b52007795c`.
+- /root/liveness_rust (current user turn): `2026-09-12T19:01:26.404Z`, `resp_05de0f6d68844f45016aa5a17ef15487d093f409f49795fe28`.
+- /root (prior reporting tail): `2026-09-12T18:54:13.476Z`, `resp_04a060a0b34b4096016aa59fcdaadc87d0bf9b3b373bd464da`.
+
+All later final-check/commit/report usage is uncounted for the next checkpoint.
+
+Routing evaluation: the narrow Astra-low Rust partition passed without production rescue; Astra-medium review requested no production repair. Root had two test-fixture repairs. Luna accounting was inexpensive in tokens but delayed the final boundary and did not provide timely status replies; root interrupted for a handoff. The helper arrived during a root fallback attempt; an existence guard prevented overwrite, and root ran the delivered helper successfully. That failed fallback attempt and coordination are counted. Prefer earlier accounting delivery/status checkpoints rather than treating low token cost as sufficient efficiency. No broader benchmark claim follows from these different task classes.
+
+
 ## 2026-09-12 — Managed Router Catalog And External Serving Observation
 
 The user confirmed an outside request directly to the llama.cpp router loaded a

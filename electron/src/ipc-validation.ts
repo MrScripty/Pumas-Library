@@ -52,7 +52,7 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
   }
 
   const method = rawMethod as RpcMethodName;
-  // These side-effect-capable requests share Rust's complete generated contract.
+  // These requests share Rust's complete generated contract.
   // Return its copied proof-bearing value, never the original renderer object.
   if (
     method === 'start_backend_setup'
@@ -64,6 +64,8 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
     || method === 'launch_torch'
     || method === 'stop_ollama'
     || method === 'stop_torch'
+    || method === 'is_ollama_running'
+    || method === 'is_torch_running'
     || method === 'switch_version'
     || method === 'install_version'
     || method === 'set_default_version'
@@ -80,6 +82,7 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
           ? decodeInstallVersionDependenciesParams(rawParams)
         : method === 'launch_ollama' || method === 'launch_torch'
           || method === 'stop_ollama' || method === 'stop_torch'
+          || method === 'is_ollama_running' || method === 'is_torch_running'
           ? decodeRuntimeLaunchParams(rawParams === undefined ? {} : rawParams)
         : method === 'switch_version'
           ? decodeSwitchVersionParams(rawParams)

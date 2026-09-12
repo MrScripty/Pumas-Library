@@ -10,10 +10,10 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Validate the bounded `is_ollama_running` / `is_torch_running`
-read contracts across standalone RPC, generated contracts and actual desktop
-consumers. Managed router external-load observation and library catalog
-synchronization are accepted within the documented restart policy and evidence
+**Next slice:** Validate `get_app_status` through its generated response contract,
+actual preload and `usePlugins` consumer, preserving current identifier and
+unknown-app semantics. Cached runtime-liveness RPC/main validation is accepted;
+managed router synchronization retains its documented restart policy and evidence
 limits. M4 and overall remediation remain incomplete.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
@@ -69,6 +69,18 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Cached Runtime Liveness Read Contracts
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-12--cached-runtime-liveness-read-contracts).
+`is_ollama_running` and `is_torch_running` use typed empty requests and generated
+scalar booleans, preserving the actual raw/wrapped wire. Electron main validates
+both directions; no unused preload/renderer API was added. Malformed requests or
+responses reject without default false or automatic retries. Core cached reads
+and absent-manager/task-failure false semantics remain unchanged and do not prove
+readiness, freshness or process absence. Optional inference gating is preserved;
+FE-I48/49/50/52 and remaining M4 work remain separate.
 
 ## Managed Router Catalog And External Serving Observation
 

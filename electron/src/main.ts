@@ -34,6 +34,7 @@ import {
 } from './ipc-validation';
 import { resolveBackendBinaryPath } from './backend-path';
 import { PythonBridge } from './python-bridge';
+import { decodeRuntimeRunningOutcome } from './generated/desktop-contract';
 import {
   LauncherRootRecoveryRequiredError,
   classifyBackendInitializationOutcome,
@@ -481,7 +482,15 @@ function registerIPCHandlers(): void {
     if (!pythonBridge) {
       throw new Error('Python bridge not initialized');
     }
-    return await pythonBridge.call(request.method, request.params);
+    const response: unknown = await pythonBridge.call(request.method, request.params);
+    if (request.method === 'is_ollama_running' || request.method === 'is_torch_running') {
+      const decoded = decodeRuntimeRunningOutcome(response);
+      if (decoded.status !== 'valid') {
+        throw new Error(`Desktop contract ${decoded.status} for ${request.method}: ${decoded.message}`);
+      }
+      return decoded.value;
+    }
+    return response;
   });
 
   // Window control handlers

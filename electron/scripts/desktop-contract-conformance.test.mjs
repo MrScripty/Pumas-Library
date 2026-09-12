@@ -693,3 +693,16 @@ test('actual download and recovery outcomes preserve nulls, numeric bounds and a
     assert.equal(contract.decodeModelsOutcome(changed).status === 'valid', probe.input === probe.emitted, JSON.stringify(probe.input));
   }
 });
+
+
+test('runtime cached-liveness producer booleans remain scalar and reject fabricated envelopes', () => {
+  for (const [key, expected] of [['runtime_running_true', true], ['runtime_running_false', false]]) {
+    assert.equal(fixtures[key], expected);
+    const decoded = contract.decodeRuntimeRunningOutcome(fixtures[key]);
+    assert.equal(decoded.status, 'valid');
+    assert.equal(decoded.value, expected);
+  }
+  for (const value of [undefined, null, 0, 1, '', 'true', 'false', [], {}, { success: true }, { running: false }]) {
+    assert.equal(contract.decodeRuntimeRunningOutcome(value).status, 'invalid');
+  }
+});

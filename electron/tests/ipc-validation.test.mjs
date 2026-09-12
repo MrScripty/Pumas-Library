@@ -362,3 +362,17 @@ test('validateExternalUrl accepts only http and https URLs', () => {
   assert.throws(() => validateExternalUrl('javascript:alert(1)'), /Only http\/https/);
   assert.throws(() => validateExternalUrl(42), /Invalid URL payload/);
 });
+
+
+test('runtime cached-liveness requests admit only the generated empty object', () => {
+  for (const method of ['is_ollama_running', 'is_torch_running']) {
+    for (const params of [undefined, {}]) {
+      const result = validateApiCallPayload(method, params);
+      assert.deepEqual(JSON.parse(JSON.stringify(result)), { method, params: {} });
+      assert.ok(Object.isFrozen(result.params));
+    }
+    for (const params of [null, [], true, 0, '', { app_id: 'ollama' }, { appId: 'torch' }, { extra: true }]) {
+      assert.throws(() => validateApiCallPayload(method, params), /Invalid API params/);
+    }
+  }
+});

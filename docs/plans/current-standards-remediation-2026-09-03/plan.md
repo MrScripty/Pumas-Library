@@ -2,6 +2,11 @@
 
 **Plan status:** `Active`
 
+**Post-release deferral:** Further unified inference gateway development is
+deferred until after the next release (user decision, 2026-09-12). The
+[architecture brief](../../breif/unified-inference-gateway.md) records the proposed direction;
+it is not implementation authority or a next-release requirement.
+
 **Current phase:** The coordinated reconciliation, selected desktop contract,
 and artifact-collision checkpoints are committed and accepted within their
 recorded Linux evidence boundaries (`f77f4bed`, `2b081fba`, `2b9553a0`). The

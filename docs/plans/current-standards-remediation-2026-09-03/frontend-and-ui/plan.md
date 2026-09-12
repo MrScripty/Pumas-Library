@@ -2,6 +2,11 @@
 
 **Plan status:** `Active`
 
+**Post-release deferral:** Further unified inference gateway development is
+deferred until after the next release (user decision, 2026-09-12). The
+[architecture brief](../../../breif/unified-inference-gateway.md) records the proposed direction;
+it is not implementation authority or a next-release requirement.
+
 **Current phase:** Complete the remaining M4 consumer migration. Milestones 0
 through 3 and the selected catalog/search, ticket-recovery, display-cache, and
 startup source checkpoint are accepted. Commit `2b081fba` includes generated

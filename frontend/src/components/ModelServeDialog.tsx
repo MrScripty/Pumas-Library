@@ -59,6 +59,8 @@ export function ModelServeDialog({
     profileId: string;
     provider: string;
     providerMode: string;
+    contextEdited: boolean;
+    contextHydrated: boolean;
   } | null>(null);
   const profileSelectRef = useRef<HTMLSelectElement | null>(null);
   const isDialogMode = displayMode === 'dialog';
@@ -139,30 +141,58 @@ export function ModelServeDialog({
     }
 
     const previousTarget = draftTargetRef.current;
-    if (
-      previousTarget?.modelId === model.id &&
-      previousTarget.profileId === selectedProfile.profile_id &&
-      previousTarget.provider === selectedProfile.provider &&
-      previousTarget.providerMode === selectedProfile.provider_mode
-    ) {
-      return;
+    const targetChanged =
+      previousTarget?.modelId !== model.id ||
+      previousTarget.profileId !== selectedProfile.profile_id ||
+      previousTarget.provider !== selectedProfile.provider ||
+      previousTarget.providerMode !== selectedProfile.provider_mode;
+
+    if (targetChanged) {
+      draftTargetRef.current = {
+        modelId: model.id,
+        profileId: selectedProfile.profile_id,
+        provider: selectedProfile.provider,
+        providerMode: selectedProfile.provider_mode,
+        contextEdited: false,
+        contextHydrated: false,
+      };
+
+      setDeviceMode(selectedProfile.device.mode);
+      setDeviceId(selectedProfile.device.device_id ?? '');
+      setGpuLayers(selectedProfile.device.gpu_layers?.toString() ?? '');
+      setTensorSplit(selectedProfile.device.tensor_split?.join(',') ?? '');
+      setContextSize(defaultContextSizeForProfile(selectedProfile));
+      setKeepLoaded(true);
+      setModelAlias('');
     }
 
-    draftTargetRef.current = {
-      modelId: model.id,
-      profileId: selectedProfile.profile_id,
-      provider: selectedProfile.provider,
-      providerMode: selectedProfile.provider_mode,
-    };
+    const draftTarget = draftTargetRef.current;
+    const requestedContext = servingControlObservation.kind === 'known'
+      ? servingControlObservation.rows.find(
+          (row) =>
+            row.model_id === model.id &&
+            row.profile_id === selectedProfile.profile_id &&
+            row.provider === selectedProfile.provider &&
+            ['requested', 'loading', 'loaded', 'unloading'].includes(row.load_state)
+        )?.context_size
+      : undefined;
+    if (
+      draftTarget &&
+      !draftTarget.contextEdited &&
+      !draftTarget.contextHydrated &&
+      typeof requestedContext === 'number'
+    ) {
+      draftTarget.contextHydrated = true;
+      setContextSize(requestedContext.toString());
+    }
+  }, [model.id, selectedProfile, servingControlObservation]);
 
-    setDeviceMode(selectedProfile.device.mode);
-    setDeviceId(selectedProfile.device.device_id ?? '');
-    setGpuLayers(selectedProfile.device.gpu_layers?.toString() ?? '');
-    setTensorSplit(selectedProfile.device.tensor_split?.join(',') ?? '');
-    setContextSize(defaultContextSizeForProfile(selectedProfile));
-    setKeepLoaded(true);
-    setModelAlias('');
-  }, [model.id, selectedProfile]);
+  const setUserContextSize = (value: string) => {
+    if (draftTargetRef.current) {
+      draftTargetRef.current.contextEdited = true;
+    }
+    setContextSize(value);
+  };
 
   const formState: ModelServeFormState = {
     deviceMode,
@@ -226,7 +256,7 @@ export function ModelServeDialog({
       serveBlockReason={serveBlockReason}
       serveError={servingActions.serveError}
       servedStatus={servingActions.servedStatus}
-      setContextSize={setContextSize}
+      setContextSize={setUserContextSize}
       setDeviceId={setDeviceId}
       setDeviceMode={setDeviceMode}
       setGpuLayers={setGpuLayers}

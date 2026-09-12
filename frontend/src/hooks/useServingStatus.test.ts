@@ -174,6 +174,66 @@ describe('useServingStatus', () => {
     });
   });
 
+  it.each([0, -1, 1.5, 0x1_0000_0000])(
+    'rejects malformed served-model context size %s',
+    async (contextSize) => {
+      getServingStatusMock.mockResolvedValue({
+        success: true,
+        snapshot: {
+          ...createSnapshot('serving:bad-context'),
+          served_models: [{
+            model_id: 'models/chat',
+            profile_id: 'llama-cpu',
+            provider: 'llama_cpp',
+            load_state: 'loading',
+            context_size: contextSize,
+          }],
+        },
+      });
+
+      const { result } = renderHook(() => useServingStatus());
+      await flushMicrotasks();
+
+      expect(result.current.controlObservation).toEqual({
+        kind: 'unavailable',
+        message: 'Serving status response was malformed',
+      });
+    }
+  );
+
+  it.each([undefined, null, 0xffff_ffff])(
+    'admits optional served-model context size %s',
+    async (contextSize) => {
+      getServingStatusMock.mockResolvedValue({
+        success: true,
+        snapshot: {
+          ...createSnapshot('serving:context'),
+          served_models: [{
+            model_id: 'models/chat',
+            profile_id: 'llama-cpu',
+            provider: 'llama_cpp',
+            load_state: 'loading',
+            ...(contextSize !== undefined ? { context_size: contextSize } : {}),
+          }],
+        },
+      });
+
+      const { result } = renderHook(() => useServingStatus());
+      await flushMicrotasks();
+
+      expect(result.current.controlObservation).toEqual({
+        kind: 'known',
+        rows: [{
+          model_id: 'models/chat',
+          profile_id: 'llama-cpu',
+          provider: 'llama_cpp',
+          load_state: 'loading',
+          ...(contextSize !== undefined ? { context_size: contextSize } : {}),
+        }],
+      });
+    }
+  );
+
   it('does not admit a non-boolean success value as a known empty observation', async () => {
     getServingStatusMock.mockResolvedValue({
       success: 'false',

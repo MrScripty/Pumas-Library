@@ -1,5 +1,32 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-12 — Loading Navigation And Requested Context
+
+Accepted FE-I58: actual library navigation remains enabled while Loading and the
+reopened dialog initializes requested context from validated exact active serving
+observations. User edits and target boundaries remain protected. The preceding
+fixture bypassed the disabled library action, so this explicitly corrects its
+broader reopen claim. The corrected Electron test traverses the actual entry
+point with one mocked Start and restores 20000 before and after completion.
+
+The [frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-12--loading-navigation-and-requested-context)
+records two initial failures, 82 final focused tests, rendered interaction proof,
+both frontend builds, desktop IPC, generator/freshness and producer/renderer
+conformance, model routing, review evidence and cost cutoffs. Existing runtime
+logs prove requested 20000/effective 20224 and approximately 33s startup; they do not
+identify the late VRAM stage. No backend source or live runtime was changed.
+The previous accepted optimized backend remains applicable. M4 and overall
+remediation are incomplete; the sole next slice is
+`is_ollama_running`/`is_torch_running` read-contract validation.
+
+Both canonical plans pass the unchanged pure external validator and helpers;
+the full standards engine was not run. The frontend ledger records the frozen
+cost checkpoint: current slice $8.78974432 plus carried reporting
+$0.40627400; cumulative known API-equivalent estimate
+$408.45142340 standard / $816.90284680 priority scenario.
+Two automatic-review records, tiers and shared tool fees remain unpriced, not
+free. Later reporting usage is uncounted; these are estimates, not invoices.
+
 ## 2026-09-12 — Backend-Owned Model Loading
 
 Accepted FE-I57 after the user's clarification that no timeout message occurred:

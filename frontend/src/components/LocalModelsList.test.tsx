@@ -126,6 +126,7 @@ describe('LocalModelsList', () => {
   });
 
   it('renders backend-confirmed loading state for a local model', () => {
+    const onServeModel = vi.fn();
     render(
       <LocalModelsList
         modelGroups={modelGroups}
@@ -152,13 +153,20 @@ describe('LocalModelsList', () => {
         expandedRelated={new Set()}
         onToggleRelated={vi.fn()}
         onOpenRelatedUrl={vi.fn()}
-        onServeModel={vi.fn()}
+        onServeModel={onServeModel}
       />
     );
 
     expect(screen.getByText('Loading')).toBeInTheDocument();
     expect(screen.queryByText('Loaded')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /loading model/i })).toBeDisabled();
+    const openDialog = screen.getByRole('button', { name: /loading model/i });
+    expect(openDialog).toBeEnabled();
+    fireEvent.click(openDialog);
+    const [firstGroup] = modelGroups;
+    const [firstModel] = firstGroup?.models ?? [];
+    expect(firstModel).toBeDefined();
+    if (!firstModel) return;
+    expect(onServeModel).toHaveBeenCalledExactlyOnceWith(firstModel);
   });
 
   it.each(['loaded-first', 'loading-first'] as const)(

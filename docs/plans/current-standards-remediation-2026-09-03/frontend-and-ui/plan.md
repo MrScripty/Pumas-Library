@@ -12,8 +12,8 @@ one-second main-owned marker barrier remains the reveal authority.
 
 **Next slice:** Resume the bounded `is_ollama_running`/`is_torch_running`
 producer, RPC, generated desktop and actual-consumer read-contract
-inventory/validation. Backend-owned Loading and reopened-dialog/library
-projection are accepted; M4 and overall remediation remain incomplete.
+inventory/validation. Actual library Loading navigation and requested-context
+restoration are accepted; M4 and overall remediation remain incomplete.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -68,6 +68,19 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Loading Navigation And Requested Context
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-12--loading-navigation-and-requested-context).
+The real library action opens the dialog during Loading while its Start control
+remains disabled. Exact validated active serving context initializes the draft,
+including delayed observations, and does not overwrite user edits. Actual Electron
+navigation proves requested 20000 survives close/reopen and completion. This
+corrects the preceding fixture's test-only opener and disabled-navigation oracle.
+The runtime log independently records requested 20000/effective 20224 and roughly
+33 seconds of initialization; it does not identify the late VRAM allocation stage.
+No backend readiness change or live model mutation is included.
 
 ## Backend-Owned Model Loading
 

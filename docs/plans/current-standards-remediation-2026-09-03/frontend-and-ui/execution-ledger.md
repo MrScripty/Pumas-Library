@@ -1,5 +1,119 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-12 — Loading Navigation And Requested Context
+
+The user exposed two gaps in the preceding loading-state acceptance: the real
+library action disabled navigation during Loading, and a freshly mounted dialog
+initialized context from the profile default even when the active serving row
+retained the requested value. The previous rendered fixture used a separate
+Open serving control, so it did not prove the actual library entry point; its
+unit test incorrectly required that entry point to be disabled. This follow-up
+corrects that evidence boundary rather than claiming the earlier test covered it.
+
+Root changed the exact existing library and fresh-dialog assertions before
+production edits. Both failed: Loading navigation was disabled and requested
+context 20000 displayed 4096. The initial `pnpm run test:run -- ...` accidentally
+selected the full suite (2 failures, 647 passes); subsequent focused commands use
+`pnpm exec vitest run ...` directly. The real Electron RED used the actual library
+Serve action, submitted context 20000 once, closed the dialog, and failed to
+reopen through its disabled Loading action. No simulated success bypasses that
+entry point in the corrected fixture.
+
+Read-only timing inventory found the existing runtime log at
+`launcher-data/runtime-profiles/llama-cpp/runtime-1778279326877/runtime.log`.
+It records child arguments `--ctx-size 20000`, child load start at 0.069801s,
+threadpool initialization at 32.748322s, four slots with `n_ctx_slot = 20224` at
+33.062072s, and model loaded/listening at 33.066876s/33.066879s. The backend
+serving status stores the requested 20000, not effective slot size 20224. This
+proves the captured runtime received the larger context; the 4096 dialog value
+was not evidence of runtime reconfiguration.
+
+The serving source waits for the exact model's Loaded catalog state, verifies
+the requested preset context and runtime `/props` capacity, and rechecks process
+and listener identity before publication. Readiness retries use 250ms intervals;
+there is no fixed sleep after VRAM allocation. Runtime verification is a GET
+with `autoload=false`, not an inference/warmup request. The existing verbosity-3
+log has no GPU allocation or warmup stage timestamps or aligned frontend status
+trace, so the user's specific late VRAM increase and post-allocation delay remain
+unlocalized. No duration reduction or particular shader/cache/warmup cause is
+claimed. Runtime/source evidence is retained below ignored
+`tmp/llamacpp-hosting-20260909/evidence/reopen-context/`. No live model load,
+unload, profile mutation, Python/pip, inference or network request occurred.
+
+The accepted frontend repair leaves the library navigation action enabled during
+Loading, retaining the partial-download restriction. The dialog's mutation
+control remains disabled while Loading or uncertain. The existing private
+serving-control decoder projects optional/null requested context and validates
+positive integers through u32::MAX. Exact active model/profile/provider rows
+initialize the target-scoped context draft once, including a delayed first
+snapshot; explicit edits before or after hydration survive subsequent snapshots.
+Target changes reset initialization, and unrelated, failed, unloaded, malformed
+or unavailable observations cannot supply context. Missing/null observations
+retain defaults until a valid active value arrives. No global cache, persistence,
+new state source or backend contract field was added.
+
+Final verification: 82 focused component/action/status tests, TypeScript and
+affected ESLint pass. The corrected actual Electron workflow passes Start at
+20000 -> Loading -> close -> reopen through the real library icon -> disabled
+Loading at 20000 -> Stop/Loaded at 20000. Exactly one mocked start, zero stops and
+eight status reads occurred. Normal and library-only frontend builds pass, with
+the normal assets restored; Electron build and 168 tests pass with one existing
+explicit skip. Generator tests 8/8, freshness, producer conformance 39/39 and
+renderer conformance 48/48 pass. Rust source and wire contracts are unchanged,
+so the preceding accepted optimized backend and strict dual-feature checks remain
+applicable without redundant rebuild/lint suites. The app was not restarted;
+reopen it to consume the rebuilt frontend/Electron assets.
+
+Astra medium owned the plan, read-only readiness inventory and independent review;
+Sol low implemented the settled six-file frontend projection; Luna max adapted
+accounting. The inherited root remained Astra medium rather than the requested
+Sol-low coordination configuration and was not relabeled. Review found no
+implementation defect but required a missing pre-hydration edit regression:
+user 18000 before backend 20000 must retain 18000. It passed along with all checks.
+The narrow Sol assignment was accepted without rescue; the preceding false
+acceptance stemmed from an incorrect interaction oracle and bypassed entry point,
+so lower token price alone would not demonstrate cost efficiency. Routing remains
+provisional across unlike tasks, with review, failed attempts and root overhead
+included rather than a controlled benchmark.
+
+FE-I58 is resolved within navigation and requested-context initialization.
+FE-I57 remains bounded to backend publication; its previous broader reopen proof
+is corrected above. The specific late-VRAM stage remains unlocalized, and
+FE-I48/49/52 and full serving-wire migration remain separate. Overall remediation
+and M4 are incomplete; the sole next slice is
+`is_ollama_running`/`is_torch_running` read-contract inventory/validation.
+
+The unchanged current external pure `validate_plan` and its helpers/constants
+pass both canonical plans; the full standards engine was not run. Final diff
+checks pass. The cost checkpoint uses frozen
+`/tmp/pumas-reopen-context-costs.py` / JSON, verified root
+`01a0880c-8ce6-74e2-afec-f69e0fc6f1e0` and exact user turn
+`2026-09-12T17:25:23.314Z`, local token_usage_record entries and global response-ID
+deduplication. Prior accepted cutoffs are inherited, including the immediately
+preceding included final cutoffs; no accepted usage is recounted. Known costs:
+carried reporting $0.40627400; current slice
+$8.78974432; newly checkpointed
+$9.19601832; cumulative API-equivalent estimate
+$408.45142340 standard /
+$816.90284680 priority scenario.
+Current breakdown: root Astra medium $5.01900600; design/review Astra medium
+$2.73257400; UI Sol low $0.91620720; accounting Luna max $0.12195712.
+The 136 deduplicated records have zero duplicates/collisions/read errors,
+no request above 272,000 input tokens and zero recorded cache writes. Two
+automatic-review records have unknown pricing; requested/observed service tiers
+and shared tool fees are unknown, unallocated and never treated as free. Cached
+input is included in input, reasoning in output. The documented per-million
+uncached/cached/cache-write/output assumptions remain Sol 4/.4/5/20,
+Luna .2/.02/.25/1.2 and Astra 10/1/12.5/50 USD; the priority scenario doubles known
+standard cost. These are estimates, not invoices. Later report/commit usage is
+an uncounted tail. Frozen cutoffs:
+
+- `01a0880c-8ce6-74e2-afec-f69e0fc6f1e0`: `resp_04a060a0b34b4096016aa58d53838087d0aa6cc081ef4b3823` at `2026-09-12T17:35:24.366Z`.
+- `01a096a7-4fc1-7cc0-9eb9-75af326f57a6`: `resp_00e5f7b2f5c8d420016aa58cbae82887d08523629953f77478` at `2026-09-12T17:32:47.790Z`.
+- `01a096a8-715f-7052-ba80-80a4fbf0e9ef`: `resp_02665bd74429c651016aa58d4311b087d0b536edd5740fe4a8` at `2026-09-12T17:35:08.031Z`.
+- `01a096a9-9aed-74c0-850d-b6716484047d`: `resp_083578e9c9d5ea15016aa58cafca8487d0b9401ceafc0ce8ba` at `2026-09-12T17:32:36.239Z`.
+- `01a0963d-1283-7d43-a7d7-c89cc696bfe4`: `resp_0267b9e1194688a8016aa58c8a1f0087d0a02693bde42c3b8c` at `2026-09-12T17:31:58.276Z`.
+
 ## 2026-09-12 — Backend-Owned Model Loading
 
 Accepted the user's clarification: no timeout message was observed. Loaded/Stop

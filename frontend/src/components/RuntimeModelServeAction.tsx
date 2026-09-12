@@ -29,7 +29,7 @@ export function RuntimeModelServeAction({
       icon={isLoaded ? <Square /> : <Play />}
       tooltip={isLoaded ? 'Unload model' : isLoading ? 'Loading model' : 'Serve model'}
       onClick={() => onServeModel(model)}
-      disabled={rowState.isPartialDownload || (isLoading && !isLoaded)}
+      disabled={rowState.isPartialDownload}
       size="sm"
       active={isLoaded}
       className={

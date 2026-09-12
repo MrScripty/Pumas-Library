@@ -1105,6 +1105,7 @@ describe('ModelServeDialog actions', () => {
       load_state: 'loading',
       device_mode: 'gpu',
       keep_loaded: true,
+      context_size: 20000,
     };
     useServingStatusMock.mockReturnValue({
       snapshot: null,
@@ -1130,8 +1131,232 @@ describe('ModelServeDialog actions', () => {
     );
 
     expect(await screen.findByRole('button', { name: 'Loading' })).toBeDisabled();
+    expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(20000);
     expect(screen.queryByRole('button', { name: 'Start serving' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stop serving' })).not.toBeInTheDocument();
+  });
+
+  it('hydrates a delayed active request context without overwriting a same-target edit', async () => {
+    let controlRows: Array<{
+      model_id: string;
+      model_alias: string;
+      provider: 'llama_cpp';
+      profile_id: string;
+      load_state: 'loading';
+      context_size: number;
+    }> = [];
+    useServingStatusMock.mockImplementation(() => ({
+      snapshot: null,
+      servedModels: controlRows.map((row) => ({
+        ...row,
+        device_mode: 'gpu' as const,
+        keep_loaded: true,
+      })),
+      endpoint: null,
+      cursor: 'serving:delayed',
+      error: null,
+      controlObservation: { kind: 'known' as const, rows: controlRows },
+      refreshServingStatus: vi.fn(),
+    }));
+    const model = {
+      id: 'model-delayed-context',
+      name: 'Delayed Context Model',
+      category: 'local' as const,
+      primaryFormat: 'gguf' as const,
+    };
+    const props = { model, initialProfileId: 'emily-llama', onClose: vi.fn() };
+    const { rerender } = render(<ModelServeDialog {...props} />);
+    await waitFor(() =>
+      expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(4096)
+    );
+
+    controlRows = [{
+      model_id: model.id,
+      model_alias: model.id,
+      provider: 'llama_cpp',
+      profile_id: 'emily-llama',
+      load_state: 'loading',
+      context_size: 20000,
+    }];
+    rerender(<ModelServeDialog {...props} />);
+    await waitFor(() =>
+      expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(20000)
+    );
+
+    fireEvent.change(screen.getByRole('spinbutton', { name: /context/i }), {
+      target: { value: '18000' },
+    });
+    const [currentRow] = controlRows;
+    expect(currentRow).toBeDefined();
+    if (!currentRow) return;
+    controlRows = [{ ...currentRow, context_size: 24000 }];
+    rerender(<ModelServeDialog {...props} />);
+    expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(18000);
+  });
+
+  it('preserves a context edit made before the first exact active row arrives', async () => {
+    let controlRows: Array<{
+      model_id: string;
+      provider: 'llama_cpp';
+      profile_id: string;
+      load_state: 'loading';
+      context_size: number;
+    }> = [];
+    useServingStatusMock.mockImplementation(() => ({
+      snapshot: null,
+      servedModels: [],
+      endpoint: null,
+      cursor: 'serving:late-context',
+      error: null,
+      controlObservation: { kind: 'known' as const, rows: controlRows },
+      refreshServingStatus: vi.fn(),
+    }));
+    const model = {
+      id: 'model-edited-before-context',
+      name: 'Edited Before Context Model',
+      category: 'local' as const,
+      primaryFormat: 'gguf' as const,
+    };
+    const props = { model, initialProfileId: 'emily-llama', onClose: vi.fn() };
+    const { rerender } = render(<ModelServeDialog {...props} />);
+    const contextInput = await screen.findByRole('spinbutton', { name: /context/i });
+    fireEvent.change(contextInput, { target: { value: '18000' } });
+
+    controlRows = [{
+      model_id: model.id,
+      provider: 'llama_cpp',
+      profile_id: 'emily-llama',
+      load_state: 'loading',
+      context_size: 20000,
+    }];
+    rerender(<ModelServeDialog {...props} />);
+
+    expect(contextInput).toHaveValue(18000);
+  });
+
+  it('hydrates an already-loaded target from the requested context', async () => {
+    const loadedStatus: ServedModelStatus = {
+      model_id: 'model-loaded-context',
+      model_alias: 'model-loaded-context',
+      provider: 'llama_cpp',
+      profile_id: 'emily-llama',
+      load_state: 'loaded',
+      device_mode: 'gpu',
+      context_size: 20000,
+      keep_loaded: true,
+    };
+    useServingStatusMock.mockReturnValue({
+      snapshot: null,
+      servedModels: [loadedStatus],
+      endpoint: null,
+      cursor: 'serving:loaded',
+      error: null,
+      controlObservation: { kind: 'known', rows: [loadedStatus] },
+      refreshServingStatus: vi.fn(),
+    });
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: loadedStatus.model_id,
+          name: 'Loaded Context Model',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByRole('button', { name: 'Stop serving' })).toBeEnabled();
+    expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(20000);
+  });
+
+  it('excludes the previous target row after the model changes', async () => {
+    const firstModel = {
+      id: 'model-old-context',
+      name: 'Old Context Model',
+      category: 'local' as const,
+      primaryFormat: 'gguf' as const,
+    };
+    const oldRow: ServedModelStatus = {
+      model_id: firstModel.id,
+      model_alias: firstModel.id,
+      provider: 'llama_cpp',
+      profile_id: 'emily-llama',
+      load_state: 'loading',
+      device_mode: 'gpu',
+      context_size: 20000,
+      keep_loaded: true,
+    };
+    useServingStatusMock.mockReturnValue({
+      snapshot: null,
+      servedModels: [oldRow],
+      endpoint: null,
+      cursor: 'serving:old-target',
+      error: null,
+      controlObservation: { kind: 'known', rows: [oldRow] },
+      refreshServingStatus: vi.fn(),
+    });
+    const { rerender } = render(
+      <ModelServeDialog model={firstModel} initialProfileId="emily-llama" onClose={vi.fn()} />
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(20000)
+    );
+
+    rerender(
+      <ModelServeDialog
+        model={{ ...firstModel, id: 'model-new-context', name: 'New Context Model' }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(4096)
+    );
+  });
+
+  it('does not hydrate context from raw status when the control observation is malformed', async () => {
+    const rawStatus: ServedModelStatus = {
+      model_id: 'model-malformed-context',
+      model_alias: 'model-malformed-context',
+      provider: 'llama_cpp',
+      profile_id: 'emily-llama',
+      load_state: 'loading',
+      device_mode: 'gpu',
+      context_size: 20000,
+      keep_loaded: true,
+    };
+    useServingStatusMock.mockReturnValue({
+      snapshot: null,
+      servedModels: [rawStatus],
+      endpoint: null,
+      cursor: 'serving:malformed-context',
+      error: 'Serving status response was malformed',
+      controlObservation: {
+        kind: 'unavailable',
+        message: 'Serving status response was malformed',
+      },
+      refreshServingStatus: vi.fn(),
+    });
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: rawStatus.model_id,
+          name: 'Malformed Context Model',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole('spinbutton', { name: /context/i })).toHaveValue(4096)
+    );
   });
 
   it('keeps Start disabled when a fresh dialog observes an interrupted serving outcome', async () => {

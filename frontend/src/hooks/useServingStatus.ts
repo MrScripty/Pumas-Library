@@ -12,7 +12,10 @@ const SERVING_STATUS_OBSERVATION_INVALID = 'Serving status response was malforme
 export type ServingControlStatus = Pick<
   ServingStatusSnapshot['served_models'][number],
   'model_id' | 'model_alias' | 'provider' | 'profile_id' | 'load_state'
-> & { last_error?: { code: ModelServeErrorCode } | null };
+> & {
+  context_size?: number | null;
+  last_error?: { code: ModelServeErrorCode } | null;
+};
 
 export type ServingControlObservation =
   | { kind: 'known'; rows: ServingControlStatus[] }
@@ -65,6 +68,20 @@ function readControlObservation(value: unknown): ServingControlStatus[] | null {
       )
     ) return null;
     let lastError: ServingControlStatus['last_error'];
+    let contextSize: ServingControlStatus['context_size'];
+    if (Object.hasOwn(row, 'context_size')) {
+      if (row['context_size'] === null) {
+        contextSize = null;
+      } else {
+        if (
+          typeof row['context_size'] !== 'number' ||
+          !Number.isInteger(row['context_size']) ||
+          row['context_size'] <= 0 ||
+          row['context_size'] > 0xffff_ffff
+        ) return null;
+        contextSize = row['context_size'];
+      }
+    }
     if (Object.hasOwn(row, 'last_error')) {
       if (row['last_error'] === null) {
         lastError = null;
@@ -81,6 +98,7 @@ function readControlObservation(value: unknown): ServingControlStatus[] | null {
       provider: row['provider'],
       profile_id: row['profile_id'],
       load_state: row['load_state'],
+      ...(Object.hasOwn(row, 'context_size') ? { context_size: contextSize } : {}),
       ...(Object.hasOwn(row, 'last_error') ? { last_error: lastError } : {}),
     } as ServingControlStatus);
   }

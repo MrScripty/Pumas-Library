@@ -82,21 +82,24 @@ pub async fn serve_model(state: &AppState, params: &Value) -> pumas_library::Res
                 &request,
             )
         });
+        state.api.record_serving_load_error(error.clone()).await?;
         return non_critical_failure_response(state, error).await;
     }
 
-    match state
+    let result = execute_serving_load(&state.api, request, async |request, operation| match state
         .provider_registry
         .get(request.config.provider)
         .map(|behavior| behavior.serving_adapter_kind)
     {
         Some(ProviderServingAdapterKind::OllamaProviderApi) => {
-            serve_ollama_model(state, request).await
+            serve_ollama_model(state, request, operation).await
         }
         Some(ProviderServingAdapterKind::LlamaCppRuntime) => {
-            serve_llama_cpp_model(state, request).await
+            serve_llama_cpp_model(state, request, operation).await
         }
-        Some(ProviderServingAdapterKind::OnnxRuntime) => serve_onnx_model(state, request).await,
+        Some(ProviderServingAdapterKind::OnnxRuntime) => {
+            serve_onnx_model(state, request, operation).await
+        }
         None => {
             let error = serving_error(
                 ModelServeErrorCode::UnsupportedProvider,
@@ -105,8 +108,47 @@ pub async fn serve_model(state: &AppState, params: &Value) -> pumas_library::Res
             );
             non_critical_failure_response(state, error).await
         }
+    })
+    .await?;
+    let mut response: ServeModelResponse = serde_json::from_value(result)?;
+    if let Some(snapshot) = &mut response.snapshot {
+        decorate_serving_snapshot(state, snapshot);
     }
+    Ok(serde_json::to_value(response)?)
 }
+
+async fn execute_serving_load<F>(
+    api: &pumas_library::PumasApi,
+    request: ServeModelRequest,
+    provider: F,
+) -> pumas_library::Result<Value>
+where
+    F: AsyncFnOnce(
+        ServeModelRequest,
+        &pumas_library::serving::ServingLoadOperation,
+    ) -> pumas_library::Result<Value>,
+{
+    let operation = match api.begin_serving_load(&request) {
+        Ok(operation) => operation,
+        Err(error) => {
+            let mut response = ServeModelResponse::non_critical_failure(error);
+            response.snapshot = Some(api.get_serving_status().await?.snapshot);
+            return Ok(serde_json::to_value(response)?);
+        }
+    };
+    let result = provider(request, &operation).await;
+    let mut response: ServeModelResponse = serde_json::from_value(result?)?;
+    if let Some(error) = response.load_error.clone() {
+        operation.finish_failure(error);
+    }
+    drop(operation);
+    response.snapshot = Some(api.get_serving_status().await?.snapshot);
+    Ok(serde_json::to_value(response)?)
+}
+
+#[cfg(test)]
+#[path = "serving_operation_tests.rs"]
+mod operation_tests;
 
 pub async fn unserve_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let command: UnserveModelParams = parse_params("unserve_model", params)?;
@@ -213,7 +255,7 @@ pub(super) async fn non_critical_failure_response(
     state: &AppState,
     error: ModelServeError,
 ) -> pumas_library::Result<Value> {
-    let mut snapshot = state.api.record_serving_load_error(error.clone()).await?;
+    let mut snapshot = state.api.get_serving_status().await?.snapshot;
     decorate_serving_snapshot(state, &mut snapshot);
     let mut response = ServeModelResponse::non_critical_failure(error);
     response.snapshot = Some(snapshot);

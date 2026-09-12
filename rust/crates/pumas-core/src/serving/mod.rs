@@ -1,13 +1,19 @@
 //! Backend-owned user-directed serving service.
 //!
-//! This module owns served-model status snapshots and validation helpers for
-//! model-row/modal serving requests. Provider-specific load/unload behavior is
-//! added in later slices behind this service boundary.
+//! Canonical loaded state and invocation-owned load admissions share one short
+//! critical section. Public snapshots project pending and terminal load outcomes;
+//! gateway discovery retains loaded state only. Existing async library signatures
+//! are preserved for consumers; new non-suspending receipt methods are synchronous.
+//! Poisoned state fails closed and is never replaced with an empty snapshot.
 
 mod gateway_alias;
+mod operation;
 mod placement;
+pub use operation::ServingLoadOperation;
+use operation::ServingState;
+use std::sync::{Arc, Mutex};
 
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::broadcast;
 
 pub use gateway_alias::effective_gateway_model_alias;
 use gateway_alias::{validate_gateway_alias_contract, validate_gateway_alias_is_unique};
@@ -45,7 +51,7 @@ pub struct ServingValidationContext {
 
 #[derive(Debug)]
 pub struct ServingService {
-    snapshot: RwLock<ServingStatusSnapshot>,
+    state: Arc<Mutex<ServingState>>,
     updates: broadcast::Sender<ServingStatusUpdateFeed>,
     provider_registry: ProviderRegistry,
 }
@@ -53,7 +59,7 @@ pub struct ServingService {
 impl ServingService {
     pub fn with_provider_registry(provider_registry: ProviderRegistry) -> Self {
         Self {
-            snapshot: RwLock::new(ServingStatusSnapshot::empty()),
+            state: Arc::new(Mutex::new(ServingState::new())),
             updates: broadcast::channel(SERVING_STATUS_UPDATE_CHANNEL_CAPACITY).0,
             provider_registry,
         }
@@ -63,7 +69,7 @@ impl ServingService {
         ServingStatusResponse {
             success: true,
             error: None,
-            snapshot: self.snapshot.read().await.clone(),
+            snapshot: self.state.lock().expect("serving state poisoned").project(),
         }
     }
 
@@ -71,7 +77,13 @@ impl ServingService {
         &self,
         cursor: Option<&str>,
     ) -> ServingStatusUpdateFeedResponse {
-        let current_cursor = self.snapshot.read().await.cursor.clone();
+        let current_cursor = self
+            .state
+            .lock()
+            .expect("serving state poisoned")
+            .snapshot
+            .cursor
+            .clone();
         ServingStatusUpdateFeedResponse {
             success: true,
             error: None,
@@ -85,9 +97,10 @@ impl ServingService {
 
     pub async fn record_loaded_model(&self, status: ServedModelStatus) -> ServingStatusSnapshot {
         let (snapshot, event) = {
-            let mut snapshot = self.snapshot.write().await;
-            let event = Self::record_loaded_model_locked(&mut snapshot, status);
-            (snapshot.clone(), event)
+            let mut state = self.state.lock().expect("serving state poisoned");
+            let snapshot = &mut state.snapshot;
+            let event = Self::record_loaded_model_locked(snapshot, status);
+            (state.project(), event)
         };
         self.publish_event(event);
         snapshot
@@ -99,14 +112,12 @@ impl ServingService {
         owner: &crate::runtime_profiles::RuntimeProfileProcessOwner,
         expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
     ) -> crate::Result<ServingStatusSnapshot> {
-        let (snapshot, event) = {
-            let mut snapshot = self.snapshot.write().await;
-            let profile_id = status.profile_id.clone();
-            let event = owner.with_running_session(&profile_id, expected, || {
-                Self::record_loaded_model_locked(&mut snapshot, status)
-            })?;
-            (snapshot.clone(), event)
-        };
+        let profile_id = status.profile_id.clone();
+        let (snapshot, event) = owner.with_running_session(&profile_id, expected, || {
+            let mut state = self.state.lock().expect("serving state poisoned");
+            let event = Self::record_loaded_model_locked(&mut state.snapshot, status);
+            (state.project(), event)
+        })?;
         self.publish_event(event);
         Ok(snapshot)
     }
@@ -136,24 +147,21 @@ impl ServingService {
     }
 
     pub async fn record_load_error(&self, error: ModelServeError) -> ServingStatusSnapshot {
-        let mut snapshot = self.snapshot.write().await;
-        snapshot.last_errors.push(error);
-        bump_snapshot_cursor(&mut snapshot);
-        let event = serving_status_event(
-            snapshot.cursor.clone(),
-            ServingStatusEventKind::LoadFailed,
-            snapshot
-                .last_errors
-                .last()
-                .and_then(|error| error.model_id.clone()),
-            snapshot
-                .last_errors
-                .last()
-                .and_then(|error| error.profile_id.clone()),
-            snapshot.last_errors.last().and_then(|error| error.provider),
-        );
+        let (snapshot, event) = {
+            let mut state = self.state.lock().expect("serving state poisoned");
+            state.snapshot.last_errors.push(error.clone());
+            bump_snapshot_cursor(&mut state.snapshot);
+            let event = serving_status_event(
+                state.snapshot.cursor.clone(),
+                ServingStatusEventKind::LoadFailed,
+                error.model_id,
+                error.profile_id,
+                error.provider,
+            );
+            (state.project(), event)
+        };
         self.publish_event(event);
-        snapshot.clone()
+        snapshot
     }
 
     pub async fn record_unloaded_model(
@@ -164,15 +172,16 @@ impl ServingService {
         model_alias: Option<&str>,
     ) -> ServingStatusSnapshot {
         let (snapshot, event) = {
-            let mut snapshot = self.snapshot.write().await;
+            let mut state = self.state.lock().expect("serving state poisoned");
+            let snapshot = &mut state.snapshot;
             let event = Self::record_unloaded_model_locked(
-                &mut snapshot,
+                snapshot,
                 model_id,
                 provider,
                 profile_id,
                 model_alias,
             );
-            (snapshot.clone(), event)
+            (state.project(), event)
         };
         self.publish_event(event);
         snapshot
@@ -185,19 +194,17 @@ impl ServingService {
         expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
     ) -> crate::Result<ServingStatusSnapshot> {
         let (model_id, provider, profile_id, model_alias) = selection;
-        let (snapshot, event) = {
-            let mut snapshot = self.snapshot.write().await;
-            let event = owner.with_running_session(profile_id, expected, || {
-                Self::record_unloaded_model_locked(
-                    &mut snapshot,
-                    model_id,
-                    Some(provider),
-                    Some(profile_id),
-                    Some(model_alias),
-                )
-            })?;
-            (snapshot.clone(), event)
-        };
+        let (snapshot, event) = owner.with_running_session(profile_id, expected, || {
+            let mut state = self.state.lock().expect("serving state poisoned");
+            let event = Self::record_unloaded_model_locked(
+                &mut state.snapshot,
+                model_id,
+                Some(provider),
+                Some(profile_id),
+                Some(model_alias),
+            );
+            (state.project(), event)
+        })?;
         self.publish_event(event);
         Ok(snapshot)
     }
@@ -249,9 +256,9 @@ impl ServingService {
         profile_id: &RuntimeProfileId,
     ) -> Option<ServingStatusSnapshot> {
         let (result, feed) = {
-            let mut snapshot = self.snapshot.write().await;
-            let feed = Self::record_profile_unavailable_locked(&mut snapshot, profile_id)?;
-            (snapshot.clone(), feed)
+            let mut state = self.state.lock().expect("serving state poisoned");
+            let feed = Self::record_profile_unavailable_locked(&mut state, profile_id)?;
+            (state.project(), feed)
         };
         self.publish_feed(feed);
         Some(result)
@@ -263,15 +270,13 @@ impl ServingService {
         generation: u64,
         owner: &crate::runtime_profiles::RuntimeProfileProcessOwner,
     ) -> crate::Result<Option<ServingStatusSnapshot>> {
-        let update = {
-            let mut snapshot = self.snapshot.write().await;
-            owner
-                .with_current_generation(profile_id, generation, || {
-                    Self::record_profile_unavailable_locked(&mut snapshot, profile_id)
-                        .map(|feed| (snapshot.clone(), feed))
-                })?
-                .flatten()
-        };
+        let update = owner
+            .with_current_generation(profile_id, generation, || {
+                let mut state = self.state.lock().expect("serving state poisoned");
+                Self::record_profile_unavailable_locked(&mut state, profile_id)
+                    .map(|feed| (state.project(), feed))
+            })?
+            .flatten();
         Ok(update.map(|(snapshot, feed)| {
             self.publish_feed(feed);
             snapshot
@@ -279,9 +284,11 @@ impl ServingService {
     }
 
     fn record_profile_unavailable_locked(
-        snapshot: &mut ServingStatusSnapshot,
+        state: &mut ServingState,
         profile_id: &RuntimeProfileId,
     ) -> Option<ServingStatusUpdateFeed> {
+        let invalidated = state.invalidate_profile(profile_id);
+        let snapshot = &mut state.snapshot;
         let mut removed_models = Vec::new();
         snapshot.served_models.retain(|status| {
             if &status.profile_id == profile_id {
@@ -291,7 +298,7 @@ impl ServingService {
             true
         });
 
-        if removed_models.is_empty() {
+        if removed_models.is_empty() && !invalidated {
             return None;
         }
 
@@ -317,7 +324,7 @@ impl ServingService {
             cursor,
             events,
             stale_cursor: false,
-            snapshot_required: false,
+            snapshot_required: invalidated,
         })
     }
 
@@ -327,9 +334,10 @@ impl ServingService {
         provider: Option<RuntimeProviderId>,
         profile_id: Option<&RuntimeProfileId>,
     ) -> Option<ServedModelStatus> {
-        self.snapshot
-            .read()
-            .await
+        self.state
+            .lock()
+            .expect("serving state poisoned")
+            .snapshot
             .served_models
             .iter()
             .find(|status| {

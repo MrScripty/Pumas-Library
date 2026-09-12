@@ -23,6 +23,7 @@ use tracing::warn;
 pub(super) async fn serve_llama_cpp_router_model(
     state: &AppState,
     request: ServeModelRequest,
+    load_operation: &pumas_library::serving::ServingLoadOperation,
 ) -> pumas_library::Result<Value> {
     let profile = state
         .api
@@ -164,18 +165,19 @@ pub(super) async fn serve_llama_cpp_router_model(
                 {
                     return Err("llama.cpp router process has a fixed context override".into());
                 }
-                let snapshot = current_serving_snapshot(state).await
+                let snapshot = current_serving_snapshot(state)
+                    .await
                     .map_err(|_| "llama.cpp router serving state could not be observed")?;
-                if snapshot.served_models.iter().any(|model| model.profile_id == request.config.profile_id) {
-                    return Err("Clear or stop the existing llama.cpp serving session before changing context size".into());
-                }
+                ensure_router_context_change_allowed(&snapshot, &request.config.profile_id)?;
                 operation
                     .set_model_context(&router_model_id, context)
                     .await
                     .map_err(|_| {
                         "llama.cpp router model context could not be prepared".to_string()
                     })?;
-                operation.mark_mutating().map_err(|_| "llama.cpp router ownership changed before reload")?;
+                operation
+                    .mark_mutating()
+                    .map_err(|_| "llama.cpp router ownership changed before reload")?;
                 Ok(())
             },
         )
@@ -283,13 +285,16 @@ pub(super) async fn serve_llama_cpp_router_model(
         last_error: None,
     };
     let publication = match &owned {
-        Some(owned) => {
-            state
-                .api
-                .record_served_model_for_owned_profile(status.clone(), owned)
-                .await
-        }
-        None => state.api.record_served_model(status.clone()).await,
+        Some(owned) => state
+            .api
+            .record_served_model_for_operation_and_owned_profile(
+                load_operation,
+                status.clone(),
+                owned,
+            ),
+        None => state
+            .api
+            .record_served_model_for_operation(load_operation, status.clone()),
     };
     let mut snapshot = match publication {
         Ok(snapshot) => snapshot,
@@ -305,6 +310,8 @@ pub(super) async fn serve_llama_cpp_router_model(
             .await
         }
     };
+    // Keep router exclusion until Loaded is visible: releasing it earlier would
+    // let another context operation observe no loaded model and reload the router.
     if let Some(operation) = operation {
         operation.finish()?;
     }
@@ -479,6 +486,21 @@ async fn router_endpoint_after_launch(
     });
     result
         .map_err(|message| serving_error(ModelServeErrorCode::ProviderLoadFailed, message, request))
+}
+
+fn ensure_router_context_change_allowed(
+    snapshot: &pumas_library::models::ServingStatusSnapshot,
+    profile_id: &pumas_library::models::RuntimeProfileId,
+) -> Result<(), String> {
+    if snapshot.served_models.iter().any(|model| {
+        &model.profile_id == profile_id && model.load_state == ServedModelLoadState::Loaded
+    }) {
+        return Err(
+            "Clear or stop the existing llama.cpp serving session before changing context size"
+                .into(),
+        );
+    }
+    Ok(())
 }
 
 pub(super) async fn unserve_llama_cpp_router_model(

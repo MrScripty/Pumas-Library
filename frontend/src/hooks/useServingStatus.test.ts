@@ -114,6 +114,66 @@ describe('useServingStatus', () => {
     });
   });
 
+  it('admits only the error code needed for interrupted serving control', async () => {
+    getServingStatusMock.mockResolvedValue({
+      success: true,
+      snapshot: {
+        ...createSnapshot('serving:interrupted'),
+        served_models: [{
+          model_id: 'models/chat',
+          model_alias: 'chat',
+          profile_id: 'llama-cpu',
+          provider: 'llama_cpp',
+          load_state: 'failed',
+          last_error: {
+            code: 'unknown',
+            severity: 'critical',
+            message: 'outcome unavailable',
+          },
+        }],
+      },
+    });
+
+    const { result } = renderHook(() => useServingStatus());
+    await flushMicrotasks();
+
+    expect(result.current.controlObservation).toEqual({
+      kind: 'known',
+      rows: [{
+        model_id: 'models/chat',
+        model_alias: 'chat',
+        profile_id: 'llama-cpu',
+        provider: 'llama_cpp',
+        load_state: 'failed',
+        last_error: { code: 'unknown' },
+      }],
+    });
+  });
+
+  it('rejects a malformed served-model error code', async () => {
+    getServingStatusMock.mockResolvedValue({
+      success: true,
+      snapshot: {
+        ...createSnapshot('serving:bad-error'),
+        served_models: [{
+          model_id: 'models/chat',
+          profile_id: 'llama-cpu',
+          provider: 'llama_cpp',
+          load_state: 'failed',
+          last_error: { code: 'not-a-serving-error' },
+        }],
+      },
+    });
+
+    const { result } = renderHook(() => useServingStatus());
+    await flushMicrotasks();
+
+    expect(result.current.controlObservation).toEqual({
+      kind: 'unavailable',
+      message: 'Serving status response was malformed',
+    });
+  });
+
   it('does not admit a non-boolean success value as a known empty observation', async () => {
     getServingStatusMock.mockResolvedValue({
       success: 'false',

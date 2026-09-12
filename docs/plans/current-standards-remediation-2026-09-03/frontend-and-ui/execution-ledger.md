@@ -1,5 +1,116 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-12 — Backend-Owned Model Loading
+
+Accepted the user's clarification: no timeout message was observed. Loaded/Stop
+already appeared after completion; fresh dialogs and library rows lacked an
+in-progress observation. The backend RED used the actual generic serving
+composition with a gated synthetic provider: the status snapshot contained zero
+rows while work was pending. The frontend RED had two failures (28 passing): no
+Loading badge and a fresh loading dialog showing unavailable instead of Loading.
+
+The generic RPC path now admits a noncloneable exact operation receipt before
+awaiting any provider. Coherent serving state reserves the model/profile/provider
+target and normalized gateway alias atomically. All four adapters publish through
+that receipt; managed adapters also require their existing runtime-generation
+receipt. Duplicate starts cannot invoke another provider mutation. Loading is a
+snapshot projection, never gateway readiness or the loaded-model count. Router
+context preparation reads canonical Loaded rows so its own Loading reservation
+does not block the existing profile-first context workflow.
+
+Known failures leave a terminal Failed row so a reopened control can settle.
+Cancellation, infrastructure errors and explicit Unknown failures retain an
+uncertain Failed row and their reservation. Profile invalidation prevents stale
+publication; active invalidated receipts keep admission blocked until they exit.
+Publication also verifies the admitted normalized alias. No detached cleanup,
+polling or automatic load/unload retry was introduced. Process observation occurs
+before the short serving mutex, with consistent owner-before-serving lock order;
+events broadcast after unlocking. Router Loaded publication remains before the
+owned operation's finish to avoid opening a competing context-operation gap.
+
+The dialog shows disabled Loading from exact target observations, including a
+fresh mount. The library retains Loading and Loaded independently when multiple
+profiles have instances, with Loaded action priority independent of row order.
+Its existing action still opens the Serve dialog; this does not add direct
+exact-instance unload routing. Exact Failed+Unknown disables Start; known failure
+restores Start. The private control decoder validates only the error code needed
+for that distinction, without inventing a full generated serving contract.
+
+Verification passed: core serving 36 tests in each feature configuration; default
+RPC serving 29 unit and 3 integration tests; full no-default RPC 151 unit and 13
+integration tests with 10 existing ignores. Strict core/RPC all-target Clippy,
+formatting, 77 focused frontend tests, TypeScript and affected lint pass.
+The actual hidden Electron fixture renders the real dialog, library and status
+hooks against a gated bridge: one Start -> Loading -> close/reopen -> Loading ->
+Stop/Loaded. Exactly one mocked start, zero stops and eight status reads occurred.
+Evidence is retained under ignored
+`tmp/llamacpp-hosting-20260909/evidence/loading-state/`. No live model, runtime,
+profile, dependency tool or network service was mutated. This is controlled
+composition evidence, not a new live GPU-load test.
+
+Review repaired the distinction between canonical Loaded and projected Loading,
+retained known failures instead of erasing them, verified mixed-row order, moved
+procfs observation outside the serving lock, and bound publication to the reserved
+alias. Permanent regressions cover explicit Unknown completion and forged aliases.
+A sandbox fixture EPERM required approved isolated execution. Root delayed review
+reactivation by sending messages to a completed reviewer; explicit follow-up
+restarted it. That coordination delay is included in costs. Final source review
+accepted the corrections; Cargo ownership remained sequential this slice.
+
+Astra medium owned design and independent review; Astra low directly owned the
+settled Rust lifecycle implementation; Sol low owned the bounded renderer
+projection; Luna max prepared accounting. The inherited root remained Astra
+medium, not the requested Sol-low coordination configuration. Direct Astra-low
+ownership avoided the prior lifecycle rescue pattern, while the narrow Sol UI
+work was accepted after focused aggregation repair. These observations include
+review, repairs and coordination overhead and are provisional across unlike task
+classes, not a controlled benchmark.
+
+FE-I57 is resolved within the generic RPC/receipt path. Trusted legacy core
+publication APIs remain available; continuous external-router health, broader
+runtime lifecycle and full serving-wire migration remain outside this repair
+(FE-I48/49/52). M4 and overall remediation remain incomplete. The sole next slice
+is `is_ollama_running`/`is_torch_running` read-contract inventory/validation.
+
+Final integration gates also pass: strict RPC all-target/all-feature Clippy
+with warnings denied; Electron build and 168 tests with one existing explicit
+skip; generator 8/8 and freshness; producer 39/39 and renderer 48/48 conformance;
+normal and library-only frontend builds; and the optimized release-profile RPC
+binary build. The final normal frontend and Electron assets are rebuilt. Only
+the unchanged pure external `validate_plan` and its helpers/constants ran for
+both canonical plans; this is not the full standards engine. Reopen the app to
+consume the new backend and frontend; the running app was not restarted.
+
+Cost checkpoint: frozen `/tmp/pumas-loading-state-costs.py` / JSON uses current
+local token_usage_record entries, exact root `01a0880c-8ce6-74e2-afec-f69e0fc6f1e0` and user turn
+`2026-09-12T16:41:20.014Z`, with global response-ID deduplication and inherited
+accepted cutoffs. Carried reporting tail $1.72230600;
+current slice $30.17642080; newly checkpointed
+$31.89872680; cumulative known API-equivalent
+estimate $399.25540508 standard /
+$798.51081016 priority scenario.
+Current breakdown: root Astra medium $10.56038400; design Astra medium
+$7.22673800; Rust Astra low $9.44635800; UI Sol low $2.81685920; accounting
+Luna max $0.12608160. The 338 deduplicated records have zero duplicate
+IDs/collisions, no requests over 272,000 input tokens, and zero recorded cache
+writes. Eight automatic-review records are unpriced; requested/observed service
+tiers and shared tool fees remain unknown and unallocated, never free. Cached
+input is included in input and reasoning in output. Prices retain the documented
+API-equivalent assumptions (Sol 4/.4/5/20, Luna .2/.02/.25/1.2, Astra 10/1/12.5/50
+USD per million uncached/cached/cache-write/output; priority scenario doubles the
+known standard estimate). These are not invoices or controlled routing benchmarks.
+Later commit/reporting usage remains an uncounted tail.
+
+Final included cutoffs:
+
+- `01a0880c-8ce6-74e2-afec-f69e0fc6f1e0`: `resp_04a060a0b34b4096016aa58804cca887d0a4bb72f34af1a3af` at `2026-09-12T17:12:45.268Z`.
+- `01a0967f-09d4-7563-83e1-0f4355339bc4`: `resp_0b6ac46b2cea0fd0016aa5862be90887d091260b3adead7ec1` at `2026-09-12T17:04:50.171Z`.
+- `01a0967f-6466-7490-b927-172445c93ef8`: `resp_00e47a6e07f74453016aa5837e408487d09d7d8b6e7922b983` at `2026-09-12T16:53:21.438Z`.
+- `01a09682-aea4-7823-a5b3-8aabe923b6af`: `resp_0e0a6b8d6f800886016aa5841e243c87d08bbeb361721380f4` at `2026-09-12T16:56:15.505Z`.
+- `01a09683-df5f-70a3-9098-0f00f328a7b8`: `resp_0dfff94cce4446a6016aa5868f9ac487d09f7fc42300abfa33` at `2026-09-12T17:06:34.952Z`.
+- `01a09683-dfbb-7040-a3c5-f87c0e956ab0`: `resp_059eacf0ad518568016aa5863cbdc087d08648928276463cef` at `2026-09-12T17:05:03.586Z`.
+- `01a0963d-1283-7d43-a7d7-c89cc696bfe4`: `resp_0267b9e1194688a8016aa583792a1487d081c2432819d6c76d` at `2026-09-12T16:53:17.425Z`.
+
 ## 2026-09-12 — Single Serving Control And Status Reconciliation
 
 Accepted the user's follow-up after GPU loading was confirmed: one Start/Stop

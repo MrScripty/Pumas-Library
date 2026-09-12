@@ -379,6 +379,34 @@ describe('useModelServingActions', () => {
     }
   );
 
+  it('keeps an exact interrupted target unavailable without affecting another target', () => {
+    const interrupted: ServedModelStatus = {
+      model_id: 'models/chat',
+      model_alias: 'chat-cpu',
+      provider: 'llama_cpp',
+      profile_id: 'llama-cpu',
+      load_state: 'failed',
+      device_mode: 'cpu',
+      keep_loaded: true,
+      last_error: {
+        code: 'unknown',
+        severity: 'critical',
+        message: 'Serving outcome unavailable',
+      },
+    };
+    const exact = renderHook(() =>
+      useModelServingActions('models/chat', { profileId: 'llama-cpu' }, [interrupted])
+    );
+    const unrelated = renderHook(() =>
+      useModelServingActions('models/chat', { profileId: 'llama-gpu' }, [interrupted])
+    );
+
+    expect(exact.result.current.isUnavailable).toBe(true);
+    expect(exact.result.current.actionPhase).toBe('uncertain');
+    expect(unrelated.result.current.isUnavailable).toBe(false);
+    expect(unrelated.result.current.actionPhase).toBe('idle');
+  });
+
   it.each(['model', 'profile', 'provider', 'mode', 'alias', 'unmount'] as const)(
     'discards a late start completion after %s supersession',
     async (change) => {

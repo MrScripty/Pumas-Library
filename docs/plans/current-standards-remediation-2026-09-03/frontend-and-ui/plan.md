@@ -12,7 +12,8 @@ one-second main-owned marker barrier remains the reveal authority.
 
 **Next slice:** Resume the bounded `is_ollama_running`/`is_torch_running`
 producer, RPC, generated desktop and actual-consumer read-contract
-inventory/validation. The remaining M4 and overall remediation are not complete.
+inventory/validation. Backend-owned Loading and reopened-dialog/library
+projection are accepted; M4 and overall remediation remain incomplete.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -67,6 +68,19 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Backend-Owned Model Loading
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-12--backend-owned-model-loading).
+A fresh serving snapshot exposes an admitted operation as Loading before provider
+work completes. Exact operation receipts exclude duplicate target/alias starts
+and stale publication. Loading is not gateway readiness. Cancellation and unknown
+failure retain uncertainty; known failure settles the control. Reopened dialogs
+show disabled Loading, and library rows retain both Loading and Loaded badges
+when different profiles have simultaneous instances. No automatic mutation retry
+or polling was added. FE-I57 is resolved within the generic RPC/receipt path;
+continuing external health and broader lifecycle work remain FE-I48/49/52.
 
 ## Single Model-Serving Control And Status Reconciliation
 

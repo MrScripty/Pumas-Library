@@ -17,6 +17,7 @@ use tracing::warn;
 pub(super) async fn serve_ollama_model(
     state: &AppState,
     request: ServeModelRequest,
+    operation: &pumas_library::serving::ServingLoadOperation,
 ) -> pumas_library::Result<Value> {
     let endpoint = match state
         .api
@@ -136,7 +137,9 @@ pub(super) async fn serve_ollama_model(
         loaded_at: None,
         last_error: None,
     };
-    let mut snapshot = state.api.record_served_model(status.clone()).await?;
+    let mut snapshot = state
+        .api
+        .record_served_model_for_operation(operation, status.clone())?;
     decorate_serving_snapshot(state, &mut snapshot);
 
     Ok(serde_json::to_value(ServeModelResponse {

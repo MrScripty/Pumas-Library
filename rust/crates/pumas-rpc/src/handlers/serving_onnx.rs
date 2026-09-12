@@ -37,6 +37,7 @@ struct ValidatedOnnxUnserveRequest {
 pub(super) async fn serve_onnx_model(
     state: &AppState,
     request: ServeModelRequest,
+    operation: &pumas_library::serving::ServingLoadOperation,
 ) -> pumas_library::Result<Value> {
     let validated = match validate_onnx_serve_request(state, &request).await? {
         Ok(validated) => validated,
@@ -165,7 +166,10 @@ pub(super) async fn serve_onnx_model(
         loaded_at: None,
         last_error: None,
     };
-    let mut snapshot = match state.api.record_served_model(status.clone()).await {
+    let mut snapshot = match state
+        .api
+        .record_served_model_for_operation(operation, status.clone())
+    {
         Ok(snapshot) => snapshot,
         Err(error) => {
             warn!(

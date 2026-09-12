@@ -80,7 +80,10 @@ async fn serve_onnx_model_is_idempotent_for_loaded_session() {
     let request = onnx_serving_request();
     create_onnx_model_fixture(&state, &request.model_id);
 
-    let first = serve_onnx_model(&state, request.clone()).await.unwrap();
+    let operation = state.api.begin_serving_load(&request).unwrap();
+    let first = serve_onnx_model(&state, request.clone(), &operation)
+        .await
+        .unwrap();
     assert_eq!(first["loaded"], true);
     assert_eq!(first["loaded_models_unchanged"], false);
     assert_eq!(
@@ -95,7 +98,7 @@ async fn serve_onnx_model_is_idempotent_for_loaded_session() {
         .unwrap()
         .to_string();
 
-    let second = serve_onnx_model(&state, request).await.unwrap();
+    let second = serve_onnx_model(&state, request, &operation).await.unwrap();
     assert_eq!(second["loaded"], true);
     assert_eq!(second["loaded_models_unchanged"], true);
     assert_eq!(

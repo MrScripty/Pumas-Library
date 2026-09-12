@@ -23,6 +23,7 @@ use tracing::warn;
 pub(super) async fn serve_llama_cpp_model(
     state: &AppState,
     request: ServeModelRequest,
+    operation: &pumas_library::serving::ServingLoadOperation,
 ) -> pumas_library::Result<Value> {
     let profile = state
         .api
@@ -46,7 +47,7 @@ pub(super) async fn serve_llama_cpp_model(
     };
 
     if profile.provider_mode == RuntimeProviderMode::LlamaCppRouter {
-        return serve_llama_cpp_router_model(state, request).await;
+        return serve_llama_cpp_router_model(state, request, operation).await;
     }
 
     if profile.provider_mode != RuntimeProviderMode::LlamaCppDedicated {
@@ -208,8 +209,7 @@ pub(super) async fn serve_llama_cpp_model(
     };
     let mut snapshot = match state
         .api
-        .record_served_model_for_owned_profile(status.clone(), owned)
-        .await
+        .record_served_model_for_operation_and_owned_profile(operation, status.clone(), owned)
     {
         Ok(snapshot) => snapshot,
         Err(_) => {

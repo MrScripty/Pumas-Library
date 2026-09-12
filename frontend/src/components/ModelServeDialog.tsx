@@ -186,6 +186,8 @@ export function ModelServeDialog({
       controls={controls}
       formState={formState}
       isDialogMode={isDialogMode}
+      isLoading={servingActions.isLoading}
+      isUnavailable={servingActions.isUnavailable}
       message={servingActions.message}
       model={model}
       aliasRequired={aliasRequired}

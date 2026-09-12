@@ -8,6 +8,7 @@ import type { LocalModelRowState } from './LocalModelRowState';
 
 interface LocalModelInstalledActionsProps {
   model: ModelInfo;
+  isLoading?: boolean;
   rowState: LocalModelRowState;
   selectedAppId: string | null;
   servedStatus?: ServedModelStatus | null;
@@ -54,6 +55,7 @@ function RecoverPartialDownloadIcon({ rowState }: { rowState: LocalModelRowState
 
 export function LocalModelInstalledActions({
   model,
+  isLoading = false,
   rowState,
   selectedAppId,
   servedStatus,
@@ -99,6 +101,7 @@ export function LocalModelInstalledActions({
         )}
       <RuntimeModelServeAction
         model={model}
+        isLoading={isLoading}
         rowState={rowState}
         servedStatus={servedStatus}
         onServeModel={onServeModel}

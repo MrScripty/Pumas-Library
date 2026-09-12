@@ -8,6 +8,7 @@ import type { LocalModelRowState } from './LocalModelRowState';
 
 interface LocalModelRowActionsProps {
   model: ModelInfo;
+  isLoading: boolean;
   rowState: LocalModelRowState;
   selectedAppId: string | null;
   servedStatus: ServedModelStatus | null;
@@ -24,6 +25,7 @@ interface LocalModelRowActionsProps {
 
 export function LocalModelRowActions({
   model,
+  isLoading,
   rowState,
   selectedAppId,
   servedStatus,
@@ -59,6 +61,7 @@ export function LocalModelRowActions({
       ) : (
         <LocalModelInstalledActions
           model={model}
+          isLoading={isLoading}
           rowState={rowState}
           selectedAppId={selectedAppId}
           servedStatus={servedStatus}

@@ -39,6 +39,8 @@ interface ModelServeDialogContentProps {
   serveError: ModelServeError | null;
   message: string | null;
   actionPhase: ModelServingActionPhase;
+  isLoading: boolean;
+  isUnavailable: boolean;
   controlObservation: ServingControlObservation;
   servedStatus: ServingControlStatus | null;
   onServe: () => void;
@@ -71,6 +73,8 @@ export function ModelServeDialogContent({
   serveError,
   message,
   actionPhase,
+  isLoading,
+  isUnavailable,
   controlObservation,
   servedStatus,
   onServe,
@@ -115,6 +119,8 @@ export function ModelServeDialogContent({
       <ModelServeActions
         actionPhase={actionPhase}
         controlObservation={controlObservation}
+        isLoading={isLoading}
+        isUnavailable={isUnavailable}
         isDialogMode={isDialogMode}
         onClose={onClose}
         onServe={onServe}

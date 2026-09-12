@@ -111,7 +111,7 @@ pub(super) fn validate_gateway_alias_is_unique(
         .unwrap_or_default()
 }
 
-fn gateway_alias_key(alias: &str) -> Option<String> {
+pub(super) fn gateway_alias_key(alias: &str) -> Option<String> {
     let alias = alias.trim();
     if alias.is_empty() {
         return None;
@@ -136,7 +136,7 @@ fn gateway_alias_key(alias: &str) -> Option<String> {
     Some(key.trim_matches('-').to_string()).filter(|key| !key.is_empty())
 }
 
-fn served_status_effective_gateway_alias(status: &ServedModelStatus) -> &str {
+pub(super) fn served_status_effective_gateway_alias(status: &ServedModelStatus) -> &str {
     status
         .model_alias
         .as_deref()

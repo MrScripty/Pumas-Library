@@ -90,6 +90,37 @@ impl PumasApi {
         Ok(primary.serving_service.validate_request(&request, &context))
     }
 
+    pub fn begin_serving_load(
+        &self,
+        request: &ServeModelRequest,
+    ) -> std::result::Result<crate::serving::ServingLoadOperation, ModelServeError> {
+        self.primary().serving_service.begin_load(request)
+    }
+
+    pub fn record_served_model_for_operation(
+        &self,
+        operation: &crate::serving::ServingLoadOperation,
+        status: ServedModelStatus,
+    ) -> Result<ServingStatusSnapshot> {
+        self.primary()
+            .serving_service
+            .record_loaded_model_for_operation(operation, status, None)
+    }
+
+    pub fn record_served_model_for_operation_and_owned_profile(
+        &self,
+        operation: &crate::serving::ServingLoadOperation,
+        status: ServedModelStatus,
+        expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
+    ) -> Result<ServingStatusSnapshot> {
+        let primary = self.primary();
+        primary.serving_service.record_loaded_model_for_operation(
+            operation,
+            status,
+            Some((&primary.runtime_profile_service.process_owner, expected)),
+        )
+    }
+
     pub async fn record_served_model(
         &self,
         status: ServedModelStatus,

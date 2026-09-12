@@ -125,6 +125,87 @@ describe('LocalModelsList', () => {
     expect(screen.getByRole('button', { name: /unload model/i })).toBeEnabled();
   });
 
+  it('renders backend-confirmed loading state for a local model', () => {
+    render(
+      <LocalModelsList
+        modelGroups={modelGroups}
+        starredModels={new Set()}
+        excludedModels={new Set()}
+        onToggleStar={vi.fn()}
+        onToggleLink={vi.fn()}
+        selectedAppId="llama-cpp"
+        servedModels={[
+          {
+            model_id: 'llm/llama/test-model',
+            model_alias: 'llm/llama/test-model',
+            provider: 'llama_cpp',
+            profile_id: 'llama-profile',
+            load_state: 'loading',
+            device_mode: 'cpu',
+            keep_loaded: true,
+            endpoint_url: null,
+          },
+        ]}
+        totalModels={1}
+        hasFilters={false}
+        relatedModelsById={{}}
+        expandedRelated={new Set()}
+        onToggleRelated={vi.fn()}
+        onOpenRelatedUrl={vi.fn()}
+        onServeModel={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('Loading')).toBeInTheDocument();
+    expect(screen.queryByText('Loaded')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /loading model/i })).toBeDisabled();
+  });
+
+  it.each(['loaded-first', 'loading-first'] as const)(
+    'keeps Loaded actionable and also shows Loading with concurrent instances (%s)',
+    (order) => {
+      const loaded: NonNullable<React.ComponentProps<typeof LocalModelsList>['servedModels']>[number] = {
+        model_id: 'llm/llama/test-model',
+        model_alias: 'loaded-instance',
+        provider: 'llama_cpp',
+        profile_id: 'loaded-profile',
+        load_state: 'loaded',
+        device_mode: 'cpu',
+        keep_loaded: true,
+      };
+      const loading = {
+        ...loaded,
+        model_alias: 'loading-instance',
+        profile_id: 'loading-profile',
+        load_state: 'loading' as const,
+      };
+
+      render(
+        <LocalModelsList
+          modelGroups={modelGroups}
+          starredModels={new Set()}
+          excludedModels={new Set()}
+          onToggleStar={vi.fn()}
+          onToggleLink={vi.fn()}
+          selectedAppId="llama-cpp"
+          servedModels={order === 'loaded-first' ? [loaded, loading] : [loading, loaded]}
+          totalModels={1}
+          hasFilters={false}
+          relatedModelsById={{}}
+          expandedRelated={new Set()}
+          onToggleRelated={vi.fn()}
+          onOpenRelatedUrl={vi.fn()}
+          onServeModel={vi.fn()}
+        />
+      );
+
+      expect(screen.getByText('Loaded')).toBeInTheDocument();
+      expect(screen.getByText('Loading')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /unload model/i })).toBeEnabled();
+      expect(screen.queryByRole('button', { name: /loading model/i })).not.toBeInTheDocument();
+    }
+  );
+
   it('does not render backend compatibility badges on local model rows', () => {
     const firstModel = modelGroups[0]?.models[0];
     if (firstModel === undefined) {

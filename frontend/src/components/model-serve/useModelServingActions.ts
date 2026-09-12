@@ -186,9 +186,14 @@ export function useModelServingActions(
       (servedModel) =>
         servedModel.load_state === 'loaded'
     );
+    const interruptedStatus = matchingRows.find(
+      (servedModel) =>
+        servedModel.load_state === 'failed' && servedModel.last_error?.code === 'unknown'
+    );
     const terminalStatus = matchingRows.find(
       (servedModel) =>
-        servedModel.load_state === 'failed' || servedModel.load_state === 'unloaded'
+        (servedModel.load_state === 'failed' && servedModel.last_error?.code !== 'unknown') ||
+        servedModel.load_state === 'unloaded'
     );
     loadedRef.current = Boolean(status);
     setServedStatus(status ?? null);
@@ -201,6 +206,10 @@ export function useModelServingActions(
     } else {
       setMessage((current) => (current?.source === 'loaded' ? null : current));
       setActionPhase((current) => {
+        if (interruptedStatus) {
+          invocationRef.current += 1;
+          return 'uncertain';
+        }
         if (terminalStatus) {
           invocationRef.current += 1;
           return 'idle';
@@ -313,6 +322,17 @@ export function useModelServingActions(
 
   return {
     actionPhase,
+    isLoading: Boolean(controlRows?.some(
+      (servedModel) =>
+        matchesServingTarget(servedModel, modelId, target) &&
+        (servedModel.load_state === 'requested' || servedModel.load_state === 'loading')
+    )),
+    isUnavailable: Boolean(controlRows?.some(
+      (servedModel) =>
+        matchesServingTarget(servedModel, modelId, target) &&
+        servedModel.load_state === 'failed' &&
+        servedModel.last_error?.code === 'unknown'
+    )),
     isSubmitting: actionPhase === 'starting' || actionPhase === 'stopping',
     message: message?.text ?? null,
     serveError,

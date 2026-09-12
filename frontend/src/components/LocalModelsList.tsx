@@ -75,11 +75,18 @@ export function LocalModelsList({
     modelId: string;
     modelName: string;
   } | null>(null);
-  const servedModelById = useMemo(() => {
-    const entries = servedModels
-      .filter((status) => status.load_state === 'loaded')
-      .map((status) => [status.model_id, status] as const);
-    return new Map(entries);
+  const servingStateByModel = useMemo(() => {
+    const loadedById = new Map<string, ServedModelStatus>();
+    const loadingIds = new Set<string>();
+    for (const status of servedModels) {
+      if (status.load_state === 'loaded' && !loadedById.has(status.model_id)) {
+        loadedById.set(status.model_id, status);
+      }
+      if (status.load_state === 'requested' || status.load_state === 'loading') {
+        loadingIds.add(status.model_id);
+      }
+    }
+    return { loadedById, loadingIds };
   }, [servedModels]);
 
   if (modelGroups.length === 0) {
@@ -110,10 +117,11 @@ export function LocalModelsList({
                 excludedModels={excludedModels}
                 expandedRelated={expandedRelated}
                 model={model}
+                isLoading={servingStateByModel.loadingIds.has(model.id)}
                 recoveringPartialModelIds={recoveringPartialModelIds}
                 relatedModelsById={relatedModelsById}
                 selectedAppId={selectedAppId}
-                servedStatus={servedModelById.get(model.id) ?? null}
+                servedStatus={servingStateByModel.loadedById.get(model.id) ?? null}
                 starredModels={starredModels}
                 onCancelDownload={onCancelDownload}
                 onDeleteModel={onDeleteModel}

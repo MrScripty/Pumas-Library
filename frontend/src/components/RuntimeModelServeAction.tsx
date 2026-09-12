@@ -6,6 +6,7 @@ import { IconButton } from './ui';
 
 export interface RuntimeModelServeActionProps {
   model: ModelInfo;
+  isLoading?: boolean;
   rowState: LocalModelRowState;
   servedStatus?: ServedModelStatus | null;
   onServeModel?: (model: ModelInfo) => void;
@@ -13,6 +14,7 @@ export interface RuntimeModelServeActionProps {
 
 export function RuntimeModelServeAction({
   model,
+  isLoading = false,
   rowState,
   servedStatus,
   onServeModel,
@@ -21,16 +23,17 @@ export function RuntimeModelServeAction({
     return null;
   }
 
+  const isLoaded = servedStatus?.load_state === 'loaded';
   return (
     <IconButton
-      icon={servedStatus ? <Square /> : <Play />}
-      tooltip={servedStatus ? 'Unload model' : 'Serve model'}
+      icon={isLoaded ? <Square /> : <Play />}
+      tooltip={isLoaded ? 'Unload model' : isLoading ? 'Loading model' : 'Serve model'}
       onClick={() => onServeModel(model)}
-      disabled={rowState.isPartialDownload}
+      disabled={rowState.isPartialDownload || (isLoading && !isLoaded)}
       size="sm"
-      active={Boolean(servedStatus)}
+      active={isLoaded}
       className={
-        servedStatus
+        isLoaded
           ? 'text-[hsl(var(--accent-success))] bg-[hsl(var(--accent-success)/0.12)]'
           : undefined
       }

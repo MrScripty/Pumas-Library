@@ -1096,6 +1096,159 @@ describe('ModelServeDialog actions', () => {
     await waitFor(() => expect(serveModel).toHaveBeenCalledTimes(1));
   });
 
+  it('shows a disabled Loading control when a fresh dialog observes the model loading', async () => {
+    const loadingStatus: ServedModelStatus = {
+      model_id: 'model-known-loading',
+      model_alias: 'model-known-loading',
+      provider: 'llama_cpp',
+      profile_id: 'emily-llama',
+      load_state: 'loading',
+      device_mode: 'gpu',
+      keep_loaded: true,
+    };
+    useServingStatusMock.mockReturnValue({
+      snapshot: null,
+      servedModels: [loadingStatus],
+      endpoint: null,
+      cursor: 'serving:loading',
+      error: null,
+      controlObservation: { kind: 'known', rows: [loadingStatus] },
+      refreshServingStatus: vi.fn(),
+    });
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'model-known-loading',
+          name: 'Known Loading Model',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByRole('button', { name: 'Loading' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Start serving' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop serving' })).not.toBeInTheDocument();
+  });
+
+  it('keeps Start disabled when a fresh dialog observes an interrupted serving outcome', async () => {
+    const interruptedStatus: ServedModelStatus = {
+      model_id: 'model-interrupted',
+      model_alias: 'model-interrupted',
+      provider: 'llama_cpp',
+      profile_id: 'emily-llama',
+      load_state: 'failed',
+      device_mode: 'gpu',
+      keep_loaded: true,
+      last_error: {
+        code: 'unknown',
+        severity: 'critical',
+        message: 'Serving outcome unavailable',
+      },
+    };
+    useServingStatusMock.mockReturnValue({
+      snapshot: null,
+      servedModels: [interruptedStatus],
+      endpoint: null,
+      cursor: 'serving:interrupted',
+      error: null,
+      controlObservation: {
+        kind: 'known',
+        rows: [{ ...interruptedStatus, last_error: { code: 'unknown' } }],
+      },
+      refreshServingStatus: vi.fn(),
+    });
+
+    render(
+      <ModelServeDialog
+        model={{
+          id: 'model-interrupted',
+          name: 'Interrupted Model',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(
+      await screen.findByRole('button', { name: 'Serving status unavailable' })
+    ).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Start serving' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['provider_load_failed', 'Start serving'],
+    ['unknown', 'Serving status unavailable'],
+  ] as const)(
+    'projects a fresh observed Loading to Failed(%s) sequence as %s',
+    async (errorCode, expectedLabel) => {
+      let status: ServedModelStatus = {
+        model_id: 'model-loading-terminal',
+        model_alias: 'model-loading-terminal',
+        provider: 'llama_cpp',
+        profile_id: 'emily-llama',
+        load_state: 'loading',
+        device_mode: 'gpu',
+        keep_loaded: true,
+      };
+      useServingStatusMock.mockImplementation(() => ({
+        snapshot: null,
+        servedModels: [status],
+        endpoint: null,
+        cursor: `serving:${status.load_state}`,
+        error: null,
+        controlObservation: {
+          kind: 'known',
+          rows: [{
+            model_id: status.model_id,
+            model_alias: status.model_alias,
+            provider: status.provider,
+            profile_id: status.profile_id,
+            load_state: status.load_state,
+            ...(status.last_error ? { last_error: { code: status.last_error.code } } : {}),
+          }],
+        },
+        refreshServingStatus: vi.fn(),
+      }));
+
+      const model = {
+        id: 'model-loading-terminal',
+        name: 'Loading Terminal Model',
+        category: 'local' as const,
+        primaryFormat: 'gguf' as const,
+      };
+      const { rerender } = render(
+        <ModelServeDialog model={model} initialProfileId="emily-llama" onClose={vi.fn()} />
+      );
+      expect(await screen.findByRole('button', { name: 'Loading' })).toBeDisabled();
+
+      status = {
+        ...status,
+        load_state: 'failed',
+        last_error: {
+          code: errorCode,
+          severity: errorCode === 'unknown' ? 'critical' : 'non_critical',
+          message: 'terminal load result',
+        },
+      };
+      rerender(
+        <ModelServeDialog model={model} initialProfileId="emily-llama" onClose={vi.fn()} />
+      );
+
+      const terminalButton = await screen.findByRole('button', { name: expectedLabel });
+      if (errorCode === 'unknown') {
+        expect(terminalButton).toBeDisabled();
+      } else {
+        expect(terminalButton).toBeEnabled();
+      }
+    }
+  );
+
   it('switches the single serving control to Stop when status reports the model loaded during a pending start', async () => {
     let rejectServe: (reason: Error) => void = () => undefined;
     const serveModel = vi.fn<(_request: ServeModelRequest) => Promise<ServeModelResponse>>()

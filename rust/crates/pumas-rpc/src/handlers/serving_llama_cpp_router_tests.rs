@@ -552,6 +552,10 @@ async fn router_context_preparation_reloads_once_before_one_load_and_runtime_pro
     let check = async {
         let client = crate::provider_clients::LlamaCppRouterClient::new(reqwest::Client::new());
         let request = request();
+        let serving = pumas_library::serving::ServingService::with_provider_registry(
+            pumas_library::ProviderRegistry::builtin(),
+        );
+        let _load_operation = serving.begin_load(&request).unwrap();
         let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
         prepare_router_context(
             &client,
@@ -565,6 +569,12 @@ async fn router_context_preparation_reloads_once_before_one_load_and_runtime_pro
             || Ok(true),
             || Ok(true),
             || async {
+                let snapshot = serving.status().await.snapshot;
+                assert_eq!(
+                    snapshot.served_models[0].load_state,
+                    ServedModelLoadState::Loading
+                );
+                ensure_router_context_change_allowed(&snapshot, &request.config.profile_id)?;
                 events.lock().unwrap().push("preset");
                 Ok(())
             },

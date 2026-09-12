@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getElectronAPI } from '../api/adapter';
 import type { ServingStatusSnapshot } from '../types/api-serving';
+import type { ModelServeErrorCode } from '../types/api-serving';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger('useServingStatus');
@@ -11,7 +12,7 @@ const SERVING_STATUS_OBSERVATION_INVALID = 'Serving status response was malforme
 export type ServingControlStatus = Pick<
   ServingStatusSnapshot['served_models'][number],
   'model_id' | 'model_alias' | 'provider' | 'profile_id' | 'load_state'
->;
+> & { last_error?: { code: ModelServeErrorCode } | null };
 
 export type ServingControlObservation =
   | { kind: 'known'; rows: ServingControlStatus[] }
@@ -19,6 +20,24 @@ export type ServingControlObservation =
 
 const PROVIDERS = new Set(['ollama', 'llama_cpp', 'onnx_runtime']);
 const LOAD_STATES = new Set(['requested', 'loading', 'loaded', 'unloading', 'unloaded', 'failed']);
+const ERROR_CODES = new Set<ModelServeErrorCode>([
+  'invalid_request',
+  'model_not_found',
+  'model_not_executable',
+  'profile_not_found',
+  'profile_stopped',
+  'unsupported_provider',
+  'unsupported_placement',
+  'device_unavailable',
+  'insufficient_memory',
+  'provider_load_failed',
+  'missing_runtime',
+  'invalid_format',
+  'endpoint_unavailable',
+  'duplicate_model_alias',
+  'ambiguous_model_routing',
+  'unknown',
+]);
 
 function readControlObservation(value: unknown): ServingControlStatus[] | null {
   if (!value || typeof value !== 'object') return null;
@@ -45,7 +64,25 @@ function readControlObservation(value: unknown): ServingControlStatus[] | null {
         typeof row['model_alias'] === 'string'
       )
     ) return null;
-    rows.push(row as unknown as ServingControlStatus);
+    let lastError: ServingControlStatus['last_error'];
+    if (Object.hasOwn(row, 'last_error')) {
+      if (row['last_error'] === null) {
+        lastError = null;
+      } else {
+        if (!row['last_error'] || typeof row['last_error'] !== 'object') return null;
+        const code = (row['last_error'] as Record<string, unknown>)['code'];
+        if (typeof code !== 'string' || !ERROR_CODES.has(code as ModelServeErrorCode)) return null;
+        lastError = { code: code as ModelServeErrorCode };
+      }
+    }
+    rows.push({
+      model_id: row['model_id'],
+      ...(row['model_alias'] !== undefined ? { model_alias: row['model_alias'] } : {}),
+      provider: row['provider'],
+      profile_id: row['profile_id'],
+      load_state: row['load_state'],
+      ...(Object.hasOwn(row, 'last_error') ? { last_error: lastError } : {}),
+    } as ServingControlStatus);
   }
   return rows;
 }

@@ -1,5 +1,38 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-12 — Backend-Owned Model Loading
+
+Accepted FE-I57 after the user's clarification that no timeout message occurred:
+loaded state already updated, but a fresh dialog and library missed pending
+loads. Generic RPC serving now owns an exact operation receipt and publishes
+Loading before provider work. Target/alias admission prevents duplicate mutation;
+all adapters require the receipt for Loaded, with managed runtime-generation
+checks retained. Known failures settle, while cancellation/Unknown keeps explicit
+uncertainty. Loading never becomes gateway readiness. Existing router context
+preparation excludes its own pending projection.
+
+The reopened dialog shows disabled Loading, and the library shows Loading alongside
+Loaded when separate profiles have simultaneous instances. The
+[frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-12--backend-owned-model-loading)
+records backend and frontend RED/GREEN evidence, independent review and repairs,
+feature-gated standalone checks, rendered Electron proof, build verification,
+routing and cost cutoffs. No live model/runtime or service was mutated. Continuous
+external health and broader lifecycle remain FE-I48/49/52; trusted legacy core
+publication APIs are outside the new generic admission guarantee.
+
+M4 and overall remediation remain incomplete. The sole next slice is the bounded
+`is_ollama_running`/`is_torch_running` read-contract inventory and validation.
+Only the unchanged current external pure plan validator and helpers/constants
+ran for both canonical plans; the full standards engine was not run.
+
+All final build, generator/freshness and desktop producer/renderer conformance
+gates passed. The frontend ledger records the frozen current slice
+$30.17642080 plus $1.72230600 carried tail;
+cumulative known API-equivalent estimate $399.25540508 standard /
+$798.51081016 priority scenario. Eight automatic-review records,
+service tiers and shared tool fees remain unpriced, not free. Later reporting
+usage remains uncounted; costs are estimates, not invoices.
+
 ## 2026-09-12 — Single Serving Control And Status Reconciliation
 
 Accepted the follow-up serving-control repair (FE-I56): one Start/Stop button

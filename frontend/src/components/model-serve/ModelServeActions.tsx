@@ -27,6 +27,8 @@ type ModelServeActionsProps = {
   isDialogMode: boolean;
   actionPhase: ModelServingActionPhase;
   controlObservation: ServingControlObservation;
+  isLoading: boolean;
+  isUnavailable: boolean;
   onClose: () => void;
   onServe: () => void;
   onUnload: () => void;
@@ -37,6 +39,8 @@ export function ModelServeActions({
   isDialogMode,
   actionPhase,
   controlObservation,
+  isLoading,
+  isUnavailable,
   onClose,
   onServe,
   onUnload,
@@ -45,12 +49,14 @@ export function ModelServeActions({
   const isLoaded = Boolean(servedStatus) && controlObservation.kind === 'known';
   const label = isLoaded
     ? actionPhase === 'stopping' ? 'Stopping...' : 'Stop serving'
-    : controlObservation.kind === 'unavailable' || actionPhase === 'uncertain'
+    : isLoading
+      ? 'Loading'
+    : isUnavailable || controlObservation.kind === 'unavailable' || actionPhase === 'uncertain'
       ? 'Serving status unavailable'
       : actionPhase === 'starting' ? 'Starting...' : 'Start serving';
   const disabled = isLoaded
     ? actionPhase === 'stopping'
-    : controlObservation.kind === 'unavailable' || actionPhase !== 'idle';
+    : isLoading || isUnavailable || controlObservation.kind === 'unavailable' || actionPhase !== 'idle';
 
   return (
     <div className="mt-4 flex justify-end gap-2">

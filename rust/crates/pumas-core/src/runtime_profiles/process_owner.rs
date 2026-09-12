@@ -2,6 +2,7 @@
 //! authority to adopt or signal a process. Linux leaders remain unreaped until
 //! cooperating group cleanup completes; escaped descendants are not contained.
 
+use super::router_model_operation::{OwnedRouterModelOperation, RouterModelState};
 use super::{RuntimeProfileLaunchSpec, RuntimeProfileOperationGuard};
 use crate::models::{
     LaunchResponse, RuntimeEndpointUrl, RuntimeLifecycleState, RuntimeProfileId,
@@ -58,6 +59,7 @@ struct Session {
     generation: u64,
     model_path: Option<PathBuf>,
     context_size: Option<u32>,
+    router_models: Option<Arc<Mutex<RouterModelState>>>,
     stop: AtomicBool,
     state: Mutex<SessionState>,
 }
@@ -120,6 +122,7 @@ impl RuntimeProfileProcessOwner {
         #[cfg(target_os = "linux")]
         {
             crate::platform::linux_group::ensure_supported().map_err(|e| failure(e.to_string()))?;
+            let router_models = RouterModelState::for_spec(&spec);
             let session = {
                 let mut registry = self
                     .registry
@@ -145,6 +148,7 @@ impl RuntimeProfileProcessOwner {
                     .ok_or_else(|| failure("Runtime generation exhausted"))?;
                 let session = Arc::new(Session {
                     generation: registry.generation,
+                    router_models,
                     model_path,
                     context_size,
                     stop: AtomicBool::new(false),
@@ -266,7 +270,7 @@ impl RuntimeProfileProcessOwner {
         id: &RuntimeProfileId,
         expected: &OwnedRuntimeProfileObservation,
     ) -> Result<bool> {
-        Ok(self.with_listener(id, expected, || ())?.is_some())
+        Ok(self.with_listener(id, expected, |_| ())?.is_some())
     }
 
     pub(crate) fn with_running_session<T>(
@@ -275,15 +279,29 @@ impl RuntimeProfileProcessOwner {
         expected: &OwnedRuntimeProfileObservation,
         publish: impl FnOnce() -> T,
     ) -> Result<T> {
-        self.with_listener(id, expected, publish)?
+        self.with_listener(id, expected, |_| publish())?
             .ok_or_else(|| failure("Runtime endpoint listener is not owned by the admitted child"))
+    }
+
+    pub(crate) fn begin_router_model_operation(
+        self: &Arc<Self>,
+        id: &RuntimeProfileId,
+        expected: &OwnedRuntimeProfileObservation,
+    ) -> Result<OwnedRouterModelOperation> {
+        self.with_listener(id, expected, |session| {
+            let models = session.router_models.clone().ok_or_else(|| {
+                failure("Model operations require an owned llama.cpp router session")
+            })?;
+            OwnedRouterModelOperation::begin(self.clone(), id.clone(), expected.clone(), models)
+        })?
+        .ok_or_else(|| failure("Runtime endpoint listener is not owned by the admitted child"))?
     }
 
     fn with_listener<T>(
         &self,
         id: &RuntimeProfileId,
         expected: &OwnedRuntimeProfileObservation,
-        publish: impl FnOnce() -> T,
+        publish: impl FnOnce(&Session) -> T,
     ) -> Result<Option<T>> {
         let registry = self
             .registry
@@ -329,7 +347,7 @@ impl RuntimeProfileProcessOwner {
             {
                 return Ok(None);
             }
-            Ok(Some(publish()))
+            Ok(Some(publish(session)))
         }
         #[cfg(not(target_os = "linux"))]
         {
@@ -501,6 +519,9 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
         use std::io::Write;
         use std::os::unix::process::CommandExt;
         use std::process::{Command, Stdio};
+        if let Some(models) = &session.router_models {
+            RouterModelState::capture(models)?;
+        }
         // Reserve diagnostic metadata without adopting or replacing existing state.
         if let Some(parent) = config.pid_file.parent() {
             std::fs::create_dir_all(parent).map_err(|e| PumasError::io_with_path(e, parent))?;
@@ -572,6 +593,37 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
         }
         drop(guard);
         loop {
+            if let Some(models) = &session.router_models {
+                RouterModelState::process_pending(models, |receipt| {
+                    if session.stop.load(Ordering::Acquire)
+                        || receipt.generation != session.generation
+                        || receipt.pid != Some(pid)
+                        || receipt.endpoint_url != session.spec.endpoint_url
+                        || receipt.context_size != session.context_size
+                        || receipt.model_path != session.model_path
+                    {
+                        return Err(failure(
+                            "Managed runtime receipt is no longer current and running",
+                        ));
+                    }
+                    if crate::platform::linux_group::observe_exit(pid)
+                        .map_err(|e| failure(e.to_string()))?
+                        .is_some()
+                        || !crate::platform::runtime_listener::owns_listener(
+                            pid,
+                            &session.spec.endpoint_url,
+                        )
+                        .map_err(|e| {
+                            failure(format!("Runtime listener attribution unavailable: {e}"))
+                        })?
+                    {
+                        return Err(failure(
+                            "Runtime endpoint listener is not owned by the admitted child",
+                        ));
+                    }
+                    Ok(())
+                })?;
+            }
             if session.stop.load(Ordering::Acquire) {
                 return Ok(());
             }
@@ -590,6 +642,9 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
     };
     if let Ok(mut state) = session.state.lock() {
         state.status.state = RuntimeLifecycleState::Stopping;
+    }
+    if let Some(models) = &session.router_models {
+        RouterModelState::reject_pending(models);
     }
     let spawned = child.is_some();
     if let Some(process) = child.as_mut() {
@@ -1040,5 +1095,176 @@ mod tests {
             .is_err());
         assert_eq!(serving.status().await.snapshot, successor_snapshot);
         fixture.owner.stop(&id).await.unwrap();
+    }
+    fn router_listener_launch(
+        fixture: &Fixture,
+        address: std::net::SocketAddr,
+    ) -> (
+        BinaryLaunchConfig,
+        RuntimeProfileLaunchSpec,
+        RuntimeProfileOperationGuard,
+    ) {
+        let (config, mut spec, guard) = listener_launch(fixture, address);
+        spec.provider_mode = RuntimeProviderMode::LlamaCppRouter;
+        spec.launch_strategy = RuntimeProfileLaunchStrategy::BinaryProcess(
+            RuntimeProfileBinaryLaunchKind::LlamaCppRouter,
+        );
+        std::fs::write(spec.runtime_dir.join("models-preset.ini"), b"version = 1\n[*]\nload-on-startup = false\n[model/a]\nmodel = /a\n[model/b]\nctx-size = 4096\n").unwrap();
+        (config, spec, guard)
+    }
+
+    fn vacant_address() -> std::net::SocketAddr {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn router_model_operation_serializes_context_and_retains_immutable_receipt() {
+        let fixture = Fixture::new();
+        let (config, spec, guard) = router_listener_launch(&fixture, vacant_address());
+        let id = spec.profile_id.clone();
+        let receipt = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap()
+            .observation
+            .unwrap();
+        wait_for_listener(&receipt).await;
+        let operation = fixture
+            .owner
+            .begin_router_model_operation(&id, &receipt)
+            .unwrap();
+        assert!(fixture
+            .owner
+            .begin_router_model_operation(&id, &receipt)
+            .is_err());
+        drop(operation);
+        let mut operation = fixture
+            .owner
+            .begin_router_model_operation(&id, &receipt)
+            .unwrap();
+        assert!(operation.set_model_context("model/a", 18000).await.unwrap());
+        assert!(!operation.set_model_context("model/a", 18000).await.unwrap());
+        assert_eq!(fixture.owner.snapshot(&id).unwrap().unwrap(), receipt);
+        assert_eq!(std::fs::read_to_string(fixture.root.path().join("models-preset.ini")).unwrap(), "version = 1\n[*]\nload-on-startup = false\n[model/a]\nctx-size = 18000\nmodel = /a\n[model/b]\nctx-size = 4096\n");
+        operation.finish().unwrap();
+        let operation = fixture
+            .owner
+            .begin_router_model_operation(&id, &receipt)
+            .unwrap();
+        // Stop bypasses the model lease and invalidates its completion proof.
+        fixture.owner.stop(&id).await.unwrap();
+        assert!(operation.finish().is_err());
+        let (config, spec, guard) = router_listener_launch(&fixture, vacant_address());
+        let successor = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap()
+            .observation
+            .unwrap();
+        wait_for_listener(&successor).await;
+        assert_ne!(receipt.generation, successor.generation);
+        assert!(fixture
+            .owner
+            .begin_router_model_operation(&id, &receipt)
+            .is_err());
+        fixture
+            .owner
+            .begin_router_model_operation(&id, &successor)
+            .unwrap()
+            .finish()
+            .unwrap();
+        fixture.owner.stop(&id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn router_model_operation_external_edit_leaves_uncertain_until_stop() {
+        let fixture = Fixture::new();
+        let (config, spec, guard) = router_listener_launch(&fixture, vacant_address());
+        let id = spec.profile_id.clone();
+        let receipt = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap()
+            .observation
+            .unwrap();
+        wait_for_listener(&receipt).await;
+        let mut operation = fixture
+            .owner
+            .begin_router_model_operation(&id, &receipt)
+            .unwrap();
+        let path = fixture.root.path().join("models-preset.ini");
+        let edited = b"[model/a]\nctx-size = 17\n";
+        std::fs::write(&path, edited).unwrap();
+        assert!(operation.set_model_context("model/a", 18000).await.is_err());
+        drop(operation);
+        assert!(fixture
+            .owner
+            .begin_router_model_operation(&id, &receipt)
+            .is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), edited);
+        fixture.owner.stop(&id).await.unwrap();
+        let (config, spec, guard) = router_listener_launch(&fixture, vacant_address());
+        let successor = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap()
+            .observation
+            .unwrap();
+        wait_for_listener(&successor).await;
+        fixture
+            .owner
+            .begin_router_model_operation(&id, &successor)
+            .unwrap()
+            .finish()
+            .unwrap();
+        fixture.owner.stop(&id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn router_model_operation_cancelled_method_cannot_release_pending_command() {
+        use std::future::Future;
+        let fixture = Fixture::new();
+        let (config, spec, guard) = router_listener_launch(&fixture, vacant_address());
+        let id = spec.profile_id.clone();
+        let receipt = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap()
+            .observation
+            .unwrap();
+        wait_for_listener(&receipt).await;
+        let (release_command, command_gate) = std::sync::mpsc::channel();
+        {
+            let registry = fixture.owner.registry.lock().unwrap();
+            RouterModelState::set_command_gate(
+                registry.sessions[&id].router_models.as_ref().unwrap(),
+                command_gate,
+            );
+        }
+        let mut operation = fixture
+            .owner
+            .begin_router_model_operation(&id, &receipt)
+            .unwrap();
+        let mut future = Box::pin(operation.set_model_context("model/a", 18000));
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(future.as_mut().poll(&mut context).is_pending());
+        drop(future);
+        assert!(operation.set_model_context("model/a", 4096).await.is_err());
+        assert!(operation.finish().is_err());
+        assert!(fixture
+            .owner
+            .begin_router_model_operation(&id, &receipt)
+            .is_err());
+        let _ = release_command.send(());
+        fixture.owner.stop(&id).await.unwrap();
+        assert!(!fixture.root.path().join("runtime.pid").exists());
     }
 }

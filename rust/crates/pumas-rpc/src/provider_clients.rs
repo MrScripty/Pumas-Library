@@ -60,6 +60,72 @@ impl LlamaCppRouterClient {
         router_catalog_model_ready(&payload, model_id, require_loaded)
     }
 
+    pub(crate) async fn router_context_catalog(
+        &self,
+        endpoint: &str,
+        model_id: &str,
+        reload: bool,
+        deadline: tokio::time::Instant,
+    ) -> Result<RouterContextCatalog, String> {
+        let mut url = reqwest::Url::parse(&llama_cpp_router_models_url(endpoint))
+            .map_err(|_| "llama.cpp router endpoint is invalid")?;
+        if reload {
+            url.query_pairs_mut().append_pair("reload", "1");
+        }
+        let response = self
+            .http
+            .get(url)
+            .timeout(deadline.saturating_duration_since(tokio::time::Instant::now()))
+            .send()
+            .await
+            .map_err(|_| "llama.cpp router context catalog request failed")?;
+        if response.status() != reqwest::StatusCode::OK {
+            return Err("llama.cpp router context catalog returned an unexpected status".into());
+        }
+        let payload = response
+            .json()
+            .await
+            .map_err(|_| "llama.cpp router context catalog returned invalid JSON")?;
+        parse_router_context_catalog(&payload, model_id)
+    }
+
+    pub(crate) async fn verify_router_runtime_context(
+        &self,
+        endpoint: &str,
+        model_id: &str,
+        requested: u32,
+        deadline: tokio::time::Instant,
+    ) -> Result<(), String> {
+        let mut url = reqwest::Url::parse(&format!("{}/props", endpoint.trim_end_matches('/')))
+            .map_err(|_| "llama.cpp router endpoint is invalid")?;
+        url.query_pairs_mut()
+            .append_pair("model", model_id)
+            .append_pair("autoload", "false");
+        let response = self
+            .http
+            .get(url)
+            .timeout(deadline.saturating_duration_since(tokio::time::Instant::now()))
+            .send()
+            .await
+            .map_err(|_| "llama.cpp router runtime context request failed")?;
+        if response.status() != reqwest::StatusCode::OK {
+            return Err("llama.cpp router runtime context returned an unexpected status".into());
+        }
+        let payload: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|_| "llama.cpp router runtime context returned invalid JSON")?;
+        let actual = payload
+            .get("default_generation_settings")
+            .and_then(|settings| settings.get("n_ctx"))
+            .and_then(serde_json::Value::as_u64)
+            .ok_or("llama.cpp router runtime context is missing or invalid")?;
+        if actual < u64::from(requested) {
+            return Err("llama.cpp router runtime context is smaller than requested".into());
+        }
+        Ok(())
+    }
+
     /// Prove readiness of one dedicated server against its owned launch model.
     /// The caller owns the overall startup deadline and process identity checks.
     pub(crate) async fn dedicated_model_ready(
@@ -160,6 +226,89 @@ impl LlamaCppRouterClient {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct RouterContextCatalog {
+    pub context_size: Option<u32>,
+    pub selected_loaded: bool,
+    pub selected_unloaded: bool,
+    pub all_unloaded: bool,
+}
+
+fn parse_router_context_catalog(
+    payload: &serde_json::Value,
+    model_id: &str,
+) -> Result<RouterContextCatalog, String> {
+    let rows = payload
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("llama.cpp router context catalog is missing")?;
+    let mut ids = std::collections::HashSet::new();
+    let mut selected = None;
+    let mut all_unloaded = true;
+    for row in rows {
+        let id = row
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|id| !id.is_empty())
+            .ok_or("llama.cpp router catalog identity is invalid")?;
+        if !ids.insert(id) {
+            return Err("llama.cpp router catalog identity is duplicated".into());
+        }
+        let status = row
+            .get("status")
+            .ok_or("llama.cpp router catalog status is missing")?;
+        let value = router_catalog_status(status, false)?;
+        all_unloaded &= value == "unloaded";
+        if id == model_id {
+            selected = Some((router_context_argument(status.get("args"))?, value));
+        }
+    }
+    let (context_size, status) =
+        selected.ok_or("llama.cpp router context catalog omits selected model")?;
+    Ok(RouterContextCatalog {
+        context_size,
+        selected_loaded: status == "loaded",
+        selected_unloaded: status == "unloaded",
+        all_unloaded,
+    })
+}
+
+fn router_context_argument(args: Option<&serde_json::Value>) -> Result<Option<u32>, String> {
+    let args = args
+        .and_then(serde_json::Value::as_array)
+        .ok_or("llama.cpp router context arguments are missing or invalid")?;
+    let args = args
+        .iter()
+        .map(|arg| {
+            arg.as_str()
+                .ok_or("llama.cpp router context argument is invalid")
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if args.first().is_none_or(|binary| binary.is_empty()) {
+        return Err("llama.cpp router context arguments omit the executable".into());
+    }
+    let mut context = None;
+    let mut index = 0;
+    while index < args.len() {
+        if matches!(args[index], "-c" | "--ctx-size" | "-ctx") {
+            index += 1;
+            let value = args
+                .get(index)
+                .ok_or("llama.cpp router context argument has no value")?;
+            let value = value
+                .parse::<u32>()
+                .ok()
+                .filter(|value| *value > 0)
+                .ok_or("llama.cpp router context argument value is invalid")?;
+            if context.replace(value).is_some() {
+                return Err("llama.cpp router context argument is duplicated".into());
+            }
+        }
+        index += 1;
+    }
+    Ok(context)
+}
+
 fn router_catalog_model_ready(
     payload: &serde_json::Value,
     model_id: &str,
@@ -181,6 +330,13 @@ fn router_catalog_model_ready(
     let status = model
         .get("status")
         .ok_or("llama.cpp router catalog omitted model status")?;
+    match router_catalog_status(status, require_loaded)? {
+        "loaded" => Ok(true),
+        _ => Ok(!require_loaded),
+    }
+}
+
+fn router_catalog_status(status: &serde_json::Value, require_loaded: bool) -> Result<&str, String> {
     match status.get("failed") {
         Some(serde_json::Value::Bool(true))
             if require_loaded
@@ -194,8 +350,7 @@ fn router_catalog_model_ready(
         _ => return Err("llama.cpp router catalog returned invalid model failure status".into()),
     }
     match status.get("value").and_then(serde_json::Value::as_str) {
-        Some("loaded") => Ok(true),
-        Some("unloaded" | "loading" | "sleeping") => Ok(!require_loaded),
+        Some(value @ ("loaded" | "unloaded" | "loading" | "sleeping")) => Ok(value),
         _ => Err("llama.cpp router catalog returned invalid model status".into()),
     }
 }
@@ -234,6 +389,63 @@ fn llama_cpp_router_model_unload_url(endpoint: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn router_context_catalog_requires_complete_unambiguous_status_and_context() {
+        let row = serde_json::json!({"id":"selected", "status":{
+            "value":"unloaded", "failed":true, "args":["llama-server", "-c", "18000"]
+        }});
+        let catalog =
+            parse_router_context_catalog(&serde_json::json!({"data":[row.clone()]}), "selected")
+                .unwrap();
+        assert_eq!(catalog.context_size, Some(18000));
+        assert!(catalog.all_unloaded);
+        for other in [
+            serde_json::json!({"id":"other", "status":{"value":"loaded"}}),
+            serde_json::json!({"id":"other", "status":{"value":"loading"}}),
+            serde_json::json!({"id":"other", "status":{"value":"sleeping"}}),
+        ] {
+            assert!(
+                !parse_router_context_catalog(
+                    &serde_json::json!({"data":[row.clone(),other]}),
+                    "selected"
+                )
+                .unwrap()
+                .all_unloaded
+            );
+        }
+        for other in [
+            serde_json::json!({"id":"other"}),
+            serde_json::json!({"id":42, "status":{"value":"unloaded"}}),
+            serde_json::json!({"id":"other", "status":{"value":"unknown"}}),
+            serde_json::json!({"id":"other", "status":{"value":"unloaded","failed":"false"}}),
+            row.clone(),
+        ] {
+            assert!(parse_router_context_catalog(
+                &serde_json::json!({"data":[row.clone(),other]}),
+                "selected"
+            )
+            .is_err());
+        }
+        for args in [
+            serde_json::json!([]),
+            serde_json::json!([""]),
+            serde_json::json!(["--ctx-size", "18000", "-c", "4096"]),
+            serde_json::json!(["--ctx-size"]),
+            serde_json::json!(["--ctx-size", "invalid"]),
+            serde_json::json!(["--ctx-size", "0"]),
+            serde_json::json!(["--ctx-size", 18000]),
+            serde_json::Value::Null,
+        ] {
+            let mut malformed = row.clone();
+            malformed["status"]["args"] = args;
+            assert!(parse_router_context_catalog(
+                &serde_json::json!({"data":[malformed]}),
+                "selected"
+            )
+            .is_err());
+        }
+    }
 
     #[test]
     fn router_b9090_fresh_unloaded_catalog_allows_explicit_load() {

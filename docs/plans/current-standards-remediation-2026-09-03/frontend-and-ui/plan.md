@@ -10,13 +10,9 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** With fresh explicit approval, install official `b10883+vulkan`
-alongside `b9090+vulkan` in the inactive original launcher root and select it
-through Pumas, preserving model bytes and profile configuration. Automatic
-approval review rejected that live-root install/select because it conflicts with
-the earlier no-runtime-mutation restriction. After that concrete user-approved
-step, resume the bounded `is_ollama_running`/`is_torch_running` contract slice.
-The remaining M4 and overall remediation are not complete.
+**Next slice:** Resume the bounded `is_ollama_running`/`is_torch_running`
+producer, RPC, generated desktop and actual-consumer read-contract
+inventory/validation. The remaining M4 and overall remediation are not complete.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -71,6 +67,39 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Profile-First Router Context And Loaded-State Repair
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-12--profile-first-router-context-and-loaded-state-repair).
+Operation: reproduce the actual `Start runtime` then `Start serving` composition
+with the exact selected profile/model and context `18000`. A prestarted router
+has no model-specific context. It must be reusable for a later model request;
+the router CLI must not claim a global context that competes with the per-model
+preset, and the requested context must be written at the model boundary before
+the single load request. Context identity must still reject a genuinely
+incompatible owned session, with no automatic stop, relaunch or mutation retry.
+
+Independently, only a serving-status row whose `load_state` is exactly `loaded`
+may project `servedStatus` or a Loaded notice. Pending, failed and absent rows
+clear a stale Loaded-origin notice from either action success or status
+observation without replacing current validation, load or transport errors.
+This generic renderer gap is not claimed as the cause of the
+current report: the captured live snapshot had no served-model rows and recorded
+the exact context-mismatch failure. Acceptance requires the actual profile-first
+route, effective context, GPU/model process evidence, inference, unload and owned
+cleanup; direct-serve fixture evidence alone is insufficient.
+
+The exact profile-first proof passed with official `b10883+vulkan`, the copied
+Huihui Qwen3.8 27B model, GPU `-1`, and requested context `18000`. The
+prestarted router retained PID `87374`, kept global CLI context unset, applied
+the request through its model preset, and reported effective context `18176`.
+The owned model process used 16,762 MiB of GPU memory, and gateway inference
+returned HTTP 200, `finish_reason:stop`, and exact answer
+`389 screws remain.`. Unload and scoped
+stop removed both owned PIDs and closed the listener. FE-I54 and FE-I55 record
+the resolved backend-composition and renderer-projection defects; broader
+lifecycle/readiness findings remain open.
 
 ## Serving Draft And Current Router Catalog Repair
 

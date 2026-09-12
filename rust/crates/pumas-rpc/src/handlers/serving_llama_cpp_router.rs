@@ -104,9 +104,10 @@ pub(super) async fn serve_llama_cpp_router_model(
             }),
         None => Ok(true),
     };
+    let preparation_deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     let readiness = RouterReadiness {
         model_id: &router_model_id,
-        deadline: tokio::time::Instant::now() + Duration::from_secs(60),
+        deadline: preparation_deadline,
         require_loaded: false,
     };
     if let Err(error) = router_endpoint_after_launch(
@@ -121,13 +122,93 @@ pub(super) async fn serve_llama_cpp_router_model(
     {
         return non_critical_failure_response(state, error).await;
     }
+    let mut operation = match &owned {
+        Some(owned) => match state
+            .api
+            .begin_owned_router_model_operation(&request.config.profile_id, owned)
+        {
+            Ok(operation) => Some(operation),
+            Err(error) => {
+                return non_critical_failure_response(
+                    state,
+                    serving_error(
+                        ModelServeErrorCode::ProviderLoadFailed,
+                        router_operation_admission_message(&error),
+                        &request,
+                    ),
+                )
+                .await
+            }
+        },
+        None => None,
+    };
+    if let Some(context) = request.config.context_size {
+        let preparation = prepare_router_context(
+            &state.llama_cpp_router_client,
+            endpoint.as_str(),
+            context,
+            RouterReadiness {
+                model_id: &router_model_id,
+                deadline: preparation_deadline,
+                require_loaded: false,
+            },
+            ownership_matches,
+            owns_listener,
+            || async {
+                let operation = operation
+                    .as_mut()
+                    .ok_or("external llama.cpp router context cannot be changed")?;
+                if owned
+                    .as_ref()
+                    .is_some_and(|owned| owned.context_size.is_some())
+                {
+                    return Err("llama.cpp router process has a fixed context override".into());
+                }
+                let snapshot = current_serving_snapshot(state).await
+                    .map_err(|_| "llama.cpp router serving state could not be observed")?;
+                if snapshot.served_models.iter().any(|model| model.profile_id == request.config.profile_id) {
+                    return Err("Clear or stop the existing llama.cpp serving session before changing context size".into());
+                }
+                operation
+                    .set_model_context(&router_model_id, context)
+                    .await
+                    .map_err(|_| {
+                        "llama.cpp router model context could not be prepared".to_string()
+                    })?;
+                operation.mark_mutating().map_err(|_| "llama.cpp router ownership changed before reload")?;
+                Ok(())
+            },
+        )
+        .await;
+        if let Err(message) = preparation {
+            return non_critical_failure_response(
+                state,
+                serving_error(ModelServeErrorCode::ProviderLoadFailed, message, &request),
+            )
+            .await;
+        }
+    }
+    if let Some(operation) = operation.as_mut() {
+        if operation.mark_mutating().is_err() {
+            return non_critical_failure_response(
+                state,
+                serving_error(
+                    ModelServeErrorCode::ProviderLoadFailed,
+                    "llama.cpp router ownership changed before model load",
+                    &request,
+                ),
+            )
+            .await;
+        }
+    }
+    let load_deadline = tokio::time::Instant::now() + Duration::from_secs(180);
     if let Err(error) = load_router_model(
         &state.llama_cpp_router_client,
         endpoint.as_str(),
         &request,
         RouterReadiness {
             model_id: &router_model_id,
-            deadline: tokio::time::Instant::now() + Duration::from_secs(180),
+            deadline: load_deadline,
             require_loaded: true,
         },
         ownership_matches,
@@ -136,6 +217,52 @@ pub(super) async fn serve_llama_cpp_router_model(
     .await
     {
         return non_critical_failure_response(state, error).await;
+    }
+    if let Some(context) = request.config.context_size {
+        let proof = async {
+            if !ownership_matches()? || !owns_listener()? {
+                return Err(
+                    "llama.cpp router ownership changed before context verification".to_string(),
+                );
+            }
+            let catalog = state
+                .llama_cpp_router_client
+                .router_context_catalog(endpoint.as_str(), &router_model_id, false, load_deadline)
+                .await?;
+            if !ownership_matches()? || !owns_listener()? {
+                return Err(
+                    "llama.cpp router ownership changed during context verification".into(),
+                );
+            }
+            if !catalog.selected_loaded || catalog.context_size != Some(context) {
+                return Err(
+                    "llama.cpp router loaded model context does not match the request".into(),
+                );
+            }
+            state
+                .llama_cpp_router_client
+                .verify_router_runtime_context(
+                    endpoint.as_str(),
+                    &router_model_id,
+                    context,
+                    load_deadline,
+                )
+                .await?;
+            if !ownership_matches()? || !owns_listener()? {
+                return Err(
+                    "llama.cpp router ownership changed during runtime context verification".into(),
+                );
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(message) = proof {
+            return non_critical_failure_response(
+                state,
+                serving_error(ModelServeErrorCode::ProviderLoadFailed, message, &request),
+            )
+            .await;
+        }
     }
     let gateway_alias = effective_gateway_alias_from_config(&request);
     let status = ServedModelStatus {
@@ -178,6 +305,9 @@ pub(super) async fn serve_llama_cpp_router_model(
             .await
         }
     };
+    if let Some(operation) = operation {
+        operation.finish()?;
+    }
     decorate_serving_snapshot(state, &mut snapshot);
 
     Ok(serde_json::to_value(ServeModelResponse {
@@ -189,6 +319,72 @@ pub(super) async fn serve_llama_cpp_router_model(
         load_error: None,
         snapshot: Some(snapshot),
     })?)
+}
+
+fn router_operation_admission_message(error: &pumas_library::PumasError) -> &'static str {
+    match error {
+        pumas_library::PumasError::Other(message)
+            if message
+                == "Router model state is uncertain; explicitly stop and restart the profile" =>
+        {
+            "llama.cpp router model state is uncertain; explicitly stop and restart the profile"
+        }
+        pumas_library::PumasError::Other(message)
+            if message == "Router model operation is busy" =>
+        {
+            "llama.cpp router model operation is busy"
+        }
+        _ => "llama.cpp router model operation ownership is unavailable",
+    }
+}
+
+async fn prepare_router_context<F, Fut>(
+    client: &crate::provider_clients::LlamaCppRouterClient,
+    endpoint: &str,
+    context: u32,
+    readiness: RouterReadiness<'_>,
+    mut ownership_matches: impl FnMut() -> Result<bool, String>,
+    mut owns_listener: impl FnMut() -> Result<bool, String>,
+    set_context: F,
+) -> Result<(), String>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
+    let model_id = readiness.model_id;
+    let deadline = readiness.deadline;
+    if !ownership_matches()? || !owns_listener()? {
+        return Err("llama.cpp router ownership changed before context preparation".into());
+    }
+    let catalog = client
+        .router_context_catalog(endpoint, model_id, false, deadline)
+        .await?;
+    if !ownership_matches()? || !owns_listener()? {
+        return Err("llama.cpp router ownership changed during context preparation".into());
+    }
+    if catalog.context_size == Some(context) {
+        return Ok(());
+    }
+    if !catalog.all_unloaded {
+        return Err("Unload all llama.cpp router models before changing model context size".into());
+    }
+    tokio::time::timeout_at(deadline, set_context())
+        .await
+        .map_err(|_| "llama.cpp router context preparation exceeded its deadline")??;
+    if !ownership_matches()? || !owns_listener()? {
+        return Err("llama.cpp router ownership changed before preset reload".into());
+    }
+    let catalog = client
+        .router_context_catalog(endpoint, model_id, true, deadline)
+        .await?;
+    if !ownership_matches()? || !owns_listener()? {
+        return Err("llama.cpp router ownership changed during preset reload".into());
+    }
+    if !catalog.all_unloaded || !catalog.selected_unloaded || catalog.context_size != Some(context)
+    {
+        return Err("llama.cpp router reloaded model context does not match the request".into());
+    }
+    Ok(())
 }
 
 struct RouterReadiness<'a> {
@@ -259,7 +455,7 @@ async fn router_endpoint_after_launch(
                         deadline,
                     )
                     .await?;
-                if !ownership_matches()? {
+                if !ownership_matches()? || !owns_listener()? {
                     return Err(
                         "llama.cpp router owned process exited or changed during startup"
                             .to_string(),
@@ -313,6 +509,51 @@ pub(super) async fn unserve_llama_cpp_router_model(
             )?));
         }
     };
+    let owned = state.api.observe_owned_runtime_profile(profile_id)?;
+    let managed = state
+        .api
+        .get_runtime_profiles_snapshot()
+        .await?
+        .snapshot
+        .profiles
+        .iter()
+        .any(|profile| {
+            &profile.profile_id == profile_id
+                && profile.management_mode == RuntimeManagementMode::Managed
+        });
+    let mut operation = if managed {
+        let owned = owned.as_ref().ok_or_else(|| {
+            pumas_library::PumasError::Other(
+                "llama.cpp router unload has no owned process identity".into(),
+            )
+        })?;
+        if owned.endpoint_url != endpoint {
+            return Err(pumas_library::PumasError::Other(
+                "llama.cpp router unload endpoint differs from the owned listener".into(),
+            ));
+        }
+        match state
+            .api
+            .begin_owned_router_model_operation(profile_id, owned)
+        {
+            Ok(operation) => Some(operation),
+            Err(error) => {
+                return Ok(Some(serde_json::to_value(
+                    pumas_library::models::UnserveModelResponse {
+                        success: true,
+                        error: Some(router_operation_admission_message(&error).into()),
+                        unloaded: false,
+                        snapshot: Some(current_serving_snapshot(state).await?),
+                    },
+                )?))
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(operation) = operation.as_mut() {
+        operation.mark_mutating()?;
+    }
     let router_model_id = request_model_id.trim();
     if state
         .llama_cpp_router_client
@@ -330,15 +571,49 @@ pub(super) async fn unserve_llama_cpp_router_model(
             },
         )?));
     }
-    let mut snapshot = state
-        .api
-        .record_unserved_model(
-            request_model_id,
-            Some(RuntimeProviderId::LlamaCpp),
-            Some(profile_id),
-            Some(model_alias),
-        )
-        .await?;
+    if let Some(owned) = owned.as_ref().filter(|_| managed) {
+        if state
+            .api
+            .observe_owned_runtime_profile(profile_id)?
+            .as_ref()
+            != Some(owned)
+            || !state
+                .api
+                .owned_runtime_profile_has_listener(profile_id, owned)?
+        {
+            return Err(pumas_library::PumasError::Other(
+                "llama.cpp router ownership changed during unload".into(),
+            ));
+        }
+    }
+    let mut snapshot = match owned.as_ref().filter(|_| managed) {
+        Some(owned) => {
+            state
+                .api
+                .record_unserved_model_for_owned_profile(
+                    request_model_id,
+                    RuntimeProviderId::LlamaCpp,
+                    profile_id,
+                    model_alias,
+                    owned,
+                )
+                .await?
+        }
+        None => {
+            state
+                .api
+                .record_unserved_model(
+                    request_model_id,
+                    Some(RuntimeProviderId::LlamaCpp),
+                    Some(profile_id),
+                    Some(model_alias),
+                )
+                .await?
+        }
+    };
+    if let Some(operation) = operation {
+        operation.finish()?;
+    }
     decorate_serving_snapshot(state, &mut snapshot);
     Ok(Some(serde_json::to_value(
         pumas_library::models::UnserveModelResponse {
@@ -429,7 +704,10 @@ where
             "llama.cpp router owned process is not running at the selected endpoint",
         ));
     }
-    if request.config.context_size.is_some() && request.config.context_size != owned.context_size {
+    if owned.context_size.is_some()
+        && request.config.context_size.is_some()
+        && request.config.context_size != owned.context_size
+    {
         return Err(failure(
             "Stop the llama.cpp router profile before changing its context size",
         ));
@@ -472,12 +750,12 @@ async fn launch_llama_cpp_router_profile(
 }
 
 fn llama_cpp_router_launch_overrides(
-    request: &ServeModelRequest,
+    _request: &ServeModelRequest,
     profile: &RuntimeProfileConfig,
 ) -> RuntimeProfileLaunchOverrides {
     RuntimeProfileLaunchOverrides {
         device: Some(profile.device.clone()),
-        context_size: request.config.context_size,
+        context_size: None,
     }
 }
 

@@ -15,6 +15,11 @@ const PROVIDER_LOAD_FAILED_ERROR = {
   message: 'The runtime did not report the model as loaded.',
 } as const;
 const EMPTY_SERVED_MODELS: ServedModelStatus[] = [];
+type ServingMessage = { source: 'action' | 'loaded'; text: string };
+
+function actionMessage(text: string): ServingMessage {
+  return { source: 'action', text };
+}
 
 function getValidationErrorFallback(modelId: string, profileId: string): ModelServeError {
   return {
@@ -121,48 +126,52 @@ export function useModelServingActions(
   servedModels: ServedModelStatus[] = EMPTY_SERVED_MODELS
 ) {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<ServingMessage | null>(null);
   const [serveError, setServeError] = useState<ModelServeError | null>(null);
   const [servedStatus, setServedStatus] = useState<ServedModelStatus | null>(null);
 
   useEffect(() => {
-    const status = servedModels.find((servedModel) =>
-      matchesServingTarget(servedModel, modelId, target)
+    const status = servedModels.find(
+      (servedModel) =>
+        servedModel.load_state === 'loaded' &&
+        matchesServingTarget(servedModel, modelId, target)
     );
     setServedStatus(status ?? null);
     if (status) {
-      setMessage(`Loaded on ${status.profile_id}`);
+      setMessage({ source: 'loaded', text: `Loaded on ${status.profile_id}` });
+    } else {
+      setMessage((current) => (current?.source === 'loaded' ? null : current));
     }
   }, [modelId, servedModels, target.modelAlias, target.profileId]);
 
   const serveModel = useCallback(
     async (config: ModelServingConfig | null) => {
       if (!config) {
-        setMessage('Select a runtime target before serving.');
+        setMessage(actionMessage('Select a runtime target before serving.'));
         return;
       }
 
       const api = getElectronAPI();
       if (!api) {
-        setMessage('Serving API is not available in this app session.');
+        setMessage(actionMessage('Serving API is not available in this app session.'));
         return;
       }
 
       setIsSubmitting(true);
-      setMessage('Starting serving...');
+      setMessage(actionMessage('Starting serving...'));
       setServeError(null);
 
       try {
         const result = await serveModelWithValidation({ api, config, modelId });
         if (result.kind === 'missing_config') {
-          setMessage(result.message);
+          setMessage(actionMessage(result.message));
           return;
         }
         if (
           result.kind === 'validation_request_failed' ||
           result.kind === 'serve_request_failed'
         ) {
-          setMessage(result.message);
+          setMessage(actionMessage(result.message));
           return;
         }
         if (result.kind === 'validation_failed' || result.kind === 'load_failed') {
@@ -171,9 +180,11 @@ export function useModelServingActions(
           return;
         }
         setServedStatus(result.status);
-        setMessage('Loaded');
+        setMessage({ source: 'loaded', text: 'Loaded' });
       } catch (caught) {
-        setMessage(caught instanceof Error ? caught.message : 'Serving request failed');
+        setMessage(
+          actionMessage(caught instanceof Error ? caught.message : 'Serving request failed')
+        );
       } finally {
         setIsSubmitting(false);
       }
@@ -200,12 +211,12 @@ export function useModelServingActions(
       });
       if (response.unloaded) {
         setServedStatus(null);
-        setMessage('Unloaded');
+        setMessage(actionMessage('Unloaded'));
       } else {
-        setMessage(response.error ?? 'Model was not loaded');
+        setMessage(actionMessage(response.error ?? 'Model was not loaded'));
       }
     } catch (caught) {
-      setMessage(caught instanceof Error ? caught.message : 'Unload request failed');
+      setMessage(actionMessage(caught instanceof Error ? caught.message : 'Unload request failed'));
     } finally {
       setIsSubmitting(false);
     }
@@ -213,7 +224,7 @@ export function useModelServingActions(
 
   return {
     isSubmitting,
-    message,
+    message: message?.text ?? null,
     serveError,
     servedStatus,
     serveModel,

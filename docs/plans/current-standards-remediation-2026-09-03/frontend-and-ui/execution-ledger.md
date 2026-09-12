@@ -1,5 +1,135 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-12 — Profile-First Router Context And Loaded-State Repair
+
+Accepted the exact user-reported composition without closing M4: start the
+managed llama.cpp router before choosing a model, then serve that model with
+context `18000`. The previous global receipt comparison treated the prestarted
+router's unset context as incompatible and rejected before its load POST. The
+router now keeps CLI context unset, serializes model operations through its
+retained same-generation worker, writes model-specific context to
+`models-preset.ini`, performs one admitted reload, and verifies exact model
+arguments and properties before Loaded publication. Conflicting generations and
+busy/uncertain operations retain explicit errors; cancellation never causes an
+automatic restart, context reduction, or mutation retry. Dedicated mode is
+unchanged. FE-I54 is resolved for this managed b10883 profile-first boundary;
+FE-I48 and FE-I49 remain open outside the accepted subset.
+
+Preset rewrite/reload admission requires every visible router catalog row to be
+unloaded and zero Pumas-published rows for that profile. An exact matching
+model-context request skips rewrite/reload. Only per-model file edits run on the
+retained worker while its operation lease serializes HTTP mutation; an armed
+uncertain or cancelled operation blocks further mutations until explicit Stop
+and restart create a new generation. Independently mutating clients, caches and files remain
+outside this atomic exclusion.
+
+The renderer separately projected any matching loading/failed row as Loaded and
+could retain a successful Loaded notice after a later authoritative empty or
+failed snapshot. Both mutation-success and observed-snapshot Loaded notices now
+carry an explicit Loaded origin. Only exact `load_state:loaded` projects current
+readiness; authoritative absence/failure clears that origin while preserving a
+current validation, load, or transport error. FE-I55 is resolved. This generic
+projection defect is not claimed as the cause of the user's report: the captured
+normal-root snapshot contained no served rows and recorded the exact profile-
+first context mismatch.
+
+The deciding isolated proof used the release build, official `b10883+vulkan`,
+the copied Huihui Qwen3.8 27B model, GPU `-1`, and requested context `18000`.
+`launch_runtime_profile` ran first with `auto_load:false`; the later one
+`serve_model` call retained router PID `87374`. Its argv before and after serving
+used the model preset and `--n-gpu-layers -1` with no global context argument.
+The exact URL-encoded `/props?model=...&autoload=false` observation reported
+per-sequence context `18176`. The owned model PID `87409` was correlated in 19
+GPU samples and used 16,762 MiB of GPU memory. Pumas gateway inference returned HTTP 200,
+`finish_reason:stop`, exact text `389 screws remain.`, 96 prompt plus 72 completion
+tokens, and 26.98 tokens/s. One outer launch, serve, unload, and scoped stop each
+completed; unload/stop returned true, both owned PIDs disappeared, and the
+listener closed. The copied text model was exercised; projector/multimodal use
+was not. The user's normal-root process and model/profile configuration were not
+mutated by this proof. Durable ignored evidence is under
+`tmp/llamacpp-hosting-20260909/evidence/profile-first-18k/`.
+
+The user had already installed the current runtime in the normal root before
+this slice, superseding the prior approval-blocked installation step. That
+running older application was neither restarted nor used for this repaired
+proof; it must be closed and reopened to consume the new backend and frontend
+artifacts.
+
+The RPC shutdown request returned its existing `shutting_down` result after the
+owned model/router were clean, but the server process did not exit within the
+harness's 15-second wait and was terminated with SIGTERM. The RPC method does not
+signal the main Ctrl-C-owned server shutdown path. This is retained under the
+open FE-I48 lifecycle boundary; natural RPC exit is not claimed and no shutdown
+algorithm was added to this slice.
+
+Verification passes: 18 focused router RPC tests, seven model-operation custody
+tests, and one owned-unload publication regression; the full no-default RPC gate
+passes 151 unit and 13 integration tests with ten existing ignores. Strict RPC
+all-target Clippy passes with all features and with no default features, warnings
+denied; full Rust formatting passes. The focused renderer hook passes 8/8,
+TypeScript and affected ESLint pass, and both frontend build modes pass. The final
+canonical release build compiled the backend, 2,385-module frontend and Electron
+bundle. Actual bundled-preload/main IPC passes 168/169 tests with one explicit
+sandbox skip; generator tests pass 8/8 and freshness passes; producer conformance
+passes 39/39 and renderer conformance passes 48/48. An initial no-default name
+filter selected zero feature-gated tests and was replaced by the non-vacuous full
+suite.
+
+Independent review replaced an initial synchronous filesystem/guard proposal
+with the retained worker command required by the concurrency standard before
+verification. It added cancellation-safe pending ownership, moved oneshot
+notification outside the lock, replaced a scheduling-dependent test oracle,
+preserved actionable busy/uncertain reasons, shared status validation, guarded
+Unload publication and endpoint identity, rejected empty model argv before
+mutation, and unified both Loaded notice sources. No intermediate runtime effect
+occurred. A read-only diagnostic first used unavailable `python`, then succeeded
+with `python3`; the model runtime never executed Python. Sandboxed `nvidia-smi`
+reported driver access unavailable while the same approved read-only host query
+showed the RTX 5090 and sufficient memory; the isolated proof used approved host
+GPU access. The proof harness correctly distinguished outer RPC request counts
+from internal model-load calls.
+
+Routing and cost checkpoint: the prior `/tmp` checkpoint JSON was lost in an
+environment rollover, so `/tmp/pumas-profile-first-costs.py` reconstructed the
+committed $291.3336964 standard checkpoint from its exact recorded response
+cutoffs, scanned Sep. 9–12 rollout records, and deduplicated 542 response IDs.
+The carried reporting tail is $1.9993216: root Astra medium $0.709690, design
+Astra medium $0.407318, and integration Sol low $0.8823136. The current slice is
+$50.77839076: root Astra medium $15.372838; design Astra medium $12.279216;
+integration Sol low $10.4259304; RPC Astra low $7.833644; core Astra low
+$4.823088; and Luna max inventory $0.04367436. Newly checkpointed cost is
+$52.77771236, bringing the cumulative API-equivalent estimate to $344.11140876
+standard and $688.22281752 under the separate 2x priority scenario. No recorded
+request crossed 272,000 input tokens; recorded cache writes were zero. Requested
+and observed service tiers were unrecorded, and tool fees/shared costs remain
+unknown rather than free. These are estimates under the documented model-price
+assumptions, not invoices.
+
+Final cutoffs are: root
+`resp_04a060a0b34b4096016aa57786666487d0ba128d02f4196979` at
+`2026-09-12T16:02:20.627Z`; design
+`resp_00d2061a8f0dbbb1016aa57786661487d0bfec7d6e29e4501f` at
+`2026-09-12T16:02:20.240Z`; integration
+`resp_09205224c8e19910016aa57785fdbc87d0b96a8f8873278b27` at
+`2026-09-12T16:02:21.281Z`; RPC
+`resp_0b41ac758a1a0cc0016aa5748d990c87d0adf9b54f1ea3ab34` at
+`2026-09-12T15:49:39.308Z`; core
+`resp_0ebb2361359e2fc0016aa573ea3be487d086ce67e7ecc8ea23` at
+`2026-09-12T15:46:56.182Z`; and inventory
+`resp_01eda5dd1e4769fc016aa20ee2200887d0884dac46ef6082e6` at
+`2026-09-10T01:59:22.726Z`. The root session remained Astra medium rather than
+the requested Sol coordination route. The two fresh Astra-low owners respected
+disjoint core/RPC writes and serialized Cargo, but the initial synchronous
+proposal required redesign before verification. Reusing large root/design/Sol
+contexts and the Sep. 10–12 continuation increased cached-input cost; the focused
+Luna inventory was inexpensive. Different task classes and cache histories make
+these routing conclusions provisional, not a controlled benchmark. Later
+commit/reporting usage remains an uncounted tail.
+
+The sole next slice is the bounded `is_ollama_running`/`is_torch_running`
+producer, RPC, generated desktop and actual-consumer read-contract
+inventory/validation. M4 and the overall remediation remain incomplete.
+
 ## 2026-09-10 — Serving Draft, Current Router And Exact Target Repair
 
 Accepted two independently reproduced source bugs and an exact isolated target

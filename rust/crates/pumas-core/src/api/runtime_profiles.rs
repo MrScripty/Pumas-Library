@@ -17,6 +17,21 @@ pub struct ManagedRuntimeShutdownSummary {
 }
 
 impl PumasApi {
+    /// Reserve one model operation for an exact owned router generation.
+    ///
+    /// Busy or uncertain sessions reject immediately. Dropping an armed operation
+    /// requires an explicit profile stop/restart before another model mutation.
+    pub fn begin_owned_router_model_operation(
+        &self,
+        profile_id: &RuntimeProfileId,
+        expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
+    ) -> Result<crate::runtime_profiles::OwnedRouterModelOperation> {
+        self.primary()
+            .runtime_profile_service
+            .process_owner
+            .begin_router_model_operation(profile_id, expected)
+    }
+
     /// Observe the retained process identity of a managed binary profile.
     pub fn observe_owned_runtime_profile(
         &self,

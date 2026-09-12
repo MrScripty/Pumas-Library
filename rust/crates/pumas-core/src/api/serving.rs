@@ -143,6 +143,26 @@ impl PumasApi {
             .await)
     }
 
+    /// Publish an unload only while the exact admitted process remains current.
+    pub async fn record_unserved_model_for_owned_profile(
+        &self,
+        model_id: &str,
+        provider: crate::models::RuntimeProviderId,
+        profile_id: &RuntimeProfileId,
+        model_alias: &str,
+        expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
+    ) -> Result<ServingStatusSnapshot> {
+        let primary = self.primary();
+        primary
+            .serving_service
+            .record_unloaded_model_for_owned_profile(
+                (model_id, provider, profile_id, model_alias),
+                &primary.runtime_profile_service.process_owner,
+                expected,
+            )
+            .await
+    }
+
     pub async fn find_served_model(
         &self,
         model_id: &str,

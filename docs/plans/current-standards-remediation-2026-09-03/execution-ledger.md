@@ -1,5 +1,39 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-12 — Profile-First Router Context And Loaded-State Repair
+
+The managed llama.cpp router now supports the user's exact profile-first
+composition: an owned router starts with global context unset, then a later model
+serve applies context `18000` through its per-model preset on the retained same-
+generation worker. Operations are serialized, exact arguments/properties guard
+Loaded publication, and cancellation or mismatch never triggers automatic
+restart or context reduction. FE-I54 is resolved for this managed b10883 subset;
+broader FE-I48/FE-I49 lifecycle and readiness work remains open.
+
+The separate renderer repair projects Loaded only from an exact loaded row and
+clears stale Loaded-origin notices on authoritative absence/failure while
+preserving current action errors. FE-I55 is resolved without claiming that this
+generic defect caused the captured user report, whose normal-root snapshot was
+empty and carried the exact context-mismatch error.
+
+The final isolated release proof started the router before serving the copied
+Huihui Qwen3.8 27B model on official `b10883+vulkan`, GPU `-1`, context `18000`.
+It retained one router PID, omitted global CLI context, reported effective context
+`18176`, correlated the owned model process at 16,762 MiB, and returned HTTP 200,
+`finish_reason:stop`, and exact `389 screws remain.` through the Pumas gateway.
+Unload and scoped stop removed both owned PIDs and the listener. The user's normal
+root was not mutated; its user-installed current runtime supersedes the earlier
+approval-blocked install step, but the running older app was not restarted to
+consume this repair. The frontend ledger owns exact proof, tests, review repairs,
+costs, and the acknowledged RPC-process shutdown limitation.
+
+Focused custody/RPC and renderer tests, full no-default RPC, strict RPC lint in
+both required feature configurations, Rust formatting, both frontend builds,
+TypeScript/lint, final release build, actual Electron IPC/preload tests, generator
+freshness/tests and producer/renderer conformance all pass. The sole next slice
+is `is_ollama_running`/`is_torch_running` read-contract inventory/validation; M4
+and overall remediation remain incomplete.
+
 ## 2026-09-10 — Serving Draft, Current Router And Exact Target Repair
 
 Two source defects are accepted independently. The serving dialog now owns one

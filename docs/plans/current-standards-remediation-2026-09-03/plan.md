@@ -247,13 +247,10 @@ Phase custody, idle handoff, canonical admission validation, and busy consumer
 behavior pass Linux gates. The existing desktop diagnostic enum and generated
 validators migrated together; no persistence schema or live data changed.
 
-**Next slice:** Pending fresh explicit approval, install and select official
-`b10883+vulkan` in the inactive original launcher root while preserving the
-existing `b9090` install, model bytes and profile configuration. Automatic review
-rejected that live-root mutation under the earlier prohibition. The two source
-repairs and exact isolated 27B/GPU/context-18000 proof are accepted. After the
-approved update, resume the bounded `is_ollama_running`/`is_torch_running`
-read-contract slice.
+**Next slice:** Resume the bounded `is_ollama_running`/`is_torch_running`
+producer, RPC, generated desktop and actual-consumer read-contract
+inventory/validation. The profile-first router/context repair is accepted; M4
+and the overall remediation remain incomplete.
 The Linux CPU dedicated-profile hosting checkpoint remains accepted without
 closing remaining M4 or overall remediation, following the accepted runtime-stop
 response and the [standalone backend/link-health

@@ -6,6 +6,9 @@ mod launch_specs;
 mod launch_strategy;
 #[path = "runtime_profiles/process_owner.rs"]
 mod process_owner;
+#[path = "runtime_profiles/router_model_operation.rs"]
+mod router_model_operation;
+pub use router_model_operation::OwnedRouterModelOperation;
 #[path = "runtime_profiles/route_config.rs"]
 mod route_config;
 pub(crate) use process_owner::RuntimeProfileProcessOwner;

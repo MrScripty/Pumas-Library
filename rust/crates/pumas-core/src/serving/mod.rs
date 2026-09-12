@@ -163,7 +163,52 @@ impl ServingService {
         profile_id: Option<&RuntimeProfileId>,
         model_alias: Option<&str>,
     ) -> ServingStatusSnapshot {
-        let mut snapshot = self.snapshot.write().await;
+        let (snapshot, event) = {
+            let mut snapshot = self.snapshot.write().await;
+            let event = Self::record_unloaded_model_locked(
+                &mut snapshot,
+                model_id,
+                provider,
+                profile_id,
+                model_alias,
+            );
+            (snapshot.clone(), event)
+        };
+        self.publish_event(event);
+        snapshot
+    }
+
+    pub(crate) async fn record_unloaded_model_for_owned_profile(
+        &self,
+        selection: (&str, RuntimeProviderId, &RuntimeProfileId, &str),
+        owner: &crate::runtime_profiles::RuntimeProfileProcessOwner,
+        expected: &crate::runtime_profiles::OwnedRuntimeProfileObservation,
+    ) -> crate::Result<ServingStatusSnapshot> {
+        let (model_id, provider, profile_id, model_alias) = selection;
+        let (snapshot, event) = {
+            let mut snapshot = self.snapshot.write().await;
+            let event = owner.with_running_session(profile_id, expected, || {
+                Self::record_unloaded_model_locked(
+                    &mut snapshot,
+                    model_id,
+                    Some(provider),
+                    Some(profile_id),
+                    Some(model_alias),
+                )
+            })?;
+            (snapshot.clone(), event)
+        };
+        self.publish_event(event);
+        Ok(snapshot)
+    }
+
+    fn record_unloaded_model_locked(
+        snapshot: &mut ServingStatusSnapshot,
+        model_id: &str,
+        provider: Option<RuntimeProviderId>,
+        profile_id: Option<&RuntimeProfileId>,
+        model_alias: Option<&str>,
+    ) -> ServingStatusEvent {
         snapshot.served_models.retain(|status| {
             if status.model_id != model_id {
                 return true;
@@ -189,16 +234,14 @@ impl ServingService {
         if snapshot.served_models.is_empty() {
             snapshot.endpoint = ServingEndpointStatus::not_configured();
         }
-        bump_snapshot_cursor(&mut snapshot);
-        let event = serving_status_event(
+        bump_snapshot_cursor(snapshot);
+        serving_status_event(
             snapshot.cursor.clone(),
             ServingStatusEventKind::ModelUnloaded,
             Some(model_id.to_string()),
             profile_id.cloned(),
             provider,
-        );
-        self.publish_event(event);
-        snapshot.clone()
+        )
     }
 
     pub async fn record_profile_unavailable(
@@ -648,6 +691,41 @@ mod tests {
             loaded_at: None,
             last_error: None,
         }
+    }
+
+    #[tokio::test]
+    async fn owned_unload_without_current_receipt_preserves_published_model() {
+        let service = service();
+        let status = loaded_status("models/example", "router", Some("example"));
+        let profile_id = status.profile_id.clone();
+        let before = service.record_loaded_model(status).await;
+        let mut updates = service.subscribe_updates();
+        let owner = crate::runtime_profiles::RuntimeProfileProcessOwner::default();
+        let receipt = crate::runtime_profiles::OwnedRuntimeProfileObservation {
+            generation: 1,
+            pid: Some(42),
+            state: RuntimeLifecycleState::Running,
+            endpoint_url: crate::models::RuntimeEndpointUrl::parse("http://127.0.0.1:1").unwrap(),
+            model_path: None,
+            context_size: None,
+        };
+        assert!(service
+            .record_unloaded_model_for_owned_profile(
+                (
+                    "models/example",
+                    RuntimeProviderId::LlamaCpp,
+                    &profile_id,
+                    "example"
+                ),
+                &owner,
+                &receipt,
+            )
+            .await
+            .is_err());
+        let after = service.status().await.snapshot;
+        assert_eq!(after.cursor, before.cursor);
+        assert_eq!(after.served_models, before.served_models);
+        assert!(updates.try_recv().is_err());
     }
 
     #[tokio::test]

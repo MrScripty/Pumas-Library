@@ -5,7 +5,9 @@ import type {
   RuntimeProfileStatus,
 } from '../../types/api-runtime-profiles';
 import type { ModelInfo } from '../../types/apps';
-import type { ModelServeError, ServedModelStatus } from '../../types/api-serving';
+import type { ModelServeError } from '../../types/api-serving';
+import type { ServingControlObservation, ServingControlStatus } from '../../hooks/useServingStatus';
+import type { ModelServingActionPhase } from './useModelServingActions';
 import { ModelServeActions, ModelServeFeedback } from './ModelServeActions';
 import { ModelServeForm } from './ModelServeForm';
 import { ModelServeHeader } from './ModelServeHeader';
@@ -36,8 +38,9 @@ interface ModelServeDialogContentProps {
   controls: ModelServeControls;
   serveError: ModelServeError | null;
   message: string | null;
-  isSubmitting: boolean;
-  servedStatus: ServedModelStatus | null;
+  actionPhase: ModelServingActionPhase;
+  controlObservation: ServingControlObservation;
+  servedStatus: ServingControlStatus | null;
   onServe: () => void;
   onUnload: () => void;
 }
@@ -67,7 +70,8 @@ export function ModelServeDialogContent({
   controls,
   serveError,
   message,
-  isSubmitting,
+  actionPhase,
+  controlObservation,
   servedStatus,
   onServe,
   onUnload,
@@ -109,8 +113,9 @@ export function ModelServeDialogContent({
       />
       <ModelServeFeedback message={message} serveError={serveError} />
       <ModelServeActions
+        actionPhase={actionPhase}
+        controlObservation={controlObservation}
         isDialogMode={isDialogMode}
-        isSubmitting={isSubmitting}
         onClose={onClose}
         onServe={onServe}
         onUnload={onUnload}

@@ -62,7 +62,20 @@ export function ModelServeDialog({
   } | null>(null);
   const profileSelectRef = useRef<HTMLSelectElement | null>(null);
   const isDialogMode = displayMode === 'dialog';
-  const servingActions = useModelServingActions(model.id, { profileId }, servingStatus.servedModels);
+  const selectedProfile = servingProfiles.find((profile) => profile.profile_id === profileId);
+  const servingControlObservation = selectedProfile
+    ? servingStatus.controlObservation
+    : { kind: 'unavailable' as const, message: 'Select a runtime target before serving' };
+  const servingActions = useModelServingActions(
+    model.id,
+    {
+      profileId,
+      provider: selectedProfile?.provider,
+      providerMode: selectedProfile?.provider_mode,
+    },
+    servingStatus.servedModels,
+    servingControlObservation
+  );
 
   useEffect(() => {
     if (profileId) {
@@ -96,7 +109,6 @@ export function ModelServeDialog({
     servingProfiles,
   ]);
 
-  const selectedProfile = servingProfiles.find((profile) => profile.profile_id === profileId);
   const selectedStatus = runtimeProfiles.error
     ? null
     : (runtimeProfiles.statuses.find((status) => status.profile_id === profileId) ?? null);
@@ -169,10 +181,11 @@ export function ModelServeDialog({
     });
   const content = (
     <ModelServeDialogContent
+      actionPhase={servingActions.actionPhase}
+      controlObservation={servingControlObservation}
       controls={controls}
       formState={formState}
       isDialogMode={isDialogMode}
-      isSubmitting={servingActions.isSubmitting}
       message={servingActions.message}
       model={model}
       aliasRequired={aliasRequired}
@@ -187,14 +200,20 @@ export function ModelServeDialog({
         try {
           await servingActions.serveModel(buildConfig());
         } finally {
-          await runtimeProfiles.refreshRuntimeProfiles();
+          await Promise.all([
+            runtimeProfiles.refreshRuntimeProfiles(),
+            servingStatus.refreshServingStatus(),
+          ]);
         }
       }}
       onUnload={async () => {
         try {
           await servingActions.unloadModel();
         } finally {
-          await runtimeProfiles.refreshRuntimeProfiles();
+          await Promise.all([
+            runtimeProfiles.refreshRuntimeProfiles(),
+            servingStatus.refreshServingStatus(),
+          ]);
         }
       }}
       profileId={profileId}

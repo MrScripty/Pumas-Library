@@ -105,6 +105,7 @@ beforeEach(() => {
       endpoint: null,
       cursor: null,
       error: null,
+      controlObservation: { kind: 'known', rows: [] },
       refreshServingStatus: vi.fn(),
     });
     getElectronAPIMock.mockReturnValue({
@@ -558,6 +559,31 @@ describe('ModelServeDialog actions', () => {
 
   it('refreshes profile status after serving and unloading', async () => {
     const refreshRuntimeProfiles = vi.fn();
+    const refreshServingStatus = vi.fn();
+    const loadedStatus: ServedModelStatus = {
+      model_id: 'model-refresh',
+      model_alias: 'model-refresh',
+      provider: 'llama_cpp',
+      profile_id: 'emily-llama',
+      load_state: 'loaded',
+      device_mode: 'gpu',
+      keep_loaded: true,
+    };
+    useServingStatusMock.mockImplementation(() => {
+      const [rows, setRows] = useState<ServedModelStatus[]>([]);
+      refreshServingStatus.mockImplementation(async () => {
+        setRows((current) => current.length === 0 ? [loadedStatus] : []);
+      });
+      return {
+        snapshot: null,
+        servedModels: rows,
+        endpoint: null,
+        cursor: null,
+        error: null,
+        controlObservation: { kind: 'known', rows },
+        refreshServingStatus,
+      };
+    });
     useRuntimeProfilesMock.mockImplementation(() => {
       const [refreshCount, setRefreshCount] = useState(0);
       refreshRuntimeProfiles.mockImplementation(async () => setRefreshCount((count) => count + 1));
@@ -582,15 +608,7 @@ describe('ModelServeDialog actions', () => {
       success: true,
       loaded: true,
       loaded_models_unchanged: false,
-      status: {
-        model_id: 'model-refresh',
-        model_alias: 'model-refresh',
-        provider: 'llama_cpp',
-        profile_id: 'emily-llama',
-        load_state: 'loaded',
-        device_mode: 'gpu',
-        keep_loaded: true,
-      },
+      status: loadedStatus,
       load_error: null,
       snapshot: null,
     });
@@ -637,7 +655,7 @@ describe('ModelServeDialog actions', () => {
     await waitFor(() => expect(screen.getByText('running')).toBeInTheDocument());
     expect(refreshRuntimeProfiles).toHaveBeenCalledTimes(1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Unload' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop serving' }));
     await waitFor(() => expect(screen.getByText('stopped')).toBeInTheDocument());
     expect(unserveModel).toHaveBeenCalledTimes(1);
     expect(refreshRuntimeProfiles).toHaveBeenCalledTimes(2);
@@ -709,7 +727,7 @@ describe('ModelServeDialog actions', () => {
     expect(request?.config.gpu_layers).toBe(32);
     expect(request?.config.context_size).toBe(4096);
     expect(request?.config.keep_loaded).toBe(true);
-    expect(screen.getByText('Loaded')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Starting...' })).toBeDisabled();
   });
 
   it('passes context size for router profile serving', async () => {
@@ -980,6 +998,7 @@ describe('ModelServeDialog actions', () => {
       endpoint: { endpoint_mode: 'pumas_gateway', model_count: 1 },
       cursor: 'serving:1',
       error: null,
+      controlObservation: { kind: 'known', rows: servedModels },
       refreshServingStatus: vi.fn(),
     });
 
@@ -1075,6 +1094,85 @@ describe('ModelServeDialog actions', () => {
     fireEvent.click(startButton);
 
     await waitFor(() => expect(serveModel).toHaveBeenCalledTimes(1));
+  });
+
+  it('switches the single serving control to Stop when status reports the model loaded during a pending start', async () => {
+    let rejectServe: (reason: Error) => void = () => undefined;
+    const serveModel = vi.fn<(_request: ServeModelRequest) => Promise<ServeModelResponse>>()
+      .mockImplementation(
+        () => new Promise((_resolve, reject) => {
+          rejectServe = reject;
+        })
+      );
+    let servedModels: ServedModelStatus[] = [];
+    useServingStatusMock.mockImplementation(() => ({
+      snapshot: null,
+      servedModels,
+      endpoint: null,
+      cursor: null,
+      error: null,
+      controlObservation: { kind: 'known', rows: servedModels },
+      refreshServingStatus: vi.fn(),
+    }));
+    getElectronAPIMock.mockReturnValue({
+      validate_model_serving_config: vi.fn().mockResolvedValue({
+        success: true,
+        valid: true,
+        errors: [],
+        warnings: [],
+      }),
+      serve_model: serveModel,
+      unserve_model: vi.fn(),
+    });
+
+    const { rerender } = render(
+      <ModelServeDialog
+        model={{
+          id: 'model-pending-loaded',
+          name: 'Pending Loaded Model',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start serving' }));
+    expect(await screen.findByRole('button', { name: 'Starting...' })).toBeDisabled();
+    await waitFor(() => expect(serveModel).toHaveBeenCalledTimes(1));
+
+    servedModels = [{
+      model_id: 'model-pending-loaded',
+      model_alias: 'model-pending-loaded',
+      provider: 'llama_cpp',
+      profile_id: 'emily-llama',
+      load_state: 'loaded',
+      device_mode: 'gpu',
+      keep_loaded: true,
+    }];
+    rerender(
+      <ModelServeDialog
+        model={{
+          id: 'model-pending-loaded',
+          name: 'Pending Loaded Model',
+          category: 'local',
+          primaryFormat: 'gguf',
+        }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    const stopButton = await screen.findByRole('button', { name: 'Stop serving' });
+    expect(stopButton).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Start serving' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Starting...' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Unload' })).not.toBeInTheDocument();
+
+    rejectServe(new Error('Serving request timed out'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stop serving' })).toBeEnabled());
+    expect(screen.queryByRole('button', { name: 'Start serving' })).not.toBeInTheDocument();
   });
 
   it('shows feedback when the serving API is unavailable', async () => {

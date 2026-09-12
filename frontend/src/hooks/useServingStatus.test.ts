@@ -91,6 +91,69 @@ describe('useServingStatus', () => {
     setIntervalSpy.mockRestore();
   });
 
+  it('rejects an entire control observation when one served-model row is malformed', async () => {
+    getServingStatusMock.mockResolvedValue({
+      success: true,
+      snapshot: {
+        ...createSnapshot('serving:malformed'),
+        served_models: [{
+          model_id: 'models/chat',
+          profile_id: '',
+          provider: 'llama_cpp',
+          load_state: 'loaded',
+        }],
+      },
+    });
+
+    const { result } = renderHook(() => useServingStatus());
+    await flushMicrotasks();
+
+    expect(result.current.controlObservation).toEqual({
+      kind: 'unavailable',
+      message: 'Serving status response was malformed',
+    });
+  });
+
+  it('does not admit a non-boolean success value as a known empty observation', async () => {
+    getServingStatusMock.mockResolvedValue({
+      success: 'false',
+      snapshot: createSnapshot('serving:not-success'),
+    });
+
+    const { result } = renderHook(() => useServingStatus());
+    await flushMicrotasks();
+
+    expect(result.current.controlObservation.kind).toBe('unavailable');
+  });
+
+  it('keeps a read failure authoritative until a later admitted snapshot completes', async () => {
+    let resolveRefresh: ((value: ReturnType<typeof getServingStatusMock>) => void) | null = null;
+    getServingStatusMock.mockRejectedValueOnce(new Error('status timed out'));
+    const { result } = renderHook(() => useServingStatus());
+    await flushMicrotasks();
+    expect(result.current.controlObservation).toEqual({
+      kind: 'unavailable',
+      message: 'status timed out',
+    });
+
+    getServingStatusMock.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveRefresh = resolve;
+      })
+    );
+    let refreshPromise: Promise<void> | undefined;
+    act(() => {
+      refreshPromise = result.current.refreshServingStatus();
+    });
+    expect(result.current.controlObservation.kind).toBe('unavailable');
+
+    await act(async () => {
+      resolveRefresh?.({ success: true, snapshot: createSnapshot('serving:recovered') });
+      await refreshPromise;
+    });
+    expect(result.current.controlObservation).toEqual({ kind: 'known', rows: [] });
+  });
+
   it('refreshes the backend-owned snapshot when a pushed update requires it', async () => {
     getServingStatusMock
       .mockResolvedValueOnce({
@@ -134,6 +197,32 @@ describe('useServingStatus', () => {
     expect(listServingStatusUpdatesSinceMock).not.toHaveBeenCalled();
     expect(setIntervalSpy).not.toHaveBeenCalled();
     setIntervalSpy.mockRestore();
+  });
+
+  it('keeps stream recovery unavailable until a fresh admitted read completes', async () => {
+    const { result } = renderHook(() => useServingStatus());
+    await flushMicrotasks();
+    act(() => {
+      servingStatusErrorCallback?.('Serving-status stream failed');
+    });
+    expect(result.current.controlObservation.kind).toBe('unavailable');
+
+    let finishRead: (value: unknown) => void = () => undefined;
+    getServingStatusMock.mockImplementationOnce(() => new Promise((resolve) => { finishRead = resolve; }));
+    act(() => {
+      servingStatusCallback?.({
+        cursor: 'serving:1',
+        events: [],
+        stale_cursor: false,
+        snapshot_required: false,
+      });
+    });
+    expect(result.current.controlObservation.kind).toBe('unavailable');
+    await act(async () => {
+      finishRead({ success: true, snapshot: createSnapshot('serving:recovered') });
+      await Promise.resolve();
+    });
+    expect(result.current.controlObservation).toEqual({ kind: 'known', rows: [] });
   });
 
   it('reports an unavailable push bridge without falling back to update polling', async () => {

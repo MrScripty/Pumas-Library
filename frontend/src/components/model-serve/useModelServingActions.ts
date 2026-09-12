@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getElectronAPI } from '../../api/adapter';
 import type { DesktopBridgeRuntimeAPI } from '../../types/api-bridge-runtime';
 import type { ModelServeError, ModelServingConfig, ServedModelStatus } from '../../types/api-serving';
+import type { ServingControlObservation, ServingControlStatus } from '../../hooks/useServingStatus';
 
 const INVALID_CONFIGURATION_ERROR = {
   code: 'invalid_request',
@@ -40,7 +41,11 @@ function getProviderLoadFailedError(modelId: string, profileId: string): ModelSe
 export interface ModelServingActionTarget {
   modelAlias?: string | null;
   profileId?: string | null;
+  provider?: string | null;
+  providerMode?: string | null;
 }
+
+export type ModelServingActionPhase = 'idle' | 'starting' | 'stopping' | 'uncertain';
 
 export type ModelServeWithValidationResult =
   | { kind: 'missing_config'; message: string }
@@ -68,13 +73,14 @@ export async function serveModelWithValidation({
 
   const request = { model_id: modelId, config };
   const validation = await api.validate_model_serving_config(request);
-  if (!validation.success) {
+  const validationWire = validation as unknown as Record<string, unknown>;
+  if (validationWire['success'] !== true) {
     return {
       kind: 'validation_request_failed',
       message: validation.error ?? 'Serving validation failed.',
     };
   }
-  if (!validation.valid) {
+  if (validationWire['valid'] !== true) {
     return {
       kind: 'validation_failed',
       error: validation.errors[0] ?? getValidationErrorFallback(modelId, config.profile_id),
@@ -82,16 +88,23 @@ export async function serveModelWithValidation({
   }
 
   const response = await api.serve_model(request);
-  if (!response.success) {
+  const responseWire = response as unknown as Record<string, unknown>;
+  if (responseWire['success'] !== true) {
     return {
       kind: 'serve_request_failed',
       message: response.error ?? 'Serving request failed.',
     };
   }
-  if (response.loaded) {
+  if (responseWire['loaded'] === true) {
     return {
       kind: 'loaded',
       status: response.status ?? null,
+    };
+  }
+  if (responseWire['loaded'] !== false) {
+    return {
+      kind: 'serve_request_failed',
+      message: 'Serving response was malformed.',
     };
   }
   return {
@@ -101,7 +114,7 @@ export async function serveModelWithValidation({
 }
 
 function matchesServingTarget(
-  servedModel: ServedModelStatus,
+  servedModel: ServingControlStatus,
   modelId: string,
   target: ModelServingActionTarget
 ): boolean {
@@ -109,6 +122,9 @@ function matchesServingTarget(
     return false;
   }
   if (target.profileId && servedModel.profile_id !== target.profileId) {
+    return false;
+  }
+  if (target.provider && servedModel.provider !== target.provider) {
     return false;
   }
   if (
@@ -123,29 +139,92 @@ function matchesServingTarget(
 export function useModelServingActions(
   modelId: string,
   target: ModelServingActionTarget = {},
-  servedModels: ServedModelStatus[] = EMPTY_SERVED_MODELS
+  servedModels: ServedModelStatus[] = EMPTY_SERVED_MODELS,
+  controlObservation: ServingControlObservation = { kind: 'known', rows: servedModels }
 ) {
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [actionPhase, setActionPhase] = useState<ModelServingActionPhase>('idle');
   const [message, setMessage] = useState<ServingMessage | null>(null);
   const [serveError, setServeError] = useState<ModelServeError | null>(null);
-  const [servedStatus, setServedStatus] = useState<ServedModelStatus | null>(null);
+  const [servedStatus, setServedStatus] = useState<ServingControlStatus | null>(null);
+  const invocationRef = useRef(0);
+  const targetKey = [modelId, target.profileId, target.provider, target.providerMode, target.modelAlias]
+    .map((part) => part ?? '')
+    .join('\u0000');
+  const targetKeyRef = useRef(targetKey);
+  const loadedRef = useRef(false);
+  const actionPhaseRef = useRef<ModelServingActionPhase>('idle');
+  const actionDirectionRef = useRef<'start' | 'stop' | null>(null);
+  const controlRows = controlObservation.kind === 'known' ? controlObservation.rows : null;
+  actionPhaseRef.current = actionPhase;
 
   useEffect(() => {
-    const status = servedModels.find(
-      (servedModel) =>
-        servedModel.load_state === 'loaded' &&
-        matchesServingTarget(servedModel, modelId, target)
+    if (targetKeyRef.current === targetKey) return;
+    targetKeyRef.current = targetKey;
+    invocationRef.current += 1;
+    loadedRef.current = false;
+    actionDirectionRef.current = null;
+    setActionPhase('idle');
+    setMessage(null);
+    setServeError(null);
+    setServedStatus(null);
+  }, [targetKey]);
+
+  useEffect(() => () => {
+    invocationRef.current += 1;
+  }, []);
+
+  useEffect(() => {
+    if (!controlRows) {
+      loadedRef.current = false;
+      setServedStatus(null);
+      return;
+    }
+    const matchingRows = controlRows.filter((servedModel) =>
+      matchesServingTarget(servedModel, modelId, target)
     );
+    const status = matchingRows.find(
+      (servedModel) =>
+        servedModel.load_state === 'loaded'
+    );
+    const terminalStatus = matchingRows.find(
+      (servedModel) =>
+        servedModel.load_state === 'failed' || servedModel.load_state === 'unloaded'
+    );
+    loadedRef.current = Boolean(status);
     setServedStatus(status ?? null);
     if (status) {
+      if (actionPhaseRef.current === 'starting' || actionPhaseRef.current === 'uncertain') {
+        invocationRef.current += 1;
+        setActionPhase('idle');
+      }
       setMessage({ source: 'loaded', text: `Loaded on ${status.profile_id}` });
     } else {
       setMessage((current) => (current?.source === 'loaded' ? null : current));
+      setActionPhase((current) => {
+        if (terminalStatus) {
+          invocationRef.current += 1;
+          return 'idle';
+        }
+        if (
+          (current === 'stopping' || (current === 'uncertain' && actionDirectionRef.current === 'stop')) &&
+          matchingRows.length === 0
+        ) {
+          invocationRef.current += 1;
+          return 'idle';
+        }
+        if (current === 'idle' && matchingRows.some((row) =>
+          (row.load_state === 'requested' || row.load_state === 'loading' || row.load_state === 'unloading')
+        )) return 'uncertain';
+        return current;
+      });
     }
-  }, [modelId, servedModels, target.modelAlias, target.profileId]);
+  }, [controlRows, modelId, target.modelAlias, target.profileId, target.provider, targetKey]);
 
   const serveModel = useCallback(
     async (config: ModelServingConfig | null) => {
+      if (loadedRef.current) {
+        return;
+      }
       if (!config) {
         setMessage(actionMessage('Select a runtime target before serving.'));
         return;
@@ -157,39 +236,47 @@ export function useModelServingActions(
         return;
       }
 
-      setIsSubmitting(true);
+      const invocation = ++invocationRef.current;
+      const invocationTarget = targetKeyRef.current;
+      actionDirectionRef.current = 'start';
+      setActionPhase('starting');
       setMessage(actionMessage('Starting serving...'));
       setServeError(null);
 
       try {
         const result = await serveModelWithValidation({ api, config, modelId });
+        if (invocation !== invocationRef.current || invocationTarget !== targetKeyRef.current) return;
         if (result.kind === 'missing_config') {
           setMessage(actionMessage(result.message));
+          setActionPhase('idle');
           return;
         }
-        if (
-          result.kind === 'validation_request_failed' ||
-          result.kind === 'serve_request_failed'
-        ) {
+        if (result.kind === 'validation_request_failed') {
           setMessage(actionMessage(result.message));
+          setActionPhase('idle');
+          return;
+        }
+        if (result.kind === 'serve_request_failed') {
+          setMessage(actionMessage(result.message));
+          setActionPhase('uncertain');
           return;
         }
         if (result.kind === 'validation_failed' || result.kind === 'load_failed') {
           setServeError(result.error);
           setMessage(null);
+          setActionPhase('idle');
           return;
         }
-        setServedStatus(result.status);
-        setMessage({ source: 'loaded', text: 'Loaded' });
+        setActionPhase('starting');
       } catch (caught) {
+        if (invocation !== invocationRef.current || invocationTarget !== targetKeyRef.current) return;
         setMessage(
           actionMessage(caught instanceof Error ? caught.message : 'Serving request failed')
         );
-      } finally {
-        setIsSubmitting(false);
+        setActionPhase('uncertain');
       }
     },
-    [modelId]
+    [modelId, targetKey]
   );
 
   const unloadModel = useCallback(async () => {
@@ -198,7 +285,10 @@ export function useModelServingActions(
       return;
     }
 
-    setIsSubmitting(true);
+    const invocation = ++invocationRef.current;
+    const invocationTarget = targetKeyRef.current;
+    actionDirectionRef.current = 'stop';
+    setActionPhase('stopping');
     setMessage(null);
     setServeError(null);
 
@@ -209,21 +299,21 @@ export function useModelServingActions(
         profile_id: servedStatus.profile_id,
         model_alias: servedStatus.model_alias ?? null,
       });
-      if (response.unloaded) {
-        setServedStatus(null);
-        setMessage(actionMessage('Unloaded'));
-      } else {
+      if (invocation !== invocationRef.current || invocationTarget !== targetKeyRef.current) return;
+      if (!response.unloaded) {
         setMessage(actionMessage(response.error ?? 'Model was not loaded'));
+        setActionPhase('uncertain');
       }
     } catch (caught) {
+      if (invocation !== invocationRef.current || invocationTarget !== targetKeyRef.current) return;
       setMessage(actionMessage(caught instanceof Error ? caught.message : 'Unload request failed'));
-    } finally {
-      setIsSubmitting(false);
+      setActionPhase('uncertain');
     }
-  }, [servedStatus]);
+  }, [servedStatus, targetKey]);
 
   return {
-    isSubmitting,
+    actionPhase,
+    isSubmitting: actionPhase === 'starting' || actionPhase === 'stopping',
     message: message?.text ?? null,
     serveError,
     servedStatus,

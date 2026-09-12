@@ -1,4 +1,6 @@
-import type { ModelServeError, ServedModelStatus } from '../../types/api-serving';
+import type { ModelServeError } from '../../types/api-serving';
+import type { ServingControlObservation, ServingControlStatus } from '../../hooks/useServingStatus';
+import type { ModelServingActionPhase } from './useModelServingActions';
 import { formatServeError } from './modelServeHelpers';
 
 export function ModelServeFeedback({
@@ -23,21 +25,33 @@ export function ModelServeFeedback({
 
 type ModelServeActionsProps = {
   isDialogMode: boolean;
-  isSubmitting: boolean;
+  actionPhase: ModelServingActionPhase;
+  controlObservation: ServingControlObservation;
   onClose: () => void;
   onServe: () => void;
   onUnload: () => void;
-  servedStatus: ServedModelStatus | null;
+  servedStatus: ServingControlStatus | null;
 };
 
 export function ModelServeActions({
   isDialogMode,
-  isSubmitting,
+  actionPhase,
+  controlObservation,
   onClose,
   onServe,
   onUnload,
   servedStatus,
 }: ModelServeActionsProps) {
+  const isLoaded = Boolean(servedStatus) && controlObservation.kind === 'known';
+  const label = isLoaded
+    ? actionPhase === 'stopping' ? 'Stopping...' : 'Stop serving'
+    : controlObservation.kind === 'unavailable' || actionPhase === 'uncertain'
+      ? 'Serving status unavailable'
+      : actionPhase === 'starting' ? 'Starting...' : 'Start serving';
+  const disabled = isLoaded
+    ? actionPhase === 'stopping'
+    : controlObservation.kind === 'unavailable' || actionPhase !== 'idle';
+
   return (
     <div className="mt-4 flex justify-end gap-2">
       {isDialogMode && (
@@ -51,19 +65,11 @@ export function ModelServeActions({
       )}
       <button
         type="button"
-        onClick={onServe}
-        disabled={isSubmitting}
+        onClick={isLoaded ? onUnload : onServe}
+        disabled={disabled}
         className="rounded bg-[hsl(var(--accent-primary))] px-3 py-1.5 text-sm text-[hsl(0_0%_10%)] disabled:opacity-50"
       >
-        {isSubmitting ? 'Starting...' : 'Start serving'}
-      </button>
-      <button
-        type="button"
-        onClick={onUnload}
-        disabled={!servedStatus || isSubmitting}
-        className="rounded border border-[hsl(var(--border-default))] px-3 py-1.5 text-sm text-[hsl(var(--text-primary))] disabled:opacity-50"
-      >
-        Unload
+        {label}
       </button>
     </div>
   );

@@ -1,5 +1,125 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-12 — Single Serving Control And Status Reconciliation
+
+Accepted the user's follow-up after GPU loading was confirmed: one Start/Stop
+control replaces the separate Serve/Unload buttons. The deciding dialog RED
+received an exact loaded observation while the start promise remained pending,
+yet rendered disabled Starting and Unload with no usable Stop. The original
+command `cd frontend && npm test -- --run src/components/ModelServeDialog.test.tsx`
+reported 20 passing tests and that one failure.
+
+The control now follows an admitted model/profile/provider observation. Loaded
+settles pending Start immediately; a late timeout or acknowledgement cannot
+restore Start or overwrite a newer Stop/target. A loaded refresh preserves
+pending Stop. Target absence settles Stop even when unrelated models remain,
+but absence cannot settle uncertain Start because loading may still complete.
+Requested/loading/unloading and unavailable observations do not admit Start.
+Direction, invocation and target identity scope state application; superseded
+completions remain observed without applying stale state.
+
+The existing serving-status event subscription remains the synchronization
+mechanism. Each explicit mutation outcome also causes one serving snapshot read
+alongside the existing runtime-profile refresh. No polling, timeout increase,
+load/unload retry, or automatic runtime mutation was added. Stream recovery
+requires a fresh admitted read before restoring control authority. The receiving
+hook validates the narrow fields authorizing this control (strict success,
+schema/cursor, row identity/provider/load state and optional alias), and rejects
+the complete control observation if a row is malformed. This private projection
+does not claim a generated full serving-wire contract or validate unrelated
+legacy snapshot fields. Mutation acknowledgements cannot publish Loaded.
+
+Verification: 53 permanent dialog/action/status tests pass, including all seven
+independent review probes transferred to permanent suites. TypeScript and
+affected ESLint pass. Actual bundled-preload/main IPC passes 168 tests with one
+existing explicit skip. Generator tests pass 8/8 and freshness passes; producer
+conformance passes 39/39 and renderer conformance 48/48. Normal and library-only
+frontend builds pass; the final normal build and Electron bundle are rebuilt.
+Rust source and contracts are unchanged, so the previous accepted backend
+binary and Rust verification remain applicable without a redundant Cargo
+rebuild or repeated Rust suites.
+
+The final hidden Electron fixture renders the real dialog and both actual
+status hooks with mocked bridge methods. It proves Start -> Starting -> enabled
+Stop on an event while Start is pending -> Stop after late RPC timeout -> Start
+after explicit Stop and known absence -> disabled unavailable on read error ->
+Start after recovery. Exactly one start and one stop were called. Evidence and
+fixture sources are retained below ignored
+`tmp/llamacpp-hosting-20260909/evidence/serving-control/`. An initial harness
+attempt clicked before profile selection had settled; its oracle was corrected
+to await the actual ready target before exercising Start. No live model, runtime,
+profile, installation or network service was mutated by this slice. A read-only
+query to the most recently logged normal-root RPC port was refused, so this is
+not a live diagnostic proof of the user's particular timeout timing.
+
+Independent review found and reproduced seven authority/race defects in the
+first implementation: loaded refresh releasing pending Stop; a late loaded
+acknowledgement after failed observation; truthy malformed success; target
+absence hidden by unrelated rows; malformed loaded acknowledgement; premature
+stream recovery authority; and uncertain Stop not settling on target absence.
+All seven independently reran green after repair. Additional permanent cases
+cover nonterminal states, target/provider/mode/alias supersession and unmount.
+Temporary review tests were removed after permanent coverage was verified.
+
+FE-I56 is resolved within the Pumas-published snapshot boundary. The existing
+backend status method returns its cached published snapshot; detecting direct
+external router unload or natural exit continuously remains outside this repair
+under FE-I52. Full serving-wire migration and overall M4 remain incomplete.
+The user's current application was not restarted; reopen it to use these assets.
+
+Routing used fresh bounded contexts: Astra medium owned design and substantive
+review; Sol low owned the initial routine frontend implementation; Luna max
+prepared cost accounting; Astra low completed the settled async-state rescue.
+The inherited root remained Astra medium rather than the requested Sol-low
+coordination configuration; it was not relabeled. Two substantive review/repair
+rounds showed that Sol low's first passing tests were insufficient for this
+lifecycle work. The bounded Astra-low rescue completed the remaining direction
+tracking and permanent regression coverage. Prefer Astra low for comparable
+settled lifecycle implementation; retain Sol low for routine UI integration and
+Luna for bounded inventories. This is a provisional routing conclusion based on
+accepted work, including review and rescue cost, not a controlled benchmark.
+
+Cost checkpoint uses `/tmp/pumas-serving-control-costs.py` and its frozen JSON,
+current local `token_usage_record` data, verified session lineage and the exact
+user-turn timestamp `2026-09-12T16:08:58.638Z`. Root corrected the helper's initial
+response/thread-pair deduplication to global response-ID deduplication; there
+were zero actual duplicate records or collisions, so this changed no totals.
+The previous frozen helper/JSON were preserved. Cached input remains included in
+input, reasoning in output. No recorded request exceeded 272,000 input tokens,
+and recorded cache writes were zero. Current-turn known API-equivalent costs:
+
+| Role | Model / effort | Standard estimate |
+| --- | --- | ---: |
+| Root coordination, evidence, docs | GPT-6 Astra medium | $10.40544400 |
+| Design and independent review | GPT-6 Astra medium | $6.45731000 |
+| Initial UI implementation and repair | GPT-5.6 Sol low | $3.50826160 |
+| Settled async rescue | GPT-6 Astra low | $1.13609000 |
+| Accounting inventory | GPT-5.6 Luna max | $0.07619552 |
+
+Current slice: $21.58330112; carried uncounted reporting tail: $1.66196840;
+newly checkpointed known estimate: $23.24526952. Cumulative known estimate is
+$367.35667828 standard / $734.71335656 priority scenario. There are 292
+deduplicated records, including four unpriced `codex-auto-review` records
+(351,966 input, 215,040 cached input, 455 output tokens). Those costs remain
+unknown, not free. Requested/observed service tiers and shared tool fees remain
+unknown and unallocated. These use the recorded pricing assumptions and are
+API-equivalent estimates, not invoices. Later commit/report usage is uncounted.
+
+Final newly included response cutoffs (earlier accepted cutoff history remains
+in the preceding checkpoints and frozen helper):
+
+- `01a0880c-8ce6-74e2-afec-f69e0fc6f1e0`: `resp_04a060a0b34b4096016aa57e85537087d08b94183a652ddc1b` at `2026-09-12T16:32:17.291Z`.
+- `01a0880d-7a28-7941-8cbd-a03c6976da34`: `resp_00d2061a8f0dbbb1016aa5778c6f2087d0bf54e6a5ad98b271` at `2026-09-12T16:02:27.794Z`.
+- `01a0880e-84b2-7863-b341-97085f3fa049`: `resp_09205224c8e19910016aa577f8b0c087d0a2afd27c1ad92bc2` at `2026-09-12T16:04:13.807Z`.
+- `01a0963d-1283-7d43-a7d7-c89cc696bfe4`: `resp_0267b9e1194688a8016aa57e18d2b487d08c7d596881dd6a83` at `2026-09-12T16:30:19.319Z`.
+- `01a09661-618b-7361-b070-41e3f0bb51ac`: `resp_02a2f2c45484e2af016aa57e10a8cc87d0b66e25c64a494ef5` at `2026-09-12T16:30:12.324Z`.
+- `01a09661-ab8c-7d53-98e2-695a43799f8d`: `resp_0b78b204175048d7016aa57d3037f087d0a816ad0f2d7f8dc2` at `2026-09-12T16:26:29.353Z`.
+- `01a09663-49b1-7c51-a40f-1f1af57228f3`: `resp_0e5914862ec126ff016aa57b6e1b5c87d092b3df6b51a8f2f0` at `2026-09-12T16:19:04.617Z`.
+- `01a09671-4367-74b2-9319-01823495d6a9`: `resp_08de543b00efcd32016aa57df1f66087d0b4126e5509cb19d8` at `2026-09-12T16:29:42.469Z`.
+
+The sole next slice returns to bounded `is_ollama_running`/`is_torch_running`
+producer, RPC, generated desktop and actual-consumer read-contract validation.
+
 ## 2026-09-12 — Profile-First Router Context And Loaded-State Repair
 
 Accepted the exact user-reported composition without closing M4: start the

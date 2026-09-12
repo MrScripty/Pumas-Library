@@ -1,5 +1,37 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-12 — Single Serving Control And Status Reconciliation
+
+Accepted the follow-up serving-control repair (FE-I56): one Start/Stop button
+uses admitted Pumas serving observations instead of the lifetime of a mutation
+request. Loaded can settle pending Start before its response; loaded reads do
+not release pending Stop. Target absence settles uncertain Stop but leaves
+uncertain Start blocked. Late responses cannot replace newer target/state,
+malformed or unavailable reads cannot authorize Start, and stream recovery
+requires a fresh status read. Existing status events plus one terminal read own
+reconciliation, without polling or mutation retry.
+
+The [frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-12--single-serving-control-and-status-reconciliation)
+records 53 permanent tests, seven independently reproduced/repaired review cases,
+strict frontend checks, desktop/generator/conformance gates, both frontend builds,
+and the final real-hook Electron fixture with exactly one mocked start/stop.
+No backend source or live model/runtime was changed. The existing Pumas snapshot
+is not perpetual external-router health evidence; FE-I52 and full serving-wire
+migration remain open. The rebuilt frontend/Electron assets require reopening
+the user's app. M4 and overall remediation are incomplete; the sole next slice
+is `is_ollama_running`/`is_torch_running` read-contract validation.
+
+The frontend ledger records model/effort routing, two substantive repair rounds,
+Astra-low rescue, and the frozen cost checkpoint: $21.58330112 current slice plus
+$1.66196840 carried reporting = $23.24526952 newly checkpointed known estimate.
+Cumulative known API-equivalent estimate: $367.35667828 standard /
+$734.71335656 priority scenario. Four automatic-review records have unknown
+pricing; service tiers and shared tool fees remain unknown, not free. Later
+report/commit usage is uncounted. The comparison is provisional, not a controlled
+benchmark or invoice. Only the unchanged pure current `validate_plan` function
+and its helpers/constants were executed for both canonical plans; the full
+standards engine was not run.
+
 ## 2026-09-12 — Profile-First Router Context And Loaded-State Repair
 
 The managed llama.cpp router now supports the user's exact profile-first

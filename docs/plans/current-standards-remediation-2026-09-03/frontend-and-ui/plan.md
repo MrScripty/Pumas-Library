@@ -68,6 +68,21 @@ cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
 
+## Single Model-Serving Control And Status Reconciliation
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-12--single-serving-control-and-status-reconciliation).
+Operation: replace separate Serve/Unload buttons with one Start/Stop control.
+An admitted exact loaded observation settles pending Start immediately; late
+acknowledgements cannot replace it. Preserve pending Stop across loaded reads,
+settle a timed-out Stop on target absence, and keep a timed-out Start uncertain
+on absence because backend loading may still complete. Existing status events
+and one explicit read after each mutation outcome own reconciliation. Unknown,
+malformed and nonterminal observations do not authorize another Start. No
+polling, mutation retry, backend change or live model mutation is included.
+The authority is the Pumas-published snapshot, not perpetual external router
+health; FE-I52 and full serving-wire migration remain separate.
+
 ## Profile-First Router Context And Loaded-State Repair
 
 Status: `Accepted`; see the

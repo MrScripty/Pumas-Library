@@ -5,6 +5,7 @@
 //! It does not issue recovery authority or make cached tickets current.
 
 use super::*;
+use pumas_library::models::RouterProfileSyncStatus;
 use schemars::{generate::SchemaSettings, JsonSchema};
 
 /// Conformance values are made by the production constructors and real ticket
@@ -646,6 +647,44 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
         None,
         Some("Model not found: private model details"),
     )?)?;
+    for (key, observation_state, catalog_state, pending_model_ids, last_error) in [
+        (
+            "router_sync_current",
+            pumas_library::models::RouterObservationState::Current,
+            pumas_library::models::RouterCatalogState::Current,
+            vec![],
+            None,
+        ),
+        (
+            "router_sync_pending",
+            pumas_library::models::RouterObservationState::Connecting,
+            pumas_library::models::RouterCatalogState::Pending,
+            vec!["synthetic/pending-model".to_string()],
+            None,
+        ),
+        (
+            "router_sync_unavailable",
+            pumas_library::models::RouterObservationState::Unavailable,
+            pumas_library::models::RouterCatalogState::Uncertain,
+            vec![],
+            Some("Synthetic observer unavailable".to_string()),
+        ),
+    ] {
+        fixtures[key] = serde_json::to_value(RouterProfileSyncStatus {
+            profile_id: pumas_library::models::RuntimeProfileId::parse("synthetic-router")
+                .map_err(anyhow::Error::msg)?,
+            generation: 7,
+            observation_state,
+            catalog_state,
+            pending_model_ids,
+            last_error,
+        })?;
+    }
+    fixtures["router_profile_sync_statuses"] = serde_json::json!([
+        fixtures["router_sync_current"],
+        fixtures["router_sync_pending"],
+        fixtures["router_sync_unavailable"],
+    ]);
     Ok(fixtures)
 }
 
@@ -657,6 +696,7 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         )+ };
     }
     export!(
+        RouterProfileSyncStatus,
         ModelsOutcome,
         CatalogSearchOutcome,
         HfDownloadDetailsOutcome,
@@ -761,6 +801,29 @@ fn schema<T: JsonSchema>() -> Result<Value, serde_json::Error> {
 // These named wire refinements project existing constructor invariants, not
 // authorization. The generator owns their executable TypeScript projection.
 fn refine_named(name: &str, schema: &mut Value) {
+    if name == "RouterProfileSyncStatus" {
+        let definitions = schema.get("definitions").cloned();
+        let mut available = schema.clone();
+        let object = available
+            .as_object_mut()
+            .expect("router sync object schema");
+        object.remove("$schema");
+        object.remove("title");
+        object.remove("definitions");
+        available["properties"]["catalog_state"] =
+            serde_json::json!({"type":"string","enum":["current","pending"]});
+        let mut uncertain = available.clone();
+        uncertain["properties"]["catalog_state"] =
+            serde_json::json!({"type":"string","enum":["uncertain"]});
+        uncertain["properties"]["observation_state"] =
+            serde_json::json!({"type":"string","enum":["unavailable"]});
+        *schema = serde_json::json!({"oneOf":[available, uncertain]});
+        if let Some(definitions) = definitions {
+            schema["definitions"] = definitions;
+        }
+        return;
+    }
+
     if matches!(
         name,
         "SetDefaultVersionParams"

@@ -38,6 +38,7 @@ interface ModelServeDialogContentProps {
   controls: ModelServeControls;
   serveError: ModelServeError | null;
   message: string | null;
+  routerCatalogMessage: string | null;
   actionPhase: ModelServingActionPhase;
   isLoading: boolean;
   isUnavailable: boolean;
@@ -72,6 +73,7 @@ export function ModelServeDialogContent({
   controls,
   serveError,
   message,
+  routerCatalogMessage,
   actionPhase,
   isLoading,
   isUnavailable,
@@ -116,6 +118,11 @@ export function ModelServeDialogContent({
         setTensorSplit={setTensorSplit}
       />
       <ModelServeFeedback message={message} serveError={serveError} />
+      {routerCatalogMessage && (
+        <div className="mt-3 rounded border border-[hsl(var(--accent-warning)/0.35)] px-3 py-2 text-xs text-[hsl(var(--text-secondary))]">
+          {routerCatalogMessage}
+        </div>
+      )}
       <ModelServeActions
         actionPhase={actionPhase}
         controlObservation={controlObservation}

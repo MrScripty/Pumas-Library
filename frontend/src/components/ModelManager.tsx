@@ -7,7 +7,8 @@
 
 import React, { useMemo, useRef, useState } from 'react';
 import type { ModelCategory, ModelInfo, RemoteModelInfo } from '../types/apps';
-import type { ServedModelStatus, ServingEndpointStatus } from '../types/api-serving';
+import type { RouterProfileSyncStatus, ServedModelStatus, ServingEndpointStatus } from '../types/api-serving';
+import type { ServingControlObservation } from '../hooks/useServingStatus';
 import { useDownloadCompletionRefresh } from '../hooks/useDownloadCompletionRefresh';
 import { useExistingLibraryChooser } from '../hooks/useExistingLibraryChooser';
 import { useHfAuthPrompt } from '../hooks/useHfAuthPrompt';
@@ -45,6 +46,8 @@ export interface ModelManagerProps {
   onToggleLink: (modelId: string) => void;
   selectedAppId: string | null;
   servedModels?: ServedModelStatus[];
+  routerProfiles?: RouterProfileSyncStatus[];
+  servingControlObservation?: ServingControlObservation;
   servingEndpoint?: ServingEndpointStatus | null;
   onAddModels?: () => void;
   onOpenModelsRoot?: () => void;
@@ -65,6 +68,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   onToggleLink,
   selectedAppId,
   servedModels = [],
+  routerProfiles = [],
+  servingControlObservation,
   onAddModels,
   onOpenModelsRoot,
   onServeModel,
@@ -310,6 +315,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                   onToggleLink={onToggleLink}
                   selectedAppId={selectedAppId}
                   servedModels={servedModels}
+                  routerProfiles={routerProfiles}
+                  servingControlObservation={servingControlObservation}
                   totalModels={totalModels}
                   hasFilters={hasLocalFilters}
                   onClearFilters={handleClearLocalFilters}

@@ -10,6 +10,7 @@ const RUNTIME_PROFILE_CURSOR_ZERO: &str = "runtime-profiles:0";
 pub const RUNTIME_PROFILES_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct RuntimeProfileId(String);
 

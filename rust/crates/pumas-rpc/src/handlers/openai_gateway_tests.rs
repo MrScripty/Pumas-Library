@@ -47,6 +47,7 @@ fn snapshot(served_models: Vec<ServedModelStatus>) -> ServingStatusSnapshot {
         cursor: "serving:1".to_string(),
         endpoint: ServingEndpointStatus::not_configured(),
         served_models,
+        router_profiles: Vec::new(),
         last_errors: Vec::new(),
     }
 }
@@ -622,5 +623,66 @@ async fn openai_proxy_rejects_ambiguous_embedding_alias() {
     assert_eq!(
         body.pointer("/error/code").and_then(Value::as_str),
         Some("duplicate_model_alias")
+    );
+}
+
+#[tokio::test]
+async fn router_discovery_is_unavailable_while_independent_current_target_can_route() {
+    use pumas_library::models::{
+        RouterCatalogState, RouterObservationState, RouterProfileSyncStatus,
+    };
+    let mut value = snapshot(vec![
+        loaded_status("stale", "router", Some("stale-alias")),
+        loaded_status("healthy", "other", None),
+    ]);
+    value.router_profiles.push(RouterProfileSyncStatus {
+        profile_id: RuntimeProfileId::parse("router").unwrap(),
+        generation: 1,
+        observation_state: RouterObservationState::Unavailable,
+        catalog_state: RouterCatalogState::Current,
+        pending_model_ids: vec![],
+        last_error: Some("synthetic disconnect".into()),
+    });
+    let response = openai_models_snapshot_response(value.clone());
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
+            .unwrap();
+    assert_eq!(body["error"]["code"], "endpoint_unavailable");
+    assert_eq!(
+        resolve_openai_served_model(value.clone(), "stale-alias"),
+        OpenAiServedModelLookup::Unavailable
+    );
+    assert!(matches!(
+        resolve_openai_served_model(value, "healthy"),
+        OpenAiServedModelLookup::Found(_)
+    ));
+}
+
+#[test]
+fn uncertain_catalog_with_current_observation_cannot_discover_or_route() {
+    use pumas_library::models::{
+        RouterCatalogState, RouterObservationState, RouterProfileSyncStatus,
+    };
+    let mut value = snapshot(vec![loaded_status(
+        "synthetic-model",
+        "router",
+        Some("synthetic-alias"),
+    )]);
+    value.router_profiles.push(RouterProfileSyncStatus {
+        profile_id: RuntimeProfileId::parse("router").unwrap(),
+        generation: 1,
+        observation_state: RouterObservationState::Current,
+        catalog_state: RouterCatalogState::Uncertain,
+        pending_model_ids: Vec::new(),
+        last_error: None,
+    });
+    assert_eq!(
+        openai_models_snapshot_response(value.clone()).status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
+    assert_eq!(
+        resolve_openai_served_model(value, "synthetic-alias"),
+        OpenAiServedModelLookup::Unavailable
     );
 }

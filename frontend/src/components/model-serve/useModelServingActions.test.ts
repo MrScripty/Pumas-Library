@@ -119,6 +119,29 @@ describe('useModelServingActions', () => {
     await waitFor(() => expect(result.current.servedStatus).toBeNull());
   });
 
+  it('clears a Loaded notice when the selected profile observation becomes unavailable', async () => {
+    const loaded = servedModels().find((status) => status.profile_id === 'llama-gpu');
+    expect(loaded).toBeDefined();
+    if (!loaded) return;
+    const known = { kind: 'known' as const, rows: [loaded] };
+    const unavailable = { kind: 'unavailable' as const, message: 'router unreachable' };
+    const { result, rerender } = renderHook(
+      ({ observation }: { observation: typeof known | typeof unavailable }) => useModelServingActions(
+        'models/chat',
+        { profileId: 'llama-gpu' },
+        [loaded],
+        observation
+      ),
+      { initialProps: { observation: known as typeof known | typeof unavailable } }
+    );
+    await waitFor(() => expect(result.current.message).toBe('Loaded on llama-gpu'));
+
+    rerender({ observation: unavailable });
+
+    await waitFor(() => expect(result.current.message).toBeNull());
+    expect(result.current.servedStatus).toBeNull();
+  });
+
   it('keeps an exact context-18000 load rejection out of Loaded state', async () => {
     const validateModelServingConfig = vi.fn<
       (_request: ServeModelRequest) => Promise<ModelServeValidationResponse>

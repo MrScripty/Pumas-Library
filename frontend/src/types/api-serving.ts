@@ -1,5 +1,8 @@
 import type { BaseResponse } from './api-common';
 import type { RuntimeDeviceMode, RuntimeProviderId } from './api-runtime-profiles';
+import type { RouterProfileSyncStatus } from '../generated/desktop-contract';
+
+export type { RouterProfileSyncStatus } from '../generated/desktop-contract';
 
 export type ServingEndpointMode = 'not_configured' | 'provider_endpoint' | 'pumas_gateway';
 
@@ -101,6 +104,7 @@ export interface ServingStatusSnapshot {
   endpoint: ServingEndpointStatus;
   served_models: ServedModelStatus[];
   last_errors: ModelServeError[];
+  router_profiles?: RouterProfileSyncStatus[];
 }
 
 export interface ServingStatusResponse extends BaseResponse {

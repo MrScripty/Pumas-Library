@@ -51,6 +51,8 @@ struct Registry {
     #[cfg(target_os = "linux")]
     generation: u64,
     sessions: HashMap<RuntimeProfileId, Arc<Session>>,
+    #[cfg(test)]
+    launch_reply_gate: Option<Arc<tokio::sync::Notify>>,
 }
 
 #[derive(Debug)]
@@ -62,6 +64,8 @@ struct Session {
     router_models: Option<Arc<Mutex<RouterModelState>>>,
     stop: AtomicBool,
     state: Mutex<SessionState>,
+    observer_stop: tokio::sync::watch::Sender<bool>,
+    observer_terminal: tokio::sync::watch::Sender<Option<bool>>,
 }
 
 #[derive(Debug)]
@@ -71,6 +75,8 @@ struct SessionState {
     launch: Option<std::result::Result<OwnedRuntimeProfileObservation, String>>,
     terminal: Option<std::result::Result<bool, String>>,
     worker: Option<JoinHandle<()>>,
+    observer: Option<JoinHandle<()>>,
+    observer_error: Option<String>,
     joined: bool,
     // A failed cleanup never releases child custody or permits replacement.
     residual_child: Option<Child>,
@@ -94,7 +100,11 @@ impl RuntimeProfileProcessOwner {
                 .state
                 .lock()
                 .map_err(|_| failure("Runtime process session poisoned"))?;
-            if state.terminal.is_none() || state.residual_child.is_some() || !state.joined {
+            if state.terminal.is_none()
+                || state.residual_child.is_some()
+                || !state.joined
+                || state.observer.is_some()
+            {
                 return Err(failure(format!(
                     "Managed runtime profile {} still owns a process or worker",
                     profile_id.as_str()
@@ -104,6 +114,7 @@ impl RuntimeProfileProcessOwner {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) async fn launch(
         &self,
         config: BinaryLaunchConfig,
@@ -111,6 +122,19 @@ impl RuntimeProfileProcessOwner {
         model_path: Option<PathBuf>,
         context_size: Option<u32>,
         guard: RuntimeProfileOperationGuard,
+    ) -> Result<OwnedRuntimeProfileLaunchReceipt> {
+        self.launch_observed(config, spec, model_path, context_size, guard, None)
+            .await
+    }
+
+    pub(crate) async fn launch_observed(
+        &self,
+        config: BinaryLaunchConfig,
+        spec: RuntimeProfileLaunchSpec,
+        model_path: Option<PathBuf>,
+        context_size: Option<u32>,
+        guard: RuntimeProfileOperationGuard,
+        observer: Option<super::router_observer::RouterObserverContext>,
     ) -> Result<OwnedRuntimeProfileLaunchReceipt> {
         #[cfg(not(target_os = "linux"))]
         {
@@ -136,7 +160,11 @@ impl RuntimeProfileProcessOwner {
                         .state
                         .lock()
                         .map_err(|_| failure("Runtime process session poisoned"))?;
-                    if state.terminal.is_none() || state.residual_child.is_some() || !state.joined {
+                    if state.terminal.is_none()
+                        || state.residual_child.is_some()
+                        || !state.joined
+                        || state.observer.is_some()
+                    {
                         return Err(failure(
                             "Managed runtime profile already owns a process or worker",
                         ));
@@ -147,6 +175,8 @@ impl RuntimeProfileProcessOwner {
                     .checked_add(1)
                     .ok_or_else(|| failure("Runtime generation exhausted"))?;
                 let session = Arc::new(Session {
+                    observer_stop: tokio::sync::watch::channel(false).0,
+                    observer_terminal: tokio::sync::watch::channel(None).0,
                     generation: registry.generation,
                     router_models,
                     model_path,
@@ -168,6 +198,8 @@ impl RuntimeProfileProcessOwner {
                         terminal: None,
                         worker: None,
                         joined: false,
+                        observer: None,
+                        observer_error: None,
                         residual_child: None,
                     }),
                     spec,
@@ -178,6 +210,19 @@ impl RuntimeProfileProcessOwner {
                 session
             };
             // No await between registration, worker retention and gate release.
+            if let Some(observer) = observer.filter(|_| session.router_models.is_some()) {
+                let task = observer.spawn(
+                    session.spec.clone(),
+                    session.generation,
+                    session.observer_stop.subscribe(),
+                    session.observer_terminal.subscribe(),
+                );
+                session
+                    .state
+                    .lock()
+                    .map_err(|_| failure("Runtime process session poisoned"))?
+                    .observer = Some(task);
+            }
             let (start, gate) = std::sync::mpsc::channel();
             let worker_session = session.clone();
             let worker = tokio::task::spawn_blocking(move || {
@@ -193,6 +238,13 @@ impl RuntimeProfileProcessOwner {
             start
                 .send(())
                 .map_err(|_| failure("Runtime process start gate closed"))?;
+            #[cfg(test)]
+            {
+                let gate = self.registry.lock().unwrap().launch_reply_gate.clone();
+                if let Some(gate) = gate {
+                    gate.notified().await;
+                }
+            }
             loop {
                 let launch = session
                     .state
@@ -295,6 +347,22 @@ impl RuntimeProfileProcessOwner {
             OwnedRouterModelOperation::begin(self.clone(), id.clone(), expected.clone(), models)
         })?
         .ok_or_else(|| failure("Runtime endpoint listener is not owned by the admitted child"))?
+    }
+
+    pub(crate) fn router_observation_preset(
+        &self,
+        id: &RuntimeProfileId,
+        expected: &OwnedRuntimeProfileObservation,
+    ) -> Result<(Vec<u8>, bool, bool)> {
+        self.with_listener(id, expected, |session| {
+            RouterModelState::observation(
+                session
+                    .router_models
+                    .as_ref()
+                    .ok_or_else(|| failure("Not an owned router"))?,
+            )
+        })?
+        .ok_or_else(|| failure("Owned router listener unavailable"))?
     }
 
     fn with_listener<T>(
@@ -404,6 +472,7 @@ impl RuntimeProfileProcessOwner {
                 .lock()
                 .map_err(|_| failure("Runtime process session poisoned"))?;
             session.stop.store(true, Ordering::Release);
+            session.observer_stop.send_replace(true);
             OwnedRuntimeProfileObservation {
                 generation: session.generation,
                 pid: state.status.pid,
@@ -452,6 +521,7 @@ impl RuntimeProfileProcessOwner {
                 .lock()
                 .map_err(|_| failure("Runtime process session poisoned"))?;
             session.stop.store(true, Ordering::Release);
+            session.observer_stop.send_replace(true);
         }
         let mut results = Vec::new();
         for session in sessions {
@@ -464,9 +534,41 @@ impl RuntimeProfileProcessOwner {
     }
 }
 
+impl Drop for RuntimeProfileProcessOwner {
+    fn drop(&mut self) {
+        if let Ok(registry) = self.registry.get_mut() {
+            for session in registry.sessions.values() {
+                session.stop.store(true, Ordering::Release);
+                session.observer_stop.send_replace(true);
+            }
+        }
+    }
+}
+
 async fn drain_session(session: &Session) -> Result<bool> {
     let deadline = tokio::time::Instant::now() + STOP_WAIT;
     loop {
+        let observer = {
+            let mut state = session
+                .state
+                .lock()
+                .map_err(|_| failure("Runtime process session poisoned"))?;
+            if state.observer.as_ref().is_some_and(JoinHandle::is_finished) {
+                state.observer.take()
+            } else {
+                None
+            }
+        };
+        if let Some(observer) = observer {
+            if let Err(error) = observer.await {
+                let mut state = session
+                    .state
+                    .lock()
+                    .map_err(|_| failure("Runtime process session poisoned"))?;
+                state.observer_error = Some(format!("Router observer failed: {error}"));
+                state.status.state = RuntimeLifecycleState::Failed;
+            }
+        }
         let worker = {
             let mut state = session
                 .state
@@ -488,6 +590,8 @@ async fn drain_session(session: &Session) -> Result<bool> {
             if let Err(error) = outcome {
                 state.terminal = Some(Err(format!("Runtime worker failed: {error}")));
                 state.status.state = RuntimeLifecycleState::Failed;
+                session.observer_stop.send_replace(true);
+                session.observer_terminal.send_replace(Some(false));
             }
             state.joined = true;
         }
@@ -496,7 +600,10 @@ async fn drain_session(session: &Session) -> Result<bool> {
                 .state
                 .lock()
                 .map_err(|_| failure("Runtime process session poisoned"))?;
-            if state.joined {
+            if state.joined && state.observer.is_none() {
+                if let Some(error) = &state.observer_error {
+                    return Err(failure(error.clone()));
+                }
                 if let Some(result) = &state.terminal {
                     return result.clone().map_err(failure);
                 }
@@ -643,6 +750,7 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
     if let Ok(mut state) = session.state.lock() {
         state.status.state = RuntimeLifecycleState::Stopping;
     }
+    session.observer_stop.send_replace(true);
     if let Some(models) = &session.router_models {
         RouterModelState::reject_pending(models);
     }
@@ -687,6 +795,11 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
         state.status.pid = child.as_ref().map(Child::id);
         state.status.last_error = error.clone();
         state.residual_child = child;
+        // This receipt reflects completed group cleanup, independently of an
+        // unexpected child exit or diagnostic metadata error.
+        session
+            .observer_terminal
+            .send_replace(Some(state.residual_child.is_none()));
         state.terminal = Some(match error {
             Some(error) => Err(error),
             None => Ok(spawned),
@@ -1267,4 +1380,226 @@ mod tests {
         fixture.owner.stop(&id).await.unwrap();
         assert!(!fixture.root.path().join("runtime.pid").exists());
     }
+    #[tokio::test]
+    async fn router_observation_fences_cursor_and_preserves_receipts_and_unavailable_rows() {
+        use crate::models::{
+            ModelServingConfig, RouterCatalogState, RouterObservationState,
+            RouterProfileSyncStatus, RuntimeDeviceMode, ServeModelRequest, ServedModelLoadState,
+            ServedModelStatus,
+        };
+        use crate::serving::ServingService;
+        let fixture = Fixture::new();
+        let (config, spec, guard) = router_listener_launch(&fixture, vacant_address());
+        let id = spec.profile_id.clone();
+        let receipt = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap()
+            .observation
+            .unwrap();
+        wait_for_listener(&receipt).await;
+        let service =
+            ServingService::with_provider_registry(crate::providers::ProviderRegistry::builtin());
+        let sync = RouterProfileSyncStatus {
+            profile_id: id.clone(),
+            generation: receipt.generation,
+            observation_state: RouterObservationState::Current,
+            catalog_state: RouterCatalogState::Current,
+            pending_model_ids: Vec::new(),
+            last_error: None,
+        };
+        let row = ServedModelStatus {
+            model_id: "synthetic/external".into(),
+            model_alias: Some("external".into()),
+            provider: RuntimeProviderId::LlamaCpp,
+            profile_id: id.clone(),
+            load_state: ServedModelLoadState::Loaded,
+            device_mode: RuntimeDeviceMode::Cpu,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
+            context_size: Some(4096),
+            keep_loaded: false,
+            endpoint_url: Some(receipt.endpoint_url.clone()),
+            memory_bytes: None,
+            loaded_at: None,
+            last_error: None,
+        };
+        let initial = service.status().await.snapshot.cursor;
+        assert!(service
+            .publish_router_observation(
+                &id,
+                &receipt,
+                &fixture.owner,
+                &initial,
+                vec![row.clone()],
+                sync.clone()
+            )
+            .unwrap());
+        let sampled = service.status().await.snapshot.cursor;
+        let mut changed_row = row.clone();
+        changed_row.model_alias = Some("provider-alias".into());
+        changed_row.context_size = None;
+        changed_row.device_mode = RuntimeDeviceMode::Auto;
+        assert!(service
+            .publish_router_observation(
+                &id,
+                &receipt,
+                &fixture.owner,
+                &sampled,
+                vec![changed_row],
+                sync.clone()
+            )
+            .unwrap());
+        assert_eq!(
+            service.status().await.snapshot.served_models,
+            vec![row.clone()]
+        );
+        let request = ServeModelRequest {
+            model_id: "synthetic/pending".into(),
+            config: ModelServingConfig {
+                provider: RuntimeProviderId::LlamaCpp,
+                profile_id: id.clone(),
+                device_mode: RuntimeDeviceMode::Cpu,
+                device_id: None,
+                gpu_layers: None,
+                tensor_split: None,
+                context_size: Some(8192),
+                keep_loaded: true,
+                model_alias: Some("pending".into()),
+            },
+        };
+        let mut failed_request = request.clone();
+        failed_request.model_id = "synthetic/failed".into();
+        failed_request.config.model_alias = Some("failed".into());
+        let failed_operation = service.begin_load(&failed_request).unwrap();
+        failed_operation.finish_failure(crate::models::ModelServeError::non_critical(
+            crate::models::ModelServeErrorCode::ProviderLoadFailed,
+            "synthetic rejected load",
+        ));
+        let mut recovered_row = row.clone();
+        recovered_row.model_id = failed_request.model_id.clone();
+        recovered_row.model_alias = Some("failed".into());
+        let failed_cursor = service.status().await.snapshot.cursor;
+        assert!(service
+            .publish_router_observation(
+                &id,
+                &receipt,
+                &fixture.owner,
+                &failed_cursor,
+                vec![row.clone(), recovered_row.clone()],
+                sync.clone()
+            )
+            .unwrap());
+        let recovered = service.status().await.snapshot;
+        assert_eq!(
+            recovered
+                .served_models
+                .iter()
+                .filter(|status| status.model_id == failed_request.model_id)
+                .collect::<Vec<_>>(),
+            vec![&recovered_row]
+        );
+        let operation = service.begin_load(&request).unwrap();
+        assert!(!service
+            .publish_router_observation(
+                &id,
+                &receipt,
+                &fixture.owner,
+                &sampled,
+                Vec::new(),
+                sync.clone()
+            )
+            .unwrap());
+        drop(operation);
+        let before = service.status().await.snapshot;
+        let pending = before
+            .served_models
+            .iter()
+            .find(|row| row.model_id == request.model_id)
+            .unwrap()
+            .clone();
+        assert_eq!(pending.load_state, ServedModelLoadState::Failed);
+        assert_eq!(
+            pending.last_error.as_ref().unwrap().code,
+            crate::models::ModelServeErrorCode::Unknown
+        );
+        let mut observed_pending = pending.clone();
+        observed_pending.load_state = ServedModelLoadState::Loaded;
+        assert!(service
+            .publish_router_observation(
+                &id,
+                &receipt,
+                &fixture.owner,
+                &before.cursor,
+                vec![row.clone(), observed_pending],
+                sync.clone()
+            )
+            .unwrap());
+        let current = service.status().await.snapshot;
+        assert_eq!(
+            current
+                .served_models
+                .iter()
+                .filter(|row| row.model_id == request.model_id)
+                .collect::<Vec<_>>(),
+            vec![&pending]
+        );
+        assert_eq!(current.endpoint.model_count, 1);
+        assert!(service.begin_load(&request).is_err());
+        let mut unavailable = sync.clone();
+        unavailable.observation_state = RouterObservationState::Unavailable;
+        unavailable.last_error = Some("synthetic listener unavailable".into());
+        service
+            .publish_router_sync(&receipt, &fixture.owner, unavailable.clone())
+            .unwrap();
+        let unavailable_snapshot = service.status().await.snapshot;
+        assert_eq!(unavailable_snapshot.served_models, current.served_models);
+        assert_eq!(unavailable_snapshot.endpoint.model_count, 0);
+        assert!(service
+            .find_served_model(&row.model_id, None, Some(&id))
+            .await
+            .is_none());
+        service
+            .publish_router_sync(&receipt, &fixture.owner, unavailable)
+            .unwrap();
+        assert_eq!(
+            service.status().await.snapshot.cursor,
+            unavailable_snapshot.cursor
+        );
+        service
+            .publish_router_sync(&receipt, &fixture.owner, sync.clone())
+            .unwrap();
+        assert!(service
+            .find_served_model(&row.model_id, None, Some(&id))
+            .await
+            .is_some());
+        let cursor = service.status().await.snapshot.cursor;
+        assert!(service
+            .publish_router_observation(&id, &receipt, &fixture.owner, &cursor, Vec::new(), sync)
+            .unwrap());
+        let final_snapshot = service.status().await.snapshot;
+        assert_eq!(final_snapshot.served_models, vec![pending]);
+        assert_eq!(final_snapshot.endpoint.model_count, 0);
+        fixture.owner.stop(&id).await.unwrap();
+        let stopped = RouterProfileSyncStatus {
+            profile_id: id.clone(),
+            generation: receipt.generation,
+            observation_state: RouterObservationState::Unavailable,
+            catalog_state: RouterCatalogState::Current,
+            pending_model_ids: Vec::new(),
+            last_error: Some("synthetic stopped".into()),
+        };
+        service
+            .publish_router_sync(&receipt, &fixture.owner, stopped.clone())
+            .unwrap();
+        assert_eq!(
+            service.status().await.snapshot.router_profiles,
+            vec![stopped]
+        );
+    }
+
+    #[path = "router_observer_tests.rs"]
+    mod observer_tests;
 }

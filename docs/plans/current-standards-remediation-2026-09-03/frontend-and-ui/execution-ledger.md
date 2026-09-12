@@ -1,5 +1,214 @@
 # Execution Ledger: Frontend and UI Standards Remediation
 
+## 2026-09-12 — Managed Router Catalog And External Serving Observation
+
+The user confirmed an outside request directly to the llama.cpp router loaded a
+model, and requested that this remain supported while Pumas reflects the actual
+state and owns the available-model catalog. A read-only live RED queried only
+`get_serving_status` and router `/v1/models`: router DiffusionGemma was Loaded,
+while Pumas published no rows. The deciding script
+`python3 /tmp/pumas-router-sync-read-proof.py` exited 1 on that assertion; source
+and minimized output are retained in ignored
+`tmp/llamacpp-hosting-20260909/evidence/router-sync/`. No inference/load/unload
+was invoked by the diagnostic. Separate read-only evidence established that
+Pumas `/v1/models` returned HTTP 200 with an empty list, while the router listed 30
+available presets. The client's “model list unavailable” was not a Pumas HTTP
+error. DiffusionGemma was the first sorted preset, not an implicit model-directory
+scan or proof it had previously been loaded through Pumas.
+
+The available-model catalog already came from Pumas library records at launch.
+The missing responsibilities were ongoing catalog synchronization and external
+router-state observation. Pinned b10883 source exposes `/models/sse`, whose
+messages provide change notifications but no heartbeat/cursor replay. Reloading
+`/v1/models?reload=1` can unload changed/removed running presets. Sampling an
+entry as unloaded cannot exclude a concurrent external autoload before reload,
+so automatic destructive refresh cannot be made safe by the existing Pumas-only
+operation guard. The default policy preserves every existing preset/accepted
+context, applies additions live, and reports removals/path changes pending until
+profile restart. The user was offered immediate updates with their possible
+unload effect as an alternative; the conservative policy was stated after a
+reasonable opportunity to reply. No live reload or runtime stop was performed.
+
+The selected implementation uses one core observer per retained managed-router
+generation, installed before the first launch await. It connects the router
+SSE stream before the initial snapshot, observes library changes, uses a 30-second
+idle connection lease and 5-second bounded reads, and reconnects in the same
+owner rather than creating a second polling task. Reads do not acquire the
+exclusive model-mutation guard; only catalog changes do. Observation publications
+are fenced by owned generation/listener and sample revision. Active and Unknown
+serving-operation receipts retain their authority; completed known failures do
+not hide a subsequent external load or resurrect after its later unload.
+
+Serving snapshots add generated RouterProfileSyncStatus metadata: profile_id,
+generation, observation_state(connecting/current/unavailable),
+catalog_state(current/pending/uncertain), pending_model_ids and explicit nullable
+last_error. Current means an owned admitted observation with bounded refresh,
+not perpetual health or inference-correctness proof. Noncurrent rows remain
+retained evidence, but cannot authorize gateway routing or UI Loaded/Start/Stop.
+Discovery returns 503 if any managed-router observation is noncurrent, avoiding
+a partial or empty 200 that falsely claims complete knowledge; independently
+healthy targeted routes remain usable. Ready counts include only Loaded rows
+from current profiles. Existing missing metadata remains a legacy boundary.
+
+Safe live additions preserve exact existing preset bytes and context overrides.
+Changed or removed entries remain pending until restart because outside autoload
+cannot be excluded by Pumas's mutation guard. Reload is issued once for a changed
+catalog; an uncertain result is sticky and never automatically retried as a
+mutation. Pending with current observation leaves healthy Stop available;
+uncertain catalog means unavailable observation and requires profile recovery.
+
+Stop/replacement must drain the exact owned observer. A stop request or a failed
+health read alone cannot prove absence. Exact-generation successful terminal
+cleanup retires rows and metadata; potentially live unreachable processes retain
+unavailability. The RPC supervisor now awaits the existing scoped managed-profile
+stop/drain operation, closing this bounded shutdown gap for the new observer;
+legacy global process routes and arbitrary escaped descendants remain separate.
+No cleanup uses unverified PID adoption or global process scans.
+
+The actual App -> ModelManager -> LocalModelsList path carries validated router
+metadata and observation availability. The library shows Loading/Loaded from
+current observations, unavailable indicators for retained unknown rows, and
+pending catalog notices even when no model row is present. Dialog controls are
+scoped to the selected profile, preserving unrelated healthy profiles and user
+context drafts. Old Loaded-origin notices clear on lost authority without erasing
+current action errors. No UI polling, extra load/unload request, or independent
+frontend state store was added.
+
+Frontend source review accepted 92 focused tests plus TypeScript and affected
+ESLint. The final hidden Electron fixture uses actual hooks/dialog/library with
+simulated router events: external Loading -> Loaded -> pending catalog with Stop
+available -> unavailable without Loaded badge/notice -> recovery -> external
+unload. Exactly zero Start/Stop mutations and 13 status reads occurred. The first
+browser oracle checked the button and badge but missed the dialog's stale
+“Loaded on” notice; independent review caught it, a permanent regression was
+added, and the strengthened rendered test passed. This is synthetic integration
+evidence, not a load/unload test against the user's live router.
+
+Pinned upstream evidence: [b10883 server routes](https://github.com/ggml-org/llama.cpp/blob/b10883/tools/server/server.cpp)
+and [b10883 model management](https://github.com/ggml-org/llama.cpp/blob/b10883/tools/server/server-models.cpp)
+establish SSE availability, lack of heartbeat/replay, and reload's effects on
+changed/removed entries. No conditional reload/admission endpoint was found in
+that bounded route audit. This does not claim future runtime versions preserve
+these semantics.
+
+Verification uses synthetic owned child HTTP/SSE fixtures. Core process-owner
+checks pass 18 cases in each feature configuration, including 8 observer cases;
+core serving checks pass 39 per configuration. RPC all-feature serving passes 29
+unit plus 3 integration tests, gateway passes 22 tests, and server/shutdown passes 11.
+The optional live ONNX body is unconfigured and is not execution evidence. Full
+no-default RPC passes 151 unit and 13 integration tests with 10 existing ignores.
+Normal/library-only frontend builds and Electron build pass; Electron tests pass
+168 with one existing explicit skip; generator tests pass 8. Final release,
+strict lint and producer/generated conformance results are recorded below.
+
+Independent review required: attaching observer ownership before launch could
+be cancelled; draining before replacement; stop already true at subscription;
+sticky observer failure and terminal failure wakeup; terminal cleanup before
+retiring metadata; read observation independent of Busy mutation ownership;
+bounded chunked HTTP reads and stream lease; strict failed/status/identity/context
+argument admission; preventing known-failure resurrection; ready-only counts
+across all mutation paths; discovery 503 under incomplete knowledge; duplicate
+frontend metadata rejection; global read failure propagation to library badges;
+empty-library profile notices; and clearing stale Loaded-origin dialog text.
+All accepted production corrections have permanent focused evidence or the
+rendered proof. A final alleged mutation-precondition regression used an earlier
+source version: re-reading frozen code confirmed validation already precedes
+catalog mutation. That finding was withdrawn with no edits or new tests; it is
+not reported as an additional repair.
+
+Repairs and environment findings: an initial synthetic-test compile missed a
+std::path::Path import; it was corrected. Loopback fixture binding intermittently
+failed with sandbox EPERM and passed with approved isolated execution. Root
+strict Clippy found a collapsible nested condition; the equivalent short-circuit
+condition was applied without changing behavior. No Cargo commands overlapped.
+The original live RED still concerns the old running app, deliberately left
+untouched. Activation requires the rebuilt backend/frontend and a fresh profile
+launch under retained ownership; the observer never adopts old PID files.
+
+Routing used Astra medium for consequential design and independent review,
+Astra low for coupled core lifecycle/observer/catalog/RPC implementation, a
+separate bounded Astra-low helper for the serving-publication/DTO seam, Sol low
+for frontend integration, and Luna max for accounting. The extra Rust helper was
+introduced after the settled implementation proved larger than its initial
+partition; one agent retained Cargo ownership. The inherited root remained Astra
+medium rather than the requested Sol-low coordination configuration. Required
+review corrections, compile/lint repairs, environment retries, the withdrawn
+stale-source finding, root integration and all agents are included in accounting.
+The narrow Sol projection was accepted without rescue; complex Rust required
+substantial lifecycle review. These are provisional task-class observations,
+not a controlled benchmark or a comparison based only on token prices.
+
+External rows expose observed lifecycle and catalog identity, not complete
+runtime telemetry. New external rows use keep_loaded:false (no Pumas pin request),
+device_mode:Auto, unknown device/tensor/memory/time fields as None, and context/GPU
+layers only from validated available arguments or retained launch settings.
+Existing Pumas rows preserve requested policy/alias/context. No actual GPU
+placement, effective context or inference correctness is inferred from these
+fields. Full serving-wire migration, legacy global lifecycle, non-managed routers
+and remaining M4 work remain outside acceptance.
+
+Root's final generated-decoder check found a separate real contract omission:
+Current observation plus Uncertain catalog was accepted, contrary to the agreed
+invariant. The deciding pure generated-decoder probe returned valid when invalid
+was required. The exported schema now uses two complete object alternatives,
+requiring Unavailable for Uncertain; it preserves closed fields, explicit null
+and definitions without another handwritten validator. Canonical publication
+normalizes uncertainty and a shared backend predicate independently excludes it
+from core readiness/counts and RPC discovery/routing. Focused regressions cover
+manually constructed contradictory metadata as well as generated admission.
+Independent review accepted the corrected source. This late repair required
+another optimized-build pass; its work is included rather than hidden as an
+initial clean acceptance.
+
+Final invariant regressions pass in both core feature configurations; the
+all-feature RPC uncertainty regression passes. Strict core/RPC Clippy passes for
+all targets with all features and with no default features, with warnings denied;
+Cargo formatting passes. Final regenerated producer/decoder conformance passes
+40 cases and actual renderer conformance passes 48. Generator tests pass 8 and
+freshness passes. Final frontend validation passes 92 focused tests, TypeScript,
+affected ESLint and both library-only and normal builds. Electron build and
+bundled preload/main tests pass 168 with one explicit existing skip. The final
+isolated Electron rendering proof passes all external loading, loaded, pending,
+unavailable, recovery and unload transitions with zero Start/Stop calls and 13
+status reads; the normal frontend build is restored. No live runtime was changed.
+
+Final optimized `cargo build -p pumas-rpc --release` passes after the last
+invariant repair (5m 23s). Both canonical plans pass the unchanged external pure
+`validate_plan` function and helpers; the full standards engine was not run
+because its environment lacks jsonschema. Final staged whitespace/path checks
+pass; unrelated deletions and scratch directories remain excluded.
+
+Cost checkpoint (API-equivalent assumptions, not invoices), frozen 2026-09-12T18:50:37.589299Z:
+
+| Work | Model / effort | Standard USD |
+| --- | --- | ---: |
+| current user turn: /root | gpt-6-astra / medium | 21.201068 |
+| current user turn: /root/router_sync_costs | gpt-5.6-luna / max | 0.06611732 |
+| current user turn: /root/router_sync_design | gpt-6-astra / medium | 22.062370 |
+| current user turn: /root/router_sync_design/core_router_reconcile | gpt-6-astra / low | 12.207864 |
+| current user turn: /root/router_sync_design/core_router_reconcile/serving_observation | gpt-6-astra / low | 3.285180 |
+| current user turn: /root/router_sync_ui | gpt-5.6-sol / low | 2.5298408 |
+| prior reporting tail: /root | gpt-6-astra / medium | 2.448928 |
+
+Current slice: $61.35244012; carried uncounted tail: $2.44892800; newly checkpointed: $63.80136812. Cumulative: $472.25279152 standard / $944.50558304 priority scenario.
+
+Deduplicated 543 response IDs across root and descendants. Cached input is included in input; reasoning is included in output. No request crossed 272,000 input tokens; cache writes were zero. Requested/observed tiers are unknown. Shared auto-review (11 records) and tool fees remain unknown and unallocated, never free. Rates remain the recorded assumptions, not independently verified invoice prices. Standard/priority scenarios are estimates only.
+
+Helper `/tmp/pumas-router-sync-costs.py`; frozen artifact `/tmp/pumas-router-sync-costs.json`. Root `01a0880c-8ce6-74e2-afec-f69e0fc6f1e0`, turn `01a096cc-1af4-7682-8884-3f1f070ffa6c`. Prior accepted snapshot and inherited cutoffs are retained unchanged; every included thread cutoff is below. Later final-check/commit/report usage remains uncounted for the next checkpoint.
+
+- /root (current user turn): `2026-09-12T18:50:36.338Z`, `resp_04a060a0b34b4096016aa59ef2960c87d0844e2d5948a9fc54`.
+- /root/router_sync_costs (current user turn): `2026-09-12T18:11:29.809Z`, `resp_05df97324dfdf478016aa595bc11a487d09907c8922a3e0a14`.
+- /root/router_sync_design (current user turn): `2026-09-12T18:43:25.731Z`, `resp_00ad60c9e8c2d448016aa59d48b61487d09149e1dd1751acc5`.
+- /root/router_sync_design/core_router_reconcile (current user turn): `2026-09-12T18:36:27.268Z`, `resp_04596a5f7e6664c7016aa59ba8706887d0840d925858f0903d`.
+- /root/router_sync_design/core_router_reconcile/serving_observation (current user turn): `2026-09-12T18:42:45.033Z`, `resp_02cdc624df112919016aa59d2225c487d0b2a9f862f663691d`.
+- /root/router_sync_ui (current user turn): `2026-09-12T18:24:10.917Z`, `resp_05acb9e2804e9506016aa598c691c487d0b989cee0e74155db`.
+- subagent:guardian (current user turn): `2026-09-12T18:48:44.633Z`, `resp_0267b9e1194688a8016aa59e89fee087d0af9be27ace41a451`.
+- /root (prior reporting tail): `2026-09-12T17:59:15.579Z`, `resp_04a060a0b34b4096016aa592ec333087d08d230c8381e62455`.
+- subagent:guardian (prior reporting tail): `2026-09-12T17:59:07.845Z`, `resp_0267b9e1194688a8016aa592e767e087d0a24acd5003cf4403`.
+
+Pricing per million uncached/cached/cache-write/output: Sol 4/0.4/5/20, Luna 0.2/0.02/0.25/1.2, Astra 10/1/12.5/50 USD. Above 272,000 input tokens: 2x input and 1.5x output; separately reported priority scenario: 2x standard. No usage validation/read errors.
+
+
 ## 2026-09-12 — Loading Navigation And Requested Context
 
 The user exposed two gaps in the preceding loading-state acceptance: the real

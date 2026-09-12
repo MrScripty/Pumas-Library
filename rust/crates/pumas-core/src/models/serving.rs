@@ -297,6 +297,42 @@ pub struct ServedModelStatus {
     pub last_error: Option<ModelServeError>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RouterObservationState {
+    Connecting,
+    Current,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RouterCatalogState {
+    Current,
+    Pending,
+    Uncertain,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "contract-schema", derive(schemars::JsonSchema))]
+pub struct RouterProfileSyncStatus {
+    pub profile_id: RuntimeProfileId,
+    pub generation: u64,
+    pub observation_state: RouterObservationState,
+    pub catalog_state: RouterCatalogState,
+    pub pending_model_ids: Vec<String>,
+    pub last_error: Option<String>,
+}
+
+impl RouterProfileSyncStatus {
+    pub fn is_observation_current(&self) -> bool {
+        self.observation_state == RouterObservationState::Current
+            && self.catalog_state != RouterCatalogState::Uncertain
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ServingStatusSnapshot {
@@ -304,6 +340,8 @@ pub struct ServingStatusSnapshot {
     pub cursor: String,
     pub endpoint: ServingEndpointStatus,
     pub served_models: Vec<ServedModelStatus>,
+    #[serde(default)]
+    pub router_profiles: Vec<RouterProfileSyncStatus>,
     pub last_errors: Vec<ModelServeError>,
 }
 
@@ -314,6 +352,7 @@ impl ServingStatusSnapshot {
             cursor: SERVING_CURSOR_ZERO.to_string(),
             endpoint: ServingEndpointStatus::not_configured(),
             served_models: Vec::new(),
+            router_profiles: Vec::new(),
             last_errors: Vec::new(),
         }
     }
@@ -599,5 +638,41 @@ mod tests {
             snapshot.endpoint.endpoint_mode,
             ServingEndpointMode::NotConfigured
         );
+    }
+}
+
+#[cfg(test)]
+mod router_sync_tests {
+    use super::*;
+
+    #[test]
+    fn router_sync_serializes_freshness_and_explicit_null_error() {
+        let status = RouterProfileSyncStatus {
+            profile_id: RuntimeProfileId::parse("synthetic-router").unwrap(),
+            generation: 7,
+            observation_state: RouterObservationState::Unavailable,
+            catalog_state: RouterCatalogState::Uncertain,
+            pending_model_ids: vec!["synthetic/model".into()],
+            last_error: None,
+        };
+        let encoded = serde_json::to_value(&status).unwrap();
+        assert_eq!(encoded["observation_state"], "unavailable");
+        assert_eq!(encoded["catalog_state"], "uncertain");
+        assert!(encoded.as_object().unwrap().contains_key("last_error"));
+        assert!(encoded["last_error"].is_null());
+        assert_eq!(
+            serde_json::from_value::<RouterProfileSyncStatus>(encoded).unwrap(),
+            status
+        );
+    }
+
+    #[test]
+    fn legacy_snapshot_defaults_router_profiles() {
+        let mut encoded = serde_json::to_value(ServingStatusSnapshot::empty()).unwrap();
+        encoded.as_object_mut().unwrap().remove("router_profiles");
+        assert!(serde_json::from_value::<ServingStatusSnapshot>(encoded)
+            .unwrap()
+            .router_profiles
+            .is_empty());
     }
 }

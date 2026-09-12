@@ -177,6 +177,7 @@ export function useModelServingActions(
     if (!controlRows) {
       loadedRef.current = false;
       setServedStatus(null);
+      setMessage((current) => (current?.source === 'loaded' ? null : current));
       return;
     }
     const matchingRows = controlRows.filter((servedModel) =>

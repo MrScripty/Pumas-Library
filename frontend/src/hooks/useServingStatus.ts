@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getElectronAPI } from '../api/adapter';
 import type { ServingStatusSnapshot } from '../types/api-serving';
 import type { ModelServeErrorCode } from '../types/api-serving';
+import type { RouterProfileSyncStatus } from '../types/api-serving';
+import { decodeRouterProfileSyncStatus } from '../generated/desktop-contract';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger('useServingStatus');
@@ -105,11 +107,26 @@ function readControlObservation(value: unknown): ServingControlStatus[] | null {
   return rows;
 }
 
+function readRouterProfiles(value: unknown): RouterProfileSyncStatus[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+  const profiles: RouterProfileSyncStatus[] = [];
+  const profileIds = new Set<string>();
+  for (const entry of value) {
+    const decoded = decodeRouterProfileSyncStatus(entry);
+    if (decoded.status !== 'valid' || profileIds.has(decoded.value.profile_id)) return null;
+    profileIds.add(decoded.value.profile_id);
+    profiles.push(decoded.value);
+  }
+  return profiles;
+}
+
 export function useServingStatus() {
   const [snapshot, setSnapshot] = useState<ServingStatusSnapshot | null>(null);
   const [readError, setReadError] = useState<string | null>(null);
   const [subscriptionError, setSubscriptionError] = useState<string | null>(null);
   const [controlRows, setControlRows] = useState<ServingControlStatus[] | null>(null);
+  const [routerProfiles, setRouterProfiles] = useState<RouterProfileSyncStatus[]>([]);
   const refreshSequenceRef = useRef(0);
   const cursorRef = useRef<string | null>(null);
   const subscriptionFailedRef = useRef(false);
@@ -129,7 +146,13 @@ export function useServingStatus() {
       const responseWire = response as unknown as Record<string, unknown>;
       if (responseWire['success'] === true) {
         const admittedRows = readControlObservation(response.snapshot);
-        if (!admittedRows) {
+        const snapshotWire = responseWire['snapshot'];
+        const admittedRouterProfiles = readRouterProfiles(
+          snapshotWire && typeof snapshotWire === 'object'
+            ? (snapshotWire as Record<string, unknown>)['router_profiles']
+            : undefined
+        );
+        if (!admittedRows || !admittedRouterProfiles) {
           setReadError(SERVING_STATUS_OBSERVATION_INVALID);
           setControlRows(null);
           return;
@@ -137,6 +160,7 @@ export function useServingStatus() {
         cursorRef.current = response.snapshot.cursor;
         setSnapshot(response.snapshot);
         setControlRows(admittedRows);
+        setRouterProfiles(admittedRouterProfiles);
         setReadError(null);
       } else {
         setReadError(response.error ?? 'Failed to load serving status');
@@ -217,6 +241,7 @@ export function useServingStatus() {
     cursor: snapshot?.cursor ?? null,
     error,
     controlObservation,
+    routerProfiles,
     refreshServingStatus,
   };
 }

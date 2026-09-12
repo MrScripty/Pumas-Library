@@ -20,6 +20,7 @@ import type {
   ServingStatusUpdateFeed,
 } from '../types/api-serving';
 import { useServingStatus } from './useServingStatus';
+import { profileControlObservation } from './servingStatusProjection';
 
 function createSnapshot(cursor: string): ServingStatusSnapshot {
   return {
@@ -89,6 +90,64 @@ describe('useServingStatus', () => {
     unmount();
     expect(unsubscribeMock).toHaveBeenCalledTimes(1);
     setIntervalSpy.mockRestore();
+  });
+
+  it('keeps a healthy profile authoritative while another profile is unavailable', () => {
+    const rows = [
+      { model_id: 'models/healthy', profile_id: 'healthy', provider: 'llama_cpp', load_state: 'loaded' },
+      { model_id: 'models/stale', profile_id: 'offline', provider: 'llama_cpp', load_state: 'loaded' },
+    ] as const;
+    const profiles = [
+      { profile_id: 'healthy', generation: 2, observation_state: 'current', catalog_state: 'current', pending_model_ids: [], last_error: null },
+      { profile_id: 'offline', generation: 3, observation_state: 'unavailable', catalog_state: 'uncertain', pending_model_ids: [], last_error: 'router unreachable' },
+    ] as const;
+
+    expect(profileControlObservation({ kind: 'known', rows: [...rows] }, profiles, 'healthy')).toEqual({
+      kind: 'known', rows: [...rows],
+    });
+    expect(profileControlObservation({ kind: 'known', rows: [...rows] }, profiles, 'offline')).toEqual({
+      kind: 'unavailable', message: 'router unreachable',
+    });
+  });
+
+  it('admits a missing router profile list as a legacy snapshot', async () => {
+    const { result } = renderHook(() => useServingStatus());
+    await flushMicrotasks();
+    expect(result.current.routerProfiles).toEqual([]);
+    expect(result.current.controlObservation).toEqual({ kind: 'known', rows: [] });
+  });
+
+  it('retains the prior raw snapshot but withdraws control authority after malformed router metadata', async () => {
+    const { result } = renderHook(() => useServingStatus());
+    await flushMicrotasks();
+    getServingStatusMock.mockResolvedValueOnce({
+      success: true,
+      snapshot: { ...createSnapshot('serving:bad-router'), router_profiles: [{ profile_id: 'broken' }] },
+    });
+    await act(async () => result.current.refreshServingStatus());
+    expect(result.current.cursor).toBe('serving:1');
+    expect(result.current.controlObservation).toEqual({
+      kind: 'unavailable', message: 'Serving status response was malformed',
+    });
+  });
+
+  it('rejects duplicate router profile metadata rather than applying inconsistent authority', async () => {
+    const duplicate = {
+      profile_id: 'duplicate', generation: 1, observation_state: 'current',
+      catalog_state: 'current', pending_model_ids: [], last_error: null,
+    } as const;
+    getServingStatusMock.mockResolvedValueOnce({
+      success: true,
+      snapshot: {
+        ...createSnapshot('serving:duplicate-router'),
+        router_profiles: [duplicate, { ...duplicate, observation_state: 'unavailable' }],
+      },
+    });
+    const { result } = renderHook(() => useServingStatus());
+    await flushMicrotasks();
+    expect(result.current.controlObservation).toEqual({
+      kind: 'unavailable', message: 'Serving status response was malformed',
+    });
   });
 
   it('rejects an entire control observation when one served-model row is malformed', async () => {

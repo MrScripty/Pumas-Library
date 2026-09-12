@@ -7,7 +7,9 @@
 //! Poisoned state fails closed and is never replaced with an empty snapshot.
 
 mod gateway_alias;
+mod observation;
 mod operation;
+use observation::refresh_endpoint;
 mod placement;
 pub use operation::ServingLoadOperation;
 use operation::ServingState;
@@ -22,9 +24,9 @@ use placement::validate_provider_placement;
 use crate::models::{
     ModelServeError, ModelServeErrorCode, ModelServeValidationResponse, RuntimeDeviceMode,
     RuntimeLifecycleState, RuntimeManagementMode, RuntimeProfileId, RuntimeProviderId,
-    RuntimeProviderMode, ServeModelRequest, ServedModelStatus, ServingEndpointMode,
-    ServingEndpointStatus, ServingStatusEvent, ServingStatusEventKind, ServingStatusResponse,
-    ServingStatusSnapshot, ServingStatusUpdateFeed, ServingStatusUpdateFeedResponse,
+    RuntimeProviderMode, ServeModelRequest, ServedModelStatus, ServingStatusEvent,
+    ServingStatusEventKind, ServingStatusResponse, ServingStatusSnapshot, ServingStatusUpdateFeed,
+    ServingStatusUpdateFeedResponse,
 };
 use crate::providers::{ExecutableArtifactFormat, ProviderRegistry};
 
@@ -130,12 +132,7 @@ impl ServingService {
             .served_models
             .retain(|model| !same_served_model(model, &status));
         snapshot.served_models.push(status.clone());
-        snapshot.endpoint = ServingEndpointStatus {
-            endpoint_mode: ServingEndpointMode::PumasGateway,
-            endpoint_url: None,
-            model_count: snapshot.served_models.len() as u32,
-            message: Some("Use the Pumas /v1 serving gateway for loaded models".to_string()),
-        };
+        refresh_endpoint(snapshot);
         bump_snapshot_cursor(snapshot);
         serving_status_event(
             snapshot.cursor.clone(),
@@ -237,10 +234,7 @@ impl ServingService {
             }
             false
         });
-        snapshot.endpoint.model_count = snapshot.served_models.len() as u32;
-        if snapshot.served_models.is_empty() {
-            snapshot.endpoint = ServingEndpointStatus::not_configured();
-        }
+        refresh_endpoint(snapshot);
         bump_snapshot_cursor(snapshot);
         serving_status_event(
             snapshot.cursor.clone(),
@@ -289,6 +283,13 @@ impl ServingService {
     ) -> Option<ServingStatusUpdateFeed> {
         let invalidated = state.invalidate_profile(profile_id);
         let snapshot = &mut state.snapshot;
+        let removed_sync = snapshot
+            .router_profiles
+            .iter()
+            .any(|sync| &sync.profile_id == profile_id);
+        snapshot
+            .router_profiles
+            .retain(|sync| &sync.profile_id != profile_id);
         let mut removed_models = Vec::new();
         snapshot.served_models.retain(|status| {
             if &status.profile_id == profile_id {
@@ -298,14 +299,11 @@ impl ServingService {
             true
         });
 
-        if removed_models.is_empty() && !invalidated {
+        if removed_models.is_empty() && !invalidated && !removed_sync {
             return None;
         }
 
-        snapshot.endpoint.model_count = snapshot.served_models.len() as u32;
-        if snapshot.served_models.is_empty() {
-            snapshot.endpoint = ServingEndpointStatus::not_configured();
-        }
+        refresh_endpoint(snapshot);
         bump_snapshot_cursor(snapshot);
         let cursor = snapshot.cursor.clone();
         let events = removed_models
@@ -324,7 +322,7 @@ impl ServingService {
             cursor,
             events,
             stale_cursor: false,
-            snapshot_required: invalidated,
+            snapshot_required: invalidated || removed_sync,
         })
     }
 
@@ -334,14 +332,15 @@ impl ServingService {
         provider: Option<RuntimeProviderId>,
         profile_id: Option<&RuntimeProfileId>,
     ) -> Option<ServedModelStatus> {
-        self.state
-            .lock()
-            .expect("serving state poisoned")
+        let state = self.state.lock().expect("serving state poisoned");
+        state
             .snapshot
             .served_models
             .iter()
             .find(|status| {
                 status.model_id == model_id
+                    && status.load_state == crate::models::ServedModelLoadState::Loaded
+                    && observation::profile_is_current(&state.snapshot, &status.profile_id)
                     && provider.is_none_or(|provider| status.provider == provider)
                     && profile_id.is_none_or(|profile_id| &status.profile_id == profile_id)
             })
@@ -600,11 +599,44 @@ fn profile_accepts_serving_operation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::ServingEndpointMode;
     use crate::models::{
         ModelServeErrorSeverity, ModelServingConfig, RuntimeDeviceMode, RuntimeProfileId,
         ServedModelLoadState,
     };
     use crate::providers::ProviderBehavior;
+
+    #[test]
+    fn canonical_mutations_count_only_current_loaded_rows() {
+        use crate::models::{RouterCatalogState, RouterObservationState, RouterProfileSyncStatus};
+        let mut snapshot = ServingStatusSnapshot::empty();
+        let unavailable = loaded_status("synthetic/unavailable", "router-offline", None);
+        snapshot.router_profiles.push(RouterProfileSyncStatus {
+            profile_id: unavailable.profile_id.clone(),
+            generation: 1,
+            observation_state: RouterObservationState::Current,
+            catalog_state: RouterCatalogState::Uncertain,
+            pending_model_ids: Vec::new(),
+            last_error: None,
+        });
+        snapshot.served_models.push(unavailable);
+        let mut loading = loaded_status("synthetic/loading", "router-loading", None);
+        loading.load_state = ServedModelLoadState::Loading;
+        snapshot.served_models.push(loading);
+        let mut available = loaded_status("synthetic/available", "ollama", None);
+        available.provider = RuntimeProviderId::Ollama;
+        ServingService::record_loaded_model_locked(&mut snapshot, available);
+        assert_eq!(snapshot.endpoint.model_count, 1);
+        ServingService::record_unloaded_model_locked(
+            &mut snapshot,
+            "synthetic/available",
+            None,
+            None,
+            None,
+        );
+        assert_eq!(snapshot.endpoint.model_count, 0);
+        assert_eq!(snapshot.served_models.len(), 2);
+    }
 
     fn request() -> ServeModelRequest {
         ServeModelRequest {

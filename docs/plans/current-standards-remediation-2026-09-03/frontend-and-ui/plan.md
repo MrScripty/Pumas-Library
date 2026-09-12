@@ -10,10 +10,11 @@ producer/preload/renderer conformance and Linux cold/warm GUI evidence;
 checkpoint closes all M4, XR-S1, or M5 claims. The approved approximately
 one-second main-owned marker barrier remains the reveal authority.
 
-**Next slice:** Resume the bounded `is_ollama_running`/`is_torch_running`
-producer, RPC, generated desktop and actual-consumer read-contract
-inventory/validation. Actual library Loading navigation and requested-context
-restoration are accepted; M4 and overall remediation remain incomplete.
+**Next slice:** Validate the bounded `is_ollama_running` / `is_torch_running`
+read contracts across standalone RPC, generated contracts and actual desktop
+consumers. Managed router external-load observation and library catalog
+synchronization are accepted within the documented restart policy and evidence
+limits. M4 and overall remediation remain incomplete.
 Installation progress, installation validation, runtime-version info,
 comprehensive status, active/default, installed-version, runtime
 GitHub cache-status and available-version response
@@ -68,6 +69,21 @@ The user explicitly prioritizes API/UI contracts ahead of Pending download
 cleanup replay; neither the remaining M4 work nor Pending replay is accepted.
 
 **Acceptance status:** `partial`
+
+## Managed Router Catalog And External Serving Observation
+
+Status: `Accepted`; see the
+[ledger](execution-ledger.md#2026-09-12--managed-router-catalog-and-external-serving-observation).
+Pumas owns available library entries; an exact-generation core observer consumes
+router SSE and bounded snapshots to publish external model lifecycle changes.
+Per-profile generated metadata distinguishes current, pending and unavailable
+state; incomplete discovery returns 503 rather than authoritative empty data.
+Safe catalog additions preserve existing presets/context, while removals or path
+changes remain pending until restart because external autoload cannot be excluded
+atomically. Owned stop/replacement and supervised shutdown drain observers before
+retirement. No existing live runtime was modified or adopted; use the rebuilt
+backend and a fresh owned profile launch. GPU/effective-context telemetry, full
+serving-wire migration, non-managed routers and broader M4 remain separate.
 
 ## Loading Navigation And Requested Context
 

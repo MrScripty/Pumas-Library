@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRuntimeProfiles } from '../hooks/useRuntimeProfiles';
 import { useServingStatus } from '../hooks/useServingStatus';
+import { profileControlObservation } from '../hooks/servingStatusProjection';
 import type { RuntimeDeviceMode, RuntimeProviderId } from '../types/api-runtime-profiles';
 import type { ModelInfo } from '../types/apps';
+import type { RouterProfileSyncStatus } from '../types/api-serving';
 import { ModelServeDialogContent } from './model-serve/ModelServeDialogContent';
 import { ModalDialog } from './ui';
 import {
@@ -29,6 +31,8 @@ interface ModelServeDialogProps {
   onClose: () => void;
 }
 
+const EMPTY_ROUTER_PROFILES: RouterProfileSyncStatus[] = [];
+
 export function ModelServeDialog({
   model,
   initialProfileId,
@@ -39,6 +43,7 @@ export function ModelServeDialog({
 }: ModelServeDialogProps) {
   const runtimeProfiles = useRuntimeProfiles();
   const servingStatus = useServingStatus();
+  const routerProfiles = (servingStatus as { routerProfiles?: RouterProfileSyncStatus[] }).routerProfiles ?? EMPTY_ROUTER_PROFILES;
   const servingProfiles = useMemo(
     () =>
       providerFilter
@@ -65,9 +70,16 @@ export function ModelServeDialog({
   const profileSelectRef = useRef<HTMLSelectElement | null>(null);
   const isDialogMode = displayMode === 'dialog';
   const selectedProfile = servingProfiles.find((profile) => profile.profile_id === profileId);
-  const servingControlObservation = selectedProfile
-    ? servingStatus.controlObservation
-    : { kind: 'unavailable' as const, message: 'Select a runtime target before serving' };
+  const servingControlObservation = useMemo(
+    () => selectedProfile
+      ? profileControlObservation(
+          servingStatus.controlObservation,
+          routerProfiles,
+          selectedProfile.profile_id
+        )
+      : { kind: 'unavailable' as const, message: 'Select a runtime target before serving' },
+    [routerProfiles, selectedProfile, servingStatus.controlObservation]
+  );
   const servingActions = useModelServingActions(
     model.id,
     {
@@ -134,6 +146,14 @@ export function ModelServeDialog({
     profileStateBlockReason,
     model,
   });
+  const selectedRouterSync = routerProfiles.find(
+    (profile) => profile.profile_id === profileId
+  );
+  const routerCatalogMessage = selectedRouterSync?.catalog_state === 'pending'
+    ? 'Library changes pending profile restart'
+    : selectedRouterSync?.catalog_state === 'uncertain'
+      ? (selectedRouterSync.last_error ?? 'Router catalog status is unavailable')
+      : null;
 
   useEffect(() => {
     if (!selectedProfile) {
@@ -219,6 +239,7 @@ export function ModelServeDialog({
       isLoading={servingActions.isLoading}
       isUnavailable={servingActions.isUnavailable}
       message={servingActions.message}
+      routerCatalogMessage={routerCatalogMessage}
       model={model}
       aliasRequired={aliasRequired}
       aliasError={aliasError}

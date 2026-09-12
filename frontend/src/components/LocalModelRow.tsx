@@ -14,6 +14,7 @@ interface LocalModelRowProps {
   expandedRelated: Set<string>;
   model: ModelInfo;
   isLoading: boolean;
+  isServingUnavailable?: boolean;
   recoveringPartialModelIds?: Set<string>;
   relatedModelsById: Record<string, RelatedModelsState>;
   selectedAppId: string | null;
@@ -39,6 +40,7 @@ export function LocalModelRow({
   expandedRelated,
   model,
   isLoading,
+  isServingUnavailable = false,
   recoveringPartialModelIds,
   relatedModelsById,
   selectedAppId,
@@ -108,13 +110,16 @@ export function LocalModelRow({
               dependencyCount={model.dependencyCount}
               partialError={rowState.partialError}
             />}
-            {!isReadOnly && (servedStatus || isLoading) && (
+            {!isReadOnly && (servedStatus || isLoading || isServingUnavailable) && (
               <div className="mt-1 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-[hsl(var(--accent-success))]">
                 {servedStatus && <span className="rounded bg-[hsl(var(--accent-success)/0.14)] px-1.5 py-0.5">
                   Loaded
                 </span>}
                 {isLoading && <span className="rounded bg-[hsl(var(--accent-success)/0.14)] px-1.5 py-0.5">
                   Loading
+                </span>}
+                {isServingUnavailable && <span className="rounded bg-[hsl(var(--accent-warning)/0.14)] px-1.5 py-0.5 text-[hsl(var(--accent-warning))]">
+                  Unavailable
                 </span>}
                 <span className="truncate text-[hsl(var(--launcher-text-muted))]">
                   {servedStatus?.endpoint_url ? ` - ${servedStatus.endpoint_url}` : ''}

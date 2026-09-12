@@ -125,6 +125,67 @@ describe('LocalModelsList', () => {
     expect(screen.getByRole('button', { name: /unload model/i })).toBeEnabled();
   });
 
+  it('retains an unavailable profile row as evidence without claiming it is loaded', () => {
+    render(
+      <LocalModelsList
+        modelGroups={modelGroups}
+        starredModels={new Set()} excludedModels={new Set()} selectedAppId="llama-cpp"
+        servedModels={[{
+          model_id: 'llm/llama/test-model', model_alias: 'test', provider: 'llama_cpp',
+          profile_id: 'offline', load_state: 'loaded', device_mode: 'cpu', keep_loaded: true,
+        }]}
+        routerProfiles={[{
+          profile_id: 'offline', generation: 4, observation_state: 'unavailable',
+          catalog_state: 'uncertain', pending_model_ids: [], last_error: 'router unreachable',
+        }]}
+        totalModels={1} hasFilters={false} relatedModelsById={{}} expandedRelated={new Set()}
+        onToggleStar={vi.fn()} onToggleLink={vi.fn()} onToggleRelated={vi.fn()}
+        onOpenRelatedUrl={vi.fn()} onServeModel={vi.fn()}
+      />
+    );
+    expect(screen.getByText('Unavailable')).toBeVisible();
+    expect(screen.queryByText('Loaded')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /serve model/i })).toBeEnabled();
+  });
+
+  it('shows pending and unavailable profile state even without a retained served row', () => {
+    render(
+      <LocalModelsList
+        modelGroups={modelGroups} starredModels={new Set()} excludedModels={new Set()}
+        selectedAppId="llama-cpp" servedModels={[]}
+        routerProfiles={[{
+          profile_id: 'router-profile', generation: 8, observation_state: 'unavailable',
+          catalog_state: 'pending', pending_model_ids: ['models/new'], last_error: null,
+        }]}
+        totalModels={1} hasFilters={false} relatedModelsById={{}} expandedRelated={new Set()}
+        onToggleStar={vi.fn()} onToggleLink={vi.fn()} onToggleRelated={vi.fn()}
+        onOpenRelatedUrl={vi.fn()} onServeModel={vi.fn()}
+      />
+    );
+    expect(screen.getByText('Router status unavailable for profile router-profile.')).toBeVisible();
+    expect(screen.getByText('Library changes pending profile restart for router-profile.')).toBeVisible();
+  });
+
+  it('withdraws loaded presentation when the serving observation is globally unavailable', () => {
+    render(
+      <LocalModelsList
+        modelGroups={modelGroups} starredModels={new Set()} excludedModels={new Set()}
+        selectedAppId="llama-cpp"
+        servedModels={[{
+          model_id: 'llm/llama/test-model', provider: 'llama_cpp', profile_id: 'router-profile',
+          load_state: 'loaded', device_mode: 'cpu', keep_loaded: true,
+        }]}
+        servingControlObservation={{ kind: 'unavailable', message: 'transport failed' }}
+        totalModels={1} hasFilters={false} relatedModelsById={{}} expandedRelated={new Set()}
+        onToggleStar={vi.fn()} onToggleLink={vi.fn()} onToggleRelated={vi.fn()}
+        onOpenRelatedUrl={vi.fn()} onServeModel={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/Serving status unavailable\. The last observed model state is retained/)).toBeVisible();
+    expect(screen.queryByText('Loaded')).not.toBeInTheDocument();
+    expect(screen.getByText('Unavailable')).toBeVisible();
+  });
+
   it('renders backend-confirmed loading state for a local model', () => {
     const onServeModel = vi.fn();
     render(

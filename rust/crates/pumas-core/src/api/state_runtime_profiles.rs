@@ -74,7 +74,7 @@ pub(super) async fn launch_runtime_profile_with_receipt(
     primary
         .runtime_profile_service
         .process_owner
-        .launch(
+        .launch_observed(
             config,
             spec,
             model_path,
@@ -82,6 +82,15 @@ pub(super) async fn launch_runtime_profile_with_receipt(
                 .as_ref()
                 .and_then(|overrides| overrides.context_size),
             operation_guard,
+            Some(
+                crate::runtime_profiles::router_observer::RouterObserverContext {
+                    owner: std::sync::Arc::downgrade(
+                        &primary.runtime_profile_service.process_owner,
+                    ),
+                    library: primary.model_library.clone(),
+                    serving: primary.serving_service.clone(),
+                },
+            ),
         )
         .await
 }
@@ -366,14 +375,16 @@ pub(super) async fn stop_runtime_profile(
         .stop_with_receipt(&profile_id)
         .await?
     {
-        primary
-            .serving_service
-            .record_profile_unavailable_for_owned_generation(
-                &profile_id,
-                receipt.generation,
-                &primary.runtime_profile_service.process_owner,
-            )
-            .await?;
+        if result.is_ok() {
+            primary
+                .serving_service
+                .record_profile_unavailable_for_owned_generation(
+                    &profile_id,
+                    receipt.generation,
+                    &primary.runtime_profile_service.process_owner,
+                )
+                .await?;
+        }
         return result;
     }
     let _guard = primary
@@ -428,10 +439,12 @@ pub(super) async fn stop_all_managed_runtime_profiles(
         errors: Vec::new(),
     };
     for (profile_id, result) in results {
-        primary
-            .serving_service
-            .record_profile_unavailable(&profile_id)
-            .await;
+        if result.is_ok() {
+            primary
+                .serving_service
+                .record_profile_unavailable(&profile_id)
+                .await;
+        }
         match result {
             Ok(true) => summary.processes_stopped += 1,
             Ok(false) => {}

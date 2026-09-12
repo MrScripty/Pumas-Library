@@ -8,6 +8,8 @@ mod launch_strategy;
 mod process_owner;
 #[path = "runtime_profiles/router_model_operation.rs"]
 mod router_model_operation;
+#[path = "runtime_profiles/router_observer.rs"]
+pub(crate) mod router_observer;
 pub use router_model_operation::OwnedRouterModelOperation;
 #[path = "runtime_profiles/route_config.rs"]
 mod route_config;
@@ -188,8 +190,18 @@ fn llama_cpp_router_catalog_entry_for_record(
     library: &ModelLibrary,
     record: &ModelRecord,
 ) -> Option<LlamaCppRouterCatalogEntry> {
+    if record.id.is_empty()
+        || record.id == "*"
+        || record.id.trim() != record.id
+        || record.id.contains(['[', ']', '\r', '\n'])
+    {
+        return None;
+    }
     let (format, model_path) = executable_artifact_for_record(library, record)?;
     if format != ExecutableArtifactFormat::Gguf {
+        return None;
+    }
+    if model_path.to_string_lossy().contains(['\r', '\n']) {
         return None;
     }
 

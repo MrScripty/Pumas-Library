@@ -181,6 +181,8 @@ export default function InferencePluginsApp() {
     onChooseExistingLibrary: chooseLibraryRoot,
     servingEndpoint: servingStatus.endpoint,
     servedModels: servingStatus.servedModels,
+    routerProfiles: servingStatus.routerProfiles,
+    servingControlObservation: servingStatus.controlObservation,
   });
   const panels = buildAppShellPanels({
     appDisplayName: selectedAppShellState.appDisplayName,

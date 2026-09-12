@@ -4,8 +4,9 @@ import type { ModelManagerProps } from './ModelManager';
 import type { useManagedApps } from '../hooks/useManagedApps';
 import type { LauncherUpdateState } from '../hooks/useLauncherUpdates';
 import type { AppConfig, ModelCategory, ModelInfo, SystemResources } from '../types/apps';
-import type { ServedModelStatus, ServingEndpointStatus } from '../types/api-serving';
+import type { RouterProfileSyncStatus, ServedModelStatus, ServingEndpointStatus } from '../types/api-serving';
 import type { StatusResponse } from '../types/api-system';
+import type { ServingControlObservation } from '../hooks/useServingStatus';
 
 type AppShellProps = ComponentProps<typeof AppShell>;
 type AppHeaderProps = AppShellProps['header'];
@@ -47,6 +48,8 @@ interface BuildModelManagerPropsOptions {
   selectedAppId: string | null;
   servingEndpoint?: ServingEndpointStatus | null;
   servedModels?: ServedModelStatus[];
+  routerProfiles?: RouterProfileSyncStatus[];
+  servingControlObservation?: ServingControlObservation;
   starredModels: Set<string>;
   onAddModels: () => void;
   onChooseExistingLibrary: () => void;
@@ -145,6 +148,8 @@ export function buildModelManagerProps({
   selectedAppId,
   servingEndpoint = null,
   servedModels = [],
+  routerProfiles = [],
+  servingControlObservation,
   starredModels,
   onAddModels,
   onChooseExistingLibrary,
@@ -164,6 +169,8 @@ export function buildModelManagerProps({
     selectedAppId,
     servingEndpoint,
     servedModels,
+    routerProfiles,
+    servingControlObservation,
     onAddModels,
     onOpenModelsRoot,
     onServeModel,

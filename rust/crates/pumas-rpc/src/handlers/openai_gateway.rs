@@ -27,28 +27,44 @@ const OPENAI_GATEWAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// OpenAI-compatible served-model listing backed by Pumas serving status.
 pub async fn handle_openai_models(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.api.get_serving_status().await {
-        Ok(response) => {
-            let mut served_models = response.snapshot.served_models;
-            served_models.retain(|model| model.load_state == ServedModelLoadState::Loaded);
-            served_models.sort_by(|left, right| {
-                openai_model_id(left)
-                    .cmp(openai_model_id(right))
-                    .then_with(|| left.profile_id.as_str().cmp(right.profile_id.as_str()))
-            });
-            Json(json!({
-                "object": "list",
-                "data": served_models
-                    .into_iter()
-                    .map(openai_model_entry)
-                    .collect::<Vec<_>>()
-            }))
-            .into_response()
-        }
+        Ok(response) => openai_models_snapshot_response(response.snapshot),
         Err(error) => openai_public_error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             PublicError::from(&error),
         ),
     }
+}
+
+fn openai_models_snapshot_response(snapshot: ServingStatusSnapshot) -> Response {
+    if snapshot
+        .router_profiles
+        .iter()
+        .any(|profile| !profile.is_observation_current())
+    {
+        return openai_error_response_with_code(
+            StatusCode::SERVICE_UNAVAILABLE,
+            ModelServeErrorCode::EndpointUnavailable,
+            "Managed router model discovery is unavailable; retry after observation reconnects",
+        );
+    }
+    let mut served_models = snapshot.served_models;
+    served_models.retain(|model| {
+        model.load_state == ServedModelLoadState::Loaded
+            && router_profile_current(&snapshot.router_profiles, &model.profile_id)
+    });
+    served_models.sort_by(|left, right| {
+        openai_model_id(left)
+            .cmp(openai_model_id(right))
+            .then_with(|| left.profile_id.as_str().cmp(right.profile_id.as_str()))
+    });
+    Json(json!({
+        "object": "list",
+        "data": served_models
+            .into_iter()
+            .map(openai_model_entry)
+            .collect::<Vec<_>>()
+    }))
+    .into_response()
 }
 
 /// OpenAI-compatible proxy for served models.
@@ -102,6 +118,13 @@ pub async fn handle_openai_proxy(
             return openai_error_response(
                 StatusCode::NOT_FOUND,
                 format!("model is not served: {}", requested_model.as_str()),
+            );
+        }
+        Ok(OpenAiServedModelLookup::Unavailable) => {
+            return openai_error_response_with_code(
+                StatusCode::SERVICE_UNAVAILABLE,
+                ModelServeErrorCode::EndpointUnavailable,
+                "Selected router model observation is unavailable",
             );
         }
         Ok(OpenAiServedModelLookup::Ambiguous { code, message }) => {
@@ -242,6 +265,7 @@ fn openai_model_id(model: &ServedModelStatus) -> &str {
 enum OpenAiServedModelLookup {
     Found(Box<ServedModelStatus>),
     NotFound,
+    Unavailable,
     Ambiguous {
         code: ModelServeErrorCode,
         message: String,
@@ -260,10 +284,17 @@ fn resolve_openai_served_model(
     snapshot: ServingStatusSnapshot,
     requested_model: &str,
 ) -> OpenAiServedModelLookup {
+    let unavailable_target = snapshot.served_models.iter().any(|model| {
+        (model.model_id == requested_model || model.model_alias.as_deref() == Some(requested_model))
+            && !router_profile_current(&snapshot.router_profiles, &model.profile_id)
+    });
     let loaded: Vec<ServedModelStatus> = snapshot
         .served_models
         .into_iter()
-        .filter(|model| model.load_state == ServedModelLoadState::Loaded)
+        .filter(|model| {
+            model.load_state == ServedModelLoadState::Loaded
+                && router_profile_current(&snapshot.router_profiles, &model.profile_id)
+        })
         .collect();
     let alias_matches: Vec<ServedModelStatus> = loaded
         .iter()
@@ -301,7 +332,11 @@ fn resolve_openai_served_model(
         };
     }
 
-    OpenAiServedModelLookup::NotFound
+    if unavailable_target {
+        OpenAiServedModelLookup::Unavailable
+    } else {
+        OpenAiServedModelLookup::NotFound
+    }
 }
 
 async fn proxy_response(response: reqwest::Response) -> Response {
@@ -385,3 +420,13 @@ fn openai_error_response_body(
 #[cfg(test)]
 #[path = "openai_gateway_tests.rs"]
 mod tests;
+
+fn router_profile_current(
+    profiles: &[pumas_library::models::RouterProfileSyncStatus],
+    id: &pumas_library::models::RuntimeProfileId,
+) -> bool {
+    profiles
+        .iter()
+        .find(|profile| &profile.profile_id == id)
+        .is_none_or(|profile| profile.is_observation_current())
+}

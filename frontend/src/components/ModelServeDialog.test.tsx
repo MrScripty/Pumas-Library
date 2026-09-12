@@ -106,6 +106,7 @@ beforeEach(() => {
       cursor: null,
       error: null,
       controlObservation: { kind: 'known', rows: [] },
+      routerProfiles: [],
       refreshServingStatus: vi.fn(),
     });
     getElectronAPIMock.mockReturnValue({
@@ -444,6 +445,56 @@ describe('ModelServeDialog configuration', () => {
 });
 
 describe('ModelServeDialog actions', () => {
+  it('blocks only the selected unavailable profile and shows pending catalog state', async () => {
+    useServingStatusMock.mockReturnValue({
+      snapshot: null,
+      servedModels: [],
+      endpoint: null,
+      cursor: 'serving:router-sync',
+      error: null,
+      controlObservation: { kind: 'known', rows: [] },
+      routerProfiles: [{
+        profile_id: 'emily-llama', generation: 5, observation_state: 'connecting',
+        catalog_state: 'pending', pending_model_ids: ['model-router-sync'], last_error: null,
+      }],
+      refreshServingStatus: vi.fn(),
+    });
+
+    render(
+      <ModelServeDialog
+        model={{ id: 'model-router-sync', name: 'Router Sync Model', category: 'local', primaryFormat: 'gguf' }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByRole('button', { name: 'Serving status unavailable' })).toBeDisabled();
+    expect(screen.getByText('Library changes pending profile restart')).toBeInTheDocument();
+  });
+
+  it('keeps healthy profile controls enabled when another profile is unavailable', async () => {
+    useServingStatusMock.mockReturnValue({
+      snapshot: null, servedModels: [], endpoint: null, cursor: 'serving:mixed', error: null,
+      controlObservation: { kind: 'known', rows: [] },
+      routerProfiles: [{
+        profile_id: 'other-profile', generation: 7, observation_state: 'unavailable',
+        catalog_state: 'uncertain', pending_model_ids: [], last_error: 'router unreachable',
+      }],
+      refreshServingStatus: vi.fn(),
+    });
+
+    render(
+      <ModelServeDialog
+        model={{ id: 'model-healthy', name: 'Healthy Model', category: 'local', primaryFormat: 'gguf' }}
+        initialProfileId="emily-llama"
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByRole('button', { name: 'Start serving' })).toBeEnabled();
+    expect(screen.queryByText('router unreachable')).not.toBeInTheDocument();
+  });
+
   it('does not present a stale profile state after profile refresh fails', () => {
     useRuntimeProfilesMock.mockReturnValue({
       snapshot,

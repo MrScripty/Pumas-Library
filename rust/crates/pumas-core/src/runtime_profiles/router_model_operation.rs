@@ -38,6 +38,19 @@ pub(super) struct RouterModelState {
 }
 
 impl RouterModelState {
+    pub(super) fn observation(models: &Mutex<Self>) -> Result<(Vec<u8>, bool, bool)> {
+        let state = models
+            .lock()
+            .map_err(|_| failure("Router model state poisoned"))?;
+        Ok((
+            state
+                .expected
+                .clone()
+                .ok_or_else(|| failure("Router preset was not captured at launch"))?,
+            state.operation == ModelOperationState::Busy,
+            state.operation == ModelOperationState::Uncertain,
+        ))
+    }
     #[cfg(target_os = "linux")]
     pub(super) fn for_spec(spec: &RuntimeProfileLaunchSpec) -> Option<Arc<Mutex<Self>>> {
         if spec.launch_strategy
@@ -275,6 +288,26 @@ impl OwnedRouterModelOperation {
             .clone()
             .ok_or_else(|| failure("Router preset was not captured at launch"))?;
         let replacement = edit_model_context(&expected, model_id, context_size)?;
+        self.replace_preset(expected, replacement).await
+    }
+
+    pub(crate) fn preset(&self) -> Result<Vec<u8>> {
+        self.models
+            .lock()
+            .map_err(|_| failure("Router model state poisoned"))?
+            .expected
+            .clone()
+            .ok_or_else(|| failure("Router preset was not captured at launch"))
+    }
+
+    pub(crate) async fn replace_preset(
+        &mut self,
+        expected: Vec<u8>,
+        replacement: Vec<u8>,
+    ) -> Result<bool> {
+        if self.command_pending {
+            return Err(failure("Router preset command completion is unobserved"));
+        }
         self.mark_mutating()?;
         let (reply, receiver) = tokio::sync::oneshot::channel();
         self.command_pending = true;

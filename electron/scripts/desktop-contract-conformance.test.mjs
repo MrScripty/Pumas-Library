@@ -10,6 +10,31 @@ const fixtures = JSON.parse(await readFile(fixturePath, 'utf8'));
 const compiled = await build({entryPoints:[fileURLToPath(new URL('../src/generated/desktop-contract.ts', import.meta.url))], bundle:true, format:'esm', platform:'browser', write:false});
 const contract = await import(`data:text/javascript;base64,${Buffer.from(compiled.outputFiles[0].text).toString('base64')}`);
 
+test('router synchronization metadata preserves producer states and rejects malformed observations', () => {
+  const samples = fixtures.router_profile_sync_statuses;
+  assert.ok(Array.isArray(samples) && samples.length >= 3);
+  for (const value of samples) {
+    const result = contract.decodeRouterProfileSyncStatus(value);
+    assert.equal(result.status, 'valid');
+    assert.deepEqual(JSON.parse(JSON.stringify(result.value)), value);
+  }
+  const valid = samples[0];
+  const { last_error: omitted, ...withoutError } = valid;
+  assert.ok(omitted === null || typeof omitted === 'string');
+  for (const value of [null, {}, withoutError,
+    { ...valid, observation_state: 'ready' },
+    { ...valid, observation_state: 'current', catalog_state: 'uncertain' },
+    { ...valid, catalog_state: true },
+    { ...valid, generation: -1 },
+    { ...valid, generation: 1.5 },
+    { ...valid, generation: Number.MAX_SAFE_INTEGER + 1 },
+    { ...valid, pending_model_ids: [42] },
+    { ...valid, last_error: false },
+    { ...valid, extra: true }]) {
+    assert.equal(contract.decodeRouterProfileSyncStatus(value).status, 'invalid', JSON.stringify(value));
+  }
+});
+
 test('installation-start admission and discriminated outcomes match Rust', () => {
   for (const probe of fixtures.install_version_request_probes) {
     const result = contract.decodeInstallVersionParams(probe.params);

@@ -26,6 +26,17 @@ struct PendingLoad {
     active: bool,
 }
 
+impl PendingLoad {
+    fn reserves_target(&self) -> bool {
+        self.active
+            || self
+                .status
+                .last_error
+                .as_ref()
+                .is_some_and(|error| error.code == ModelServeErrorCode::Unknown)
+    }
+}
+
 impl ServingState {
     pub fn new() -> Self {
         Self {
@@ -40,10 +51,32 @@ impl ServingState {
         snapshot.served_models.extend(
             self.pending
                 .iter()
-                .filter(|load| load.valid)
+                .filter(|load| {
+                    load.valid
+                        && (load.reserves_target()
+                            || !self
+                                .snapshot
+                                .served_models
+                                .iter()
+                                .any(|row| same_target(&load.status, row)))
+                })
                 .map(|load| load.status.clone()),
         );
+        super::refresh_endpoint(&mut snapshot);
         snapshot
+    }
+
+    pub(super) fn reserves_target(&self, row: &ServedModelStatus) -> bool {
+        self.pending
+            .iter()
+            .any(|load| load.valid && load.reserves_target() && same_target(&load.status, row))
+    }
+
+    /// A fresh provider observation supersedes a settled, known failure only.
+    /// Active and uncertain receipts remain owned by their original invocation.
+    pub(super) fn retire_settled_failure(&mut self, row: &ServedModelStatus) {
+        self.pending
+            .retain(|load| load.reserves_target() || !same_target(&load.status, row));
     }
 
     pub fn invalidate_profile(&mut self, profile_id: &RuntimeProfileId) -> bool {

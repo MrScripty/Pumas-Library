@@ -341,24 +341,40 @@ pub async fn start_server(
             result = serving => result.map_err(anyhow::Error::from),
             _ = shutdown.changed() => Ok(()),
         };
-        drain_server_owners(
-            server_result,
-            async {
-                let result = state.api.shutdown_downloads().await;
-                #[cfg(test)]
-                downloads_drain_observed.store(true, std::sync::atomic::Ordering::Release);
-                result
-            },
-            async {
-                let result = catalog_worker.shutdown().await;
-                #[cfg(test)]
-                catalog_drain_observed.store(true, std::sync::atomic::Ordering::Release);
-                result
-            },
-            state.api.shutdown_conversion_setup(),
-            state.api.shutdown_conversions(),
-        )
-        .await
+        let (owners, runtimes) = tokio::join!(
+            drain_server_owners(
+                server_result,
+                async {
+                    let result = state.api.shutdown_downloads().await;
+                    #[cfg(test)]
+                    downloads_drain_observed.store(true, std::sync::atomic::Ordering::Release);
+                    result
+                },
+                async {
+                    let result = catalog_worker.shutdown().await;
+                    #[cfg(test)]
+                    catalog_drain_observed.store(true, std::sync::atomic::Ordering::Release);
+                    result
+                },
+                state.api.shutdown_conversion_setup(),
+                state.api.shutdown_conversions(),
+            ),
+            state.api.stop_all_managed_runtime_profiles()
+        );
+        let runtimes = runtimes.map_err(anyhow::Error::from).and_then(|summary| {
+            if summary.errors.is_empty() {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!(summary.errors.join("; ")))
+            }
+        });
+        match (owners, runtimes) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),
+            (Err(owners), Err(runtimes)) => {
+                Err(anyhow::anyhow!("{owners}; managed runtimes: {runtimes}"))
+            }
+        }
     });
 
     let handle = ServerHandle::new(actual_addr, task, shutdown_signal);

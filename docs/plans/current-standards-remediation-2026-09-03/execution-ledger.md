@@ -1,5 +1,69 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-12 — Managed Router Catalog And External Serving Observation
+
+Accepted FE-I59 within the managed router boundary. The user confirmed direct
+external requests may auto-load library models. Pumas now owns an observer per
+retained router generation, connects SSE before a full snapshot, refreshes on
+library/model events with a bounded connection lease, and publishes external
+Loading/Loaded/unload through the existing serving feed. Per-profile generated
+metadata preserves uncertainty and gates readiness; incomplete discovery returns
+503, while unrelated healthy targeted routes retain authority.
+
+Catalog generation already used Pumas library records. The new live update path
+adds safe entries while preserving existing preset bytes/context. Changes and
+removals remain pending until restart: upstream reload can unload changed entries,
+and no conditional endpoint excludes external autoload between observation and
+mutation. That conservative policy was presented to the user; no live reload or
+stop occurred. The observer never adopts old PID files. Activation requires the
+new build and a fresh owned profile launch.
+
+The [frontend ledger](frontend-and-ui/execution-ledger.md#2026-09-12--managed-router-catalog-and-external-serving-observation)
+records the live read-only RED, synthetic HTTP/SSE lifecycle and rendered UI proof,
+strict feature checks, final builds, contract conformance, review repairs and
+routing/cost cutoffs. Supervised RPC shutdown now awaits scoped owned runtime and
+observer drain; arbitrary legacy/global processes are outside that cleanup.
+The generated schema and shared backend predicate reject contradictory
+Current+Uncertain metadata. Complete runtime telemetry, non-managed routers,
+legacy lifecycle, full serving-wire migration and M4 remain incomplete.
+
+Final optimized `cargo build -p pumas-rpc --release` passes after the last
+invariant repair (5m 23s). Both canonical plans pass the unchanged external pure
+`validate_plan` function and helpers; the full standards engine was not run
+because its environment lacks jsonschema. Final staged whitespace/path checks
+pass; unrelated deletions and scratch directories remain excluded.
+
+Cost checkpoint (API-equivalent assumptions, not invoices), frozen 2026-09-12T18:50:37.589299Z:
+
+| Work | Model / effort | Standard USD |
+| --- | --- | ---: |
+| current user turn: /root | gpt-6-astra / medium | 21.201068 |
+| current user turn: /root/router_sync_costs | gpt-5.6-luna / max | 0.06611732 |
+| current user turn: /root/router_sync_design | gpt-6-astra / medium | 22.062370 |
+| current user turn: /root/router_sync_design/core_router_reconcile | gpt-6-astra / low | 12.207864 |
+| current user turn: /root/router_sync_design/core_router_reconcile/serving_observation | gpt-6-astra / low | 3.285180 |
+| current user turn: /root/router_sync_ui | gpt-5.6-sol / low | 2.5298408 |
+| prior reporting tail: /root | gpt-6-astra / medium | 2.448928 |
+
+Current slice: $61.35244012; carried uncounted tail: $2.44892800; newly checkpointed: $63.80136812. Cumulative: $472.25279152 standard / $944.50558304 priority scenario.
+
+Deduplicated 543 response IDs across root and descendants. Cached input is included in input; reasoning is included in output. No request crossed 272,000 input tokens; cache writes were zero. Requested/observed tiers are unknown. Shared auto-review (11 records) and tool fees remain unknown and unallocated, never free. Rates remain the recorded assumptions, not independently verified invoice prices. Standard/priority scenarios are estimates only.
+
+Helper `/tmp/pumas-router-sync-costs.py`; frozen artifact `/tmp/pumas-router-sync-costs.json`. Root `01a0880c-8ce6-74e2-afec-f69e0fc6f1e0`, turn `01a096cc-1af4-7682-8884-3f1f070ffa6c`. Prior accepted snapshot and inherited cutoffs are retained unchanged; every included thread cutoff is below. Later final-check/commit/report usage remains uncounted for the next checkpoint.
+
+- /root (current user turn): `2026-09-12T18:50:36.338Z`, `resp_04a060a0b34b4096016aa59ef2960c87d0844e2d5948a9fc54`.
+- /root/router_sync_costs (current user turn): `2026-09-12T18:11:29.809Z`, `resp_05df97324dfdf478016aa595bc11a487d09907c8922a3e0a14`.
+- /root/router_sync_design (current user turn): `2026-09-12T18:43:25.731Z`, `resp_00ad60c9e8c2d448016aa59d48b61487d09149e1dd1751acc5`.
+- /root/router_sync_design/core_router_reconcile (current user turn): `2026-09-12T18:36:27.268Z`, `resp_04596a5f7e6664c7016aa59ba8706887d0840d925858f0903d`.
+- /root/router_sync_design/core_router_reconcile/serving_observation (current user turn): `2026-09-12T18:42:45.033Z`, `resp_02cdc624df112919016aa59d2225c487d0b2a9f862f663691d`.
+- /root/router_sync_ui (current user turn): `2026-09-12T18:24:10.917Z`, `resp_05acb9e2804e9506016aa598c691c487d0b989cee0e74155db`.
+- subagent:guardian (current user turn): `2026-09-12T18:48:44.633Z`, `resp_0267b9e1194688a8016aa59e89fee087d0af9be27ace41a451`.
+- /root (prior reporting tail): `2026-09-12T17:59:15.579Z`, `resp_04a060a0b34b4096016aa592ec333087d08d230c8381e62455`.
+- subagent:guardian (prior reporting tail): `2026-09-12T17:59:07.845Z`, `resp_0267b9e1194688a8016aa592e767e087d0a24acd5003cf4403`.
+
+Pricing per million uncached/cached/cache-write/output: Sol 4/0.4/5/20, Luna 0.2/0.02/0.25/1.2, Astra 10/1/12.5/50 USD. Above 272,000 input tokens: 2x input and 1.5x output; separately reported priority scenario: 2x standard. No usage validation/read errors.
+
+
 ## 2026-09-12 — Loading Navigation And Requested Context
 
 Accepted FE-I58: actual library navigation remains enabled while Loading and the

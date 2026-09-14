@@ -5,7 +5,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd)
 MANIFEST_PATH="${REPO_ROOT}/rust/Cargo.toml"
 
-workspace_args=(--manifest-path "${MANIFEST_PATH}" --workspace --exclude pumas_rustler)
+workspace_args=(--locked --manifest-path "${MANIFEST_PATH}" --workspace --exclude pumas_rustler)
 
 usage() {
   cat <<'USAGE'
@@ -49,7 +49,7 @@ run_test_isolation() {
     "tests::test_api_paths"
     "tests::test_get_status"
     "tests::test_get_disk_space"
-    "tests::test_new_returns_client_for_existing_primary"
+    "tests::test_new_rejects_existing_primary_without_implicit_client"
     "tests::test_start_ipc_server_is_idempotent"
     "tests::test_discover_returns_working_client_for_basic_ipc_methods"
     "tests::test_get_library_status_reconciles_stale_library_state_on_first_read"

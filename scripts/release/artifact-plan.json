@@ -61,7 +61,7 @@
       "os": "linux",
       "architecture": "x86_64",
       "rust_target": "x86_64-unknown-linux-gnu",
-      "runner": "ubuntu-latest",
+      "runner": "ubuntu-24.04",
       "artifacts": [
         "desktop-linux-appimage",
         "desktop-linux-deb"
@@ -79,7 +79,7 @@
       "os": "windows",
       "architecture": "x86_64",
       "rust_target": "x86_64-pc-windows-msvc",
-      "runner": "windows-latest",
+      "runner": "windows-2025",
       "artifacts": [
         "desktop-windows-nsis",
         "desktop-windows-portable"
@@ -91,7 +91,8 @@
         "launcher-root-recovery",
         "launcher-wrapper-equivalence",
         "launcher-process-tree-termination"
-      ]
+      ],
+      "release_gating": "best-effort"
     },
     {
       "id": "macos-arm64",

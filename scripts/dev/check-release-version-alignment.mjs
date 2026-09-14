@@ -23,7 +23,14 @@ if (uniqueVersions.size > 1) {
   process.exit(1);
 }
 
-console.log(`Release version alignment checks passed (${[...uniqueVersions][0]})`);
+const version = [...uniqueVersions][0];
+const tag = process.argv[2] ?? (process.env.GITHUB_REF_TYPE === 'tag' ? process.env.GITHUB_REF_NAME : undefined);
+if (tag !== undefined && tag !== `v${version}`) {
+  console.error(`Release tag ${tag} does not match manifest version v${version}`);
+  process.exit(1);
+}
+
+console.log(`Release version alignment checks passed (${version})`);
 
 function readPackageVersion(relativePath) {
   const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, relativePath), 'utf8'));

@@ -67,7 +67,11 @@
         "to": ".",
         "filter": [
           "pumas-rpc",
-          "pumas-rpc.exe"
+          "pumas-rpc.exe",
+          "*.dll",
+          "*.so",
+          "*.so.*",
+          "*.dylib"
         ]
       },
       {
@@ -78,6 +82,10 @@
           "icon.ico",
           "icon.icns"
         ]
+      },
+      {
+        "from": "../LICENSE",
+        "to": "LICENSE.txt"
       }
     ],
     "linux": {
@@ -127,7 +135,8 @@
       "shortcutName": "Pumas Library",
       "installerIcon": "build/icons/icon.ico",
       "uninstallerIcon": "build/icons/icon.ico",
-      "installerHeaderIcon": "build/icons/icon.ico"
+      "installerHeaderIcon": "build/icons/icon.ico",
+      "artifactName": "Pumas.Library.Setup.${version}.${ext}"
     },
     "mac": {
       "target": [
@@ -140,6 +149,18 @@
       ],
       "icon": "build/icons/icon.icns",
       "category": "public.app-category.developer-tools"
+    },
+    "appImage": {
+      "artifactName": "Pumas.Library-${version}.${ext}"
+    },
+    "deb": {
+      "artifactName": "pumas-library-electron_${version}_amd64.${ext}"
+    },
+    "portable": {
+      "artifactName": "Pumas.Library.${version}.${ext}"
+    },
+    "dmg": {
+      "artifactName": "Pumas.Library-${version}-arm64.${ext}"
     }
   }
 }

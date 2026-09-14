@@ -6,508 +6,324 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Only superseded PR work is obsolete. Never cancel a tag or manual rehearsal.
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_TOOLCHAIN_VERSION: 1.92.0
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CARGO_INCREMENTAL: '0'
 
 jobs:
   lint-workflows:
-    name: Lint Workflows
-    runs-on: ubuntu-latest
+    name: Workflow and release contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
       - uses: rhysd/actionlint@v1.7.8
-      - name: Check workspace dependency ownership
-        run: npm run check:dependency-ownership
-      - name: Check release version alignment
-        run: npm run check:release-versions
-
-  # Build and test Rust backend on all platforms
-  build-rust:
-    name: Build Rust (${{ matrix.target }})
-    needs: [lint-workflows]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: macos-14
-            target: aarch64-apple-darwin
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
-          targets: ${{ matrix.target }}
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: rust -> target
-
-      - name: Build Rust
-        working-directory: ./rust
-        run: cargo build --workspace --exclude pumas_rustler --release --target ${{ matrix.target }}
-
-      - name: Run Rust tests
-        working-directory: ./rust
-        run: cargo test --workspace --exclude pumas_rustler --release
-
-      - name: Upload Rust artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: rust-${{ matrix.target }}
-          path: |
-            rust/target/${{ matrix.target }}/release/libpumas_uniffi.so
-            rust/target/${{ matrix.target }}/release/libpumas_uniffi.dylib
-            rust/target/${{ matrix.target }}/release/pumas_uniffi.dll
-          if-no-files-found: ignore
-
-      - name: Upload pumas-rpc for Electron packaging
-        uses: actions/upload-artifact@v4
-        with:
-          name: rpc-${{ matrix.target }}
-          path: |
-            rust/target/${{ matrix.target }}/release/pumas-rpc
-            rust/target/${{ matrix.target }}/release/pumas-rpc.exe
-          if-no-files-found: ignore
+      - run: npm run check:dependency-ownership
+      - run: npm run check:release-versions
+      - run: node --test scripts/release/*.test.mjs
 
   rust-quality:
-    name: Rust Quality
-    needs: [lint-workflows]
-    runs-on: ubuntu-latest
-
+    name: Rust quality
+    needs: lint-workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
-          components: rustfmt, clippy
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+      # Reads the repository's rust-toolchain.toml; no second toolchain pin.
+      - name: Install repository Rust toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
+          key: quality
+      - run: ./scripts/rust/check.sh
 
-      - name: Run Rust verification contract
-        run: ./scripts/rust/check.sh
-
-  # Build and test frontend
-  build-frontend:
-    name: Build Frontend
-    needs: [lint-workflows]
-    runs-on: ubuntu-latest
-
+  headless:
+    name: Headless without inference plugins
+    needs: lint-workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Install repository Rust toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
         with:
-          run_install: false
+          workspaces: rust -> target
+          key: headless
+      # Separate package invocations prevent workspace feature unification from
+      # silently enabling the features this gate is supposed to exclude.
+      - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features
+      - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features
+      - run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release --no-default-features
+      - run: python3 scripts/release/smoke-rpc.py rust/target/release/pumas-rpc --inference-disabled
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+  build-frontend:
+    name: Frontend and desktop contracts
+    needs: lint-workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
         with:
-          node-version-file: '.node-version'
+          node-version-file: .node-version
           cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Install workspace dependencies
-        run: corepack pnpm install --frozen-lockfile
-
-      - name: Lint
-        run: npm run -w frontend lint
-
-      - name: Type check
-        run: npm run -w frontend check:types
-
-      - name: Run tests
-        run: npm run -w frontend test:run
-
-      - name: Build
-        run: npm run -w frontend build
-
-      - name: Upload frontend artifact
-        uses: actions/upload-artifact@v4
+      - name: Install repository Rust toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: contracts
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir frontend lint
+      - run: pnpm --dir frontend check:types
+      - run: pnpm --dir frontend test:run
+      - run: pnpm --dir frontend build:library-only
+      # Restore the default renderer before publishing the packaging input.
+      - run: pnpm --dir frontend build
+      - run: pnpm --dir electron lint
+      - run: pnpm --dir electron validate
+      - run: cargo fetch --locked --manifest-path rust/Cargo.toml
+      - run: pnpm --dir electron check:desktop-contract
+      - run: pnpm --dir electron test:desktop-contract-generator
+      - run: pnpm --dir electron test:desktop-contract-conformance
+      - run: pnpm --dir frontend test:desktop-contract
+      - uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
           path: frontend/dist/
+          if-no-files-found: error
 
-  verify-launcher:
-    name: Verify Launcher
-    needs: [lint-workflows]
-    runs-on: ubuntu-latest
-
+  torch-quality:
+    name: Torch source QA
+    needs: lint-workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: actions/setup-python@v6
         with:
-          run_install: false
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: torch-server/requirements-dev.txt
+      - run: python -m pip install -r torch-server/requirements-dev.txt
+      - run: python -m ruff check torch-server scripts/release
+      - run: python -m ruff format --check torch-server scripts/release
+      # Unit fixtures do not claim GPU inference or a shipped Torch runtime.
+      - run: python -m unittest discover -s torch-server/tests
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: '.node-version'
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version-file: '.python-version'
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
+  build-rust:
+    name: Rust release (${{ matrix.os }})
+    needs: lint-workflows
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install repository Rust toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
-
-      - name: Install workspace dependencies
-        run: corepack pnpm install --frozen-lockfile
-
-      - name: Install Python development dependencies
-        run: python -m pip install -r torch-server/requirements-dev.txt
-
-      - name: Verify generated desktop contract against current Rust source
+          key: release
+      - name: Build release backend
+        run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release
+      - name: Test release workspace
+        run: cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --release
+      - name: Verify backend startup from isolated staging
+        shell: bash
         run: |
-          cargo fetch --locked --manifest-path rust/Cargo.toml
-          corepack pnpm --dir electron run check:desktop-contract
-          corepack pnpm --dir electron run test:desktop-contract-generator
-          corepack pnpm --dir electron run test:desktop-contract-conformance
-          corepack pnpm --dir electron run build
-          corepack pnpm --dir frontend run test:desktop-contract
-
-      - name: Install Xvfb
-        run: sudo apt-get update && sudo apt-get install -y xvfb
-
-      - name: Build release artifacts for launcher verification
-        run: bash launcher.sh --build-release
-
-      - name: Run launcher tests
-        run: npm run test:launcher
-
-      - name: Lint Torch sidecar
-        run: python -m ruff check torch-server
-
-      - name: Check Torch sidecar formatting
-        run: python -m ruff format --check torch-server
-
-      - name: Run Torch sidecar tests
-        run: python -m unittest discover -s torch-server/tests
-
-      - name: Run bounded release smoke
-        run: xvfb-run -a bash launcher.sh --release-smoke
-
-  # Generate binding source files (platform-independent, only needs one OS)
-  generate-bindings:
-    name: Generate Binding Sources
-    needs: [build-rust]
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+          python scripts/release/stage-rpc.py
+          python scripts/release/smoke-rpc.py electron/resources/bin
+      - uses: actions/upload-artifact@v4
         with:
-          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          name: rpc-${{ matrix.os }}
+          path: electron/resources/bin/
+          if-no-files-found: error
 
-      - name: Download Linux Rust artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: rust-x86_64-unknown-linux-gnu
-          path: rust-artifact
-
-      - name: Package pumas-core crate
-        working-directory: ./rust
-        run: cargo package -p pumas-library --allow-dirty
-
-      - name: Upload pumas-core crate
-        uses: actions/upload-artifact@v4
-        with:
-          name: pumas-core-crate
-          path: rust/target/package/pumas-library-*.crate
-
-      - name: Install uniffi-bindgen
-        run: cargo install --path rust/crates/pumas-uniffi --bin pumas-uniffi-bindgen --no-default-features --features cli
-
-      - name: Install uniffi-bindgen-cs
-        run: CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.9.0+v0.28.3
-
-      - name: Generate Python bindings
-        working-directory: ./rust
-        run: |
-          mkdir -p ../bindings/python
-          pumas-uniffi-bindgen generate \
-            --library \
-            --language python \
-            --out-dir ../bindings/python \
-            ../rust-artifact/libpumas_uniffi.so
-
-      - name: Generate Kotlin bindings
-        working-directory: ./rust
-        run: |
-          mkdir -p ../bindings/kotlin
-          pumas-uniffi-bindgen generate \
-            --library \
-            --language kotlin \
-            --out-dir ../bindings/kotlin \
-            ../rust-artifact/libpumas_uniffi.so
-
-      - name: Generate Swift bindings
-        working-directory: ./rust
-        run: |
-          mkdir -p ../bindings/swift
-          pumas-uniffi-bindgen generate \
-            --library \
-            --language swift \
-            --out-dir ../bindings/swift \
-            ../rust-artifact/libpumas_uniffi.so
-
-      - name: Generate Ruby bindings
-        working-directory: ./rust
-        run: |
-          mkdir -p ../bindings/ruby
-          pumas-uniffi-bindgen generate \
-            --library \
-            --language ruby \
-            --out-dir ../bindings/ruby \
-            ../rust-artifact/libpumas_uniffi.so
-
-      - name: Generate C# bindings
-        working-directory: ./rust
-        run: |
-          mkdir -p ../bindings/csharp
-          uniffi-bindgen-cs \
-            --library \
-            --out-dir ../bindings/csharp \
-            ../rust-artifact/libpumas_uniffi.so
-
-      - name: Upload binding sources
-        uses: actions/upload-artifact@v4
-        with:
-          name: binding-sources
-          path: bindings/
-
-  # Package Electron app for each platform
   build-electron:
-    name: Package Electron (${{ matrix.platform }})
-    needs: [build-rust, build-frontend, verify-launcher]
+    name: Desktop package (${{ matrix.platform }})
+    needs: [build-rust, build-frontend]
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             platform: linux
-            rust-target: x86_64-unknown-linux-gnu
-            binary-name: pumas-rpc
-          - os: windows-latest
-            platform: win
-            rust-target: x86_64-pc-windows-msvc
-            binary-name: pumas-rpc.exe
           - os: macos-14
             platform: mac
-            rust-target: aarch64-apple-darwin
-            binary-name: pumas-rpc
     runs-on: ${{ matrix.os }}
-
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-
-      - name: Setup Windows RAM disk
-        if: runner.os == 'Windows'
-        uses: ./.github/actions/setup-windows-ramdisk
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
         with:
-          run_install: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: '.node-version'
+          node-version-file: .node-version
           cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Download pumas-rpc binary
-        uses: actions/download-artifact@v4
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
         with:
-          name: rpc-${{ matrix.rust-target }}
-          path: rust-artifact
-
-      - name: Download frontend artifact
-        uses: actions/download-artifact@v4
+          name: rpc-${{ matrix.os }}
+          path: electron/resources/bin
+      - uses: actions/download-artifact@v4
         with:
           name: frontend-dist
           path: frontend/dist
-
-      - name: Stage Rust binary
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path "electron/resources/bin" | Out-Null
-          Copy-Item -Path "rust-artifact/${{ matrix.binary-name }}" -Destination "electron/resources/bin/${{ matrix.binary-name }}" -Force
-          if (-not $IsWindows) {
-            chmod +x "electron/resources/bin/${{ matrix.binary-name }}"
-          }
-
-      - name: Install workspace dependencies
-        run: corepack pnpm install --frozen-lockfile
-
-      - name: Verify app icon assets
-        shell: pwsh
-        run: |
-          $required = @(
-            "electron/build/icons/Pumas-Library_05.png",
-            "electron/build/icons/icon.ico",
-            "electron/build/icons/icon.icns"
-          )
-          foreach ($file in $required) {
-            if (-not (Test-Path $file)) {
-              throw "Missing required icon asset: $file"
-            }
-          }
-
-      - name: Lint Electron
-        if: matrix.platform == 'linux'
-        run: corepack pnpm --filter ./electron lint
-
-      - name: Test Electron IPC validation
-        run: corepack pnpm --filter ./electron test
-
-      - name: Package Electron app
-        run: corepack pnpm --filter ./electron exec electron-builder --${{ matrix.platform }} --publish never
-
-      - name: Upload Electron artifact
-        uses: actions/upload-artifact@v4
+      - name: Restore executable permission lost in artifact transport
+        if: runner.os != 'Windows'
+        run: chmod +x electron/resources/bin/pumas-rpc
+      - run: npm run test:launcher
+      - name: Install Electron runtime before native tests
+        timeout-minutes: 10
+        run: node electron/node_modules/electron/install.js
+      - run: pnpm --dir electron test
+      - name: Package desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm --dir electron exec electron-builder --${{ matrix.platform }} --publish never
+      - name: Verify expected installers
+        run: node scripts/release/check-artifacts.mjs electron/release ${{ matrix.platform }}
+      - name: Verify extracted Linux installers
+        if: runner.os == 'Linux'
+        run: python3 scripts/release/smoke-linux-packages.py electron/release
+      - uses: actions/upload-artifact@v4
         with:
-          name: electron-${{ matrix.platform }}
+          name: desktop-${{ matrix.platform }}
           path: |
             electron/release/*.AppImage
             electron/release/*.deb
             electron/release/*.exe
             electron/release/*.dmg
-            electron/release/*.zip
-          if-no-files-found: warn
+          if-no-files-found: error
 
-  # Create release when a tag is pushed
-  release:
-    name: Create Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-rust, rust-quality, build-electron, generate-bindings, verify-launcher]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
+  windows-candidate:
+    name: Windows candidate (best effort)
+    needs: [lint-workflows, build-frontend]
+    runs-on: windows-2025
+    timeout-minutes: 150
+    # Failure stays visible in the job summary, but cannot block Linux/macOS.
+    # No candidate is uploaded unless every Windows check succeeds.
+    continue-on-error: true
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v6
+      - name: Install repository Rust toolchain
+        run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: artifacts
-
-      - name: Extract version from tag
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-
-      - name: Rename and organize release artifacts
-        run: |
-          mkdir -p release-artifacts
-          VERSION=${{ steps.version.outputs.version }}
-
-          # --- Per-language binding packages ---
-          # Each package contains the generated source files + native libraries for all platforms
-
-          # --- pumas-core source crate ---
-          cp artifacts/pumas-core-crate/pumas-library-*.crate release-artifacts/
-
-          # Collect UniFFI native libraries by target.
-          mkdir -p staging/uniffi
-
-          for target_dir in artifacts/rust-*/; do
-            TARGET=$(basename "$target_dir" | sed 's/^rust-//')
-            mkdir -p "staging/uniffi/${TARGET}"
-
-            for file in "$target_dir"*; do
-              [ -f "$file" ] || continue
-              BASENAME=$(basename "$file")
-              case "$BASENAME" in
-                libpumas_uniffi.*|pumas_uniffi.dll)
-                  cp "$file" "staging/uniffi/${TARGET}/"
-                  ;;
-              esac
-            done
-          done
-
-          # --- Per-language binding packages ---
-          # Each package contains the generated source files + native libraries for all platforms
-          for lang in python kotlin swift ruby csharp; do
-            mkdir -p "staging/${lang}-pkg/native"
-            cp -r "artifacts/binding-sources/${lang}/." "staging/${lang}-pkg/"
-            cp -r staging/uniffi/* "staging/${lang}-pkg/native/"
-            cd "staging/${lang}-pkg"
-            zip -r "../../release-artifacts/pumas-bindings-${lang}-${VERSION}.zip" .
-            cd ../..
-          done
-
-          # --- Desktop application ---
-
-          # Electron installers (already named with version by electron-builder)
-          for electron_dir in artifacts/electron-*/; do
-            for file in "$electron_dir"*; do
-              [ -f "$file" ] || continue
-              cp "$file" "release-artifacts/"
-            done
-          done
-
-      - name: List release artifacts
-        run: ls -la release-artifacts/
-
-      - name: Generate checksums
-        working-directory: release-artifacts
-        run: |
-          mapfile -d '' artifacts < <(
-            find . -maxdepth 1 -type f ! -name checksums-sha256.txt -printf '%P\0' |
-              sort -z
-          )
-
-          if (( ${#artifacts[@]} == 0 )); then
-            echo "No release artifacts found for checksum generation" >&2
-            exit 1
-          fi
-
-          sha256sum "${artifacts[@]}" > checksums-sha256.txt
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+          workspaces: rust -> target
+          key: windows-release
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
         with:
-          files: release-artifacts/*
-          draft: true
-          generate_release_notes: true
-          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - name: Build Windows backend
+        run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release
+      - name: Run Windows release tests
+        run: cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --release
+      - run: python scripts/release/stage-rpc.py
+      - run: python scripts/release/smoke-rpc.py electron/resources/bin
+      - run: npm run test:launcher
+      - name: Install Electron runtime before native tests
+        timeout-minutes: 10
+        run: node electron/node_modules/electron/install.js
+      - run: pnpm --dir electron test
+      - name: Package Windows installers
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm --dir electron exec electron-builder --win --publish never
+      - name: Verify and assemble Windows candidate
+        run: node scripts/release/check-artifacts.mjs electron/release win windows-candidate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-candidate
+          path: windows-candidate/
+          if-no-files-found: error
+      - name: Record best-effort outcome
+        if: always()
+        shell: bash
+        env:
+          WINDOWS_JOB_STATUS: ${{ job.status }}
+        run: |
+          echo "Windows candidate outcome: $WINDOWS_JOB_STATUS" >> "$GITHUB_STEP_SUMMARY"
+          echo "Windows is best effort for 0.7.0. Only a passing run produces a candidate; native installer acceptance is still required before publication." >> "$GITHUB_STEP_SUMMARY"
+
+  verify-launcher:
+    name: Linux release startup
+    needs: [build-rust, build-frontend]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: rpc-ubuntu-24.04
+          path: rust/target/release
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - run: chmod +x rust/target/release/pumas-rpc
+      - name: Install Electron runtime before launcher smoke
+        timeout-minutes: 10
+        run: node electron/node_modules/electron/install.js
+      - run: pnpm --dir electron build
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Smoke an isolated library
+        run: |
+          mkdir -p "$RUNNER_TEMP/pumas-smoke/shared-resources/models" "$RUNNER_TEMP/pumas-smoke-config"
+          PUMAS_LAUNCHER_ROOT="$RUNNER_TEMP/pumas-smoke" XDG_CONFIG_HOME="$RUNNER_TEMP/pumas-smoke-config" \
+            xvfb-run -a bash launcher.sh --release-smoke
+
+  release-candidate:
+    name: Assemble release candidate
+    needs: [rust-quality, headless, torch-quality, build-electron, verify-launcher]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: candidate-input
+      - run: node scripts/release/check-artifacts.mjs candidate-input required release-candidate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate
+          path: release-candidate/
+          if-no-files-found: error
+      # Publication is separate: installer behavior, notices, SBOMs and
+      # provenance remain release acceptance obligations in RELEASING.md.

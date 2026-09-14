@@ -80,6 +80,21 @@ The Rust workspace checks exclude `pumas_rustler` because it requires an Erlang
 host. `bindings/support-matrix.json` currently accepts no host-binding tuple;
 crate archives and host-binding bundles are not release assets.
 
+## Attribution and artifact metadata
+
+The checked-in [attribution collection](docs/release-attribution/0.7.0/README.md)
+is embedded in desktop packages. After dependency or manifest changes, run
+`python3 scripts/release/generate-notices.py` and review the source-text inventory.
+CI and Electron beforePack reject missing or stale attribution. Preserve
+Electron/Chromium notices alongside the combined notice.
+
+For Linux, use `python3 scripts/release/verify-deb-install.py CANDIDATE_DEB` for
+isolated native install/remove checks. Run `scripts/release/verify-packaged-onnx.py` with the extracted RPC
+and a real local Nomic fixture to verify import, load, gateway embeddings and
+unload. Generate per-installer SPDX, local provenance and final checksums with
+`write-linux-metadata.py`; see its attribution report for scope and limitations.
+CI-built releases must use the CI build identity and actual final files.
+
 ## Required release acceptance
 
 The candidate workflow rejects missing, empty, duplicate, stale-version, and

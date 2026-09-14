@@ -1,5 +1,9 @@
 # 0.7.0 local release preparation
 
+See [the dependency and installer follow-up](release-evidence/0.7.0/follow-up.md)
+for the current der 0.8.2, attribution, metadata and final installer evidence.
+The original preparation record below is retained as the earlier baseline.
+
 Prepared on 2026-09-14 against `af45f3e0` plus the local release changes.
 Preparation and verification were local. No push, tag, remote workflow dispatch, or publication was performed.
 This is a local candidate, not approval to publish all advertised platforms.

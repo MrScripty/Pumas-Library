@@ -1,0 +1,3 @@
+before {"status":"recovery-required","reason":"invalid","authoritySource":"persisted","action":"select-library"} /tmp/pumas-recovery-fCzu5Y
+after {"status":"ready","selectionAction":"select-library","libraryScopeId":null}
+{"persisted_selection":true,"restarted_ready":true,"evidence":"/tmp/pumas-recovery-fCzu5Y"}

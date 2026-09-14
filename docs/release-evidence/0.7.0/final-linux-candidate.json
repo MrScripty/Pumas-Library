@@ -1,0 +1,79 @@
+{
+  "date": "2026-09-14",
+  "kind": "local-linux-candidate-follow-up",
+  "source_base": "45d491a9",
+  "der_version": "0.8.2",
+  "cargo_audit": {
+    "vulnerabilities": 0,
+    "yanked": 0,
+    "unmaintained": 4
+  },
+  "artifacts": [
+    {
+      "filename": "Pumas.Library-0.7.0.AppImage",
+      "bytes": 154483121,
+      "sha256": "87e59b8be5a6acc299916dbc8b0eed8db814301dc126c0a23586001bd80ec5b6"
+    },
+    {
+      "filename": "Pumas.Library-0.7.0.AppImage.spdx.json",
+      "bytes": 364746,
+      "sha256": "e367e9f28d40ba55f68aa3227057ee69d0b0e7228f8b9912ef3a8e7b4e0377a4"
+    },
+    {
+      "filename": "THIRD-PARTY-NOTICES-0.7.0.txt",
+      "bytes": 4256762,
+      "sha256": "71dbacd48cc0cffc59ea8bd692dcf04de5789e4d4a521a6e738923c268a435bf"
+    },
+    {
+      "filename": "checksums-sha256.txt",
+      "bytes": 619,
+      "sha256": "955dadba723d7c7fdfe2829333ab14bf9a9581c5426f62a4e7b4295ddd283e95"
+    },
+    {
+      "filename": "pumas-library-0.7.0.provenance.jsonl",
+      "bytes": 1672,
+      "sha256": "6ad8395fdea4e06c2ff64cc791aa46b1a7e1f49a61798ee884e8bea52d8effb7"
+    },
+    {
+      "filename": "pumas-library-electron_0.7.0_amd64.deb",
+      "bytes": 120180252,
+      "sha256": "b07af27025c63dd5f777b92917a290d4fa4b01f728e27fe0052c34445aefa375"
+    },
+    {
+      "filename": "pumas-library-electron_0.7.0_amd64.deb.spdx.json",
+      "bytes": 360039,
+      "sha256": "3e1070a3638f87f6ec7061b290eebcebf2cf562c47dcf743ef92b0afced64cec"
+    }
+  ],
+  "notices_entries": 401,
+  "evidence_scope": {
+    "spdx": "Exact extracted application files plus conservative dependency attribution closure; native components retain vendor notices",
+    "provenance": "Unsigned local self-report; upstream ONNX archive attestation verified separately"
+  },
+  "remaining_native_targets": [
+    "macos-arm64",
+    "windows-x86_64-msvc"
+  ],
+  "checks": {
+    "release_rpc_build": "passed",
+    "optimized_rpc_suites": "passed",
+    "final_cargo_audit": "passed, four reviewed maintenance notices",
+    "attribution_freshness_and_negative_tests": "passed",
+    "workflow_lint": "passed",
+    "spdx_2_3_schema": "passed, format annotations not validated",
+    "both_installer_resource_hashes_and_health": "passed",
+    "both_packaged_onnx_import_load_embedding_unload": "passed",
+    "both_desktop_filter_and_preload_rpc": "passed",
+    "both_desktop_close_and_backend_termination": "passed",
+    "both_native_chooser_persistence_and_restart": "passed on real X11 desktop",
+    "debian_install_alternatives_version_and_remove": "passed in isolated user/mount namespace",
+    "both_desktop_default_electron_sandbox": "passed"
+  },
+  "environment_limits": [
+    "Desktop checks also passed with the default Electron sandbox; GPU rendering was disabled",
+    "Virtual-display portal chooser could not be qualified; real desktop chooser path passed",
+    "No native macOS or Windows verification",
+    "SPDX native transitive components retained through vendor notices rather than exhaustive component-level identities",
+    "Local provenance is unsigned and self-reported"
+  ]
+}

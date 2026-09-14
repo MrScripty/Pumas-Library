@@ -1,0 +1,4 @@
+import {"error": null, "model_id": "embedding/fixture/nomic", "model_path": "embedding/fixture/nomic", "path": "/tmp/pumas-packaged-inference-smhp3wa3/shared-resources/models/embedding/fixture/nomic", "security_tier": null, "success": true}
+profile {'profile_id': 'onnx-verification', 'snapshot_required': True, 'success': True}
+launch {'ready': True, 'success': True}
+{"binary": "/tmp/pumas-070-verified-final-extracted/deb/opt/Pumas Library/resources/pumas-rpc", "import": "passed", "load": "passed", "embedding_dimensions": 256, "finite": true, "unload": "passed"}

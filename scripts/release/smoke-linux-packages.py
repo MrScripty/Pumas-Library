@@ -52,6 +52,10 @@ with tempfile.TemporaryDirectory(prefix="pumas-installer-smoke-") as temporary:
         for bundled, source in (
             ("pumas-rpc", root / "electron/resources/bin/pumas-rpc"),
             ("LICENSE.txt", root / "LICENSE"),
+            (
+                "THIRD-PARTY-NOTICES.txt",
+                root / "docs/release-attribution/0.7.0/THIRD-PARTY-NOTICES.txt",
+            ),
             ("frontend/index.html", root / "frontend/dist/index.html"),
         ):
             if digest(resources / bundled) != digest(source):

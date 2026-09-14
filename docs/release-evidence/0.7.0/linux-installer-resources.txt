@@ -1,0 +1,5 @@
+Verified 2 nonempty installers for linux v0.7.0
+{"health": "passed", "inference_disabled": false}
+{"health": "passed", "inference_disabled": false}
+Verified extracted installer resources and RPC: /tmp/pumas-installer-smoke-gk5q7k7w/squashfs-root/resources
+Verified extracted installer resources and RPC: /tmp/pumas-installer-smoke-gk5q7k7w/deb/opt/Pumas Library/resources

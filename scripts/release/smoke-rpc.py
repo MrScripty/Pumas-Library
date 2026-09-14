@@ -29,6 +29,11 @@ with tempfile.TemporaryDirectory(prefix="pumas-release-smoke-") as temporary:
         process = subprocess.Popen(
             [str(binary), "--launcher-root", str(root), "--port", "0"],
             cwd=root,
+            env={
+                **os.environ,
+                "XDG_CONFIG_HOME": str(root / "config"),
+                "APPDATA": str(root / "config"),
+            },
             stdout=log,
             stderr=subprocess.STDOUT,
         )

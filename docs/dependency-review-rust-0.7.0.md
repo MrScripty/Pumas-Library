@@ -1,5 +1,10 @@
 # Rust dependency findings for 0.7.0
 
+Completed follow-up: `der` was updated precisely to 0.8.2; release RPC/ONNX
+build and optimized RPC tests passed. [Final Cargo audit](release-evidence/0.7.0/cargo-audit-final.json)
+reports no vulnerabilities or yanks and retains four maintenance notices.
+The research below records the pre-update assessment.
+
 Reviewed on 2026-09-14 against upstream sources and the current local lockfile.
 This review changes no dependency versions and does not approve publication.
 

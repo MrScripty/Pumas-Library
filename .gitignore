@@ -64,8 +64,13 @@ launcher-data/*
 !launcher-data/plugins/
 .active-version
 .active-version-ollama
+.active-version-torch
 shared-resources/
 comfyui.db
+
+# Private local migration/repair records and backups (retain on disk)
+/.download-identity-repair.*/
+/.download-store-cutover.*/
 
 # ComfyUI version installations
 comfyui-versions/

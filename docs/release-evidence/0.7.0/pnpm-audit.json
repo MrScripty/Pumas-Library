@@ -1,0 +1,46 @@
+{
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 8,
+      "moderate": 29,
+      "high": 15,
+      "critical": 1
+    },
+    "dependencies": 715,
+    "devDependencies": 0,
+    "optionalDependencies": 0,
+    "totalDependencies": 715
+  },
+  "real_dependency_advisories": [
+    {
+      "id": "GHSA-jmr9-qjv8-65gv",
+      "package": "extract-zip",
+      "severity": "high",
+      "url": "https://github.com/advisories/GHSA-jmr9-qjv8-65gv",
+      "findings": [
+        {
+          "version": "2.0.1",
+          "paths": [
+            "electron>electron>extract-zip"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "GHSA-7pqw-9j4j-h8q3",
+      "package": "extract-zip",
+      "severity": "high",
+      "url": "https://github.com/advisories/GHSA-7pqw-9j4j-h8q3",
+      "findings": [
+        {
+          "version": "2.0.1",
+          "paths": [
+            "electron>electron>extract-zip"
+          ]
+        }
+      ]
+    }
+  ],
+  "workspace_importer_false_positive_count": 51
+}

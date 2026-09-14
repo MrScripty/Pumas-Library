@@ -1,0 +1,61 @@
+{
+  "date": "2026-09-14",
+  "electron_version": "43.7.0",
+  "product_version": "0.7.0",
+  "platform_verified": "linux-x86_64",
+  "input_sha256": {
+    "electron/package.json": "cdf4f1954bd50426423e927056393568987dd824ffb3a4e8ab25729fa70edac1",
+    "pnpm-lock.yaml": "d7612d38ff34fe72473c3168b80e6da59ae1eec0867368190d23f002f554a810",
+    "rust/Cargo.lock": "b2738a39bf41ad21b9ace2253b6886704f0d674c66aebd4ed258494f5466bca6"
+  },
+  "staged_rpc_sha256": "a2273d9ea1d2176d08ef6bf0f530ac8b71b335f251a1ba01f508dd834b4a87ba",
+  "pnpm_audit": {
+    "raw_counts": {
+      "info": 0,
+      "low": 8,
+      "moderate": 29,
+      "high": 13,
+      "critical": 1
+    },
+    "actual_installed_version_advisories": [],
+    "workspace_importer_false_positive_count": 51
+  },
+  "legacy_extract_zip_present_in_lockfile": false,
+  "validation": {
+    "electron_lint": "passed",
+    "electron_types": "passed",
+    "desktop_tests": {
+      "passed": 172,
+      "failed": 0,
+      "skipped": 0,
+      "real_sandboxed_preload_oracle": true
+    },
+    "contract_generation": "passed",
+    "contract_conformance_tests": 41,
+    "launcher_tests": 49,
+    "launcher_smoke": "passed",
+    "workflow_lint": "passed",
+    "installer_inventory": "passed",
+    "extracted_resource_hashes_and_rpc_health": "passed",
+    "both_extracted_desktop_startup_and_shutdown": "passed",
+    "both_extracted_electron_versions": "43.7.0"
+  },
+  "installers": [
+    {
+      "filename": "Pumas.Library-0.7.0.AppImage",
+      "sha256": "961bc495d8dd4820b5b6a08dcd975b5d99ec33647ca3dafd5a6f0602b7d27972",
+      "bytes": 154146664
+    },
+    {
+      "filename": "pumas-library-electron_0.7.0_amd64.deb",
+      "sha256": "850a18c4eb5c8ef0650c0842eb5646721356efeb398d6470bc253264c2c2ff10",
+      "bytes": 120103200
+    }
+  ],
+  "remaining_limits": [
+    "Native Windows and macOS not exercised locally",
+    "Combined third-party notices and per-installer SPDX SBOMs remain incomplete",
+    "Rust der update remains separate",
+    "Initial implicit test-import download stalled; CI now initializes runtime explicitly with timeout and skipped native tests no longer load the runtime"
+  ]
+}

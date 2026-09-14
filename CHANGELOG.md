@@ -7,22 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - Unreleased candidate
+
+See [0.7.0 release notes](docs/release-notes-0.7.0.md) for capabilities,
+upgrade guidance, and scope.
+
 ### Added
 
-- Added first-class Rust ONNX Runtime embedding serving through managed
-  `onnx_runtime` profiles and the Pumas `/v1` gateway, including packaged
-  release smoke coverage for loading, embedding, and unloading a local ONNX
-  model without a Python sidecar.
+- Headless build/run paths independent of the desktop, with independent GUI and inference selections.
+- Model Intent API, immutable upstream revision resolution, and durable consumer model declarations.
+- Backend-owned conversion setup, cancellation, recovery, and FP8/NVFP4 Safetensors output.
+- In-process ONNX Runtime embeddings and optional Torch image-generation adapters.
+- Pre-tag CI rehearsal, independent headless QA, and exact installer inventory checks.
 
 ### Changed
 
-- Bumped the package-facts contract to version 2 with structured Diffusers, image-family, GGUF, value-source, and inspection-manifest DTOs for image-generation planning.
-- Updated the repo Node.js toolchain pin and Node typings to 24.15.0 while opting GitHub JavaScript actions into the Node 24 runner runtime.
-- Added a Windows CI RAM disk setup for temporary files in Windows frontend/package jobs.
+- Strengthened explicit library ownership, download mutation exclusion, cancellation, and restart reconciliation.
+- Expanded backend-owned runtime and serving state, gateway routes, and event contracts.
+- Bumped the package-facts contract to version 2 for structured model inspection data.
+- Aligned release versions at 0.7.0; retained the Node 24.15.0 toolchain pin.
+- Updated the desktop runtime to Electron 43.7.0, removing the legacy ZIP extractor.
+- Replaced obsolete crate/binding release assembly with desktop candidate artifacts matching the artifact plan.
 
 ### Fixed
 
-- Made Windows CI-sensitive runtime tests platform-aware for Ollama binary names and llama.cpp models-directory paths.
+- Improved managed llama.cpp readiness, router reconciliation, context configuration, and sibling vision-projector discovery.
+- Hardened Hugging Face acquisition, destination validation, and recovery.
+- Updated vulnerable Rust and JavaScript dependencies, including the Electron runtime and packaging tools.
+- Repaired conversion and mutation-authority QA fixtures and canonical path handling in recovery fixtures.
 
 ## [0.6.0] - 2026-05-06
 

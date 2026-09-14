@@ -6,6 +6,9 @@
 mod builder;
 mod conversion;
 mod hf;
+#[cfg(test)]
+pub(crate) use hf::tests::recovery_api_fixture as intent_acquisition_test_fixture;
+pub(crate) use hf::PreparedIntentDownload;
 mod links;
 mod migration;
 mod models;
@@ -26,9 +29,9 @@ mod system;
 
 pub use builder::PumasApiBuilder;
 pub(crate) use reconciliation::{
-    reconcile_on_demand, reconcile_required_model_index, start_model_library_watcher,
-    ReconcileScope, ReconciliationCoordinator, WatcherWriteSuppressor,
+    reconcile_on_demand, reconcile_required_model_index, start_intent_reconciliation,
+    start_model_library_watcher, ReconcileScope, ReconciliationCoordinator, WatcherWriteSuppressor,
     WATCHER_WRITE_SUPPRESSION_TTL,
 };
-pub(crate) use runtime_tasks::RuntimeTasks;
+pub(crate) use runtime_tasks::{RuntimeTaskContext, RuntimeTasks};
 pub(crate) use state::PrimaryState;

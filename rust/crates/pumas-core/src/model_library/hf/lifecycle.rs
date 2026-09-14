@@ -651,6 +651,7 @@ struct TaskEntry {
 pub(super) struct PendingAdmissionIdentity {
     pub(super) destination: crate::model_library::download_recovery::DestinationIdentity,
     pub(super) repo_id: String,
+    pub(super) revision: crate::model_library::artifact_identity::DownloadRevision,
     pub(super) files: Vec<(String, Option<u64>, Option<String>)>,
 }
 
@@ -2488,6 +2489,16 @@ impl DownloadTaskOwner {
 }
 
 impl TaskContext {
+    /// Retain existing native exclusion across a nested owned library effect.
+    /// The library validates this grant against its configured root.
+    pub(crate) fn held_root_execution_grant(&self) -> crate::Result<Arc<RootExecutionGrant>> {
+        self.root_grant
+            .clone()
+            .ok_or_else(|| crate::PumasError::Config {
+                message: "Download root execution grant is unavailable".into(),
+            })
+    }
+
     /// Scope physical exclusion to mutation, not to historical task entries.
     /// Acquisition itself is retained work: a cancelled waiter cannot strand
     /// the in-progress slot or detach a newly opened native lock.

@@ -36,6 +36,7 @@ pub mod config;
 pub mod conversion;
 pub mod error;
 pub mod index;
+pub mod intent;
 pub mod ipc;
 pub mod launcher;
 pub mod metadata;
@@ -136,6 +137,28 @@ enum ApiInner {
 }
 
 impl PumasApi {
+    /// Access transport-independent local model intent operations.
+    pub fn intent(&self) -> intent::IntentApi<'_> {
+        intent::IntentApi::new(&self.primary().intent_service)
+    }
+
+    /// Close local intent admission, drain admitted local effects, then drain downloads.
+    ///
+    /// Dropping this waiter does not cancel admitted work. Repeated calls observe
+    /// the same owner settlement. This does not stop inference runtimes.
+    pub async fn shutdown_intent(&self) -> Result<()> {
+        let client = self.primary().hf_client.clone();
+        self.runtime_tasks.close();
+        self.runtime_tasks
+            .shutdown_owned_then(move || async move {
+                match client {
+                    Some(client) => client.shutdown_downloads().await,
+                    None => Ok(()),
+                }
+            })
+            .await
+    }
+
     /// Get a reference to the primary state, or error if in client mode.
     fn try_primary(&self) -> Result<&Arc<PrimaryState>> {
         let ApiInner::Primary(state) = &self.inner;

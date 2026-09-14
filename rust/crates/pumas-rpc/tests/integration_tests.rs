@@ -106,6 +106,7 @@ fn create_tracked_partial_test_model(root: &std::path::Path, status: &str) -> &'
     let snapshot = serde_json::from_value(json!({
         "download_id": "tracked-partial-1",
         "repo_id": "acme/model",
+        "revision": null,
         "filename": "weights.gguf",
         "filenames": ["weights.gguf"],
         "dest_dir": root.join("shared-resources/models").join(model_id),

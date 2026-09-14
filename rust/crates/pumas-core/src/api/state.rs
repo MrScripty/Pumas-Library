@@ -229,6 +229,7 @@ pub(crate) struct PrimaryState {
     pub(crate) system_utils: Arc<system::SystemUtils>,
     pub(crate) model_library: Arc<model_library::ModelLibrary>,
     pub(crate) hf_client: Option<Arc<model_library::HuggingFaceClient>>,
+    pub(crate) intent_service: Arc<crate::intent::IntentService>,
     pub(crate) model_importer: model_library::ModelImporter,
     pub(crate) conversion_manager: Arc<conversion::ConversionManager>,
     pub(crate) runtime_profile_service: Arc<runtime_profiles::RuntimeProfileService>,
@@ -259,6 +260,55 @@ impl ipc::server::IpcDispatch for PrimaryState {
         params: serde_json::Value,
     ) -> std::result::Result<serde_json::Value, PumasError> {
         match method {
+            "intent_query_models" => {
+                validate_local_client_connection_token(self, &params)?;
+                let requirement = parse_ipc_param(&params, "requirement")?;
+                let intent = crate::intent::IntentApi::new(&self.intent_service);
+                Ok(serde_json::to_value(
+                    intent.query_models(&requirement).await?,
+                )?)
+            }
+            "intent_get_model" => {
+                validate_local_client_connection_token(self, &params)?;
+                let requirement = parse_ipc_param(&params, "requirement")?;
+                let intent = crate::intent::IntentApi::new(&self.intent_service);
+                Ok(serde_json::to_value(intent.get_model(&requirement).await?)?)
+            }
+            "intent_get_model_status" => {
+                validate_local_client_connection_token(self, &params)?;
+                let requirement = parse_ipc_param(&params, "requirement")?;
+                let intent = crate::intent::IntentApi::new(&self.intent_service);
+                Ok(serde_json::to_value(
+                    intent.get_model_status(&requirement).await?,
+                )?)
+            }
+            "intent_ensure_model" => {
+                validate_local_client_connection_token(self, &params)?;
+                let request = parse_ipc_param(&params, "request")?;
+                let intent = crate::intent::IntentApi::new(&self.intent_service);
+                Ok(serde_json::to_value(intent.ensure_model(&request).await?)?)
+            }
+            "intent_release_model" => {
+                validate_local_client_connection_token(self, &params)?;
+                let reference = parse_ipc_param(&params, "reference")?;
+                let intent = crate::intent::IntentApi::new(&self.intent_service);
+                Ok(serde_json::to_value(
+                    intent.release_model(&reference).await?,
+                )?)
+            }
+            "intent_get_ensure_status" => {
+                validate_local_client_connection_token(self, &params)?;
+                let reference = parse_ipc_param(&params, "reference")?;
+                let intent = crate::intent::IntentApi::new(&self.intent_service);
+                Ok(serde_json::to_value(
+                    intent.get_ensure_status(&reference).await?,
+                )?)
+            }
+            "intent_list_declarations" => {
+                validate_local_client_connection_token(self, &params)?;
+                let intent = crate::intent::IntentApi::new(&self.intent_service);
+                Ok(serde_json::to_value(intent.list_declarations().await?)?)
+            }
             "list_models" => {
                 let _ =
                     reconcile_on_demand(self, ReconcileScope::AllModels, "ipc-list-models").await?;
@@ -1512,6 +1562,15 @@ fn parse_model_ids_param(
 ) -> std::result::Result<Vec<String>, PumasError> {
     serde_json::from_value(params["model_ids"].clone()).map_err(|err| PumasError::InvalidParams {
         message: format!("model_ids must be an array of strings: {err}"),
+    })
+}
+
+fn parse_ipc_param<T>(params: &serde_json::Value, field: &str) -> std::result::Result<T, PumasError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    serde_json::from_value(params[field].clone()).map_err(|_| PumasError::InvalidParams {
+        message: format!("{field} is invalid"),
     })
 }
 

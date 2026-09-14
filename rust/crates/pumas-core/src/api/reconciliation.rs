@@ -30,15 +30,18 @@ use crate::model_library::{
     ModelType, RepoFileTree,
 };
 
+use super::runtime_tasks::{RuntimeTaskContext, RuntimeTasks};
 use super::state::PrimaryState;
 
 /// The subsystems owned by one reconciliation, independent of its requester.
+#[derive(Clone)]
 struct ReconciliationInputs {
     model_library: Arc<crate::model_library::ModelLibrary>,
     model_importer: crate::model_library::ModelImporter,
     hf_client: Option<Arc<crate::model_library::HuggingFaceClient>>,
-    #[cfg(test)]
     reconciliation: Arc<ReconciliationCoordinator>,
+    intent_service: Arc<crate::intent::IntentService>,
+    runtime_tasks: RuntimeTasks,
 }
 
 impl From<&PrimaryState> for ReconciliationInputs {
@@ -47,8 +50,9 @@ impl From<&PrimaryState> for ReconciliationInputs {
             model_library: primary.model_library.clone(),
             model_importer: primary.model_importer.clone(),
             hf_client: primary.hf_client.clone(),
-            #[cfg(test)]
             reconciliation: primary.reconciliation.clone(),
+            intent_service: primary.intent_service.clone(),
+            runtime_tasks: primary.runtime_tasks.clone(),
         }
     }
 }
@@ -131,6 +135,48 @@ struct ScopeRuntimeState {
 struct ReconciliationState {
     all: ScopeRuntimeState,
     models: HashMap<String, ScopeRuntimeState>,
+    desired_retry: DesiredRetryState,
+}
+
+#[derive(Debug, Default)]
+struct DesiredRetryState {
+    attempts: usize,
+    scheduled: Option<Arc<RunIdentity>>,
+}
+
+const DESIRED_RETRY_DELAYS: [Duration; 3] = [
+    Duration::from_secs(30),
+    Duration::from_secs(120),
+    Duration::from_secs(600),
+];
+
+impl DesiredRetryState {
+    fn schedule(&mut self, needs_retry: bool) -> Option<(Duration, Arc<RunIdentity>)> {
+        if !needs_retry {
+            *self = Self::default();
+            return None;
+        }
+        if self.scheduled.is_some() || self.attempts >= DESIRED_RETRY_DELAYS.len() {
+            return None;
+        }
+        let delay = DESIRED_RETRY_DELAYS[self.attempts];
+        self.attempts += 1;
+        let identity = Arc::new(RunIdentity);
+        self.scheduled = Some(identity.clone());
+        Some((delay, identity))
+    }
+
+    fn consume(&mut self, identity: &Arc<RunIdentity>) -> bool {
+        if !self
+            .scheduled
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, identity))
+        {
+            return false;
+        }
+        self.scheduled = None;
+        true
+    }
 }
 
 #[derive(Debug)]
@@ -157,6 +203,7 @@ pub(crate) struct ReconciliationRunToken {
     coordinator: Weak<ReconciliationCoordinator>,
     scope: ReconcileScope,
     identity: Arc<RunIdentity>,
+    intent: ReconcileIntent,
     finished: bool,
 }
 
@@ -290,6 +337,7 @@ impl ReconciliationCoordinator {
             coordinator: Arc::downgrade(self),
             scope: scope.clone(),
             identity,
+            intent,
             finished: false,
         })
     }
@@ -466,37 +514,193 @@ fn start_owned_reconciliation(
     scope: ReconcileScope,
     reason: &'static str,
     run: ReconciliationRunToken,
-) -> tokio::sync::oneshot::Receiver<Result<()>> {
-    let inputs = ReconciliationInputs::from(primary);
-    let (completion, result) = tokio::sync::oneshot::channel();
-    primary.runtime_tasks.spawn(async move {
-        tracing::debug!("Running owned reconciliation: scope={scope:?} reason={reason}");
-        // Request cancellation only drops the receiver. The run and all its
-        // awaited effects retain single-flight ownership until settlement.
-        let outcome = AssertUnwindSafe(run_scope(&inputs, &scope))
-            .catch_unwind()
-            .await
-            .unwrap_or_else(|_| {
-                Err(PumasError::Other(
-                    "Model reconciliation task panicked".to_string(),
-                ))
-            });
-        if outcome.is_ok() {
-            run.finish_success(chrono::Utc::now().to_rfc3339()).await;
-        } else {
-            run.finish_failure().await;
-        }
-        if let Err(Err(error)) = completion.send(outcome) {
-            tracing::warn!("Unclaimed reconciliation failed for {scope:?}: {error}");
-        }
-    });
-    result
+) -> tokio::sync::oneshot::Receiver<Result<Result<()>>> {
+    start_reconciliation_with_inputs(ReconciliationInputs::from(primary), scope, reason, run)
 }
 
-async fn await_reconciliation(result: tokio::sync::oneshot::Receiver<Result<()>>) -> Result<()> {
+fn start_reconciliation_with_inputs(
+    inputs: ReconciliationInputs,
+    scope: ReconcileScope,
+    reason: &'static str,
+    run: ReconciliationRunToken,
+) -> tokio::sync::oneshot::Receiver<Result<Result<()>>> {
+    let runtime_tasks = inputs.runtime_tasks.clone();
+    let started =
+        runtime_tasks.start_owned("reconcile local model library", move |context| async move {
+            match execute_reconciliation(inputs, scope, reason, run, context).await {
+                // Forced callers still receive this expected authority conflict,
+                // while the runtime owner observes a settled operation.
+                Err(error @ PumasError::DownloadRootBusy) => Ok(Err(error)),
+                Err(error) => Err(error),
+                Ok(()) => Ok(Ok(())),
+            }
+        });
+    match started {
+        Ok(result) => result,
+        Err(error) => {
+            let (completion, result) = tokio::sync::oneshot::channel();
+            let _ = completion.send(Err(error));
+            result
+        }
+    }
+}
+
+async fn execute_reconciliation(
+    inputs: ReconciliationInputs,
+    scope: ReconcileScope,
+    reason: &'static str,
+    run: ReconciliationRunToken,
+    context: RuntimeTaskContext,
+) -> Result<()> {
+    tracing::debug!("Running owned reconciliation: scope={scope:?} reason={reason}");
+    // The token stays outside the caught future until registered effects settle.
+    let outcome = AssertUnwindSafe(async {
+        run_scope(&inputs, &context, &scope).await?;
+        inputs.intent_service.reconcile(context.clone()).await
+    })
+    .catch_unwind()
+    .await
+    .unwrap_or_else(|_| {
+        Err(PumasError::Other(
+            "Model reconciliation task panicked".into(),
+        ))
+    });
+    let drain = context.drain_nested().await;
+    let outcome = match drain {
+        Ok(()) => outcome,
+        Err(error) => Err(error),
+    };
+    match outcome {
+        Ok(needs_retry) => {
+            run.finish_success(chrono::Utc::now().to_rfc3339()).await;
+            schedule_dirty_followup(inputs.clone());
+            schedule_desired_retry(inputs, needs_retry);
+            Ok(())
+        }
+        Err(PumasError::DownloadRootBusy) if run.intent == ReconcileIntent::Opportunistic => {
+            // The mutation authority refuses before acquiring a destructive
+            // claim or changing bytes. Busy download custody is a deferred
+            // observation, not an unverified mutation that poisons shutdown.
+            run.finish_failure().await;
+            schedule_desired_retry(inputs, true);
+            Ok(())
+        }
+        Err(error) => {
+            run.finish_failure().await;
+            Err(error)
+        }
+    }
+}
+
+/// Admit startup inspection without changing startup behavior for empty stores.
+pub(crate) fn start_intent_reconciliation(primary: Arc<PrimaryState>) {
+    let inputs = ReconciliationInputs::from(primary.as_ref());
+    let runtime_tasks = inputs.runtime_tasks.clone();
+    let started = runtime_tasks.start_owned(
+        "inspect retained intents at startup",
+        move |context| async move {
+            if !inputs
+                .intent_service
+                .has_declarations(context.clone())
+                .await?
+            {
+                return Ok(());
+            }
+            let scope = ReconcileScope::AllModels;
+            inputs.reconciliation.mark_dirty_all().await;
+            match inputs
+                .reconciliation
+                .try_start(&scope, ReconcileIntent::Opportunistic)
+                .await
+            {
+                StartOutcome::Started(run) => {
+                    execute_reconciliation(inputs, scope, "intent-startup", run, context).await
+                }
+                StartOutcome::Clean | StartOutcome::InFlight => Ok(()),
+            }
+        },
+    );
+    if let Err(error) = started {
+        tracing::debug!(%error, "Intent startup reconciliation was not admitted");
+    }
+}
+
+/// Deliver events that arrived after this run took its snapshot. The existing
+/// dirty flags and single-flight coordinator coalesce concurrent follow-ups.
+fn schedule_dirty_followup(inputs: ReconciliationInputs) {
+    let dirty = {
+        let state = inputs.reconciliation.lock_state();
+        state.all.dirty || state.models.values().any(has_unreconciled_dirty)
+    };
+    if !dirty {
+        return;
+    }
+    let runtime_tasks = inputs.runtime_tasks.clone();
+    runtime_tasks.spawn(async move {
+        let scope = ReconcileScope::AllModels;
+        match inputs
+            .reconciliation
+            .try_start(&scope, ReconcileIntent::Opportunistic)
+            .await
+        {
+            StartOutcome::Started(run) => {
+                drop(start_reconciliation_with_inputs(
+                    inputs,
+                    scope,
+                    "coalesced-dirty-event",
+                    run,
+                ));
+            }
+            StartOutcome::Clean | StartOutcome::InFlight => {}
+        }
+    });
+}
+
+/// One bounded wake re-enters the existing coordinator; it never executes
+/// desired work outside the coordinator or owns a separate retry scheduler.
+fn schedule_desired_retry(inputs: ReconciliationInputs, needs_retry: bool) {
+    let scheduled = {
+        let mut state = inputs.reconciliation.lock_state();
+        state.desired_retry.schedule(needs_retry)
+    };
+    let Some(scheduled) = scheduled else { return };
+    let runtime_tasks = inputs.runtime_tasks.clone();
+    runtime_tasks.spawn(async move {
+        tokio::time::sleep(scheduled.0).await;
+        {
+            let mut state = inputs.reconciliation.lock_state();
+            if !state.desired_retry.consume(&scheduled.1) {
+                return;
+            }
+            state.all.dirty = true;
+        }
+        let scope = ReconcileScope::AllModels;
+        match inputs
+            .reconciliation
+            .try_start(&scope, ReconcileIntent::Opportunistic)
+            .await
+        {
+            StartOutcome::Started(run) => {
+                drop(start_reconciliation_with_inputs(
+                    inputs,
+                    scope,
+                    "desired-state-retry",
+                    run,
+                ));
+            }
+            // An active run retains the dirty mark and performs the same
+            // desired-state observation before deciding its next bounded wake.
+            StartOutcome::Clean | StartOutcome::InFlight => {}
+        }
+    });
+}
+
+async fn await_reconciliation(
+    result: tokio::sync::oneshot::Receiver<Result<Result<()>>>,
+) -> Result<()> {
     result.await.map_err(|_| {
         PumasError::Other("Model reconciliation ended before reporting its outcome".to_string())
-    })?
+    })??
 }
 
 /// Start a cross-platform model-library watcher and route events into reconciliation.
@@ -902,42 +1106,48 @@ fn select_partial_model_type(
 }
 
 async fn select_partial_model_type_async(
+    context: &RuntimeTaskContext,
     index: ModelIndex,
     model_dir: PathBuf,
     path_model_type: Option<String>,
     pipeline_tag_hint: Option<String>,
     model_type_hint: Option<String>,
 ) -> Result<PartialModelTypeSelection> {
-    tokio::task::spawn_blocking(move || {
-        select_partial_model_type(
-            &index,
-            &model_dir,
-            path_model_type.as_deref(),
-            pipeline_tag_hint.as_deref(),
-            model_type_hint.as_deref(),
-        )
-    })
-    .await
-    .map_err(|err| {
-        PumasError::Other(format!(
-            "Failed to join partial model-type selection task: {}",
-            err
-        ))
-    })?
+    context
+        .run_blocking("select partial model type", move || {
+            select_partial_model_type(
+                &index,
+                &model_dir,
+                path_model_type.as_deref(),
+                pipeline_tag_hint.as_deref(),
+                model_type_hint.as_deref(),
+            )
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join partial model-type selection task: {}",
+                err
+            ))
+        })?
 }
 
-async fn load_persisted_downloads(primary: &ReconciliationInputs) -> Vec<PersistedDownload> {
+async fn load_persisted_downloads(
+    primary: &ReconciliationInputs,
+    context: &RuntimeTaskContext,
+) -> Vec<PersistedDownload> {
     let persistence = primary
         .hf_client
         .as_ref()
         .and_then(|client| client.persistence().cloned());
-    tokio::task::spawn_blocking(move || {
-        persistence
-            .map(|persistence| persistence.load_all())
-            .unwrap_or_default()
-    })
-    .await
-    .unwrap_or_default()
+    context
+        .run_blocking("observe persisted partial downloads", move || {
+            persistence
+                .map(|persistence| persistence.load_all())
+                .unwrap_or_default()
+        })
+        .await
+        .unwrap_or_default()
 }
 
 fn candidate_from_persisted(
@@ -1070,6 +1280,7 @@ fn reuse_existing_partial_lookup_hints(
 
 async fn stage_partial_candidate(
     primary: &ReconciliationInputs,
+    context: &RuntimeTaskContext,
     mut candidate: PartialDownloadCandidate,
 ) -> Result<()> {
     let metadata_path = candidate.model_dir.join("metadata.json");
@@ -1105,6 +1316,7 @@ async fn stage_partial_candidate(
     let now = chrono::Utc::now().to_rfc3339();
     let (path_model_type, path_family, path_cleaned_name) = split_model_id(&candidate.model_id);
     let selected_type = select_partial_model_type_async(
+        context,
         primary.model_library.index().clone(),
         candidate.model_dir.clone(),
         path_model_type,
@@ -1175,9 +1387,12 @@ async fn stage_partial_candidate(
     Ok(())
 }
 
-async fn stage_partial_download_rows(primary: &ReconciliationInputs) -> Result<()> {
+async fn stage_partial_download_rows(
+    primary: &ReconciliationInputs,
+    context: &RuntimeTaskContext,
+) -> Result<()> {
     let library_root = primary.model_library.library_root().to_path_buf();
-    let persisted = load_persisted_downloads(primary).await;
+    let persisted = load_persisted_downloads(primary, context).await;
     let known_dirs: HashSet<PathBuf> = persisted
         .iter()
         .map(|entry| entry.dest_dir.clone())
@@ -1219,7 +1434,7 @@ async fn stage_partial_download_rows(primary: &ReconciliationInputs) -> Result<(
     }
 
     for candidate in candidates.into_values() {
-        stage_partial_candidate(primary, candidate).await?;
+        stage_partial_candidate(primary, context, candidate).await?;
     }
 
     Ok(())
@@ -1281,10 +1496,11 @@ async fn candidate_from_marker(
 
 async fn stage_partial_download_row_for_model(
     primary: &ReconciliationInputs,
+    context: &RuntimeTaskContext,
     model_id: &str,
     model_dir: &Path,
 ) -> Result<()> {
-    let persisted = load_persisted_downloads(primary).await;
+    let persisted = load_persisted_downloads(primary, context).await;
     let mut candidate = persisted
         .iter()
         .find(|entry| entry.dest_dir == model_dir)
@@ -1324,7 +1540,7 @@ async fn stage_partial_download_row_for_model(
         }
     }
 
-    stage_partial_candidate(primary, candidate).await
+    stage_partial_candidate(primary, context, candidate).await
 }
 
 fn has_importable_model_files(model_dir: &Path) -> bool {
@@ -1365,7 +1581,11 @@ fn is_non_fatal_reclassify_error(error: &PumasError) -> bool {
     )
 }
 
-async fn reconcile_model_scope(primary: &ReconciliationInputs, model_id: &str) -> Result<()> {
+async fn reconcile_model_scope(
+    primary: &ReconciliationInputs,
+    context: &RuntimeTaskContext,
+    model_id: &str,
+) -> Result<()> {
     let model_dir = primary.model_library.library_root().join(model_id);
 
     if !path_exists(&model_dir).await? {
@@ -1401,7 +1621,7 @@ async fn reconcile_model_scope(primary: &ReconciliationInputs, model_id: &str) -
     if has_pending_download_artifacts(&model_dir) {
         // Partial downloads are indexed directly in SQLite as source-of-truth rows,
         // even when metadata.json is absent.
-        stage_partial_download_row_for_model(primary, model_id, &model_dir).await?;
+        stage_partial_download_row_for_model(primary, context, model_id, &model_dir).await?;
         return Ok(());
     }
     if !has_importable_model_files(&model_dir) {
@@ -1431,7 +1651,11 @@ async fn reconcile_model_scope(primary: &ReconciliationInputs, model_id: &str) -
     Ok(())
 }
 
-async fn run_scope(primary: &ReconciliationInputs, scope: &ReconcileScope) -> Result<()> {
+async fn run_scope(
+    primary: &ReconciliationInputs,
+    context: &RuntimeTaskContext,
+    scope: &ReconcileScope,
+) -> Result<()> {
     match scope {
         ReconcileScope::AllModels => {
             let orphan_result = primary.model_importer.adopt_orphans(false).await;
@@ -1442,35 +1666,36 @@ async fn run_scope(primary: &ReconciliationInputs, scope: &ReconcileScope) -> Re
                 );
             }
 
-            let pre_cleanup = tokio::task::spawn_blocking({
-                let library = primary.model_library.clone();
-                #[cfg(test)]
-                let observer = primary
-                    .reconciliation
-                    .cleanup_observer
-                    .lock()
-                    .unwrap()
-                    .take();
-                move || {
+            let pre_cleanup = context
+                .run_blocking("reconcile duplicate cleanup before reclassification", {
+                    let library = primary.model_library.clone();
                     #[cfg(test)]
-                    if let Some(ref observer) = observer {
-                        observer(CleanupPhase::Entered);
+                    let observer = primary
+                        .reconciliation
+                        .cleanup_observer
+                        .lock()
+                        .unwrap()
+                        .take();
+                    move || {
+                        #[cfg(test)]
+                        if let Some(ref observer) = observer {
+                            observer(CleanupPhase::Entered);
+                        }
+                        let result = library.cleanup_duplicate_repo_entries();
+                        #[cfg(test)]
+                        if let Some(ref observer) = observer {
+                            observer(CleanupPhase::Finished);
+                        }
+                        result
                     }
-                    let result = library.cleanup_duplicate_repo_entries();
-                    #[cfg(test)]
-                    if let Some(ref observer) = observer {
-                        observer(CleanupPhase::Finished);
-                    }
-                    result
-                }
-            })
-            .await
-            .map_err(|err| {
-                PumasError::Other(format!(
-                    "Failed to join duplicate repo cleanup task: {}",
-                    err
-                ))
-            })??;
+                })
+                .await
+                .map_err(|err| {
+                    PumasError::Other(format!(
+                        "Failed to join duplicate repo cleanup task: {}",
+                        err
+                    ))
+                })??;
             if pre_cleanup.duplicate_repo_groups > 0 {
                 tracing::info!(
                     "Reconcile(all): pre-reclassify duplicate cleanup groups={}, removed={}, unresolved_groups={}, normalized_ids={}",
@@ -1489,17 +1714,18 @@ async fn run_scope(primary: &ReconciliationInputs, scope: &ReconcileScope) -> Re
                 );
             }
 
-            let post_cleanup = tokio::task::spawn_blocking({
-                let library = primary.model_library.clone();
-                move || library.cleanup_duplicate_repo_entries()
-            })
-            .await
-            .map_err(|err| {
-                PumasError::Other(format!(
-                    "Failed to join duplicate repo cleanup task: {}",
-                    err
-                ))
-            })??;
+            let post_cleanup = context
+                .run_blocking("reconcile duplicate cleanup after reclassification", {
+                    let library = primary.model_library.clone();
+                    move || library.cleanup_duplicate_repo_entries()
+                })
+                .await
+                .map_err(|err| {
+                    PumasError::Other(format!(
+                        "Failed to join duplicate repo cleanup task: {}",
+                        err
+                    ))
+                })??;
             if post_cleanup.duplicate_repo_groups > 0 {
                 tracing::info!(
                     "Reconcile(all): post-reclassify duplicate cleanup groups={}, removed={}, unresolved_groups={}, normalized_ids={}",
@@ -1511,10 +1737,10 @@ async fn run_scope(primary: &ReconciliationInputs, scope: &ReconcileScope) -> Re
             }
 
             let _ = primary.model_library.rebuild_index().await?;
-            stage_partial_download_rows(primary).await?;
+            stage_partial_download_rows(primary, context).await?;
             Ok(())
         }
-        ReconcileScope::Model(model_id) => reconcile_model_scope(primary, model_id).await,
+        ReconcileScope::Model(model_id) => reconcile_model_scope(primary, context, model_id).await,
     }
 }
 
@@ -1522,6 +1748,77 @@ async fn run_scope(primary: &ReconciliationInputs, scope: &ReconcileScope) -> Re
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn desired_retry_wakes_coalesce_and_stop_after_three_attempts() {
+        let mut retry = DesiredRetryState::default();
+        for expected in DESIRED_RETRY_DELAYS {
+            let (delay, identity) = retry.schedule(true).unwrap();
+            assert_eq!(delay, expected);
+            assert!(
+                retry.schedule(true).is_none(),
+                "duplicate event cannot create a second wake"
+            );
+            assert!(retry.consume(&identity));
+            assert!(
+                !retry.consume(&identity),
+                "one wake cannot be consumed twice"
+            );
+        }
+        assert!(
+            retry.schedule(true).is_none(),
+            "automatic retries are bounded"
+        );
+        assert!(retry.schedule(false).is_none());
+        assert_eq!(retry.schedule(true).unwrap().0, DESIRED_RETRY_DELAYS[0]);
+    }
+
+    #[test]
+    fn settled_desired_episode_invalidates_its_old_wake() {
+        let mut retry = DesiredRetryState::default();
+        let (_, old) = retry.schedule(true).unwrap();
+        retry.schedule(false);
+        let (_, current) = retry.schedule(true).unwrap();
+        assert!(!retry.consume(&old));
+        assert!(retry.consume(&current));
+    }
+
+    #[tokio::test]
+    async fn successful_run_delivers_dirty_event_that_arrived_during_its_snapshot() {
+        let temp = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(temp.path(), None).await;
+        let coordinator = &api.primary().reconciliation;
+        let StartOutcome::Started(run) = coordinator
+            .try_start(&ReconcileScope::AllModels, ReconcileIntent::Forced)
+            .await
+        else {
+            panic!("fixture must admit initial run")
+        };
+        // A new ensure/watcher event arrives after the run selected its inputs.
+        coordinator.mark_dirty_all().await;
+        assert!(matches!(
+            coordinator
+                .try_start(&ReconcileScope::AllModels, ReconcileIntent::Opportunistic)
+                .await,
+            StartOutcome::InFlight
+        ));
+        run.finish_success(chrono::Utc::now().to_rfc3339()).await;
+        schedule_dirty_followup(ReconciliationInputs::from(api.primary().as_ref()));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let settled = {
+                    let state = coordinator.lock_state();
+                    !state.all.dirty && state.all.active_run.is_none()
+                };
+                if settled {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("coalesced event must run without another external trigger");
+    }
 
     #[tokio::test]
     async fn cancelled_rebuild_retains_exclusion_until_blocking_cleanup_finishes() {
@@ -1572,6 +1869,105 @@ mod tests {
         .await
         .expect("the owned reconciliation must settle after cleanup is released")
         .expect("a later rebuild must make progress after the cancelled request's run settles");
+    }
+
+    #[tokio::test]
+    async fn busy_download_root_defers_background_reconciliation_without_failing_shutdown() {
+        let temp = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(temp.path(), None).await;
+        let root = crate::model_library::DownloadDestinationRoot::open(
+            api.primary().model_library.library_root(),
+        )
+        .unwrap();
+        let grant = root.try_acquire_execution_grant().unwrap();
+        trigger_reconciliation(
+            api.primary().clone(),
+            ReconcileScope::AllModels,
+            "test-busy-download",
+        )
+        .await;
+        api.primary().runtime_tasks.shutdown_owned().await.unwrap();
+        let state = api.primary().reconciliation.lock_state();
+        assert!(state.all.dirty, "deferred work must remain dirty");
+        assert!(state.all.active_run.is_none());
+        assert_eq!(
+            state.desired_retry.attempts, 1,
+            "busy custody requests a bounded retry"
+        );
+        drop(state);
+        drop(grant);
+    }
+
+    #[tokio::test]
+    async fn busy_download_root_remains_a_forced_refresh_error_without_failing_shutdown() {
+        let temp = TempDir::new().unwrap();
+        let api = super::super::hf::tests::recovery_api_fixture(temp.path(), None).await;
+        let root = crate::model_library::DownloadDestinationRoot::open(
+            api.primary().model_library.library_root(),
+        )
+        .unwrap();
+        let grant = root.try_acquire_execution_grant().unwrap();
+        assert!(matches!(
+            api.rebuild_model_index().await,
+            Err(PumasError::DownloadRootBusy)
+        ));
+        api.primary().runtime_tasks.shutdown_owned().await.unwrap();
+        assert!(api.primary().reconciliation.lock_state().all.dirty);
+        drop(grant);
+    }
+
+    #[tokio::test]
+    async fn runtime_shutdown_retains_reconciliation_exclusion_until_cleanup_settles() {
+        let temp = TempDir::new().unwrap();
+        let api = Arc::new(super::super::hf::tests::recovery_api_fixture(temp.path(), None).await);
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let entered_tx = StdMutex::new(Some(entered_tx));
+        let release_rx = StdMutex::new(release_rx);
+        *api.primary()
+            .reconciliation
+            .cleanup_observer
+            .lock()
+            .unwrap() = Some(Arc::new(move |phase| {
+            if matches!(phase, CleanupPhase::Entered) {
+                let _ = entered_tx.lock().unwrap().take().unwrap().send(());
+                let _ = release_rx.lock().unwrap().recv();
+            }
+        }));
+        let requester = tokio::spawn({
+            let api = api.clone();
+            async move { api.rebuild_model_index().await }
+        });
+        entered_rx.await.unwrap();
+        let owner = api.primary().runtime_tasks.clone();
+        owner.close();
+        let shutdown = tokio::spawn(async move { owner.shutdown_owned().await });
+        requester.abort();
+        assert!(requester.await.unwrap_err().is_cancelled());
+        assert!(matches!(
+            api.primary()
+                .reconciliation
+                .try_start(&ReconcileScope::AllModels, ReconcileIntent::Forced)
+                .await,
+            StartOutcome::InFlight
+        ));
+        assert!(
+            !shutdown.is_finished(),
+            "shutdown must retain the held cleanup effect"
+        );
+        drop(release_tx);
+        tokio::time::timeout(Duration::from_secs(5), shutdown)
+            .await
+            .expect("shutdown must settle after cleanup")
+            .unwrap()
+            .unwrap();
+        assert!(api
+            .primary()
+            .reconciliation
+            .lock_state()
+            .all
+            .active_run
+            .is_none());
     }
 
     #[tokio::test]

@@ -41,6 +41,28 @@ desktop use, Electron supervises that RPC process. Renderer state is a projectio
 backend responses and update events; local optimistic state must not redefine
 whether a model, download, route, or runtime is authoritative.
 
+## Local Intent Domain
+
+The core intent service accepts transport-independent model requirements and
+returns typed observations. Its resolver, immutable acquisition plan, durable
+consumer declarations and reconciliation share the existing library owner.
+`PumasApi::intent()` and `PumasLocalClient::intent()` provide the native and local
+IPC views; seven `intent_` JSON-RPC methods project the same service through the
+existing loopback server. Transport handlers decode and project outcomes without
+owning another download or declaration lifecycle.
+
+Get may admit acquisition when explicitly allowed. Ensure commits retention
+before convergence; release removes one declaration generation without deleting
+files or cancelling downloads. Consumer disconnection does not revoke ownership
+of admitted work. The primary drains local effects and downloads during composed
+shutdown. See the [core contract](../rust/crates/pumas-core/README.md#local-intent-interface)
+for availability evidence, restart, retry, deletion and downgrade limits.
+
+Existing operational consumers remain supported. Desktop and UniFFI intent
+adoption is separate from this native/local transport increment. Node, fleet,
+remote discovery and additional network features are deferred until after the
+next Pumas release.
+
 ## Storage
 
 Important launcher-root paths are:

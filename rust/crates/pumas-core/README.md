@@ -9,7 +9,7 @@ imports, integrity reconciliation, runtime profiles, and serving state.
 | API | Use when |
 | --- | --- |
 | `PumasApi` / `PumasLibraryInstance` | This process owns the launcher root and may mutate it |
-| `PumasLocalClient` | Another process owns the root and exposes the local RPC service |
+| `PumasLocalClient` | Another process owns the root and exposes authenticated local IPC |
 | `PumasReadOnlyLibrary` | The caller needs indexed reads without lifecycle ownership |
 
 Owner construction fails when another live owner has claimed the same root.
@@ -33,6 +33,130 @@ async fn main() -> Result<()> {
     Ok(())
 }
 ```
+
+## Local Intent Interface
+
+`PumasApi::intent()` exposes structured local model requirements through
+`query_models`, `get_model`, and `get_model_status`. The existing
+`PumasApi::get_model(&str)` retains its operational lookup behavior.
+
+An intent requirement selects an existing local model reference or a Hugging
+Face repository, with optional revision, artifact, format, and quantization
+constraints. `query_models` and `get_model_status` are read-only local
+observations: they do not contact an upstream service, generate package facts,
+or reconcile the library. `get_model` also remains observational under
+`AcquisitionPolicy::LocalOnly`. With `AllowUpstream`, it can join or admit one
+managed Hugging Face acquisition when no matching local artifact is ready.
+
+Upstream branch and tag selectors are resolved to a validated immutable commit
+before admission. An `Acquiring` result includes a pinned local
+`resolved_requirement`; use that requirement with `get_model_status` to poll
+without resolving the moving selector again. The download hint is advisory, and
+the managed download lifecycle remains the authority. Existing paused, failed,
+or unresolved durable custody is reported explicitly rather than starting a
+second writer. If several pinned artifacts satisfy a request,
+`UpstreamAmbiguous` returns distinct candidates and selected artifact IDs so the
+caller can choose one and retry.
+
+Initial upstream acquisition supports a single GGUF, ONNX, or bare Safetensors
+file whose pinned repository tree supplies trusted LFS size and SHA-256
+evidence. Known Hugging Face directory, sharded, adapter, and Diffusers bundle
+layouts are reported as unsupported before admission. In particular, a
+Safetensors repository with directory metadata such as `config.json` is not
+treated as a coherent single-file artifact. I8 directory packages remain
+unsupported through this path; the interface does not fabricate a file handle
+for a directory load target. Filename quantization is only a selection hint:
+local package facts must still prove the requested quantization before the
+result becomes `Available`.
+
+Public operational `DownloadRequest` values retain their existing default-main
+behavior. Intent acquisition carries its immutable revision through metadata,
+auxiliary files, retries, persistence, resume, integrity verification, and
+import. Download persistence uses schema 5 with validated schema-4 upgrade;
+older readers reject the new version. `PersistedDownload` gains a
+`revision: Option<String>` field, so Rust callers constructing that lower-level
+record must initialize it. Pinned ticket recovery is unavailable; pinned
+execution resumes through its persisted download record.
+
+`ensure_model(&EnsureModelRequest)` durably records a consumer's requirement
+before attempting convergence. `Accepted` includes the declaration reference and
+an observed state; acceptance alone does not mean the artifact is available.
+Repeated requests from the same consumer reuse the declaration. Different
+consumers retain separate declarations for the same model. Upstream targets bind
+to an immutable commit and canonical artifact before download admission.
+
+`get_ensure_status(&ModelEnsureRef)` and `list_declarations()` read durable state.
+`release_model(&ModelEnsureRef)` removes only that declaration, without deleting
+files or cancelling downloads. The reference's generation prevents an old
+release from removing a replacement declaration. Initial durable requirements
+support local references with `LocalOnly` and repositories with `AllowUpstream`.
+
+The primary instance reconciles declarations at startup and on existing library
+events. After restart it can resume an exact retained download whose durable
+state shows an interrupted queue or transfer. Deliberate pauses and failed
+verification remain blocked; recovery does not enqueue a replacement writer. Transient upstream work has at most three automatic retry wakes per
+unresolved episode (30 seconds, 2 minutes, 10 minutes); later events, explicit
+ensure, or restart can trigger another observation. `shutdown_intent()` closes
+local admission, drains admitted local effects, then drains downloads, even if
+the requesting waiter is dropped. `shutdown_downloads()` retains its narrower
+meaning. Neither operation stops inference runtimes.
+
+The index contains the versioned declaration authority for
+ensure/release. Its additive migration is transactional and writer connections
+use SQLite FULL synchronization. Declaration and deletion-claim rows survive
+catalog clearing; incompatible or corrupt declaration state fails closed.
+Destructive operations consult durable declarations, deletion claims, and the
+existing download inventory, including paused work when HF is disabled. Failed
+partial deletion retains its claim for explicit recovery. Standalone libraries
+without composed mutation authority refuse destructive operations; path-only
+merge is also refused. Cross-filesystem relocation and partial duplicate merging
+preserve the source rather than using an unprotected copy/delete fallback.
+Historical binaries ignore the new tables, so downgrading with live declarations
+or claims is unsupported.
+
+Availability requires matching evidence and a current local artifact. Missing
+files, stale or incomplete facts, mismatched constraints, ambiguous selection,
+and invalid requirements remain typed outcomes. A returned handle is an
+observation of local availability, not a file lease, an integrity certificate,
+or proof that an inference runtime can execute the model. Re-resolve when a
+fresh access decision is needed. Inspect readiness and match evidence when
+consuming query candidates; being listed is not a promise of availability.
+GGUF quantization constraints require header evidence; filename-derived guesses
+remain insufficient, and canonical header labels such as `MOSTLY_Q4_K_M` match
+`Q4_K_M` without changing the recorded evidence.
+
+Some existing local Hugging Face directory packages expose a primary-file entry
+path with a directory load-target kind. The intent interface reports
+`Incomplete` for that inconsistency rather than returning a handle with the
+wrong path kind. Correcting that existing package/load-target contract is
+separate work.
+
+See the native [local intent example](examples/intent_model.rs) and [managed
+acquisition example](examples/intent_acquire.rs) for the public call shapes.
+The [local client example](examples/intent_local_client.rs) uses the same domain
+requirements through `PumasLocalClient::intent()` and existing authenticated IPC.
+These types and policies belong to core independently of any transport; no new
+service or network exposure is needed.
+
+## Intent Through Existing Local Transports
+
+`PumasLocalClient::intent()` provides the seven intent methods with the same
+request and outcome types as `PumasApi::intent()`. Discover a ready owner and
+connect through the existing registry; its connection token remains required.
+The loopback JSON-RPC adapter exposes these methods with an `intent_` prefix;
+see its [wire contract](../pumas-rpc/README.md#local-intent-rpc).
+
+Both adapters call the owning core service. Dropping a consumer connection does
+not release a declaration or cancel admitted work. Reconnect and query status
+using the pinned requirement or declaration reference. For durable retention,
+keep the `ModelEnsureRef` returned by ensure and release that exact generation
+when it is no longer needed. Release removes the declaration only.
+
+Operational lookup/download methods remain available. UniFFI and the desktop
+bridge continue to expose their existing operational contracts; adopting the
+intent methods through those bindings is separate work. Nodes, fleet management,
+remote discovery and additional network features are deferred until after the
+next Pumas release.
 
 ## Model and Storage Rules
 

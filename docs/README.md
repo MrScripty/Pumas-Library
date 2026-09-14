@@ -27,9 +27,10 @@ available through Git history rather than in the working tree.
 Audits describe the named repository and standards commits. They are evidence
 and remediation inputs, not current operating instructions.
 
-## Active Plans
+## Active and Planned Work
 
 - [2026-09-03 current-standards remediation program](plans/current-standards-remediation-2026-09-03/plan.md)
+- [Local intent API and transport-independent domain language](plans/local-intent-api-2026-09-12/plan.md) — complete within the recorded local scope; native resolution, acquisition, durable declarations and existing IPC/RPC projections accepted; nodes/fleets/new networking deferred until after the next release
 
 An implementation invocation must name the exact focused `plan.md` and an
 explicit `start`, `continue`, or `verify` operation. Plans remain temporary

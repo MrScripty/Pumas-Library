@@ -11,6 +11,9 @@ mod query;
 
 pub use fts5::{FTS5Config, FTS5Manager};
 pub(crate) use model_index::classify_package_facts_cache_record;
+pub(crate) use model_index::{
+    BoundTarget, IntentDeclarationRecord, IntentDeclarationRelease, IntentDeletionClaimResult,
+};
 pub use model_index::{
     DependencyBindingHistoryRecord, DependencyProfileRecord, ForeignKeyViolation,
     ModelDependencyBindingRecord, ModelIndex, ModelPackageFactsCacheRecord,

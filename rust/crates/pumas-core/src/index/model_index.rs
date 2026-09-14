@@ -2,11 +2,15 @@
 
 mod dependency_profiles;
 mod governance;
+mod intent_declarations;
 mod metadata_overlays;
 mod model_library_updates;
 mod model_selector_snapshot;
 mod package_facts_cache;
 
+pub(crate) use intent_declarations::{
+    BoundTarget, IntentDeclarationRecord, IntentDeclarationRelease, IntentDeletionClaimResult,
+};
 pub(crate) use package_facts_cache::classify_package_facts_cache_record;
 
 use crate::models::{
@@ -268,14 +272,19 @@ impl ModelIndex {
             }
         }
 
-        let conn = Connection::open(&db_path)?;
+        let mut conn = Connection::open(&db_path)?;
         let (update_tx, _) = broadcast::channel(256);
+
+        // Refuse incompatible authoritative intent state before any unrelated
+        // write-oriented initialization can change this database.
+        Self::inspect_intent_schema(&conn)?;
 
         // Configure connection
         Self::configure_connection(&conn)?;
 
         // Ensure schema
         Self::ensure_schema(&conn)?;
+        Self::ensure_intent_schema(&mut conn)?;
 
         let index = Self {
             db_path,
@@ -295,6 +304,7 @@ impl ModelIndex {
         let db_path = db_path.into();
         let conn = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         Self::configure_read_only_connection(&conn)?;
+        Self::inspect_intent_schema(&conn)?;
         let (update_tx, _) = broadcast::channel(1);
 
         Ok(Self {
@@ -312,7 +322,7 @@ impl ModelIndex {
             PRAGMA foreign_keys=ON;
             PRAGMA journal_mode=WAL;
             PRAGMA busy_timeout=30000;
-            PRAGMA synchronous=NORMAL;
+            PRAGMA synchronous=FULL;
             PRAGMA temp_store=MEMORY;
             ",
         )?;

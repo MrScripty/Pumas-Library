@@ -346,7 +346,7 @@ pub async fn start_server(
             drain_server_owners(
                 server_result,
                 async {
-                    let result = state.api.shutdown_downloads().await;
+                    let result = state.api.shutdown_intent().await;
                     #[cfg(test)]
                     downloads_drain_observed.store(true, std::sync::atomic::Ordering::Release);
                     result

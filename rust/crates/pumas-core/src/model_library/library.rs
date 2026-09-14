@@ -27,6 +27,9 @@ use crate::model_library::external_assets::{
 use crate::model_library::hashing::{verify_blake3, verify_sha256};
 use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
 use crate::model_library::importer::detect_dllm_from_config_json;
+use crate::model_library::mutation_authority::{
+    authority_unavailable, owned_mutation_outcome, LibraryMutationAuthority,
+};
 use crate::model_library::naming::normalize_name;
 use crate::model_library::package_facts::{
     artifact_logical_size_facts, auto_map_sources_from_config, backend_hint_facts,
@@ -35,9 +38,6 @@ use crate::model_library::package_facts::{
     invalid_gguf_package_evidence, merge_string_lists, package_artifact_kind,
     package_class_references, package_component_facts, package_facts_summary,
     transformers_package_evidence, PackageInspectionContext,
-};
-use crate::model_library::partial_download::{
-    finalize_download_artifact_if_complete, infer_expected_sizes_from_total,
 };
 use crate::model_library::types::{
     HuggingFaceEvidence, ModelMetadata, ModelOverrides, ModelReviewFilter, ModelReviewItem,
@@ -205,6 +205,9 @@ pub struct ModelLibrary {
     /// Optional callback used by primaries to suppress watcher feedback from
     /// Pumas-owned metadata projection writes.
     metadata_write_notifier: Arc<StdMutex<Option<MetadataWriteNotifier>>>,
+    /// Installed once by the composition owner. Standalone libraries remain
+    /// read-only for destructive operations until trusted authority is supplied.
+    mutation_authority: Arc<OnceLock<LibraryMutationAuthority>>,
 }
 
 impl ModelLibrary {
@@ -244,17 +247,8 @@ impl ModelLibrary {
             write_lock: Arc::new(Mutex::new(())),
             package_facts_locks: Arc::new(Mutex::new(HashMap::new())),
             metadata_write_notifier: Arc::new(StdMutex::new(None)),
+            mutation_authority: Arc::new(OnceLock::new()),
         };
-
-        if let Err(error) = library
-            .auto_finalize_complete_partial_artifacts_on_startup()
-            .await
-        {
-            tracing::warn!(
-                "Failed to auto-finalize byte-complete partial downloads on startup: {}",
-                error
-            );
-        }
 
         // Rebuild index from existing metadata files on disk
         // This ensures models are available immediately on startup
@@ -292,6 +286,25 @@ impl ModelLibrary {
     /// Get a reference to the model index.
     pub fn index(&self) -> &ModelIndex {
         &self.index
+    }
+
+    pub(crate) fn install_mutation_authority(
+        &self,
+        tasks: crate::api::RuntimeTasks,
+        root: crate::model_library::DownloadDestinationRoot,
+        downloads: Arc<crate::model_library::DownloadPersistence>,
+    ) -> Result<()> {
+        let authority = LibraryMutationAuthority::new(&self.library_root, tasks, root, downloads)?;
+        self.mutation_authority
+            .set(authority)
+            .map_err(|_| authority_unavailable("mutation authority was already configured"))
+    }
+
+    pub(crate) fn mutation_authority(&self) -> Result<LibraryMutationAuthority> {
+        self.mutation_authority
+            .get()
+            .cloned()
+            .ok_or_else(|| authority_unavailable("trusted composition was not installed"))
     }
 
     /// Return the canonical SQLite-backed model count.
@@ -371,12 +384,41 @@ impl ModelLibrary {
             return Ok(target_dir);
         }
 
+        let authority = self.mutation_authority()?;
+        let grant = Arc::new(authority.root().try_acquire_execution_grant()?);
+        self.prepare_artifact_download_destination_under_grant(
+            model_type,
+            family,
+            artifact_id,
+            grant,
+        )
+    }
+
+    pub(crate) fn prepare_artifact_download_destination_under_grant(
+        &self,
+        model_type: &str,
+        family: &str,
+        artifact_id: &str,
+        grant: Arc<crate::model_library::RootExecutionGrant>,
+    ) -> Result<PathBuf> {
+        let target_dir = self.build_artifact_model_path(model_type, family, artifact_id);
+        if target_dir.exists() || normalize_name(model_type) == "unknown" {
+            return Ok(target_dir);
+        }
+        let artifact_key = artifact_id.trim().to_lowercase();
+        if artifact_key.is_empty() {
+            return Ok(target_dir);
+        }
+        let authority = self.mutation_authority()?;
+        grant.validate_root(authority.root())?;
+
         let model_dirs: Vec<PathBuf> = self.model_dirs().collect();
         for source_dir in model_dirs {
             if source_dir == target_dir {
                 continue;
             }
-            let Some(mut metadata) = self.load_metadata(&source_dir)? else {
+            let source_candidate = authority.root().resolve(&source_dir)?;
+            let Some(mut metadata) = source_candidate.read_model_metadata()? else {
                 continue;
             };
             if metadata
@@ -399,20 +441,67 @@ impl ModelLibrary {
                 continue;
             }
 
-            if let Some(parent) = target_dir.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::rename(&source_dir, &target_dir)?;
-            cleanup_empty_parent_dirs_after_move(&source_dir, &self.library_root);
-
             let target_model_id = self.build_artifact_model_id(model_type, family, artifact_id);
+            let original_metadata = metadata.clone();
+            let mut mutation = authority.acquire_under_grant(
+                &self.index,
+                &[
+                    (source_model_id.clone(), source_dir.clone()),
+                    (target_model_id.clone(), target_dir.clone()),
+                ],
+                grant,
+            )?;
+            if target_dir.exists() || !source_dir.exists() {
+                mutation.finish_unstarted()?;
+                return Err(PumasError::Validation {
+                    field: "model_library.mutation".into(),
+                    message: "Artifact relocation preconditions changed while acquiring custody"
+                        .into(),
+                });
+            }
+            let source_destination = authority.root().resolve(&source_dir)?;
+            let target_destination = authority.root().resolve(&target_dir)?;
+            let held_metadata = match source_destination.read_model_metadata() {
+                Ok(metadata) => metadata,
+                Err(error) => {
+                    mutation.finish_unstarted()?;
+                    return Err(error);
+                }
+            };
+            let Some(held_metadata) = held_metadata else {
+                mutation.finish_unstarted()?;
+                return Err(PumasError::Validation {
+                    field: "model_library.mutation".into(),
+                    message: "Artifact relocation source metadata disappeared".into(),
+                });
+            };
+            let metadata_matches = match (
+                serde_json::to_value(held_metadata),
+                serde_json::to_value(original_metadata),
+            ) {
+                (Ok(held), Ok(original)) => held == original,
+                (Err(error), _) | (_, Err(error)) => {
+                    mutation.finish_unstarted()?;
+                    return Err(error.into());
+                }
+            };
+            if !metadata_matches {
+                mutation.finish_unstarted()?;
+                return Err(PumasError::Validation {
+                    field: "model_library.mutation".into(),
+                    message: "Artifact relocation source changed after preflight".into(),
+                });
+            }
+            mutation.mark_started();
+            source_destination.rename_model_directory_noreplace(&target_destination)?;
             metadata.model_id = Some(target_model_id.clone());
             metadata.model_type = Some(normalize_name(model_type));
             metadata.family = Some(normalize_name(family));
             metadata.architecture_family = Some(normalize_name(family));
             metadata.cleaned_name = Some(normalize_artifact_path_slug(artifact_id));
             metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
-            self.write_metadata_projection(&target_dir.join(METADATA_FILENAME), &metadata)?;
+            self.notify_metadata_projection_write(&target_dir.join(METADATA_FILENAME));
+            target_destination.write_model_metadata(&metadata)?;
 
             let record = metadata_to_record(&target_model_id, &target_dir, &metadata);
             if self.index.get(&source_model_id)?.is_some() {
@@ -422,6 +511,7 @@ impl ModelLibrary {
             } else {
                 let _ = self.index.upsert(&record)?;
             }
+            mutation.finish_success()?;
             return Ok(target_dir);
         }
 
@@ -476,81 +566,6 @@ impl ModelLibrary {
     pub fn load_metadata(&self, model_dir: &Path) -> Result<Option<ModelMetadata>> {
         let path = model_dir.join(METADATA_FILENAME);
         atomic_read_json(&path)
-    }
-
-    async fn auto_finalize_complete_partial_artifacts_on_startup(&self) -> Result<usize> {
-        let model_dirs = collect_model_dirs_async(self.clone()).await?;
-        let mut finalized = 0;
-
-        for model_dir in model_dirs {
-            let Some(mut metadata) =
-                load_model_metadata_async(self.clone(), model_dir.clone()).await?
-            else {
-                continue;
-            };
-            let expected_files = metadata.expected_files.clone().unwrap_or_default();
-            if expected_files.is_empty() {
-                continue;
-            }
-
-            let finalization = tokio::task::spawn_blocking({
-                let model_dir = model_dir.clone();
-                let expected_files = expected_files.clone();
-                let total_size = metadata.size_bytes;
-                move || {
-                    let expected_sizes =
-                        infer_expected_sizes_from_total(&model_dir, &expected_files, total_size)?;
-                    finalize_download_artifact_if_complete(
-                        &model_dir,
-                        &expected_files,
-                        &expected_sizes,
-                    )
-                }
-            })
-            .await
-            .map_err(|error| {
-                PumasError::Other(format!(
-                    "Failed to join partial download finalization task: {error}"
-                ))
-            })??;
-
-            let was_partial_metadata = metadata.match_source.as_deref() == Some("download_partial");
-            if !finalization.complete || (!was_partial_metadata && finalization.promoted_files == 0)
-            {
-                continue;
-            }
-
-            metadata.match_source = Some("download".to_string());
-            let mut review_reasons = metadata.review_reasons.take().unwrap_or_default();
-            review_reasons.retain(|reason| reason != "download-partial");
-            let still_needs_review = !review_reasons.is_empty();
-            metadata.review_reasons = Some(review_reasons);
-            metadata.metadata_needs_review = Some(still_needs_review);
-            metadata.review_status = Some(
-                if still_needs_review {
-                    "pending"
-                } else {
-                    "not_required"
-                }
-                .to_string(),
-            );
-            metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
-            self.save_metadata(&model_dir, &metadata).await?;
-            finalized += 1;
-
-            tracing::info!(
-                "Auto-finalized byte-complete model artifact {} ({} promoted file{})",
-                model_dir.display(),
-                finalization.promoted_files,
-                if finalization.promoted_files == 1 {
-                    ""
-                } else {
-                    "s"
-                }
-            );
-        }
-
-        Ok(finalized)
     }
 
     /// Save metadata to a model directory.
@@ -2090,21 +2105,71 @@ impl ModelLibrary {
     /// * `model_id` - Model ID to delete
     /// * `cascade` - Whether to remove all symlinks pointing to this model
     pub async fn delete_model(&self, model_id: &str, cascade: bool) -> Result<()> {
-        let model_dir = self.library_root.join(model_id);
+        let authority = self.mutation_authority()?;
+        let tasks = authority.tasks();
+        let library = self.clone();
+        let model_id = model_id.to_string();
+        tasks
+            .run_owned("delete model", move |context| async move {
+                owned_mutation_outcome(
+                    library
+                        .delete_model_owned(&model_id, cascade, authority, context)
+                        .await,
+                )
+            })
+            .await?
+    }
 
-        if !tokio::fs::try_exists(&model_dir).await? {
+    async fn delete_model_owned(
+        &self,
+        model_id: &str,
+        cascade: bool,
+        authority: LibraryMutationAuthority,
+        context: crate::api::RuntimeTaskContext,
+    ) -> Result<()> {
+        let model_dir = self.library_root.join(model_id);
+        let mutation_index = self.index.clone();
+        let mutation_model_id = model_id.to_string();
+        let mutation_dir = model_dir.clone();
+        let deletion_root = authority.root().clone();
+        let (mut mutation, destination, storage_kind) = context
+            .run_blocking("claim and inspect model deletion", move || {
+                let destination = deletion_root.resolve(&mutation_dir)?;
+                let mutation =
+                    authority.acquire(&mutation_index, &[(mutation_model_id, mutation_dir)])?;
+                let metadata = match destination.read_model_metadata() {
+                    Ok(metadata) => metadata,
+                    Err(error) => {
+                        mutation.finish_unstarted()?;
+                        return Err(error);
+                    }
+                };
+                let storage_kind = metadata
+                    .and_then(|metadata| metadata.storage_kind)
+                    .unwrap_or(StorageKind::LibraryOwned);
+                Ok::<_, PumasError>((mutation, destination, storage_kind))
+            })
+            .await??;
+        if !model_dir.exists() {
+            context
+                .run_blocking("release unstarted model deletion", move || {
+                    mutation.finish_unstarted()
+                })
+                .await??;
             return Err(PumasError::ModelNotFound {
                 model_id: model_id.to_string(),
             });
         }
-
-        let storage_kind = load_model_metadata_async(self.clone(), model_dir.clone())
-            .await?
-            .and_then(|metadata| metadata.storage_kind)
-            .unwrap_or(StorageKind::LibraryOwned);
+        mutation.mark_started();
 
         // Remove from index first
-        self.index.delete(model_id)?;
+        let deletion_index = self.index.clone();
+        let deletion_model_id = model_id.to_string();
+        context
+            .run_blocking("remove model index entry", move || {
+                deletion_index.delete(&deletion_model_id)
+            })
+            .await??;
 
         // Cascade delete symlinks if requested
         if cascade {
@@ -2122,16 +2187,22 @@ impl ModelLibrary {
         }
 
         // Delete the library-owned registry artifact directory only.
-        tokio::fs::remove_dir_all(&model_dir).await?;
-
-        // Try to clean up empty parent directories
-        cleanup_empty_parent_dirs_after_move_async(&model_dir, &self.library_root).await;
+        context
+            .run_blocking("remove model directory", move || {
+                destination.remove_model_directory_all()
+            })
+            .await??;
 
         if storage_kind == StorageKind::ExternalReference {
             tracing::info!("Unregistered external model: {}", model_id);
         } else {
             tracing::info!("Deleted model: {}", model_id);
         }
+        context
+            .run_blocking("settle model deletion claim", move || {
+                mutation.finish_success()
+            })
+            .await??;
         Ok(())
     }
 
@@ -2193,7 +2264,6 @@ impl ModelLibrary {
             });
         }
 
-        // Load current metadata
         let mut metadata = match load_model_metadata_async(self.clone(), model_dir.clone()).await? {
             Some(m) => m,
             None => return Ok(None),
@@ -2373,6 +2443,16 @@ impl ModelLibrary {
         self.refresh_external_asset_state_by_model_id(model_id)
             .await?;
 
+        self.resolve_model_execution_descriptor_read_only(model_id, include_dependency_resolution)
+            .await
+    }
+
+    // Shared descriptor construction without external-asset reconciliation or writes.
+    async fn resolve_model_execution_descriptor_read_only(
+        &self,
+        model_id: &str,
+        include_dependency_resolution: bool,
+    ) -> Result<ModelExecutionDescriptor> {
         let model_dir = self.library_root.join(model_id);
         if !tokio::fs::try_exists(&model_dir).await? {
             return Err(PumasError::ModelNotFound {
@@ -2499,6 +2579,75 @@ impl ModelLibrary {
             }
         }
         Ok(items)
+    }
+
+    /// Check cached detail facts against current local source state without refreshing
+    /// assets, inspecting upstream sources, or publishing index/cache updates.
+    pub(crate) async fn cached_model_package_facts_are_current(
+        &self,
+        cached: &ModelPackageFactsCacheRecord,
+        observed_ref: Option<&crate::models::PumasModelRef>,
+        observed_repo_id: Option<&str>,
+    ) -> Result<bool> {
+        if cached.cache_scope != ModelPackageFactsCacheScope::Detail
+            || self.index.get(&cached.model_id)?.is_none()
+        {
+            return Ok(false);
+        }
+        let Some(metadata) =
+            load_effective_metadata_by_id_async(self.clone(), cached.model_id.clone()).await?
+        else {
+            return Ok(false);
+        };
+        let descriptor = self
+            .resolve_model_execution_descriptor_read_only(&cached.model_id, true)
+            .await?;
+        let dependency_bindings = self
+            .index
+            .list_active_model_dependency_bindings(&cached.model_id, None)?;
+        let context = PackageInspectionContext::build(
+            cached.model_id.clone(),
+            self.library_root.join(&cached.model_id),
+            descriptor,
+            metadata,
+            dependency_bindings,
+        )
+        .await?;
+        let fingerprint = context.source_fingerprint().await?;
+        let (_, facts) =
+            crate::index::classify_package_facts_cache_record::<ResolvedModelPackageFacts>(
+                context.selected_artifact_id(),
+                Some(&fingerprint),
+                Some(cached),
+            );
+        let Some(facts) = facts else {
+            return Ok(false);
+        };
+        let expected_ref = context.model_ref();
+        let current_revision = context.metadata().upstream_revision.as_deref();
+        let revision_coheres = |revision: Option<&str>| {
+            revision.is_none_or(|revision| Some(revision) == current_revision)
+        };
+        if !revision_coheres(facts.model_ref.revision.as_deref())
+            || observed_ref.is_some_and(|observed| {
+                observed.model_id != context.model_id()
+                    || observed_repo_id != context.metadata().repo_id.as_deref()
+                    || !revision_coheres(observed.revision.as_deref())
+            })
+        {
+            return Ok(false);
+        }
+        Ok(
+            facts.model_ref.model_ref_contract_version == expected_ref.model_ref_contract_version
+                && facts.model_ref.model_id == expected_ref.model_id
+                && facts.model_ref.selected_artifact_id == expected_ref.selected_artifact_id
+                && facts.model_ref.selected_artifact_path == expected_ref.selected_artifact_path
+                && facts.artifact.entry_path == context.descriptor().entry_path
+                && facts.artifact.storage_kind == context.descriptor().storage_kind
+                && facts.artifact.validation_state == context.descriptor().validation_state
+                && facts.artifact.selected_files == context.selected_files()
+                && facts.inspection_manifest.as_ref() == Some(&context.inspection_manifest()),
+        )
     }
 
     /// Resolve versioned package facts for a model without selecting a runtime.
@@ -3161,11 +3310,26 @@ impl ModelLibrary {
             });
         }
 
-        // Load current metadata
-        let mut metadata = match load_model_metadata_async(self.clone(), model_dir.clone()).await? {
+        // Configured primaries read through held authority. Standalone callers
+        // retain legacy read-only classification, but relocation still refuses
+        // later unless destructive authority is installed.
+        let configured_authority = self.mutation_authority().ok();
+        let mut metadata = match if let Some(authority) = configured_authority {
+            let destination = authority.root().resolve(&model_dir)?;
+            tokio::task::spawn_blocking(move || destination.read_model_metadata())
+                .await
+                .map_err(|error| {
+                    PumasError::Other(format!(
+                        "Failed to join held reclassification metadata read: {error}"
+                    ))
+                })??
+        } else {
+            load_model_metadata_async(self.clone(), model_dir.clone()).await?
+        } {
             Some(m) => m,
             None => return Ok(None),
         };
+        let original_metadata = metadata.clone();
 
         let current_type = metadata.model_type.clone().unwrap_or_default();
         let current_family = metadata.family.clone().unwrap_or_default();
@@ -3264,9 +3428,15 @@ impl ModelLibrary {
 
         if !identity_changed {
             // Classification metadata changed, but canonical path did not.
-            self.save_metadata(&model_dir, &metadata).await?;
-            self.index_model_dir(&model_dir).await?;
-            return Ok(None);
+            return self
+                .write_reclassification_metadata_owned(
+                    model_id.to_string(),
+                    model_dir,
+                    original_metadata,
+                    metadata,
+                    None,
+                )
+                .await;
         }
 
         // Reclassification changes the category, not the stored artifact identity.
@@ -3295,12 +3465,20 @@ impl ModelLibrary {
             metadata.model_type = Some(normalize_name(&new_type_str));
             metadata.family = Some(normalize_name(&new_family));
             metadata.architecture_family = Some(normalize_name(&new_family));
-            self.save_metadata(&model_dir, &metadata).await?;
-            self.index_model_dir(&model_dir).await?;
-            return Ok(Some(new_model_id));
+            return self
+                .write_reclassification_metadata_owned(
+                    model_id.to_string(),
+                    model_dir,
+                    original_metadata,
+                    metadata,
+                    Some(new_model_id),
+                )
+                .await;
         }
 
-        // Check for collision at new path
+        let authority = self.mutation_authority()?;
+        // This is only an early diagnostic. The owned operation revalidates
+        // both paths after acquiring native and durable custody.
         if tokio::fs::try_exists(&new_dir).await? {
             return Err(PumasError::io_with_path(
                 std::io::Error::new(
@@ -3310,44 +3488,224 @@ impl ModelLibrary {
                 &new_dir,
             ));
         }
+        let tasks = authority.tasks();
+        let library = self.clone();
+        let old_model_id = model_id.to_string();
+        tasks
+            .run_owned("reclassify model relocation", move |context| async move {
+                owned_mutation_outcome(
+                    library
+                        .reclassify_model_relocation_owned(
+                            old_model_id,
+                            model_dir,
+                            new_model_id,
+                            new_dir,
+                            original_metadata,
+                            metadata,
+                            current_type,
+                            new_type_str,
+                            new_family,
+                            authority,
+                            context,
+                        )
+                        .await,
+                )
+            })
+            .await?
+    }
 
-        // The preflight is only an early diagnostic. The native operation also
-        // refuses a target created concurrently, including an empty directory.
-        tokio::fs::create_dir_all(new_dir.parent().unwrap()).await?;
-        let source = model_dir.clone();
-        let target = new_dir.clone();
-        tokio::task::spawn_blocking(move || {
-            crate::platform::filesystem::rename_directory_noreplace(&source, &target)
-                .map_err(|error| PumasError::io_with_path(error, &target))
-        })
-        .await
-        .map_err(|error| {
-            PumasError::Other(format!("Failed to join reclassification move: {error}"))
-        })??;
+    async fn write_reclassification_metadata_owned(
+        &self,
+        model_id: String,
+        model_dir: PathBuf,
+        original_metadata: ModelMetadata,
+        metadata: ModelMetadata,
+        result: Option<String>,
+    ) -> Result<Option<String>> {
+        let authority = self.mutation_authority()?;
+        let tasks = authority.tasks();
+        let library = self.clone();
+        tasks
+            .run_owned(
+                "write model reclassification metadata",
+                move |context| async move {
+                    owned_mutation_outcome(
+                        async move {
+                            let mutation_target = [(model_id, model_dir.clone())];
+                            let metadata_root = authority.root().clone();
+                            let metadata_path = model_dir.clone();
+                            let (mut mutation, destination) = context
+                                .run_blocking("protect reclassification metadata", move || {
+                                    let destination = metadata_root.resolve(&metadata_path)?;
+                                    let mutation = authority.protect_metadata(&mutation_target)?;
+                                    let held_metadata = match destination.read_model_metadata() {
+                                        Ok(metadata) => metadata,
+                                        Err(error) => {
+                                            mutation.finish_unstarted()?;
+                                            return Err(error);
+                                        }
+                                    };
+                                    let Some(held_metadata) = held_metadata else {
+                                        mutation.finish_unstarted()?;
+                                        return Err(PumasError::Validation {
+                                            field: "model_library.mutation".into(),
+                                            message: "Reclassification metadata disappeared".into(),
+                                        });
+                                    };
+                                    let metadata_matches = match (
+                                        serde_json::to_value(held_metadata),
+                                        serde_json::to_value(original_metadata),
+                                    ) {
+                                        (Ok(held), Ok(original)) => held == original,
+                                        (Err(error), _) | (_, Err(error)) => {
+                                            mutation.finish_unstarted()?;
+                                            return Err(error.into());
+                                        }
+                                    };
+                                    if !metadata_matches {
+                                        mutation.finish_unstarted()?;
+                                        return Err(PumasError::Validation {
+                                            field: "model_library.mutation".into(),
+                                            message:
+                                                "Reclassification metadata changed after preflight"
+                                                    .into(),
+                                        });
+                                    }
+                                    Ok::<_, PumasError>((mutation, destination))
+                                })
+                                .await??;
+                            mutation.mark_started();
+                            library.notify_metadata_projection_write(
+                                &model_dir.join(METADATA_FILENAME),
+                            );
+                            context
+                                .run_blocking("publish reclassification metadata", move || {
+                                    destination.write_model_metadata(&metadata)
+                                })
+                                .await??;
+                            library.index_model_dir(&model_dir).await?;
+                            context
+                                .run_blocking("settle reclassification metadata guard", move || {
+                                    mutation.finish_success()
+                                })
+                                .await??;
+                            Ok(result)
+                        }
+                        .await,
+                    )
+                },
+            )
+            .await?
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn reclassify_model_relocation_owned(
+        &self,
+        old_model_id: String,
+        old_dir: PathBuf,
+        new_model_id: String,
+        new_dir: PathBuf,
+        original_metadata: ModelMetadata,
+        mut metadata: ModelMetadata,
+        current_type: String,
+        new_type: String,
+        new_family: String,
+        authority: LibraryMutationAuthority,
+        context: crate::api::RuntimeTaskContext,
+    ) -> Result<Option<String>> {
+        let mutation_index = self.index.clone();
+        let claim_targets = [
+            (old_model_id.clone(), old_dir.clone()),
+            (new_model_id.clone(), new_dir.clone()),
+        ];
+        let relocation_root = authority.root().clone();
+        let relocation_source_path = old_dir.clone();
+        let relocation_target_path = new_dir.clone();
+        let (mut mutation, source_destination, target_destination) = context
+            .run_blocking("claim model reclassification", move || {
+                let source_destination = relocation_root.resolve(&relocation_source_path)?;
+                let target_destination = relocation_root.resolve(&relocation_target_path)?;
+                let mutation = authority.acquire(&mutation_index, &claim_targets)?;
+                let held_metadata = match source_destination.read_model_metadata() {
+                    Ok(metadata) => metadata,
+                    Err(error) => {
+                        mutation.finish_unstarted()?;
+                        return Err(error);
+                    }
+                };
+                let Some(held_metadata) = held_metadata else {
+                    mutation.finish_unstarted()?;
+                    return Err(PumasError::Validation {
+                        field: "model_library.mutation".into(),
+                        message: "Reclassification source metadata disappeared".into(),
+                    });
+                };
+                let metadata_matches = match (
+                    serde_json::to_value(&held_metadata),
+                    serde_json::to_value(&original_metadata),
+                ) {
+                    (Ok(held), Ok(original)) => held == original,
+                    (Err(error), _) | (_, Err(error)) => {
+                        mutation.finish_unstarted()?;
+                        return Err(error.into());
+                    }
+                };
+                if !metadata_matches {
+                    mutation.finish_unstarted()?;
+                    return Err(PumasError::Validation {
+                        field: "model_library.mutation".into(),
+                        message: "Reclassification source changed after preflight".into(),
+                    });
+                }
+                Ok::<_, PumasError>((mutation, source_destination, target_destination))
+            })
+            .await??;
+        if !tokio::fs::try_exists(&old_dir).await? || tokio::fs::try_exists(&new_dir).await? {
+            context
+                .run_blocking("release unstarted model reclassification", move || {
+                    mutation.finish_unstarted()
+                })
+                .await??;
+            return Err(PumasError::Validation {
+                field: "model_library.mutation".into(),
+                message: "Reclassification paths changed while acquiring custody".into(),
+            });
+        }
+        mutation.mark_started();
+
+        let rename_source = source_destination.clone();
+        let rename_target = target_destination.clone();
+        context
+            .run_blocking("move reclassified model", move || {
+                rename_source.rename_model_directory_noreplace(&rename_target)
+            })
+            .await??;
 
         metadata.model_id = Some(new_model_id.clone());
-        metadata.model_type = Some(normalize_name(&new_type_str));
+        metadata.model_type = Some(normalize_name(&new_type));
         metadata.family = Some(normalize_name(&new_family));
         metadata.architecture_family = Some(normalize_name(&new_family));
-        self.save_metadata(&new_dir, &metadata).await?;
-
-        // Clean up empty parent directories left behind
-        cleanup_empty_parent_dirs_after_move_async(&model_dir, &self.library_root).await;
-
-        // Remove from index at old ID after the destination metadata is durable.
-        let _ = self.index.delete(model_id);
-
-        // Re-index at new location
+        self.notify_metadata_projection_write(&new_dir.join(METADATA_FILENAME));
+        context
+            .run_blocking("write reclassified model metadata", move || {
+                target_destination.write_model_metadata(&metadata)
+            })
+            .await??;
+        self.index.delete(&old_model_id)?;
         self.index_model_dir(&new_dir).await?;
+        context
+            .run_blocking("settle model reclassification claims", move || {
+                mutation.finish_success()
+            })
+            .await??;
 
         tracing::info!(
             "Reclassified model: {} ({}) -> {} ({})",
-            model_id,
+            old_model_id,
             current_type,
             new_model_id,
-            new_type_str
+            new_type
         );
-
         Ok(Some(new_model_id))
     }
 
@@ -3398,6 +3756,8 @@ impl ModelLibrary {
     ///
     /// The retained entry is re-indexed and metadata `model_id` is normalized to path.
     pub fn cleanup_duplicate_repo_entries(&self) -> Result<DuplicateRepoCleanupReport> {
+        let authority = self.mutation_authority()?;
+        let root_grant = Arc::new(authority.root().try_acquire_execution_grant()?);
         let mut report = DuplicateRepoCleanupReport::default();
         let mut mutated = false;
         let mut by_repo: HashMap<String, Vec<DuplicateRepoEntry>> = HashMap::new();
@@ -3407,18 +3767,10 @@ impl ModelLibrary {
             let Some(model_id) = self.get_model_id(&model_dir) else {
                 continue;
             };
-            let Some(mut metadata) = self.load_metadata(&model_dir)? else {
+            let destination = authority.root().resolve(&model_dir)?;
+            let Some(metadata) = destination.read_model_metadata()? else {
                 continue;
             };
-
-            if metadata.model_id.as_deref() != Some(&model_id) {
-                metadata.model_id = Some(model_id.clone());
-                metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
-                let metadata_path = model_dir.join(METADATA_FILENAME);
-                self.write_metadata_projection(&metadata_path, &metadata)?;
-                mutated = true;
-                report.normalized_metadata_ids += 1;
-            }
 
             let Some(repo_key) = normalized_repo_key_from_metadata(&metadata) else {
                 continue;
@@ -3465,6 +3817,16 @@ impl ModelLibrary {
                 let Some(preferred) = entries.first().cloned() else {
                     continue;
                 };
+                let claim_targets = entries
+                    .iter()
+                    .map(|entry| (entry.model_id.clone(), entry.model_dir.clone()))
+                    .collect::<Vec<_>>();
+                let mut mutation = authority.acquire_under_grant(
+                    &self.index,
+                    &claim_targets,
+                    root_grant.clone(),
+                )?;
+                mutation.mark_started();
                 let mut unresolved = false;
 
                 for duplicate in entries.iter().skip(1) {
@@ -3479,7 +3841,12 @@ impl ModelLibrary {
                         && preferred.download_incomplete
                         && duplicate.download_incomplete
                     {
-                        merge_partial_payload_files(&duplicate.model_dir, &preferred.model_dir)?;
+                        // A safe partial merge needs held per-file source and
+                        // destination capabilities. Preserve both entries until
+                        // that narrower operation exists.
+                        unresolved = true;
+                        report.unresolved_duplicate_dirs += 1;
+                        continue;
                     }
 
                     let removable = if duplicate.payload_file_count == 0
@@ -3499,11 +3866,10 @@ impl ModelLibrary {
 
                     if removable {
                         mutated |= self.index.delete(&duplicate.model_id)?;
-                        std::fs::remove_dir_all(&duplicate.model_dir)?;
-                        cleanup_empty_parent_dirs_after_move(
-                            &duplicate.model_dir,
-                            &self.library_root,
-                        );
+                        authority
+                            .root()
+                            .resolve(&duplicate.model_dir)?
+                            .remove_model_directory_all()?;
                         report.removed_duplicate_dirs += 1;
                     } else {
                         unresolved = true;
@@ -3511,26 +3877,27 @@ impl ModelLibrary {
                     }
                 }
 
-                if preferred.model_dir.exists() {
-                    if let Some(mut preferred_metadata) =
-                        self.load_metadata(&preferred.model_dir)?
-                    {
-                        let preferred_model_id = self
-                            .get_model_id(&preferred.model_dir)
-                            .unwrap_or_else(|| preferred.model_id.clone());
-                        if preferred_metadata.model_id.as_deref() != Some(&preferred_model_id) {
-                            preferred_metadata.model_id = Some(preferred_model_id.clone());
-                            preferred_metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
-                            let metadata_path = preferred.model_dir.join(METADATA_FILENAME);
-                            self.write_metadata_projection(&metadata_path, &preferred_metadata)?;
-                            mutated = true;
-                            report.normalized_metadata_ids += 1;
-                        }
-                        let record = metadata_to_record(
-                            &preferred_model_id,
-                            &preferred.model_dir,
-                            &preferred_metadata,
+                for retained in &entries {
+                    if !retained.model_dir.exists() {
+                        continue;
+                    }
+                    let destination = authority.root().resolve(&retained.model_dir)?;
+                    let Some(mut metadata) = destination.read_model_metadata()? else {
+                        continue;
+                    };
+                    if metadata.model_id.as_deref() != Some(&retained.model_id) {
+                        metadata.model_id = Some(retained.model_id.clone());
+                        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+                        self.notify_metadata_projection_write(
+                            &retained.model_dir.join(METADATA_FILENAME),
                         );
+                        destination.write_model_metadata(&metadata)?;
+                        mutated = true;
+                        report.normalized_metadata_ids += 1;
+                    }
+                    if retained.model_id == preferred.model_id {
+                        let record =
+                            metadata_to_record(&retained.model_id, &retained.model_dir, &metadata);
                         mutated |= self.index.upsert(&record)?;
                     }
                 }
@@ -3538,6 +3905,7 @@ impl ModelLibrary {
                 if unresolved {
                     report.unresolved_duplicate_groups += 1;
                 }
+                mutation.finish_success()?;
             }
         }
 
@@ -3763,17 +4131,6 @@ async fn path_is_symlink_async(path: &Path) -> Result<bool> {
         Ok(metadata) => Ok(metadata.file_type().is_symlink()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(err) => Err(PumasError::io_with_path(err, path)),
-    }
-}
-
-async fn cleanup_empty_parent_dirs_after_move_async(model_dir: &Path, library_root: &Path) {
-    if let Some(parent) = model_dir.parent() {
-        let _ = tokio::fs::remove_dir(parent).await;
-        if let Some(grandparent) = parent.parent() {
-            if grandparent != library_root {
-                let _ = tokio::fs::remove_dir(grandparent).await;
-            }
-        }
     }
 }
 
@@ -4652,54 +5009,6 @@ fn duplicate_preference_score(entry: &DuplicateRepoEntry) -> i64 {
         + entry.payload_file_count as i64
 }
 
-fn merge_partial_payload_files(source_dir: &Path, target_dir: &Path) -> Result<()> {
-    if !source_dir.exists() || !target_dir.exists() {
-        return Ok(());
-    }
-
-    for entry in WalkDir::new(source_dir)
-        .min_depth(1)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().is_file())
-    {
-        let source_path = entry.path();
-        let name = entry.file_name().to_string_lossy();
-        if is_metadata_artifact_filename(&name) {
-            continue;
-        }
-
-        let Ok(relative_path) = source_path.strip_prefix(source_dir) else {
-            continue;
-        };
-        let target_path = target_dir.join(relative_path);
-        let source_size = entry.metadata().map(|metadata| metadata.len()).unwrap_or(0);
-        let target_size = target_path
-            .metadata()
-            .map(|metadata| metadata.len())
-            .unwrap_or(0);
-        if target_path.exists() && target_size >= source_size {
-            continue;
-        }
-
-        if let Some(parent) = target_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        if target_path.exists() {
-            std::fs::remove_file(&target_path)?;
-        }
-        match std::fs::rename(source_path, &target_path) {
-            Ok(()) => {}
-            Err(_) => {
-                std::fs::copy(source_path, &target_path)?;
-                std::fs::remove_file(source_path)?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
 fn annotate_and_dedupe_records_by_artifact(records: &mut Vec<ModelRecord>) {
     let mut by_repo: HashMap<String, Vec<ModelRecord>> = HashMap::new();
     let mut passthrough = Vec::new();
@@ -5000,17 +5309,6 @@ fn apply_target_identity_to_metadata(metadata: &mut ModelMetadata, target_model_
     metadata.architecture_family = Some(parts[1].to_string());
     if let Some(cleaned_name) = parts.last() {
         metadata.cleaned_name = Some((*cleaned_name).to_string());
-    }
-}
-
-fn cleanup_empty_parent_dirs_after_move(source_dir: &Path, library_root: &Path) {
-    if let Some(parent) = source_dir.parent() {
-        let _ = std::fs::remove_dir(parent);
-        if let Some(grandparent) = parent.parent() {
-            if grandparent != library_root {
-                let _ = std::fs::remove_dir(grandparent);
-            }
-        }
     }
 }
 
@@ -6506,6 +6804,7 @@ pub struct LibraryStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::intent::{AcquisitionPolicy, ModelRequirement, ModelSelector};
     use crate::models::{
         BackendHintFacts, ModelArtifactState, ModelEntryPathState, ModelFactFamily,
         ModelLibraryChangeKind, ModelLibraryRefreshScope, PackageFactStatus, PumasArtifactConsumer,
@@ -6530,6 +6829,19 @@ mod tests {
         let relative_root = temp_dir.path().strip_prefix(&cwd).unwrap().to_path_buf();
         let library = ModelLibrary::new(relative_root).await.unwrap();
         (temp_dir, library)
+    }
+
+    fn install_test_mutation_authority(temp_dir: &TempDir, library: &ModelLibrary) {
+        let root =
+            crate::model_library::DownloadDestinationRoot::open(library.library_root()).unwrap();
+        let download_state = temp_dir.path().join("download-state");
+        std::fs::create_dir_all(&download_state).unwrap();
+        let downloads = Arc::new(crate::model_library::DownloadPersistence::new(
+            &download_state,
+        ));
+        library
+            .install_mutation_authority(crate::api::RuntimeTasks::new(), root, downloads)
+            .unwrap();
     }
 
     #[tokio::test]
@@ -7013,7 +7325,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_startup_auto_finalizes_byte_complete_partial_artifact() {
+    async fn test_startup_preserves_byte_complete_partial_artifact_until_download_owner() {
         let (temp_dir, library) = setup_library().await;
         let model_dir = library.build_model_path("llm", "test", "ready-model");
         std::fs::create_dir_all(&model_dir).unwrap();
@@ -7039,33 +7351,36 @@ mod tests {
 
         let reopened = ModelLibrary::new(temp_dir.path()).await.unwrap();
 
+        assert!(!model_dir.join("weights.gguf").exists());
         assert_eq!(
-            std::fs::read(model_dir.join("weights.gguf")).unwrap(),
+            std::fs::read(model_dir.join("weights.gguf.part")).unwrap(),
             b"complete"
         );
-        assert!(!model_dir.join("weights.gguf.part").exists());
-        assert!(!model_dir.join(".pumas_download").exists());
+        assert!(model_dir.join(".pumas_download").exists());
 
-        let completed_metadata = reopened.load_metadata(&model_dir).unwrap().unwrap();
-        assert_eq!(completed_metadata.match_source.as_deref(), Some("download"));
-        assert_eq!(completed_metadata.metadata_needs_review, Some(false));
+        let partial_metadata = reopened.load_metadata(&model_dir).unwrap().unwrap();
         assert_eq!(
-            completed_metadata.review_status.as_deref(),
-            Some("not_required")
+            partial_metadata.match_source.as_deref(),
+            Some("download_partial")
         );
-        assert_eq!(completed_metadata.review_reasons, Some(Vec::new()));
+        assert_eq!(partial_metadata.metadata_needs_review, Some(true));
+        assert_eq!(partial_metadata.review_status.as_deref(), Some("pending"));
+        assert_eq!(
+            partial_metadata.review_reasons,
+            Some(vec!["download-partial".to_string()])
+        );
 
         let record = reopened
             .index()
             .get("llm/test/ready-model")
             .unwrap()
             .unwrap();
-        assert_eq!(record.metadata["download_incomplete"], false);
-        assert_eq!(record.metadata["download_progress"], 1.0);
+        assert_eq!(record.metadata["download_incomplete"], true);
+        assert_eq!(record.metadata["download_progress"], 0.99);
     }
 
     #[tokio::test]
-    async fn test_startup_auto_finalizes_byte_complete_multi_file_artifact() {
+    async fn test_startup_preserves_byte_complete_multi_file_partial_until_download_owner() {
         let (temp_dir, library) = setup_library().await;
         let model_dir = library.build_model_path("diffusion", "test", "ready-bundle");
         std::fs::create_dir_all(&model_dir).unwrap();
@@ -7091,17 +7406,17 @@ mod tests {
 
         let reopened = ModelLibrary::new(temp_dir.path()).await.unwrap();
 
+        assert!(!model_dir.join("embedding.safetensors").exists());
         assert_eq!(
-            std::fs::read(model_dir.join("embedding.safetensors")).unwrap(),
+            std::fs::read(model_dir.join("embedding.safetensors.part")).unwrap(),
             b"done"
         );
-        assert!(!model_dir.join("embedding.safetensors.part").exists());
         let record = reopened
             .index()
             .get("diffusion/test/ready-bundle")
             .unwrap()
             .unwrap();
-        assert_eq!(record.metadata["download_incomplete"], false);
+        assert_eq!(record.metadata["download_incomplete"], true);
     }
 
     #[tokio::test]
@@ -7922,7 +8237,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_reclassify_model_uses_rule_resolver_for_move() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let old_dir = library.build_model_path("llm", "llama", "resolver-move");
         std::fs::create_dir_all(&old_dir).unwrap();
@@ -8020,7 +8336,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_reclassify_model_preserves_family_casing_when_path_family_differs_only_by_case() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let model_dir = library.build_model_path("diffusion", "qwen", "case-family-noop");
         std::fs::create_dir_all(model_dir.join("transformer")).unwrap();
@@ -8200,7 +8517,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_reclassify_model_falls_back_to_file_signature_for_move() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let old_dir = library.build_model_path("llm", "test", "resolver-fallback-embedding");
         std::fs::create_dir_all(&old_dir).unwrap();
@@ -8240,7 +8558,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_reclassify_model_moves_when_path_is_stale_but_metadata_already_updated() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let old_dir = library.build_model_path("unknown", "test", "stale-path-embedding");
         std::fs::create_dir_all(&old_dir).unwrap();
@@ -8274,7 +8593,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_reclassify_model_moves_whisper_style_unknown_dir_to_audio() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let old_dir = library.build_model_path("unknown", "openai", "whisper-large-v3-turbo");
         std::fs::create_dir_all(&old_dir).unwrap();
@@ -8328,7 +8648,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_reclassify_model_moves_with_relative_library_root() {
-        let (_temp_dir, library) = setup_library_relative_to_cwd().await;
+        let (temp_dir, library) = setup_library_relative_to_cwd().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let old_dir = library.build_model_path("unknown", "openai", "whisper-large-v3-turbo");
         std::fs::create_dir_all(&old_dir).unwrap();
@@ -8415,7 +8736,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_reclassify_model_promotes_qwen_image_name_over_qwen_llm_config() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let old_dir = library.build_model_path("llm", "catplusplus", "qwen-image-2512-heretic");
         std::fs::create_dir_all(&old_dir).unwrap();
@@ -8458,7 +8780,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_reclassify_model_promotes_image_turbo_name_over_file_signature_llm() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let old_dir = library.build_model_path("llm", "nunchaku-ai", "nunchaku-z-image-turbo");
         std::fs::create_dir_all(&old_dir).unwrap();
@@ -8505,7 +8828,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_reclassify_model_moves_florence_to_vlm() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let old_dir = library.build_model_path("embedding", "microsoft", "florence-2-large");
         std::fs::create_dir_all(&old_dir).unwrap();
@@ -8582,7 +8906,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_reclassify_model_preserves_quant_basename_and_display_metadata() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
         let source_id = "unknown/qwen3/qwen--qwen3-embedding-8b-gguf__q4_k_m";
         let existing_id = "embedding/qwen3/qwen3-embedding-8b-gguf";
         let expected_id = "embedding/qwen3/qwen--qwen3-embedding-8b-gguf__q4_k_m";
@@ -8649,7 +8974,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_reclassify_model_preserves_identical_payloads_from_different_repos() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let source_dir = library.build_model_path("unknown", "test", "collision-dedupe");
         let target_dir = library.build_model_path("diffusion", "test", "collision-dedupe");
@@ -8731,7 +9057,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_reclassify_model_collision_non_identical_still_errors() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let source_dir = library.build_model_path("unknown", "test", "collision-blocked");
         let target_dir = library.build_model_path("diffusion", "test", "collision-blocked");
@@ -8788,7 +9115,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_duplicate_repo_entries_removes_metadata_stub_duplicate() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let canonical_dir = library.build_model_path("llm", "dup-test", "repo-cleanup");
         let unknown_dir = library.build_model_path("unknown", "dup-test", "repo-cleanup");
@@ -8841,7 +9169,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_duplicate_repo_entries_ignores_metadata_artifact_differences() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let canonical_dir = library.build_model_path("audio", "dup-test", "artifact-dedupe");
         let unknown_dir = library.build_model_path("unknown", "dup-test", "artifact-dedupe");
@@ -8898,7 +9227,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_duplicate_repo_entries_removes_partial_duplicate_against_complete_copy() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let canonical_dir = library.build_model_path("audio", "dup-test", "partial-dedupe");
         let partial_dir = library.build_model_path("unknown", "dup-test", "partial-dedupe");
@@ -8955,8 +9285,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cleanup_duplicate_repo_entries_merges_same_artifact_partial_downloads() {
-        let (_, library) = setup_library().await;
+    async fn test_cleanup_duplicate_repo_entries_preserves_same_artifact_partial_downloads() {
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let artifact_id = "mradermacher--gpt-oss-20b-heretic-v2-gguf__q4_k_m";
         let filename = "gpt-oss-20b-heretic-v2.Q4_K_M.gguf";
@@ -9014,18 +9345,23 @@ mod tests {
 
         let report = library.cleanup_duplicate_repo_entries().unwrap();
         assert_eq!(report.duplicate_repo_groups, 1);
-        assert_eq!(report.removed_duplicate_dirs, 1);
-        assert_eq!(report.unresolved_duplicate_groups, 0);
-        assert!(!unknown_dir.exists());
+        assert_eq!(report.removed_duplicate_dirs, 0);
+        assert_eq!(report.unresolved_duplicate_dirs, 1);
+        assert_eq!(report.unresolved_duplicate_groups, 1);
+        assert!(unknown_dir.exists());
         assert_eq!(
             std::fs::read(canonical_dir.join(format!("{filename}.part"))).unwrap(),
+            b"small-part"
+        );
+        assert_eq!(
+            std::fs::read(unknown_dir.join(format!("{filename}.part"))).unwrap(),
             b"larger-partial-payload"
         );
         assert!(library
             .index()
             .get(&format!("unknown/mradermacher/{artifact_id}"))
             .unwrap()
-            .is_none());
+            .is_some());
         assert!(library
             .index()
             .get(&format!("llm/mradermacher/{artifact_id}"))
@@ -9035,7 +9371,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_prepare_artifact_download_destination_moves_unknown_partial_to_resolved_path() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
 
         let artifact_id = "owner--repo__q4_k_m";
         let unknown_dir = library.build_artifact_model_path("unknown", "owner", artifact_id);
@@ -9085,6 +9422,45 @@ mod tests {
             .get("llm/owner/owner--repo__q4_k_m")
             .unwrap()
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn standalone_library_refuses_unknown_partial_relocation_and_deletion() {
+        let (_, library) = setup_library().await;
+        let artifact_id = "owner--repo__q4_k_m";
+        let model_id = format!("unknown/owner/{artifact_id}");
+        let unknown_dir = library.build_artifact_model_path("unknown", "owner", artifact_id);
+        std::fs::create_dir_all(&unknown_dir).unwrap();
+        std::fs::write(unknown_dir.join("model.Q4_K_M.gguf.part"), b"partial").unwrap();
+        let metadata = ModelMetadata {
+            model_id: Some(model_id.clone()),
+            model_type: Some("unknown".to_string()),
+            family: Some("owner".to_string()),
+            cleaned_name: Some(artifact_id.to_string()),
+            match_source: Some("download_partial".to_string()),
+            selected_artifact_id: Some(artifact_id.to_string()),
+            expected_files: Some(vec!["model.Q4_K_M.gguf".to_string()]),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&unknown_dir, &metadata)
+            .await
+            .unwrap();
+        library.index_model_dir(&unknown_dir).await.unwrap();
+
+        let relocate_error = library
+            .prepare_artifact_download_destination("llm", "owner", artifact_id)
+            .expect_err("standalone library must not relocate model bytes");
+        assert!(matches!(relocate_error, PumasError::Config { .. }));
+        assert!(unknown_dir.join("model.Q4_K_M.gguf.part").exists());
+
+        let delete_error = library
+            .delete_model(&model_id, false)
+            .await
+            .expect_err("standalone library must not delete model bytes");
+        assert!(matches!(delete_error, PumasError::Config { .. }));
+        assert!(unknown_dir.join("model.Q4_K_M.gguf.part").exists());
+        assert!(library.index().get(&model_id).unwrap().is_some());
     }
 
     #[tokio::test]
@@ -9626,7 +10002,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_migration_remaps_model_id_references_for_ordinary_move() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
         let model_id = "llm/llama/bound-move";
         let target_model_id = "diffusion/llama/bound-move";
         let model_dir = library.build_model_path("llm", "llama", "bound-move");
@@ -10117,6 +10494,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_migration_with_checkpoint_moves_and_clears_checkpoint() {
         let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
         let source_dir = library.build_model_path("llm", "llama", "exec-move");
         std::fs::create_dir_all(&source_dir).unwrap();
         write_min_safetensors(&source_dir.join("model.safetensors"));
@@ -10186,7 +10564,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_migration_with_checkpoint_advances_update_feed_for_move() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
         let source_model_id = "llm/llama/feed-move";
         let target_model_id = "diffusion/llama/feed-move";
         let source_dir = library.build_model_path("llm", "llama", "feed-move");
@@ -10240,6 +10619,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_migration_with_checkpoint_resumes_existing_checkpoint() {
         let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
         let source_dir = library.build_model_path("llm", "llama", "resume-move");
         std::fs::create_dir_all(&source_dir).unwrap();
         write_min_safetensors(&source_dir.join("model.safetensors"));
@@ -10317,7 +10697,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_migration_with_checkpoint_reports_post_validation_errors() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
         let model_dir = library.build_model_path("llm", "llama", "validation-error");
         std::fs::create_dir_all(&model_dir).unwrap();
         write_min_safetensors(&model_dir.join("model.safetensors"));
@@ -10777,7 +11158,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_migration_with_checkpoint_skips_partial_split_directories() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
         let model_dir =
             library.build_artifact_model_path("vlm", "qwen3_6", "owner--qwen3_6-27b-gguf__q5_k_m");
         std::fs::create_dir_all(&model_dir).unwrap();
@@ -10808,16 +11190,25 @@ mod tests {
         assert!(report
             .results
             .iter()
-            .any(|row| row.action == "skipped_split_partial_download"));
+            .any(|row| row.action == "skipped_split_directory"));
         assert!(report
             .referential_integrity_errors
             .iter()
             .any(|error| error.contains("mixed_gguf_artifact_files")));
+        assert!(model_dir.exists());
+        assert!(model_dir.join("Qwen3.6-27B-Q5_K_M.gguf").exists());
+        assert!(model_dir.join("Qwen3.6-27B-Q4_K_M.gguf.part").exists());
+        assert!(library
+            .index()
+            .get("vlm/qwen3_6/owner--qwen3_6-27b-gguf__q5_k_m")
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]
     async fn test_execute_migration_with_checkpoint_splits_complete_artifact_directory() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
         let source_dir = library.build_model_path("vlm", "qwen35", "legacy-mixed-repo");
         std::fs::create_dir_all(&source_dir).unwrap();
         write_min_safetensors(&source_dir.join("Qwen3.6-27B-Q5_K_M.gguf"));
@@ -10840,56 +11231,35 @@ mod tests {
 
         let report = library.execute_migration_with_checkpoint().await.unwrap();
         assert_eq!(report.planned_move_count, 1);
-        assert_eq!(report.completed_move_count, 1);
-        assert_eq!(report.skipped_move_count, 0);
-        assert_eq!(report.orphan_payload_dir_count, 1);
-        assert_eq!(
-            report.orphan_payload_dirs,
-            vec![source_dir.display().to_string()]
-        );
-        assert_eq!(
-            report.error_count, 0,
-            "{:?}",
-            report.referential_integrity_errors
-        );
-        assert!(report.referential_integrity_ok);
+        assert_eq!(report.completed_move_count, 0);
+        assert_eq!(report.skipped_move_count, 1);
         assert!(report
             .results
             .iter()
-            .any(|row| row.action == "split_directory"));
+            .any(|row| row.action == "skipped_split_directory"));
 
         let target_dir =
             library.build_artifact_model_path("vlm", "qwen3_6", "owner--qwen3_6-27b-gguf__q5_k_m");
-        assert!(target_dir.join("Qwen3.6-27B-Q5_K_M.gguf").is_file());
-        assert!(target_dir.join(METADATA_FILENAME).is_file());
-        assert!(!source_dir.join(METADATA_FILENAME).exists());
-        assert!(!source_dir.join("Qwen3.6-27B-Q5_K_M.gguf").exists());
+        assert!(!target_dir.exists());
+        assert!(source_dir.join(METADATA_FILENAME).exists());
+        assert!(source_dir.join("Qwen3.6-27B-Q5_K_M.gguf").is_file());
         assert!(source_dir.join("Qwen3.6-27B-Q4_K_M.gguf").is_file());
-
-        let target_metadata = library.load_metadata(&target_dir).unwrap().unwrap();
-        assert_eq!(
-            target_metadata.model_id.as_deref(),
-            Some("vlm/qwen3_6/owner--qwen3_6-27b-gguf__q5_k_m")
-        );
-        assert_eq!(
-            target_metadata.selected_artifact_files.as_deref(),
-            Some(&["Qwen3.6-27B-Q5_K_M.gguf".to_string()][..])
-        );
         assert!(library
             .index()
             .get("vlm/qwen35/legacy-mixed-repo")
             .unwrap()
-            .is_none());
+            .is_some());
         assert!(library
             .index()
             .get("vlm/qwen3_6/owner--qwen3_6-27b-gguf__q5_k_m")
             .unwrap()
-            .is_some());
+            .is_none());
     }
 
     #[tokio::test]
     async fn test_execute_migration_with_checkpoint_advances_update_feed_for_split() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
         let source_model_id = "vlm/qwen35/feed-split";
         let target_model_id = "vlm/qwen3_6/owner--qwen3_6-27b-gguf__q5_k_m";
         let source_dir = library.build_model_path("vlm", "qwen35", "feed-split");
@@ -10919,31 +11289,23 @@ mod tests {
             .cursor;
 
         let report = library.execute_migration_with_checkpoint().await.unwrap();
-        assert_eq!(report.completed_move_count, 1);
-        assert_eq!(report.error_count, 0, "{:?}", report.results);
+        assert_eq!(report.completed_move_count, 0);
+        assert_eq!(report.skipped_move_count, 1);
 
         let feed = library
             .list_model_library_updates_since(Some(&baseline), 100)
             .await
             .unwrap();
-        assert_eq!(feed.events.len(), 2, "{:?}", feed.events);
-        assert!(feed.events.iter().any(|event| {
-            event.model_id == source_model_id
-                && event.change_kind == ModelLibraryChangeKind::ModelRemoved
-                && event.fact_family == ModelFactFamily::ModelRecord
-                && event.refresh_scope == ModelLibraryRefreshScope::SummaryAndDetail
-        }));
-        assert!(feed.events.iter().any(|event| {
-            event.model_id == target_model_id
-                && event.change_kind == ModelLibraryChangeKind::ModelAdded
-                && event.fact_family == ModelFactFamily::ModelRecord
-                && event.refresh_scope == ModelLibraryRefreshScope::SummaryAndDetail
-        }));
+        assert!(feed.events.is_empty(), "{:?}", feed.events);
+        assert_eq!(feed.cursor, baseline);
+        assert!(source_dir.exists());
+        assert!(!library.library_root().join(target_model_id).exists());
     }
 
     #[tokio::test]
     async fn test_execute_migration_with_checkpoint_no_op_does_not_emit_update_events() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
         let model_dir = library.build_model_path("llm", "llama", "feed-no-op");
         std::fs::create_dir_all(&model_dir).unwrap();
         write_min_safetensors(&model_dir.join("model.safetensors"));
@@ -10985,6 +11347,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_migration_with_checkpoint_resumes_split_directory() {
         let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
         let source_dir = library.build_model_path("vlm", "qwen35", "resume-split");
         std::fs::create_dir_all(&source_dir).unwrap();
         write_min_safetensors(&source_dir.join("Qwen3.6-27B-Q5_K_M.gguf"));
@@ -11027,17 +11390,13 @@ mod tests {
         let report = library.execute_migration_with_checkpoint().await.unwrap();
         assert!(report.resumed_from_checkpoint);
         assert_eq!(report.planned_move_count, 1);
-        assert_eq!(report.completed_move_count, 1);
-        assert_eq!(
-            report.error_count, 0,
-            "{:?}",
-            report.referential_integrity_errors
-        );
-        assert!(report.referential_integrity_ok);
+        assert_eq!(report.completed_move_count, 0);
+        assert_eq!(report.skipped_move_count, 1);
         assert!(!checkpoint_path.exists());
-        assert!(target_dir.join("Qwen3.6-27B-Q5_K_M.gguf").is_file());
+        assert!(!target_dir.exists());
+        assert!(source_dir.join("Qwen3.6-27B-Q5_K_M.gguf").is_file());
         assert!(source_dir.join("Qwen3.6-27B-Q4_K_M.gguf").is_file());
-        assert!(!source_dir.join(METADATA_FILENAME).exists());
+        assert!(source_dir.join(METADATA_FILENAME).exists());
     }
 
     #[tokio::test]
@@ -11121,7 +11480,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_migration_with_checkpoint_reports_skipped_partial_downloads() {
-        let (_, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
         let partial_dir = library.build_model_path("llm", "forturne", "qwen3-reranker-4b-nvfp4");
         std::fs::create_dir_all(&partial_dir).unwrap();
         std::fs::write(
@@ -11314,9 +11674,10 @@ mod tests {
         library.index_model_dir(&model_dir).await.unwrap();
 
         let integrity = library.validate_post_migration_integrity().unwrap();
-        assert!(integrity.errors.iter().any(|error| error
-            .contains("artifact directory validation failed")
-            && error.contains("mixed_gguf_artifact_files")));
+        assert!(integrity.errors.iter().any(|error| {
+            error.contains("artifact directory validation failed")
+                && error.contains("mixed_gguf_artifact_files")
+        }));
     }
 
     #[tokio::test]
@@ -12415,6 +12776,163 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cached_package_facts_freshness_is_read_only_and_rejects_source_changes() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "llm/freshness/model";
+        let model_dir = library.build_model_path("llm", "freshness", "model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("model.safetensors"), b"test").unwrap();
+        std::fs::write(model_dir.join("config.json"), r#"{"model_type":"llama"}"#).unwrap();
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("freshness".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("model".to_string()),
+            cleaned_name: Some("model".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+        library.resolve_model_package_facts(model_id).await.unwrap();
+        let cached = library
+            .index
+            .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+            .unwrap()
+            .unwrap();
+        let metadata_before = std::fs::read(model_dir.join("metadata.json")).unwrap();
+        assert!(library
+            .cached_model_package_facts_are_current(&cached, None, None)
+            .await
+            .unwrap());
+
+        let mut mismatched = cached.clone();
+        let mut payload: ResolvedModelPackageFacts =
+            serde_json::from_str(&mismatched.facts_json).unwrap();
+        payload.model_ref.model_id = "llm/freshness/other".to_string();
+        mismatched.facts_json = serde_json::to_string(&payload).unwrap();
+        assert!(!library
+            .cached_model_package_facts_are_current(&mismatched, None, None)
+            .await
+            .unwrap());
+        mismatched = cached.clone();
+        mismatched.selected_artifact_id = "other-artifact".to_string();
+        assert!(!library
+            .cached_model_package_facts_are_current(&mismatched, None, None)
+            .await
+            .unwrap());
+
+        library
+            .index
+            .apply_metadata_overlay(
+                model_id,
+                "freshness-overlay",
+                &serde_json::json!({"recommended_backend": "freshness-test-backend"}),
+                "test",
+                None,
+            )
+            .unwrap();
+        let cursor = library.index.current_model_library_update_cursor().unwrap();
+        let effective = library.index.get_effective_metadata_json(model_id).unwrap();
+        assert!(!library
+            .cached_model_package_facts_are_current(&cached, None, None)
+            .await
+            .unwrap());
+        assert_eq!(
+            library.index.current_model_library_update_cursor().unwrap(),
+            cursor
+        );
+        assert_eq!(
+            library.index.get_effective_metadata_json(model_id).unwrap(),
+            effective
+        );
+        library
+            .index
+            .reset_metadata_overlay(model_id, "test", None)
+            .unwrap();
+        assert!(library
+            .cached_model_package_facts_are_current(&cached, None, None)
+            .await
+            .unwrap());
+
+        std::fs::write(model_dir.join("config.json"), r#"{"model_type":"other"}"#).unwrap();
+        assert!(!library
+            .cached_model_package_facts_are_current(&cached, None, None)
+            .await
+            .unwrap());
+        assert_eq!(
+            std::fs::read(model_dir.join("metadata.json")).unwrap(),
+            metadata_before
+        );
+        assert_eq!(
+            library
+                .index
+                .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+                .unwrap()
+                .unwrap(),
+            cached
+        );
+    }
+
+    #[tokio::test]
+    async fn cached_package_facts_reject_observed_repository_from_before_metadata_overlay() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "llm/freshness/repository";
+        let model_dir = library.build_model_path("llm", "freshness", "repository");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("model.safetensors"), b"test").unwrap();
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("freshness".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("repository".to_string()),
+            cleaned_name: Some("repository".to_string()),
+            repo_id: Some("example/before".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+        library
+            .index
+            .apply_metadata_overlay(
+                model_id,
+                "repository-overlay",
+                &serde_json::json!({"repo_id": "example/after"}),
+                "test",
+                None,
+            )
+            .unwrap();
+        let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+        let cached = library
+            .index
+            .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+            .unwrap()
+            .unwrap();
+        let cursor = library.index.current_model_library_update_cursor().unwrap();
+        assert!(!library
+            .cached_model_package_facts_are_current(
+                &cached,
+                Some(&facts.model_ref),
+                Some("example/before")
+            )
+            .await
+            .unwrap());
+        assert!(library
+            .cached_model_package_facts_are_current(
+                &cached,
+                Some(&facts.model_ref),
+                Some("example/after")
+            )
+            .await
+            .unwrap());
+        assert_eq!(
+            library.index.current_model_library_update_cursor().unwrap(),
+            cursor
+        );
+    }
+
+    #[tokio::test]
     async fn test_batch_package_facts_summaries_report_per_model_errors() {
         let (_temp_dir, library) = setup_library().await;
         let model_id = "llm/batch/package-facts";
@@ -12826,6 +13344,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_external_reference_preserves_external_bundle_contents() {
         let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
         let external_root = temp_dir.path().join("external");
         std::fs::create_dir_all(&external_root).unwrap();
         let bundle_root = create_external_diffusers_bundle(&external_root);
@@ -12870,7 +13389,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_model_advances_update_feed() {
-        let (_tmp, library) = setup_library().await;
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
         let model_id = "llm/llama/delete-feed";
         let model_dir = library.build_model_path("llm", "llama", "delete-feed");
         std::fs::create_dir_all(&model_dir).unwrap();
@@ -12908,6 +13428,57 @@ mod tests {
         assert_eq!(
             feed.events[0].refresh_scope,
             ModelLibraryRefreshScope::SummaryAndDetail
+        );
+    }
+
+    #[tokio::test]
+    async fn test_delete_model_preserves_model_retained_by_local_intent() {
+        let (temp_dir, library) = setup_library().await;
+        install_test_mutation_authority(&temp_dir, &library);
+        let model_id = "llm/llama/retained-delete";
+        let model_dir = library.build_model_path("llm", "llama", "retained-delete");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+        let metadata = ModelMetadata {
+            model_id: Some(model_id.to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("retained-delete".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+        let requirement = ModelRequirement {
+            selector: ModelSelector::LocalModel {
+                model_ref: PumasModelRef {
+                    model_id: model_id.to_string(),
+                    selected_artifact_id: Some("model.safetensors".to_string()),
+                    ..PumasModelRef::default()
+                },
+            },
+            artifact: Default::default(),
+            acquisition_policy: AcquisitionPolicy::LocalOnly,
+        };
+        library
+            .index()
+            .commit_intent_declaration("retained-delete-consumer", &requirement)
+            .unwrap();
+
+        let error = library
+            .delete_model(model_id, false)
+            .await
+            .expect_err("a retained model must refuse deletion");
+        assert!(matches!(error, PumasError::Validation { ref message, .. }
+            if message.contains("retained by local intent")));
+        assert!(model_dir.join("model.safetensors").exists());
+        assert!(library.index().get(model_id).unwrap().is_some());
+        assert_eq!(
+            library
+                .index()
+                .list_intent_declarations_for_model(model_id)
+                .unwrap()
+                .len(),
+            1
         );
     }
 

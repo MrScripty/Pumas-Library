@@ -2,6 +2,11 @@
 
 use super::protocol::{read_frame, write_frame, IpcRequest, IpcResponse, LocalIpcOperation};
 use super::IpcClient;
+use crate::intent::{
+    EnsureModelOutcome, EnsureModelRequest, GetEnsureStatusOutcome, GetModelOutcome,
+    ListModelDeclarationsOutcome, ModelEnsureRef, ModelRequirement, ObservedModelState,
+    QueryModelsOutcome, ReleaseModelOutcome,
+};
 use crate::models::{
     ModelExecutionDescriptorBatchItem, ModelInferenceSettingsBatchItem,
     ModelLibrarySelectorSnapshot, ModelLibrarySelectorSnapshotRequest,
@@ -60,6 +65,11 @@ impl PumasLocalClient {
 
     pub fn instance(&self) -> &InstanceEntry {
         &self.instance
+    }
+
+    /// Borrow the transport-independent model intent interface.
+    pub fn intent(&self) -> PumasLocalIntentApi<'_> {
+        PumasLocalIntentApi { client: self }
     }
 
     /// Fetch the selector snapshot in one transport request.
@@ -194,6 +204,82 @@ impl PumasLocalClient {
             ),
             source: Some(err),
         })
+    }
+}
+
+/// Model intent operations forwarded to the owning local Pumas process.
+pub struct PumasLocalIntentApi<'a> {
+    client: &'a PumasLocalClient,
+}
+
+impl PumasLocalIntentApi<'_> {
+    pub async fn query_models(&self, requirement: &ModelRequirement) -> Result<QueryModelsOutcome> {
+        self.client
+            .call_owner_method(
+                LocalIpcOperation::IntentQueryModels,
+                serde_json::json!({ "requirement": requirement }),
+            )
+            .await
+    }
+
+    pub async fn get_model(&self, requirement: &ModelRequirement) -> Result<GetModelOutcome> {
+        self.client
+            .call_owner_method(
+                LocalIpcOperation::IntentGetModel,
+                serde_json::json!({ "requirement": requirement }),
+            )
+            .await
+    }
+
+    pub async fn get_model_status(
+        &self,
+        requirement: &ModelRequirement,
+    ) -> Result<ObservedModelState> {
+        self.client
+            .call_owner_method(
+                LocalIpcOperation::IntentGetModelStatus,
+                serde_json::json!({ "requirement": requirement }),
+            )
+            .await
+    }
+
+    pub async fn ensure_model(&self, request: &EnsureModelRequest) -> Result<EnsureModelOutcome> {
+        self.client
+            .call_owner_method(
+                LocalIpcOperation::IntentEnsureModel,
+                serde_json::json!({ "request": request }),
+            )
+            .await
+    }
+
+    pub async fn release_model(&self, reference: &ModelEnsureRef) -> Result<ReleaseModelOutcome> {
+        self.client
+            .call_owner_method(
+                LocalIpcOperation::IntentReleaseModel,
+                serde_json::json!({ "reference": reference }),
+            )
+            .await
+    }
+
+    pub async fn get_ensure_status(
+        &self,
+        reference: &ModelEnsureRef,
+    ) -> Result<GetEnsureStatusOutcome> {
+        self.client
+            .call_owner_method(
+                LocalIpcOperation::IntentGetEnsureStatus,
+                serde_json::json!({ "reference": reference }),
+            )
+            .await
+    }
+
+    pub async fn list_declarations(&self) -> Result<ListModelDeclarationsOutcome> {
+        self.client
+            .call_owner_method(
+                LocalIpcOperation::IntentListDeclarations,
+                serde_json::json!({}),
+            )
+            .await
     }
 }
 

@@ -8,6 +8,10 @@
 //! ```
 
 use crate::config::RegistryConfig;
+use crate::intent::{
+    EnsureModelOutcome, EnsureModelRequest, GetEnsureStatusOutcome, ListModelDeclarationsOutcome,
+    ModelEnsureRef, ModelRequirement, ObservedModelState, QueryModelsOutcome, ReleaseModelOutcome,
+};
 use crate::models::{
     ModelExecutionDescriptorBatchItem, ModelInferenceSettingsBatchItem,
     ModelLibrarySelectorSnapshot, ModelLibrarySelectorSnapshotRequest,
@@ -33,6 +37,13 @@ pub(crate) enum LocalIpcOperation {
     ResolveModelPackageFactsSummaries,
     ResolveModelExecutionDescriptorsBatch,
     GetInferenceSettingsBatch,
+    IntentQueryModels,
+    IntentGetModel,
+    IntentGetModelStatus,
+    IntentEnsureModel,
+    IntentReleaseModel,
+    IntentGetEnsureStatus,
+    IntentListDeclarations,
     SubscribeModelLibraryUpdateStreamSince,
 }
 
@@ -48,6 +59,13 @@ impl LocalIpcOperation {
                 Some(Self::ResolveModelExecutionDescriptorsBatch)
             }
             "get_inference_settings_batch" => Some(Self::GetInferenceSettingsBatch),
+            "intent_query_models" => Some(Self::IntentQueryModels),
+            "intent_get_model" => Some(Self::IntentGetModel),
+            "intent_get_model_status" => Some(Self::IntentGetModelStatus),
+            "intent_ensure_model" => Some(Self::IntentEnsureModel),
+            "intent_release_model" => Some(Self::IntentReleaseModel),
+            "intent_get_ensure_status" => Some(Self::IntentGetEnsureStatus),
+            "intent_list_declarations" => Some(Self::IntentListDeclarations),
             "subscribe_model_library_update_stream_since" => {
                 Some(Self::SubscribeModelLibraryUpdateStreamSince)
             }
@@ -64,6 +82,13 @@ impl LocalIpcOperation {
                 "resolve_model_execution_descriptors_batch"
             }
             Self::GetInferenceSettingsBatch => "get_inference_settings_batch",
+            Self::IntentQueryModels => "intent_query_models",
+            Self::IntentGetModel => "intent_get_model",
+            Self::IntentGetModelStatus => "intent_get_model_status",
+            Self::IntentEnsureModel => "intent_ensure_model",
+            Self::IntentReleaseModel => "intent_release_model",
+            Self::IntentGetEnsureStatus => "intent_get_ensure_status",
+            Self::IntentListDeclarations => "intent_list_declarations",
             Self::SubscribeModelLibraryUpdateStreamSince => {
                 "subscribe_model_library_update_stream_since"
             }
@@ -114,6 +139,16 @@ impl LocalIpcOperation {
                 }
                 serde_json::to_value(outcome).map_err(|_| IpcError::internal())
             }
+            Self::IntentQueryModels => validate_typed_outcome::<QueryModelsOutcome>(value),
+            Self::IntentGetModel | Self::IntentGetModelStatus => {
+                validate_typed_outcome::<ObservedModelState>(value)
+            }
+            Self::IntentEnsureModel => validate_typed_outcome::<EnsureModelOutcome>(value),
+            Self::IntentReleaseModel => validate_typed_outcome::<ReleaseModelOutcome>(value),
+            Self::IntentGetEnsureStatus => validate_typed_outcome::<GetEnsureStatusOutcome>(value),
+            Self::IntentListDeclarations => {
+                validate_typed_outcome::<ListModelDeclarationsOutcome>(value)
+            }
             Self::SubscribeModelLibraryUpdateStreamSince => Err(IpcError::internal()),
         }
     }
@@ -149,6 +184,33 @@ pub(crate) enum LocalIpcCommand {
         model_ids: Vec<String>,
         connection_token: String,
     },
+    IntentQueryModels {
+        requirement: ModelRequirement,
+        connection_token: String,
+    },
+    IntentGetModel {
+        requirement: ModelRequirement,
+        connection_token: String,
+    },
+    IntentGetModelStatus {
+        requirement: ModelRequirement,
+        connection_token: String,
+    },
+    IntentEnsureModel {
+        request: EnsureModelRequest,
+        connection_token: String,
+    },
+    IntentReleaseModel {
+        reference: ModelEnsureRef,
+        connection_token: String,
+    },
+    IntentGetEnsureStatus {
+        reference: ModelEnsureRef,
+        connection_token: String,
+    },
+    IntentListDeclarations {
+        connection_token: String,
+    },
     SubscribeModelLibraryUpdateStreamSince {
         cursor: String,
         connection_token: String,
@@ -173,6 +235,13 @@ impl LocalIpcCommand {
                 | LocalIpcOperation::GetInferenceSettingsBatch => {
                     &["model_ids", "connection_token"]
                 }
+                LocalIpcOperation::IntentQueryModels
+                | LocalIpcOperation::IntentGetModel
+                | LocalIpcOperation::IntentGetModelStatus => &["requirement", "connection_token"],
+                LocalIpcOperation::IntentEnsureModel => &["request", "connection_token"],
+                LocalIpcOperation::IntentReleaseModel
+                | LocalIpcOperation::IntentGetEnsureStatus => &["reference", "connection_token"],
+                LocalIpcOperation::IntentListDeclarations => &["connection_token"],
                 LocalIpcOperation::SubscribeModelLibraryUpdateStreamSince => {
                     &["cursor", "connection_token"]
                 }
@@ -222,6 +291,57 @@ impl LocalIpcCommand {
                 model_ids: bounded_model_ids(object)?,
                 connection_token,
             }),
+            LocalIpcOperation::IntentQueryModels => {
+                let requirement = required_value(object, "requirement")?;
+                validate_intent_requirement(requirement)?;
+                Ok(Self::IntentQueryModels {
+                    requirement: decode_value(requirement)?,
+                    connection_token,
+                })
+            }
+            LocalIpcOperation::IntentGetModel => {
+                let requirement = required_value(object, "requirement")?;
+                validate_intent_requirement(requirement)?;
+                Ok(Self::IntentGetModel {
+                    requirement: decode_value(requirement)?,
+                    connection_token,
+                })
+            }
+            LocalIpcOperation::IntentGetModelStatus => {
+                let requirement = required_value(object, "requirement")?;
+                validate_intent_requirement(requirement)?;
+                Ok(Self::IntentGetModelStatus {
+                    requirement: decode_value(requirement)?,
+                    connection_token,
+                })
+            }
+            LocalIpcOperation::IntentEnsureModel => {
+                let request = required_value(object, "request")?;
+                validate_intent_ensure_request(request)?;
+                Ok(Self::IntentEnsureModel {
+                    request: decode_value(request)?,
+                    connection_token,
+                })
+            }
+            LocalIpcOperation::IntentReleaseModel => {
+                let reference = required_value(object, "reference")?;
+                validate_intent_reference(reference)?;
+                Ok(Self::IntentReleaseModel {
+                    reference: decode_value(reference)?,
+                    connection_token,
+                })
+            }
+            LocalIpcOperation::IntentGetEnsureStatus => {
+                let reference = required_value(object, "reference")?;
+                validate_intent_reference(reference)?;
+                Ok(Self::IntentGetEnsureStatus {
+                    reference: decode_value(reference)?,
+                    connection_token,
+                })
+            }
+            LocalIpcOperation::IntentListDeclarations => {
+                Ok(Self::IntentListDeclarations { connection_token })
+            }
             LocalIpcOperation::SubscribeModelLibraryUpdateStreamSince => {
                 Ok(Self::SubscribeModelLibraryUpdateStreamSince {
                     cursor: required_bounded_string(object, "cursor")?,
@@ -246,6 +366,13 @@ impl LocalIpcCommand {
                 LocalIpcOperation::ResolveModelExecutionDescriptorsBatch
             }
             Self::GetInferenceSettingsBatch { .. } => LocalIpcOperation::GetInferenceSettingsBatch,
+            Self::IntentQueryModels { .. } => LocalIpcOperation::IntentQueryModels,
+            Self::IntentGetModel { .. } => LocalIpcOperation::IntentGetModel,
+            Self::IntentGetModelStatus { .. } => LocalIpcOperation::IntentGetModelStatus,
+            Self::IntentEnsureModel { .. } => LocalIpcOperation::IntentEnsureModel,
+            Self::IntentReleaseModel { .. } => LocalIpcOperation::IntentReleaseModel,
+            Self::IntentGetEnsureStatus { .. } => LocalIpcOperation::IntentGetEnsureStatus,
+            Self::IntentListDeclarations { .. } => LocalIpcOperation::IntentListDeclarations,
             Self::SubscribeModelLibraryUpdateStreamSince { .. } => {
                 LocalIpcOperation::SubscribeModelLibraryUpdateStreamSince
             }
@@ -283,6 +410,42 @@ impl LocalIpcCommand {
                 "model_ids": model_ids,
                 "connection_token": connection_token,
             }),
+            Self::IntentQueryModels {
+                requirement,
+                connection_token,
+            }
+            | Self::IntentGetModel {
+                requirement,
+                connection_token,
+            }
+            | Self::IntentGetModelStatus {
+                requirement,
+                connection_token,
+            } => serde_json::json!({
+                "requirement": requirement,
+                "connection_token": connection_token,
+            }),
+            Self::IntentEnsureModel {
+                request,
+                connection_token,
+            } => serde_json::json!({
+                "request": request,
+                "connection_token": connection_token,
+            }),
+            Self::IntentReleaseModel {
+                reference,
+                connection_token,
+            }
+            | Self::IntentGetEnsureStatus {
+                reference,
+                connection_token,
+            } => serde_json::json!({
+                "reference": reference,
+                "connection_token": connection_token,
+            }),
+            Self::IntentListDeclarations { connection_token } => serde_json::json!({
+                "connection_token": connection_token,
+            }),
             Self::SubscribeModelLibraryUpdateStreamSince {
                 cursor,
                 connection_token,
@@ -318,6 +481,84 @@ fn required_bounded_string(
         .filter(|value| !value.trim().is_empty() && value.len() <= MAX_LOCAL_STRING_BYTES)
         .ok_or_else(IpcError::invalid_params)?;
     Ok(value.to_string())
+}
+
+fn required_value<'a>(
+    object: &'a Map<String, Value>,
+    field: &str,
+) -> std::result::Result<&'a Value, IpcError> {
+    object.get(field).ok_or_else(IpcError::invalid_params)
+}
+
+fn decode_value<T>(value: &Value) -> std::result::Result<T, IpcError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    serde_json::from_value(value.clone()).map_err(|_| IpcError::invalid_params())
+}
+
+fn validate_intent_requirement(value: &Value) -> std::result::Result<(), IpcError> {
+    let requirement = exact_object(value, &["selector", "artifact", "acquisition_policy"])?;
+    let selector = required_value(requirement, "selector")?;
+    let selector = selector.as_object().ok_or_else(IpcError::invalid_params)?;
+    match selector.get("kind").and_then(Value::as_str) {
+        Some("local_model") => {
+            if selector
+                .keys()
+                .any(|key| !["kind", "model_ref"].contains(&key.as_str()))
+            {
+                return Err(IpcError::invalid_params());
+            }
+            let model_ref = selector
+                .get("model_ref")
+                .ok_or_else(IpcError::invalid_params)?;
+            let model_ref = exact_object(
+                model_ref,
+                &[
+                    "model_ref_contract_version",
+                    "model_id",
+                    "revision",
+                    "selected_artifact_id",
+                    "selected_artifact_path",
+                    "migration_diagnostics",
+                ],
+            )?;
+            if let Some(diagnostics) = model_ref.get("migration_diagnostics") {
+                let diagnostics = diagnostics
+                    .as_array()
+                    .ok_or_else(IpcError::invalid_params)?;
+                for diagnostic in diagnostics {
+                    exact_object(diagnostic, &["code", "message", "input"])?;
+                }
+            }
+        }
+        Some("upstream_repository") => {
+            if selector
+                .keys()
+                .any(|key| !["kind", "repository_id", "revision"].contains(&key.as_str()))
+            {
+                return Err(IpcError::invalid_params());
+            }
+        }
+        _ => return Err(IpcError::invalid_params()),
+    }
+    if let Some(artifact) = requirement.get("artifact") {
+        exact_object(
+            artifact,
+            &["format", "quantization", "selected_artifact_id"],
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_intent_ensure_request(value: &Value) -> std::result::Result<(), IpcError> {
+    let request = exact_object(value, &["consumer_key", "requirement"])?;
+    validate_intent_requirement(required_value(request, "requirement")?)
+}
+
+fn validate_intent_reference(value: &Value) -> std::result::Result<(), IpcError> {
+    exact_object(value, &["consumer_key", "declaration_id", "generation"])?;
+    Ok(())
 }
 
 fn bounded_model_ids(object: &Map<String, Value>) -> std::result::Result<Vec<String>, IpcError> {
@@ -768,6 +1009,161 @@ mod tests {
             .validate_outcome(serde_json::json!({ "success": true }))
             .unwrap_err();
         assert_eq!(error.code, -32603);
+    }
+
+    #[test]
+    fn intent_operations_decode_closed_typed_parameters() {
+        let requirement = serde_json::json!({
+            "selector": {
+                "kind": "upstream_repository",
+                "repository_id": "acme/model",
+                "revision": "main"
+            },
+            "artifact": { "format": "gguf" },
+            "acquisition_policy": "allow_upstream"
+        });
+        for operation in [
+            LocalIpcOperation::IntentQueryModels,
+            LocalIpcOperation::IntentGetModel,
+            LocalIpcOperation::IntentGetModelStatus,
+        ] {
+            let command = LocalIpcCommand::decode(
+                operation,
+                Some(serde_json::json!({
+                    "requirement": requirement,
+                    "connection_token": "test-token"
+                })),
+            )
+            .unwrap();
+            assert_eq!(command.operation(), operation);
+            assert_eq!(
+                command.into_dispatch_params()["connection_token"],
+                "test-token"
+            );
+        }
+
+        let omitted_default_artifact = serde_json::json!({
+            "selector": {
+                "kind": "upstream_repository",
+                "repository_id": "acme/model"
+            },
+            "acquisition_policy": "allow_upstream"
+        });
+        assert!(LocalIpcCommand::decode(
+            LocalIpcOperation::IntentQueryModels,
+            Some(serde_json::json!({
+                "requirement": omitted_default_artifact,
+                "connection_token": "test-token"
+            })),
+        )
+        .is_ok());
+
+        let mut unknown = requirement.clone();
+        unknown["artifact"]["future_field"] = Value::Bool(true);
+        assert!(LocalIpcCommand::decode(
+            LocalIpcOperation::IntentGetModel,
+            Some(serde_json::json!({
+                "requirement": unknown,
+                "connection_token": "test-token"
+            })),
+        )
+        .is_err());
+        assert!(LocalIpcCommand::decode(
+            LocalIpcOperation::IntentListDeclarations,
+            Some(serde_json::json!({
+                "connection_token": "test-token",
+                "unexpected": true
+            })),
+        )
+        .is_err());
+
+        let local_with_misspelled_model_ref = serde_json::json!({
+            "selector": {
+                "kind": "local_model",
+                "model_ref": { "model_id": "llm/acme/model", "modelid": "typo" }
+            },
+            "acquisition_policy": "local_only"
+        });
+        assert!(LocalIpcCommand::decode(
+            LocalIpcOperation::IntentGetModelStatus,
+            Some(serde_json::json!({
+                "requirement": local_with_misspelled_model_ref,
+                "connection_token": "test-token"
+            })),
+        )
+        .is_err());
+        let local_with_misspelled_migration_diagnostic = serde_json::json!({
+            "selector": {
+                "kind": "local_model",
+                "model_ref": {
+                    "model_id": "llm/acme/model",
+                    "migration_diagnostics": [{
+                        "code": "legacy",
+                        "message": "legacy reference",
+                        "detail": "typo"
+                    }]
+                }
+            },
+            "acquisition_policy": "local_only"
+        });
+        assert!(LocalIpcCommand::decode(
+            LocalIpcOperation::IntentGetModel,
+            Some(serde_json::json!({
+                "requirement": local_with_misspelled_migration_diagnostic,
+                "connection_token": "test-token"
+            })),
+        )
+        .is_err());
+        assert!(LocalIpcCommand::decode(
+            LocalIpcOperation::IntentEnsureModel,
+            Some(serde_json::json!({
+                "request": {
+                    "consumer_key": "consumer",
+                    "requirement": requirement,
+                    "consumer": "typo"
+                },
+                "connection_token": "test-token"
+            })),
+        )
+        .is_err());
+        assert!(LocalIpcCommand::decode(
+            LocalIpcOperation::IntentReleaseModel,
+            Some(serde_json::json!({
+                "reference": {
+                    "consumer_key": "consumer",
+                    "declaration_id": "declaration",
+                    "generation": "generation",
+                    "declaration": "typo"
+                },
+                "connection_token": "test-token"
+            })),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn intent_operations_validate_their_exact_outcome_types() {
+        let missing = serde_json::json!({
+            "state": "missing",
+            "diagnostics": []
+        });
+        assert!(LocalIpcOperation::IntentGetModel
+            .validate_outcome(missing.clone())
+            .is_ok());
+        assert!(LocalIpcOperation::IntentGetModelStatus
+            .validate_outcome(missing)
+            .is_ok());
+        for operation in [
+            LocalIpcOperation::IntentQueryModels,
+            LocalIpcOperation::IntentEnsureModel,
+            LocalIpcOperation::IntentReleaseModel,
+            LocalIpcOperation::IntentGetEnsureStatus,
+            LocalIpcOperation::IntentListDeclarations,
+        ] {
+            assert!(operation
+                .validate_outcome(serde_json::json!({ "state": "missing", "diagnostics": [] }))
+                .is_err());
+        }
     }
 
     #[test]

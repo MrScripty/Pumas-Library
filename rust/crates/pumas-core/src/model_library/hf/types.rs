@@ -3,6 +3,7 @@
 //! Contains API response deserialization types, internal state structures,
 //! and helper functions shared between search, download, and metadata operations.
 
+use crate::model_library::artifact_identity::DownloadRevision;
 use crate::model_library::download_store::PersistedDownload;
 use crate::model_library::types::{DownloadRequest, DownloadStatus};
 use crate::model_library::DownloadRecoveryDestination;
@@ -121,6 +122,8 @@ pub(crate) struct DownloadState {
     pub download_id: String,
     /// Repository ID
     pub repo_id: String,
+    /// Revision used by metadata lookup, byte transfer, resume, and import.
+    pub(super) revision: DownloadRevision,
     /// Current status
     pub status: DownloadStatus,
     /// Progress (0.0-1.0)
@@ -225,14 +228,18 @@ impl DownloadState {
         entry: &PersistedDownload,
         downloaded_bytes: u64,
         destination: DownloadDestination,
+        revision: DownloadRevision,
     ) -> Self {
-        Self::restore_fields(entry, downloaded_bytes, Some(destination))
+        Self::restore_fields(entry, downloaded_bytes, Some(destination), revision)
     }
 
     /// Historical failure metadata after durable cleanup and queue settlement.
     /// This state deliberately cannot grant filesystem or resume authority.
-    pub(super) fn from_verified_cleanup(entry: &PersistedDownload) -> Self {
-        let mut state = Self::restore_fields(entry, 0, None);
+    pub(super) fn from_verified_cleanup(
+        entry: &PersistedDownload,
+        revision: DownloadRevision,
+    ) -> Self {
+        let mut state = Self::restore_fields(entry, 0, None, revision);
         state.status = DownloadStatus::Error;
         state.error = Some("Download failed; terminal cleanup was verified".into());
         state.ambient_authority_blocked = true;
@@ -244,6 +251,7 @@ impl DownloadState {
         entry: &PersistedDownload,
         downloaded_bytes: u64,
         destination: Option<DownloadDestination>,
+        revision: DownloadRevision,
     ) -> Self {
         let progress = entry
             .total_bytes
@@ -253,7 +261,9 @@ impl DownloadState {
         // Normalize status: any non-terminal status becomes Paused since
         // the download task is no longer running after a restart.
         let restored_status = match entry.status {
-            DownloadStatus::Queued | DownloadStatus::Downloading => DownloadStatus::Paused,
+            DownloadStatus::Queued | DownloadStatus::Downloading | DownloadStatus::Pausing => {
+                DownloadStatus::Paused
+            }
             other => other,
         };
 
@@ -271,6 +281,7 @@ impl DownloadState {
         Self {
             download_id: entry.download_id.clone(),
             repo_id: entry.repo_id.clone(),
+            revision,
             status: restored_status,
             progress,
             downloaded_bytes,

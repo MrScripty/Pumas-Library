@@ -21,7 +21,7 @@
 //!     └── ModelIndex (FTS5) - Full-text search
 //! ```
 
-mod artifact_identity;
+pub(crate) mod artifact_identity;
 mod artifact_load_target;
 mod dependencies;
 pub(crate) mod dependency_pins;
@@ -41,6 +41,7 @@ mod mapper;
 pub mod merge;
 mod metadata_v2;
 mod model_type_resolver;
+mod mutation_authority;
 mod naming;
 mod package_facts;
 mod partial_download;
@@ -65,11 +66,10 @@ pub use dependencies::{
     ModelDependencyRequirementsResolution, DEPENDENCY_CONTRACT_VERSION,
 };
 pub use directory_import::classify_import_path;
-#[cfg(test)]
-pub(crate) use download_recovery::DownloadDestinationRoot;
 pub(crate) use download_recovery::{
-    canonical_managed_model_dir, verify_download_recovery_ticket, DownloadRecoveryDestination,
-    DownloadRecoveryVerification, RecoveryDownloadAdmission, VerifiedDownloadRecovery,
+    canonical_managed_model_dir, verify_download_recovery_ticket, DownloadDestinationRoot,
+    DownloadRecoveryDestination, DownloadRecoveryVerification, RecoveryDownloadAdmission,
+    RootExecutionGrant, VerifiedDownloadRecovery,
 };
 pub use download_recovery::{
     issue_download_recovery_ticket, DownloadRecoveryModelId, DownloadRecoveryTicket,
@@ -79,6 +79,7 @@ pub use download_store::DownloadPersistence;
 pub(crate) use external_assets::get_diffusers_bundle_lookup_hints;
 pub use external_assets::{get_diffusers_component_manifest, MODEL_EXECUTION_CONTRACT_VERSION};
 pub use hashing::{compute_dual_hash, compute_fast_hash, DualHash};
+pub(crate) use hf::IntentDownloadObservation;
 pub use hf::{
     AuxFilesCompleteCallback, AuxFilesCompleteInfo, DownloadCompletionCallback,
     DownloadCompletionInfo, HfAuthStatus, HuggingFaceClient,

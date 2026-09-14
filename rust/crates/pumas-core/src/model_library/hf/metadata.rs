@@ -4,12 +4,12 @@
 //! metadata lookup by filename/hash, and candidate verification.
 
 use super::types::{
-    infer_pipeline_tag_from_config, HfFileEntry, HfSearchResult, HF_API_BASE, HF_HUB_BASE,
-    REPO_CACHE_TTL_SECS,
+    infer_pipeline_tag_from_config, HfFileEntry, HfSearchResult, HF_HUB_BASE, REPO_CACHE_TTL_SECS,
 };
 use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
 use crate::metadata::{atomic_read_json, atomic_write_json};
+use crate::model_library::artifact_identity::DownloadRevision;
 use crate::model_library::hashing::compute_fast_hash;
 use crate::model_library::naming::extract_base_name;
 use crate::model_library::types::{
@@ -18,6 +18,14 @@ use crate::model_library::types::{
 };
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+#[derive(serde::Deserialize)]
+struct HfModelInfoResponse {
+    #[serde(flatten)]
+    model: HfSearchResult,
+    #[serde(default)]
+    sha: Option<String>,
+}
 
 impl HuggingFaceClient {
     async fn compute_fast_hash_async(path: PathBuf) -> Option<String> {
@@ -31,15 +39,110 @@ impl HuggingFaceClient {
         &self,
         repo_id: &str,
     ) -> Result<(HuggingFaceModel, HuggingFaceEvidence)> {
-        let result = self.fetch_model_info_response(repo_id).await?;
+        self.get_model_snapshot_at_revision(repo_id, &DownloadRevision::legacy_main())
+            .await
+    }
+
+    pub(crate) async fn get_model_snapshot_at_revision(
+        &self,
+        repo_id: &str,
+        revision: &DownloadRevision,
+    ) -> Result<(HuggingFaceModel, HuggingFaceEvidence)> {
+        let result = self.fetch_model_info_response(repo_id, revision).await?;
         let evidence = Self::build_huggingface_evidence(repo_id, &result);
         let model = Self::convert_search_result(result);
         Ok((model, evidence))
     }
 
-    async fn fetch_model_info_response(&self, repo_id: &str) -> Result<HfSearchResult> {
-        let url = format!("{}/models/{}", HF_API_BASE, repo_id);
+    pub(crate) async fn resolve_download_revision(
+        &self,
+        repo_id: &str,
+        selector: Option<&str>,
+    ) -> Result<DownloadRevision> {
+        validate_hf_repo_id(repo_id)?;
+        let selector = match selector {
+            Some(value) => validate_revision_selector(value)?,
+            None => "main",
+        };
+        let encoded_selector = urlencoding::encode(selector);
+        let url = format!(
+            "{}/api/models/{repo_id}/revision/{encoded_selector}",
+            self.hub_base_url()
+        );
+        let response = self.fetch_model_info_url(repo_id, url).await?;
+        if response.model.model_id.trim() != repo_id {
+            return Err(PumasError::Validation {
+                field: "repo_id".to_string(),
+                message: "HuggingFace revision response identified a different repository"
+                    .to_string(),
+            });
+        }
+        let commit = response
+            .sha
+            .as_deref()
+            .ok_or_else(|| PumasError::Validation {
+                field: "revision".to_string(),
+                message: "HuggingFace revision response did not identify an immutable commit"
+                    .to_string(),
+            })?;
+        let resolved =
+            DownloadRevision::from_commit(commit.trim()).map_err(|_| PumasError::Validation {
+                field: "revision".to_string(),
+                message: "HuggingFace revision response did not contain a valid immutable commit"
+                    .to_string(),
+            })?;
+        if DownloadRevision::from_commit(selector).is_ok_and(|requested| requested != resolved) {
+            return Err(PumasError::Validation {
+                field: "revision".to_string(),
+                message:
+                    "HuggingFace revision response contradicted the requested immutable commit"
+                        .to_string(),
+            });
+        }
+        Ok(resolved)
+    }
 
+    async fn fetch_model_info_response(
+        &self,
+        repo_id: &str,
+        revision: &DownloadRevision,
+    ) -> Result<HfSearchResult> {
+        let url = match revision.as_persisted() {
+            Some(commit) => format!(
+                "{}/api/models/{}/revision/{}",
+                self.hub_base_url(),
+                repo_id,
+                commit
+            ),
+            None => format!("{}/models/{}", self.api_base_url(), repo_id),
+        };
+
+        let response = self.fetch_model_info_url(repo_id, url).await?;
+        if let Some(expected) = revision.as_persisted() {
+            if response.model.model_id.trim() != repo_id {
+                return Err(PumasError::Validation {
+                    field: "repo_id".to_string(),
+                    message: "HuggingFace revision response identified a different repository"
+                        .to_string(),
+                });
+            }
+            let actual = response.sha.as_deref().map(str::trim);
+            if actual != Some(expected) {
+                return Err(PumasError::Validation {
+                    field: "revision".to_string(),
+                    message: "HuggingFace revision response did not confirm the requested commit"
+                        .to_string(),
+                });
+            }
+        }
+        Ok(response.model)
+    }
+
+    async fn fetch_model_info_url(
+        &self,
+        repo_id: &str,
+        url: String,
+    ) -> Result<HfModelInfoResponse> {
         let mut request = self.client.get(&url);
         if let Some(auth) = self.auth_header_value().await {
             request = request.header("Authorization", auth);
@@ -145,8 +248,18 @@ impl HuggingFaceClient {
     ///
     /// Results are cached for 24 hours.
     pub async fn get_repo_files(&self, repo_id: &str) -> Result<RepoFileTree> {
+        self.get_repo_files_at_revision(repo_id, &DownloadRevision::legacy_main())
+            .await
+    }
+
+    pub(crate) async fn get_repo_files_at_revision(
+        &self,
+        repo_id: &str,
+        revision: &DownloadRevision,
+    ) -> Result<RepoFileTree> {
         // Check cache first
-        let cache_file = self.get_cache_path(repo_id, "files");
+        let cache_repo_id = revision_cache_key(repo_id, revision);
+        let cache_file = self.get_cache_path(&cache_repo_id, "files");
         if let Some(cached) = read_repo_file_tree_cache(cache_file.clone()).await? {
             // Reject entries from an older cache format (e.g. pre-recursive)
             if cached.cache_version >= REPO_FILE_TREE_VERSION
@@ -158,8 +271,10 @@ impl HuggingFaceClient {
 
         // Fetch from API
         let url = format!(
-            "{}/api/models/{}/tree/main?recursive=true",
-            HF_HUB_BASE, repo_id
+            "{}/api/models/{}/tree/{}?recursive=true",
+            self.hub_base_url(),
+            repo_id,
+            revision.as_str()
         );
 
         let mut request = self.client.get(&url);
@@ -398,6 +513,60 @@ impl HuggingFaceClient {
     }
 }
 
+fn revision_cache_key(repo_id: &str, revision: &DownloadRevision) -> String {
+    match revision.as_persisted() {
+        Some(commit) => format!("{repo_id}@{commit}"),
+        None => repo_id.to_string(),
+    }
+}
+
+fn validate_hf_repo_id(repo_id: &str) -> Result<()> {
+    let mut segments = repo_id.split('/');
+    let owner = segments.next().unwrap_or_default();
+    let name = segments.next().unwrap_or_default();
+    let valid_segment = |segment: &str| {
+        !segment.is_empty()
+            && segment.len() <= 96
+            && segment.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+            })
+            && !segment.starts_with('-')
+            && !segment.starts_with('.')
+            && !segment.ends_with('-')
+            && !segment.ends_with('.')
+            && !segment.contains("..")
+            && !segment.contains("--")
+    };
+    if segments.next().is_none()
+        && valid_segment(owner)
+        && valid_segment(name)
+        && !name.to_ascii_lowercase().ends_with(".git")
+    {
+        Ok(())
+    } else {
+        Err(PumasError::Validation {
+            field: "repo_id".to_string(),
+            message: "HuggingFace repository ID must be a valid owner/name identifier".to_string(),
+        })
+    }
+}
+
+fn validate_revision_selector(selector: &str) -> Result<&str> {
+    if selector.is_empty()
+        || selector.trim() != selector
+        || selector.len() > 1024
+        || selector.chars().any(char::is_control)
+        || matches!(selector, "." | "..")
+    {
+        Err(PumasError::Validation {
+            field: "revision".to_string(),
+            message: "HuggingFace revision selector is invalid".to_string(),
+        })
+    } else {
+        Ok(selector)
+    }
+}
+
 async fn read_repo_file_tree_cache(path: PathBuf) -> Result<Option<RepoFileTree>> {
     tokio::task::spawn_blocking(move || atomic_read_json(&path))
         .await
@@ -434,4 +603,397 @@ async fn repo_file_tree_cache_is_fresh(path: &Path) -> Result<bool> {
         .and_then(|modified| modified.elapsed().ok())
         .map(|elapsed| elapsed.as_secs() < REPO_CACHE_TTL_SECS)
         .unwrap_or(false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn read_request(socket: &mut tokio::net::TcpStream) -> String {
+        let mut bytes = Vec::new();
+        while !bytes.ends_with(b"\r\n\r\n") {
+            assert!(
+                bytes.len() < 8 * 1024,
+                "fixture request exceeded header limit"
+            );
+            bytes.push(socket.read_u8().await.unwrap());
+        }
+        String::from_utf8(bytes).unwrap()
+    }
+
+    async fn serve_once(status: &str, body: String) -> (String, tokio::task::JoinHandle<String>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let status = status.to_string();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = read_request(&mut socket).await;
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            request
+        });
+        (base_url, server)
+    }
+
+    #[tokio::test]
+    async fn revision_resolver_encodes_selectors_and_returns_immutable_commit() {
+        let commit = "abcdefabcdefabcdefabcdefabcdefabcdefabcd";
+        for (selector, encoded) in [
+            (None, "main"),
+            (Some("release-v1.2"), "release-v1.2"),
+            (Some("feature/quantized"), "feature%2Fquantized"),
+            (Some("percent%branch"), "percent%25branch"),
+        ] {
+            let (base_url, server) = serve_once(
+                "200 OK",
+                format!(r#"{{"modelId":"acme/model","sha":"{commit}"}}"#),
+            )
+            .await;
+            let temp = TempDir::new().unwrap();
+            let mut client = HuggingFaceClient::new(temp.path()).unwrap();
+            client.set_test_download_base_url(base_url);
+
+            let revision = client
+                .resolve_download_revision("acme/model", selector)
+                .await
+                .unwrap();
+
+            assert_eq!(revision.as_str(), commit);
+            assert!(server.await.unwrap().starts_with(&format!(
+                "GET /api/models/acme/model/revision/{encoded} HTTP/1.1"
+            )));
+        }
+    }
+
+    #[tokio::test]
+    async fn revision_resolver_rejects_substitution_of_an_explicit_immutable_commit() {
+        let requested = "a".repeat(40);
+        let returned = "b".repeat(40);
+        let (base_url, server) = serve_once(
+            "200 OK",
+            format!(r#"{{"modelId":"acme/model","sha":"{returned}"}}"#),
+        )
+        .await;
+        let temp = TempDir::new().unwrap();
+        let mut client = HuggingFaceClient::new(temp.path()).unwrap();
+        client.set_test_download_base_url(base_url);
+        let error = client
+            .resolve_download_revision("acme/model", Some(&requested))
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, PumasError::Validation { ref field, .. } if field == "revision"),
+            "expected contradictory revision validation, got {error:?}"
+        );
+        assert!(server.await.unwrap().starts_with(&format!(
+            "GET /api/models/acme/model/revision/{requested} HTTP/1.1"
+        )));
+    }
+
+    #[tokio::test]
+    async fn revision_resolver_rejects_invalid_inputs_and_untrusted_responses() {
+        let temp = TempDir::new().unwrap();
+        let client = HuggingFaceClient::new(temp.path()).unwrap();
+        for (repo_id, selector) in [
+            ("model", Some("main")),
+            ("../model", Some("main")),
+            ("acme/model", Some("")),
+            ("acme/model", Some(" branch")),
+            ("acme/model", Some("branch\nname")),
+        ] {
+            assert!(matches!(
+                client.resolve_download_revision(repo_id, selector).await,
+                Err(PumasError::Validation { .. })
+            ));
+        }
+
+        for (status, body, expected_field) in [
+            (
+                "200 OK",
+                r#"{"modelId":"acme/model"}"#.to_string(),
+                Some("revision"),
+            ),
+            (
+                "200 OK",
+                r#"{"modelId":"acme/model","sha":"not-a-commit"}"#.to_string(),
+                Some("revision"),
+            ),
+            (
+                "200 OK",
+                r#"{"modelId":"other/model","sha":"abcdefabcdefabcdefabcdefabcdefabcdefabcd"}"#
+                    .to_string(),
+                Some("repo_id"),
+            ),
+            ("404 Not Found", "{}".to_string(), None),
+        ] {
+            let (base_url, server) = serve_once(status, body).await;
+            let temp = TempDir::new().unwrap();
+            let mut client = HuggingFaceClient::new(temp.path()).unwrap();
+            client.set_test_download_base_url(base_url);
+
+            let error = client
+                .resolve_download_revision("acme/model", Some("release/v1"))
+                .await
+                .unwrap_err();
+
+            match expected_field {
+                Some(expected) => assert!(
+                    matches!(
+                        error,
+                        PumasError::Validation { ref field, .. } if field == expected
+                    ),
+                    "expected validation field {expected}, got {error:?}"
+                ),
+                None => assert!(matches!(error, PumasError::Network { .. })),
+            }
+            assert!(server
+                .await
+                .unwrap()
+                .starts_with("GET /api/models/acme/model/revision/release%2Fv1 HTTP/1.1"));
+        }
+    }
+
+    #[tokio::test]
+    async fn pinned_snapshot_uses_revision_endpoint_and_requires_matching_sha() {
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        let (base_url, server) = serve_once(
+            "200 OK",
+            format!(r#"{{"modelId":"acme/model","sha":"{commit}"}}"#),
+        )
+        .await;
+        let temp = TempDir::new().unwrap();
+        let mut client = HuggingFaceClient::new(temp.path()).unwrap();
+        client.set_test_download_base_url(base_url);
+        let revision = DownloadRevision::from_commit(commit).unwrap();
+
+        let (model, evidence) = client
+            .get_model_snapshot_at_revision("acme/model", &revision)
+            .await
+            .unwrap();
+
+        assert_eq!(model.repo_id, "acme/model");
+        assert_eq!(evidence.repo_id.as_deref(), Some("acme/model"));
+        assert!(server.await.unwrap().starts_with(&format!(
+            "GET /api/models/acme/model/revision/{commit} HTTP/1.1"
+        )));
+    }
+
+    #[tokio::test]
+    async fn legacy_snapshot_keeps_api_route_and_does_not_require_sha() {
+        let (base_url, server) =
+            serve_once("200 OK", r#"{"modelId":"acme/model"}"#.to_string()).await;
+        let temp = TempDir::new().unwrap();
+        let mut client = HuggingFaceClient::new(temp.path()).unwrap();
+        client.set_test_download_base_url(base_url);
+
+        let (model, _) = client.get_model_snapshot("acme/model").await.unwrap();
+
+        assert_eq!(model.repo_id, "acme/model");
+        assert!(server
+            .await
+            .unwrap()
+            .starts_with("GET /models/acme/model HTTP/1.1"));
+    }
+
+    #[tokio::test]
+    async fn pinned_snapshot_rejects_absent_or_mismatched_sha() {
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        for body in [
+            r#"{"modelId":"acme/model"}"#.to_string(),
+            r#"{"modelId":"acme/model","sha":"ffffffffffffffffffffffffffffffffffffffff"}"#
+                .to_string(),
+        ] {
+            let (base_url, server) = serve_once("200 OK", body).await;
+            let temp = TempDir::new().unwrap();
+            let mut client = HuggingFaceClient::new(temp.path()).unwrap();
+            client.set_test_download_base_url(base_url);
+            let revision = DownloadRevision::from_commit(commit).unwrap();
+
+            let error = client
+                .get_model_snapshot_at_revision("acme/model", &revision)
+                .await
+                .unwrap_err();
+
+            assert!(matches!(error, PumasError::Validation { .. }));
+            assert!(server.await.unwrap().starts_with(&format!(
+                "GET /api/models/acme/model/revision/{commit} HTTP/1.1"
+            )));
+        }
+    }
+
+    #[tokio::test]
+    async fn pinned_snapshot_rejects_contradicting_repo_and_upstream_failure() {
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        for (status, body, expected_validation) in [
+            (
+                "200 OK",
+                format!(r#"{{"modelId":"other/model","sha":"{commit}"}}"#),
+                true,
+            ),
+            ("404 Not Found", "{}".to_string(), false),
+        ] {
+            let (base_url, server) = serve_once(status, body).await;
+            let temp = TempDir::new().unwrap();
+            let mut client = HuggingFaceClient::new(temp.path()).unwrap();
+            client.set_test_download_base_url(base_url);
+            let revision = DownloadRevision::from_commit(commit).unwrap();
+
+            let error = client
+                .get_model_snapshot_at_revision("acme/model", &revision)
+                .await
+                .unwrap_err();
+
+            if expected_validation {
+                assert!(matches!(
+                    error,
+                    PumasError::Validation { ref field, .. } if field == "repo_id"
+                ));
+            } else {
+                assert!(matches!(error, PumasError::Network { .. }));
+            }
+            assert!(server.await.unwrap().starts_with(&format!(
+                "GET /api/models/acme/model/revision/{commit} HTTP/1.1"
+            )));
+        }
+    }
+
+    #[tokio::test]
+    async fn pinned_repo_tree_uses_revision_specific_urls_and_caches() {
+        let first = "1111111111111111111111111111111111111111";
+        let second = "2222222222222222222222222222222222222222";
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for (commit, filename) in [(first, "first.gguf"), (second, "second.gguf")] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let request = read_request(&mut socket).await;
+                assert!(request.starts_with(&format!(
+                    "GET /api/models/acme/model/tree/{commit}?recursive=true HTTP/1.1"
+                )));
+                requests.push(request);
+                let body = format!(
+                    r#"[{{"path":"{filename}","type":"file","lfs":{{"oid":"{commit}","size":1}}}}]"#
+                );
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+            }
+            requests
+        });
+        let temp = TempDir::new().unwrap();
+        let mut client = HuggingFaceClient::new(temp.path()).unwrap();
+        client.set_test_download_base_url(base_url);
+        let first_revision = DownloadRevision::from_commit(first).unwrap();
+        let second_revision = DownloadRevision::from_commit(second).unwrap();
+
+        let first_tree = client
+            .get_repo_files_at_revision("acme/model", &first_revision)
+            .await
+            .unwrap();
+        let cached_first_tree = client
+            .get_repo_files_at_revision("acme/model", &first_revision)
+            .await
+            .unwrap();
+        let second_tree = client
+            .get_repo_files_at_revision("acme/model", &second_revision)
+            .await
+            .unwrap();
+
+        assert_eq!(first_tree.lfs_files[0].filename, "first.gguf");
+        assert_eq!(cached_first_tree.lfs_files[0].filename, "first.gguf");
+        assert_eq!(second_tree.lfs_files[0].filename, "second.gguf");
+        assert_eq!(server.await.unwrap().len(), 2);
+        assert_ne!(
+            client.get_cache_path(&revision_cache_key("acme/model", &first_revision), "files"),
+            client.get_cache_path(&revision_cache_key("acme/model", &second_revision), "files")
+        );
+    }
+
+    #[tokio::test]
+    async fn resolved_main_stays_pinned_after_branch_moves() {
+        let first = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let second = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let main_commit = std::sync::Arc::new(std::sync::Mutex::new(first.to_string()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server_main = main_commit.clone();
+        let server = tokio::spawn(async move {
+            let mut request_lines = Vec::new();
+            for _ in 0..3 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let request = read_request(&mut socket).await;
+                let request_line = request.lines().next().unwrap().to_string();
+                let current_main = server_main.lock().unwrap().clone();
+                let body = if request_line == "GET /api/models/acme/model/revision/main HTTP/1.1" {
+                    format!(r#"{{"modelId":"acme/model","sha":"{current_main}"}}"#)
+                } else if request_line
+                    == format!("GET /api/models/acme/model/revision/{first} HTTP/1.1")
+                {
+                    format!(r#"{{"modelId":"acme/model","sha":"{first}"}}"#)
+                } else if request_line
+                    == format!("GET /api/models/acme/model/tree/{first}?recursive=true HTTP/1.1")
+                {
+                    format!(
+                        r#"[{{"path":"from-{first}.gguf","type":"file","lfs":{{"oid":"{first}","size":1}}}}]"#
+                    )
+                } else {
+                    panic!("request escaped resolved commit: {request_line}");
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+                request_lines.push(request_line);
+            }
+            request_lines
+        });
+
+        let resolved: serde_json::Value = reqwest::Client::new()
+            .get(format!("{base_url}/api/models/acme/model/revision/main"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        let revision = DownloadRevision::from_commit(resolved["sha"].as_str().unwrap()).unwrap();
+        *main_commit.lock().unwrap() = second.to_string();
+
+        let temp = TempDir::new().unwrap();
+        let mut client = HuggingFaceClient::new(temp.path()).unwrap();
+        client.set_test_download_base_url(base_url);
+        let (model, _) = client
+            .get_model_snapshot_at_revision("acme/model", &revision)
+            .await
+            .unwrap();
+        let tree = client
+            .get_repo_files_at_revision("acme/model", &revision)
+            .await
+            .unwrap();
+
+        assert_eq!(revision.as_str(), first);
+        assert_eq!(model.repo_id, "acme/model");
+        assert_eq!(tree.lfs_files[0].filename, format!("from-{first}.gguf"));
+        let request_lines = server.await.unwrap();
+        assert_eq!(
+            request_lines,
+            vec![
+                "GET /api/models/acme/model/revision/main HTTP/1.1".to_string(),
+                format!("GET /api/models/acme/model/revision/{first} HTTP/1.1"),
+                format!("GET /api/models/acme/model/tree/{first}?recursive=true HTTP/1.1"),
+            ]
+        );
+    }
 }

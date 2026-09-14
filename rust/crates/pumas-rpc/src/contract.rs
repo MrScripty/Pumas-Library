@@ -4,6 +4,10 @@
 //! details, or upstream response text. Transports must project them through
 //! [`PublicError`] instead of serializing `Display` or `Debug` output.
 
+use pumas_library::intent::{
+    EnsureModelOutcome, EnsureModelRequest, GetEnsureStatusOutcome, ListModelDeclarationsOutcome,
+    ModelEnsureRef, ModelRequirement, ObservedModelState, QueryModelsOutcome, ReleaseModelOutcome,
+};
 use pumas_library::{
     conversion::{
         BackendStatus, ConversionDirection, ConversionProgress, ConversionRequest,
@@ -366,6 +370,25 @@ pub(crate) enum RpcCommand {
         offset: usize,
     },
     RefreshModelIndex,
+    IntentQueryModels {
+        requirement: ModelRequirement,
+    },
+    IntentGetModel {
+        requirement: ModelRequirement,
+    },
+    IntentGetModelStatus {
+        requirement: ModelRequirement,
+    },
+    IntentEnsureModel {
+        request: EnsureModelRequest,
+    },
+    IntentReleaseModel {
+        reference: ModelEnsureRef,
+    },
+    IntentGetEnsureStatus {
+        reference: ModelEnsureRef,
+    },
+    IntentListDeclarations,
     Legacy {
         method: String,
         params: Value,
@@ -456,6 +479,13 @@ impl RpcCommand {
             Self::UpdateInferenceSettings { .. } => "update_inference_settings",
             Self::UpdateModelNotes { .. } => "update_model_notes",
             Self::RefreshModelIndex => "refresh_model_index",
+            Self::IntentQueryModels { .. } => "intent_query_models",
+            Self::IntentGetModel { .. } => "intent_get_model",
+            Self::IntentGetModelStatus { .. } => "intent_get_model_status",
+            Self::IntentEnsureModel { .. } => "intent_ensure_model",
+            Self::IntentReleaseModel { .. } => "intent_release_model",
+            Self::IntentGetEnsureStatus { .. } => "intent_get_ensure_status",
+            Self::IntentListDeclarations => "intent_list_declarations",
             Self::Legacy { method, .. } => method,
         }
     }
@@ -563,6 +593,13 @@ pub(crate) enum RpcOutcome {
     UpdateModelNotes(UpdateModelNotesOutcome),
     LibraryModelMetadata(Box<LibraryModelMetadataOutcome>),
     ModelIndexRefresh(ModelIndexRefreshOutcome),
+    IntentQueryModels(Box<QueryModelsOutcome>),
+    IntentGetModel(Box<ObservedModelState>),
+    IntentGetModelStatus(Box<ObservedModelState>),
+    IntentEnsureModel(Box<EnsureModelOutcome>),
+    IntentReleaseModel(ReleaseModelOutcome),
+    IntentGetEnsureStatus(Box<GetEnsureStatusOutcome>),
+    IntentListDeclarations(Box<ListModelDeclarationsOutcome>),
     Legacy(Value),
 }
 
@@ -661,6 +698,13 @@ impl RpcOutcome {
             Self::UpdateModelNotes(value) => serde_json::to_value(value),
             Self::LibraryModelMetadata(value) => serde_json::to_value(value),
             Self::ModelIndexRefresh(value) => serde_json::to_value(value),
+            Self::IntentQueryModels(value) => serde_json::to_value(value),
+            Self::IntentGetModel(value) => serde_json::to_value(value),
+            Self::IntentGetModelStatus(value) => serde_json::to_value(value),
+            Self::IntentEnsureModel(value) => serde_json::to_value(value),
+            Self::IntentReleaseModel(value) => serde_json::to_value(value),
+            Self::IntentGetEnsureStatus(value) => serde_json::to_value(value),
+            Self::IntentListDeclarations(value) => serde_json::to_value(value),
             Self::Legacy(value) => return Ok(value),
         };
         result.map_err(|_| PublicError::internal())
@@ -5033,6 +5077,24 @@ struct RecoverDownloadParams {
     recovery_token: String,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IntentRequirementParams {
+    requirement: ModelRequirement,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IntentEnsureParams {
+    request: EnsureModelRequest,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IntentReferenceParams {
+    reference: ModelEnsureRef,
+}
+
 const fn default_true() -> bool {
     true
 }
@@ -5429,11 +5491,153 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             })
         }),
         "refresh_model_index" => empty().map(|()| RpcCommand::RefreshModelIndex),
+        "intent_query_models" => {
+            parse_intent_requirement_params(params).map(|params| RpcCommand::IntentQueryModels {
+                requirement: params.requirement,
+            })
+        }
+        "intent_get_model" => {
+            parse_intent_requirement_params(params).map(|params| RpcCommand::IntentGetModel {
+                requirement: params.requirement,
+            })
+        }
+        "intent_get_model_status" => {
+            parse_intent_requirement_params(params).map(|params| RpcCommand::IntentGetModelStatus {
+                requirement: params.requirement,
+            })
+        }
+        "intent_ensure_model" => {
+            parse_intent_ensure_params(params).map(|params| RpcCommand::IntentEnsureModel {
+                request: params.request,
+            })
+        }
+        "intent_release_model" => {
+            parse_intent_reference_params(params).map(|params| RpcCommand::IntentReleaseModel {
+                reference: params.reference,
+            })
+        }
+        "intent_get_ensure_status" => {
+            parse_intent_reference_params(params).map(|params| RpcCommand::IntentGetEnsureStatus {
+                reference: params.reference,
+            })
+        }
+        "intent_list_declarations" => empty().map(|()| RpcCommand::IntentListDeclarations),
         _ => Ok(RpcCommand::Legacy {
             method: method.to_string(),
             params: params.cloned().unwrap_or_else(|| Value::Object(Map::new())),
         }),
     }
+}
+
+fn parse_intent_requirement_params(
+    params: Option<&Value>,
+) -> Result<IntentRequirementParams, PublicError> {
+    let value = params.cloned().unwrap_or_else(|| Value::Object(Map::new()));
+    validate_object_fields(&value, &["requirement"])?;
+    let requirement = value
+        .get("requirement")
+        .ok_or_else(PublicError::invalid_params)?;
+    validate_intent_requirement_shape(requirement)?;
+    serde_json::from_value(value).map_err(|_| PublicError::invalid_params())
+}
+
+fn parse_intent_ensure_params(params: Option<&Value>) -> Result<IntentEnsureParams, PublicError> {
+    let value = params.cloned().unwrap_or_else(|| Value::Object(Map::new()));
+    validate_object_fields(&value, &["request"])?;
+    let request = value
+        .get("request")
+        .ok_or_else(PublicError::invalid_params)?;
+    validate_object_fields(request, &["consumer_key", "requirement"])?;
+    let requirement = request
+        .get("requirement")
+        .ok_or_else(PublicError::invalid_params)?;
+    validate_intent_requirement_shape(requirement)?;
+    serde_json::from_value(value).map_err(|_| PublicError::invalid_params())
+}
+
+fn parse_intent_reference_params(
+    params: Option<&Value>,
+) -> Result<IntentReferenceParams, PublicError> {
+    let value = params.cloned().unwrap_or_else(|| Value::Object(Map::new()));
+    validate_object_fields(&value, &["reference"])?;
+    let reference = value
+        .get("reference")
+        .ok_or_else(PublicError::invalid_params)?;
+    validate_object_fields(reference, &["consumer_key", "declaration_id", "generation"])?;
+    serde_json::from_value(value).map_err(|_| PublicError::invalid_params())
+}
+
+fn validate_intent_requirement_shape(value: &Value) -> Result<(), PublicError> {
+    validate_object_fields(value, &["selector", "artifact", "acquisition_policy"])?;
+    let selector = value
+        .get("selector")
+        .ok_or_else(PublicError::invalid_params)?;
+    let selector_object = validate_object_fields(
+        selector,
+        &["kind", "model_ref", "repository_id", "revision"],
+    )?;
+    match selector_object.get("kind").and_then(Value::as_str) {
+        Some("local_model") => {
+            if selector_object
+                .keys()
+                .any(|key| !matches!(key.as_str(), "kind" | "model_ref"))
+            {
+                return Err(PublicError::invalid_params());
+            }
+            let model_ref = selector_object
+                .get("model_ref")
+                .ok_or_else(PublicError::invalid_params)?;
+            let model_ref_object = validate_object_fields(
+                model_ref,
+                &[
+                    "model_ref_contract_version",
+                    "model_id",
+                    "revision",
+                    "selected_artifact_id",
+                    "selected_artifact_path",
+                    "migration_diagnostics",
+                ],
+            )?;
+            if let Some(diagnostics) = model_ref_object.get("migration_diagnostics") {
+                let diagnostics = diagnostics
+                    .as_array()
+                    .ok_or_else(PublicError::invalid_params)?;
+                for diagnostic in diagnostics {
+                    validate_object_fields(diagnostic, &["code", "message", "input"])?;
+                }
+            }
+        }
+        Some("upstream_repository") => {
+            if selector_object
+                .keys()
+                .any(|key| !matches!(key.as_str(), "kind" | "repository_id" | "revision"))
+            {
+                return Err(PublicError::invalid_params());
+            }
+        }
+        _ => {}
+    }
+    if let Some(artifact) = value.get("artifact") {
+        validate_object_fields(
+            artifact,
+            &["format", "quantization", "selected_artifact_id"],
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_object_fields<'a>(
+    value: &'a Value,
+    allowed: &[&str],
+) -> Result<&'a Map<String, Value>, PublicError> {
+    let object = value.as_object().ok_or_else(PublicError::invalid_params)?;
+    if object
+        .keys()
+        .any(|key| !allowed.iter().any(|allowed| key == allowed))
+    {
+        return Err(PublicError::invalid_params());
+    }
+    Ok(object)
 }
 
 fn parse_params<T>(params: Option<&Value>) -> Result<T, PublicError>
@@ -7329,5 +7533,139 @@ mod tests {
         if usize::BITS > u32::BITS {
             assert!(ModelIndexRefreshOutcome::try_from(usize::MAX).is_err());
         }
+    }
+
+    #[test]
+    fn intent_methods_decode_as_closed_typed_commands() {
+        let requirement = json!({
+            "selector": {"kind": "upstream_repository", "repository_id": "owner/model"},
+            "artifact": {},
+            "acquisition_policy": "local_only"
+        });
+        let reference = json!({
+            "consumer_key": "desktop.test",
+            "declaration_id": "a".repeat(64),
+            "generation": "00000000-0000-4000-8000-000000000001"
+        });
+        let cases = [
+            (
+                "intent_query_models",
+                json!({"requirement": requirement.clone()}),
+            ),
+            (
+                "intent_get_model",
+                json!({"requirement": requirement.clone()}),
+            ),
+            (
+                "intent_get_model_status",
+                json!({"requirement": requirement.clone()}),
+            ),
+            (
+                "intent_ensure_model",
+                json!({"request": {"consumer_key": "desktop.test", "requirement": requirement}}),
+            ),
+            (
+                "intent_release_model",
+                json!({"reference": reference.clone()}),
+            ),
+            ("intent_get_ensure_status", json!({"reference": reference})),
+            ("intent_list_declarations", json!({})),
+        ];
+
+        for (method, params) in cases {
+            let body = serde_json::to_vec(&json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": method,
+                "params": params,
+            }))
+            .unwrap();
+            let admitted = AdmittedRpcRequest::decode(&body).unwrap();
+            assert_eq!(admitted.command.method(), method);
+            assert!(!matches!(admitted.command, RpcCommand::Legacy { .. }));
+        }
+    }
+
+    #[test]
+    fn intent_methods_require_their_named_parameter_envelopes() {
+        for method in [
+            "intent_query_models",
+            "intent_get_model",
+            "intent_get_model_status",
+            "intent_ensure_model",
+            "intent_release_model",
+            "intent_get_ensure_status",
+        ] {
+            let Err(error) = parse_command(method, Some(&json!({}))) else {
+                panic!("{method} accepted an empty parameter object");
+            };
+            assert_eq!(error, PublicError::invalid_params());
+        }
+        let Err(error) = parse_command(
+            "intent_list_declarations",
+            Some(&json!({"unexpected": true})),
+        ) else {
+            panic!("intent_list_declarations accepted unknown parameters");
+        };
+        assert_eq!(error, PublicError::invalid_params());
+    }
+
+    #[test]
+    fn intent_admission_rejects_unknown_nested_fields() {
+        let requirement_with_typo = json!({
+            "selector": {"kind": "upstream_repository", "repository_id": "owner/model"},
+            "artifact": {"quantisation": "q4"},
+            "acquisition_policy": "local_only"
+        });
+        let Err(error) = parse_command(
+            "intent_query_models",
+            Some(&json!({"requirement": requirement_with_typo})),
+        ) else {
+            panic!("unknown nested artifact field was accepted");
+        };
+        assert_eq!(error, PublicError::invalid_params());
+
+        let Err(error) = parse_command(
+            "intent_release_model",
+            Some(&json!({
+                "reference": {
+                    "consumer_key": "desktop.test",
+                    "declaration_id": "a".repeat(64),
+                    "generation": "00000000-0000-4000-8000-000000000001",
+                    "generaton": "typo"
+                }
+            })),
+        ) else {
+            panic!("unknown nested reference field was accepted");
+        };
+        assert_eq!(error, PublicError::invalid_params());
+    }
+
+    #[test]
+    fn intent_admission_keeps_known_semantic_errors_for_the_domain() {
+        let requirement = json!({
+            "selector": {"kind": "upstream_repository", "repository_id": ""},
+            "artifact": {"quantization": ""},
+            "acquisition_policy": "local_only"
+        });
+        let command = parse_command(
+            "intent_query_models",
+            Some(&json!({"requirement": requirement})),
+        )
+        .expect("known fields must reach native semantic validation");
+        assert!(matches!(command, RpcCommand::IntentQueryModels { .. }));
+    }
+
+    #[test]
+    fn intent_outcomes_serialize_without_the_legacy_wrapper() {
+        let outcome = RpcOutcome::IntentReleaseModel(ReleaseModelOutcome::AlreadyAbsent {
+            reference: ModelEnsureRef {
+                consumer_key: "desktop.test".into(),
+                declaration_id: "a".repeat(64),
+                generation: "00000000-0000-4000-8000-000000000001".into(),
+            },
+        });
+        assert!(!outcome.uses_response_wrapper());
+        assert_eq!(outcome.into_value().unwrap()["outcome"], "already_absent");
     }
 }

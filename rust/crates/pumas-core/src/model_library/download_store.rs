@@ -10,6 +10,7 @@ use crate::metadata::{
     AtomicJsonTarget, AtomicPublication, AtomicPublishFailure, AtomicPublishFailureKind,
     AtomicPublishResult, AtomicPublishStage, StagingCleanup,
 };
+use crate::model_library::artifact_identity::DownloadRevision;
 use crate::model_library::types::DownloadRequest;
 use crate::models::DownloadStatus;
 use crate::models::HuggingFaceEvidence;
@@ -21,7 +22,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
-const DOWNLOAD_STORE_SCHEMA_VERSION: u32 = 4;
+const DOWNLOAD_STORE_SCHEMA_VERSION: u32 = 5;
+const LEGACY_DOWNLOAD_STORE_SCHEMA_VERSION: u32 = 4;
 const DOWNLOAD_STORE_LOCK_FILE: &str = ".downloads.lock";
 
 /// A single persisted download entry.
@@ -38,6 +40,10 @@ pub struct PersistedDownload {
     pub total_bytes: Option<u64>,
     pub status: DownloadStatus,
     pub download_request: DownloadRequest,
+    /// Immutable upstream commit for pinned execution. `None` retains the
+    /// legacy operational behavior of resolving the repository's `main` ref.
+    #[serde(deserialize_with = "deserialize_required_revision")]
+    pub revision: Option<String>,
     pub created_at: String,
     /// Known SHA256 from HuggingFace LFS metadata (avoids recomputation on import).
     #[serde(default)]
@@ -45,6 +51,15 @@ pub struct PersistedDownload {
     /// Normalized HuggingFace evidence captured during download preflight.
     #[serde(default)]
     pub huggingface_evidence: Option<HuggingFaceEvidence>,
+}
+
+fn deserialize_required_revision<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer)
 }
 
 /// Persisted ownership domain for a quarantined download lifecycle.
@@ -1491,27 +1506,26 @@ impl DownloadPersistence {
         let Some(value) = transaction.target.read_json::<serde_json::Value>()? else {
             return Ok(DownloadStoreData::empty());
         };
-        if value
+        let schema_version = value
             .get("schema_version")
-            .and_then(serde_json::Value::as_u64)
-            != Some(4)
-        {
-            return Err(crate::PumasError::Validation {
-                field: "downloads.schema_version".into(),
-                message: "Download store requires schema version 4; migrate older data explicitly before starting the application".into(),
-            });
-        }
-        let data = serde_json::from_value::<DownloadStoreData>(value).map_err(|source| {
-            crate::PumasError::Json {
-                message: format!(
-                    "Failed to parse current download store {}: {source}",
-                    self.path.display()
-                ),
-                source: Some(source),
+            .and_then(serde_json::Value::as_u64);
+        let value = match schema_version {
+            Some(version) if version == u64::from(DOWNLOAD_STORE_SCHEMA_VERSION) => value,
+            Some(version) if version == u64::from(LEGACY_DOWNLOAD_STORE_SCHEMA_VERSION) => {
+                let mut data = migrate_v4_to_v5(value, &self.path)?;
+                self.write_data(transaction, &mut data)?;
+                return Ok(data);
             }
-        })?;
-        validate_store_data(&data)?;
-        Ok(data)
+            _ => {
+                return Err(crate::PumasError::Validation {
+                    field: "downloads.schema_version".into(),
+                    message: format!(
+                        "Download store requires schema version {DOWNLOAD_STORE_SCHEMA_VERSION}; only schema version {LEGACY_DOWNLOAD_STORE_SCHEMA_VERSION} can be upgraded automatically"
+                    ),
+                });
+            }
+        };
+        parse_current_store(value, &self.path)
     }
 
     /// Replace the complete versioned store document and require `Durable`.
@@ -1540,6 +1554,131 @@ impl DownloadPersistence {
             }
             Err(failure) => Err((*failure).into_error()),
         }
+    }
+}
+
+fn parse_current_store(value: serde_json::Value, path: &Path) -> Result<DownloadStoreData> {
+    let data = serde_json::from_value::<DownloadStoreData>(value).map_err(|source| {
+        crate::PumasError::Json {
+            message: format!(
+                "Failed to parse current download store {}: {source}",
+                path.display()
+            ),
+            source: Some(source),
+        }
+    })?;
+    validate_store_data(&data)?;
+    Ok(data)
+}
+
+fn migrate_v4_to_v5(mut value: serde_json::Value, path: &Path) -> Result<DownloadStoreData> {
+    let root = value
+        .as_object_mut()
+        .ok_or_else(|| invalid_store_migration("Download store document must be an object"))?;
+
+    add_legacy_revision_to_snapshot_array(root.get_mut("downloads"), "downloads")?;
+    add_legacy_revision_to_nested_snapshots(
+        root.get_mut("lifecycle_quarantines"),
+        &["snapshot"],
+        "lifecycle_quarantines",
+    )?;
+    add_legacy_revision_to_nested_snapshots(
+        root.get_mut("admission_attempts"),
+        &["request", "snapshot"],
+        "admission_attempts",
+    )?;
+    add_legacy_revision_to_admitted_revocations(root.get_mut("recovery_revocations"))?;
+    root.insert(
+        "schema_version".to_string(),
+        serde_json::Value::from(DOWNLOAD_STORE_SCHEMA_VERSION),
+    );
+
+    parse_current_store(value, path)
+}
+
+fn add_legacy_revision_to_snapshot_array(
+    value: Option<&mut serde_json::Value>,
+    field: &str,
+) -> Result<()> {
+    let snapshots = value
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or_else(|| invalid_store_migration(&format!("{field} must be an array")))?;
+    for snapshot in snapshots {
+        add_legacy_revision(snapshot, field)?;
+    }
+    Ok(())
+}
+
+fn add_legacy_revision_to_nested_snapshots(
+    value: Option<&mut serde_json::Value>,
+    path: &[&str],
+    field: &str,
+) -> Result<()> {
+    let records = value
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| invalid_store_migration(&format!("{field} must be an object")))?;
+    for record in records.values_mut() {
+        let mut snapshot = record;
+        for segment in path {
+            snapshot = snapshot
+                .as_object_mut()
+                .and_then(|object| object.get_mut(*segment))
+                .ok_or_else(|| {
+                    invalid_store_migration(&format!("{field} has no {segment} record"))
+                })?;
+        }
+        add_legacy_revision(snapshot, field)?;
+    }
+    Ok(())
+}
+
+fn add_legacy_revision_to_admitted_revocations(
+    value: Option<&mut serde_json::Value>,
+) -> Result<()> {
+    let records = value
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| invalid_store_migration("recovery_revocations must be an object"))?;
+    for revocation in records.values_mut() {
+        let origin = revocation
+            .as_object_mut()
+            .and_then(|object| object.get_mut("origin"))
+            .and_then(serde_json::Value::as_object_mut)
+            .ok_or_else(|| invalid_store_migration("Recovery revocation has no origin object"))?;
+        match origin.get("kind").and_then(serde_json::Value::as_str) {
+            Some("unadmitted") => {}
+            Some("admitted") => {
+                let snapshot = origin.get_mut("snapshot").ok_or_else(|| {
+                    invalid_store_migration("Admitted recovery revocation has no snapshot")
+                })?;
+                add_legacy_revision(snapshot, "recovery_revocations")?;
+            }
+            _ => {
+                return Err(invalid_store_migration(
+                    "Recovery revocation has an invalid origin kind",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn add_legacy_revision(snapshot: &mut serde_json::Value, field: &str) -> Result<()> {
+    let snapshot = snapshot
+        .as_object_mut()
+        .ok_or_else(|| invalid_store_migration(&format!("{field} snapshot must be an object")))?;
+    if snapshot.contains_key("revision") {
+        return Err(invalid_store_migration(&format!(
+            "Schema version {LEGACY_DOWNLOAD_STORE_SCHEMA_VERSION} {field} snapshot unexpectedly contains revision"
+        )));
+    }
+    snapshot.insert("revision".to_string(), serde_json::Value::Null);
+    Ok(())
+}
+
+fn invalid_store_migration(message: &str) -> crate::PumasError {
+    crate::PumasError::Validation {
+        field: "downloads.schema_version".into(),
+        message: format!("Cannot upgrade download store schema: {message}"),
     }
 }
 
@@ -1678,6 +1817,13 @@ fn validate_admission_request(request: &DownloadAdmissionRequest) -> Result<()> 
 }
 
 fn validate_snapshot_files(snapshot: &PersistedDownload) -> Result<()> {
+    let revision = DownloadRevision::from_persisted(snapshot.revision.as_deref())?;
+    if revision.as_persisted() != snapshot.revision.as_deref() {
+        return Err(crate::PumasError::Validation {
+            field: "downloads.revision".into(),
+            message: "Pinned download revision must use canonical lowercase hexadecimal".into(),
+        });
+    }
     let mut files = HashSet::new();
     if snapshot.filenames.is_empty()
         || !snapshot.filenames.contains(&snapshot.filename)
@@ -2411,6 +2557,7 @@ mod tests {
             total_bytes: Some(1000),
             status: DownloadStatus::Paused,
             download_request: make_request(),
+            revision: None,
             created_at: "2025-01-01T00:00:00Z".to_string(),
             known_sha256: None,
             huggingface_evidence: None,
@@ -2447,6 +2594,7 @@ mod tests {
             total_bytes: Some(1000),
             status: DownloadStatus::Paused,
             download_request: make_request(),
+            revision: None,
             created_at: "2025-01-01T00:00:00Z".to_string(),
             known_sha256: None,
             huggingface_evidence: None,
@@ -2465,6 +2613,7 @@ mod tests {
             total_bytes: Some(1000),
             status: DownloadStatus::Paused,
             download_request: make_request(),
+            revision: None,
             created_at: "2025-01-01T00:00:00Z".to_string(),
             known_sha256: None,
             huggingface_evidence: None,
@@ -3121,7 +3270,7 @@ mod tests {
     }
 
     #[test]
-    fn strict_fresh_read_rejects_unsupported_and_unowned_v4_documents() {
+    fn strict_fresh_read_rejects_unsupported_and_unowned_v5_documents() {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("downloads.json");
         std::fs::write(
@@ -3171,6 +3320,363 @@ mod tests {
             crate::PumasError::Validation { ref field, .. }
                 if field == "downloads.queue_admissions"
         ));
+    }
+
+    #[test]
+    fn pinned_revision_persists_and_reopens_exactly() {
+        let tmp = TempDir::new().unwrap();
+        let store = DownloadPersistence::new(tmp.path());
+        let mut entry = persisted("dl-pinned");
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        entry.revision = Some(commit.to_string());
+
+        store.admit_test_download(&entry).unwrap();
+
+        let transaction = store.transaction(StoreOperation::Load).unwrap();
+        let reopened = store.load_data_strict(&transaction).unwrap();
+        assert_eq!(reopened.downloads[0].revision.as_deref(), Some(commit));
+        let document = std::fs::read_to_string(&store.path).unwrap();
+        assert!(document.contains(&format!("\"revision\": \"{commit}\"")));
+        assert!(document.contains("\"schema_version\": 5"));
+    }
+
+    #[test]
+    fn invalid_or_noncanonical_revision_cannot_mutate_store() {
+        for revision in [
+            "main",
+            "0123456789abcdef0123456789abcdef0123456",
+            "0123456789ABCDEF0123456789ABCDEF01234567",
+            "0123456789abcdef0123456789abcdef0123456g",
+        ] {
+            let tmp = TempDir::new().unwrap();
+            let store = DownloadPersistence::new(tmp.path());
+            let mut entry = persisted("dl-invalid-pin");
+            entry.revision = Some(revision.to_string());
+
+            assert!(store.admit_test_download(&entry).is_err());
+            assert!(!store.path.exists());
+        }
+    }
+
+    #[test]
+    fn schema_v4_upgrade_persists_legacy_main_revision() {
+        let tmp = TempDir::new().unwrap();
+        let store = DownloadPersistence::new(tmp.path());
+        store
+            .admit_test_download(&persisted("dl-v4-upgrade"))
+            .unwrap();
+        let mut legacy = std::fs::read_to_string(&store.path)
+            .map(|contents| serde_json::from_str::<serde_json::Value>(&contents).unwrap())
+            .unwrap();
+        legacy["schema_version"] = serde_json::Value::from(4);
+        legacy["downloads"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("revision");
+        std::fs::write(&store.path, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
+
+        let reopened = DownloadPersistence::new(tmp.path());
+        let transaction = reopened.transaction(StoreOperation::Load).unwrap();
+        let upgraded = reopened.load_data_strict(&transaction).unwrap();
+        assert_eq!(upgraded.schema_version, 5);
+        assert_eq!(upgraded.downloads[0].revision, None);
+        drop(transaction);
+
+        let durable: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&reopened.path).unwrap()).unwrap();
+        assert_eq!(durable["schema_version"], 5);
+        assert!(durable["downloads"][0]["revision"].is_null());
+    }
+
+    #[test]
+    fn schema_v4_upgrade_reopens_every_snapshot_custody_location() {
+        let quarantine_tmp = TempDir::new().unwrap();
+        let quarantine_store = DownloadPersistence::new(quarantine_tmp.path());
+        let quarantine_snapshot = persisted("dl-v4-quarantine");
+        let quarantine_attempt = quarantine_store
+            .admit_test_download(&quarantine_snapshot)
+            .unwrap();
+        quarantine_store
+            .begin_lifecycle_quarantine(
+                &quarantine_snapshot,
+                LifecycleQuarantineDomain::Ambient,
+                false,
+                Some(&quarantine_attempt),
+            )
+            .unwrap();
+        rewrite_current_store_as_v4(&quarantine_store);
+        let reopened = DownloadPersistence::new(quarantine_tmp.path());
+        let transaction = reopened.transaction(StoreOperation::Load).unwrap();
+        let data = reopened.load_data_strict(&transaction).unwrap();
+        assert_eq!(
+            data.lifecycle_quarantines["dl-v4-quarantine"]
+                .snapshot
+                .revision,
+            None
+        );
+        assert_eq!(
+            data.lifecycle_quarantines["dl-v4-quarantine"]
+                .snapshot
+                .download_request
+                .repo_id,
+            "test/model"
+        );
+        assert_eq!(
+            data.queue_admissions["dl-v4-quarantine"].attempt_id,
+            quarantine_attempt
+        );
+
+        let revocation_tmp = TempDir::new().unwrap();
+        let revocation_store = DownloadPersistence::new(revocation_tmp.path());
+        let revocation_snapshot = persisted("dl-v4-revocation");
+        let revocation_attempt = revocation_store
+            .admit_test_download(&revocation_snapshot)
+            .unwrap();
+        revocation_store
+            .revoke_admitted_for_recovery(
+                &revocation_snapshot.download_id,
+                &revocation_attempt,
+                &revocation_snapshot,
+            )
+            .unwrap();
+        rewrite_current_store_as_v4(&revocation_store);
+        let reopened = DownloadPersistence::new(revocation_tmp.path());
+        let transaction = reopened.transaction(StoreOperation::Load).unwrap();
+        let data = reopened.load_data_strict(&transaction).unwrap();
+        assert!(data.recovery_revocations["dl-v4-revocation"]
+            .origin
+            .snapshot()
+            .is_some_and(|snapshot| snapshot.revision.is_none()));
+        assert!(matches!(
+            data.queue_admissions["dl-v4-revocation"].domain,
+            DownloadAdmissionDomain::Recovery
+        ));
+        assert!(matches!(
+            &data.recovery_revocations["dl-v4-revocation"].origin,
+            PersistedRecoveryOrigin::Admitted {
+                admission_attempt_id,
+                ..
+            } if admission_attempt_id == &revocation_attempt
+        ));
+
+        let admission_tmp = TempDir::new().unwrap();
+        let admission_store = DownloadPersistence::new(admission_tmp.path()).with_test_publisher(
+            Arc::new(ScriptedPublisher::new([
+                ScriptedPublication::Durable,
+                ScriptedPublication::NotPublished,
+            ])),
+        );
+        let request = admission_request("dl-v4-hidden-admission");
+        let attempt = Uuid::new_v4().to_string();
+        assert!(matches!(
+            admission_store.admit_download(&attempt, &request).unwrap(),
+            DownloadAdmissionTransition::NotPublished {
+                phase: DownloadAdmissionPhase::Confirmation,
+                ..
+            }
+        ));
+        rewrite_current_store_as_v4(&admission_store);
+        let reopened = DownloadPersistence::new(admission_tmp.path());
+        let transaction = reopened.transaction(StoreOperation::Load).unwrap();
+        let data = reopened.load_data_strict(&transaction).unwrap();
+        assert_eq!(
+            data.admission_attempts[&attempt].request.snapshot.revision,
+            None
+        );
+        assert_eq!(
+            data.admission_attempts[&attempt]
+                .request
+                .requested_payload_files,
+            vec!["model.gguf"]
+        );
+    }
+
+    fn rewrite_current_store_as_v4(store: &DownloadPersistence) -> Vec<u8> {
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
+        document["schema_version"] = serde_json::Value::from(4);
+        for snapshot in document["downloads"].as_array_mut().unwrap() {
+            snapshot.as_object_mut().unwrap().remove("revision");
+        }
+        for quarantine in document["lifecycle_quarantines"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+        {
+            quarantine["snapshot"]
+                .as_object_mut()
+                .unwrap()
+                .remove("revision");
+        }
+        for admission in document["admission_attempts"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+        {
+            admission["request"]["snapshot"]
+                .as_object_mut()
+                .unwrap()
+                .remove("revision");
+        }
+        for revocation in document["recovery_revocations"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+        {
+            if revocation["origin"]["kind"] == "admitted" {
+                revocation["origin"]["snapshot"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("revision");
+            }
+        }
+        let bytes = serde_json::to_vec_pretty(&document).unwrap();
+        std::fs::write(&store.path, &bytes).unwrap();
+        bytes
+    }
+
+    #[test]
+    fn schema_v4_document_cannot_smuggle_revision_state() {
+        let tmp = TempDir::new().unwrap();
+        let store = DownloadPersistence::new(tmp.path()).with_test_publisher(Arc::new(
+            ScriptedPublisher::new([
+                ScriptedPublication::Durable,
+                ScriptedPublication::NotPublished,
+            ]),
+        ));
+        let request = admission_request("dl-v4-with-revision");
+        let attempt = Uuid::new_v4().to_string();
+        assert!(matches!(
+            store.admit_download(&attempt, &request).unwrap(),
+            DownloadAdmissionTransition::NotPublished {
+                phase: DownloadAdmissionPhase::Confirmation,
+                ..
+            }
+        ));
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
+        legacy["schema_version"] = serde_json::Value::from(4);
+        let original = serde_json::to_vec_pretty(&legacy).unwrap();
+        std::fs::write(&store.path, &original).unwrap();
+
+        let reopened = DownloadPersistence::new(tmp.path());
+        assert!(matches!(
+            reopened.load_all_strict(),
+            Err(crate::PumasError::Validation { ref field, .. })
+                if field == "downloads.schema_version"
+        ));
+        assert_eq!(std::fs::read(&reopened.path).unwrap(), original);
+    }
+
+    #[test]
+    fn malformed_schema_v4_upgrade_preserves_original_document() {
+        let tmp = TempDir::new().unwrap();
+        let store = DownloadPersistence::new(tmp.path());
+        store
+            .admit_test_download(&persisted("dl-v4-malformed"))
+            .unwrap();
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
+        legacy["schema_version"] = serde_json::Value::from(4);
+        legacy["downloads"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("revision");
+        legacy["downloads"][0]["filenames"] = serde_json::json!([]);
+        let original = serde_json::to_vec_pretty(&legacy).unwrap();
+        std::fs::write(&store.path, &original).unwrap();
+
+        let reopened = DownloadPersistence::new(tmp.path());
+        assert!(reopened.load_all_strict().is_err());
+        assert_eq!(std::fs::read(&reopened.path).unwrap(), original);
+    }
+
+    #[test]
+    fn schema_v4_upgrade_prepublication_failure_preserves_original_document() {
+        let tmp = TempDir::new().unwrap();
+        let store = DownloadPersistence::new(tmp.path());
+        store
+            .admit_test_download(&persisted("dl-v4-publication-failure"))
+            .unwrap();
+        let original = rewrite_current_store_as_v4(&store);
+        let reopened = DownloadPersistence::new(tmp.path()).with_test_publisher(Arc::new(
+            ScriptedPublisher::new([ScriptedPublication::NotPublished]),
+        ));
+
+        assert!(reopened.load_all_strict().is_err());
+        assert_eq!(std::fs::read(&reopened.path).unwrap(), original);
+    }
+
+    #[test]
+    fn schema_v4_upgrade_unknown_durability_returns_error_and_retains_valid_v5_custody() {
+        let tmp = TempDir::new().unwrap();
+        let store = DownloadPersistence::new(tmp.path());
+        store
+            .admit_test_download(&persisted("dl-v4-unknown-durability"))
+            .unwrap();
+        rewrite_current_store_as_v4(&store);
+        let reopened = DownloadPersistence::new(tmp.path()).with_test_publisher(Arc::new(
+            ScriptedPublisher::new([ScriptedPublication::PublishedDurabilityUnknown]),
+        ));
+
+        assert!(matches!(
+            reopened.load_all_strict(),
+            Err(crate::PumasError::Other(ref message))
+                if message == "injected parent-sync uncertainty"
+        ));
+        let durable: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&reopened.path).unwrap()).unwrap();
+        assert_eq!(durable["schema_version"], 5);
+        assert!(durable["downloads"][0]["revision"].is_null());
+
+        let fresh = DownloadPersistence::new(tmp.path());
+        let transaction = fresh.transaction(StoreOperation::Load).unwrap();
+        let data = fresh.load_data_strict(&transaction).unwrap();
+        assert_eq!(data.downloads[0].download_id, "dl-v4-unknown-durability");
+        assert!(data
+            .queue_admissions
+            .contains_key("dl-v4-unknown-durability"));
+    }
+
+    #[test]
+    fn schema_older_than_v4_is_rejected_without_rewrite() {
+        let tmp = TempDir::new().unwrap();
+        let store = DownloadPersistence::new(tmp.path());
+        let original = serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": 3,
+            "downloads": [],
+            "recovery_revocations": {}
+        }))
+        .unwrap();
+        std::fs::write(&store.path, &original).unwrap();
+
+        assert!(matches!(
+            store.load_all_strict(),
+            Err(crate::PumasError::Validation { ref field, .. })
+                if field == "downloads.schema_version"
+        ));
+        assert_eq!(std::fs::read(&store.path).unwrap(), original);
+    }
+
+    #[test]
+    fn schema_v5_snapshot_requires_explicit_revision_field() {
+        let tmp = TempDir::new().unwrap();
+        let store = DownloadPersistence::new(tmp.path());
+        store
+            .admit_test_download(&persisted("dl-v5-missing-revision"))
+            .unwrap();
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
+        document["downloads"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("revision");
+        let original = serde_json::to_vec_pretty(&document).unwrap();
+        std::fs::write(&store.path, &original).unwrap();
+
+        let reopened = DownloadPersistence::new(tmp.path());
+        assert!(reopened.load_all_strict().is_err());
+        assert_eq!(std::fs::read(&reopened.path).unwrap(), original);
     }
 
     #[test]

@@ -48,3 +48,61 @@ unchanged. Server shutdown drains these probes even if their request was dropped
 Contract export includes `StartBackendSetupParams`, `GetBackendSetupParams`, and
 `backend_setup_request_probes` produced by the actual Rust command parser.
 Desktop decoding and user-interface integration require their own consumer evidence.
+
+
+## Local Intent RPC
+
+The existing loopback server projects the native core intent service. Requests
+use the existing JSON-RPC envelope and these method-specific `params` objects:
+
+| Method | Params | Typed result |
+| --- | --- | --- |
+| `intent_query_models` | `{ "requirement": ModelRequirement }` | `QueryModelsOutcome` |
+| `intent_get_model` | `{ "requirement": ModelRequirement }` | `GetModelOutcome` |
+| `intent_get_model_status` | `{ "requirement": ModelRequirement }` | `ObservedModelState` |
+| `intent_ensure_model` | `{ "request": EnsureModelRequest }` | `EnsureModelOutcome` |
+| `intent_release_model` | `{ "reference": ModelEnsureRef }` | `ReleaseModelOutcome` |
+| `intent_get_ensure_status` | `{ "reference": ModelEnsureRef }` | `GetEnsureStatusOutcome` |
+| `intent_list_declarations` | `{}` | `ListModelDeclarationsOutcome` |
+
+For example, a local observational request is:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "intent_get_model",
+  "params": {
+    "requirement": {
+      "selector": {
+        "kind": "upstream_repository",
+        "repository_id": "ggml-org/test-model-stories260K"
+      },
+      "acquisition_policy": "local_only"
+    }
+  }
+}
+```
+
+Results are the serialized domain outcomes directly in the JSON-RPC `result`.
+A valid request can report invalid requirements, missing/incomplete artifacts,
+ambiguity, blocked work, or unavailable upstream access. Inspect the outcome;
+a successful transport response does not prove model availability. Malformed
+wire shapes are invalid parameters; infrastructure failures use the existing
+redacted public errors.
+
+Query and status are local observations. Get may admit or join a managed download
+when its requirement allows upstream acquisition; `Acquiring` carries a pinned
+`resolved_requirement` for subsequent status queries. Ensure durably records a
+consumer requirement before convergence. Retain the returned declaration
+reference to read its status or release its exact generation. Release neither
+deletes the model nor cancels downloads. Disconnecting a client does not release
+its declarations or cancel admitted work. The server's existing shutdown drains
+the composed intent owner and downloads.
+
+See the [core contract](../pumas-core/README.md#local-intent-interface) for supported
+single-artifact layouts, retry/restart behavior, retention and upgrade limits.
+The same domain types are available through native Rust and existing authenticated
+IPC. Operational RPC methods and desktop allowlists retain their existing
+contracts. This adds no production listener, node, fleet, discovery, or remote
+control feature.

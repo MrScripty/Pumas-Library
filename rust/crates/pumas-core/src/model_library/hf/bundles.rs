@@ -1,6 +1,6 @@
-use super::types::HF_HUB_BASE;
 use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
+use crate::model_library::artifact_identity::DownloadRevision;
 use crate::model_library::external_assets::{
     is_diffusers_component_entry, is_optional_component_marker,
     is_supported_text_to_image_pipeline, normalized_component_relative_path,
@@ -21,7 +21,16 @@ impl HuggingFaceClient {
         &self,
         repo_id: &str,
     ) -> Result<Option<HfRepoBundleClassification>> {
-        let tree = self.get_repo_files(repo_id).await?;
+        self.classify_repo_bundle_at_revision(repo_id, &DownloadRevision::legacy_main())
+            .await
+    }
+
+    pub(crate) async fn classify_repo_bundle_at_revision(
+        &self,
+        repo_id: &str,
+        revision: &DownloadRevision,
+    ) -> Result<Option<HfRepoBundleClassification>> {
+        let tree = self.get_repo_files_at_revision(repo_id, revision).await?;
         if !tree
             .regular_files
             .iter()
@@ -31,13 +40,24 @@ impl HuggingFaceClient {
         }
 
         let model_index = self
-            .fetch_repo_text_file(repo_id, "model_index.json")
+            .fetch_repo_text_file(repo_id, "model_index.json", revision)
             .await?;
         Ok(classify_repo_bundle_from_parts(&tree, &model_index))
     }
 
-    async fn fetch_repo_text_file(&self, repo_id: &str, path: &str) -> Result<String> {
-        let url = format!("{}/{}/resolve/main/{}", HF_HUB_BASE, repo_id, path);
+    async fn fetch_repo_text_file(
+        &self,
+        repo_id: &str,
+        path: &str,
+        revision: &DownloadRevision,
+    ) -> Result<String> {
+        let url = format!(
+            "{}/{}/resolve/{}/{}",
+            self.hub_base_url(),
+            repo_id,
+            revision.as_str(),
+            path
+        );
         let mut request = self.client.get(&url);
         if let Some(auth) = self.auth_header_value().await {
             request = request.header("Authorization", auth);
@@ -120,6 +140,8 @@ pub(crate) fn classify_repo_bundle_from_parts(
 mod tests {
     use super::*;
     use crate::model_library::types::{LfsFileInfo, RepoFileTree, REPO_FILE_TREE_VERSION};
+    use tempfile::TempDir;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     fn repo_tree(regular_files: &[&str], lfs_files: &[&str]) -> RepoFileTree {
         RepoFileTree {
@@ -215,5 +237,80 @@ mod tests {
         );
 
         assert!(classification.is_none());
+    }
+
+    async fn read_request(socket: &mut tokio::net::TcpStream) -> String {
+        let mut bytes = Vec::new();
+        while !bytes.ends_with(b"\r\n\r\n") {
+            assert!(
+                bytes.len() < 8 * 1024,
+                "fixture request exceeded header limit"
+            );
+            bytes.push(socket.read_u8().await.unwrap());
+        }
+        String::from_utf8(bytes).unwrap()
+    }
+
+    async fn write_response(socket: &mut tokio::net::TcpStream, content_type: &str, body: &str) {
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn pinned_bundle_fetches_tree_and_model_index_at_same_commit() {
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (mut tree_socket, _) = listener.accept().await.unwrap();
+            let tree_request = read_request(&mut tree_socket).await;
+            write_response(
+                &mut tree_socket,
+                "application/json",
+                r#"[
+                    {"path":"model_index.json","type":"file"},
+                    {"path":"unet/diffusion_pytorch_model.safetensors","type":"file","lfs":{"oid":"abc","size":1}}
+                ]"#,
+            )
+            .await;
+
+            let (mut index_socket, _) = listener.accept().await.unwrap();
+            let index_request = read_request(&mut index_socket).await;
+            write_response(
+                &mut index_socket,
+                "application/json",
+                r#"{
+                    "_class_name":"StableDiffusionPipeline",
+                    "unet":["diffusers","UNet2DConditionModel"]
+                }"#,
+            )
+            .await;
+            (tree_request, index_request)
+        });
+        let temp = TempDir::new().unwrap();
+        let mut client = HuggingFaceClient::new(temp.path()).unwrap();
+        client.set_test_download_base_url(base_url);
+        let revision = DownloadRevision::from_commit(commit).unwrap();
+
+        let classification = client
+            .classify_repo_bundle_at_revision("acme/diffusers", &revision)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            classification.bundle_format,
+            BundleFormat::DiffusersDirectory
+        );
+        let (tree_request, index_request) = server.await.unwrap();
+        assert!(tree_request.starts_with(&format!(
+            "GET /api/models/acme/diffusers/tree/{commit}?recursive=true HTTP/1.1"
+        )));
+        assert!(index_request.starts_with(&format!(
+            "GET /acme/diffusers/resolve/{commit}/model_index.json HTTP/1.1"
+        )));
     }
 }

@@ -1,6 +1,7 @@
 //! JSON-RPC request handlers, split by domain.
 
 mod conversion;
+mod intent;
 mod links;
 mod models;
 #[cfg(feature = "inference-plugins")]
@@ -733,6 +734,37 @@ async fn dispatch_admitted_command(
         RpcCommand::RefreshModelIndex => models::refresh_model_index(state)
             .await
             .map(RpcOutcome::ModelIndexRefresh),
+        RpcCommand::IntentQueryModels { requirement } => intent::query_models(state, &requirement)
+            .await
+            .map(Box::new)
+            .map(RpcOutcome::IntentQueryModels),
+        RpcCommand::IntentGetModel { requirement } => intent::get_model(state, &requirement)
+            .await
+            .map(Box::new)
+            .map(RpcOutcome::IntentGetModel),
+        RpcCommand::IntentGetModelStatus { requirement } => {
+            intent::get_model_status(state, &requirement)
+                .await
+                .map(Box::new)
+                .map(RpcOutcome::IntentGetModelStatus)
+        }
+        RpcCommand::IntentEnsureModel { request } => intent::ensure_model(state, &request)
+            .await
+            .map(Box::new)
+            .map(RpcOutcome::IntentEnsureModel),
+        RpcCommand::IntentReleaseModel { reference } => intent::release_model(state, &reference)
+            .await
+            .map(RpcOutcome::IntentReleaseModel),
+        RpcCommand::IntentGetEnsureStatus { reference } => {
+            intent::get_ensure_status(state, &reference)
+                .await
+                .map(Box::new)
+                .map(RpcOutcome::IntentGetEnsureStatus)
+        }
+        RpcCommand::IntentListDeclarations => intent::list_declarations(state)
+            .await
+            .map(Box::new)
+            .map(RpcOutcome::IntentListDeclarations),
         RpcCommand::GetHfDownloadDetails { repo_id, quants } => {
             models::get_hf_download_details(state, &repo_id, &quants)
                 .await

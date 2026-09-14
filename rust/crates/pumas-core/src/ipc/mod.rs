@@ -16,5 +16,5 @@ pub(crate) mod protocol;
 pub(crate) mod server;
 
 pub(crate) use client::IpcClient;
-pub use local_client::{PumasLocalClient, PumasLocalModelLibraryUpdateStream};
+pub use local_client::{PumasLocalClient, PumasLocalIntentApi, PumasLocalModelLibraryUpdateStream};
 pub(crate) use server::{IpcServer, IpcServerHandle};

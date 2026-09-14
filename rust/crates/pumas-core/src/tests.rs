@@ -282,6 +282,7 @@ async fn builder_retains_failed_download_import_and_retries_before_completion() 
     std::fs::create_dir_all(temp.path().join("launcher-data")).unwrap();
     let store = DownloadPersistence::new(&temp.path().join("launcher-data"));
     let snapshot = PersistedDownload {
+        revision: None,
         download_id: "builder-import-retry".into(),
         repo_id: "IDEA-Research/grounding-dino-base".into(),
         filename: "detector.onnx".into(),

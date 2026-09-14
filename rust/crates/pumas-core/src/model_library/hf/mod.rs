@@ -47,6 +47,25 @@ use std::time::Duration;
 use tokio::sync::{broadcast, Mutex, RwLock};
 use tracing::{debug, info, warn};
 
+/// An observation of this live owner's downloads, without reconciliation or I/O.
+/// Absence here does not establish the absence of persisted acquisition custody.
+#[derive(Debug, Clone)]
+pub(crate) struct IntentDownloadSnapshot {
+    pub(crate) owner_closed: bool,
+    pub(crate) downloads: Vec<IntentDownloadObservation>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct IntentDownloadObservation {
+    pub(crate) download_id: String,
+    pub(crate) model_ref: Option<crate::models::PumasModelRef>,
+    pub(crate) repo_id: String,
+    pub(crate) status: crate::models::DownloadStatus,
+    pub(crate) downloaded_bytes: u64,
+    pub(crate) total_bytes: Option<u64>,
+    pub(crate) blocked: bool,
+}
+
 /// Client for HuggingFace Hub API operations.
 pub struct HuggingFaceClient {
     /// Configured mutation authority; absent for standalone search-only clients.
@@ -104,6 +123,67 @@ impl std::fmt::Debug for HuggingFaceClient {
 }
 
 impl HuggingFaceClient {
+    /// Observe only existing live state; unlike operational download reads this
+    /// never reconciles workers, opens persistence, or publishes a snapshot.
+    pub(crate) async fn intent_download_snapshot(&self) -> IntentDownloadSnapshot {
+        let states = self.downloads.read().await;
+        let mut downloads = states
+            .values()
+            .map(|state| {
+                let model_ref = state.destination.as_ref().map(|destination| {
+                    let selected_artifact_id = state.download_request.as_ref().map(|request| {
+                        super::artifact_identity::SelectedArtifactIdentity::from_download_request_at_revision(
+                            request,
+                            Some(state.files.iter().map(|file| file.filename.clone()).collect()),
+                            &state.revision,
+                        )
+                        .artifact_id
+                    });
+                    crate::models::PumasModelRef {
+                        model_ref_contract_version: crate::models::PUMAS_MODEL_REF_CONTRACT_VERSION,
+                        model_id: destination.capability().library_model_id(),
+                        revision: state.revision.as_persisted().map(str::to_owned),
+                        selected_artifact_id,
+                        selected_artifact_path: None,
+                        migration_diagnostics: Vec::new(),
+                    }
+                });
+                IntentDownloadObservation {
+                    download_id: state.download_id.clone(),
+                    model_ref,
+                    repo_id: state.repo_id.clone(),
+                    status: state.status,
+                    downloaded_bytes: state.downloaded_bytes,
+                    total_bytes: state.total_bytes,
+                    blocked: state.ambient_authority_blocked
+                        || state.lifecycle_failure_unverified
+                        || state.recovery_destination().is_some(),
+                }
+            })
+            .collect::<Vec<_>>();
+        downloads.sort_by(|left, right| left.download_id.cmp(&right.download_id));
+        IntentDownloadSnapshot {
+            owner_closed: self.download_tasks.is_closed(),
+            downloads,
+        }
+    }
+
+    pub(super) fn hub_base_url(&self) -> &str {
+        #[cfg(test)]
+        if let Some(base) = self.download_base_url.as_deref() {
+            return base;
+        }
+        types::HF_HUB_BASE
+    }
+
+    pub(super) fn api_base_url(&self) -> &str {
+        #[cfg(test)]
+        if let Some(base) = self.download_base_url.as_deref() {
+            return base;
+        }
+        types::HF_API_BASE
+    }
+
     fn clone_for_invocation(&self) -> Self {
         Self {
             destination_root: self.destination_root.clone(),
@@ -491,6 +571,40 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let client = HuggingFaceClient::new(temp_dir.path()).unwrap();
         (temp_dir, client)
+    }
+
+    #[tokio::test]
+    async fn intent_snapshot_does_not_open_store_reconcile_or_publish() {
+        let (temp, mut client) = setup();
+        client
+            .configure_download_destination_root(temp.path())
+            .unwrap();
+        client.set_persistence(Arc::new(DownloadPersistence::new(temp.path())));
+        let store_path = temp.path().join("downloads.json");
+        std::fs::write(&store_path, b"deliberately invalid store").unwrap();
+        let mut notifications = client.subscribe_download_updates();
+        let revision = client
+            .download_revision
+            .load(std::sync::atomic::Ordering::SeqCst);
+        let observed = client.intent_download_snapshot().await;
+        assert!(!observed.owner_closed);
+        assert!(observed.downloads.is_empty());
+        assert_eq!(
+            std::fs::read(&store_path).unwrap(),
+            b"deliberately invalid store"
+        );
+        assert!(!temp.path().join(".downloads.lock").exists());
+        assert_eq!(
+            client
+                .download_revision
+                .load(std::sync::atomic::Ordering::SeqCst),
+            revision
+        );
+        assert!(matches!(
+            notifications.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        assert!(client.download_tasks.is_empty());
     }
 
     #[test]

@@ -92,6 +92,7 @@ fn start_primary_background_work(
     known_download_dirs: HashSet<PathBuf>,
     runtime_tasks: RuntimeTasks,
 ) -> Option<model_library::ModelLibraryWatcher> {
+    super::start_intent_reconciliation(primary_state.clone());
     let model_watcher = match start_model_library_watcher(primary_state.clone()) {
         Ok(watcher) => Some(watcher),
         Err(err) => {
@@ -402,6 +403,17 @@ impl PumasApiBuilder {
             })?;
         let model_library = Arc::new(model_library);
 
+        // Historical download custody applies even when upstream access is disabled.
+        let download_persistence = Arc::new(model_library::DownloadPersistence::new(
+            &self.launcher_root.join("launcher-data"),
+        ));
+        let mutation_root = model_library::DownloadDestinationRoot::open(&model_library_dir)?;
+        model_library.install_mutation_authority(
+            runtime_tasks.clone(),
+            mutation_root,
+            download_persistence.clone(),
+        )?;
+
         // Initialize HuggingFace client (if enabled)
         let mut hf_client = if self.enable_hf_client {
             let cache_dir = self
@@ -434,11 +446,6 @@ impl PumasApiBuilder {
                 }
             };
 
-            // Initialize download persistence
-            let data_dir = self.launcher_root.join("launcher-data");
-            let download_persistence =
-                std::sync::Arc::new(model_library::DownloadPersistence::new(&data_dir));
-
             let hf_cache_dir_for_task = hf_cache_dir.clone();
             let model_library_dir_for_task = model_library_dir.clone();
             match tokio::task::spawn_blocking(move || {
@@ -456,7 +463,7 @@ impl PumasApiBuilder {
                         client.set_search_cache(cache);
                     }
                     // Attach download persistence
-                    client.set_persistence(download_persistence);
+                    client.set_persistence(download_persistence.clone());
                     Some(client)
                 }
                 Ok(Err(e)) => {
@@ -527,6 +534,12 @@ impl PumasApiBuilder {
 
         let provider_registry = crate::providers::ProviderRegistry::builtin();
         let runtime_provider_adapters = crate::runtime_profiles::RuntimeProviderAdapters::builtin();
+        let hf_client = hf_client.map(Arc::new);
+        let intent_service = Arc::new(crate::intent::IntentService::new(
+            model_library.clone(),
+            hf_client.clone(),
+            runtime_tasks.clone(),
+        ));
         let primary_state = Arc::new(PrimaryState {
             _state: state,
             network_manager,
@@ -535,7 +548,8 @@ impl PumasApiBuilder {
             status_telemetry,
             system_utils,
             model_library,
-            hf_client: hf_client.map(Arc::new),
+            hf_client,
+            intent_service,
             model_importer,
             conversion_manager,
             runtime_profile_service: Arc::new(
@@ -558,6 +572,14 @@ impl PumasApiBuilder {
             registry: Some(registry),
             instance_claim: tokio::sync::Mutex::new(Some(claim)),
         });
+        let intent_primary = Arc::downgrade(&primary_state);
+        primary_state
+            .intent_service
+            .install_reconciliation_wake(Arc::new(move || {
+                if let Some(primary) = intent_primary.upgrade() {
+                    super::start_intent_reconciliation(primary);
+                }
+            }))?;
         primary_state.reconciliation.mark_dirty_all().await;
 
         let mut api = PumasApi {

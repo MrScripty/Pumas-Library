@@ -7,6 +7,7 @@ use cap_std::fs::OpenOptionsExt;
 use cap_std::fs::{Dir, OpenOptions};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
@@ -537,6 +538,39 @@ impl RecoveryRoot {
 }
 
 impl DownloadRecoveryDestination {
+    /// Observe durable destructive custody while the caller holds this root's
+    /// execution grant. An absent index is allowed for standalone download roots;
+    /// an existing index must be readable and authoritative.
+    pub(crate) fn assert_no_intent_deletion_claim(&self) -> Result<()> {
+        self.authority.require_current()?;
+        let database = self.authority.root_canonical_path.join("models.db");
+        let before = match std::fs::symlink_metadata(&database) {
+            Ok(metadata) if metadata.is_file() => metadata,
+            Ok(_) => return Err(invalid_capability_path().into()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                self.authority.require_current()?;
+                return Ok(());
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let index = crate::index::ModelIndex::open_read_only(&database)?;
+        let claims = index.list_intent_model_deletion_claims()?;
+        let after = std::fs::symlink_metadata(&database)?;
+        self.authority.require_current()?;
+        if !after.is_file() || filesystem_identity(&before) != filesystem_identity(&after) {
+            return Err(invalid_capability_path().into());
+        }
+        if claims
+            .iter()
+            .any(|claim| claim.model_id == self.library_model_id())
+        {
+            return Err(PumasError::Config {
+                message: "Download destination has unresolved intent deletion custody".into(),
+            });
+        }
+        Ok(())
+    }
+
     /// Observed catalog identity, not authority to perform filesystem effects.
     pub(crate) fn library_model_id(&self) -> String {
         self.model_relative
@@ -629,6 +663,206 @@ impl DownloadRecoveryDestination {
 
     pub(crate) fn prepare(&self) -> io::Result<()> {
         self.directory(true).map(|_| ())
+    }
+
+    pub(crate) fn read_model_metadata(&self) -> Result<Option<crate::models::ModelMetadata>> {
+        let Some(directory) = self.directory_if_present(false)? else {
+            return Ok(None);
+        };
+        let metadata = Self::read_provenance_file(&directory, "metadata.json")?
+            .map(serde_json::from_value)
+            .transpose()?;
+        self.directory(false)?;
+        Ok(metadata)
+    }
+
+    pub(crate) fn write_model_metadata(
+        &self,
+        metadata: &crate::models::ModelMetadata,
+    ) -> Result<()> {
+        let directory = self.directory(false)?;
+        let expected = directory_identity(&directory)?;
+        let destination = self.clone();
+        let target = crate::metadata::AtomicJsonTarget::from_capability(
+            directory,
+            std::ffi::OsStr::new("metadata.json"),
+            self.display_path.join("metadata.json"),
+            move || Ok(directory_identity(&destination.directory(false)?)? == expected),
+        )?;
+        match target.publish_json(metadata) {
+            Ok(crate::metadata::AtomicPublication::Durable) => Ok(()),
+            Ok(crate::metadata::AtomicPublication::PublishedDurabilityUnknown { error }) => {
+                Err(error)
+            }
+            Ok(crate::metadata::AtomicPublication::VisibilityUnknown { error, cleanup }) => {
+                Err(crate::metadata::AtomicPublishFailure {
+                    stage: crate::metadata::AtomicPublishStage::Rename,
+                    kind: crate::metadata::AtomicPublishFailureKind::Filesystem,
+                    error,
+                    cleanup,
+                }
+                .into_error())
+            }
+            Err(failure) => Err(failure.into_error()),
+        }
+    }
+
+    /// Remove only the bound model directory, using held directory-relative
+    /// operations. Symlinks inside the payload are unlinked, never traversed.
+    /// The caller retains native exclusion and a durable deletion claim.
+    pub(crate) fn remove_model_directory_all(&self) -> Result<()> {
+        let directory = self.directory(false)?;
+        let parent_relative = self
+            .model_relative
+            .parent()
+            .ok_or_else(invalid_capability_path)?;
+        let name = self
+            .model_relative
+            .file_name()
+            .ok_or_else(invalid_capability_path)?;
+        let parent = open_directory_chain(&self.authority.root, parent_relative, false)?;
+        let expected = directory_identity(&directory)?;
+        if directory_identity(&open_directory_chain(&parent, Path::new(name), false)?)? != expected
+        {
+            return Err(invalid_capability_path().into());
+        }
+        remove_held_directory_contents(&directory)?;
+        self.authority.require_current()?;
+        if directory_identity(&open_directory_chain(&parent, Path::new(name), false)?)? != expected
+        {
+            return Err(invalid_capability_path().into());
+        }
+        parent.remove_dir(name)?;
+        parent.open(".")?.sync_all()?;
+        self.authority.require_current()?;
+        Ok(())
+    }
+
+    /// Relocate a bound directory between held roots without replacing a
+    /// destination. The caller retains grants for both roots; cross-filesystem
+    /// copying is not authorized by this capability.
+    pub(crate) fn rename_model_directory_noreplace(&self, target: &Self) -> Result<()> {
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = target;
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Held model relocation requires Linux renameat2",
+            )
+            .into())
+        }
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::ffi::OsStrExt;
+
+            self.authority.require_current()?;
+            target.authority.require_current()?;
+            let source = self.directory(false)?;
+            let expected = directory_identity(&source)?;
+            if target.directory_if_present(false)?.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "Model relocation destination already exists",
+                )
+                .into());
+            }
+            let source_parent = open_directory_chain(
+                &self.authority.root,
+                self.model_relative
+                    .parent()
+                    .ok_or_else(invalid_capability_path)?,
+                false,
+            )?;
+            let target_parent = open_directory_chain(
+                &target.authority.root,
+                target
+                    .model_relative
+                    .parent()
+                    .ok_or_else(invalid_capability_path)?,
+                true,
+            )?;
+            let source_name = self
+                .model_relative
+                .file_name()
+                .ok_or_else(invalid_capability_path)?;
+            let target_name = target
+                .model_relative
+                .file_name()
+                .ok_or_else(invalid_capability_path)?;
+            if directory_identity(&open_directory_chain(
+                &source_parent,
+                Path::new(source_name),
+                false,
+            )?)? != expected
+            {
+                return Err(invalid_capability_path().into());
+            }
+            let source_c = std::ffi::CString::new(source_name.as_bytes())
+                .map_err(|_| invalid_capability_path())?;
+            let target_c = std::ffi::CString::new(target_name.as_bytes())
+                .map_err(|_| invalid_capability_path())?;
+            // A capability directory may use O_PATH, which supports renameat2
+            // but rejects fsync. Open "." relative to each held parent to get
+            // readable directory descriptors usable for both operations.
+            let source_parent = source_parent.open(".")?.into_std();
+            let target_parent = target_parent.open(".")?.into_std();
+            self.authority.require_current()?;
+            target.authority.require_current()?;
+            rename_held_directories_noreplace(
+                &source_parent,
+                &source_c,
+                &target_parent,
+                &target_c,
+            )?;
+            source_parent.sync_all()?;
+            target_parent.sync_all()?;
+            self.authority.require_current()?;
+            target.authority.require_current()?;
+            if directory_identity(&target.directory(false)?)? != expected {
+                return Err(invalid_capability_path().into());
+            }
+            Ok(())
+        }
+    }
+
+    /// Observe existing download provenance through the held destination.
+    /// The caller owns revision policy and must repeat this observation under
+    /// its destination reservation before admitting effects.
+    pub(crate) fn read_download_provenance(&self) -> Result<(Option<Value>, Option<Value>)> {
+        let Some(directory) = self.directory_if_present(false)? else {
+            return Ok((None, None));
+        };
+        let metadata = Self::read_provenance_file(&directory, "metadata.json")?;
+        let marker = Self::read_provenance_file(&directory, ".pumas_download")?;
+        // A replaced directory/root is a refusal, never an empty observation.
+        self.directory(false)?;
+        Ok((metadata, marker))
+    }
+
+    fn read_provenance_file(directory: &Dir, name: &str) -> Result<Option<Value>> {
+        let mut options = OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        let file = match directory.open_with(name, &options) {
+            Ok(file) => file.into_std(),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.into()),
+        };
+        if !file.metadata()?.is_file() {
+            return Err(invalid_capability_path().into());
+        }
+        let value: Value = serde_json::from_reader(file).map_err(|source| PumasError::Json {
+            message: "Download provenance is not valid JSON".to_string(),
+            source: Some(source),
+        })?;
+        if !value.is_object() {
+            return Err(PumasError::Validation {
+                field: "download.provenance".to_string(),
+                message: "Download provenance must be a JSON object".to_string(),
+            });
+        }
+        Ok(Some(value))
     }
 
     fn file_parent(&self, file: &str, create: bool) -> io::Result<(Dir, String)> {
@@ -770,6 +1004,86 @@ impl DownloadRecoveryDestination {
         self.regular_file_len(&self.part_relative(Path::new(file)))
     }
 
+    /// Verify an admitted file through its held directory authority.
+    /// Missing size/hash evidence remains unknown; it is never inferred here.
+    /// The caller retains the execution reservation and owns this blocking read.
+    pub(crate) fn verify_download_file(
+        &self,
+        filename: &str,
+        is_partial: bool,
+        expected_size: Option<u64>,
+        expected_sha256: Option<&str>,
+    ) -> Result<()> {
+        if expected_sha256.is_some_and(|value| {
+            value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }) {
+            return Err(invalid_download_integrity(
+                "Expected SHA256 is not a complete hexadecimal digest",
+            ));
+        }
+        let (parent, name) = self.file_parent(filename, false)?;
+        let name = if is_partial {
+            format!(
+                "{name}{}",
+                crate::config::NetworkConfig::DOWNLOAD_TEMP_SUFFIX
+            )
+        } else {
+            name
+        };
+        let mut options = OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        let mut file = parent.open_with(&name, &options)?.into_std();
+        let before = file.metadata()?;
+        if !before.is_file() {
+            return Err(invalid_capability_path().into());
+        }
+        if expected_size.is_some_and(|expected| expected != before.len()) {
+            return Err(invalid_download_integrity(
+                "Downloaded file size does not match expected size",
+            ));
+        }
+        let actual_sha256 = if expected_sha256.is_some() {
+            let mut hasher = Sha256::new();
+            let mut buffer = [0_u8; 64 * 1024];
+            loop {
+                let count = file.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                hasher.update(&buffer[..count]);
+            }
+            Some(hex::encode(hasher.finalize()))
+        } else {
+            None
+        };
+        let after = file.metadata()?;
+        let (current_parent, _) = self.file_parent(filename, false)?;
+        let current = current_parent.open_with(&name, &options)?.into_std();
+        let current_metadata = current.metadata()?;
+        if !current_metadata.is_file()
+            || filesystem_identity(&before) != filesystem_identity(&current_metadata)
+            || before.len() != after.len()
+            || before.modified()? != after.modified()?
+            || after.len() != current_metadata.len()
+            || after.modified()? != current_metadata.modified()?
+        {
+            return Err(invalid_download_integrity(
+                "Downloaded file changed during verification",
+            ));
+        }
+        if let (Some(expected), Some(actual)) = (expected_sha256, actual_sha256) {
+            if !actual.eq_ignore_ascii_case(expected) {
+                return Err(PumasError::HashMismatch {
+                    expected: expected.to_ascii_lowercase(),
+                    actual,
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn open_part(&self, file: &str, append: bool) -> io::Result<std::fs::File> {
         let (parent, name) = self.file_parent(file, true)?;
         let name = format!(
@@ -885,6 +1199,64 @@ impl DownloadRecoveryDestination {
 fn directory_identity(directory: &Dir) -> io::Result<FilesystemIdentity> {
     filesystem_identity(&directory.try_clone()?.into_std_file().metadata()?)
         .ok_or_else(invalid_capability_path)
+}
+
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+fn rename_held_directories_noreplace(
+    source_parent: &std::fs::File,
+    source_name: &std::ffi::CStr,
+    target_parent: &std::fs::File,
+    target_name: &std::ffi::CStr,
+) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: the borrowed files keep both directory descriptors open for the
+    // entire synchronous syscall; the borrowed CStr arguments are valid,
+    // NUL-terminated names for that same lifetime. The caller supplies one
+    // validated basename per held no-follow parent. renameat2 does not retain
+    // these pointers, and RENAME_NOREPLACE forbids replacement of any target.
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_renameat2,
+            source_parent.as_raw_fd(),
+            source_name.as_ptr(),
+            target_parent.as_raw_fd(),
+            target_name.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+fn remove_held_directory_contents(directory: &Dir) -> io::Result<()> {
+    for entry in directory.entries()? {
+        let name = entry?.file_name();
+        if directory.symlink_metadata(&name)?.is_dir() {
+            let child = open_directory_chain(directory, Path::new(&name), false)?;
+            let expected = directory_identity(&child)?;
+            remove_held_directory_contents(&child)?;
+            if directory_identity(&open_directory_chain(directory, Path::new(&name), false)?)?
+                != expected
+            {
+                return Err(invalid_capability_path());
+            }
+            directory.remove_dir(&name)?;
+        } else {
+            directory.remove_file(&name)?;
+        }
+    }
+    directory.open(".")?.sync_all()
+}
+
+fn invalid_download_integrity(message: &str) -> PumasError {
+    PumasError::Validation {
+        field: "download.integrity".to_string(),
+        message: message.to_string(),
+    }
 }
 
 /// Walk one component at a time without following symlinks. Each next operation
@@ -1079,6 +1451,13 @@ fn recovery_snapshot(
         return Ok(None);
     }
 
+    // Tickets currently reconstruct a legacy-main request. Do not issue or
+    // verify that authority for an artifact bound to another revision. Pinned
+    // execution resumes through its persisted download snapshot instead.
+    if optional_text(metadata, "upstream_revision")?.is_some_and(|revision| revision != "main") {
+        return Ok(None);
+    }
+
     let repo_id = optional_text(metadata, "repo_id")?;
     let Some(repo_id) = repo_id else {
         return Ok(None);
@@ -1267,6 +1646,333 @@ fn invalid_capability_path() -> io::Error {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn held_model_metadata_preserves_substituted_destination() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let library = temp.path().join("library");
+        let victim = temp.path().join("victim");
+        std::fs::create_dir_all(library.join("model")).unwrap();
+        std::fs::create_dir_all(&victim).unwrap();
+        std::fs::write(victim.join("metadata.json"), b"external metadata").unwrap();
+        let root = super::DownloadDestinationRoot::open(&library).unwrap();
+        let destination = root.resolve(std::path::Path::new("model")).unwrap();
+        let _grant = root.try_acquire_execution_grant().unwrap();
+        let metadata = crate::models::ModelMetadata {
+            model_id: Some("model".into()),
+            ..Default::default()
+        };
+        destination.write_model_metadata(&metadata).unwrap();
+        assert_eq!(
+            destination.read_model_metadata().unwrap().unwrap().model_id,
+            metadata.model_id
+        );
+        let original_bytes = std::fs::read(library.join("model/metadata.json")).unwrap();
+        std::fs::rename(library.join("model"), library.join("original")).unwrap();
+        std::os::unix::fs::symlink(&victim, library.join("model")).unwrap();
+        assert!(destination.read_model_metadata().is_err());
+        assert!(destination.write_model_metadata(&metadata).is_err());
+        assert_eq!(
+            std::fs::read(victim.join("metadata.json")).unwrap(),
+            b"external metadata"
+        );
+        assert_eq!(
+            std::fs::read(library.join("original/metadata.json")).unwrap(),
+            original_bytes
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn held_model_relocation_moves_between_roots_and_never_overwrites() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("source");
+        let target_path = temp.path().join("target");
+        std::fs::create_dir_all(source_path.join("model")).unwrap();
+        std::fs::create_dir_all(&target_path).unwrap();
+        std::fs::write(source_path.join("model/weights"), b"original").unwrap();
+        let source_root = super::DownloadDestinationRoot::open(&source_path).unwrap();
+        let target_root = super::DownloadDestinationRoot::open(&target_path).unwrap();
+        let _source_grant = source_root.try_acquire_execution_grant().unwrap();
+        let _target_grant = target_root.try_acquire_execution_grant().unwrap();
+        let source = source_root.resolve(std::path::Path::new("model")).unwrap();
+        let target = target_root
+            .resolve(std::path::Path::new("family/model"))
+            .unwrap();
+        source.rename_model_directory_noreplace(&target).unwrap();
+        assert!(!source_path.join("model").exists());
+        assert_eq!(
+            std::fs::read(target_path.join("family/model/weights")).unwrap(),
+            b"original"
+        );
+
+        std::fs::create_dir_all(source_path.join("replacement")).unwrap();
+        std::fs::write(source_path.join("replacement/weights"), b"replacement").unwrap();
+        let replacement = source_root
+            .resolve(std::path::Path::new("replacement"))
+            .unwrap();
+        assert!(replacement
+            .rename_model_directory_noreplace(&target)
+            .is_err());
+        assert_eq!(
+            std::fs::read(source_path.join("replacement/weights")).unwrap(),
+            b"replacement"
+        );
+        assert_eq!(
+            std::fs::read(target_path.join("family/model/weights")).unwrap(),
+            b"original"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn held_model_relocation_rejects_a_substituted_destination_parent() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let library = temp.path().join("library");
+        let victim = temp.path().join("victim");
+        std::fs::create_dir_all(library.join("source")).unwrap();
+        std::fs::create_dir_all(library.join("family")).unwrap();
+        std::fs::create_dir_all(&victim).unwrap();
+        std::fs::write(library.join("source/weights"), b"original").unwrap();
+        std::fs::write(victim.join("keep"), b"victim").unwrap();
+        let root = super::DownloadDestinationRoot::open(&library).unwrap();
+        let _grant = root.try_acquire_execution_grant().unwrap();
+        let source = root.resolve(std::path::Path::new("source")).unwrap();
+        let target = root.resolve(std::path::Path::new("family/model")).unwrap();
+        std::fs::rename(library.join("family"), library.join("original-family")).unwrap();
+        std::os::unix::fs::symlink(&victim, library.join("family")).unwrap();
+        assert!(source.rename_model_directory_noreplace(&target).is_err());
+        assert_eq!(
+            std::fs::read(library.join("source/weights")).unwrap(),
+            b"original"
+        );
+        assert_eq!(std::fs::read(victim.join("keep")).unwrap(), b"victim");
+        assert!(!victim.join("model").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn held_model_deletion_unlinks_payload_symlinks_without_following_them() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let library = temp.path().join("library");
+        let victim = temp.path().join("victim");
+        std::fs::create_dir_all(library.join("model/nested")).unwrap();
+        std::fs::create_dir_all(&victim).unwrap();
+        std::fs::write(victim.join("keep"), b"external").unwrap();
+        std::fs::write(library.join("model/nested/weights"), b"owned").unwrap();
+        std::os::unix::fs::symlink(&victim, library.join("model/link")).unwrap();
+        let root = super::DownloadDestinationRoot::open(&library).unwrap();
+        let destination = root.resolve(std::path::Path::new("model")).unwrap();
+        let _grant = root.try_acquire_execution_grant().unwrap();
+        destination.remove_model_directory_all().unwrap();
+        assert!(!library.join("model").exists());
+        assert_eq!(std::fs::read(victim.join("keep")).unwrap(), b"external");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn held_model_deletion_rejects_substituted_destination_and_root() {
+        for replace_root in [false, true] {
+            let temp = tempfile::TempDir::new().unwrap();
+            let library = temp.path().join("library");
+            let victim = temp.path().join("victim");
+            std::fs::create_dir_all(library.join("model")).unwrap();
+            std::fs::create_dir_all(victim.join("model")).unwrap();
+            std::fs::write(library.join("model/keep"), b"original").unwrap();
+            std::fs::write(victim.join("model/keep"), b"victim").unwrap();
+            let root = super::DownloadDestinationRoot::open(&library).unwrap();
+            let destination = root.resolve(std::path::Path::new("model")).unwrap();
+            let _grant = root.try_acquire_execution_grant().unwrap();
+            let original = if replace_root {
+                std::fs::rename(&library, temp.path().join("original")).unwrap();
+                std::os::unix::fs::symlink(&victim, &library).unwrap();
+                temp.path().join("original/model/keep")
+            } else {
+                std::fs::rename(library.join("model"), library.join("original")).unwrap();
+                std::os::unix::fs::symlink(victim.join("model"), library.join("model")).unwrap();
+                library.join("original/keep")
+            };
+            assert!(destination.remove_model_directory_all().is_err());
+            assert_eq!(std::fs::read(original).unwrap(), b"original");
+            assert_eq!(std::fs::read(victim.join("model/keep")).unwrap(), b"victim");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn intent_deletion_custody_check_is_read_only_and_survives_reopen() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = super::DownloadDestinationRoot::open(temp.path()).unwrap();
+        let destination = root.resolve(std::path::Path::new("model")).unwrap();
+        let _grant = root.try_acquire_execution_grant().unwrap();
+        let database = temp.path().join("models.db");
+        destination.assert_no_intent_deletion_claim().unwrap();
+        assert!(!database.exists());
+
+        let token = uuid::Uuid::new_v4();
+        {
+            let index = crate::index::ModelIndex::new(&database).unwrap();
+            index.claim_intent_model_deletion("model", token).unwrap();
+        }
+        assert!(destination.assert_no_intent_deletion_claim().is_err());
+        let index = crate::index::ModelIndex::open_read_only(&database).unwrap();
+        let claims = index.list_intent_model_deletion_claims().unwrap();
+        assert_eq!(claims.len(), 1);
+        assert_eq!(claims[0].claim_token, token);
+        drop(index);
+        let index = crate::index::ModelIndex::new(&database).unwrap();
+        assert!(index.release_intent_model_deletion("model", token).unwrap());
+        destination.assert_no_intent_deletion_claim().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn malformed_intent_database_is_not_absent_download_custody() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = super::DownloadDestinationRoot::open(temp.path()).unwrap();
+        let destination = root.resolve(std::path::Path::new("model")).unwrap();
+        let _grant = root.try_acquire_execution_grant().unwrap();
+        let database = temp.path().join("models.db");
+        std::fs::write(&database, b"broken authoritative database").unwrap();
+        assert!(destination.assert_no_intent_deletion_claim().is_err());
+        assert_eq!(
+            std::fs::read(&database).unwrap(),
+            b"broken authoritative database"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bound_download_integrity_verifies_final_and_partial_without_mutating_bytes() {
+        const ABC_SHA256: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = super::DownloadDestinationRoot::open(temp.path()).unwrap();
+        let destination = root.resolve(std::path::Path::new("model")).unwrap();
+        std::fs::create_dir_all(temp.path().join("model/nested")).unwrap();
+        for is_partial in [false, true] {
+            let name = if is_partial {
+                "weights.gguf.part"
+            } else {
+                "weights.gguf"
+            };
+            let path = temp.path().join("model/nested").join(name);
+            std::fs::write(&path, b"abc").unwrap();
+            destination
+                .verify_download_file("nested/weights.gguf", is_partial, Some(3), Some(ABC_SHA256))
+                .unwrap();
+            assert!(matches!(
+                destination.verify_download_file("nested/weights.gguf", is_partial, Some(4), Some(ABC_SHA256)),
+                Err(crate::PumasError::Validation { field, .. }) if field == "download.integrity"
+            ));
+            assert!(matches!(
+                destination.verify_download_file("nested/weights.gguf", is_partial, Some(3), Some("invalid")),
+                Err(crate::PumasError::Validation { field, .. }) if field == "download.integrity"
+            ));
+            std::fs::write(&path, b"abd").unwrap();
+            assert!(matches!(
+                destination.verify_download_file(
+                    "nested/weights.gguf",
+                    is_partial,
+                    Some(3),
+                    Some(ABC_SHA256)
+                ),
+                Err(crate::PumasError::HashMismatch { .. })
+            ));
+            assert_eq!(std::fs::read(&path).unwrap(), b"abd");
+            // Missing evidence permits only the regular-file observation.
+            destination
+                .verify_download_file("nested/weights.gguf", is_partial, None, None)
+                .unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bound_download_integrity_refuses_missing_symlink_directory_and_replaced_parent() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = super::DownloadDestinationRoot::open(temp.path()).unwrap();
+        let destination = root.resolve(std::path::Path::new("model")).unwrap();
+        std::fs::create_dir_all(temp.path().join("model/nested")).unwrap();
+        assert!(destination
+            .verify_download_file("missing.gguf", false, None, None)
+            .is_err());
+        assert!(destination
+            .verify_download_file("nested", false, None, None)
+            .is_err());
+        std::fs::write(temp.path().join("outside.gguf"), b"abc").unwrap();
+        std::os::unix::fs::symlink("../outside.gguf", temp.path().join("model/linked.gguf"))
+            .unwrap();
+        assert!(destination
+            .verify_download_file("linked.gguf", false, Some(3), None)
+            .is_err());
+        std::fs::write(temp.path().join("model/nested/weights.gguf"), b"abc").unwrap();
+        destination
+            .verify_download_file("nested/weights.gguf", false, Some(3), None)
+            .unwrap();
+        std::fs::rename(
+            temp.path().join("model/nested"),
+            temp.path().join("model/original"),
+        )
+        .unwrap();
+        std::fs::create_dir(temp.path().join("model/nested")).unwrap();
+        std::fs::write(temp.path().join("model/nested/weights.gguf"), b"abc").unwrap();
+        assert!(destination
+            .verify_download_file("nested/weights.gguf", false, Some(3), None)
+            .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn download_provenance_is_read_only_and_preserves_marker_only_pins() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = super::DownloadDestinationRoot::open(temp.path()).unwrap();
+        let destination = root.resolve(std::path::Path::new("model")).unwrap();
+        assert_eq!(
+            destination.read_download_provenance().unwrap(),
+            (None, None)
+        );
+        assert!(!temp.path().join("model").exists());
+        destination.prepare().unwrap();
+        let marker = serde_json::json!({
+            "selected_artifact": { "revision": "a".repeat(40) }
+        });
+        std::fs::write(
+            temp.path().join("model/.pumas_download"),
+            serde_json::to_vec(&marker).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            destination.read_download_provenance().unwrap(),
+            (None, Some(marker))
+        );
+        assert!(!temp.path().join("model/metadata.json").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn download_provenance_refuses_symlinks_malformed_json_and_replaced_destination() {
+        for name in ["metadata.json", ".pumas_download"] {
+            let temp = tempfile::TempDir::new().unwrap();
+            let root = super::DownloadDestinationRoot::open(temp.path()).unwrap();
+            let destination = root.resolve(std::path::Path::new("model")).unwrap();
+            destination.prepare().unwrap();
+            let path = temp.path().join("model").join(name);
+            std::fs::write(temp.path().join("elsewhere.json"), b"{}").unwrap();
+            std::os::unix::fs::symlink("../elsewhere.json", &path).unwrap();
+            assert!(destination.read_download_provenance().is_err());
+            std::fs::remove_file(&path).unwrap();
+            std::fs::write(&path, b"{").unwrap();
+            assert!(destination.read_download_provenance().is_err());
+            std::fs::write(&path, b"null").unwrap();
+            assert!(destination.read_download_provenance().is_err());
+            std::fs::write(&path, b"{}").unwrap();
+            assert!(destination.read_download_provenance().is_ok());
+            std::fs::rename(temp.path().join("model"), temp.path().join("original")).unwrap();
+            std::fs::create_dir(temp.path().join("model")).unwrap();
+            assert!(destination.read_download_provenance().is_err());
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn root_execution_grants_contend_across_aliases_and_release_on_close() {
@@ -2023,6 +2729,31 @@ mod tests {
             verify_download_recovery_ticket(&root, &managed, &current).unwrap(),
             DownloadRecoveryVerification::Verified(_)
         ));
+    }
+
+    #[test]
+    fn recovery_ticket_refuses_non_main_revision_without_mutation() {
+        let temp = TempDir::new().unwrap();
+        let mut record = partial_record(temp.path(), vec!["weights.gguf"]);
+        let ticket = issue_download_recovery_ticket(temp.path(), &record)
+            .unwrap()
+            .unwrap();
+        let token = DownloadRecoveryToken::parse(ticket.token()).unwrap();
+        for revision in ["0123456789abcdef0123456789abcdef01234567", "release-tag"] {
+            record.metadata["upstream_revision"] = json!(revision);
+            assert!(issue_download_recovery_ticket(temp.path(), &record)
+                .unwrap()
+                .is_none());
+            assert!(matches!(
+                verify_download_recovery_ticket(temp.path(), &record, &token).unwrap(),
+                DownloadRecoveryVerification::Unavailable
+            ));
+        }
+        assert!(!temp.path().join(super::LIBRARY_ID_MARKER).exists());
+        record.metadata["upstream_revision"] = json!("main");
+        assert!(issue_download_recovery_ticket(temp.path(), &record)
+            .unwrap()
+            .is_some());
     }
 
     #[cfg(unix)]

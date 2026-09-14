@@ -4,6 +4,9 @@
 //! with content-based type detection and integrity verification.
 
 use crate::error::{PumasError, Result};
+use crate::model_library::artifact_identity::{
+    apply_download_artifact_metadata_at_revision, DownloadRevision,
+};
 use crate::model_library::external_assets::{
     build_diffusers_bundle_metadata, build_external_diffusers_metadata,
     validate_diffusers_directory_for_import, DiffusersBundleMetadataSpec,
@@ -20,10 +23,9 @@ use crate::model_library::types::{
     SecurityTier,
 };
 use crate::model_library::{
-    apply_download_artifact_metadata, normalize_artifact_path_slug, normalize_task_signature,
-    push_review_reason, resolve_model_type_with_rules, validate_metadata_v2_with_index,
-    AuxFilesCompleteInfo, DownloadCompletionInfo, SelectedArtifactIdentity,
-    TaskNormalizationStatus,
+    normalize_artifact_path_slug, normalize_task_signature, push_review_reason,
+    resolve_model_type_with_rules, validate_metadata_v2_with_index, AuxFilesCompleteInfo,
+    DownloadCompletionInfo, SelectedArtifactIdentity, TaskNormalizationStatus,
 };
 use crate::models::resolve_inference_settings;
 use serde::{Deserialize, Serialize};
@@ -489,6 +491,7 @@ impl ModelImporter {
         spec: &InPlaceImportSpec,
         validation: &DiffusersValidationResult,
         mode: InPlaceImportMode,
+        revision: &DownloadRevision,
     ) -> Result<ModelImportResult> {
         let model_dir = &spec.model_dir;
         let model_id = self.library.get_model_id(model_dir).ok_or_else(|| {
@@ -525,10 +528,11 @@ impl ModelImporter {
                 .clone()
                 .or_else(|| Some("license_unknown".into()));
             if let Some(request) = &spec.download_request {
-                apply_download_artifact_metadata(
+                apply_download_artifact_metadata_at_revision(
                     &mut metadata,
                     request,
                     spec.huggingface_evidence.as_ref(),
+                    revision,
                 );
             }
         }
@@ -576,6 +580,16 @@ impl ModelImporter {
         &self,
         info: &DownloadCompletionInfo,
     ) -> Result<ModelImportResult> {
+        self.finalize_downloaded_directory_at_revision(info, &DownloadRevision::legacy_main())
+            .await
+    }
+
+    /// Finalize a download using the exact revision that supplied its bytes.
+    pub(crate) async fn finalize_downloaded_directory_at_revision(
+        &self,
+        info: &DownloadCompletionInfo,
+        revision: &DownloadRevision,
+    ) -> Result<ModelImportResult> {
         let model_id =
             self.library
                 .get_model_id(&info.dest_dir)
@@ -602,7 +616,7 @@ impl ModelImporter {
             license_status: info.download_request.license_status.clone(),
         };
         let result = self
-            .import_in_place_with_mode(&spec, InPlaceImportMode::FinalizeDownload)
+            .import_in_place_with_mode(&spec, InPlaceImportMode::FinalizeDownload, revision)
             .await?;
         if !result.success || result.model_id.as_deref() != Some(model_id.as_str()) {
             return Err(PumasError::Validation {
@@ -612,20 +626,37 @@ impl ModelImporter {
                 }),
             });
         }
+        if revision.as_persisted().is_some() {
+            // The download owner awaits this finalization before publishing
+            // completion. Read-only intent observers can then use canonical
+            // facts without generating or repairing them during status reads.
+            self.library.resolve_model_package_facts(&model_id).await?;
+        }
         Ok(result)
     }
 
     /// Persist a preliminary metadata record for a queued/partial download.
     pub async fn upsert_download_metadata_stub(&self, info: &AuxFilesCompleteInfo) -> Result<()> {
+        self.upsert_download_metadata_stub_at_revision(info, &DownloadRevision::legacy_main())
+            .await
+    }
+
+    /// Persist partial-download metadata using its execution revision.
+    pub(crate) async fn upsert_download_metadata_stub_at_revision(
+        &self,
+        info: &AuxFilesCompleteInfo,
+        revision: &DownloadRevision,
+    ) -> Result<()> {
         let model_dir = &info.dest_dir;
         let model_type = info
             .download_request
             .model_type
             .clone()
             .unwrap_or_else(|| "unknown".to_string());
-        let selected_artifact = SelectedArtifactIdentity::from_download_request(
+        let selected_artifact = SelectedArtifactIdentity::from_download_request_at_revision(
             &info.download_request,
             Some(info.filenames.clone()),
+            revision,
         );
         let model_id = self.library.get_model_id(model_dir).unwrap_or_else(|| {
             self.library.build_artifact_model_id(
@@ -662,10 +693,11 @@ impl ModelImporter {
         metadata.expected_files = Some(info.filenames.clone());
         metadata.pipeline_tag = info.download_request.pipeline_tag.clone();
         metadata.huggingface_evidence = info.huggingface_evidence.clone();
-        apply_download_artifact_metadata(
+        apply_download_artifact_metadata_at_revision(
             &mut metadata,
             &info.download_request,
             info.huggingface_evidence.as_ref(),
+            revision,
         );
         metadata.release_date = info.download_request.release_date.clone();
         metadata.download_url = info.download_request.download_url.clone();
@@ -693,18 +725,10 @@ impl ModelImporter {
         metadata.requires_custom_code.get_or_insert(false);
         metadata.metadata_needs_review = Some(true);
         metadata.review_status = Some("pending".to_string());
-        let mut reasons = metadata.review_reasons.take().unwrap_or_default();
-        if !reasons.iter().any(|reason| reason == "download-partial") {
-            reasons.push("download-partial".to_string());
+        push_review_reason(&mut metadata, "download-partial");
+        if model_type == "unknown" {
+            push_review_reason(&mut metadata, "model-type-unresolved");
         }
-        if model_type == "unknown"
-            && !reasons
-                .iter()
-                .any(|reason| reason == "model-type-unresolved")
-        {
-            reasons.push("model-type-unresolved".to_string());
-        }
-        metadata.review_reasons = Some(reasons);
         metadata.license_status = info
             .download_request
             .license_status
@@ -1319,7 +1343,23 @@ impl ModelImporter {
     /// - Post-download finalization (HfClient downloads land in library tree)
     /// - Orphan recovery (directories with model files but no metadata.json)
     pub async fn import_in_place(&self, spec: &InPlaceImportSpec) -> Result<ModelImportResult> {
-        self.import_in_place_with_mode(spec, InPlaceImportMode::PreserveExisting)
+        self.import_in_place_at_revision(spec, &DownloadRevision::legacy_main())
+            .await
+    }
+
+    /// Import in place while retaining pinned download provenance when supplied.
+    pub(crate) async fn import_in_place_at_revision(
+        &self,
+        spec: &InPlaceImportSpec,
+        revision: &DownloadRevision,
+    ) -> Result<ModelImportResult> {
+        if revision.as_persisted().is_some() && spec.download_request.is_none() {
+            return Err(PumasError::Validation {
+                field: "download.revision".into(),
+                message: "Pinned in-place import requires download provenance".into(),
+            });
+        }
+        self.import_in_place_with_mode(spec, InPlaceImportMode::PreserveExisting, revision)
             .await
     }
 
@@ -1327,12 +1367,26 @@ impl ModelImporter {
         &self,
         spec: &InPlaceImportSpec,
         mode: InPlaceImportMode,
+        revision: &DownloadRevision,
     ) -> Result<ModelImportResult> {
         let model_dir = &spec.model_dir;
         let metadata_path = model_dir.join("metadata.json");
 
         // Guard: skip if metadata already exists (idempotent)
         if mode == InPlaceImportMode::PreserveExisting && path_exists(&metadata_path).await? {
+            if revision.as_persisted().is_some() {
+                let existing =
+                    load_model_metadata_or_default(self.library.clone(), model_dir.to_path_buf())
+                        .await?;
+                if existing.upstream_revision.as_deref() != Some(revision.as_str()) {
+                    return Err(PumasError::Validation {
+                        field: "download.revision".into(),
+                        message:
+                            "Existing model metadata does not match the pinned download revision"
+                                .into(),
+                    });
+                }
+            }
             let model_id = self.index_existing_metadata_if_missing(model_dir).await?;
             return Ok(ModelImportResult {
                 path: model_dir.display().to_string(),
@@ -1361,7 +1415,7 @@ impl ModelImporter {
         })?;
         if bundle_validation.validation_state == crate::models::AssetValidationState::Valid {
             return self
-                .import_library_owned_diffusers_directory(spec, &bundle_validation, mode)
+                .import_library_owned_diffusers_directory(spec, &bundle_validation, mode, revision)
                 .await;
         }
 
@@ -1542,10 +1596,11 @@ impl ModelImporter {
         metadata.pipeline_tag = spec.pipeline_tag.clone();
         metadata.huggingface_evidence = spec.huggingface_evidence.clone();
         if let Some(download_request) = spec.download_request.as_ref() {
-            apply_download_artifact_metadata(
+            apply_download_artifact_metadata_at_revision(
                 &mut metadata,
                 download_request,
                 spec.huggingface_evidence.as_ref(),
+                revision,
             );
         }
         metadata.release_date = spec.release_date.clone();
@@ -1975,6 +2030,118 @@ mod tests {
     #[tokio::test]
     async fn downloaded_diffusers_finalization_retains_provenance_after_index_failure() {
         assert_downloaded_finalization_index_retry(true).await;
+    }
+
+    #[tokio::test]
+    async fn pinned_download_finalization_records_exact_revision_for_all_import_paths() {
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+
+        for diffusers in [false, true] {
+            let (_temp, library) = setup().await;
+            let importer = ModelImporter::new(library.clone());
+            let model_dir = if diffusers {
+                create_external_diffusers_bundle(
+                    &library.library_root().join("diffusion/publisher"),
+                )
+            } else {
+                let model_dir = library.build_model_path("vision", "publisher", "finalized-model");
+                std::fs::create_dir_all(&model_dir).unwrap();
+                std::fs::write(model_dir.join("detector.onnx"), b"downloaded payload").unwrap();
+                model_dir
+            };
+            let info = completed_download(&model_dir, diffusers);
+            let revision = DownloadRevision::from_commit(COMMIT).unwrap();
+            let connection = rusqlite::Connection::open(library.index().db_path()).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TRIGGER refuse_pinned_finalization_index BEFORE INSERT ON models BEGIN SELECT RAISE(ABORT, 'injected pinned finalization index failure'); END;",
+                )
+                .unwrap();
+
+            let error = importer
+                .finalize_downloaded_directory_at_revision(&info, &revision)
+                .await
+                .unwrap_err();
+
+            assert!(error
+                .to_string()
+                .contains("injected pinned finalization index failure"));
+            let metadata = library.load_metadata(&model_dir).unwrap().unwrap();
+            assert_eq!(metadata.upstream_revision.as_deref(), Some(COMMIT));
+            let model_id = library.get_model_id(&model_dir).unwrap();
+            assert!(library.index().get(&model_id).unwrap().is_none());
+
+            connection
+                .execute_batch("DROP TRIGGER refuse_pinned_finalization_index;")
+                .unwrap();
+            let result = importer
+                .finalize_downloaded_directory_at_revision(&info, &revision)
+                .await
+                .unwrap();
+            assert!(result.success);
+            assert!(library.index().get(&model_id).unwrap().is_some());
+            assert_eq!(
+                library
+                    .load_metadata(&model_dir)
+                    .unwrap()
+                    .unwrap()
+                    .upstream_revision
+                    .as_deref(),
+                Some(COMMIT)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn pinned_finalization_requires_canonical_facts_before_success() {
+        use crate::index::ModelPackageFactsCacheScope;
+
+        let (_temp, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let model_dir = library.build_model_path("vision", "publisher", "facts-model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("detector.onnx"), b"downloaded payload").unwrap();
+        let info = completed_download(&model_dir, false);
+        let revision = DownloadRevision::from_commit(&"a".repeat(40)).unwrap();
+        let connection = rusqlite::Connection::open(library.index().db_path()).unwrap();
+        connection.execute_batch(
+            "CREATE TRIGGER refuse_pinned_facts BEFORE INSERT ON model_package_facts_cache BEGIN SELECT RAISE(ABORT, 'injected pinned facts failure'); END;",
+        ).unwrap();
+        let error = importer
+            .finalize_downloaded_directory_at_revision(&info, &revision)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("injected pinned facts failure"));
+        assert!(model_dir.join("detector.onnx").is_file());
+        connection
+            .execute_batch("DROP TRIGGER refuse_pinned_facts;")
+            .unwrap();
+        assert!(
+            importer
+                .finalize_downloaded_directory_at_revision(&info, &revision)
+                .await
+                .unwrap()
+                .success
+        );
+        let metadata = library.load_metadata(&model_dir).unwrap().unwrap();
+        let model_id = library.get_model_id(&model_dir).unwrap();
+        for scope in [
+            ModelPackageFactsCacheScope::Summary,
+            ModelPackageFactsCacheScope::Detail,
+        ] {
+            let cached = library
+                .index()
+                .get_model_package_facts_cache(
+                    &model_id,
+                    metadata.selected_artifact_id.as_deref(),
+                    scope,
+                )
+                .unwrap();
+            assert!(
+                cached.is_some(),
+                "pinned completion must retain canonical facts"
+            );
+        }
     }
 
     async fn assert_downloaded_finalization_index_retry(diffusers: bool) {
@@ -2466,6 +2633,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pinned_download_metadata_stub_records_exact_revision() {
+        const COMMIT: &str = "fedcba9876543210fedcba9876543210fedcba98";
+
+        let (_temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let model_dir = library.build_model_path("vision", "publisher", "pinned-partial-model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        let completion = completed_download(&model_dir, false);
+        let info = AuxFilesCompleteInfo {
+            download_id: completion.download_id,
+            dest_dir: completion.dest_dir,
+            filenames: completion.filenames,
+            download_request: completion.download_request,
+            total_bytes: Some(1024),
+            huggingface_evidence: completion.huggingface_evidence,
+        };
+        let revision = DownloadRevision::from_commit(COMMIT).unwrap();
+
+        importer
+            .upsert_download_metadata_stub_at_revision(&info, &revision)
+            .await
+            .unwrap();
+
+        let metadata = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(metadata.upstream_revision.as_deref(), Some(COMMIT));
+        assert!(metadata
+            .selected_artifact_id
+            .as_deref()
+            .is_some_and(|artifact_id| artifact_id.contains(COMMIT)));
+    }
+
+    #[tokio::test]
     async fn test_import_in_place_redetects_unknown_tts_model_to_audio() {
         let (_temp_dir, library) = setup().await;
         let importer = ModelImporter::new(library.clone());
@@ -2774,6 +2973,62 @@ mod tests {
         );
         assert_eq!(persisted.match_source.as_deref(), Some("existing"));
         assert_eq!(persisted.pipeline_tag, None);
+    }
+
+    #[tokio::test]
+    async fn pinned_import_in_place_refuses_mismatched_existing_metadata() {
+        const COMMIT: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        let (_temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let model_dir = library.build_model_path("vision", "idea-research", "grounding-dino-base");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("detector.onnx"), b"not-a-real-model").unwrap();
+        let model_id = library.get_model_id(&model_dir).unwrap();
+        let metadata = ModelMetadata {
+            model_id: Some(model_id.clone()),
+            model_type: Some("vision".to_string()),
+            official_name: Some("legacy-main-metadata".to_string()),
+            upstream_revision: Some("main".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        let download_request = completed_download(&model_dir, false).download_request;
+        let spec = InPlaceImportSpec {
+            model_dir: model_dir.clone(),
+            official_name: "grounding-dino-base".to_string(),
+            family: "idea-research".to_string(),
+            model_type: Some("vision".to_string()),
+            repo_id: Some("IDEA-Research/grounding-dino-base".to_string()),
+            download_request: Some(download_request),
+            known_sha256: None,
+            compute_hashes: false,
+            expected_files: Some(vec!["detector.onnx".to_string()]),
+            pipeline_tag: Some("zero-shot-object-detection".to_string()),
+            huggingface_evidence: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let revision = DownloadRevision::from_commit(COMMIT).unwrap();
+
+        let error = importer
+            .import_in_place_at_revision(&spec, &revision)
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("pinned download revision"));
+        assert!(library.index().get(&model_id).unwrap().is_none());
+        assert_eq!(
+            library
+                .load_metadata(&model_dir)
+                .unwrap()
+                .unwrap()
+                .upstream_revision
+                .as_deref(),
+            Some("main")
+        );
     }
 
     #[tokio::test]

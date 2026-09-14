@@ -1,6 +1,9 @@
 # Rust dependency findings for 0.7.0
 
-Completed follow-up: `der` was updated precisely to 0.8.2; release RPC/ONNX
+Current dependency-minimization results and macOS follow-up are tracked in
+[the minimization report](release-evidence/0.7.0/dependency-minimization.md).
+
+Earlier follow-up: `der` was updated precisely to 0.8.2; release RPC/ONNX
 build and optimized RPC tests passed. [Final Cargo audit](release-evidence/0.7.0/cargo-audit-final.json)
 reports no vulnerabilities or yanks and retains four maintenance notices.
 The research below records the pre-update assessment.

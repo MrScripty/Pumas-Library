@@ -1,6 +1,9 @@
 # Dependency review for 0.7.0
 
-Current follow-up: `der` is now 0.8.2. The default release RPC/ONNX build and
+Current dependency-minimization results and macOS follow-up are tracked in
+[the minimization report](release-evidence/0.7.0/dependency-minimization.md).
+
+Earlier follow-up: `der` is now 0.8.2. The default release RPC/ONNX build and
 optimized RPC tests passed, and the final Cargo audit reports zero vulnerabilities,
 no yanked versions and the same four maintenance notices. Attribution is now
 collected and embedded; see [the attribution report](release-attribution/0.7.0/README.md).

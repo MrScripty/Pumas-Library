@@ -1,0 +1,9 @@
+x86_64-unknown-linux-gnu pumas-library headless=True: dependency feature contract passed
+x86_64-unknown-linux-gnu pumas-rpc headless=True: dependency feature contract passed
+x86_64-unknown-linux-gnu pumas-rpc headless=False: dependency feature contract passed
+aarch64-apple-darwin pumas-library headless=True: dependency feature contract passed
+aarch64-apple-darwin pumas-rpc headless=True: dependency feature contract passed
+aarch64-apple-darwin pumas-rpc headless=False: dependency feature contract passed
+x86_64-pc-windows-msvc pumas-library headless=True: dependency feature contract passed
+x86_64-pc-windows-msvc pumas-rpc headless=True: dependency feature contract passed
+x86_64-pc-windows-msvc pumas-rpc headless=False: dependency feature contract passed

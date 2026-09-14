@@ -1,7 +1,10 @@
 # 0.7.0 local release preparation
 
+Current dependency-minimization results and macOS follow-up are tracked in
+[the minimization report](release-evidence/0.7.0/dependency-minimization.md).
+
 See [the dependency and installer follow-up](release-evidence/0.7.0/follow-up.md)
-for the current der 0.8.2, attribution, metadata and final installer evidence.
+for the earlier der 0.8.2, attribution, metadata and installer evidence.
 The original preparation record below is retained as the earlier baseline.
 
 Prepared on 2026-09-14 against `af45f3e0` plus the local release changes.

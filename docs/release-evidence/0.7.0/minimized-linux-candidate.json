@@ -1,0 +1,77 @@
+{
+  "date": "2026-09-14",
+  "source_commit": "7e3faf332aa2e1bddef9217b8d94a4b810a8067d",
+  "kind": "local-linux-candidate-after-dependency-minimization",
+  "directory": "/tmp/pumas-070-minimized-linux",
+  "artifacts": [
+    {
+      "filename": "Pumas.Library-0.7.0.AppImage",
+      "bytes": 154163302,
+      "sha256": "9e7d52db4d85a624b85c53edda0b6ac134aa0a0fb36c7413dae3dc6de29a6b12"
+    },
+    {
+      "filename": "Pumas.Library-0.7.0.AppImage.spdx.json",
+      "bytes": 339510,
+      "sha256": "8432373fab1eacbf4e6aadcd17bc2b4fbc3fd0dc90d25281db570aa39ca4abbc"
+    },
+    {
+      "filename": "THIRD-PARTY-NOTICES-0.7.0.txt",
+      "bytes": 3924204,
+      "sha256": "e4fca768460b0db777f4a2f226f5f20a71a9d0bf349a4aab5cf89fb1581fdcd2"
+    },
+    {
+      "filename": "checksums-sha256.txt",
+      "bytes": 619,
+      "sha256": "9e0cf144ab61d5fd10d514d56804b70fe5651809032a15dc88fcf9c3f72028fd"
+    },
+    {
+      "filename": "pumas-library-0.7.0.provenance.jsonl",
+      "bytes": 2080,
+      "sha256": "e53f2443e82976de01ba0be073dc7ed3fbf5fe0a296fa104634e401a0ccd42db"
+    },
+    {
+      "filename": "pumas-library-electron_0.7.0_amd64.deb",
+      "bytes": 119948220,
+      "sha256": "41770b006cad8e1fce5ed5eaca2fb359fdde252caf30a9515f55c673938e6738"
+    },
+    {
+      "filename": "pumas-library-electron_0.7.0_amd64.deb.spdx.json",
+      "bytes": 334803,
+      "sha256": "68aa3818ed7889bcc39a2e3356c7976ddd0249a859684ed5964d912aefc29320"
+    }
+  ],
+  "notices_entries": 367,
+  "rust_lock_packages_removed": 29,
+  "rust_lock_packages_added": 0,
+  "audit": {
+    "vulnerabilities": 0,
+    "yanked": 0,
+    "unmaintained": 3
+  },
+  "installer_checks": {
+    "resources_and_health": "passed in both formats",
+    "onnx_import_load_embed_unload": "passed in both formats",
+    "desktop_sandbox_readiness_menu_and_shutdown": "passed in both formats, GPU disabled",
+    "debian_install_remove": "passed in isolated user/mount/network namespaces",
+    "spdx_schema": "passed, format annotations disabled",
+    "checksums": "passed"
+  },
+  "limitations": [
+    "Native macOS and Windows execution pending",
+    "macOS smoke helper has local static validation; native DMG and Gatekeeper acceptance are outstanding",
+    "Windows remains best effort",
+    "Linux chooser recovery evidence belongs to the earlier candidate; no chooser code changed in this follow-up",
+    "SPDX inventories do not individually resolve every native vendor component",
+    "Provenance is unsigned and self-reported",
+    "Live host AppArmor policy loading is outside the Debian namespace check"
+  ],
+  "qa": {
+    "headless-core": "passed",
+    "headless-rpc": "passed",
+    "clippy": "passed",
+    "default-workspace": "passed",
+    "release-build": "passed",
+    "onnx-only-check": "passed",
+    "release-rpc-tests": "passed"
+  }
+}

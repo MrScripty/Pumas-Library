@@ -1,0 +1,111 @@
+Local verification after dependency minimization; all listed invocations exited zero.
+Rust tests retain their existing ignored fixtures; no new ignore or audit suppression was added.
+
+cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features
+Finished `test` profile [unoptimized + debuginfo] target(s) in 36.70s
+Running unittests src/lib.rs (rust/target/debug/deps/pumas_library-3679247c9cd843d5)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1389 filtered out; finished in 0.00s
+test result: ok. 1384 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 59.37s
+Running tests/api_tests.rs (rust/target/debug/deps/api_tests-e5abb0e914624e10)
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.63s
+Running tests/artifact_load_target_contract_fixtures.rs (rust/target/debug/deps/artifact_load_target_contract_fixtures-e8b253241ab7f47c)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/dependency_requirements_contract_fixtures.rs (rust/target/debug/deps/dependency_requirements_contract_fixtures-8f9971263b6aa507)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/intent_api_tests.rs (rust/target/debug/deps/intent_api_tests-d4ccdbf154e102bc)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.47s
+Running tests/intent_desired_crash_tests.rs (rust/target/debug/deps/intent_desired_crash_tests-74ecffdc320d523a)
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.92s
+Running tests/intent_desired_state_tests.rs (rust/target/debug/deps/intent_desired_state_tests-ff05a1d4b0ad9122)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.03s
+Running tests/intent_ipc_tests.rs (rust/target/debug/deps/intent_ipc_tests-93486c303cf77fa4)
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.39s
+Running tests/link_health.rs (rust/target/debug/deps/link_health-481258a300c9f710)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+Running tests/metadata_artifact_tests.rs (rust/target/debug/deps/metadata_artifact_tests-b42b7a1c0a547493)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/model_ref_contract_fixtures.rs (rust/target/debug/deps/model_ref_contract_fixtures-3b6754f1c32e4285)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/package_facts_contract_fixtures.rs (rust/target/debug/deps/package_facts_contract_fixtures-b9bff893ecb2b0d2)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/package_facts_resolution.rs (rust/target/debug/deps/package_facts_resolution-6104add0fdfb6f02)
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.24s
+Running tests/runtime_profile_contract_fixtures.rs (rust/target/debug/deps/runtime_profile_contract_fixtures-4f341458c6d39e0c)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests pumas_library
+test result: ok. 6 passed; 0 failed; 8 ignored; 0 measured; 0 filtered out; finished in 1.01s
+
+cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features
+Finished `test` profile [unoptimized + debuginfo] target(s) in 9.18s
+Running unittests src/main.rs (rust/target/debug/deps/pumas_rpc-494b34459de13d4d)
+test result: ok. 159 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 27.75s
+Running tests/integration_tests.rs (rust/target/debug/deps/integration_tests-46c1f4254a19a02d)
+test result: ok. 13 passed; 0 failed; 10 ignored; 0 measured; 0 filtered out; finished in 4.41s
+Running tests/intent_integration_tests.rs (rust/target/debug/deps/intent_integration_tests-00caf66cb21ef75f)
+test result: ok. 2 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 7.03s
+
+cargo clippy --locked --offline --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --all-targets --all-features -- -D warnings
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 39.10s
+
+cargo test --locked --offline --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler
+Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 34s
+Running unittests src/lib.rs (rust/target/debug/deps/pumas_app_manager-aeebb50c8072d781)
+test result: ok. 91 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.50s
+Running unittests src/lib.rs (rust/target/debug/deps/pumas_library-cea9a9eb945cff48)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1413 filtered out; finished in 0.00s
+test result: ok. 1408 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 64.21s
+Running tests/api_tests.rs (rust/target/debug/deps/api_tests-cd0dba9428b4a530)
+test result: ok. 36 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 32.97s
+Running tests/artifact_load_target_contract_fixtures.rs (rust/target/debug/deps/artifact_load_target_contract_fixtures-65e4aef0dfad9616)
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/dependency_requirements_contract_fixtures.rs (rust/target/debug/deps/dependency_requirements_contract_fixtures-914cb6cd376c0093)
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/intent_api_tests.rs (rust/target/debug/deps/intent_api_tests-71150101189eb342)
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.72s
+Running tests/intent_desired_crash_tests.rs (rust/target/debug/deps/intent_desired_crash_tests-0aa39615e5bca719)
+test result: ok. 1 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.86s
+Running tests/intent_desired_state_tests.rs (rust/target/debug/deps/intent_desired_state_tests-1e18227dd0320f9e)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.83s
+Running tests/intent_ipc_tests.rs (rust/target/debug/deps/intent_ipc_tests-0e47576da44fdad1)
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.27s
+Running tests/link_health.rs (rust/target/debug/deps/link_health-619a5a8ce99384bf)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+Running tests/metadata_artifact_tests.rs (rust/target/debug/deps/metadata_artifact_tests-8db257da69a908ec)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/model_ref_contract_fixtures.rs (rust/target/debug/deps/model_ref_contract_fixtures-35e160f540e2f5ad)
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/package_facts_contract_fixtures.rs (rust/target/debug/deps/package_facts_contract_fixtures-e4f48d8f22f02c8e)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running tests/package_facts_resolution.rs (rust/target/debug/deps/package_facts_resolution-58cc3e089b4c2599)
+test result: ok. 35 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.96s
+Running tests/runtime_profile_contract_fixtures.rs (rust/target/debug/deps/runtime_profile_contract_fixtures-8d19904e29c64db4)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Running unittests src/main.rs (rust/target/debug/deps/pumas_rpc-f1f6e8d49d30e241)
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 38.02s
+Running tests/integration_tests.rs (rust/target/debug/deps/integration_tests-8294b102c5f508c2)
+test result: ok. 16 passed; 0 failed; 10 ignored; 0 measured; 0 filtered out; finished in 6.16s
+Running tests/intent_integration_tests.rs (rust/target/debug/deps/intent_integration_tests-10302b083313616e)
+test result: ok. 2 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 3.86s
+Running unittests src/lib.rs (rust/target/debug/deps/pumas_uniffi-39200f28d23d1a2c)
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests pumas_app_manager
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+Doc-tests pumas_library
+test result: ok. 6 passed; 0 failed; 8 ignored; 0 measured; 0 filtered out; finished in 1.32s
+Doc-tests pumas_uniffi
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+cargo build --locked --offline --manifest-path rust/Cargo.toml -p pumas-rpc --release
+Finished `release` profile [optimized] target(s) in 5m 32s
+
+cargo check --locked --offline --manifest-path rust/Cargo.toml -p pumas-library --no-default-features --features onnx-runtime
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.91s
+
+cargo test --locked --offline --manifest-path rust/Cargo.toml -p pumas-rpc --release
+Finished `release` profile [optimized] target(s) in 6m 19s
+Running unittests src/main.rs (rust/target/release/deps/pumas_rpc-f827aa8c33596052)
+test result: ok. 227 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 25.14s
+Running tests/integration_tests.rs (rust/target/release/deps/integration_tests-ea7c8aa3c561cbc6)
+test result: ok. 16 passed; 0 failed; 10 ignored; 0 measured; 0 filtered out; finished in 4.57s
+Running tests/intent_integration_tests.rs (rust/target/release/deps/intent_integration_tests-379250b16b3a2e00)
+test result: ok. 2 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 2.81s

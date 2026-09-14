@@ -1,0 +1,7 @@
+{
+  "root": "/tmp/pumas-ui-verify-7GkhgN",
+  "library_ready": true,
+  "preload_rpc_models": true,
+  "category_menu": "Network online · model library ready\nAll Categories\n\nNo library models found\n\nChoose an existing Pumas library root or its shared-resources/models folder to load your saved models into this packaged app.\n\nUse Existing Library\nLink Health\nAll links healthy\n0 links\nMigration Reports\n0 items"
+}
+{"exit":0,"backend_closed":true,"evidence":"/tmp/pumas-ui-verify-7GkhgN"}

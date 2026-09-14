@@ -86,6 +86,10 @@
       {
         "from": "../LICENSE",
         "to": "LICENSE.txt"
+      },
+      {
+        "from": "../docs/release-attribution/0.7.0/THIRD-PARTY-NOTICES.txt",
+        "to": "THIRD-PARTY-NOTICES.txt"
       }
     ],
     "linux": {
@@ -161,6 +165,7 @@
     },
     "dmg": {
       "artifactName": "Pumas.Library-${version}-arm64.${ext}"
-    }
+    },
+    "beforePack": "../scripts/release/check-attribution.cjs"
   }
 }

@@ -1,0 +1,3 @@
+# Preserve verbatim third-party legal text; source hashes verify integrity.
+scripts/release/licenses/* -whitespace
+docs/release-attribution/**/THIRD-PARTY-NOTICES.txt -whitespace

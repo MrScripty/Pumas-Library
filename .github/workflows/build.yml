@@ -33,6 +33,7 @@ jobs:
       - uses: rhysd/actionlint@v1.7.8
       - run: npm run check:dependency-ownership
       - run: npm run check:release-versions
+      - run: node scripts/release/check-attribution.cjs
       - run: node --test scripts/release/*.test.mjs
 
   rust-quality:

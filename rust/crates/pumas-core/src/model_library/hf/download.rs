@@ -7782,6 +7782,7 @@ mod tests {
     ) -> VerifiedDownloadRecovery {
         let model_dir = library_root.join("llm/acme/model");
         std::fs::create_dir_all(&model_dir).unwrap();
+        let model_dir = std::fs::canonicalize(model_dir).unwrap();
         crate::model_library::download_recovery::DownloadDestinationRoot::open(library_root)
             .unwrap();
         let record = ModelRecord {

@@ -69,7 +69,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn install_version_dependencies_preserves_safe_producer_branches() {
+    async fn install_version_dependencies_rejects_torch_in_place_repair() {
         use pumas_app_manager::version_manager::{ConstraintsManager, DependencyManager};
         use pumas_library::config::AppId;
         use pumas_library::PumasError;
@@ -81,39 +81,25 @@ mod tests {
             temp.path().join("pip-cache"),
         );
         let constraints = ConstraintsManager::new(temp.path().join("constraints"));
-        assert!(matches!(
-            manager.install_dependencies("missing", &constraints, None).await,
-            Err(PumasError::VersionNotFound { tag }) if tag == "missing"
-        ));
-
+        // Torch runtime bundles must stay validated, even when a version directory
+        // exists. Neither a missing nor an installed version admits pip repair.
         let version_path = temp
             .path()
             .join(AppId::Torch.versions_dir_name())
             .join("fixture");
-        let python = version_path.join("venv/bin/python");
-        tokio::fs::create_dir_all(python.parent().unwrap())
-            .await
-            .unwrap();
-        // Inert, non-executable marker admits only branches before process creation.
-        let marker = b"inert fixture: never execute";
-        tokio::fs::write(&python, marker).await.unwrap();
-        let raw = manager
-            .install_dependencies("fixture", &constraints, None)
-            .await
-            .unwrap();
-        assert!(raw);
-        assert_eq!(
-            serde_json::to_value(crate::contract::InstallVersionDependenciesOutcome::new(raw))
-                .unwrap(),
-            serde_json::json!({"success":true})
-        );
+        tokio::fs::create_dir_all(&version_path).await.unwrap();
         let requirements = version_path.join("requirements.txt");
-        tokio::fs::write(&requirements, [0xff]).await.unwrap();
-        assert!(matches!(
-            manager.install_dependencies("fixture", &constraints, None).await,
-            Err(PumasError::Io { path: Some(path), .. }) if path == requirements
-        ));
-        assert_eq!(tokio::fs::read(&python).await.unwrap(), marker);
+        let marker = b"torch==fixture";
+        tokio::fs::write(&requirements, marker).await.unwrap();
+        for tag in ["missing", "fixture"] {
+            assert!(matches!(
+                manager.install_dependencies(tag, &constraints, None).await,
+                Err(PumasError::DependencyFailed { message })
+                    if message.contains("in-place dependency repair is unsupported")
+            ));
+        }
+        assert_eq!(tokio::fs::read(&requirements).await.unwrap(), marker);
+        assert!(!version_path.join("venv").exists());
         assert!(!temp.path().join("pip-cache").exists());
         assert!(!temp.path().join("constraints").exists());
     }

@@ -86,17 +86,10 @@ fn filesystem_identity(metadata: &std::fs::Metadata) -> Option<FilesystemIdentit
     })
 }
 
-#[cfg(windows)]
-fn filesystem_identity(metadata: &std::fs::Metadata) -> Option<FilesystemIdentity> {
-    use std::os::windows::fs::MetadataExt;
-    Some(FilesystemIdentity {
-        volume: u64::from(metadata.volume_serial_number()?),
-        file: metadata.file_index()?,
-    })
-}
-
-#[cfg(not(any(unix, windows)))]
+#[cfg(not(unix))]
 fn filesystem_identity(_metadata: &std::fs::Metadata) -> Option<FilesystemIdentity> {
+    // Download destination authority is unavailable outside Unix; read-only
+    // inspection must also decline to issue a usable recovery capability.
     None
 }
 
@@ -2538,6 +2531,7 @@ mod tests {
     fn partial_record(root: &std::path::Path, files: Vec<&str>) -> ModelRecord {
         let model_dir = root.join("llm/acme/model");
         std::fs::create_dir_all(&model_dir).unwrap();
+        let model_dir = std::fs::canonicalize(model_dir).unwrap();
         ModelRecord {
             id: "llm/acme/model".to_string(),
             path: model_dir.display().to_string(),
@@ -2632,7 +2626,10 @@ mod tests {
         std::fs::create_dir_all(&moved_dir).unwrap();
         let mut moved = original.clone();
         moved.id = "llm/acme/moved".to_string();
-        moved.path = moved_dir.display().to_string();
+        moved.path = std::fs::canonicalize(moved_dir)
+            .unwrap()
+            .display()
+            .to_string();
         assert_ne!(
             issue_download_recovery_ticket(root, &moved)
                 .unwrap()

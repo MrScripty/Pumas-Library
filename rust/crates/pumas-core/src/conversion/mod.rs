@@ -12,12 +12,12 @@ mod backend_setup;
 mod calibration;
 #[cfg(target_os = "linux")]
 use crate::platform::linux_group;
+pub mod fp8;
 pub mod llama_cpp;
 mod manager;
 mod native_process;
 mod native_setup;
 pub mod nvfp4;
-pub mod fp8;
 mod options;
 mod outputs;
 pub(crate) mod pipeline;

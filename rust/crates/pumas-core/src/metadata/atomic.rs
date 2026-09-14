@@ -131,12 +131,7 @@ pub(crate) struct AtomicJsonTarget {
 enum ParentIdentity {
     #[cfg(unix)]
     Unix { device: u64, inode: u64 },
-    #[cfg(windows)]
-    Windows {
-        volume_serial: Option<u32>,
-        file_index: Option<u64>,
-    },
-    #[cfg(not(any(unix, windows)))]
+    #[cfg(not(unix))]
     Unsupported,
 }
 
@@ -548,16 +543,10 @@ fn parent_identity_from_file(file: &File, parent: &Path) -> Result<ParentIdentit
             inode: metadata.ino(),
         })
     }
-    #[cfg(windows)]
+    #[cfg(not(unix))]
     {
-        use std::os::windows::fs::MetadataExt;
-        Ok(ParentIdentity::Windows {
-            volume_serial: metadata.volume_serial_number(),
-            file_index: metadata.file_index(),
-        })
-    }
-    #[cfg(not(any(unix, windows)))]
-    {
+        // Durable publication already rejects non-Unix targets. Do not call
+        // nightly-only Windows metadata APIs for an unadmitted capability.
         let _ = metadata;
         Ok(ParentIdentity::Unsupported)
     }

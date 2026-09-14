@@ -43,6 +43,17 @@ async fn pre_worker_preparation_retains_root_after_caller_and_client_drop() {
         .unwrap();
 
     let root = DownloadDestinationRoot::open(library.library_root()).unwrap();
+    let download_state = temp.path().join("download-state");
+    std::fs::create_dir_all(&download_state).unwrap();
+    library
+        .install_mutation_authority(
+            crate::api::RuntimeTasks::new(),
+            root.clone(),
+            Arc::new(crate::model_library::DownloadPersistence::new(
+                &download_state,
+            )),
+        )
+        .unwrap();
     let (entered, ready) = tokio::sync::oneshot::channel();
     let entered = Mutex::new(Some(entered));
     let (release, held) = std::sync::mpsc::channel();
@@ -63,10 +74,13 @@ async fn pre_worker_preparation_retains_root_after_caller_and_client_drop() {
             client
                 .run_download_invocation(move |context| async move {
                     let context = preparing_client.protect_download_mutation(&context).await?;
+                    let grant = context.held_root_execution_grant()?;
                     drop(preparing_client);
                     context
                         .run_fallible_blocking_named("prepare HF artifact destination", move || {
-                            library.prepare_artifact_download_destination("llm", "owner", artifact)
+                            library.prepare_artifact_download_destination_under_grant(
+                                "llm", "owner", artifact, grant,
+                            )
                         })
                         .await
                         .map_err(|error| PumasError::Other(error.to_string()))?
@@ -276,9 +290,10 @@ async fn builder_retains_failed_download_import_and_retries_before_completion() 
     let payload = b"not-a-real-model";
     std::fs::write(destination.join("detector.onnx.part"), payload).unwrap();
     std::fs::write(destination.join(".pumas_download"), b"{}").unwrap();
-    // A directory at the metadata file path makes the real importer fail
-    // without replacing its implementation or changing filesystem permissions.
-    std::fs::create_dir(destination.join("metadata.json")).unwrap();
+    // Structurally valid provenance passes destination admission, while an
+    // invalid typed metadata field makes the real importer fail. A directory
+    // here would be rejected before the importer could exercise recovery.
+    std::fs::write(destination.join("metadata.json"), br#"{"model_type":42}"#).unwrap();
     std::fs::create_dir_all(temp.path().join("launcher-data")).unwrap();
     let store = DownloadPersistence::new(&temp.path().join("launcher-data"));
     let snapshot = PersistedDownload {
@@ -373,7 +388,7 @@ async fn builder_retains_failed_download_import_and_retries_before_completion() 
         Err(PumasError::DownloadShutdownFailed { failures }) if failures > 0
     ));
     drop(api);
-    std::fs::remove_dir(destination.join("metadata.json")).unwrap();
+    std::fs::remove_file(destination.join("metadata.json")).unwrap();
 
     for _ in 0..2 {
         let api = PumasApi::builder(temp.path())
@@ -417,7 +432,9 @@ impl RegistryTestGuard {
         let lock = REGISTRY_TEST_LOCK
             .get_or_init(|| Mutex::new(()))
             .lock()
-            .expect("registry test lock poisoned");
+            // Drop resets the fixture registry even after a panic. Preserve
+            // the original failure without cascading poison into other tests.
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         crate::platform::paths::set_test_registry_db_path(Some(
             root.join("registry-test")
                 .join(config::RegistryConfig::DB_FILENAME),

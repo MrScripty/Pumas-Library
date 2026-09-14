@@ -2692,7 +2692,7 @@ exit 9
         assert!(blocked.get("error").is_none());
         assert_eq!(blocked["result"]["success"], true);
         let backends = blocked["result"]["backends"].as_array().unwrap();
-        assert_eq!(backends.len(), 3);
+        assert_eq!(backends.len(), 4);
         let llama = backends
             .iter()
             .position(|backend| backend["backend"] == "llama_cpp")
@@ -2891,7 +2891,7 @@ exit 9
         let python = temp.path().join("launcher-data/nvfp4/venv/bin/python");
         std::fs::create_dir_all(python.parent().unwrap()).unwrap();
         let fixture = r#"#!/bin/sh
-if test "$#" = 4 && test "$1" = '-I' && test "$2" = '-B' && test "$3" = '-c' && test "$4" = 'import torch; from transformers import AutoModelForCausalLM, AutoTokenizer; import modelopt.torch.quantization; from modelopt.torch.export import export_tensorrt_llm_checkpoint'; then
+if test "$#" = 4 && test "$1" = '-I' && test "$2" = '-B' && test "$3" = '-c' && test "$4" = "import torch; from transformers import AutoModelForCausalLM, AutoTokenizer; import modelopt.torch.quantization; from modelopt.torch.export import export_hf_checkpoint; assert hasattr(modelopt.torch.quantization, 'NVFP4_DEFAULT_CFG')"; then
  printf 'probe\n' >> "$0.probes"
  exit 0
 fi
@@ -3100,7 +3100,7 @@ exit 9
                 }
                 "get_backend_status" => {
                     let backends = value["result"]["backends"].as_array().unwrap();
-                    assert_eq!(backends.len(), 3);
+                    assert_eq!(backends.len(), 4);
                     assert!(backends.iter().all(|backend| backend["ready"] == false));
                 }
                 _ => unreachable!(),

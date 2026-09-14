@@ -14,7 +14,8 @@
 //! # Supported Platforms
 //!
 //! - **Linux**: Full support
-//! - **Windows**: Full support
+//! - **Windows**: Platform helpers exist; download authority and durable JSON
+//!   publication are unavailable. Compilation alone is not runtime qualification.
 //! - **macOS**: Architecture ready, implementation pending
 
 pub mod filesystem;

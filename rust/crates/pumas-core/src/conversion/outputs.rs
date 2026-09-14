@@ -245,7 +245,13 @@ mod tests {
         use std::os::unix::ffi::{OsStrExt, OsStringExt};
         use std::os::unix::fs::symlink;
         let root = tempfile::tempdir().expect("root");
-        let name = OsString::from_vec(b"model-\xff".to_vec());
+        // APFS rejects invalid UTF-8 filenames. Exercise collision retention
+        // there with a valid name, and byte preservation on Linux filesystems.
+        #[cfg(target_os = "linux")]
+        let bytes = b"model-\xff".to_vec();
+        #[cfg(target_os = "macos")]
+        let bytes = b"model-utf8".to_vec();
+        let name = OsString::from_vec(bytes.clone());
         let desired = root.path().join(&name);
         let absent = root.path().join("absent");
         symlink(&absent, &desired).expect("dangling link");
@@ -255,9 +261,11 @@ mod tests {
             .publish()
             .await
             .expect("publish beside dangling link");
+        let mut expected = bytes;
+        expected.extend_from_slice(b"-v2");
         assert_eq!(
             actual.file_name().expect("actual name").as_bytes(),
-            b"model-\xff-v2"
+            expected
         );
         assert_eq!(fs::read_link(desired).expect("link retained"), absent);
         assert!(!absent.exists());

@@ -40,6 +40,7 @@ fn fixtures(root: &Path, held: bool) -> Vec<PathBuf> {
         ("llama-cpp", "source/convert_hf_to_gguf.py"),
         ("nvfp4", "quantize_nvfp4.py"),
         ("sherry", "sherry_qat.py"),
+        ("fp8", "quantize_fp8.py"),
     ]
     .into_iter()
     .map(|(directory, script)| fixture(root, directory, script, held))
@@ -208,8 +209,9 @@ async fn public_status_and_catalog_follow_fresh_import_results_without_setup() {
     }
     for (python, expected) in pythons.iter().zip([
         "google.protobuf",
-        "export_tensorrt_llm_checkpoint",
+        "export_hf_checkpoint",
         "TernaryQuantizer",
+        "FineGrainedFP8Config",
     ]) {
         assert!(
             std::fs::read_to_string(python.with_file_name("python.imports"))

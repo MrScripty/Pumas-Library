@@ -240,6 +240,17 @@ async fn setup(
             .await
             .unwrap(),
     );
+    let download_state = fixture.root.path().join("download-state");
+    std::fs::create_dir_all(&download_state).unwrap();
+    library
+        .install_mutation_authority(
+            crate::api::RuntimeTasks::new(),
+            crate::model_library::DownloadDestinationRoot::open(library.library_root()).unwrap(),
+            Arc::new(crate::model_library::DownloadPersistence::new(
+                &download_state,
+            )),
+        )
+        .unwrap();
     let serving = Arc::new(ServingService::with_provider_registry(
         crate::providers::ProviderRegistry::builtin(),
     ));

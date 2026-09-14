@@ -303,11 +303,7 @@ async fn aggregate_setup_shutdown_closes_all_owners_and_survives_waiter_drop() {
 async fn setup_repairs_existing_interpreters_and_skips_healthy_dependencies() {
     for (id, directory, expected_import) in [
         (QuantBackend::LlamaCpp, "llama-cpp", "google.protobuf"),
-        (
-            QuantBackend::Nvfp4,
-            "nvfp4",
-            "export_tensorrt_llm_checkpoint",
-        ),
+        (QuantBackend::Nvfp4, "nvfp4", "export_hf_checkpoint"),
         (QuantBackend::Sherry, "sherry", "TernaryQuantizer"),
     ] {
         for initially_healthy in [false, true] {

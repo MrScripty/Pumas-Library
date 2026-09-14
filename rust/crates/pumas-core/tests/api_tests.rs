@@ -34,7 +34,9 @@ impl RegistryTestGuard {
         let lock = REGISTRY_TEST_LOCK
             .get_or_init(|| Mutex::new(()))
             .lock()
-            .expect("registry test lock poisoned");
+            // Drop resets the fixture registry even after a panic. Preserve
+            // the original failure without cascading poison into other tests.
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         let registry_path = root.join("registry-test").join("registry.db");
 
@@ -382,7 +384,7 @@ async fn test_launch_runtime_profile_reports_profile_scoped_failure() {
         .error
         .as_deref()
         .unwrap_or_default()
-        .contains("Binary not found"));
+        .starts_with("Runtime spawn failed:"));
 
     let snapshot = api.get_runtime_profiles_snapshot().await.unwrap();
     let status = snapshot
@@ -396,7 +398,7 @@ async fn test_launch_runtime_profile_reports_profile_scoped_failure() {
         .last_error
         .as_deref()
         .unwrap_or_default()
-        .contains("Binary not found"));
+        .starts_with("Runtime spawn failed:"));
 }
 
 #[tokio::test]
@@ -431,11 +433,15 @@ async fn test_launch_llama_cpp_router_profile_reports_profile_scoped_failure() {
         .unwrap();
 
     assert!(!response.success);
-    assert!(response
-        .error
-        .as_deref()
-        .unwrap_or_default()
-        .contains("llama-server"));
+    assert!(
+        response
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("Runtime spawn failed:"),
+        "unexpected launch failure: {:?}",
+        response.error
+    );
     let preset_path = temp_dir
         .path()
         .join("launcher-data/runtime-profiles/llama-cpp/llama-router-test/models-preset.ini");
@@ -454,7 +460,7 @@ async fn test_launch_llama_cpp_router_profile_reports_profile_scoped_failure() {
         .last_error
         .as_deref()
         .unwrap_or_default()
-        .contains("llama-server"));
+        .starts_with("Runtime spawn failed:"));
 }
 
 #[tokio::test]
@@ -501,7 +507,7 @@ async fn test_launch_llama_cpp_dedicated_profile_requires_model_binding() {
         .error
         .as_deref()
         .unwrap_or_default()
-        .contains("llama-server"));
+        .starts_with("Runtime spawn failed:"));
 
     let snapshot = api.get_runtime_profiles_snapshot().await.unwrap();
     let status = snapshot
@@ -548,18 +554,33 @@ async fn test_shutdown_managed_runtime_profiles_clears_served_models() {
     let temp_dir = create_test_env();
     let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
-    let profile_id = RuntimeProfileId::parse("ollama-shutdown-profile").unwrap();
+    let profile_id = RuntimeProfileId::parse("onnx-shutdown-profile").unwrap();
 
-    let mut profile = RuntimeProfileConfig::default_ollama();
-    profile.profile_id = profile_id.clone();
-    profile.name = "Ollama Shutdown Profile".to_string();
-    profile.endpoint_url = None;
-    profile.port = RuntimePort::parse(12557).ok();
+    // Qualify shutdown with a started, backend-owned in-process runtime.
+    // A configured external profile with no owned process is not shutdown work.
+    let profile = RuntimeProfileConfig {
+        profile_id: profile_id.clone(),
+        provider: RuntimeProviderId::OnnxRuntime,
+        provider_mode: RuntimeProviderMode::OnnxServe,
+        management_mode: RuntimeManagementMode::Managed,
+        name: "ONNX Shutdown Profile".to_string(),
+        enabled: true,
+        endpoint_url: None,
+        port: None,
+        device: Default::default(),
+        scheduler: Default::default(),
+    };
     api.upsert_runtime_profile(profile).await.unwrap();
+    assert!(
+        api.launch_runtime_profile(profile_id.clone(), "in-process", temp_dir.path())
+            .await
+            .unwrap()
+            .success
+    );
     api.record_served_model(ServedModelStatus {
         model_id: "models/shutdown-test".to_string(),
         model_alias: Some("shutdown-test".to_string()),
-        provider: RuntimeProviderId::Ollama,
+        provider: RuntimeProviderId::OnnxRuntime,
         profile_id: profile_id.clone(),
         load_state: ServedModelLoadState::Loaded,
         device_mode: RuntimeDeviceMode::Auto,

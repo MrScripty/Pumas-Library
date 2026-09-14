@@ -14,6 +14,7 @@ fn backend(root: &Path, id: QuantBackend) -> Box<dyn QuantizationBackend> {
     match id {
         QuantBackend::LlamaCpp => Box::new(LlamaCppBackend::new(root)),
         QuantBackend::Nvfp4 => Box::new(Nvfp4Backend::new(root)),
+        QuantBackend::Fp8 => Box::new(super::fp8::Fp8Backend::new(root)),
         QuantBackend::Sherry => Box::new(SherryBackend::new(root)),
         QuantBackend::PythonConversion => unreachable!("only quantization backends are under test"),
     }
@@ -37,6 +38,7 @@ fn initial_progress(params: &QuantizeParams, id: QuantBackend) -> ConversionProg
         direction: match id {
             QuantBackend::LlamaCpp => ConversionDirection::GgufToQuantizedGguf,
             QuantBackend::Nvfp4 => ConversionDirection::SafetensorsToNvfp4,
+            QuantBackend::Fp8 => ConversionDirection::SafetensorsToFp8,
             QuantBackend::Sherry => ConversionDirection::SafetensorsToSherryQat,
             QuantBackend::PythonConversion => {
                 unreachable!("only quantization backends are under test")

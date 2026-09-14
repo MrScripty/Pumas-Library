@@ -8,6 +8,7 @@ import type { ModelInfo } from '../types/apps';
 const bridge = vi.hoisted(() => ({
   check_conversion_environment: vi.fn(), list_model_conversions: vi.fn(),
   get_conversion_setup: vi.fn(), start_conversion_setup: vi.fn(), start_model_conversion: vi.fn(), cancel_model_conversion: vi.fn(),
+  get_backend_setup: vi.fn(), get_backend_status: vi.fn(), start_backend_setup: vi.fn(),
 }));
 vi.mock('../api/adapter', () => ({ api: bridge }));
 
@@ -85,6 +86,19 @@ describe('ModelConversionDialog', () => {
     expect(formatConversionDirection('safetensors')).toBe('safetensors_to_gguf');
     expect(formatConversionDirection('onnx')).toBeNull();
     expect(formatConversionDirection(undefined)).toBeNull();
+  });
+
+  it.each([['fp8', 'safetensors_to_fp8', 'FP8'], ['nvfp4', 'safetensors_to_nvfp4', 'NVFP4']] as const)('selects %s Safetensors and uses its existing backend workflow', async (backend, direction, quant) => {
+    bridge.get_backend_setup.mockResolvedValue({ success: true, setup: null });
+    bridge.get_backend_status.mockResolvedValue({ success: true, backends: [{ backend, name: quant, ready: true }] });
+    const user = userEvent.setup();
+    render(<ModelConversionDialog model={{ ...model, primaryFormat: 'safetensors' }} direction="safetensors_to_gguf" onClose={vi.fn()} />);
+    await screen.findByRole('button', { name: 'Install conversion tools' });
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Output format' }), direction);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start conversion' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Start conversion' }));
+    expect(bridge.start_model_conversion).toHaveBeenCalledWith(model.id, direction, quant);
+    expect(bridge.start_conversion_setup).not.toHaveBeenCalled();
   });
 
   it('shows retained setup on reopen and allows Escape without another installation', async () => {

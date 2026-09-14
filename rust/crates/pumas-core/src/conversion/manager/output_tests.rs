@@ -269,7 +269,7 @@ async fn every_conversion_path_indexes_the_actual_versioned_output_without_touch
                     );
                     Box::new(backend)
                 }
-                QuantBackend::Nvfp4 | QuantBackend::Sherry => {
+                QuantBackend::Nvfp4 | QuantBackend::Fp8 | QuantBackend::Sherry => {
                     let (directory, script) = if backend_id == QuantBackend::Nvfp4 {
                         ("nvfp4", "quantize_nvfp4.py")
                     } else {

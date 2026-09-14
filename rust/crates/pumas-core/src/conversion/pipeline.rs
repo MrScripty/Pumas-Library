@@ -92,10 +92,14 @@ pub async fn write_quantized_metadata(
         model_id: source_metadata.model_id.clone(),
         family: source_metadata.family.clone(),
         model_type: source_metadata.model_type.clone(),
-        official_name: source_metadata
-            .official_name
-            .as_ref()
-            .map(|name| format!("{} (GGUF {})", name, target_quant)),
+        official_name: source_metadata.official_name.as_ref().map(|name| {
+            format!(
+                "{} ({} {})",
+                name,
+                target_format.to_uppercase(),
+                target_quant
+            )
+        }),
         tags: Some(
             source_metadata
                 .tags
@@ -106,6 +110,21 @@ pub async fn write_quantized_metadata(
                 .collect(),
         ),
         match_source: Some("quantization".to_string()),
+        schema_version: source_metadata.schema_version,
+        task_type_primary: source_metadata.task_type_primary.clone(),
+        task_type_secondary: source_metadata.task_type_secondary.clone(),
+        input_modalities: source_metadata.input_modalities.clone(),
+        output_modalities: source_metadata.output_modalities.clone(),
+        task_classification_source: source_metadata.task_classification_source.clone(),
+        task_classification_confidence: source_metadata.task_classification_confidence,
+        model_type_resolution_source: source_metadata.model_type_resolution_source.clone(),
+        model_type_resolution_confidence: source_metadata.model_type_resolution_confidence,
+        metadata_needs_review: source_metadata.metadata_needs_review,
+        review_reasons: source_metadata.review_reasons.clone(),
+        requires_custom_code: source_metadata.requires_custom_code,
+        custom_code_sources: source_metadata.custom_code_sources.clone(),
+        repo_id: source_metadata.repo_id.clone(),
+        selected_artifact_quant: Some(target_quant.to_string()),
         conversion_source: Some(conversion_source),
         ..Default::default()
     };

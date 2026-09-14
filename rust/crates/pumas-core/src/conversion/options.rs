@@ -25,6 +25,7 @@ pub(super) fn validate_options(
     let name = match id {
         QuantBackend::LlamaCpp => "llama.cpp",
         QuantBackend::Nvfp4 => "nvfp4",
+        QuantBackend::Fp8 => "fp8",
         QuantBackend::Sherry => "sherry",
         QuantBackend::PythonConversion => "python conversion",
     };

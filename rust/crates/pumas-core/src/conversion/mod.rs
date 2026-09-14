@@ -17,6 +17,7 @@ mod manager;
 mod native_process;
 mod native_setup;
 pub mod nvfp4;
+pub mod fp8;
 mod options;
 mod outputs;
 pub(crate) mod pipeline;

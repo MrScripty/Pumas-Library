@@ -59,6 +59,8 @@ pub enum ConversionDirection {
     /// Quantize Safetensors to NVFP4 format via nvidia-modelopt / TensorRT-LLM.
     /// Requires NVIDIA Blackwell GPU.
     SafetensorsToNvfp4,
+    /// Quantize a Transformers Safetensors package to block-scaled FP8.
+    SafetensorsToFp8,
     /// Quantize Safetensors to 1.25-bit ternary via Sherry / AngelSlim QAT.
     /// Requires GPU with sufficient VRAM for quantization-aware training.
     SafetensorsToSherryQat,
@@ -113,6 +115,8 @@ pub enum QuantBackend {
     LlamaCpp,
     /// NVIDIA NVFP4 via TensorRT-LLM / nvidia-modelopt (Phase 2).
     Nvfp4,
+    /// CPU conversion to Transformers block-scaled FP8 Safetensors.
+    Fp8,
     /// Sherry / AngelSlim quantization-aware training (Phase 3).
     Sherry,
 }

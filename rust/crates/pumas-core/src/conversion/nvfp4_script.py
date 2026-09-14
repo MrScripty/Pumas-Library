@@ -1,91 +1,112 @@
 #!/usr/bin/env python3
-"""NVFP4 quantization script using nvidia-modelopt.
+"""Calibrate and export local Transformers packages as packed ModelOpt NVFP4.
 
-Quantizes a safetensors model to NVIDIA FP4 format suitable for
-Blackwell GPU inference via TensorRT-LLM.
-
-Progress is reported as JSON lines on stdout.
+Uses the shared conversion worker's temporary output directory. Publication,
+source preservation, cancellation and library indexing belong to that worker.
 """
 
 import argparse
+import copy
 import json
+from pathlib import Path
 import sys
-import os
 
 
 def report(stage, **kwargs):
-    """Emit a JSON progress line."""
-    msg = {"stage": stage, **kwargs}
-    print(json.dumps(msg), flush=True)
+    print(json.dumps({"stage": stage, **kwargs}), flush=True)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="NVFP4 quantization")
-    parser.add_argument("--model-dir", required=True, help="Path to source model directory")
-    parser.add_argument("--output-dir", required=True, help="Path to output directory")
-    parser.add_argument("--calibration-file", default=None, help="Path to calibration text file")
+    parser = argparse.ArgumentParser(description="NVFP4 Safetensors conversion")
+    parser.add_argument("--model-dir", required=True)
+    parser.add_argument("--output-dir", required=True)
+    parser.add_argument("--calibration-file")
     args = parser.parse_args()
 
-    report("setup", message="Loading model and quantization libraries...")
+    import torch
+    from safetensors import safe_open
+    from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+    import modelopt.torch.quantization as mtq
+    from modelopt.torch.export import export_hf_checkpoint
 
-    try:
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-        import modelopt.torch.quantization as mtq
-        from modelopt.torch.export import export_tensorrt_llm_checkpoint
-    except ImportError as e:
-        report("error", message=f"Missing dependency: {e}")
-        sys.exit(1)
+    source = Path(args.model_dir).resolve(strict=True)
+    output = Path(args.output_dir).resolve()
+    if source == output or source in output.parents:
+        raise ValueError("Output must be separate from the source model package")
+    config = AutoConfig.from_pretrained(source, local_files_only=True, trust_remote_code=False)
+    if getattr(config, "quantization_config", None):
+        raise ValueError("NVFP4 conversion requires unquantized floating-point source weights")
+    if not torch.cuda.is_available():
+        raise ValueError("NVFP4 calibration requires an available CUDA GPU")
 
-    report("loading", message="Loading model...")
-
-    tokenizer = AutoTokenizer.from_pretrained(args.model_dir)
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model_dir,
-        torch_dtype=torch.float16,
-        device_map="auto",
-    )
-
-    # Build calibration dataloader
-    report("calibrating", message="Running calibration pass...")
-
-    if args.calibration_file and os.path.exists(args.calibration_file):
-        with open(args.calibration_file, "r") as f:
-            cal_text = f.read()
-        cal_samples = [cal_text[i:i+512] for i in range(0, min(len(cal_text), 8192), 512)]
+    if args.calibration_file:
+        text = Path(args.calibration_file).read_text(encoding="utf-8")
+        samples = [text[i:i + 512] for i in range(0, min(len(text), 65536), 512)]
+        if not samples or not text.strip():
+            raise ValueError("Calibration text must not be empty")
     else:
-        # Use a small default calibration set
-        cal_samples = [
+        # A bounded offline fallback. Task-specific text can be supplied through
+        # the conversion API for better calibration of a particular workload.
+        samples = [
             "The quick brown fox jumps over the lazy dog.",
-            "In machine learning, quantization reduces model precision to improve inference speed.",
-            "Large language models have transformed natural language processing.",
-        ] * 4
+            "Explain how a computer stores and processes information.",
+            "A red ceramic teapot and a yellow lemon on a blue wooden table.",
+            "A mountain landscape at sunrise, soft light and detailed clouds.",
+            "Write a short story about a traveler who discovers a quiet village.",
+            "Describe the shapes, colors, lighting and composition of a photograph.",
+            "Mathematics studies numbers, patterns, structures and relationships.",
+            "Compare the benefits and limitations of two approaches to a problem.",
+        ]
 
-    def calibrate_loop(model):
-        for text in cal_samples:
-            inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
-            inputs = {k: v.to(model.device) for k, v in inputs.items()}
-            with torch.no_grad():
-                model(**inputs)
+    report("loading", message="Loading local floating-point model for NVFP4 calibration...")
+    tokenizer = AutoTokenizer.from_pretrained(source, local_files_only=True, trust_remote_code=False)
+    model = AutoModelForCausalLM.from_pretrained(
+        source, config=config, torch_dtype=torch.bfloat16, device_map="auto",
+        local_files_only=True, trust_remote_code=False, attn_implementation="eager",
+    ).eval()
 
-    # Quantize with FP4
-    quant_config = mtq.FP8_DEFAULT_CFG.copy()
-    quant_config["quant_cfg"]["*weight_quantizer"]["num_bits"] = (2, 2)  # FP4: E2M1
-    quant_config["quant_cfg"]["*input_quantizer"]["enable"] = False
+    def calibrate_loop(calibration_model):
+        report("calibrating", message="Calibrating NVFP4 weights and activations...")
+        with torch.inference_mode():
+            for text in samples:
+                inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
+                inputs = {key: value.to(calibration_model.device) for key, value in inputs.items()}
+                calibration_model(**inputs, use_cache=False)
 
-    report("quantizing", message="Applying FP4 quantization...")
+    report("quantizing", message="Applying NVIDIA NVFP4 quantization...")
+    mtq.quantize(model, copy.deepcopy(mtq.NVFP4_DEFAULT_CFG), forward_loop=calibrate_loop)
+    report("exporting", message="Packing NVFP4 weights into Safetensors...")
+    output.mkdir(parents=True, exist_ok=True)
+    export_hf_checkpoint(model, export_dir=str(output))
+    tokenizer.save_pretrained(output)
 
-    mtq.quantize(model, quant_config, forward_loop=calibrate_loop)
-
-    # Export
-    report("exporting", message="Exporting quantized model...")
-    os.makedirs(args.output_dir, exist_ok=True)
-
-    model.save_pretrained(args.output_dir)
-    tokenizer.save_pretrained(args.output_dir)
-
-    report("complete", message="NVFP4 quantization complete")
+    # A successful fake-quantization pass alone is not a converted checkpoint.
+    # Require the actual packed byte weights and scaling tensors from the exporter.
+    exported_config = json.loads((output / "config.json").read_text(encoding="utf-8"))
+    if exported_config.get("quantization_config", {}).get("quant_algo") != "NVFP4":
+        raise ValueError("Exporter did not declare an NVFP4 checkpoint")
+    keys = set()
+    packed_weights = []
+    for shard in output.glob("*.safetensors"):
+        with safe_open(shard, framework="pt", device="cpu") as tensors:
+            keys.update(tensors.keys())
+            packed_weights.extend(
+                key for key in tensors.keys()
+                if key.endswith(".weight") and tensors.get_slice(key).get_dtype() == "U8"
+            )
+    for key in packed_weights:
+        prefix = key.removesuffix(".weight")
+        if not {prefix + ".weight_scale", prefix + ".weight_scale_2"}.issubset(keys):
+            raise ValueError(f"Packed NVFP4 weight has missing scales: {key}")
+    packed = len(packed_weights)
+    if packed == 0:
+        raise ValueError("Exporter produced no packed NVFP4 weights")
+    report("complete", message="NVFP4 Safetensors package written", packed_weights=packed)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        report("error", message=str(error))
+        sys.exit(1)

@@ -16,7 +16,8 @@ use crate::cancel::CancellationToken;
 // Setup probes may load native libraries; this is not an interactive readiness
 // deadline. Cancellation and cleanup remain owned by the setup runner.
 const SETUP_IMPORT_PROBE_TIMEOUT: Duration = Duration::from_secs(30);
-pub(super) const NVFP4_IMPORTS: &str = "import torch; from transformers import AutoModelForCausalLM, AutoTokenizer; import modelopt.torch.quantization; from modelopt.torch.export import export_tensorrt_llm_checkpoint";
+pub(super) const FP8_IMPORTS: &str = "import torch, safetensors; from transformers import AutoConfig, AutoModelForCausalLM, FineGrainedFP8Config";
+pub(super) const NVFP4_IMPORTS: &str = "import torch; from transformers import AutoModelForCausalLM, AutoTokenizer; import modelopt.torch.quantization; from modelopt.torch.export import export_hf_checkpoint; assert hasattr(modelopt.torch.quantization, 'NVFP4_DEFAULT_CFG')";
 pub(super) const SHERRY_IMPORTS: &str = "import torch; from transformers import AutoModelForCausalLM, AutoTokenizer; from angelslim import TernaryQuantizer";
 // This proves the locally declared dependencies, not compatibility with every
 // revision of the externally maintained llama.cpp conversion script.
@@ -53,6 +54,26 @@ pub(super) fn execute(
         QuantBackend::LlamaCpp => {
             llama_cpp(&root.join("launcher-data/llama-cpp"), cancel, programs)
         }
+        QuantBackend::Fp8 => python_backend(
+            &root.join("launcher-data/fp8"),
+            "FP8",
+            "quantize_fp8.py",
+            include_str!("fp8_script.py"),
+            (
+                &[
+                    "--extra-index-url",
+                    "https://download.pytorch.org/whl/cpu",
+                    "torch==2.9.1+cpu",
+                    "transformers==4.57.6",
+                    "safetensors==0.7.0",
+                    "accelerate==1.12.0",
+                ],
+                FP8_IMPORTS,
+                COMMAND_TIMEOUT,
+            ),
+            cancel,
+            programs,
+        ),
         QuantBackend::Nvfp4 => python_backend(
             &root.join("launcher-data/nvfp4"),
             "NVFP4",
@@ -60,14 +81,16 @@ pub(super) fn execute(
             include_str!("nvfp4_script.py"),
             (
                 &[
-                    "nvidia-modelopt[all]",
-                    "transformers",
-                    "torch",
-                    "safetensors",
-                    "datasets",
-                    "accelerate",
+                    "--extra-index-url",
+                    "https://download.pytorch.org/whl/cu130",
+                    "nvidia-modelopt==0.40.0",
+                    "transformers==4.57.6",
+                    "torch==2.9.1+cu130",
+                    "safetensors==0.7.0",
+                    "accelerate==1.12.0",
                 ],
                 NVFP4_IMPORTS,
+                Duration::from_secs(45 * 60),
             ),
             cancel,
             programs,
@@ -88,6 +111,7 @@ pub(super) fn execute(
                     "bitsandbytes",
                 ],
                 SHERRY_IMPORTS,
+                COMMAND_TIMEOUT,
             ),
             cancel,
             programs,
@@ -200,6 +224,7 @@ fn ensure_python(
     name: &str,
     dependencies: &[&str],
     imports: &str,
+    install_timeout: Duration,
     cancel: &CancellationToken,
     programs: &Programs,
 ) -> Outcome {
@@ -223,13 +248,21 @@ fn ensure_python(
         &format!("Upgrading {name} pip"),
         cancel,
     )?;
-    required(
+    // CUDA wheel downloads can exceed the ordinary command budget. The
+    // recipe selects a bounded install budget; child custody and cancellation
+    // still belong to the shared setup runner.
+    let installed = run_command(
         Command::new(&python)
             .args(["-m", "pip", "install"])
             .args(dependencies),
-        &format!("Installing {name} dependencies"),
         cancel,
+        install_timeout,
     )?;
+    if !installed.success() {
+        return Err(Failure::Failed(format!(
+            "Installing {name} dependencies failed"
+        )));
+    }
     if !imports_ready(&python, name, imports, cancel, SETUP_IMPORT_PROBE_TIMEOUT)? {
         return Err(Failure::Failed(format!(
             "{name} dependencies were installed but required imports are not ready"
@@ -243,7 +276,7 @@ fn python_backend(
     name: &str,
     script_name: &str,
     script: &str,
-    requirements: (&[&str], &str),
+    requirements: (&[&str], &str, Duration),
     cancel: &CancellationToken,
     programs: &Programs,
 ) -> Outcome {
@@ -253,7 +286,15 @@ fn python_backend(
     check_cancel(cancel)?;
     fs::write(base.join(script_name), script)
         .map_err(|error| failed(&format!("Deploying {name} script"), error))?;
-    ensure_python(base, name, requirements.0, requirements.1, cancel, programs)?;
+    ensure_python(
+        base,
+        name,
+        requirements.0,
+        requirements.1,
+        requirements.2,
+        cancel,
+        programs,
+    )?;
     info!(%name, "Quantization backend setup finished");
     Ok(())
 }
@@ -365,6 +406,7 @@ fn llama_cpp(base: &Path, cancel: &CancellationToken, programs: &Programs) -> Ou
             "safetensors",
         ],
         LLAMA_IMPORTS,
+        COMMAND_TIMEOUT,
         cancel,
         programs,
     )?;

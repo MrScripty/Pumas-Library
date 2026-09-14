@@ -67,12 +67,35 @@ completed download.
 Built-in conversion and quantization setup is supervised independently of its caller.
 Standalone callers use `start_backend_setup(backend, previous_id)` and
 `get_backend_setup(backend)` on `PumasApi` or `ConversionManager` for
-`PythonConversion`, `LlamaCpp`, `Nvfp4`, and `Sherry`. The backend selects its
+`PythonConversion`, `LlamaCpp`, `Nvfp4`, `Fp8`, and `Sherry`. The backend selects its
 existing installer owner, shared with the corresponding ensure method; it does
 not create a second installation. Reads are memory-only, do not probe or install,
 and remain available after shutdown. Keep the selected backend alongside its
 snapshot: IDs cannot retry another backend's operation. Malformed IDs and retry
 tokens without a selected owner-local record return `InvalidParams`.
+
+`Fp8` provides `SafetensorsToFp8` for supported local Transformers language-model
+packages. The existing desktop conversion dialog offers **Safetensors (FP8)**.
+Conversion runs on CPU and stores E4M3FN linear weights with float32 scales per
+128x128 block; embedding/output weights remain BF16. The output is a reloadable
+Transformers Safetensors package, with tokenizer/config files and conversion
+provenance. Sources remain intact. Quantized inputs, incomplete packages,
+non-finite weights and incompatible matrix dimensions fail explicitly. GPU
+compatibility is a separate requirement when loading the result for inference.
+
+NVFP4 is available alongside FP8 in the model conversion dialog. It reuses
+`SafetensorsToNvfp4` and the managed `Nvfp4` backend. Model Optimizer 0.40.0
+calibrates an unquantized local Transformers language model and exports packed
+E2M1 weights, block/global scales, tokenizer files and ModelOpt quantization
+configuration as Safetensors. CUDA is required for calibration. Its large dependency installation has a
+45-minute command budget, with cancellation and cleanup retained by the shared
+setup owner; other backend budgets are unchanged. An optional
+calibration text file can be supplied through the conversion API; the dialog
+uses a small offline fallback corpus. Output is checked for packed weights and
+scales before publication. An NVFP4-compatible consumer is required; the qualified
+FLUX runtime continues to select its working FP8 encoder. Conversion support does
+not imply native NVFP4 encoder serving support. The export format follows the
+[Model Optimizer Hugging Face exporter](https://github.com/NVIDIA/Model-Optimizer/blob/0.40.0/modelopt/torch/export/unified_export_hf.py).
 
 For base Python conversion setup,
 use `start_conversion_setup(None)` for prompt admission/attachment and

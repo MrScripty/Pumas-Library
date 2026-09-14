@@ -11,6 +11,7 @@ use tokio::fs;
 use tokio::process::Command;
 use tracing::info;
 
+use super::fp8::Fp8Backend;
 use super::llama_cpp::LlamaCppBackend;
 use super::nvfp4::Nvfp4Backend;
 use super::outputs::OutputWorkspace;
@@ -69,18 +70,21 @@ impl ConversionManager {
     ) -> Self {
         let llama = Arc::new(LlamaCppBackend::new(&launcher_root));
         let nvfp4 = Arc::new(Nvfp4Backend::new(&launcher_root));
+        let fp8 = Arc::new(Fp8Backend::new(&launcher_root));
         let sherry = Arc::new(SherryBackend::new(&launcher_root));
         let backend_setups = vec![
             llama.setup.clone(),
             nvfp4.setup.clone(),
+            fp8.setup.clone(),
             sherry.setup.clone(),
         ];
         let backend_probes = vec![
             llama.readiness.clone(),
             nvfp4.readiness.clone(),
+            fp8.readiness.clone(),
             sherry.readiness.clone(),
         ];
-        let backends: Vec<Arc<dyn QuantizationBackend>> = vec![llama, nvfp4, sherry];
+        let backends: Vec<Arc<dyn QuantizationBackend>> = vec![llama, nvfp4, fp8, sherry];
 
         let progress = Arc::new(ConversionProgressTracker::new());
         Self {
@@ -366,8 +370,13 @@ impl ConversionManager {
                 model_id: request.model_id.clone(),
             })?;
 
-        let metadata: ModelMetadata =
+        let mut metadata: ModelMetadata =
             serde_json::from_value(model.metadata.clone()).unwrap_or_default();
+        // Indexed identity/name fields live in columns, outside metadata JSON.
+        metadata.model_id = Some(model.id.clone());
+        metadata.model_type = Some(model.model_type.clone());
+        metadata.official_name = Some(model.official_name.clone());
+        metadata.cleaned_name = Some(model.cleaned_name.clone());
 
         // Generate conversion ID
         let conversion_id = {
@@ -502,6 +511,38 @@ impl ConversionManager {
                     },
                 )?
             }
+            ConversionDirection::SafetensorsToFp8 => {
+                let (backend, params) = self
+                    .prepare_backend_quantization(
+                        QuantBackend::Fp8,
+                        "fp8",
+                        &conv_id,
+                        &model_path,
+                        &source_model_id,
+                        target_quant,
+                        &request,
+                    )
+                    .await?;
+
+                self.workers.spawn_in_environment(
+                    initial_progress,
+                    cancel_token.clone(),
+                    launcher_root.clone(),
+                    async move {
+                        run_quantization(
+                            &conv_id,
+                            backend.as_ref(),
+                            params,
+                            &source_model_id,
+                            metadata,
+                            progress.as_ref(),
+                            &cancel_token,
+                            &library,
+                        )
+                        .await
+                    },
+                )?
+            }
             ConversionDirection::SafetensorsToSherryQat => {
                 let (backend, params) = self
                     .prepare_backend_quantization(
@@ -557,6 +598,7 @@ impl ConversionManager {
         let quant_type = target_quant.unwrap_or_else(|| match backend_id {
             QuantBackend::LlamaCpp => "Q4_K_M".to_string(),
             QuantBackend::Nvfp4 => "NVFP4".to_string(),
+            QuantBackend::Fp8 => "FP8".to_string(),
             QuantBackend::Sherry => "Sherry-1.25bit".to_string(),
             QuantBackend::PythonConversion => "F16".to_string(),
         });
@@ -663,7 +705,7 @@ async fn run_quantization(
             };
             (src, "gguf")
         }
-        QuantBackend::Nvfp4 => ("safetensors", "safetensors"),
+        QuantBackend::Nvfp4 | QuantBackend::Fp8 => ("safetensors", "safetensors"),
         QuantBackend::Sherry => ("safetensors", "safetensors"),
         QuantBackend::PythonConversion => ("safetensors", "gguf"),
     };
@@ -862,6 +904,7 @@ fn source_extension(direction: ConversionDirection) -> &'static str {
         ConversionDirection::SafetensorsToGguf
         | ConversionDirection::SafetensorsToQuantizedGguf
         | ConversionDirection::SafetensorsToNvfp4
+        | ConversionDirection::SafetensorsToFp8
         | ConversionDirection::SafetensorsToSherryQat => "safetensors",
     }
 }
@@ -871,6 +914,7 @@ fn target_extension(direction: ConversionDirection) -> &'static str {
     match direction {
         ConversionDirection::GgufToSafetensors
         | ConversionDirection::SafetensorsToNvfp4
+        | ConversionDirection::SafetensorsToFp8
         | ConversionDirection::SafetensorsToSherryQat => "safetensors",
         ConversionDirection::SafetensorsToGguf
         | ConversionDirection::SafetensorsToQuantizedGguf

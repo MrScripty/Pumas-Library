@@ -132,6 +132,15 @@ fn backend(
             let probes = backend.readiness.clone();
             (Arc::new(backend), owner, probes)
         }
+        QuantBackend::Fp8 => {
+            let mut backend = super::super::fp8::Fp8Backend::new(root);
+            Arc::get_mut(&mut backend.setup)
+                .unwrap()
+                .set_programs(programs);
+            let owner = backend.setup.clone();
+            let probes = backend.readiness.clone();
+            (Arc::new(backend), owner, probes)
+        }
         QuantBackend::Sherry => {
             let mut backend = SherryBackend::new(root);
             Arc::get_mut(&mut backend.setup)

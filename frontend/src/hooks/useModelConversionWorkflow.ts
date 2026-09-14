@@ -49,6 +49,8 @@ export function useModelConversionWorkflow({ modelId, direction, onCompleted }: 
   completedCallback.current = onCompleted;
 
   useEffect(() => {
+    const quantBackend = direction === 'safetensors_to_fp8' ? 'fp8'
+      : direction === 'safetensors_to_nvfp4' ? 'nvfp4' : null;
     let disposed = false;
     const isCurrent = () => !disposed;
     let pending = false;
@@ -76,14 +78,16 @@ export function useModelConversionWorkflow({ modelId, direction, onCompleted }: 
     };
     const read = async (checkReadiness = true) => {
       publish({ loading: true });
-      const status = await api.get_conversion_setup();
+      const status = await (quantBackend ? api.get_backend_setup(quantBackend) : api.get_conversion_setup());
       if (!isCurrent()) return;
       const previousSetup = current.setupOperation;
       const terminalChanged = status.setup !== null && status.setup.status !== 'in_progress' &&
         (previousSetup === null || previousSetup.operationId !== status.setup.operationId || previousSetup.status === 'in_progress');
       acceptSetup(status.setup);
       if (checkReadiness || terminalChanged) {
-        const readiness = await api.check_conversion_environment();
+        const readiness = quantBackend
+          ? { ready: (await api.get_backend_status()).backends.some(backend => backend.backend === quantBackend && backend.ready) }
+          : await api.check_conversion_environment();
         if (!isCurrent()) return;
         publish({ ready: readiness.ready });
       }
@@ -136,7 +140,7 @@ export function useModelConversionWorkflow({ modelId, direction, onCompleted }: 
         return run(async () => {
           const previous = current.setupOperation?.operationId ?? null;
           try {
-            const admitted = await api.start_conversion_setup(previous);
+            const admitted = await (quantBackend ? api.start_backend_setup(quantBackend, previous) : api.start_conversion_setup(previous));
             acceptSetup(admitted.setup);
             publish({ busy: false });
           } catch (error) {
@@ -150,13 +154,13 @@ export function useModelConversionWorkflow({ modelId, direction, onCompleted }: 
       },
       start: () => {
         if (current.ready !== true || current.error !== null || current.startUncertain || current.setupUncertain || current.setupOperation?.status === 'in_progress' || acceptedStartId !== null || current.conversions.some((entry) => !isConversionTerminal(entry.status))) return Promise.resolve();
-        if (direction !== 'gguf_to_safetensors' && direction !== 'safetensors_to_gguf') {
+        if (direction !== 'gguf_to_safetensors' && direction !== 'safetensors_to_gguf' && quantBackend === null) {
           publish({ error: 'This dialog supports only GGUF and safetensors format conversion.' });
           return Promise.resolve();
         }
         return run(async () => {
           try {
-            const result = await api.start_model_conversion(modelId, direction, 'F16');
+            const result = await api.start_model_conversion(modelId, direction, quantBackend === 'fp8' ? 'FP8' : quantBackend === 'nvfp4' ? 'NVFP4' : 'F16');
             acceptedStartId = result.conversion_id;
             publish({ awaitingProgress: true });
           } catch (error) {

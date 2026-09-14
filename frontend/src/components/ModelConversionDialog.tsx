@@ -1,4 +1,4 @@
-import { useId, useRef, type RefObject } from 'react';
+import { useId, useRef, useState, type RefObject } from 'react';
 import type { ModelInfo } from '../types/apps';
 import type { ConversionDirection, ConversionStatus } from '../types/api-conversion';
 import { isConversionTerminal, useModelConversionWorkflow } from '../hooks/useModelConversionWorkflow';
@@ -33,12 +33,13 @@ const buttonClass = 'rounded border border-[hsl(var(--launcher-border))] px-3 py
 export function ModelConversionDialog({ model, direction, onClose, onCompleted, restoreFocusFallbackRef }: ModelConversionDialogProps) {
   const titleId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
-  const workflow = useModelConversionWorkflow({ modelId: model.id, direction, onCompleted });
+  const [targetDirection, setTargetDirection] = useState<ConversionDirection>(direction);
+  const workflow = useModelConversionWorkflow({ modelId: model.id, direction: targetDirection, onCompleted });
   const active = workflow.conversions.some(item => !isConversionTerminal(item.status));
   const setupActive = workflow.setupOperation?.status === 'in_progress';
   const setupLabel = !workflow.setupOperation ? 'Install conversion tools'
     : workflow.setupOperation.status === 'completed' ? 'Repair conversion tools' : 'Retry tool setup';
-  const target = direction === 'gguf_to_safetensors' ? 'Safetensors (F16)' : 'GGUF (F16)';
+  const target = targetDirection === 'safetensors_to_nvfp4' ? 'Safetensors (NVFP4)' : targetDirection === 'safetensors_to_fp8' ? 'Safetensors (FP8)' : direction === 'gguf_to_safetensors' ? 'Safetensors (F16)' : 'GGUF (F16)';
   return (
     <ModalDialog isOpen ariaLabelledBy={titleId} onClose={onClose}
       dismissDisabled={workflow.busy} initialFocusRef={closeRef} shouldCloseOnBackdrop={false}
@@ -50,7 +51,18 @@ export function ModelConversionDialog({ model, direction, onClose, onCompleted, 
       </div>
       <div className="mt-4 max-h-[65vh] space-y-4 overflow-y-auto">
         <p className="break-words">{model.name}</p>
+        {direction === 'safetensors_to_gguf' && <label className="block">Output format
+          <select aria-label="Output format" className="ml-2 rounded bg-[hsl(var(--launcher-bg))] p-2"
+            value={targetDirection} disabled={workflow.busy || active || setupActive || workflow.startUncertain || workflow.setupUncertain}
+            onChange={event => setTargetDirection(event.target.value as ConversionDirection)}>
+            <option value="safetensors_to_gguf">GGUF (F16)</option>
+            <option value="safetensors_to_fp8">Safetensors (FP8)</option>
+            <option value="safetensors_to_nvfp4">Safetensors (NVFP4)</option>
+          </select>
+        </label>}
         <p>Output: {target}. The source model is kept.</p>
+        {targetDirection === 'safetensors_to_fp8' && <p>For supported Transformers language-model packages. Quantization reduces storage with some precision loss. Conversion runs on CPU; FP8 inference requires a compatible GPU runtime.</p>}
+        {targetDirection === 'safetensors_to_nvfp4' && <p>For supported Transformers language-model packages. Uses NVIDIA FP4 with calibration and requires a CUDA GPU. Output requires an NVFP4-compatible inference runtime; the current FLUX encoder runtime uses FP8.</p>}
         {direction === 'gguf_to_safetensors' && <p>Dequantization does not restore precision lost during quantization. Output may require substantially more disk space.</p>}
         <p>Closing this dialog does not cancel tool setup or a conversion. Reopen it to check backend progress.</p>
         {workflow.error && <p role="alert">{workflow.error}</p>}

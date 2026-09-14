@@ -5491,6 +5491,7 @@ fn parse_conversion_direction(value: &str) -> Result<ConversionDirection, Public
         "safetensors_to_nvfp4" | "SafetensorsToNvfp4" => {
             Ok(ConversionDirection::SafetensorsToNvfp4)
         }
+        "safetensors_to_fp8" | "SafetensorsToFp8" => Ok(ConversionDirection::SafetensorsToFp8),
         "safetensors_to_sherry_qat" | "SafetensorsToSherryQat" => {
             Ok(ConversionDirection::SafetensorsToSherryQat)
         }
@@ -5502,6 +5503,7 @@ fn parse_quant_backend(value: &str) -> Result<QuantBackend, PublicError> {
     match value {
         "llama_cpp" | "LlamaCpp" => Ok(QuantBackend::LlamaCpp),
         "nvfp4" | "Nvfp4" => Ok(QuantBackend::Nvfp4),
+        "fp8" | "Fp8" => Ok(QuantBackend::Fp8),
         "sherry" | "Sherry" => Ok(QuantBackend::Sherry),
         "python_conversion" | "PythonConversion" => Ok(QuantBackend::PythonConversion),
         _ => Err(PublicError::invalid_params()),

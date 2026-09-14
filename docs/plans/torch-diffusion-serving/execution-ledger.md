@@ -319,3 +319,31 @@ working directory. These checks establish commit independence, not a new
 release/GPU qualification; earlier real image and disabled-release evidence
 retains its explicitly recorded artifact scope. Overall plan acceptance is
 partial: public distribution, remaining fault acceptance and T16 remain open.
+
+### Commit-message correction (2026-09-14)
+
+The user identified missing explanatory bodies in the five new local commits.
+Reworded only those unpublished commits on each repository's main branch,
+without changing any commit tree. The original tips remain recoverable under
+`refs/archive/before-message-correction-20260914` in each repository. Both
+working-tree diffs and complete porcelain status were identical before and
+after applying the correction. Hooks remained enabled.
+
+| Repository | Original commit | Message-corrected commit |
+| --- | --- | --- |
+| Pumas | `f174a54c90c72a560c479440358d79d403592766` | `b58ff8ac7da9a4312b5932588b2f580a4c15454a` |
+| Pumas | `ad3071d6dd15f67a4e02339e0cb5256064f04426` | `ea9752885309dc55f015dc270fe04992d3da6704` |
+| Pumas | `444eaac9764051b01b0fdc3e4718f2bcd421bb50` | `b284e5865d6bd6d3d54f1013a701cced2f61216e` |
+| Pumas | `40d47964572462e38875827a2205555fc3039c61` | `baa4f4c2f7c48203bb254b6c15fff6070c73cc01` |
+| Tuldok | `9361773d4a21d42be0ce10fc483388a262a6aeb1` | `a70f374218684cd9d8f050ba7b81a50013c11fac` |
+
+These mappings supersede the commit IDs in the preceding preparation entry;
+the recorded runtime artifact hashes and test results are unchanged. Temporary
+rewording clones have no unique commits after integration; main retains every
+replacement, and the archive refs retain every original.
+
+The remaining Tuldok labeling changes were committed separately as `2617b72`
+after 21 Python tests and the local browser regression passed. The local intent
+API was committed as `22388e70` after its focused verification recorded in that
+plan's ledger. Four pre-existing Pumas file deletions remain uncommitted pending
+clarification of their intent.

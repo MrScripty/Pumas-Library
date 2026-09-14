@@ -1,12 +1,13 @@
 import type { BaseResponse } from './api-common';
 
-export type RuntimeProviderId = 'ollama' | 'llama_cpp' | 'onnx_runtime';
+export type RuntimeProviderId = 'ollama' | 'llama_cpp' | 'onnx_runtime' | 'torch';
 
 export type RuntimeProviderMode =
   | 'ollama_serve'
   | 'llama_cpp_router'
   | 'llama_cpp_dedicated'
-  | 'onnx_serve';
+  | 'onnx_serve'
+  | 'torch_serve';
 
 export type RuntimeManagementMode = 'managed' | 'external';
 

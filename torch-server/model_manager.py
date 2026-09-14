@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Optional
@@ -96,6 +97,8 @@ class ModelManager:
         model_name: str,
         device_str: str = "auto",
         model_type: Optional[str] = None,
+        pipeline_path: Optional[str] = None,
+        vae_path: Optional[str] = None,
     ) -> ModelSlot:
         """Load a model into a new slot."""
         resolved_device = self.device_manager.resolve_device(device_str)
@@ -123,7 +126,39 @@ class ModelManager:
 
         try:
             async with lock:
-                loaded = await self._load_model(model_path, resolved_device, model_type)
+                if pipeline_path is not None:
+                    task = asyncio.create_task(
+                        asyncio.to_thread(
+                            self._load_diffusion,
+                            model_path,
+                            pipeline_path,
+                            resolved_device,
+                            model_type,
+                            vae_path,
+                        )
+                    )
+                    try:
+                        loaded = await asyncio.shield(task)
+                    except asyncio.CancelledError:
+                        # A disconnected load cannot release the GPU while its
+                        # executor thread still allocates tensors.
+                        try:
+                            while not task.done():
+                                try:
+                                    await asyncio.shield(task)
+                                except asyncio.CancelledError:
+                                    continue
+                                except Exception:
+                                    break
+                            if not task.cancelled() and task.exception() is None:
+                                abandoned = task.result()
+                                abandoned.model = None
+                                abandoned.tokenizer = None
+                        finally:
+                            await self._mark_slot_error(slot_id)
+                        raise
+                else:
+                    loaded = await self._load_model(model_path, resolved_device, model_type)
 
             async with self._registry_lock:
                 slot._loaded = loaded
@@ -149,6 +184,41 @@ class ModelManager:
             raise
 
         return slot
+
+    @staticmethod
+    def _load_diffusion(
+        model_path, pipeline_path, device, model_type, vae_path=None
+    ) -> LoadedModel:
+        from diffusion import FLUX2_KLEIN, NUNCHAKU_Z_IMAGE, NunchakuZImage
+
+        try:
+            if model_type == NUNCHAKU_Z_IMAGE:
+                adapter = NunchakuZImage(model_path, pipeline_path, device)
+            elif model_type == FLUX2_KLEIN:
+                from flux2 import Flux2Klein
+
+                adapter = Flux2Klein(model_path, pipeline_path, vae_path, device)
+            else:
+                raise ValueError("Unsupported diffusion adapter")
+            return LoadedModel(adapter, None, device, model_type)
+        finally:
+            torch.cuda.synchronize(device)
+
+    @asynccontextmanager
+    async def image_lease(self, model_name: str):
+        """Reject queued work and retain the same device lease used by loading."""
+        from diffusion import IMAGE_ADAPTERS
+
+        slot = next((s for s in self.slots.values() if s.model_name == model_name), None)
+        if slot is None or slot.state != SlotState.READY or slot._loaded is None:
+            raise KeyError("Image model is unavailable")
+        if slot.model_type not in IMAGE_ADAPTERS:
+            raise ValueError("Selected model does not support image generation")
+        lock = self._get_device_lock(slot.device)
+        if lock.locked():
+            raise RuntimeError("Image runtime is busy")
+        async with lock:
+            yield slot._loaded.model
 
     def _load_sync(
         self, model_path: str, device: torch.device, model_type: Optional[str]
@@ -180,6 +250,8 @@ class ModelManager:
                 raise KeyError(f"Slot not found: {slot_id}")
             if slot.state == SlotState.LOADING:
                 raise RuntimeError(f"Cannot unload loading slot: {slot_id}")
+            if self._get_device_lock(slot.device).locked():
+                raise RuntimeError("Cannot unload a model while its device is busy")
             slot.state = SlotState.UNLOADING
 
         try:

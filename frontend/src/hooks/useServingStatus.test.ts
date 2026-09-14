@@ -92,6 +92,21 @@ describe('useServingStatus', () => {
     setIntervalSpy.mockRestore();
   });
 
+  it('admits Torch alongside llama.cpp without withdrawing serving controls', async () => {
+    const rows = [
+      { model_id: 'images/z-image', profile_id: 'image', provider: 'torch', load_state: 'loaded' },
+      { model_id: 'vlm/qwen', profile_id: 'vision', provider: 'llama_cpp', load_state: 'loaded' },
+    ];
+    getServingStatusMock.mockResolvedValueOnce({
+      success: true,
+      snapshot: { ...createSnapshot('serving:mixed'), served_models: rows },
+    });
+    const { result } = renderHook(() => useServingStatus());
+    await flushMicrotasks();
+    expect(result.current.controlObservation).toEqual({ kind: 'known', rows });
+    expect(result.current.endpoint?.endpoint_url).toBe('http://127.0.0.1:11434/v1');
+  });
+
   it('keeps a healthy profile authoritative while another profile is unavailable', () => {
     const rows = [
       { model_id: 'models/healthy', profile_id: 'healthy', provider: 'llama_cpp', load_state: 'loaded' },

@@ -1,8 +1,7 @@
 import { AppConnectionInfo } from '../AppConnectionInfo';
 import { ModelManager, type ModelManagerProps } from '../ModelManager';
 import { VersionManagementPanel } from './VersionManagementPanel';
-import { TorchModelSlotsSection } from './sections/TorchModelSlotsSection';
-import { TorchServerConfigSection } from './sections/TorchServerConfigSection';
+import { RuntimeProfileSettingsSection } from './sections/RuntimeProfileSettingsSection';
 import type { AppVersionState } from '../../utils/appVersionState';
 import type { ModelCategory } from '../../types/apps';
 
@@ -20,15 +19,14 @@ export interface TorchPanelProps {
 
 export function TorchPanel({
   appDisplayName,
-  connectionUrl,
   versions,
   showVersionManager,
   onShowVersionManager,
   diskSpacePercent,
   modelManagerProps,
-  isTorchRunning,
-  modelGroups,
 }: TorchPanelProps) {
+  const endpoint = modelManagerProps.servingEndpoint;
+  const gatewayUrl = endpoint?.endpoint_mode === 'pumas_gateway' ? endpoint.endpoint_url : null;
   const isManagerOpen = versions.isSupported && showVersionManager;
 
   return (
@@ -41,21 +39,22 @@ export function TorchPanel({
           onShowManager={onShowVersionManager}
           diskSpacePercent={diskSpacePercent}
         />
-        {!isManagerOpen && connectionUrl && (
-          <AppConnectionInfo url={connectionUrl} />
+        {!isManagerOpen && gatewayUrl && (
+          <AppConnectionInfo url={gatewayUrl} />
         )}
       </div>
 
-      {!isManagerOpen && isTorchRunning && (
-        <TorchServerConfigSection connectionUrl={connectionUrl} />
-      )}
-
-      {!isManagerOpen && connectionUrl && (
-        <TorchModelSlotsSection
-          connectionUrl={connectionUrl}
-          isRunning={isTorchRunning}
-          modelGroups={modelGroups}
-        />
+      {!isManagerOpen && (
+        <>
+          <p className="text-sm text-[var(--text-secondary)]">
+            Create a Torch runtime profile, then use Serve on the image model.
+            {' '}{gatewayUrl
+              ? 'Copy the Pumas gateway URL above into Tuldok to generate images.'
+              : 'The Pumas gateway URL will appear when a model is served.'}
+            {' '}Stop Torch profiles before changing runtime versions.
+          </p>
+          <RuntimeProfileSettingsSection provider="torch" />
+        </>
       )}
 
       {!isManagerOpen && <ModelManager {...modelManagerProps} />}

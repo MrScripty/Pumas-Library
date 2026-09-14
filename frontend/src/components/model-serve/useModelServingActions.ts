@@ -147,6 +147,7 @@ export function useModelServingActions(
   const [serveError, setServeError] = useState<ModelServeError | null>(null);
   const [servedStatus, setServedStatus] = useState<ServingControlStatus | null>(null);
   const invocationRef = useRef(0);
+  const pendingStartRef = useRef<number | null>(null);
   const targetKey = [modelId, target.profileId, target.provider, target.providerMode, target.modelAlias]
     .map((part) => part ?? '')
     .join('\u0000');
@@ -163,6 +164,7 @@ export function useModelServingActions(
     invocationRef.current += 1;
     loadedRef.current = false;
     actionDirectionRef.current = null;
+    pendingStartRef.current = null;
     setActionPhase('idle');
     setMessage(null);
     setServeError(null);
@@ -207,6 +209,9 @@ export function useModelServingActions(
     } else {
       setMessage((current) => (current?.source === 'loaded' ? null : current));
       setActionPhase((current) => {
+        // A router can repeat the previous attempt's terminal row while a new
+        // request is still validating/loading. Keep that request's result alive.
+        if (pendingStartRef.current !== null) return current;
         if (interruptedStatus) {
           invocationRef.current += 1;
           return 'uncertain';
@@ -249,6 +254,7 @@ export function useModelServingActions(
       const invocation = ++invocationRef.current;
       const invocationTarget = targetKeyRef.current;
       actionDirectionRef.current = 'start';
+      pendingStartRef.current = invocation;
       setActionPhase('starting');
       setMessage(actionMessage('Starting serving...'));
       setServeError(null);
@@ -284,6 +290,8 @@ export function useModelServingActions(
           actionMessage(caught instanceof Error ? caught.message : 'Serving request failed')
         );
         setActionPhase('uncertain');
+      } finally {
+        if (pendingStartRef.current === invocation) pendingStartRef.current = null;
       }
     },
     [modelId, targetKey]

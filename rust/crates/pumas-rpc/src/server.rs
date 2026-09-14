@@ -310,7 +310,8 @@ pub async fn start_server(
         .route("/v1/models", get(handle_openai_models))
         .route("/v1/chat/completions", post(handle_openai_proxy))
         .route("/v1/completions", post(handle_openai_proxy))
-        .route("/v1/embeddings", post(handle_openai_proxy));
+        .route("/v1/embeddings", post(handle_openai_proxy))
+        .route("/v1/images/generations", post(handle_openai_proxy));
 
     let app = app
         .layer(DefaultBodyLimit::max(MAX_REQUEST_BODY_BYTES))

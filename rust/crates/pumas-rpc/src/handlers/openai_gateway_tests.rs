@@ -686,3 +686,70 @@ fn uncertain_catalog_with_current_observation_cannot_discover_or_route() {
         OpenAiServedModelLookup::Unavailable
     );
 }
+
+#[test]
+fn image_capability_is_additive_and_excludes_text_models() {
+    let text = loaded_status("text", "text-profile", None);
+    assert!(openai_model_entry(text.clone())
+        .get("capabilities")
+        .is_none());
+    let mut image = text;
+    image.provider = RuntimeProviderId::Torch;
+    assert_eq!(
+        openai_model_entry(image)["capabilities"],
+        json!(["image_generation"])
+    );
+}
+
+#[tokio::test]
+async fn image_client_disconnect_closes_backend_request() {
+    let (_root, state) = gateway_test_state().await;
+    let backend = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", backend.local_addr().unwrap());
+    let mut model = loaded_status("image", "torch-profile", None);
+    model.provider = RuntimeProviderId::Torch;
+    model.endpoint_url = Some(RuntimeEndpointUrl::parse(endpoint).unwrap());
+    state.api.record_served_model(model).await.unwrap();
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let backend = tokio::spawn(async move {
+        let (mut socket, _) = backend.accept().await.unwrap();
+        let mut request = vec![0; 4096];
+        assert!(socket.read(&mut request).await.unwrap() > 0);
+        started_tx.send(()).unwrap();
+        loop {
+            if socket.read(&mut request).await.unwrap() == 0 {
+                break;
+            }
+        }
+    });
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let app = axum::Router::new()
+        .route(
+            "/v1/images/generations",
+            axum::routing::post(handle_openai_proxy),
+        )
+        .with_state(state);
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let client = tokio::spawn(async move {
+        reqwest::Client::new()
+            .post(format!("http://{address}/v1/images/generations"))
+            .json(&json!({"model":"image", "prompt":"a bird"}))
+            .send()
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(5), started_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    client.abort();
+    let _ = client.await;
+    let disconnected = tokio::time::timeout(Duration::from_secs(5), backend).await;
+    server.abort();
+    assert!(
+        disconnected.is_ok(),
+        "Gateway retained the backend request after client disconnect"
+    );
+}

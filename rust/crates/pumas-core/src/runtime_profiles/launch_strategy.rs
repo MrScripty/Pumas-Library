@@ -12,6 +12,7 @@ use crate::{PumasError, Result};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeProfileBinaryLaunchKind {
+    TorchServe,
     OllamaServe,
     LlamaCppRouter,
     LlamaCppDedicated,
@@ -72,6 +73,7 @@ impl From<ProviderManagedLaunchTarget> for RuntimeProfileLaunchStrategy {
 impl From<ProviderBinaryLaunchTarget> for RuntimeProfileBinaryLaunchKind {
     fn from(target: ProviderBinaryLaunchTarget) -> Self {
         match target {
+            ProviderBinaryLaunchTarget::TorchServe => Self::TorchServe,
             ProviderBinaryLaunchTarget::OllamaServe => Self::OllamaServe,
             ProviderBinaryLaunchTarget::LlamaCppRouter => Self::LlamaCppRouter,
             ProviderBinaryLaunchTarget::LlamaCppDedicated => Self::LlamaCppDedicated,

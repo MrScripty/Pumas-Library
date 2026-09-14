@@ -102,6 +102,7 @@ impl RuntimeProviderAdapters {
             Arc::new(OllamaRuntimeProviderAdapter) as Arc<dyn RuntimeProviderAdapter>,
             Arc::new(LlamaCppRuntimeProviderAdapter) as Arc<dyn RuntimeProviderAdapter>,
             Arc::new(OnnxRuntimeProviderAdapter) as Arc<dyn RuntimeProviderAdapter>,
+            Arc::new(TorchRuntimeProviderAdapter) as Arc<dyn RuntimeProviderAdapter>,
         ])
     }
 
@@ -328,6 +329,29 @@ impl RuntimeProviderAdapter for LlamaCppRuntimeProviderAdapter {
         {
             return Err(PumasError::InvalidParams {
                 message: "external llama.cpp profiles require endpoint_url".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
+pub struct TorchRuntimeProviderAdapter;
+
+#[async_trait]
+impl RuntimeProviderAdapter for TorchRuntimeProviderAdapter {
+    fn provider(&self) -> RuntimeProviderId {
+        RuntimeProviderId::Torch
+    }
+    fn capabilities(&self) -> RuntimeProviderCapabilities {
+        RuntimeProviderCapabilities::from_behavior(&ProviderBehavior::torch())
+    }
+    async fn validate_profile(&self, profile: &RuntimeProfileConfig) -> Result<()> {
+        if profile.provider != RuntimeProviderId::Torch
+            || profile.provider_mode != RuntimeProviderMode::TorchServe
+            || profile.management_mode != RuntimeManagementMode::Managed
+        {
+            return Err(PumasError::InvalidParams {
+                message: "Torch requires a managed torch_serve profile".to_string(),
             });
         }
         Ok(())

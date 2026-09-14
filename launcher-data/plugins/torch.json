@@ -3,7 +3,7 @@
   "displayName": "Torch",
   "description": "PyTorch inference engine with OpenAI-compatible API",
   "icon": "flame",
-  "githubRepo": "pytorch/pytorch",
+  "githubRepo": "MrScripty/Pumas-Library",
   "installationType": "python-venv",
   "versionFilter": {
     "includePrereleases": false,
@@ -28,7 +28,7 @@
   "pythonConfig": {
     "requirementsFile": "requirements.txt",
     "entryPoint": "serve.py",
-    "pythonVersion": "3.10"
+    "pythonVersion": "3.12"
   },
   "panelLayout": [
     { "type": "version_manager" },

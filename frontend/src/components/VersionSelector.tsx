@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { InstallationProgress } from '../hooks/useVersions';
+import { APIError } from '../errors';
 import { getLogger } from '../utils/logger';
 import { VersionSelectorDropdown } from './VersionSelectorDropdown';
 import {
@@ -48,6 +49,7 @@ export function VersionSelector({
 }: VersionSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
   const [isOpeningPath, setIsOpeningPath] = useState(false);
   const [showOpenedIndicator, setShowOpenedIndicator] = useState(false);
   const openedIndicatorTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -61,12 +63,14 @@ export function VersionSelector({
 
     logger.info('Switching version', { from: activeVersion, to: tag });
     setIsSwitching(true);
+    setSwitchError(null);
     try {
-      await switchVersion(tag);
+      if (!await switchVersion(tag)) throw new APIError('The runtime version could not be changed', 'switch_version');
       logger.info('Version switched successfully', { version: tag });
       setIsOpen(false);
     } catch (error) {
       reportVersionSwitchError(error, tag);
+      setSwitchError(error instanceof Error ? error.message : 'The runtime version could not be changed');
     } finally {
       setIsSwitching(false);
     }
@@ -182,6 +186,7 @@ export function VersionSelector({
   }, [hasVersionsToShow]);
 
   return (
+    <>
     <Popover
       contentClassName="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded bg-[hsl(var(--surface-overlay))]/80 backdrop-blur-sm"
       initialFocusRef={initialVersionFocusRef}
@@ -232,5 +237,7 @@ export function VersionSelector({
         onSwitchVersion={handleVersionSwitch}
       />
     </Popover>
+    {switchError && <p role="alert" className="mt-2 text-sm text-red-400">{switchError}</p>}
+    </>
   );
 }

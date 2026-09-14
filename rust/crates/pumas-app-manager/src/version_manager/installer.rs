@@ -2,6 +2,11 @@
 //!
 //! Handles downloading, extracting, and setting up new versions.
 
+mod torch;
+#[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
+mod torch_tests;
+pub(crate) use torch::is_torch_runtime_release;
+
 use crate::version_manager::progress::{InstallationProgressTracker, ProgressUpdate};
 use chrono::Utc;
 use pumas_library::config::{AppId, InstallationConfig, PathsConfig};
@@ -17,7 +22,7 @@ use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, RwLock};
-use tracing::{debug, error, info, warn};
+use tracing::{info, warn};
 
 async fn path_exists(path: &Path) -> Result<bool> {
     fs::try_exists(path).await.map_err(|e| PumasError::Io {
@@ -73,108 +78,11 @@ impl VersionInstaller {
                 self.install_llama_cpp_binary(tag, release, progress_tx)
                     .await
             }
-            AppId::Torch => self.install_python_app(tag, release, progress_tx).await,
+            AppId::Torch => self.install_torch_runtime(tag, release, progress_tx).await,
             AppId::OnnxRuntime => Err(PumasError::Other(
                 "ONNX Runtime is embedded and cannot be installed as a version".to_string(),
             )),
         }
-    }
-
-    /// Install a Python-based inference runtime from source with a virtual environment.
-    async fn install_python_app(
-        &self,
-        tag: &str,
-        release: &GitHubRelease,
-        progress_tx: mpsc::Sender<ProgressUpdate>,
-    ) -> Result<()> {
-        info!("Starting installation of version {}", tag);
-
-        // Create log file
-        let log_dir = self.logs_dir();
-        fs::create_dir_all(&log_dir)
-            .await
-            .map_err(|e| PumasError::Io {
-                message: format!("Failed to create logs directory: {}", e),
-                path: Some(log_dir.clone()),
-                source: Some(e),
-            })?;
-        let log_path = log_dir.join(format!(
-            "install-{}-{}.log",
-            self.slugify_tag(tag),
-            Utc::now().format("%Y%m%d-%H%M%S")
-        ));
-
-        // Initialize progress tracker
-        {
-            let mut tracker = self.progress_tracker.write().await;
-            tracker.start_installation(
-                tag,
-                release.total_size,
-                None,
-                Some(log_path.to_string_lossy().as_ref()),
-            );
-        }
-
-        // Determine download URL
-        let download_url = release
-            .zipball_url
-            .as_ref()
-            .or(release.tarball_url.as_ref())
-            .ok_or_else(|| PumasError::InstallationFailed {
-                message: "No download URL available for release".to_string(),
-            })?;
-
-        let is_tarball = release.tarball_url.is_some() && release.zipball_url.is_none();
-
-        // Create temp directory
-        let temp_dir = self.launcher_root.join("temp");
-        fs::create_dir_all(&temp_dir)
-            .await
-            .map_err(|e| PumasError::Io {
-                message: format!("Failed to create temp directory: {}", e),
-                path: Some(temp_dir.clone()),
-                source: Some(e),
-            })?;
-
-        let archive_ext = if is_tarball { "tar.gz" } else { "zip" };
-        let archive_path = temp_dir.join(format!("{}.{}", tag, archive_ext));
-        let extract_dir = temp_dir.join(format!("extract-{}", tag));
-
-        // Clean up any previous failed attempts
-        if path_exists(&archive_path).await? {
-            let _ = fs::remove_file(&archive_path).await;
-        }
-        if path_exists(&extract_dir).await? {
-            let _ = fs::remove_dir_all(&extract_dir).await;
-        }
-
-        // Execute installation steps
-        let result = self
-            .do_install(
-                tag,
-                release,
-                download_url,
-                is_tarball,
-                &archive_path,
-                &extract_dir,
-                &progress_tx,
-            )
-            .await;
-
-        // Cleanup temp files
-        let _ = fs::remove_file(&archive_path).await;
-        let _ = fs::remove_dir_all(&extract_dir).await;
-
-        // Update progress tracker
-        {
-            let mut tracker = self.progress_tracker.write().await;
-            if let Err(error) = result.as_ref() {
-                tracker.set_error(&error.to_string());
-            }
-            tracker.complete_installation(result.is_ok());
-        }
-
-        result
     }
 
     /// Install Ollama binary from pre-built release assets.
@@ -1226,62 +1134,6 @@ impl VersionInstaller {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn do_install(
-        &self,
-        tag: &str,
-        release: &GitHubRelease,
-        download_url: &str,
-        is_tarball: bool,
-        archive_path: &Path,
-        extract_dir: &Path,
-        progress_tx: &mpsc::Sender<ProgressUpdate>,
-    ) -> Result<()> {
-        // Check cancellation
-        self.check_cancelled()?;
-
-        // Step 1: Download
-        self.download_archive(download_url, archive_path, progress_tx)
-            .await?;
-
-        // Check cancellation
-        self.check_cancelled()?;
-
-        // Step 2: Extract
-        self.extract_archive(archive_path, extract_dir, is_tarball, progress_tx)
-            .await?;
-
-        // Check cancellation
-        self.check_cancelled()?;
-
-        // Step 3: Move to final location
-        let version_dir = self.versions_dir().join(tag);
-        self.move_to_final_location(extract_dir, &version_dir)
-            .await?;
-
-        // Check cancellation
-        self.check_cancelled()?;
-
-        // Step 4: Create virtual environment
-        self.create_venv(tag, &version_dir, progress_tx).await?;
-
-        // Check cancellation
-        self.check_cancelled()?;
-
-        // Step 5: Install dependencies
-        self.install_deps(tag, &version_dir, progress_tx).await?;
-
-        // Check cancellation
-        self.check_cancelled()?;
-
-        // Step 6: Setup and finalize
-        self.finalize_installation(tag, release, &version_dir, progress_tx)
-            .await?;
-
-        info!("Installation of {} completed successfully", tag);
-        Ok(())
-    }
-
     async fn download_archive(
         &self,
         url: &str,
@@ -1419,76 +1271,6 @@ impl VersionInstaller {
         Ok(())
     }
 
-    async fn extract_archive(
-        &self,
-        archive_path: &Path,
-        extract_dir: &Path,
-        is_tarball: bool,
-        progress_tx: &mpsc::Sender<ProgressUpdate>,
-    ) -> Result<()> {
-        info!("Extracting archive to {}", extract_dir.display());
-
-        // Update progress
-        {
-            let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(
-                InstallationStage::Extract,
-                0.0,
-                Some("Extracting archive..."),
-            );
-        }
-        let _ = progress_tx
-            .send(ProgressUpdate::StageChanged {
-                stage: InstallationStage::Extract,
-                message: "Extracting archive...".to_string(),
-            })
-            .await;
-
-        fs::create_dir_all(extract_dir)
-            .await
-            .map_err(|e| PumasError::Io {
-                message: format!("Failed to create extract directory: {}", e),
-                path: Some(extract_dir.to_path_buf()),
-                source: Some(e),
-            })?;
-
-        if is_tarball {
-            let archive_path = archive_path.to_path_buf();
-            let extract_dir = extract_dir.to_path_buf();
-            tokio::task::spawn_blocking(move || Self::extract_tarball(&archive_path, &extract_dir))
-                .await
-                .map_err(|e| {
-                    PumasError::Other(format!("Failed to join tarball extraction task: {}", e))
-                })??;
-        } else {
-            let archive_path = archive_path.to_path_buf();
-            let extract_dir = extract_dir.to_path_buf();
-            tokio::task::spawn_blocking(move || Self::extract_zip(&archive_path, &extract_dir))
-                .await
-                .map_err(|e| {
-                    PumasError::Other(format!("Failed to join zip extraction task: {}", e))
-                })??;
-        }
-
-        // Update progress
-        {
-            let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(
-                InstallationStage::Extract,
-                100.0,
-                Some("Extraction complete"),
-            );
-        }
-        let _ = progress_tx
-            .send(ProgressUpdate::Extract {
-                progress_percent: 100.0,
-            })
-            .await;
-
-        info!("Extraction complete");
-        Ok(())
-    }
-
     fn extract_zip(archive_path: &Path, extract_dir: &Path) -> Result<()> {
         let file = File::open(archive_path).map_err(|e| PumasError::Io {
             message: format!("Failed to open zip archive: {}", e),
@@ -1575,289 +1357,6 @@ impl VersionInstaller {
         Ok(())
     }
 
-    async fn move_to_final_location(&self, extract_dir: &Path, version_dir: &Path) -> Result<()> {
-        info!("Moving extracted files to {}", version_dir.display());
-
-        // GitHub archives typically wrap content in a single directory
-        // Find the actual source directory
-        let mut entries = fs::read_dir(extract_dir)
-            .await
-            .map_err(|e| PumasError::Io {
-                message: format!("Failed to read extract directory: {}", e),
-                path: Some(extract_dir.to_path_buf()),
-                source: Some(e),
-            })?;
-        let mut entry_paths = Vec::new();
-        while let Some(entry) = entries.next_entry().await.map_err(|e| PumasError::Io {
-            message: format!("Failed to iterate extract directory: {}", e),
-            path: Some(extract_dir.to_path_buf()),
-            source: Some(e),
-        })? {
-            entry_paths.push(entry.path());
-        }
-
-        let source_dir = if entry_paths.len() == 1
-            && fs::metadata(&entry_paths[0])
-                .await
-                .map_err(|e| PumasError::Io {
-                    message: format!("Failed to inspect extracted entry: {}", e),
-                    path: Some(entry_paths[0].clone()),
-                    source: Some(e),
-                })?
-                .is_dir()
-        {
-            entry_paths[0].clone()
-        } else {
-            extract_dir.to_path_buf()
-        };
-
-        // Ensure versions directory exists
-        if let Some(parent) = version_dir.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(|e| PumasError::Io {
-                    message: format!("Failed to create versions directory: {}", e),
-                    path: Some(parent.to_path_buf()),
-                    source: Some(e),
-                })?;
-        }
-
-        // Remove existing version directory if present
-        if path_exists(version_dir).await? {
-            fs::remove_dir_all(version_dir)
-                .await
-                .map_err(|e| PumasError::Io {
-                    message: format!("Failed to remove existing version directory: {}", e),
-                    path: Some(version_dir.to_path_buf()),
-                    source: Some(e),
-                })?;
-        }
-
-        // Move (rename) the directory
-        match fs::rename(&source_dir, version_dir).await {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                debug!("Rename failed, falling back to copy: {}", e);
-                self.copy_dir_recursive(&source_dir, version_dir).await?;
-                if let Err(rm_err) = fs::remove_dir_all(&source_dir).await {
-                    warn!("Failed to remove source after copy: {}", rm_err);
-                }
-                Ok(())
-            }
-        }
-    }
-
-    async fn copy_dir_recursive(&self, src: &Path, dst: &Path) -> Result<()> {
-        let mut pending_dirs = vec![(src.to_path_buf(), dst.to_path_buf())];
-
-        while let Some((current_src, current_dst)) = pending_dirs.pop() {
-            fs::create_dir_all(&current_dst)
-                .await
-                .map_err(|e| PumasError::Io {
-                    message: format!("Failed to create directory: {}", e),
-                    path: Some(current_dst.clone()),
-                    source: Some(e),
-                })?;
-
-            let mut entries = fs::read_dir(&current_src)
-                .await
-                .map_err(|e| PumasError::Io {
-                    message: format!("Failed to read extract directory: {}", e),
-                    path: Some(current_src.clone()),
-                    source: Some(e),
-                })?;
-
-            while let Some(entry) = entries.next_entry().await.map_err(|e| PumasError::Io {
-                message: format!("Failed to read entry: {}", e),
-                path: Some(current_src.clone()),
-                source: Some(e),
-            })? {
-                let src_path = entry.path();
-                let dst_path = current_dst.join(entry.file_name());
-                let file_type = entry.file_type().await.map_err(|e| PumasError::Io {
-                    message: format!("Failed to inspect entry: {}", e),
-                    path: Some(src_path.clone()),
-                    source: Some(e),
-                })?;
-
-                if file_type.is_dir() {
-                    pending_dirs.push((src_path, dst_path));
-                } else {
-                    fs::copy(&src_path, &dst_path)
-                        .await
-                        .map_err(|e| PumasError::Io {
-                            message: format!("Failed to copy file: {}", e),
-                            path: Some(src_path.clone()),
-                            source: Some(e),
-                        })?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn create_venv(
-        &self,
-        tag: &str,
-        version_dir: &Path,
-        progress_tx: &mpsc::Sender<ProgressUpdate>,
-    ) -> Result<()> {
-        info!("Creating virtual environment for {}", tag);
-
-        // Update progress
-        {
-            let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(
-                InstallationStage::Venv,
-                0.0,
-                Some("Creating virtual environment..."),
-            );
-        }
-        let _ = progress_tx
-            .send(ProgressUpdate::StageChanged {
-                stage: InstallationStage::Venv,
-                message: "Creating virtual environment...".to_string(),
-            })
-            .await;
-
-        let venv_dir = version_dir.join("venv");
-
-        // Create venv using Python
-        let output = tokio::process::Command::new("python3")
-            .args(["-m", "venv", venv_dir.to_string_lossy().as_ref()])
-            .current_dir(version_dir)
-            .output()
-            .await
-            .map_err(|e| PumasError::InstallationFailed {
-                message: format!("Failed to create virtual environment: {}", e),
-            })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PumasError::InstallationFailed {
-                message: format!("Virtual environment creation failed: {}", stderr),
-            });
-        }
-
-        // Ensure pip is up to date
-        let venv_python = venv_dir.join("bin").join("python");
-        let _ = tokio::process::Command::new(&venv_python)
-            .args(["-m", "ensurepip", "--upgrade"])
-            .output()
-            .await;
-
-        let _ = tokio::process::Command::new(&venv_python)
-            .args(["-m", "pip", "install", "--upgrade", "pip"])
-            .output()
-            .await;
-
-        // Update progress
-        {
-            let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(
-                InstallationStage::Venv,
-                100.0,
-                Some("Virtual environment created"),
-            );
-        }
-        let _ = progress_tx
-            .send(ProgressUpdate::Venv {
-                message: "Virtual environment created".to_string(),
-            })
-            .await;
-
-        info!("Virtual environment created");
-        Ok(())
-    }
-
-    async fn install_deps(
-        &self,
-        tag: &str,
-        version_dir: &Path,
-        progress_tx: &mpsc::Sender<ProgressUpdate>,
-    ) -> Result<()> {
-        info!("Installing dependencies for {}", tag);
-
-        // Update progress
-        {
-            let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(
-                InstallationStage::Dependencies,
-                0.0,
-                Some("Installing dependencies..."),
-            );
-        }
-        let _ = progress_tx
-            .send(ProgressUpdate::StageChanged {
-                stage: InstallationStage::Dependencies,
-                message: "Installing dependencies...".to_string(),
-            })
-            .await;
-
-        let requirements_path = version_dir.join("requirements.txt");
-        if !path_exists(&requirements_path).await? {
-            info!("No requirements.txt found, skipping dependency installation");
-            return Ok(());
-        }
-
-        let venv_python = version_dir.join("venv").join("bin").join("python");
-
-        // Set up pip environment
-        let pip_cache_dir = self.pip_cache_dir();
-        fs::create_dir_all(&pip_cache_dir).await.ok();
-
-        // Install requirements
-        let mut cmd = tokio::process::Command::new(&venv_python);
-        cmd.args([
-            "-m",
-            "pip",
-            "install",
-            "-r",
-            requirements_path.to_string_lossy().as_ref(),
-        ])
-        .env("PIP_CACHE_DIR", &pip_cache_dir)
-        .current_dir(version_dir);
-
-        let output = cmd
-            .output()
-            .await
-            .map_err(|e| PumasError::InstallationFailed {
-                message: format!("Failed to run pip install: {}", e),
-            })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            error!("Dependency installation failed: {}", stderr);
-            return Err(PumasError::DependencyFailed {
-                message: stderr.to_string(),
-            });
-        }
-
-        // Install global required packages
-        let global_packages = ["setproctitle"];
-        for pkg in &global_packages {
-            let _ = tokio::process::Command::new(&venv_python)
-                .args(["-m", "pip", "install", pkg])
-                .env("PIP_CACHE_DIR", &pip_cache_dir)
-                .output()
-                .await;
-        }
-
-        // Update progress
-        {
-            let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(
-                InstallationStage::Dependencies,
-                100.0,
-                Some("Dependencies installed"),
-            );
-        }
-
-        info!("Dependencies installed");
-        Ok(())
-    }
-
     async fn finalize_installation(
         &self,
         tag: &str,
@@ -1913,9 +1412,16 @@ impl VersionInstaller {
             dependencies_installed: Some(true),
         };
 
-        // Save metadata
-        self.metadata_manager
-            .update_installed_version(tag, metadata, Some(self.app_id))?;
+        // Persist outside the async executor; publication is not complete until
+        // the shared metadata owner has durably recorded the installation.
+        let manager = self.metadata_manager.clone();
+        let installed_tag = tag.to_string();
+        let app_id = self.app_id;
+        tokio::task::spawn_blocking(move || {
+            manager.update_installed_version(&installed_tag, metadata, Some(app_id))
+        })
+        .await
+        .map_err(|error| PumasError::Other(format!("Runtime metadata task failed: {error}")))??;
 
         // Update progress
         {
@@ -1954,13 +1460,6 @@ impl VersionInstaller {
         self.launcher_root
             .join("launcher-data")
             .join(PathsConfig::LOGS_DIR_NAME)
-    }
-
-    fn pip_cache_dir(&self) -> PathBuf {
-        self.launcher_root
-            .join("launcher-data")
-            .join(PathsConfig::CACHE_DIR_NAME)
-            .join(PathsConfig::PIP_CACHE_DIR_NAME)
     }
 
     fn slugify_tag(&self, tag: &str) -> String {

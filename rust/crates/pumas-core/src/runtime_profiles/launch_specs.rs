@@ -98,7 +98,15 @@ pub(super) fn derive_managed_profile_launch_specs(
             env_vars: profile_runtime_env_vars(profile, &endpoint_url, port, launch_strategy)?,
             pid_file: runtime_dir.join("runtime.pid"),
             log_file: runtime_dir.join("runtime.log"),
-            health_check_url: endpoint_url,
+            health_check_url: if profile.provider == crate::models::RuntimeProviderId::Torch {
+                RuntimeEndpointUrl::parse(format!(
+                    "{}/health",
+                    endpoint_url.as_str().trim_end_matches('/')
+                ))
+                .map_err(|message| PumasError::InvalidParams { message })?
+            } else {
+                endpoint_url
+            },
             runtime_dir,
         });
     }
@@ -170,6 +178,11 @@ fn profile_runtime_env_vars(
         profile.profile_id.as_str().to_string(),
     );
     match launch_strategy {
+        RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::TorchServe) => {
+            env_vars.insert("HF_HUB_OFFLINE".into(), "1".into());
+            env_vars.insert("TRANSFORMERS_OFFLINE".into(), "1".into());
+            env_vars.insert("PYTHONNOUSERSITE".into(), "1".into());
+        }
         RuntimeProfileLaunchStrategy::BinaryProcess(
             RuntimeProfileBinaryLaunchKind::OllamaServe,
         ) => {
@@ -197,13 +210,19 @@ fn profile_runtime_extra_args(
     launch_strategy: RuntimeProfileLaunchStrategy,
 ) -> Result<Vec<String>> {
     match launch_strategy {
+        RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::TorchServe) => {
+            let mut args = vec!["serve.py".to_string()];
+            args.extend(runtime_listener_args(endpoint_url, port)?);
+            Ok(args)
+        }
+
         RuntimeProfileLaunchStrategy::BinaryProcess(
             RuntimeProfileBinaryLaunchKind::OllamaServe,
         ) => Ok(Vec::new()),
         RuntimeProfileLaunchStrategy::BinaryProcess(
             RuntimeProfileBinaryLaunchKind::LlamaCppRouter,
         ) => {
-            let mut args = llama_cpp_runtime_args(endpoint_url, port)?;
+            let mut args = runtime_listener_args(endpoint_url, port)?;
             args.extend([
                 "--models-dir".to_string(),
                 llama_cpp_router_models_dir(launcher_root)
@@ -216,7 +235,7 @@ fn profile_runtime_extra_args(
         RuntimeProfileLaunchStrategy::BinaryProcess(
             RuntimeProfileBinaryLaunchKind::LlamaCppDedicated,
         ) => {
-            let mut args = llama_cpp_runtime_args(endpoint_url, port)?;
+            let mut args = runtime_listener_args(endpoint_url, port)?;
             apply_llama_cpp_device_args(&mut args, profile);
             Ok(args)
         }
@@ -225,7 +244,7 @@ fn profile_runtime_extra_args(
     }
 }
 
-fn llama_cpp_runtime_args(
+fn runtime_listener_args(
     endpoint_url: &RuntimeEndpointUrl,
     port: RuntimePort,
 ) -> Result<Vec<String>> {
@@ -306,5 +325,41 @@ fn apply_device_visibility_env(
             }
         }
         RuntimeDeviceMode::Auto | RuntimeDeviceMode::Hybrid => {}
+    }
+}
+
+#[cfg(test)]
+mod torch_tests {
+    use super::*;
+    use crate::models::{RuntimeProviderId, RuntimeProviderMode};
+
+    #[test]
+    fn torch_profile_uses_managed_python_entry_health_and_offline_assets() {
+        let mut config = RuntimeProfilesConfigFile::default_seed();
+        let profile = &mut config.profiles[0];
+        profile.provider = RuntimeProviderId::Torch;
+        profile.provider_mode = RuntimeProviderMode::TorchServe;
+        profile.device.mode = RuntimeDeviceMode::Hybrid;
+        profile.endpoint_url = None;
+        profile.port = None;
+        let specs = derive_managed_profile_launch_specs(
+            Path::new("/fixture"),
+            &config,
+            &ProviderRegistry::builtin(),
+        )
+        .unwrap();
+        let [spec] = specs.as_slice() else {
+            panic!("expected one managed profile")
+        };
+        assert_eq!(spec.extra_args[0], "serve.py");
+        assert!(spec.extra_args.contains(&"--port".into()));
+        assert!(spec.health_check_url.as_str().ends_with("/health"));
+        assert_eq!(
+            spec.env_vars.get("HF_HUB_OFFLINE").map(String::as_str),
+            Some("1")
+        );
+        assert!(spec
+            .pid_file
+            .starts_with("/fixture/launcher-data/runtime-profiles/torch"));
     }
 }

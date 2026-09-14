@@ -1,0 +1,265 @@
+//! HTTP bundle fixtures exercise the production installer, without model downloads.
+use super::*;
+use sha2::{Digest, Sha256};
+use tokio::io::AsyncReadExt;
+
+fn create_test_installer() -> (VersionInstaller, tempfile::TempDir) {
+    let root = tempfile::TempDir::new().unwrap();
+    let metadata = Arc::new(MetadataManager::new(root.path()));
+    metadata.ensure_directories().unwrap();
+    let tracker = Arc::new(RwLock::new(InstallationProgressTracker::new(
+        root.path().join("launcher-data/cache"),
+    )));
+    let installer = VersionInstaller::new(
+        root.path().to_path_buf(),
+        AppId::Torch,
+        metadata,
+        tracker,
+        Arc::new(AtomicBool::new(false)),
+    );
+    (installer, root)
+}
+
+fn bundle(requirements: &str, validation: &str) -> Vec<u8> {
+    let mut archive = tar::Builder::new(flate2::write::GzEncoder::new(
+        Vec::new(),
+        flate2::Compression::default(),
+    ));
+    for (name, data) in [
+        (
+            "runtime.json",
+            r#"{"recipe_id":"torch-runtime-0.1.0","protocol":1,"python":"3.12","platform":"linux-x86_64"}"#,
+        ),
+        ("serve.py", ""),
+        ("requirements.txt", requirements),
+        ("validate_runtime.py", validation),
+    ] {
+        let mut header = tar::Header::new_gnu();
+        header.set_size(data.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        archive
+            .append_data(&mut header, name, data.as_bytes())
+            .unwrap();
+    }
+    archive.into_inner().unwrap().finish().unwrap()
+}
+
+async fn fixture_release(
+    archive: Vec<u8>,
+    valid_checksum: bool,
+) -> (GitHubRelease, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let checksum = if valid_checksum {
+        format!("{:x}", Sha256::digest(&archive))
+    } else {
+        "0".repeat(64)
+    };
+    let server = tokio::spawn(async move {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = vec![0; 8192];
+            let n = stream.read(&mut request).await.unwrap();
+            let body = if String::from_utf8_lossy(&request[..n]).contains(".sha256") {
+                checksum.as_bytes()
+            } else {
+                &archive
+            };
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(header.as_bytes()).await.unwrap();
+            stream.write_all(body).await.unwrap();
+        }
+    });
+    let release = GitHubRelease {
+        tag_name: "torch-runtime-0.1.0".to_string(),
+        name: "fixture".to_string(),
+        published_at: Utc::now().to_rfc3339(),
+        body: None,
+        tarball_url: None,
+        zipball_url: None,
+        prerelease: false,
+        assets: [
+            "pumas-torch-runtime-linux-x86_64.tar.gz",
+            "pumas-torch-runtime-linux-x86_64.tar.gz.sha256",
+        ]
+        .into_iter()
+        .map(|name| GitHubAsset {
+            name: name.to_string(),
+            size: 0,
+            download_url: format!("{base}/{name}"),
+            content_type: None,
+        })
+        .collect(),
+        html_url: base,
+        total_size: None,
+        archive_size: None,
+        dependencies_size: None,
+    };
+    (release, server)
+}
+
+async fn rejected_bundle_preserves_previous(
+    requirements: &str,
+    validation: &str,
+    valid_checksum: bool,
+    expected: &str,
+) {
+    let (installer, root) = create_test_installer();
+    let previous = root.path().join("torch-versions/torch-runtime-old");
+    std::fs::create_dir_all(previous.join("venv/bin")).unwrap();
+    for name in ["runtime.json", "serve.py", "requirements.txt"] {
+        std::fs::write(previous.join(name), "previous-version").unwrap();
+    }
+    std::os::unix::fs::symlink("/usr/bin/python3.12", previous.join("venv/bin/python")).unwrap();
+    installer
+        .metadata_manager
+        .update_installed_version(
+            "torch-runtime-old",
+            InstalledVersionMetadata {
+                path: "torch-runtime-old".into(),
+                release_tag: "torch-runtime-old".into(),
+                ..Default::default()
+            },
+            Some(AppId::Torch),
+        )
+        .unwrap();
+    let (release, server) = fixture_release(bundle(requirements, validation), valid_checksum).await;
+    let (tx, mut rx) = mpsc::channel(32);
+    let progress = async { while rx.recv().await.is_some() {} };
+    let (result, ()) = tokio::join!(
+        installer.install_version(&release.tag_name, &release, tx),
+        progress
+    );
+    server.await.unwrap();
+    assert!(result.unwrap_err().to_string().contains(expected));
+    assert!(!root
+        .path()
+        .join("torch-versions/torch-runtime-0.1.0")
+        .exists());
+    assert_eq!(
+        std::fs::read_to_string(previous.join("serve.py")).unwrap(),
+        "previous-version"
+    );
+    assert!(
+        tokio::process::Command::new(previous.join("venv/bin/python"))
+            .arg("--version")
+            .output()
+            .await
+            .unwrap()
+            .status
+            .success()
+    );
+    let mut restarted = crate::version_manager::VersionState::new(
+        root.path(),
+        AppId::Torch,
+        installer.metadata_manager.clone(),
+    )
+    .await
+    .unwrap();
+    restarted.validate_installations().await.unwrap();
+    assert_eq!(restarted.get_installed_tags(), vec!["torch-runtime-old"]);
+    assert_eq!(
+        std::fs::read_dir(root.path().join("torch-versions"))
+            .unwrap()
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn checksum_failure_preserves_previous_runtime_on_restart() {
+    rejected_bundle_preserves_previous("", "", false, "checksum mismatch").await;
+}
+
+#[tokio::test]
+async fn dependency_failure_preserves_previous_runtime_on_restart() {
+    rejected_bundle_preserves_previous("--no-index\npumas-nonexistent-fixture==0 --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000\n", "", true, "Installing locked runtime dependencies failed").await;
+}
+
+#[tokio::test]
+async fn validation_failure_preserves_previous_runtime_on_restart() {
+    rejected_bundle_preserves_previous(
+        "--no-index\n",
+        "raise RuntimeError('fixture validation failure')",
+        true,
+        "Validating GPU and sidecar protocol failed",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn cancellation_reaps_installer_and_its_child() {
+    let (installer, root) = create_test_installer();
+    let pid_file = root.path().join("child.pid");
+    let mut command = tokio::process::Command::new("python3.12");
+    command.args(["-c", "import subprocess,sys,time; from pathlib import Path; child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)']); Path(sys.argv[1]).write_text(str(child.pid)); time.sleep(60)"])
+        .arg(&pid_file);
+    let (tx, _rx) = mpsc::channel(32);
+    let log_path = root.path().join("install.log");
+    let run = installer.run_runtime_command(command, &log_path, "fixture", &tx);
+    let cancel = async {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while !pid_file.exists() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        installer.cancel_flag.store(true, Ordering::SeqCst);
+    };
+    let (result, ()) = tokio::join!(run, cancel);
+    assert!(result.is_err());
+    let pid = std::fs::read_to_string(pid_file).unwrap();
+    // A terminated orphan can briefly remain a zombie until init reaps it.
+    if let Ok(status) = std::fs::read_to_string(format!("/proc/{}/stat", pid.trim())) {
+        assert!(
+            status.split_whitespace().nth(2) == Some("Z"),
+            "child still computing: {status}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn validated_bundle_publishes_relocatable_python_and_shared_metadata() {
+    let (installer, root) = create_test_installer();
+    let (release, server) = fixture_release(bundle("--no-index\n", ""), true).await;
+    let (tx, mut rx) = mpsc::channel(32);
+    let progress = async { while rx.recv().await.is_some() {} };
+    let (result, ()) = tokio::join!(
+        installer.install_version(&release.tag_name, &release, tx),
+        progress
+    );
+    result.unwrap();
+    server.await.unwrap();
+    let runtime = root.path().join("torch-versions/torch-runtime-0.1.0");
+    let python = tokio::process::Command::new(runtime.join("venv/bin/python"))
+        .args(["-c", "import sys; print(sys.prefix)"])
+        .output()
+        .await
+        .unwrap();
+    assert!(python.status.success());
+    assert_eq!(
+        String::from_utf8(python.stdout).unwrap().trim(),
+        runtime.join("venv").to_str().unwrap()
+    );
+    let mut restarted = crate::version_manager::VersionState::new(
+        root.path(),
+        AppId::Torch,
+        installer.metadata_manager.clone(),
+    )
+    .await
+    .unwrap();
+    let validation = restarted.validate_installations().await.unwrap();
+    assert_eq!(validation.valid_count, 1);
+    assert_eq!(restarted.get_installed_tags(), vec![release.tag_name]);
+    assert_eq!(
+        std::fs::read_dir(root.path().join("torch-versions"))
+            .unwrap()
+            .count(),
+        1
+    );
+}

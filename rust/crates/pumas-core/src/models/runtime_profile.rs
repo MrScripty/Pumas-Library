@@ -83,6 +83,7 @@ impl RuntimePort {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeProviderId {
+    Torch,
     Ollama,
     LlamaCpp,
     OnnxRuntime,
@@ -91,6 +92,7 @@ pub enum RuntimeProviderId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeProviderMode {
+    TorchServe,
     OllamaServe,
     LlamaCppRouter,
     LlamaCppDedicated,

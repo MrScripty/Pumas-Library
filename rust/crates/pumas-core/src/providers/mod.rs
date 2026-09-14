@@ -11,6 +11,7 @@ use crate::models::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutableArtifactFormat {
+    Safetensors,
     Gguf,
     Onnx,
 }
@@ -18,6 +19,7 @@ pub enum ExecutableArtifactFormat {
 impl ExecutableArtifactFormat {
     pub fn from_extension(extension: &str) -> Option<Self> {
         match extension.to_ascii_lowercase().as_str() {
+            "safetensors" => Some(Self::Safetensors),
             "gguf" => Some(Self::Gguf),
             "onnx" => Some(Self::Onnx),
             _ => None,
@@ -34,6 +36,7 @@ impl ExecutableArtifactFormat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ServingTask {
+    ImageGeneration,
     Chat,
     Completion,
     Embedding,
@@ -43,6 +46,7 @@ pub enum ServingTask {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OpenAiGatewayEndpoint {
+    ImagesGenerations,
     Models,
     ChatCompletions,
     Completions,
@@ -60,6 +64,7 @@ pub enum ProviderLaunchKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderBinaryLaunchTarget {
+    TorchServe,
     OllamaServe,
     LlamaCppRouter,
     LlamaCppDedicated,
@@ -102,6 +107,7 @@ pub enum ProviderGatewayAliasPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderServingAdapterKind {
+    TorchRuntime,
     OllamaProviderApi,
     LlamaCppRuntime,
     OnnxRuntime,
@@ -117,6 +123,7 @@ pub enum ProviderServingPlacementPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderUnloadBehavior {
+    TorchSlot,
     ProviderApi,
     RouterPreset,
     SessionManager,
@@ -307,6 +314,45 @@ impl ProviderBehavior {
         }
     }
 
+    pub fn torch() -> Self {
+        Self {
+            provider: RuntimeProviderId::Torch,
+            provider_modes: vec![RuntimeProviderMode::TorchServe],
+            device_modes: vec![RuntimeDeviceMode::Gpu, RuntimeDeviceMode::Hybrid],
+            local_artifact_formats: vec![ExecutableArtifactFormat::Safetensors],
+            serving_tasks: vec![ServingTask::ImageGeneration],
+            openai_endpoints: vec![
+                OpenAiGatewayEndpoint::Models,
+                OpenAiGatewayEndpoint::ImagesGenerations,
+            ],
+            launch_kinds: vec![ProviderLaunchKind::BinaryProcess],
+            managed_launch_strategies: vec![ProviderManagedLaunchStrategy {
+                provider_mode: RuntimeProviderMode::TorchServe,
+                target: ProviderManagedLaunchTarget::BinaryProcess(
+                    ProviderBinaryLaunchTarget::TorchServe,
+                ),
+            }],
+            managed_runtime_app_id: "torch".to_string(),
+            managed_runtime_uninitialized_message: "Torch runtime manager is not initialized"
+                .to_string(),
+            managed_runtime_no_active_version_message:
+                "Install and activate a qualified Torch runtime first".to_string(),
+            managed_runtime_path_segment: "torch".to_string(),
+            managed_runtime_base_port: 8400,
+            provider_model_id_policy: ProviderModelIdPolicy::LibraryModelId,
+            gateway_alias_policy: ProviderGatewayAliasPolicy::LibraryModelId,
+            serving_adapter_kind: ProviderServingAdapterKind::TorchRuntime,
+            serving_placement_policy: ProviderServingPlacementPolicy::ProfileOnly,
+            unload_behavior: ProviderUnloadBehavior::TorchSlot,
+            supports_managed_profiles: true,
+            supports_external_profiles: false,
+            supports_model_catalog: true,
+            supports_dedicated_model_processes: false,
+            supports_launch_on_serve: true,
+            supports_default_profile_fallback: false,
+        }
+    }
+
     pub fn supports_mode(&self, mode: RuntimeProviderMode) -> bool {
         self.provider_modes.contains(&mode)
     }
@@ -378,6 +424,7 @@ impl ProviderRegistry {
             ProviderBehavior::ollama(),
             ProviderBehavior::llama_cpp(),
             ProviderBehavior::onnx_runtime(),
+            ProviderBehavior::torch(),
         ])
     }
 
@@ -403,6 +450,7 @@ impl ProviderRegistry {
             RuntimeProviderId::Ollama,
             RuntimeProviderId::LlamaCpp,
             RuntimeProviderId::OnnxRuntime,
+            RuntimeProviderId::Torch,
         ] {
             if let Some(behavior) = self.providers.get(&provider) {
                 providers.push(behavior);
@@ -429,7 +477,8 @@ mod tests {
         assert!(registry.contains(RuntimeProviderId::Ollama));
         assert!(registry.contains(RuntimeProviderId::LlamaCpp));
         assert!(registry.contains(RuntimeProviderId::OnnxRuntime));
-        assert_eq!(registry.providers().len(), 3);
+        assert!(registry.contains(RuntimeProviderId::Torch));
+        assert_eq!(registry.providers().len(), 4);
     }
 
     #[test]

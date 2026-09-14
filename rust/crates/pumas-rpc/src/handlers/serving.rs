@@ -97,6 +97,9 @@ pub async fn serve_model(state: &AppState, params: &Value) -> pumas_library::Res
         Some(ProviderServingAdapterKind::LlamaCppRuntime) => {
             serve_llama_cpp_model(state, request, operation).await
         }
+        Some(ProviderServingAdapterKind::TorchRuntime) => {
+            super::serving_torch::serve_torch_model(state, request, operation).await
+        }
         Some(ProviderServingAdapterKind::OnnxRuntime) => {
             serve_onnx_model(state, request, operation).await
         }
@@ -190,6 +193,15 @@ pub async fn unserve_model(state: &AppState, params: &Value) -> pumas_library::R
         }
         Some(ProviderUnloadBehavior::RouterPreset) => {
             unserve_llama_cpp_model(state, command.request, profile_id, model_alias).await
+        }
+        Some(ProviderUnloadBehavior::TorchSlot) => {
+            super::serving_torch::unserve_torch_model(
+                state,
+                command.request,
+                profile_id,
+                model_alias,
+            )
+            .await
         }
         Some(ProviderUnloadBehavior::SessionManager) => {
             unserve_onnx_model(state, command.request, profile_id, model_alias).await

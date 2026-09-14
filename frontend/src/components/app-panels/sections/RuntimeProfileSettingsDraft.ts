@@ -36,7 +36,7 @@ export function newProfileDraft(provider: RuntimeProviderId): RuntimeProfileDraf
     enabled: true,
     endpoint_url: '',
     port: '',
-    device_mode: 'auto',
+    device_mode: descriptor.deviceModes[0] ?? 'auto',
     device_id: '',
     gpu_layers: '',
   };

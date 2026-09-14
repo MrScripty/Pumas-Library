@@ -27,7 +27,40 @@ const OPENAI_GATEWAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 /// OpenAI-compatible served-model listing backed by Pumas serving status.
 pub async fn handle_openai_models(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.api.get_serving_status().await {
-        Ok(response) => openai_models_snapshot_response(response.snapshot),
+        Ok(mut response) => {
+            let mut unavailable = Vec::new();
+            for model in response
+                .snapshot
+                .served_models
+                .iter()
+                .filter(|model| model.provider == RuntimeProviderId::Torch)
+            {
+                let ready = match model.endpoint_url.as_ref() {
+                    Some(endpoint) => pumas_app_manager::TorchClient::new(Some(endpoint.as_str()))
+                        .list_slots()
+                        .await
+                        .is_ok_and(|slots| {
+                            slots.iter().any(|slot| {
+                                slot.model_name == model.model_id
+                                    && slot.state
+                                        == pumas_app_manager::torch_client::SlotState::Ready
+                                    && matches!(
+                                        slot.model_type.as_deref(),
+                                        Some("nunchaku-z-image-turbo" | "flux2-klein-9b-kv-fp8")
+                                    )
+                            })
+                        }),
+                    None => false,
+                };
+                if !ready {
+                    unavailable.push((model.model_id.clone(), model.profile_id.clone()));
+                }
+            }
+            response.snapshot.served_models.retain(|model| {
+                !unavailable.contains(&(model.model_id.clone(), model.profile_id.clone()))
+            });
+            openai_models_snapshot_response(response.snapshot)
+        }
         Err(error) => openai_public_error_response(
             StatusCode::INTERNAL_SERVER_ERROR,
             PublicError::from(&error),
@@ -100,6 +133,16 @@ pub async fn handle_openai_proxy(
             );
         }
     };
+
+    if policy.endpoint == OpenAiGatewayEndpoint::ImagesGenerations {
+        if let Err(message) = super::openai_gateway_images::validate(&body) {
+            return super::openai_gateway_images::error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                message,
+            );
+        }
+    }
 
     let Some(requested_model) = body
         .get("model")
@@ -187,6 +230,9 @@ pub async fn handle_openai_proxy(
         .send()
         .await
     {
+        Ok(response) if policy.endpoint == OpenAiGatewayEndpoint::ImagesGenerations => {
+            super::openai_gateway_images::response(response).await
+        }
         Ok(response) => proxy_response(response).await,
         Err(_) => openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable()),
     }
@@ -201,6 +247,11 @@ struct OpenAiGatewayEndpointPolicy {
 
 fn openai_gateway_policy_for_path(path: &str) -> Option<OpenAiGatewayEndpointPolicy> {
     match path {
+        "/v1/images/generations" => Some(OpenAiGatewayEndpointPolicy {
+            endpoint: OpenAiGatewayEndpoint::ImagesGenerations,
+            max_request_body_bytes: 32 * 1024,
+            request_timeout: Duration::from_secs(615),
+        }),
         "/v1/models" => Some(OpenAiGatewayEndpointPolicy {
             endpoint: OpenAiGatewayEndpoint::Models,
             max_request_body_bytes: 0,
@@ -236,12 +287,17 @@ fn provider_supports_openai_gateway_endpoint(
 }
 
 fn openai_model_entry(model: ServedModelStatus) -> Value {
-    json!({
+    let image_generation = model.provider == RuntimeProviderId::Torch;
+    let mut entry = json!({
         "id": model.model_alias.unwrap_or(model.model_id),
         "object": "model",
         "created": 0,
         "owned_by": "pumas"
-    })
+    });
+    if image_generation {
+        entry["capabilities"] = json!(["image_generation"]);
+    }
+    entry
 }
 
 fn provider_request_model_id(model: &ServedModelStatus, registry: &ProviderRegistry) -> String {

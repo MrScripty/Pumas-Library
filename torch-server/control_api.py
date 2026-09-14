@@ -4,11 +4,12 @@ Provides /api/slots, /api/load, /api/unload, /api/status, /api/devices,
 and /api/configure for the Pumas Library frontend to manage the server.
 """
 
+import asyncio
 import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from validation import (
     is_loopback_host,
@@ -35,10 +36,13 @@ def _log_and_raise_internal_error(action: str, error: Exception) -> None:
 
 
 class LoadModelRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     model_path: str
     model_name: str
     device: str = "auto"
     model_type: Optional[str] = None
+    pipeline_path: Optional[str] = None
+    vae_path: Optional[str] = None
 
     @field_validator("model_path")
     @classmethod
@@ -106,13 +110,40 @@ async def load_model(req: LoadModelRequest, request: Request):
     manager = request.app.state.model_manager
 
     try:
-        slot = await manager.load(
-            model_path=req.model_path,
-            model_name=req.model_name,
-            device_str=req.device,
-            model_type=req.model_type,
+        options = {"pipeline_path": req.pipeline_path} if req.pipeline_path is not None else {}
+        if req.vae_path is not None:
+            options["vae_path"] = req.vae_path
+        load = asyncio.create_task(
+            manager.load(
+                model_path=req.model_path,
+                model_name=req.model_name,
+                device_str=req.device,
+                model_type=req.model_type,
+                **options,
+            )
         )
+        try:
+            while not load.done():
+                if await request.is_disconnected():
+                    load.cancel()
+                    raise HTTPException(status_code=499, detail="Model load cancelled")
+                await asyncio.wait({load}, timeout=0.1)
+            slot = load.result()
+        finally:
+            if not load.done():
+                load.cancel()
+                while not load.done():
+                    try:
+                        await asyncio.shield(load)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break
+            if load.done() and not load.cancelled():
+                load.exception()
         return {"success": True, "slot": slot.to_dict()}
+    except HTTPException:
+        raise
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:

@@ -49,6 +49,19 @@ const activeProgress: InstallationProgress = {
 };
 
 describe('InstallDialog', () => {
+  it('keeps installed runtimes manageable when remote releases are unavailable', () => {
+    render(<InstallDialog
+      isOpen={true} onClose={vi.fn()} availableVersions={[]}
+      installedVersions={['torch-runtime-0.1.0']} isLoading={false}
+      onInstallVersion={vi.fn().mockResolvedValue(true)}
+      onCancelInstallation={vi.fn().mockResolvedValue(true)}
+      onRefreshAll={vi.fn().mockResolvedValue(undefined)}
+      onRemoveVersion={vi.fn().mockResolvedValue(true)}
+    />);
+    expect(screen.getByText('torch-runtime-0.1.0')).toBeInTheDocument();
+    expect(screen.queryByText('No versions available')).not.toBeInTheDocument();
+  });
+
   it('renders modal mode as a named dialog and closes from backdrop or Escape key', () => {
     const onClose = vi.fn();
 

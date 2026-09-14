@@ -8,6 +8,8 @@ mod ollama;
 #[cfg(feature = "inference-plugins")]
 mod openai_gateway;
 #[cfg(feature = "inference-plugins")]
+mod openai_gateway_images;
+#[cfg(feature = "inference-plugins")]
 mod openai_gateway_onnx;
 #[cfg(feature = "inference-plugins")]
 mod plugins;
@@ -26,6 +28,8 @@ mod serving_llama_cpp_shared;
 mod serving_ollama;
 #[cfg(feature = "inference-plugins")]
 mod serving_onnx;
+#[cfg(feature = "inference-plugins")]
+mod serving_torch;
 mod shared;
 mod status;
 #[cfg(test)]

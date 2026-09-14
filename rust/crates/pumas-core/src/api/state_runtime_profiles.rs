@@ -125,6 +125,9 @@ fn runtime_profile_binary_launch_config(
     launch_spec: &RuntimeProfileLaunchSpec,
 ) -> std::result::Result<BinaryLaunchConfig, PumasError> {
     let config = match launch_spec.launch_strategy {
+        RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::TorchServe) => {
+            BinaryLaunchConfig::torch(tag, version_dir)
+        }
         RuntimeProfileLaunchStrategy::BinaryProcess(
             RuntimeProfileBinaryLaunchKind::OllamaServe,
         ) => BinaryLaunchConfig::ollama(tag, version_dir),
@@ -226,7 +229,8 @@ async fn prepare_runtime_profile_launch_spec(
             }
         }
         RuntimeProfileLaunchStrategy::BinaryProcess(
-            RuntimeProfileBinaryLaunchKind::OllamaServe,
+            RuntimeProfileBinaryLaunchKind::OllamaServe
+            | RuntimeProfileBinaryLaunchKind::TorchServe,
         )
         | RuntimeProfileLaunchStrategy::InProcessRuntime(_)
         | RuntimeProfileLaunchStrategy::ExternalOnly => {}

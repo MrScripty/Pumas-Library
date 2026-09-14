@@ -17,9 +17,9 @@
 //! - **Windows**: Full support
 //! - **macOS**: Architecture ready, implementation pending
 
-pub(crate) mod filesystem;
+pub mod filesystem;
 #[cfg(target_os = "linux")]
-pub(crate) mod linux_group;
+pub mod linux_group;
 pub mod paths;
 pub mod permissions;
 pub mod process;

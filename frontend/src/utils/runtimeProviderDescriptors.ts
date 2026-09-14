@@ -53,6 +53,21 @@ export const runtimeProviderDescriptors: Record<RuntimeProviderId, RuntimeProvid
     canLaunchOnServe: true,
     requiresSavedRouteForImplicitServe: false,
   },
+  torch: {
+    id: 'torch',
+    label: 'Torch',
+    profileModes: ['torch_serve'],
+    managementModes: ['managed'],
+    deviceModes: ['gpu', 'hybrid'],
+    compatibleExecutableFormats: ['safetensors'],
+    dedicatedPlacementModes: [],
+    supportsGpuLayers: false,
+    supportsTensorSplit: false,
+    supportsContextSize: false,
+    defaultContextSize: null,
+    canLaunchOnServe: true,
+    requiresSavedRouteForImplicitServe: true,
+  },
   onnx_runtime: {
     id: 'onnx_runtime',
     label: 'ONNX Runtime',
@@ -75,6 +90,7 @@ const modeLabels: Record<RuntimeProviderMode, string> = {
   llama_cpp_router: 'Router',
   llama_cpp_dedicated: 'Dedicated',
   onnx_serve: 'Serve',
+  torch_serve: 'Serve',
 };
 
 const deviceModeLabels: Record<RuntimeDeviceMode, string> = {

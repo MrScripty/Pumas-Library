@@ -3,6 +3,19 @@ import { describe, expect, it, vi } from 'vitest';
 import { VersionSelector } from './VersionSelector';
 
 describe('VersionSelector popup', () => {
+  it('shows a failed switch and keeps the active version selected', async () => {
+    render(<VersionSelector
+      activeVersion="v1.0.0" installedVersions={['v1.0.0', 'v1.1.0']}
+      isLoading={false} onOpenVersionManager={vi.fn()}
+      openActiveInstall={vi.fn().mockResolvedValue(true)}
+      switchVersion={vi.fn().mockRejectedValue(new Error('Stop the running runtime first'))}
+    />);
+    fireEvent.click(screen.getByRole('button', { name: 'v1.0.0' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to v1.1.0' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Stop the running runtime first');
+    expect(screen.getByRole('button', { name: 'v1.0.0' })).toBeInTheDocument();
+  });
+
   it('exposes a named action dialog and restores the version trigger after Escape', async () => {
     render(
       <VersionSelector

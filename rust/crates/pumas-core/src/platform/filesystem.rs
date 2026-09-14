@@ -15,7 +15,7 @@ use std::path::Path;
 /// empty directory or dangling symlink. Unsupported filesystem operations
 /// return their error; never fall back to replacing rename or copy/delete.
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-pub(crate) fn rename_directory_noreplace(source: &Path, target: &Path) -> io::Result<()> {
+pub fn rename_directory_noreplace(source: &Path, target: &Path) -> io::Result<()> {
     use rustix::fs::{renameat_with, RenameFlags, CWD};
 
     renameat_with(CWD, source, CWD, target, RenameFlags::NOREPLACE).map_err(Into::into)
@@ -23,7 +23,7 @@ pub(crate) fn rename_directory_noreplace(source: &Path, target: &Path) -> io::Re
 
 #[cfg(windows)]
 #[allow(unsafe_code)]
-pub(crate) fn rename_directory_noreplace(source: &Path, target: &Path) -> io::Result<()> {
+pub fn rename_directory_noreplace(source: &Path, target: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
 
@@ -54,7 +54,7 @@ pub(crate) fn rename_directory_noreplace(source: &Path, target: &Path) -> io::Re
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-pub(crate) fn rename_directory_noreplace(_source: &Path, _target: &Path) -> io::Result<()> {
+pub fn rename_directory_noreplace(_source: &Path, _target: &Path) -> io::Result<()> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "Non-replacing classification moves are unsupported on this target",

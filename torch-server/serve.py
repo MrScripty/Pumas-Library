@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from control_api import router as control_router
 from device_manager import DeviceManager
 from model_manager import ModelManager
+from image_api import router as image_router
 from openai_api import router as openai_router
 from validation import (
     configured_api_token,
@@ -63,11 +64,12 @@ def create_app(host: str = "127.0.0.1", port: int = 8400, max_models: int = 4) -
         install_token_auth(app, api_token)
 
     app.include_router(openai_router, prefix="/v1")
+    app.include_router(image_router, prefix="/v1")
     app.include_router(control_router, prefix="/api")
 
     @app.get("/health")
     async def health_check():
-        return {"status": "ok"}
+        return {"status": "ok", "protocol": 1}
 
     return app
 

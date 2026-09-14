@@ -124,6 +124,14 @@ pub struct ModelSlot {
     pub model_type: Option<String>,
 }
 
+/// Library-resolved components for a concrete image adapter.
+pub struct ImageModelComponents<'a> {
+    /// Complete pipeline directory, or the standalone text encoder directory.
+    pub pipeline_path: &'a str,
+    /// Separate VAE checkpoint when the adapter uses standalone components.
+    pub vae_path: Option<&'a str>,
+}
+
 /// Information about an available compute device.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
@@ -327,6 +335,37 @@ impl TorchClient {
         device: &ComputeDevice,
         model_type: Option<&str>,
     ) -> Result<ModelSlot> {
+        self.load_with_pipeline(model_path, model_name, device, model_type, None)
+            .await
+    }
+
+    /// Load an image checkpoint with library-resolved local pipeline components.
+    pub async fn load_image_model(
+        &self,
+        model_path: &str,
+        model_name: &str,
+        device: &ComputeDevice,
+        adapter: &str,
+        components: &ImageModelComponents<'_>,
+    ) -> Result<ModelSlot> {
+        self.load_with_pipeline(
+            model_path,
+            model_name,
+            device,
+            Some(adapter),
+            Some(components),
+        )
+        .await
+    }
+
+    async fn load_with_pipeline(
+        &self,
+        model_path: &str,
+        model_name: &str,
+        device: &ComputeDevice,
+        model_type: Option<&str>,
+        components: Option<&ImageModelComponents<'_>>,
+    ) -> Result<ModelSlot> {
         let url = format!("{}/api/load", self.base_url);
         info!(
             "Loading model '{}' on {} from {}",
@@ -343,6 +382,12 @@ impl TorchClient {
 
         if let Some(mt) = model_type {
             body["model_type"] = serde_json::Value::String(mt.to_string());
+        }
+        if let Some(components) = components {
+            body["pipeline_path"] = serde_json::Value::String(components.pipeline_path.to_string());
+            if let Some(path) = components.vae_path {
+                body["vae_path"] = serde_json::Value::String(path.to_string());
+            }
         }
 
         let response = self

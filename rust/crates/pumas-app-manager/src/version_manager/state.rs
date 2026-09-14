@@ -150,7 +150,7 @@ impl VersionState {
         versions: &pumas_library::metadata::VersionsMetadata,
     ) -> Result<Option<String>> {
         // 1. Check .active-version file
-        let active_file = self.launcher_root.join(".active-version");
+        let active_file = super::active_version_path(&self.launcher_root, self.app_id);
         if fs::try_exists(&active_file)
             .await
             .map_err(|e| PumasError::Io {
@@ -304,7 +304,7 @@ impl VersionState {
     }
 
     async fn rewrite_active_version_if_needed(&self, old_tag: &str, new_tag: &str) -> Result<()> {
-        let active_file = self.launcher_root.join(".active-version");
+        let active_file = super::active_version_path(&self.launcher_root, self.app_id);
         if !fs::try_exists(&active_file)
             .await
             .map_err(|e| PumasError::Io {
@@ -392,7 +392,7 @@ impl VersionState {
         self.active_version = Some(tag.to_string());
 
         // Write to .active-version file
-        let active_file = self.launcher_root.join(".active-version");
+        let active_file = super::active_version_path(&self.launcher_root, self.app_id);
         fs::write(&active_file, tag)
             .await
             .map_err(|e| PumasError::Io {
@@ -451,7 +451,7 @@ impl VersionState {
         if self.active_version.as_deref() == Some(tag) {
             self.active_version = None;
             // Clear .active-version file
-            let active_file = self.launcher_root.join(".active-version");
+            let active_file = super::active_version_path(&self.launcher_root, self.app_id);
             if fs::try_exists(&active_file)
                 .await
                 .map_err(|e| PumasError::Io {
@@ -637,6 +637,12 @@ impl VersionState {
                 }
                 return Self::contains_llama_cpp_server_binary(version_path).await;
             }
+            AppId::Torch => vec![
+                version_path.join("runtime.json"),
+                version_path.join("serve.py"),
+                version_path.join("venv/bin/python"),
+                version_path.join("requirements.txt"),
+            ],
             _ => {
                 // Generic check - just need the directory to exist
                 vec![version_path.to_path_buf()]
@@ -791,12 +797,17 @@ mod tests {
         };
         state.add_installed_version("v1.0.0", metadata).unwrap();
 
-        // Set active
+        // Torch activation must preserve the llama.cpp runtime marker.
+        std::fs::write(temp.path().join(".active-version"), "llama-existing").unwrap();
         state.set_active_version("v1.0.0").await.unwrap();
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join(".active-version")).unwrap(),
+            "llama-existing"
+        );
         assert_eq!(state.get_active_version(), Some("v1.0.0".to_string()));
 
         // Check file was written
-        let active_file = temp.path().join(".active-version");
+        let active_file = temp.path().join(".active-version-torch");
         assert!(active_file.exists());
         assert_eq!(std::fs::read_to_string(active_file).unwrap(), "v1.0.0");
     }
@@ -864,6 +875,30 @@ mod tests {
         assert!(!state.is_installed("v1.0.0"));
         assert!(state.get_active_version().is_none());
         assert!(state.get_default_version().is_none());
+    }
+
+    #[tokio::test]
+    async fn legacy_torch_source_install_is_unregistered_without_deleting_files() {
+        let (mut state, root) = create_test_state().await;
+        let legacy = root.path().join("torch-versions/v2.10.0");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("user-file"), "preserve me").unwrap();
+        state
+            .add_installed_version(
+                "v2.10.0",
+                InstalledVersionMetadata {
+                    path: "v2.10.0".into(),
+                    release_tag: "v2.10.0".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let result = state.validate_installations().await.unwrap();
+        assert_eq!(result.removed_tags, vec!["v2.10.0"]);
+        assert_eq!(
+            std::fs::read_to_string(legacy.join("user-file")).unwrap(),
+            "preserve me"
+        );
     }
 
     #[tokio::test]

@@ -150,7 +150,7 @@ impl DependencyManager {
 
             // Extract package name (before any version specifier)
             let package_name = line
-                .split(['=', '>', '<', '[', ';'])
+                .split(['=', '>', '<', '[', ';', '@'])
                 .next()
                 .map(|s| s.trim())
                 .unwrap_or("");
@@ -220,6 +220,11 @@ impl DependencyManager {
         constraints_manager: &ConstraintsManager,
         progress_tx: Option<mpsc::Sender<ProgressUpdate>>,
     ) -> Result<bool> {
+        if self.app_id == AppId::Torch {
+            return Err(PumasError::DependencyFailed {
+                message: "Torch dependencies belong to its validated runtime bundle. Install another runtime version through version management; in-place dependency repair is unsupported.".to_string(),
+            });
+        }
         let version_path = self.version_path(tag);
         if !path_exists(&version_path).await? {
             return Err(PumasError::VersionNotFound {
@@ -491,6 +496,39 @@ optional-package
         assert_eq!(manager.canonicalize_name("PyTorch"), "pytorch");
         assert_eq!(manager.canonicalize_name("scikit_learn"), "scikit-learn");
         assert_eq!(manager.canonicalize_name("PIL"), "pil");
+    }
+
+    #[test]
+    fn locked_direct_reference_is_a_package_name() {
+        let (manager, _temp) = create_test_manager();
+        assert_eq!(
+            manager.parse_requirements(
+                "nunchaku @ https://example.test/nunchaku.whl \\\n    --hash=sha256:1234\n"
+            ),
+            vec!["nunchaku"]
+        );
+    }
+
+    #[tokio::test]
+    async fn torch_dependency_repair_cannot_mutate_an_installed_runtime() {
+        let (manager, temp) = create_test_manager();
+        let version = manager.version_path("candidate");
+        fs::create_dir_all(&version).await.unwrap();
+        fs::write(version.join("requirements.txt"), "torch==2.9.1")
+            .await
+            .unwrap();
+        let constraints = ConstraintsManager::new_with_cache(temp.path().join("constraints")).await;
+        let result = manager
+            .install_dependencies("candidate", &constraints, None)
+            .await;
+        assert!(matches!(result, Err(PumasError::DependencyFailed { .. })));
+        assert!(!version.join("venv").exists());
+        assert_eq!(
+            fs::read_to_string(version.join("requirements.txt"))
+                .await
+                .unwrap(),
+            "torch==2.9.1"
+        );
     }
 
     #[tokio::test]

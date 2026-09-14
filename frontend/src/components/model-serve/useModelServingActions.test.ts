@@ -142,6 +142,55 @@ describe('useModelServingActions', () => {
     expect(result.current.servedStatus).toBeNull();
   });
 
+  it.each(['validation', 'load'] as const)(
+    'preserves a restart rejection when an unloaded router row refreshes during %s',
+    async (stage) => {
+      const loaded = servedModels()[1];
+      expect(loaded).toBeDefined();
+      if (!loaded) return;
+      const unloaded: ServedModelStatus = { ...loaded, load_state: 'unloaded' };
+      const error = {
+        code: 'unsupported_placement' as const,
+        severity: 'non_critical' as const,
+        message: 'Unload all llama.cpp router models before changing model context size',
+      };
+      let finishRequest!: () => void;
+      getElectronAPIMock.mockReturnValue({
+        validate_model_serving_config: stage === 'validation'
+          ? vi.fn(() => new Promise<ModelServeValidationResponse>((resolve) => {
+            finishRequest = () => resolve({ success: true, valid: false, warnings: [], errors: [error] });
+          }))
+          : vi.fn().mockResolvedValue({ success: true, valid: true, warnings: [], errors: [] }),
+        serve_model: vi.fn(() => new Promise<ServeModelResponse>((resolve) => {
+          finishRequest = () => resolve({
+            success: true, loaded: false, loaded_models_unchanged: true, load_error: error,
+          });
+        })),
+      });
+      const { result, rerender } = renderHook(
+        ({ rows }) => useModelServingActions('models/chat', { profileId: 'llama-gpu' }, rows),
+        { initialProps: { rows: [unloaded] } }
+      );
+      let pending!: Promise<void>;
+      await act(async () => {
+        pending = result.current.serveModel({
+          provider: 'llama_cpp', profile_id: 'llama-gpu', device_mode: 'gpu',
+          context_size: 4096, keep_loaded: true,
+        });
+      });
+      rerender({ rows: [{ ...unloaded }] });
+      expect(result.current.actionPhase).toBe('starting');
+      await act(async () => {
+        finishRequest();
+        await pending;
+      });
+      expect(result.current.serveError?.message).toBe(error.message);
+      expect(result.current.actionPhase).toBe('idle');
+      rerender({ rows: [{ ...unloaded }] });
+      expect(result.current.serveError?.message).toBe(error.message);
+    }
+  );
+
   it('keeps an exact context-18000 load rejection out of Loaded state', async () => {
     const validateModelServingConfig = vi.fn<
       (_request: ServeModelRequest) => Promise<ModelServeValidationResponse>

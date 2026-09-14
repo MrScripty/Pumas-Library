@@ -23,7 +23,7 @@ export type ServingControlObservation =
   | { kind: 'known'; rows: ServingControlStatus[] }
   | { kind: 'unavailable'; message: string };
 
-const PROVIDERS = new Set(['ollama', 'llama_cpp', 'onnx_runtime']);
+const PROVIDERS = new Set(['ollama', 'llama_cpp', 'onnx_runtime', 'torch']);
 const LOAD_STATES = new Set(['requested', 'loading', 'loaded', 'unloading', 'unloaded', 'failed']);
 const ERROR_CODES = new Set<ModelServeErrorCode>([
   'invalid_request',

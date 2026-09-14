@@ -79,6 +79,16 @@ async fn path_exists(path: &Path) -> Result<bool> {
         .map_err(|err| PumasError::io_with_path(err, path))
 }
 
+fn active_version_path(root: &Path, app_id: AppId) -> PathBuf {
+    // Preserve the established native-runtime marker; Torch must not overwrite
+    // llama.cpp selection when a user activates an image runtime.
+    root.join(if app_id == AppId::Torch {
+        ".active-version-torch"
+    } else {
+        ".active-version"
+    })
+}
+
 /// Main version manager coordinating all version operations.
 #[derive(Clone)]
 pub struct VersionManager {
@@ -248,7 +258,7 @@ impl VersionManager {
 
     /// Get the active version file path.
     pub fn active_version_file(&self) -> PathBuf {
-        self.launcher_root.join(".active-version")
+        active_version_path(&self.launcher_root, self.app_id)
     }
 
     // ========================================
@@ -275,6 +285,14 @@ impl VersionManager {
 
     /// Set the active version.
     pub async fn set_active_version(&self, tag: &str) -> Result<bool> {
+        if self.app_id == AppId::Torch {
+            let current = self.get_active_version().await?;
+            if current.as_deref() != Some(tag) {
+                if let Some(current) = current {
+                    self.ensure_torch_stopped(&current).await?;
+                }
+            }
+        }
         let mut state = self.state.write().await;
         state.set_active_version(tag).await
     }
@@ -342,9 +360,14 @@ impl VersionManager {
         &self,
         force_refresh: bool,
     ) -> Result<Vec<pumas_library::network::GitHubRelease>> {
-        self.github_client
+        let mut releases = self
+            .github_client
             .get_releases_for_app(self.app_id, force_refresh)
-            .await
+            .await?;
+        if self.app_id == AppId::Torch {
+            releases.retain(installer::is_torch_runtime_release);
+        }
+        Ok(releases)
     }
 
     /// Get a specific release by tag.
@@ -353,9 +376,13 @@ impl VersionManager {
         tag: &str,
         force_refresh: bool,
     ) -> Result<Option<pumas_library::network::GitHubRelease>> {
-        self.github_client
+        let release = self
+            .github_client
             .get_release_by_tag(self.app_id.github_repo(), tag, force_refresh)
-            .await
+            .await?;
+        Ok(release.filter(|release| {
+            self.app_id != AppId::Torch || installer::is_torch_runtime_release(release)
+        }))
     }
 
     /// Get cache status for GitHub releases.
@@ -418,7 +445,15 @@ impl VersionManager {
         }
 
         // Acquire install lock
-        let _lock = self.install_lock.lock().await;
+        let install_guard = self.install_lock.clone().lock_owned().await;
+        // Resolve before recording installation state: discovery failure must not
+        // leave a phantom installation that can never complete.
+        let release = self.resolve_installable_release(tag).await?;
+        if self.state.read().await.is_installed(tag) {
+            return Err(PumasError::VersionAlreadyInstalled {
+                tag: tag.to_string(),
+            });
+        }
 
         // Reset cancellation flag
         self.cancel_flag.store(false, Ordering::SeqCst);
@@ -431,8 +466,6 @@ impl VersionManager {
 
         // Create progress channel
         let (tx, rx) = mpsc::channel(32);
-
-        let release = self.resolve_installable_release(tag).await?;
 
         // Create installer
         let installer = VersionInstaller::new(
@@ -450,6 +483,7 @@ impl VersionManager {
         let progress_tracker = self.progress_tracker.clone();
 
         tokio::spawn(async move {
+            let _install_guard = install_guard;
             let result = installer.install_version(&tag, &release, tx.clone()).await;
 
             // Clear installing tag
@@ -509,8 +543,54 @@ impl VersionManager {
             })
     }
 
+    async fn ensure_torch_stopped(&self, tag: &str) -> Result<()> {
+        if self.app_id != AppId::Torch {
+            return Ok(());
+        }
+        let mut pid_paths = vec![self.version_path(tag).join("torch.pid")];
+        let profiles = self
+            .launcher_root
+            .join("launcher-data/runtime-profiles/torch");
+        match fs::read_dir(&profiles).await {
+            Ok(mut entries) => {
+                while let Some(entry) = entries
+                    .next_entry()
+                    .await
+                    .map_err(|error| PumasError::io_with_path(error, &profiles))?
+                {
+                    pid_paths.push(entry.path().join("runtime.pid"));
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(PumasError::io_with_path(error, profiles)),
+        }
+        // Profiles share the selected environment. Require them to stop before
+        // changing runtime selection or deleting files used by a profile.
+        for pid_path in pid_paths {
+            match fs::read_to_string(&pid_path).await {
+                Ok(pid) => {
+                    let pid = pid.trim().parse::<u32>().map_err(|_| {
+                        PumasError::Other(
+                            "Cannot verify Torch process: invalid PID file".to_string(),
+                        )
+                    })?;
+                    if pumas_library::platform::is_process_alive(pid) {
+                        return Err(PumasError::Other(
+                            "Stop Torch before switching or removing its runtime".to_string(),
+                        ));
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(PumasError::io_with_path(error, pid_path)),
+            }
+        }
+        Ok(())
+    }
+
     /// Remove an installed version.
     pub async fn remove_version(&self, tag: &str) -> Result<bool> {
+        let _install_guard = self.install_lock.lock().await;
+        self.ensure_torch_stopped(tag).await?;
         // Check if installed
         {
             let state = self.state.read().await;
@@ -676,6 +756,59 @@ mod tests {
             .await
             .unwrap();
         (manager, temp_dir)
+    }
+
+    #[tokio::test]
+    async fn torch_release_rejection_does_not_leave_an_install_in_progress() {
+        let root = TempDir::new().unwrap();
+        let cache = root.path().join("launcher-data/cache");
+        let releases = pumas_library::network::ReleasesCache::new(cache, Duration::from_secs(3600));
+        releases.set_disk(AppId::Torch.github_repo(), &[]).unwrap();
+        let manager = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        assert!(matches!(
+            manager.install_version("v2.10.0").await,
+            Err(PumasError::VersionNotFound { .. })
+        ));
+        assert!(!manager.is_installing().await);
+        assert!(manager.get_installation_progress().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn running_torch_environment_cannot_be_removed() {
+        let root = TempDir::new().unwrap();
+        let manager = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        let runtime = manager.version_path("torch-runtime-running");
+        std::fs::create_dir_all(&runtime).unwrap();
+        std::fs::write(runtime.join("torch.pid"), std::process::id().to_string()).unwrap();
+        let error = manager
+            .remove_version("torch-runtime-running")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("Stop Torch"));
+        assert!(runtime.join("torch.pid").exists());
+    }
+
+    #[tokio::test]
+    async fn managed_torch_profile_blocks_runtime_removal() {
+        let root = TempDir::new().unwrap();
+        let manager = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        let profile = root
+            .path()
+            .join("launcher-data/runtime-profiles/torch/image-profile");
+        std::fs::create_dir_all(&profile).unwrap();
+        std::fs::write(profile.join("runtime.pid"), std::process::id().to_string()).unwrap();
+        let error = manager
+            .remove_version("torch-runtime-profile")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("Stop Torch"));
+        assert!(profile.join("runtime.pid").exists());
     }
 
     #[tokio::test]

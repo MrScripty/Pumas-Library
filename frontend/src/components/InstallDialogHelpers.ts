@@ -15,19 +15,26 @@ export function filterVersions(
   showPreReleases: boolean,
   showInstalled: boolean
 ): VersionRelease[] {
-  const prereleaseFiltered = availableVersions.filter((release) => {
-    if (!showPreReleases && release.prerelease) {
-      return false;
-    }
-    return true;
-  });
+  const installed = new Set(installedVersions);
+  const visibleReleases = availableVersions.filter((release) =>
+    showPreReleases || !release.prerelease || (showInstalled && installed.has(release.tagName))
+  );
+  const latestTags = new Set(filterLatestPatchVersions(visibleReleases).map((release) => release.tagName));
+  const rows = visibleReleases.filter((release) => installed.has(release.tagName)
+    ? showInstalled
+    : latestTags.has(release.tagName));
 
-  return filterLatestPatchVersions(prereleaseFiltered).filter((release) => {
-    if (!showInstalled && installedVersions.includes(release.tagName)) {
-      return false;
+  if (showInstalled) {
+    const listed = new Set(rows.map((release) => release.tagName));
+    for (const tag of installed) {
+      if (!listed.has(tag)) {
+        // Installed metadata remains authoritative even if its release was
+        // removed upstream or discovery is temporarily unavailable.
+        rows.push({ tagName: tag, name: tag, publishedAt: '', prerelease: false });
+      }
     }
-    return true;
-  });
+  }
+  return rows;
 }
 
 interface ParsedVersionTag {

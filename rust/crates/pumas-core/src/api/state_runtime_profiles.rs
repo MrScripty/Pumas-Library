@@ -219,7 +219,7 @@ async fn prepare_runtime_profile_launch_spec(
                 });
             }
             launch_spec.extra_args =
-                append_llama_cpp_model_arg(&launch_spec.extra_args, &model_path);
+                append_llama_cpp_model_arg(&launch_spec.extra_args, &model_path)?;
             selected_model_path = Some(model_path);
             if let Some(overrides) = overrides {
                 apply_llama_cpp_launch_overrides(&mut launch_spec, overrides);
@@ -356,11 +356,17 @@ fn replace_llama_cpp_models_dir_with_preset(args: &[String], preset_path: &Path)
     output
 }
 
-fn append_llama_cpp_model_arg(args: &[String], model_path: &Path) -> Vec<String> {
+fn append_llama_cpp_model_arg(args: &[String], model_path: &Path) -> crate::Result<Vec<String>> {
     let mut output = args.to_vec();
     output.push("--model".to_string());
     output.push(model_path.to_string_lossy().to_string());
-    output
+    if let Some(projector) = crate::runtime_profiles::mmproj::resolve_sibling_mmproj(model_path)? {
+        output.extend([
+            "--mmproj".to_string(),
+            projector.to_string_lossy().to_string(),
+        ]);
+    }
+    Ok(output)
 }
 
 pub(super) async fn stop_runtime_profile(
@@ -479,6 +485,32 @@ mod tests {
     use crate::models::{RuntimeEndpointUrl, RuntimePort, RuntimeProviderId, RuntimeProviderMode};
     use std::collections::HashMap;
     use std::path::PathBuf;
+
+    #[test]
+    fn llama_cpp_dedicated_loads_sibling_mmproj() {
+        let root = tempfile::TempDir::new().unwrap();
+        let model = root.path().join("Qwen.gguf");
+        let projector = root.path().join("mmproj-BF16.gguf");
+        std::fs::write(&model, b"model").unwrap();
+        let text_args = append_llama_cpp_model_arg(&[], &model).unwrap();
+        assert_eq!(text_args, vec!["--model", model.to_str().unwrap()]);
+        std::fs::write(&projector, b"projector").unwrap();
+        let args = append_llama_cpp_model_arg(&[], &model).unwrap();
+        assert_eq!(
+            args,
+            vec![
+                "--model",
+                model.to_str().unwrap(),
+                "--mmproj",
+                projector.to_str().unwrap()
+            ]
+        );
+        std::fs::write(root.path().join("mmproj-F16.gguf"), b"other").unwrap();
+        assert!(append_llama_cpp_model_arg(&[], &model)
+            .unwrap_err()
+            .to_string()
+            .contains("multiple mmproj"));
+    }
 
     #[test]
     fn llama_cpp_launch_overrides_replace_profile_device_args() {

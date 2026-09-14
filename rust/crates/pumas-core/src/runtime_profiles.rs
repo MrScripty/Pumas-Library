@@ -4,6 +4,8 @@
 mod launch_specs;
 #[path = "runtime_profiles/launch_strategy.rs"]
 mod launch_strategy;
+#[path = "runtime_profiles/mmproj.rs"]
+pub(crate) mod mmproj;
 #[path = "runtime_profiles/process_owner.rs"]
 mod process_owner;
 #[path = "runtime_profiles/router_model_operation.rs"]
@@ -151,17 +153,17 @@ pub struct LlamaCppRouterCatalogEntry {
 }
 
 impl LlamaCppRouterCatalog {
-    fn from_entries(mut entries: Vec<LlamaCppRouterCatalogEntry>) -> Self {
+    fn from_entries(mut entries: Vec<LlamaCppRouterCatalogEntry>) -> Result<Self> {
         entries.sort_by(|left, right| {
             left.model_id
                 .cmp(&right.model_id)
                 .then_with(|| left.model_path.cmp(&right.model_path))
         });
-        let preset_ini = build_llama_cpp_router_preset_ini(&entries);
-        Self {
+        let preset_ini = build_llama_cpp_router_preset_ini(&entries)?;
+        Ok(Self {
             entries,
             preset_ini,
-        }
+        })
     }
 }
 
@@ -176,7 +178,7 @@ pub async fn generate_llama_cpp_router_catalog(
                 entries.push(entry);
             }
         }
-        Ok(LlamaCppRouterCatalog::from_entries(entries))
+        LlamaCppRouterCatalog::from_entries(entries)
     })
     .await
     .map_err(|err| {
@@ -222,7 +224,7 @@ fn executable_artifact_for_record(
     Some((format, model_path))
 }
 
-fn build_llama_cpp_router_preset_ini(entries: &[LlamaCppRouterCatalogEntry]) -> String {
+fn build_llama_cpp_router_preset_ini(entries: &[LlamaCppRouterCatalogEntry]) -> Result<String> {
     let mut output = String::from("version = 1\n\n[*]\nload-on-startup = false\n\n");
     for entry in entries {
         output.push('[');
@@ -231,6 +233,10 @@ fn build_llama_cpp_router_preset_ini(entries: &[LlamaCppRouterCatalogEntry]) -> 
         output.push_str(&sanitize_llama_cpp_preset_value(
             entry.model_path.to_string_lossy().as_ref(),
         ));
+        if let Some(projector) = mmproj::resolve_sibling_mmproj(&entry.model_path)? {
+            output.push_str("\nmmproj = ");
+            output.push_str(&projector.to_string_lossy());
+        }
         output.push_str("\nalias = ");
         output.push_str(&sanitize_llama_cpp_preset_value(&entry.alias));
         if entry.model_type.eq_ignore_ascii_case("embedding") {
@@ -240,7 +246,7 @@ fn build_llama_cpp_router_preset_ini(entries: &[LlamaCppRouterCatalogEntry]) -> 
         }
         output.push_str("\n\n");
     }
-    output
+    Ok(output)
 }
 
 fn sanitize_llama_cpp_preset_section(value: &str) -> String {
@@ -1527,49 +1533,95 @@ mod tests {
             .contains("runtime profile provider adapter is not registered"));
     }
 
+    #[tokio::test]
+    async fn llama_cpp_router_catalog_loads_sibling_mmproj() {
+        let root = tempfile::TempDir::new().unwrap();
+        let library = Arc::new(ModelLibrary::new(root.path()).await.unwrap());
+        let directory = library.build_model_path("vlm", "qwen", "model");
+        std::fs::create_dir_all(&directory).unwrap();
+        let model_path = directory.join("Qwen.gguf");
+        let projector = directory.join("mmproj-BF16.gguf");
+        std::fs::write(&model_path, b"GGUF model weights larger than projector").unwrap();
+        std::fs::write(&projector, b"projector").unwrap();
+        library
+            .save_metadata(
+                &directory,
+                &crate::models::ModelMetadata {
+                    model_id: Some("vlm/qwen/model".into()),
+                    model_type: Some("vlm".into()),
+                    family: Some("qwen".into()),
+                    official_name: Some("model".into()),
+                    cleaned_name: Some("model".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        library.index_model_dir(&directory).await.unwrap();
+        let catalog = generate_llama_cpp_router_catalog(library.clone())
+            .await
+            .unwrap();
+        assert!(catalog.preset_ini.contains(&format!(
+            "\nmodel = {}\nmmproj = {}\n",
+            model_path.display(),
+            projector.display()
+        )));
+        std::fs::write(directory.join("mmproj-F16.gguf"), b"other").unwrap();
+        assert!(generate_llama_cpp_router_catalog(library)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("multiple mmproj"));
+    }
+
     #[test]
     fn llama_cpp_router_catalog_sorts_and_writes_preset_entries() {
+        let root = tempfile::TempDir::new().unwrap();
         let catalog = LlamaCppRouterCatalog::from_entries(vec![
             LlamaCppRouterCatalogEntry {
                 model_id: "llm/zeta/model".to_string(),
                 alias: "llm/zeta/model".to_string(),
                 model_type: "llm".to_string(),
-                model_path: PathBuf::from("/models/zeta.gguf"),
+                model_path: root.path().join("zeta.gguf"),
             },
             LlamaCppRouterCatalogEntry {
                 model_id: "llm/alpha/model".to_string(),
                 alias: "llm/alpha/model".to_string(),
                 model_type: "llm".to_string(),
-                model_path: PathBuf::from("/models/alpha.gguf"),
+                model_path: root.path().join("alpha.gguf"),
             },
             LlamaCppRouterCatalogEntry {
                 model_id: "embedding/qwen/model".to_string(),
                 alias: "embedding/qwen/model".to_string(),
                 model_type: "embedding".to_string(),
-                model_path: PathBuf::from("/models/embedding.gguf"),
+                model_path: root.path().join("embedding.gguf"),
             },
             LlamaCppRouterCatalogEntry {
                 model_id: "reranker/qwen/model".to_string(),
                 alias: "reranker/qwen/model".to_string(),
                 model_type: "reranker".to_string(),
-                model_path: PathBuf::from("/models/reranker.gguf"),
+                model_path: root.path().join("reranker.gguf"),
             },
-        ]);
+        ])
+        .unwrap();
+        let preset = catalog
+            .preset_ini
+            .replace(root.path().to_string_lossy().as_ref(), "/models");
 
         assert_eq!(catalog.entries[0].model_id, "embedding/qwen/model");
         assert_eq!(catalog.entries[1].model_id, "llm/alpha/model");
         assert_eq!(catalog.entries[3].model_id, "reranker/qwen/model");
-        assert!(catalog.preset_ini.contains("[*]\nload-on-startup = false"));
+        assert!(preset.contains("[*]\nload-on-startup = false"));
         assert!(
             catalog.preset_ini.find("[llm/alpha/model]").unwrap()
                 < catalog.preset_ini.find("[llm/zeta/model]").unwrap()
         );
-        assert!(catalog.preset_ini.contains("model = /models/alpha.gguf"));
-        assert!(catalog.preset_ini.contains("alias = llm/zeta/model"));
-        assert!(catalog.preset_ini.contains(
+        assert!(preset.contains("model = /models/alpha.gguf"));
+        assert!(preset.contains("alias = llm/zeta/model"));
+        assert!(preset.contains(
             "[embedding/qwen/model]\nmodel = /models/embedding.gguf\nalias = embedding/qwen/model\nembedding = true"
         ));
-        assert!(catalog.preset_ini.contains(
+        assert!(preset.contains(
             "[reranker/qwen/model]\nmodel = /models/reranker.gguf\nalias = reranker/qwen/model\nreranking = true"
         ));
     }

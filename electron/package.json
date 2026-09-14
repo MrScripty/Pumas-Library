@@ -1,6 +1,6 @@
 {
   "name": "pumas-library-electron",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Electron wrapper for Pumas Library",
   "main": "dist/main.js",
   "author": "Pumas Library Team",
@@ -30,17 +30,17 @@
     "package:mac": "cd ../frontend && npm run build && cd ../electron && npm run build && electron-builder --mac"
   },
   "dependencies": {
-    "electron-log": "^5.0.0"
+    "electron-log": "^5.4.4"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^24.13.4",
     "ajv": "8.20.0",
+    "electron": "43.7.0",
+    "electron-builder": "26.15.3",
     "esbuild": "0.25.12",
-    "@eslint/js": "^9.39.4",
-    "@types/node": "^24.0.0",
-    "electron": "39.8.6",
-    "electron-builder": "26.8.1",
-    "eslint": "^9.39.2",
-    "typescript": "~5.8.2",
+    "eslint": "^9.39.5",
+    "typescript": "~5.8.3",
     "typescript-eslint": "8.58.1"
   },
   "build": {

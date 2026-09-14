@@ -569,7 +569,6 @@ const COMPILED_PRELOAD_PATH = fileURLToPath(
 const COMPILED_WINDOW_PRESENTATION_PATH = fileURLToPath(
   new URL('../dist/window-presentation.js', import.meta.url)
 );
-const ELECTRON_BINARY_PATH = createRequire(import.meta.url)('electron');
 const CLOSED_STARTUP_STATES = [
   { status: 'initializing' },
   { status: 'ready', selectionAction: 'select-library', libraryScopeId: null },
@@ -1161,6 +1160,9 @@ app.whenReady().then(async () => {
 }
 
 async function runSandboxedPreloadOracle() {
+  // Electron 43 can download on require. Resolve it only for the opted-in
+  // native oracle, never while loading otherwise offline contract tests.
+  const electronBinaryPath = createRequire(import.meta.url)('electron');
   const temporaryDirectory = mkdtempSync(join(tmpdir(), 'pumas-preload-oracle-'));
   const harnessPath = join(temporaryDirectory, 'main.cjs');
   writeFileSync(harnessPath, sandboxedPreloadHarnessSource(), 'utf8');
@@ -1168,7 +1170,7 @@ async function runSandboxedPreloadOracle() {
   delete environment.ELECTRON_RUN_AS_NODE;
 
   try {
-    const child = spawn(ELECTRON_BINARY_PATH, [
+    const child = spawn(electronBinaryPath, [
       '--disable-gpu',
       '--disable-dev-shm-usage',
       harnessPath,

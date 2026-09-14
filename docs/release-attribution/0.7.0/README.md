@@ -5,7 +5,9 @@ notice files by `python3 scripts/release/generate-notices.py`. It is embedded as
 `resources/THIRD-PARTY-NOTICES.txt` and copied to the release directory as
 `THIRD-PARTY-NOTICES-0.7.0.txt`. `inventory.json` records input and source-text
 hashes. `check-attribution.cjs` runs in CI and before Electron packaging; stale
-inputs, altered texts, and missing notices refuse packaging.
+inputs, altered texts, and missing notices refuse packaging. Cargo manifests are
+hashed alongside lockfiles so changes to feature selection also invalidate the
+inventory. The minimized release inventory contains 367 package entries.
 
 The inventory includes the normal/build Rust dependency closure for the three
 desktop targets and the JavaScript production dependency closure. It is a
@@ -16,7 +18,7 @@ nested native-library notices. SQLite's source dedication is included separately
 The unmodified MPL-2.0 `option-ext` source is available at its exact crates.io
 source archive URL in the notice file.
 
-Published archives for binrw, governor and several Apple bridge crates omit
+Published archives for governor and several Apple bridge crates omit
 license files. Their upstream licensing statements/texts were collected at the
 revisions recorded in `.cargo_vcs_info.json`. The fetched sources and SHA-256
 values are in `scripts/release/licenses/sources.json`. The Apple bridge upstream

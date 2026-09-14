@@ -65,6 +65,8 @@ jobs:
         with:
           workspaces: rust -> target
           key: headless
+      - run: cargo fetch --locked --manifest-path rust/Cargo.toml
+      - run: python3 scripts/release/check-dependency-features.py
       # Separate package invocations prevent workspace feature unification from
       # silently enabling the features this gate is supposed to exclude.
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features
@@ -206,6 +208,13 @@ jobs:
       - name: Verify extracted Linux installers
         if: runner.os == 'Linux'
         run: python3 scripts/release/smoke-linux-packages.py electron/release
+      - uses: actions/setup-python@v6
+        if: runner.os == 'macOS'
+        with:
+          python-version-file: .python-version
+      - name: Verify installed macOS application
+        if: runner.os == 'macOS'
+        run: python3 scripts/release/smoke-macos-package.py electron/release/*.dmg
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.platform }}

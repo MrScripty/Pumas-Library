@@ -7,7 +7,13 @@ function checkAttribution() {
   const directory = path.join(root, 'docs/release-attribution', version);
   const inventory = JSON.parse(fs.readFileSync(path.join(directory, 'inventory.json')));
   const hash = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-  for (const file of ['rust/Cargo.lock', 'pnpm-lock.yaml', 'electron/package.json', 'frontend/package.json']) {
+  const inputs = [
+    'rust/Cargo.lock', 'rust/Cargo.toml',
+    'rust/crates/pumas-core/Cargo.toml', 'rust/crates/pumas-rpc/Cargo.toml',
+    'rust/crates/pumas-app-manager/Cargo.toml',
+    'pnpm-lock.yaml', 'electron/package.json', 'frontend/package.json',
+  ];
+  for (const file of inputs) {
     if (hash(path.join(root, file)) !== inventory.input_sha256[file]) throw new Error(`Stale release attribution: ${file}`);
   }
   if (hash(path.join(directory, 'THIRD-PARTY-NOTICES.txt')) !== inventory.notices_sha256) throw new Error('Changed release notices');

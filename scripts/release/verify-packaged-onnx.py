@@ -43,7 +43,11 @@ with tempfile.TemporaryDirectory(prefix="pumas-packaged-inference-") as tmp:
         [str(binary), "--launcher-root", str(root), "--port", "0"],
         stdout=log,
         stderr=subprocess.STDOUT,
-        env={**os.environ, "XDG_CONFIG_HOME": str(root / "config")},
+        env={
+            **os.environ,
+            "XDG_CONFIG_HOME": str(root / "config"),
+            "PUMAS_REGISTRY_DB_PATH": str(root / "registry.db"),
+        },
     )
     try:
         for _ in range(450):

@@ -95,6 +95,16 @@ unload. Generate per-installer SPDX, local provenance and final checksums with
 `write-linux-metadata.py`; see its attribution report for scope and limitations.
 CI-built releases must use the CI build identity and actual final files.
 
+## macOS candidate verification
+
+The macOS ARM64 job mounts the DMG read-only, copies the application with `ditto`,
+unmounts it, compares packaged resources, checks ARM64 executables and runs both
+RPC and desktop startup from the copied application. Reproduce on a Mac with
+`python3 scripts/release/smoke-macos-package.py CANDIDATE_DMG`. This check requires
+the matching staged RPC and frontend inputs. It does not qualify Gatekeeper,
+notarization, native chooser recovery or interactive desktop behavior. macOS
+remains a required target; its native results are pending until that job runs.
+
 ## Required release acceptance
 
 The candidate workflow rejects missing, empty, duplicate, stale-version, and

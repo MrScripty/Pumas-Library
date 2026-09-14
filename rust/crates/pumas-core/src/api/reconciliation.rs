@@ -1804,7 +1804,9 @@ mod tests {
         ));
         run.finish_success(chrono::Utc::now().to_rfc3339()).await;
         schedule_dirty_followup(ReconciliationInputs::from(api.primary().as_ref()));
-        tokio::time::timeout(Duration::from_secs(5), async {
+        // This exercises real filesystem/database work, not a latency contract.
+        // Leave a bounded budget for parallel-suite contention without busy-polling.
+        tokio::time::timeout(Duration::from_secs(30), async {
             loop {
                 let settled = {
                     let state = coordinator.lock_state();
@@ -1813,7 +1815,7 @@ mod tests {
                 if settled {
                     break;
                 }
-                tokio::task::yield_now().await;
+                tokio::time::sleep(Duration::from_millis(1)).await;
             }
         })
         .await

@@ -117,6 +117,13 @@ durable-publication limitations may prevent a Windows release.
 - Inference integrations remain optional for applications that only need model
   management.
 
+### Optional ONNX build dependency
+
+Rust consumers using `default-features = false` can now omit ONNX Runtime,
+tokenizers and half-precision tensor dependencies. Enable the core
+`onnx-runtime` feature to use its ONNX execution APIs. Default core builds and
+the RPC `inference-plugins` feature continue to include ONNX support.
+
 ## Outside this release
 
 Fleet/cluster operation, remote-node reconciliation, distributed acquisition,

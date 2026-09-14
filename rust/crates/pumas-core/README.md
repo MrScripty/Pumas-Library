@@ -4,6 +4,15 @@
 launcher-root lifecycle, model packages, metadata, indexing, downloads,
 imports, integrity reconciliation, runtime profiles, and serving state.
 
+## Optional inference dependencies
+
+Default builds retain ONNX execution through the `full` feature. Model-management
+consumers can use `default-features = false` (and `features = ["hf-client"]` for
+Hugging Face access) without compiling ONNX Runtime, tokenizers or half-precision
+tensor support. Enable `onnx-runtime` explicitly to expose `onnx_runtime` and its
+re-exported execution types. Provider descriptions and model metadata remain
+available without that feature. RPC enables it through `inference-plugins`.
+
 ## Choose the Correct Access Role
 
 | API | Use when |
@@ -365,10 +374,10 @@ failed outcomes instead of collapsing them into defaults.
 
 ## Features
 
-The default `full` feature enables the named `hf-client`, `process-manager`, and
-`gpu-monitor` markers. Those markers currently do not remove their dependencies
-or module surfaces when disabled. The `uniffi` feature does gate the optional
-UniFFI dependency.
+The default `full` feature enables `hf-client`, `process-manager`, `gpu-monitor`,
+and `onnx-runtime`. The first three retain their existing marker behavior.
+`onnx-runtime` gates the ONNX execution module and its native/runtime dependencies;
+`uniffi` gates the optional UniFFI dependency.
 
 ## Verification
 

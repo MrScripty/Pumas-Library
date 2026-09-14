@@ -237,6 +237,10 @@ is recorded in the release attribution report, not inferred from this list.
             p: digest((ROOT / p).read_bytes())
             for p in (
                 "rust/Cargo.lock",
+                "rust/Cargo.toml",
+                "rust/crates/pumas-core/Cargo.toml",
+                "rust/crates/pumas-rpc/Cargo.toml",
+                "rust/crates/pumas-app-manager/Cargo.toml",
                 "pnpm-lock.yaml",
                 "electron/package.json",
                 "frontend/package.json",

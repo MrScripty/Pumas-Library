@@ -1479,6 +1479,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn runtime_zip_extraction_preserves_stored_and_deflated_payloads() {
+        use std::io::Write;
+        use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
+
+        let temp = tempfile::TempDir::new().unwrap();
+        for method in [CompressionMethod::Stored, CompressionMethod::Deflated] {
+            let archive_path = temp.path().join(format!("{method:?}.zip"));
+            let output = temp.path().join(format!("{method:?}-extracted"));
+            let mut writer = ZipWriter::new(File::create(&archive_path).unwrap());
+            writer
+                .start_file(
+                    "runtime/bin/server",
+                    SimpleFileOptions::default().compression_method(method),
+                )
+                .unwrap();
+            let payload = b"runtime distribution fixture\n".repeat(128);
+            writer.write_all(&payload).unwrap();
+            writer.finish().unwrap();
+
+            VersionInstaller::extract_zip(&archive_path, &output).unwrap();
+            assert_eq!(
+                std::fs::read(output.join("runtime/bin/server")).unwrap(),
+                payload
+            );
+        }
+    }
+
+    #[test]
     fn test_slugify_tag() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let metadata_manager = Arc::new(MetadataManager::new(temp_dir.path()));

@@ -55,6 +55,7 @@ export-contract = ["dep:schemars", "dep:tempfile", "pumas-library/contract-schem
 default = ["inference-plugins"]
 inference-plugins = [
     "dep:pumas-app-manager",
+    "pumas-library/onnx-runtime",
     "pumas-library/process-manager",
     "pumas-library/gpu-monitor",
 ]

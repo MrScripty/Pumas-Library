@@ -43,6 +43,7 @@ pub mod metadata;
 pub mod model_library;
 pub mod models;
 pub mod network;
+#[cfg(feature = "onnx-runtime")]
 pub mod onnx_runtime;
 pub mod platform;
 pub mod plugins;
@@ -73,6 +74,7 @@ pub use models::{
     BundleComponentManifestEntry, BundleComponentState, BundleFormat, CommitInfo,
     EmbeddedMetadataResponse, LibraryModelMetadataResponse,
 };
+#[cfg(feature = "onnx-runtime")]
 pub use onnx_runtime::{
     FakeOnnxEmbeddingBackend, OnnxEmbedding, OnnxEmbeddingBackend, OnnxEmbeddingBackendKind,
     OnnxEmbeddingPooling, OnnxEmbeddingPostprocessConfig, OnnxEmbeddingPostprocessor,

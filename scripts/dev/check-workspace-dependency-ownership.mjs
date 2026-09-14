@@ -19,7 +19,6 @@ const workspaceToolRequirements = [
       'eslint',
       'eslint-plugin-jsx-a11y',
       'eslint-plugin-react',
-      'glob',
       'jsdom',
       'typescript',
       'typescript-eslint',

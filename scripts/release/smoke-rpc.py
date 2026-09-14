@@ -32,6 +32,7 @@ with tempfile.TemporaryDirectory(prefix="pumas-release-smoke-") as temporary:
             env={
                 **os.environ,
                 "XDG_CONFIG_HOME": str(root / "config"),
+                "PUMAS_REGISTRY_DB_PATH": str(root / "registry.db"),
                 "APPDATA": str(root / "config"),
             },
             stdout=log,

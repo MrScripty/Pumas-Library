@@ -23,7 +23,7 @@ unsafe_op_in_unsafe_fn = "deny"
 tokio = { version = "1" }
 
 # HTTP server
-axum = "0.7"
+axum = { version = "0.7", default-features = false, features = ["http1", "json", "matched-path", "original-uri", "query", "tokio", "tracing"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
@@ -43,16 +43,13 @@ anyhow = "1"
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # System information
-sysinfo = "0.32"
+sysinfo = { version = "0.32", default-features = false, features = ["system", "disk", "multithread"] }
 
 # Cross-platform signal handling
 ctrlc = "3.4"
-
-# Windows shortcut files
-lnk = "0.6"
 
 # File operations
 tempfile = "3"
@@ -60,7 +57,8 @@ walkdir = "2"
 fs2 = "0.4"
 
 # Archive extraction
-zip = "2"
+# Preserve archive decoders; installation does not encrypt or produce ZIPs.
+zip = { version = "2", default-features = false, features = ["flate2", "deflate-flate2", "bzip2", "deflate64", "lzma", "zstd", "xz"] }
 flate2 = "1"
 tar = "0.4"
 zstd = "0.13"

@@ -11,7 +11,7 @@ test('packaging refuses stale inputs, missing notices and altered upstream texts
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const hash = text => createHash('sha256').update(text).digest('hex');
   const write = (name, text) => { const p = path.join(root, name); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, text); };
-  const inputs = ['rust/Cargo.lock', 'pnpm-lock.yaml', 'electron/package.json', 'frontend/package.json'];
+  const inputs = ['rust/Cargo.lock', 'rust/Cargo.toml', 'rust/crates/pumas-core/Cargo.toml', 'rust/crates/pumas-rpc/Cargo.toml', 'rust/crates/pumas-app-manager/Cargo.toml', 'pnpm-lock.yaml', 'electron/package.json', 'frontend/package.json'];
   for (const input of inputs) write(input, '{}');
   write('package.json', '{"version":"0.7.0"}');
   write('docs/release-attribution/0.7.0/THIRD-PARTY-NOTICES.txt', 'license text');
@@ -27,6 +27,9 @@ test('packaging refuses stale inputs, missing notices and altered upstream texts
   write('rust/Cargo.lock', 'changed dependency');
   assert.match(run().stderr, /Stale release attribution/);
   write('rust/Cargo.lock', '{}');
+  write('rust/crates/pumas-core/Cargo.toml', 'changed feature selection');
+  assert.match(run().stderr, /Stale release attribution/);
+  write('rust/crates/pumas-core/Cargo.toml', '{}');
   write('scripts/release/licenses/source.txt', 'altered upstream');
   assert.match(run().stderr, /Changed upstream license/);
   write('scripts/release/licenses/source.txt', 'upstream');

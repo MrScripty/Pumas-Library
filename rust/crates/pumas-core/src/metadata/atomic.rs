@@ -318,7 +318,10 @@ impl AtomicJsonTarget {
         let parent_path = publication_parent(&display_path).to_path_buf();
         // cap-std directory handles may be O_PATH descriptors on Linux. Open
         // the held directory itself for syncing, without an ambient path.
+        #[cfg(unix)]
         let parent_sync_file = parent.open(".")?.into_std();
+        #[cfg(not(unix))]
+        let parent_sync_file = parent.try_clone()?.into_std_file();
         let parent_identity = parent_identity_from_file(&parent_sync_file, &parent_path)?;
         if !validate()? {
             return Err(PumasError::Other("Publication authority changed".into()));
@@ -1542,17 +1545,17 @@ mod tests {
         let root = crate::platform::capability_fs::open_directory(temp.path()).unwrap();
         let parent = crate::platform::capability_fs::open_directory(&path).unwrap();
         let identity =
-            parent_identity_from_file(&parent.open(".").unwrap().into_std(), &path).unwrap();
+            parent_identity_from_file(&parent.try_clone().unwrap().into_std_file(), &path).unwrap();
         let display = path.clone();
         let target = AtomicJsonTarget::from_capability(
             parent,
             OsStr::new("marker"),
             path.join("marker"),
             move || {
-                Ok(parent_identity_from_file(
-                    &root.open_dir("model")?.open(".")?.into_std(),
-                    &display,
-                )? == identity)
+                Ok(
+                    parent_identity_from_file(&root.open_dir("model")?.into_std_file(), &display)?
+                        == identity,
+                )
             },
         )
         .unwrap();

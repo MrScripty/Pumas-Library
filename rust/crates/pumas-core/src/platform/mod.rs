@@ -14,9 +14,8 @@
 //! # Supported Platforms
 //!
 //! - **Linux**: Full support
-//! - **Windows**: Platform helpers exist; download authority and durable JSON
-//!   publication are unavailable. Compilation alone is not runtime qualification.
-//! - **macOS**: Architecture ready, implementation pending
+//! - **Windows**: Native filesystem authority, durable publication, and desktop support
+//! - **macOS**: Native filesystem authority, durable publication, and desktop support
 
 pub(crate) mod capability_fs;
 pub mod filesystem;

@@ -1,10 +1,11 @@
 #![deny(unsafe_code)]
 
+use crate::platform::capability_fs::sync_directory;
 use crate::{ModelRecord, PumasError, Result};
 use cap_std::ambient_authority;
 #[cfg(unix)]
 use cap_std::fs::OpenOptionsExt;
-use cap_std::fs::{Dir, OpenOptions};
+use cap_std::fs::{Dir, Metadata, OpenOptions};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -21,7 +22,6 @@ const MAX_COLLECTION_ITEMS: usize = 512;
 const MAX_HF_REPO_ID_BYTES: usize = 96;
 const MAX_PORTABLE_PATH_COMPONENT_BYTES: usize = 255;
 const LIBRARY_ID_MARKER: &str = ".pumas-library-id.json";
-#[cfg(unix)]
 const LIBRARY_ID_LOCK: &str = ".pumas-library-id.lock";
 const MAX_LIBRARY_ID_BYTES: u64 = 1024;
 
@@ -30,6 +30,16 @@ const MAX_LIBRARY_ID_BYTES: u64 = 1024;
 struct LibraryIdDocument {
     schema_version: u32,
     library_id: String,
+}
+
+fn nofollow_options(options: &mut OpenOptions) {
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    #[cfg(windows)]
+    {
+        use cap_std::fs::OpenOptionsExt;
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
+    }
 }
 
 fn read_library_id(root: &Dir) -> io::Result<Option<uuid::Uuid>> {
@@ -44,8 +54,7 @@ fn read_library_id(root: &Dir) -> io::Result<Option<uuid::Uuid>> {
     }
     let mut options = OpenOptions::new();
     options.read(true);
-    #[cfg(unix)]
-    options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    nofollow_options(&mut options);
     let file = root.open_with(LIBRARY_ID_MARKER, &options)?.into_std();
     if !file.metadata()?.is_file() {
         return Err(invalid_library_id());
@@ -79,18 +88,25 @@ struct FilesystemIdentity {
 }
 
 #[cfg(unix)]
-fn filesystem_identity(metadata: &std::fs::Metadata) -> Option<FilesystemIdentity> {
-    use std::os::unix::fs::MetadataExt;
+fn filesystem_identity(metadata: &Metadata) -> Option<FilesystemIdentity> {
+    use cap_std::fs::MetadataExt;
     Some(FilesystemIdentity {
         volume: metadata.dev(),
         file: metadata.ino(),
     })
 }
 
-#[cfg(not(unix))]
-fn filesystem_identity(_metadata: &std::fs::Metadata) -> Option<FilesystemIdentity> {
-    // Download destination authority is unavailable outside Unix; read-only
-    // inspection must also decline to issue a usable recovery capability.
+#[cfg(windows)]
+fn filesystem_identity(metadata: &Metadata) -> Option<FilesystemIdentity> {
+    use cap_primitives::fs::_WindowsByHandle;
+    Some(FilesystemIdentity {
+        volume: metadata.volume_serial_number()? as u64,
+        file: metadata.file_index()?,
+    })
+}
+
+#[cfg(not(any(unix, windows)))]
+fn filesystem_identity(_metadata: &Metadata) -> Option<FilesystemIdentity> {
     None
 }
 
@@ -268,11 +284,19 @@ impl Drop for RootExecutionGrant {
 }
 
 impl RootExecutionGrant {
+    fn matches_lock_identity(&self, root: &DownloadDestinationRoot) -> Result<bool> {
+        #[cfg(unix)]
+        let expected = Some(root.0.root_identity);
+        #[cfg(windows)]
+        let expected = filesystem_identity(&root.0.root.symlink_metadata(LIBRARY_ID_LOCK)?);
+        Ok(filesystem_identity(&Metadata::from_file(&self.file)?) == expected)
+    }
+
     pub(crate) fn validate_root(&self, root: &DownloadDestinationRoot) -> Result<()> {
         self.authority.0.require_current()?;
         root.0.require_current()?;
         if !self.authority.same_physical_root(root)
-            || filesystem_identity(&self.file.metadata()?) != Some(root.0.root_identity)
+            || !self.matches_lock_identity(root)?
             || self.authority.0.library_id != root.0.library_id
         {
             return Err(invalid_capability_path().into());
@@ -290,13 +314,25 @@ impl DownloadDestinationRoot {
         self.0.require_current()?;
         // A fresh readable open has independent lock ownership. A cloned handle
         // shares ownership; an open_dir handle may not support native locking.
+        #[cfg(unix)]
         let file = self.0.root.open(".")?.into_std();
-        let metadata = file.metadata()?;
-        if !metadata.is_dir() || filesystem_identity(&metadata) != Some(self.0.root_identity) {
-            return Err(invalid_capability_path().into());
-        }
+        #[cfg(windows)]
+        let file = {
+            use cap_std::fs::OpenOptionsExt;
+            let mut options = OpenOptions::new();
+            options.read(true).write(true).custom_flags(
+                windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT,
+            );
+            let file = self.0.root.open_with(LIBRARY_ID_LOCK, &options)?.into_std();
+            if !file.metadata()?.is_file() || file.metadata()?.file_type().is_symlink() {
+                return Err(invalid_capability_path().into());
+            }
+            file
+        };
         fs2::FileExt::try_lock_exclusive(&file).map_err(|error| {
-            if error.kind() == io::ErrorKind::WouldBlock {
+            if error.kind() == io::ErrorKind::WouldBlock
+                || cfg!(windows) && error.raw_os_error() == Some(33)
+            {
                 PumasError::DownloadRootBusy
             } else {
                 error.into()
@@ -311,7 +347,7 @@ impl DownloadDestinationRoot {
     }
 
     pub(crate) fn open(path: &Path) -> Result<Self> {
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = path;
             return Err(io::Error::new(
@@ -320,7 +356,7 @@ impl DownloadDestinationRoot {
             )
             .into());
         }
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             let mut root = RecoveryRoot::open(path)?.ok_or_else(invalid_capability_path)?;
             root.initialize_library_id()?;
@@ -334,7 +370,9 @@ impl DownloadDestinationRoot {
         // never determine identity, and symlinks below this prefix are rejected.
         let mut relative = (!path.is_absolute()).then(|| path.to_path_buf());
         for ancestor in path.ancestors().skip(1).filter(|_| path.is_absolute()) {
-            if let Ok(metadata) = std::fs::metadata(ancestor) {
+            if let Ok(metadata) = Dir::open_ambient_dir(ancestor, ambient_authority())
+                .and_then(|dir| dir.dir_metadata())
+            {
                 if filesystem_identity(&metadata) == Some(self.0.root_identity) {
                     relative = path.strip_prefix(ancestor).ok().map(Path::to_path_buf);
                     break;
@@ -343,7 +381,12 @@ impl DownloadDestinationRoot {
         }
         let relative = relative.ok_or_else(invalid_capability_path)?;
         let text = relative.to_str().ok_or_else(invalid_capability_path)?;
-        if !is_portable_relative_path(text) {
+        let text = if cfg!(windows) {
+            text.replace('\\', "/")
+        } else {
+            text.to_string()
+        };
+        if !is_portable_relative_path(&text) {
             return Err(invalid_capability_path());
         }
         let destination = DownloadRecoveryDestination {
@@ -380,10 +423,7 @@ impl RecoveryRoot {
     fn open(library_root: &Path) -> Result<Option<Self>> {
         let root =
             Dir::open_ambient_dir(library_root, ambient_authority()).map_err(PumasError::from)?;
-        let held_metadata = root
-            .try_clone()
-            .and_then(|root| root.into_std_file().metadata())
-            .map_err(PumasError::from)?;
+        let held_metadata = root.dir_metadata()?;
         let Some(root_identity) = filesystem_identity(&held_metadata) else {
             return Ok(None);
         };
@@ -447,29 +487,25 @@ impl RecoveryRoot {
         if canonical != self.root_canonical_path {
             return Err(invalid_capability_path());
         }
-        let current = std::fs::metadata(&canonical)?;
+        let current = Dir::open_ambient_dir(&canonical, ambient_authority())?.dir_metadata()?;
         if filesystem_identity(&current) != Some(self.root_identity) {
             return Err(invalid_capability_path());
         }
-        let held = self.root.try_clone()?.into_std_file().metadata()?;
+        let held = self.root.dir_metadata()?;
         if filesystem_identity(&held) != Some(self.root_identity) {
             return Err(invalid_capability_path());
         }
         Ok(())
     }
 
-    #[cfg(unix)]
     fn initialize_library_id(&mut self) -> Result<()> {
         self.require_physical_current()?;
         if self.library_id.is_some() {
             return self.reconfirm_library_id();
         }
         let mut options = OpenOptions::new();
-        options
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        options.read(true).write(true).create_new(true);
+        nofollow_options(&mut options);
         // Concurrent non-exclusive creation can return ENOENT on macOS. Elect
         // one creator atomically, then open the winner's stable lock file.
         let lock = match self.root.open_with(LIBRARY_ID_LOCK, &options) {
@@ -534,20 +570,18 @@ impl RecoveryRoot {
         Ok(())
     }
 
-    #[cfg(unix)]
     fn reconfirm_library_id(&self) -> Result<()> {
         self.require_current()?;
         let mut options = OpenOptions::new();
-        options
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        options.read(true);
+        nofollow_options(&mut options);
         let marker = self.root.open_with(LIBRARY_ID_MARKER, &options)?.into_std();
         if !marker.metadata()?.is_file() {
             return Err(invalid_library_id().into());
         }
         marker.sync_all()?;
         self.require_current()?;
-        self.root.open(".")?.into_std().sync_all()?;
+        sync_directory(&self.root)?;
         self.require_current()?;
         Ok(())
     }
@@ -560,7 +594,7 @@ impl DownloadRecoveryDestination {
     pub(crate) fn assert_no_intent_deletion_claim(&self) -> Result<()> {
         self.authority.require_current()?;
         let database = self.authority.root_canonical_path.join("models.db");
-        let before = match std::fs::symlink_metadata(&database) {
+        let before = match self.authority.root.symlink_metadata("models.db") {
             Ok(metadata) if metadata.is_file() => metadata,
             Ok(_) => return Err(invalid_capability_path().into()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -571,7 +605,7 @@ impl DownloadRecoveryDestination {
         };
         let index = crate::index::ModelIndex::open_read_only(&database)?;
         let claims = index.list_intent_model_deletion_claims()?;
-        let after = std::fs::symlink_metadata(&database)?;
+        let after = self.authority.root.symlink_metadata("models.db")?;
         self.authority.require_current()?;
         if !after.is_file() || filesystem_identity(&before) != filesystem_identity(&after) {
             return Err(invalid_capability_path().into());
@@ -749,7 +783,7 @@ impl DownloadRecoveryDestination {
             return Err(invalid_capability_path().into());
         }
         parent.remove_dir(name)?;
-        parent.open(".")?.sync_all()?;
+        sync_directory(&parent)?;
         self.authority.require_current()?;
         Ok(())
     }
@@ -758,7 +792,7 @@ impl DownloadRecoveryDestination {
     /// destination. The caller retains grants for both roots; cross-filesystem
     /// copying is not authorized by this capability.
     pub(crate) fn rename_model_directory_noreplace(&self, target: &Self) -> Result<()> {
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             let _ = target;
             Err(io::Error::new(
@@ -767,10 +801,8 @@ impl DownloadRecoveryDestination {
             )
             .into())
         }
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        #[cfg(any(target_os = "linux", target_os = "macos", windows))]
         {
-            use std::os::unix::ffi::OsStrExt;
-
             self.authority.require_current()?;
             target.authority.require_current()?;
             let source = self.directory(false)?;
@@ -813,25 +845,41 @@ impl DownloadRecoveryDestination {
             {
                 return Err(invalid_capability_path().into());
             }
-            let source_c = std::ffi::CString::new(source_name.as_bytes())
-                .map_err(|_| invalid_capability_path())?;
-            let target_c = std::ffi::CString::new(target_name.as_bytes())
-                .map_err(|_| invalid_capability_path())?;
-            // A capability directory may use O_PATH, which supports renameat2
-            // but rejects fsync. Open "." relative to each held parent to get
-            // readable directory descriptors usable for both operations.
-            let source_parent = source_parent.open(".")?.into_std();
-            let target_parent = target_parent.open(".")?.into_std();
-            self.authority.require_current()?;
-            target.authority.require_current()?;
-            rename_held_directories_noreplace(
-                &source_parent,
-                &source_c,
-                &target_parent,
-                &target_c,
-            )?;
-            source_parent.sync_all()?;
-            target_parent.sync_all()?;
+            #[cfg(windows)]
+            {
+                crate::platform::capability_fs::rename_at(
+                    &source_parent,
+                    source_name,
+                    &target_parent,
+                    target_name,
+                    false,
+                )?;
+                sync_directory(&source_parent)?;
+                sync_directory(&target_parent)?;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::ffi::OsStrExt;
+                let source_c = std::ffi::CString::new(source_name.as_bytes())
+                    .map_err(|_| invalid_capability_path())?;
+                let target_c = std::ffi::CString::new(target_name.as_bytes())
+                    .map_err(|_| invalid_capability_path())?;
+                // A capability directory may use O_PATH, which supports renameat2
+                // but rejects fsync. Open "." relative to each held parent to get
+                // readable directory descriptors usable for both operations.
+                let source_parent = source_parent.open(".")?.into_std();
+                let target_parent = target_parent.open(".")?.into_std();
+                self.authority.require_current()?;
+                target.authority.require_current()?;
+                rename_held_directories_noreplace(
+                    &source_parent,
+                    &source_c,
+                    &target_parent,
+                    &target_c,
+                )?;
+                source_parent.sync_all()?;
+                target_parent.sync_all()?;
+            }
             self.authority.require_current()?;
             target.authority.require_current()?;
             if directory_identity(&target.directory(false)?)? != expected {
@@ -858,8 +906,7 @@ impl DownloadRecoveryDestination {
     fn read_provenance_file(directory: &Dir, name: &str) -> Result<Option<Value>> {
         let mut options = OpenOptions::new();
         options.read(true);
-        #[cfg(unix)]
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        nofollow_options(&mut options);
         let file = match directory.open_with(name, &options) {
             Ok(file) => file.into_std(),
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -1048,10 +1095,9 @@ impl DownloadRecoveryDestination {
         };
         let mut options = OpenOptions::new();
         options.read(true);
-        #[cfg(unix)]
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        nofollow_options(&mut options);
         let mut file = parent.open_with(&name, &options)?.into_std();
-        let before = file.metadata()?;
+        let before = Metadata::from_file(&file)?;
         if !before.is_file() {
             return Err(invalid_capability_path().into());
         }
@@ -1074,10 +1120,10 @@ impl DownloadRecoveryDestination {
         } else {
             None
         };
-        let after = file.metadata()?;
+        let after = Metadata::from_file(&file)?;
         let (current_parent, _) = self.file_parent(filename, false)?;
         let current = current_parent.open_with(&name, &options)?.into_std();
-        let current_metadata = current.metadata()?;
+        let current_metadata = Metadata::from_file(&current)?;
         if !current_metadata.is_file()
             || filesystem_identity(&before) != filesystem_identity(&current_metadata)
             || before.len() != after.len()
@@ -1159,7 +1205,7 @@ impl DownloadRecoveryDestination {
         if let Some(sync) = &self.cleanup_parent_sync {
             return sync(parent);
         }
-        parent.open(".")?.sync_all()
+        sync_directory(&parent)
     }
 
     fn regular_file_len(&self, relative: &Path) -> io::Result<Option<u64>> {
@@ -1213,8 +1259,7 @@ impl DownloadRecoveryDestination {
 }
 
 fn directory_identity(directory: &Dir) -> io::Result<FilesystemIdentity> {
-    filesystem_identity(&directory.try_clone()?.into_std_file().metadata()?)
-        .ok_or_else(invalid_capability_path)
+    filesystem_identity(&directory.dir_metadata()?).ok_or_else(invalid_capability_path)
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1277,7 +1322,7 @@ fn remove_held_directory_contents(directory: &Dir) -> io::Result<()> {
             directory.remove_file(&name)?;
         }
     }
-    directory.open(".")?.sync_all()
+    sync_directory(directory)
 }
 
 fn invalid_download_integrity(message: &str) -> PumasError {
@@ -1290,7 +1335,36 @@ fn invalid_download_integrity(message: &str) -> PumasError {
 /// Walk one component at a time without following symlinks. Each next operation
 /// is anchored to the held preceding directory, including missing-tail creation.
 fn open_directory_chain(root: &Dir, relative: &Path, create: bool) -> io::Result<Dir> {
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        let mut directory = root.try_clone()?;
+        for component in relative.components() {
+            let Component::Normal(name) = component else {
+                return Err(invalid_capability_path());
+            };
+            let parent = directory.try_clone()?.into_std_file();
+            let file = match cap_primitives::fs::open_dir_nofollow(&parent, Path::new(name)) {
+                Ok(file) => file,
+                Err(error) if create && error.kind() == io::ErrorKind::NotFound => {
+                    match directory.create_dir(name) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                        Err(error) => return Err(error),
+                    }
+                    cap_primitives::fs::open_dir_nofollow(&parent, Path::new(name))?
+                }
+                Err(error) => return Err(error),
+            };
+            let child = Dir::from_std_file(file);
+            if create {
+                sync_directory(&child)?;
+                sync_directory(&directory)?;
+            }
+            directory = child;
+        }
+        Ok(directory)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = (root, relative, create);
         Err(io::Error::new(
@@ -1326,7 +1400,7 @@ fn open_directory_chain(root: &Dir, relative: &Path, create: bool) -> io::Result
                 // Also sync existing entries: they may come from a previous
                 // attempt whose directory-link durability was uncertain.
                 file.sync_all()?;
-                directory.open(".")?.sync_all()?;
+                sync_directory(&directory)?;
             }
             directory = Dir::from_std_file(file.into_std());
         }

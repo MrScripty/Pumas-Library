@@ -107,6 +107,7 @@ uuid = { version = "1", features = ["v4"] }
 # Directory utilities
 dirs = "5"
 cap-std = { version = "4.0.3", default-features = false }
+cap-primitives = { version = "4.0.3", default-features = false }
 
 # File system watching
 notify = "7"

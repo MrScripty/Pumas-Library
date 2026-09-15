@@ -2326,6 +2326,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "blake3",
+ "cap-primitives",
  "cap-std",
  "chrono",
  "ctrlc",

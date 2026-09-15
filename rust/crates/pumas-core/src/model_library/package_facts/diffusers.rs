@@ -249,7 +249,7 @@ async fn read_component_config(
         if !tokio::fs::try_exists(&path).await? {
             continue;
         }
-        let relative_path_string = relative_path.display().to_string();
+        let relative_path_string = format!("{component_key}/{candidate}");
         let model_type = match read_json(path).await {
             Ok(config) => string_field(&config, "model_type"),
             Err(err) => {

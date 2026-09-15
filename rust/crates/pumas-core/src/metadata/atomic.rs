@@ -120,7 +120,7 @@ pub(crate) enum AtomicPublication {
 pub(crate) type AtomicPublishResult =
     std::result::Result<AtomicPublication, Box<AtomicPublishFailure>>;
 
-#[cfg(any(not(unix), test))]
+#[cfg(any(not(any(unix, windows)), test))]
 fn target_unavailable_failure(path: &Path) -> Box<AtomicPublishFailure> {
     Box::new(AtomicPublishFailure {
         stage: AtomicPublishStage::TargetAdmission,
@@ -173,7 +173,9 @@ pub(crate) struct AtomicJsonTarget {
 enum ParentIdentity {
     #[cfg(unix)]
     Unix { device: u64, inode: u64 },
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    Windows { volume: u32, file: u64 },
+    #[cfg(not(any(unix, windows)))]
     Unsupported,
 }
 
@@ -212,7 +214,14 @@ impl DurablePublicationAdapter for OsDurablePublicationAdapter {
     }
 
     fn rename(&self, parent: &Dir, source: &OsStr, target: &OsStr) -> std::io::Result<()> {
-        parent.rename(source, parent, target)
+        #[cfg(windows)]
+        {
+            crate::platform::capability_fs::rename_at(parent, source, parent, target, true)
+        }
+        #[cfg(not(windows))]
+        {
+            parent.rename(source, parent, target)
+        }
     }
 
     fn remove_file(&self, parent: &Dir, name: &OsStr) -> std::io::Result<()> {
@@ -220,11 +229,11 @@ impl DurablePublicationAdapter for OsDurablePublicationAdapter {
     }
 
     fn sync_parent(&self, parent: &File) -> std::io::Result<()> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
-            parent.sync_all()
+            crate::platform::capability_fs::sync_directory_file(parent)
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = parent;
             Err(std::io::Error::new(
@@ -368,13 +377,13 @@ impl AtomicJsonTarget {
         data: &T,
         adapter: &impl DurablePublicationAdapter,
     ) -> AtomicPublishResult {
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (data, adapter);
             return Err(target_unavailable_failure(&self.display_path));
         }
 
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             if let Some(validate) = &self.capability_validation {
                 match validate() {
@@ -493,7 +502,7 @@ impl AtomicJsonTarget {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn create_owned_staging(
         &self,
         adapter: &impl DurablePublicationAdapter,
@@ -533,7 +542,7 @@ impl AtomicJsonTarget {
         }))
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn cleanup_staging(
         &self,
         adapter: &impl DurablePublicationAdapter,
@@ -557,14 +566,16 @@ impl AtomicJsonTarget {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn configured_parent_still_matches(&self) -> Result<bool> {
         if let Some(validate) = &self.capability_validation {
             return validate();
         }
-        let current = File::open(&self.parent_path).map_err(|source| {
-            parent_io_error(&self.parent_path, "reopen for identity check", source)
-        })?;
+        let current = Dir::open_ambient_dir(&self.parent_path, cap_std::ambient_authority())
+            .map_err(|source| {
+                parent_io_error(&self.parent_path, "reopen for identity check", source)
+            })?
+            .into_std_file();
         Ok(parent_identity_from_file(&current, &self.parent_path)? == self.parent_identity)
     }
 }
@@ -581,6 +592,7 @@ fn parent_io_error(parent: &Path, operation: &str, source: std::io::Error) -> Pu
 }
 
 fn parent_identity_from_file(file: &File, parent: &Path) -> Result<ParentIdentity> {
+    #[cfg(not(windows))]
     let metadata = file
         .metadata()
         .map_err(|source| parent_io_error(parent, "inspect", source))?;
@@ -592,9 +604,21 @@ fn parent_identity_from_file(file: &File, parent: &Path) -> Result<ParentIdentit
             inode: metadata.ino(),
         })
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        // Durable publication already rejects non-Unix targets. Do not call
+        use cap_primitives::fs::_WindowsByHandle;
+        let metadata = cap_std::fs::Metadata::from_file(file)
+            .map_err(|source| parent_io_error(parent, "inspect identity", source))?;
+        match (metadata.volume_serial_number(), metadata.file_index()) {
+            (Some(volume), Some(file)) => Ok(ParentIdentity::Windows { volume, file }),
+            _ => Err(PumasError::Other(
+                "Windows directory identity unavailable".into(),
+            )),
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        // Durable publication already rejects other targets. Do not call
         // nightly-only Windows metadata APIs for an unadmitted capability.
         let _ = metadata;
         Ok(ParentIdentity::Unsupported)
@@ -978,7 +1002,7 @@ mod tests {
         assert!(path.exists());
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     struct FaultPublicationAdapter {
         fail_staging_write: bool,
         fail_rename: bool,
@@ -988,7 +1012,7 @@ mod tests {
         temp_name: Option<OsString>,
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     impl DurablePublicationAdapter for FaultPublicationAdapter {
         fn temp_name(&self, target: &OsStr, attempt: u8) -> OsString {
             self.temp_name.clone().unwrap_or_else(|| {
@@ -1035,7 +1059,7 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn temp_publication_files(directory: &Path) -> Vec<std::path::PathBuf> {
         fs::read_dir(directory)
             .unwrap()
@@ -1044,7 +1068,7 @@ mod tests {
             .collect()
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn atomic_publish_rename_error_is_visibility_unknown_and_cleans_owned_temp() {
         let temp_dir = TempDir::new().unwrap();
@@ -1085,7 +1109,7 @@ mod tests {
         assert!(temp_publication_files(temp_dir.path()).is_empty());
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn atomic_publish_post_rename_sync_failure_reports_visible_unknown() {
         let temp_dir = TempDir::new().unwrap();
@@ -1123,7 +1147,7 @@ mod tests {
         assert!(temp_publication_files(temp_dir.path()).is_empty());
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn atomic_publish_syncs_file_and_parent_before_durable_outcome() {
         let temp_dir = TempDir::new().unwrap();
@@ -1146,7 +1170,7 @@ mod tests {
         assert!(temp_publication_files(temp_dir.path()).is_empty());
     }
 
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     #[test]
     fn atomic_publish_refuses_unsupported_targets_without_effects() {
         let temp_dir = TempDir::new().unwrap();
@@ -1177,7 +1201,7 @@ mod tests {
         assert!(!missing_parent.exists());
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn atomic_publish_post_effect_rename_error_remains_visibility_unknown() {
         let temp_dir = TempDir::new().unwrap();
@@ -1212,7 +1236,7 @@ mod tests {
         assert_eq!(atomic_read_json(&path).unwrap(), Some(new));
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn atomic_publish_reports_cleanup_failure_without_hiding_rename_ambiguity() {
         let temp_dir = TempDir::new().unwrap();
@@ -1247,7 +1271,7 @@ mod tests {
         assert_eq!(temp_publication_files(temp_dir.path()).len(), 1);
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn atomic_publish_pre_rename_failure_reports_secondary_cleanup_failure() {
         let temp_dir = TempDir::new().unwrap();
@@ -1282,12 +1306,12 @@ mod tests {
         assert_eq!(temp_publication_files(temp_dir.path()).len(), 1);
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     struct CollisionAdapter {
         foreign_name: OsString,
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     impl DurablePublicationAdapter for CollisionAdapter {
         fn temp_name(&self, _target: &OsStr, _attempt: u8) -> OsString {
             self.foreign_name.clone()
@@ -1310,7 +1334,7 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn atomic_publish_never_truncates_or_cleans_a_foreign_staging_collision() {
         let temp_dir = TempDir::new().unwrap();
@@ -1337,14 +1361,14 @@ mod tests {
         assert!(!path.exists());
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     struct ReplaceParentAfterRenameAdapter {
         configured_parent: PathBuf,
         moved_parent: PathBuf,
         fail_parent_sync: bool,
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     impl DurablePublicationAdapter for ReplaceParentAfterRenameAdapter {
         fn temp_name(&self, target: &OsStr, attempt: u8) -> OsString {
             let mut name = target.to_os_string();
@@ -1379,7 +1403,7 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn atomic_publish_never_calls_replaced_configured_parent_durable() {
         let temp_dir = TempDir::new().unwrap();
@@ -1420,7 +1444,7 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn capability_publisher_does_not_reopen_display_path() {
         let temp = TempDir::new().unwrap();
@@ -1443,7 +1467,7 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn capability_publisher_preserves_publication_ambiguity() {
         for (rename_failure, sync_failure) in [(true, false), (false, true)] {
@@ -1483,7 +1507,7 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn capability_publisher_rejects_authority_change_before_staging() {
         use std::sync::{
@@ -1506,7 +1530,7 @@ mod tests {
         assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn capability_parent_replacement_after_rename_is_visibility_unknown() {
         let temp = TempDir::new().unwrap();
@@ -1547,7 +1571,7 @@ mod tests {
         assert!(!path.join("marker").exists());
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn parent_sync_failure_after_parent_replacement_is_visibility_unknown() {
         let temp_dir = TempDir::new().unwrap();
@@ -1581,12 +1605,12 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     struct ExitDuringRenameAdapter {
         after_effect: bool,
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     impl DurablePublicationAdapter for ExitDuringRenameAdapter {
         fn temp_name(&self, target: &OsStr, attempt: u8) -> OsString {
             let mut name = target.to_os_string();
@@ -1615,7 +1639,7 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     #[ignore = "subprocess helper invoked by interrupted_rename_reopens_as_old_or_new_without_success"]
     fn atomic_publish_interruption_child() {
@@ -1634,7 +1658,7 @@ mod tests {
         panic!("interruption adapter returned unexpectedly");
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn interrupted_rename_reopens_as_old_or_new_without_success() {
         for (after_effect, exit_code, expected_name) in [(false, 71, "old"), (true, 72, "new")] {

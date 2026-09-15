@@ -18,6 +18,7 @@
 //!   publication are unavailable. Compilation alone is not runtime qualification.
 //! - **macOS**: Architecture ready, implementation pending
 
+pub(crate) mod capability_fs;
 pub mod filesystem;
 #[cfg(target_os = "linux")]
 pub mod linux_group;

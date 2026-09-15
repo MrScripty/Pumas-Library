@@ -1631,7 +1631,8 @@ mod tests {
         .unwrap();
         let preset = catalog
             .preset_ini
-            .replace(root.path().to_string_lossy().as_ref(), "/models");
+            .replace(root.path().to_string_lossy().as_ref(), "/models")
+            .replace('\\', "/");
 
         assert_eq!(catalog.entries[0].model_id, "embedding/qwen/model");
         assert_eq!(catalog.entries[1].model_id, "llm/alpha/model");

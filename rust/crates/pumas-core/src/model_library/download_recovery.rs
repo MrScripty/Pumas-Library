@@ -504,6 +504,7 @@ impl RecoveryRoot {
 
     fn initialize_library_id(&mut self) -> Result<()> {
         self.require_physical_current()?;
+        #[cfg(not(windows))]
         if self.library_id.is_some() {
             return self.reconfirm_library_id();
         }
@@ -523,6 +524,13 @@ impl RecoveryRoot {
         .into_std();
         if !lock.metadata()?.is_file() {
             return Err(invalid_library_id().into());
+        }
+        // A copied library may contain its UUID marker without the lock file.
+        // Ensure the Windows execution lock exists, but do not wait for an
+        // active execution grant when the library identity is already known.
+        #[cfg(windows)]
+        if self.library_id.is_some() {
+            return self.reconfirm_library_id();
         }
         fs2::FileExt::lock_exclusive(&lock)?;
         self.require_physical_current()?;

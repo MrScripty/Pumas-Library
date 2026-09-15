@@ -319,9 +319,15 @@ impl AtomicJsonTarget {
         // cap-std directory handles may be O_PATH descriptors on Linux. Open
         // the held directory itself for syncing, without an ambient path.
         #[cfg(unix)]
-        let parent_sync_file = parent.open(".")?.into_std();
+        let parent_sync_file = parent
+            .open(".")
+            .map_err(|source| parent_io_error(&parent_path, "open held", source))?
+            .into_std();
         #[cfg(not(unix))]
-        let parent_sync_file = parent.try_clone()?.into_std_file();
+        let parent_sync_file = parent
+            .try_clone()
+            .map_err(|source| parent_io_error(&parent_path, "clone held", source))?
+            .into_std_file();
         let parent_identity = parent_identity_from_file(&parent_sync_file, &parent_path)?;
         if !validate()? {
             return Err(PumasError::Other("Publication authority changed".into()));
@@ -633,8 +639,13 @@ pub fn atomic_read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     let mut file = match File::open(path) {
         Ok(file) => file,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
-            crate::platform::capability_fs::check_missing_path(path)
-                .map_err(|error| PumasError::io_with_path(error, path))?;
+            crate::platform::capability_fs::check_missing_path(path).map_err(|source| {
+                PumasError::Io {
+                    message: format!("Failed to open {}", path.display()),
+                    path: Some(path.to_path_buf()),
+                    source: Some(source),
+                }
+            })?;
             return Ok(None);
         }
 

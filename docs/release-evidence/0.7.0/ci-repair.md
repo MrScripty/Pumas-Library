@@ -34,7 +34,11 @@ Its Windows warning check exposed unused publication fault-injection helpers:
 these tests now compile only on Unix, where durable publication is supported.
 A non-Unix regression verifies publication refusal leaves existing bytes and the
 parent directory unchanged. RPC shutdown timeouts include captured diagnostics
-on every platform. Native CI verification continues before moving the release tag.
+on every platform. Windows installs the manifest-pinned pnpm with npm to avoid
+`pnpm/action-setup`'s deprecated shell invocation, and uses PowerShell to extract
+the frontend archive after the download action verifies its digest, avoiding that
+action's deprecated Windows Buffer API. Native CI verification continues before
+moving the release tag.
 
 ## First repair
 

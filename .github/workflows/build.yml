@@ -245,16 +245,26 @@ jobs:
         with:
           workspaces: rust -> target
           key: windows-release
-      - uses: pnpm/action-setup@v6.1.0
       - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
-          cache: pnpm
+      # action-setup v6 invokes a deprecated shell/argument combination on Windows.
+      - name: Install repository pnpm version
+        run: |
+          $packageManager = (Get-Content package.json | ConvertFrom-Json).packageManager
+          npm install --global $packageManager
       - run: pnpm install --frozen-lockfile
       - uses: actions/download-artifact@v8.0.1
         with:
           name: frontend-dist
-          path: frontend/dist
+          path: ${{ runner.temp }}/frontend-archive
+          skip-decompress: true
+      # Avoid the action's deprecated Windows Buffer API; digest checks still run above.
+      - name: Extract frontend artifact
+        run: |
+          $archives = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/frontend-archive" -File)
+          if ($archives.Count -ne 1) { throw "Expected exactly one frontend archive" }
+          Expand-Archive -LiteralPath $archives[0].FullName -DestinationPath frontend/dist
       - name: Check Windows warnings
         env:
           RUSTFLAGS: -D warnings

@@ -1,37 +1,22 @@
-name: Windows native verification
+name: Windows desktop verification
 on:
   workflow_dispatch:
-    inputs:
-      probe:
-        type: boolean
-        default: false
 permissions:
   contents: read
-env:
-  CARGO_INCREMENTAL: '0'
-  CARGO_PROFILE_DEV_DEBUG: '0'
 jobs:
-  filesystem-probe:
-    if: inputs.probe
+  desktop:
     runs-on: windows-2025
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-      - run: python scripts/windows-native-probe.py
-  windows:
-    if: ${{ !inputs.probe }}
-    runs-on: windows-2025
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v6
-      - run: rustup toolchain install --no-self-update
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v6
         with:
-          workspaces: rust -> target
-          key: windows-native-debug
-          cache-on-failure: true
-      - name: Check Windows warnings
-        env:
-          RUSTFLAGS: -D warnings
-        run: cargo check --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --all-targets
-      - name: Verify corrected Windows cancellation fixtures
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --features test-support,uniffi --lib -- cancellation_retry_without_retained_snapshot_refuses_filesystem_cleanup cancellation_retry_preserves_successor_files_after_unconfirmed_verified_cleanup restore_confirms_terminal_cleanup_intent_before_restoring_follower
+          node-version-file: .node-version
+      - name: Install repository pnpm version
+        run: |
+          $packageManager = (Get-Content package.json | ConvertFrom-Json).packageManager
+          npm install --global $packageManager
+      - run: pnpm install --frozen-lockfile
+      - run: npm run test:launcher
+      - run: node electron/node_modules/electron/install.js
+      - run: pnpm --dir electron test

@@ -16302,7 +16302,10 @@ mod tests {
             )
             .unwrap();
         std::fs::remove_file(source.join("weights.gguf.part")).unwrap();
-        std::fs::File::open(&source).unwrap().sync_all().unwrap();
+        crate::platform::capability_fs::sync_directory(
+            &crate::platform::capability_fs::open_directory(&source).unwrap(),
+        )
+        .unwrap();
         assert!(completing_store
             .settle_queue_admission(download_id, &admission.attempt_id)
             .unwrap());
@@ -16376,7 +16379,10 @@ mod tests {
                 )
                 .unwrap();
             std::fs::remove_file(source.join("weights.gguf.part")).unwrap();
-            std::fs::File::open(&source).unwrap().sync_all().unwrap();
+            crate::platform::capability_fs::sync_directory(
+                &crate::platform::capability_fs::open_directory(&source).unwrap(),
+            )
+            .unwrap();
             assert!(completing_store
                 .verify_lifecycle_quarantine(download_id)
                 .unwrap());
@@ -16662,10 +16668,10 @@ mod tests {
             let part = head.dest_dir.join("head.gguf.part");
             let marker = head.dest_dir.join(".pumas_download");
             std::fs::remove_file(&part).unwrap();
-            std::fs::File::open(&head.dest_dir)
-                .unwrap()
-                .sync_all()
-                .unwrap();
+            crate::platform::capability_fs::sync_directory(
+                &crate::platform::capability_fs::open_directory(&head.dest_dir).unwrap(),
+            )
+            .unwrap();
             assert!(
                 matches!(completing_store.verify_cleanup_with_interrupted_confirmation_for_test(&head.download_id),
                 Err(PumasError::Other(message)) if message == "injected pre-publication failure")

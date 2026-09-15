@@ -31,9 +31,9 @@ Versions are aligned at 0.7.0. Electron, packaging, frontend tooling and vulnera
 Rust dependencies were updated. Staging excludes stale Rustler/UniFFI libraries.
 Test fixtures now supply real mutation authority, use canonical paths, exercise
 current conversion setup probes, start an owned runtime for shutdown verification,
-and respect Torch's prohibition on in-place dependency repair. Non-Unix code no
-longer references nightly-only Windows metadata methods; its existing unsupported
-runtime operations remain explicitly unsupported.
+and respect Torch's prohibition on in-place dependency repair. The initial
+preparation removed nightly-only Windows metadata calls. The subsequent Windows
+implementation adds native download authority and durable JSON publication.
 
 The [release notes](release-notes-0.7.0.md) remove repeated feature descriptions,
 correct the ownership transition's chronology (already present in v0.6), and avoid
@@ -85,14 +85,17 @@ package: extraction and execution of its bundled backend were verified.
 
 ## Remaining release and platform blockers
 
-- **Windows runtime support:** download destination authority and durable JSON
-  publication reject non-Unix targets. Per the subsequent maintainer direction,
-  Windows is now best effort in a separate non-blocking job. It emits a candidate
-  only on success; failures do not block Linux/macOS. Compilation fixes do not
-  qualify Windows runtime behavior.
-- **Native platform evidence:** macOS and Windows cannot be qualified on this Linux
-  machine. The revised workflow has been linted and rehearsed locally where
-  possible, but has not run on GitHub or those native runners.
+- **Native candidate validation:** Windows now implements held filesystem identity,
+  no-follow directory traversal, execution locking, native rename, and directory
+  synchronization. Windows is a required candidate gate alongside Linux and macOS.
+  The [native Windows verification](https://github.com/MrScripty/Pumas-Library/actions/runs/35028010502)
+  passed filesystem/recovery checks, API/RPC integration tests, and backend startup;
+  its three remaining failures were Unix directory opens in test fixtures, now
+  switched to the native helper. The final candidate must also pass release tests
+  and installed/portable application startup checks. Earlier
+  [Linux/macOS CI](https://github.com/MrScripty/Pumas-Library/actions/runs/35011477450)
+  passed their release and installer checks; those gates remain required after
+  the Windows changes.
 - **Dependency review:** the [review](dependency-review-0.7.0.md) found the
   unsupported Electron 39 line and reproduced its legacy extractor's overwrite
   flaw. The follow-up upgrade to Electron 43.7.0 removes that dependency; fresh

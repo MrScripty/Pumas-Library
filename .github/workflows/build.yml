@@ -1,29 +1,19 @@
-name: Windows desktop verification
+name: macOS desktop verification
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   desktop:
-    runs-on: windows-2025
+    runs-on: macos-14
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
-      - name: Install repository pnpm version
-        run: |
-          $packageManager = (Get-Content package.json | ConvertFrom-Json).packageManager
-          npm install --global $packageManager
+      - uses: pnpm/action-setup@v6
       - run: pnpm install --frozen-lockfile
       - run: npm run test:launcher
-        id: launcher
-        continue-on-error: true
       - run: node electron/node_modules/electron/install.js
       - run: pnpm --dir electron test
-        id: electron
-        continue-on-error: true
-      - name: Require native desktop checks
-        if: always() && (steps.launcher.outcome != 'success' || steps.electron.outcome != 'success')
-        run: exit 1

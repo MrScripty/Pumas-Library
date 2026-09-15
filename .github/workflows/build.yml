@@ -1,47 +1,348 @@
-name: Windows native verification
+name: Build
+
 on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      probe:
-        type: boolean
-        default: false
+
 permissions:
   contents: read
+
+# Only superseded PR work is obsolete. Never cancel a tag or manual rehearsal.
+concurrency:
+  group: build-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
+  CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: '0'
-  CARGO_PROFILE_DEV_DEBUG: '0'
+
 jobs:
-  filesystem-probe:
-    if: inputs.probe
-    runs-on: windows-2025
+  lint-workflows:
+    name: Workflow and release contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      - run: python scripts/windows-native-probe.py
-  windows:
-    if: ${{ !inputs.probe }}
-    runs-on: windows-2025
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      - uses: rhysd/actionlint@v1.7.8
+      - run: npm run check:dependency-ownership
+      - run: npm run check:release-versions
+      - run: node scripts/release/check-attribution.cjs
+      - run: node --test scripts/release/*.test.mjs
+
+  rust-quality:
+    name: Rust quality
+    needs: lint-workflows
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
-      - run: rustup toolchain install --no-self-update
+      # Reads the repository's rust-toolchain.toml; no second toolchain pin.
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
-          key: windows-native-debug
-          cache-on-failure: true
+          key: quality
+      - run: ./scripts/rust/check.sh
+
+  headless:
+    name: Headless without inference plugins
+    needs: lint-workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: headless
+      - run: cargo fetch --locked --manifest-path rust/Cargo.toml
+      - run: python3 scripts/release/check-dependency-features.py
+      # Separate package invocations prevent workspace feature unification from
+      # silently enabling the features this gate is supposed to exclude.
+      - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features
+      - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features
+      - run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release --no-default-features
+      - run: python3 scripts/release/smoke-rpc.py rust/target/release/pumas-rpc --inference-disabled
+
+  build-frontend:
+    name: Frontend and desktop contracts
+    needs: lint-workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6.1.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: contracts
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --dir frontend lint
+      - run: pnpm --dir frontend check:types
+      - run: pnpm --dir frontend test:run
+      - run: pnpm --dir frontend build:library-only
+      # Restore the default renderer before publishing the packaging input.
+      - run: pnpm --dir frontend build
+      - run: pnpm --dir electron lint
+      - run: pnpm --dir electron validate
+      - run: cargo fetch --locked --manifest-path rust/Cargo.toml
+      - run: pnpm --dir electron check:desktop-contract
+      - run: pnpm --dir electron test:desktop-contract-generator
+      - run: pnpm --dir electron test:desktop-contract-conformance
+      - run: pnpm --dir frontend test:desktop-contract
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          if-no-files-found: error
+
+  torch-quality:
+    name: Torch source QA
+    needs: lint-workflows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+          cache: pip
+          cache-dependency-path: torch-server/requirements-dev.txt
+      - run: python -m pip install -r torch-server/requirements-dev.txt
+      - run: python -m ruff check torch-server scripts/release
+      - run: python -m ruff format --check torch-server scripts/release
+      # Unit fixtures do not claim GPU inference or a shipped Torch runtime.
+      - run: python -m unittest discover -s torch-server/tests
+
+  build-rust:
+    name: Rust release (${{ matrix.os }})
+    needs: lint-workflows
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: release
+      - name: Check platform warnings
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --all-targets
+      - name: Build release backend
+        run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release
+      - name: Test release workspace
+        run: cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --release
+      - name: Verify backend startup from isolated staging
+        shell: bash
+        run: |
+          python scripts/release/stage-rpc.py
+          python scripts/release/smoke-rpc.py electron/resources/bin
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: rpc-${{ matrix.os }}
+          path: electron/resources/bin/
+          if-no-files-found: error
+
+  build-electron:
+    name: Desktop package (${{ matrix.platform }})
+    needs: [build-rust, build-frontend]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+          - os: macos-14
+            platform: mac
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6.1.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: rpc-${{ matrix.os }}
+          path: electron/resources/bin
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - name: Restore executable permission lost in artifact transport
+        if: runner.os != 'Windows'
+        run: chmod +x electron/resources/bin/pumas-rpc
+      - run: npm run test:launcher
+      - name: Install Electron runtime before native tests
+        timeout-minutes: 10
+        run: node electron/node_modules/electron/install.js
+      - run: pnpm --dir electron test
+      - name: Package desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm --dir electron exec electron-builder --${{ matrix.platform }} --publish never
+      - name: Verify expected installers
+        run: node scripts/release/check-artifacts.mjs electron/release ${{ matrix.platform }}
+      - name: Verify extracted Linux installers
+        if: runner.os == 'Linux'
+        run: python3 scripts/release/smoke-linux-packages.py electron/release
+      - uses: actions/setup-python@v6
+        if: runner.os == 'macOS'
+        with:
+          python-version-file: .python-version
+      - name: Verify installed macOS application
+        if: runner.os == 'macOS'
+        run: python3 scripts/release/smoke-macos-package.py electron/release/*.dmg
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: |
+            electron/release/*.AppImage
+            electron/release/*.deb
+            electron/release/*.exe
+            electron/release/*.dmg
+          if-no-files-found: error
+
+  windows-candidate:
+    name: Windows candidate
+    needs: [lint-workflows, build-frontend]
+    runs-on: windows-2025
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: windows-release
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      # action-setup v6 invokes a deprecated shell/argument combination on Windows.
+      - name: Install repository pnpm version
+        run: |
+          $packageManager = (Get-Content package.json | ConvertFrom-Json).packageManager
+          npm install --global $packageManager
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: frontend-dist
+          path: ${{ runner.temp }}/frontend-archive
+          skip-decompress: true
+      # Avoid the action's deprecated Windows Buffer API; digest checks still run above.
+      - name: Extract frontend artifact
+        run: |
+          $archives = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/frontend-archive" -File)
+          if ($archives.Count -ne 1) { throw "Expected exactly one frontend archive" }
+          Expand-Archive -LiteralPath $archives[0].FullName -DestinationPath frontend/dist
       - name: Check Windows warnings
         env:
           RUSTFLAGS: -D warnings
         run: cargo check --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --all-targets
-      - name: Windows filesystem primitives
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --features test-support,uniffi --lib -- platform::capability_fs metadata::atomic model_library::download_recovery
-      - name: All Windows Rust tests
-        id: tests
-        continue-on-error: true
-        run: cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --no-fail-fast
-      - name: Native backend startup
-        if: always() && steps.tests.outcome != 'skipped'
-        run: python scripts/release/smoke-rpc.py rust/target/debug/pumas-rpc.exe
-      - name: Require tests to pass
-        if: always() && steps.tests.outcome != 'success'
-        run: exit 1
+      - name: Build Windows backend
+        run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release
+      - name: Run Windows release tests
+        run: cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --release
+      - run: python scripts/release/stage-rpc.py
+      - run: python scripts/release/smoke-rpc.py electron/resources/bin
+      - run: npm run test:launcher
+      - name: Install Electron runtime before native tests
+        timeout-minutes: 10
+        run: node electron/node_modules/electron/install.js
+      - run: pnpm --dir electron test
+      - name: Package Windows installers
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm --dir electron exec electron-builder --win --publish never
+      - name: Verify installed and portable Windows applications
+        run: python scripts/release/smoke-windows-packages.py electron/release
+      - name: Verify and assemble Windows candidate
+        run: node scripts/release/check-artifacts.mjs electron/release win windows-candidate
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-windows
+          path: windows-candidate/
+          if-no-files-found: error
+
+  verify-launcher:
+    name: Linux release startup
+    needs: [build-rust, build-frontend]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6.1.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: rpc-ubuntu-24.04
+          path: rust/target/release
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - run: chmod +x rust/target/release/pumas-rpc
+      - name: Install Electron runtime before launcher smoke
+        timeout-minutes: 10
+        run: node electron/node_modules/electron/install.js
+      - run: pnpm --dir electron build
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Smoke an isolated library
+        run: |
+          mkdir -p "$RUNNER_TEMP/pumas-smoke/shared-resources/models" "$RUNNER_TEMP/pumas-smoke-config"
+          PUMAS_LAUNCHER_ROOT="$RUNNER_TEMP/pumas-smoke" XDG_CONFIG_HOME="$RUNNER_TEMP/pumas-smoke-config" \
+            xvfb-run -a bash launcher.sh --release-smoke
+
+  release-candidate:
+    name: Assemble release candidate
+    needs: [rust-quality, headless, torch-quality, build-electron, windows-candidate, verify-launcher]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: desktop-*
+          path: candidate-input
+      - run: node scripts/release/check-artifacts.mjs candidate-input required release-candidate
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: release-candidate
+          path: release-candidate/
+          if-no-files-found: error
+      # Publication is separate: installer behavior, notices, SBOMs and
+      # provenance remain release acceptance obligations in RELEASING.md.

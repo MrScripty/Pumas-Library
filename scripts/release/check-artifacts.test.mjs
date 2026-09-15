@@ -41,14 +41,17 @@ test('installer inventory rejects missing, extra, empty and duplicate outputs', 
 });
 
 
-test('required candidates omit Windows, while Windows and all-platform checks stay strict', t => {
+test('required candidates include both Windows installers', t => {
   const directory = fixture(t);
   assert.throws(() => checkArtifacts(directory, 'required'), /Invalid installer set/);
   fs.writeFileSync(path.join(directory, `Pumas.Library-${version}-arm64.dmg`), 'mac fixture');
-  assert.equal(checkArtifacts(directory, 'required').length, 3);
+  assert.throws(() => checkArtifacts(directory, 'required'), /Invalid installer set/);
   assert.throws(() => checkArtifacts(directory, 'all'), /Invalid installer set/);
   fs.writeFileSync(path.join(directory, `Pumas.Library.Setup.${version}.exe`), 'partial Windows fixture');
   assert.throws(() => checkArtifacts(directory, 'required'), /Invalid installer set/);
   assert.throws(() => checkArtifacts(directory, 'all'), /Invalid installer set/);
   assert.throws(() => checkArtifacts(directory, 'win'), /Invalid installer set/);
+  fs.writeFileSync(path.join(directory, `Pumas.Library.${version}.exe`), 'portable fixture');
+  assert.equal(checkArtifacts(directory, 'required').length, 5);
+  assert.equal(checkArtifacts(directory, 'all').length, 5);
 });

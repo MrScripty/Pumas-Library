@@ -99,9 +99,9 @@ discovery of compatible sibling `mmproj` vision projectors.
 
 ## Integration and upgrade notes
 
-Windows packaging is best effort for 0.7.0. Windows artifacts require a passing
-native candidate run and separate installer acceptance; current download and
-durable-publication limitations may prevent a Windows release.
+Windows supports download/library operations and durable metadata publication.
+The release candidate requires native Windows tests and startup checks for both
+the installed application and portable executable, alongside Linux and macOS.
 
 - Use the `pumas-library` Rust crate in `pumas-core` for direct integration, or
   `pumas-rpc` when process separation is useful. Language-binding adapters remain

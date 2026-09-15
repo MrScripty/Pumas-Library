@@ -4,7 +4,7 @@
 
 The `Build` workflow runs on pull requests, `main`, version tags, and manual
 `workflow_dispatch`. Every trigger runs the same release-candidate gates and
-installer assembly. Windows is a separate best-effort target for 0.7.0. Rehearse the intended commit before creating a version tag;
+installer assembly for Linux, macOS, and Windows. Rehearse the intended commit before creating a version tag;
 a tag is not the first opportunity to discover packaging failures.
 
 1. Update `CHANGELOG.md` and the version's release notes. Keep an empty
@@ -16,10 +16,9 @@ a tag is not the first opportunity to discover packaging failures.
    against the manifests automatically.
 4. Complete local QA below, then run the workflow against the candidate commit
    once it is available remotely. Inspect every platform's result.
-5. Review the `release-candidate` workflow artifact. It contains the three required
-   Linux/macOS installers selected by [the artifact plan](scripts/release/artifact-plan.json)
-   and checksums over those final installer bytes. A successful `windows-candidate`
-   job separately provides both Windows installers and their checksums.
+5. Review the `release-candidate` workflow artifact. It contains all five required
+   Linux, macOS, and Windows installers selected by [the artifact plan](scripts/release/artifact-plan.json)
+   and checksums over those final installer bytes.
 
 The workflow deliberately assembles **candidates**, with read-only repository
 permissions. It does not create or publish a GitHub release. Publication requires
@@ -132,18 +131,19 @@ Before tagging or publishing, satisfy the remaining artifact-plan obligations:
 - Real ONNX inference checks require a valid model/tokenizer fixture. A test
   that returns early without that fixture does not prove packaged inference.
 
-For 0.7.0, Windows is best effort: its independent CI job attempts the native
-build, release tests, staged RPC startup, launcher/Electron tests, and packaging.
-A failure is recorded but does not block Linux/macOS candidate assembly. Windows
-candidate artifacts are uploaded only after every step passes; missing Windows
-artifacts cannot be mistaken for a complete five-installer release.
+Windows is a required native target. Its CI job runs the build, release tests,
+staged RPC startup, launcher/Electron tests, and packaging. The installer check
+silently installs the NSIS candidate, compares installed resources with the build
+inputs, starts the installed RPC and desktop, and starts the portable executable.
+The combined candidate requires both Windows installers alongside Linux and macOS.
 
-Download destination authority and durable JSON publication currently refuse
-non-Unix targets. Those limitations still block qualification of a Windows
-artifact, even though they no longer block release of other targets. Native
-installation and the remaining acceptance evidence are required before publishing
-a passing Windows candidate. See the [dependency review](docs/dependency-review-0.7.0.md)
-for the remaining security and attribution decisions.
+Windows download authority uses held directory handles and physical file identity,
+no-follow traversal, a pinned execution lock file, native handle-relative rename,
+and writable directory flushes. Durable JSON publication retains the same explicit
+failure and durability states across Linux, macOS, and Windows. Native startup
+checks do not establish signing, SmartScreen acceptance, or interactive workflows.
+See the [dependency review](docs/dependency-review-0.7.0.md) for the remaining
+security and attribution decisions.
 
 ## Tag and publish
 

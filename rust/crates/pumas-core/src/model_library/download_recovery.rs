@@ -258,6 +258,15 @@ pub(crate) struct RootExecutionGrant {
     authority: DownloadDestinationRoot,
 }
 
+impl Drop for RootExecutionGrant {
+    fn drop(&mut self) {
+        // Closing our descriptor alone can leave flock held by a concurrent
+        // fork until the child execs. Custody ends with this grant, so release
+        // the lock explicitly on its shared open file description.
+        let _ = fs2::FileExt::unlock(&self.file);
+    }
+}
+
 impl RootExecutionGrant {
     pub(crate) fn validate_root(&self, root: &DownloadDestinationRoot) -> Result<()> {
         self.authority.0.require_current()?;
@@ -2050,6 +2059,32 @@ mod tests {
             2,
             "execution must not add a sidecar beyond existing identity files"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn root_execution_grant_release_is_not_delayed_by_inherited_handles() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = super::DownloadDestinationRoot::open(temp.path()).unwrap();
+        let grant = root.try_acquire_execution_grant().unwrap();
+        // A duplicate shares the open file description, just as a concurrent
+        // fork does before the child exec closes CLOEXEC descriptors.
+        let inherited = grant.file.try_clone().unwrap();
+        assert!(matches!(
+            root.try_acquire_execution_grant(),
+            Err(crate::PumasError::DownloadRootBusy)
+        ));
+        drop(grant);
+        let next = root
+            .try_acquire_execution_grant()
+            .expect("grant drop must release custody even while an inherited descriptor is open");
+        drop(inherited);
+        assert!(matches!(
+            root.try_acquire_execution_grant(),
+            Err(crate::PumasError::DownloadRootBusy)
+        ));
+        drop(next);
+        root.try_acquire_execution_grant().unwrap();
     }
 
     #[cfg(unix)]

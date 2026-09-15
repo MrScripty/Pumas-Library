@@ -735,16 +735,16 @@ impl DownloadRecoveryDestination {
     /// destination. The caller retains grants for both roots; cross-filesystem
     /// copying is not authorized by this capability.
     pub(crate) fn rename_model_directory_noreplace(&self, target: &Self) -> Result<()> {
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {
             let _ = target;
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
-                "Held model relocation requires Linux renameat2",
+                "Held model relocation requires an atomic no-replace rename",
             )
             .into())
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             use std::os::unix::ffi::OsStrExt;
 
@@ -1194,7 +1194,7 @@ fn directory_identity(directory: &Dir) -> io::Result<FilesystemIdentity> {
         .ok_or_else(invalid_capability_path)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[allow(unsafe_code)]
 fn rename_held_directories_noreplace(
     source_parent: &std::fs::File,
@@ -1206,8 +1206,9 @@ fn rename_held_directories_noreplace(
     // SAFETY: the borrowed files keep both directory descriptors open for the
     // entire synchronous syscall; the borrowed CStr arguments are valid,
     // NUL-terminated names for that same lifetime. The caller supplies one
-    // validated basename per held no-follow parent. renameat2 does not retain
-    // these pointers, and RENAME_NOREPLACE forbids replacement of any target.
+    // validated basename per held no-follow parent. Neither syscall retains
+    // these pointers; the exclusive flag forbids replacement of any target.
+    #[cfg(target_os = "linux")]
     let result = unsafe {
         libc::syscall(
             libc::SYS_renameat2,
@@ -1216,6 +1217,17 @@ fn rename_held_directories_noreplace(
             target_parent.as_raw_fd(),
             target_name.as_ptr(),
             libc::RENAME_NOREPLACE,
+        )
+    };
+    // SAFETY: same descriptor and basename lifetime guarantees as above.
+    #[cfg(target_os = "macos")]
+    let result = unsafe {
+        libc::renameatx_np(
+            source_parent.as_raw_fd(),
+            source_name.as_ptr(),
+            target_parent.as_raw_fd(),
+            target_name.as_ptr(),
+            libc::RENAME_EXCL,
         )
     };
     if result == 0 {
@@ -1675,7 +1687,30 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn held_rename_syscall_rejects_destination_created_after_preflight() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let parent = std::fs::File::open(temp.path()).unwrap();
+        std::fs::create_dir(temp.path().join("source")).unwrap();
+        std::fs::write(temp.path().join("source/weights"), b"original").unwrap();
+        assert!(!temp.path().join("target").exists());
+        // An empty directory could be replaced by ordinary rename. Create it
+        // after preflight and exercise the syscall's exclusive flag directly.
+        std::fs::create_dir(temp.path().join("target")).unwrap();
+        let error =
+            super::rename_held_directories_noreplace(&parent, c"source", &parent, c"target")
+                .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            std::fs::read(temp.path().join("source/weights")).unwrap(),
+            b"original"
+        );
+        assert!(temp.path().join("target").is_dir());
+        assert!(!temp.path().join("target/weights").exists());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn held_model_relocation_moves_between_roots_and_never_overwrites() {
         let temp = tempfile::TempDir::new().unwrap();
@@ -1717,7 +1752,7 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn held_model_relocation_rejects_a_substituted_destination_parent() {
         let temp = tempfile::TempDir::new().unwrap();

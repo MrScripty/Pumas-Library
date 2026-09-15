@@ -80,10 +80,11 @@ fn seed_available_model(root: &Path) {
         metadata,
         serde_json::to_vec_pretty(&serde_json::json!({
             "model_id": AVAILABLE_MODEL_ID,
-            "family": "intent-ipc-test",
+            "family": "intent",
             "model_type": "llm",
+            "pipeline_tag": "text-generation",
             "official_name": "Intent IPC Available",
-            "cleaned_name": "intent-ipc-available",
+            "cleaned_name": "ipc-available",
             "repo_id": "example/intent-ipc-available",
             "upstream_revision": "commit-ipc",
             "selected_artifact_id": "model.safetensors",
@@ -113,6 +114,10 @@ async fn intent_ipc_registry_child() {
         .build()
         .await
         .unwrap();
+    // Retained declarations trigger startup reconciliation on restart. Drain it
+    // before caching facts so classification writes cannot stale the fixture.
+    // The seeded metadata must agree with AVAILABLE_MODEL_ID after reconciliation.
+    api.rebuild_model_index().await.unwrap();
     api.resolve_model_package_facts(AVAILABLE_MODEL_ID)
         .await
         .unwrap();

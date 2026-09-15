@@ -154,7 +154,10 @@ const NODE_LAUNCHER_ROOT_FILE_SYSTEM: LauncherRootFileSystem = {
 };
 const NODE_LAUNCHER_ROOT_PERSISTENCE_ADAPTER: LauncherRootPersistenceAdapter = {
   ensureDirectory: (directoryPath) => fs.mkdirSync(directoryPath, { recursive: true }),
-  openParentDirectory: (directoryPath) => fs.openSync(directoryPath, 'r'),
+  // Windows FlushFileBuffers requires a writable directory handle.
+  openParentDirectory: (directoryPath) => fs.openSync(
+    directoryPath, process.platform === 'win32' ? 'r+' : 'r'
+  ),
   createTemporaryName: (authorityFilename) => `${authorityFilename}.tmp-${randomUUID()}`,
   openTemporaryFile: (temporaryPath) => fs.openSync(temporaryPath, 'wx', 0o600),
   writeTemporaryFile: (descriptor, serializedConfig) => {
@@ -498,6 +501,25 @@ function resolveLauncherRootOverride(
   return { state: 'absent' };
 }
 
+// Windows can report ENOENT when a parent is a file. That means unavailable
+// saved authority, not permission to fall through to another discovered library.
+function missingAuthorityHasValidParents(
+  directory: string,
+  fileSystem: LauncherRootFileSystem
+): boolean {
+  let current = path.resolve(directory);
+  for (;;) {
+    try {
+      return fileSystem.statSync(current).isDirectory();
+    } catch (error) {
+      if (errorCode(error) !== 'ENOENT') return false;
+    }
+    const parent = path.dirname(current);
+    if (parent === current) return true;
+    current = parent;
+  }
+}
+
 function readPersistedLauncherRootAuthority(
   userDataPath: string,
   fileSystem: LauncherRootFileSystem
@@ -508,7 +530,7 @@ function readPersistedLauncherRootAuthority(
   try {
     serializedConfig = fileSystem.readFileSync(configPath, 'utf8');
   } catch (error) {
-    if (errorCode(error) === 'ENOENT') {
+    if (errorCode(error) === 'ENOENT' && missingAuthorityHasValidParents(userDataPath, fileSystem)) {
       return { state: 'absent' };
     }
     return { state: 'unavailable' };

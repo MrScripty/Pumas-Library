@@ -22,29 +22,16 @@ pub(crate) fn sync_directory_file(file: &File) -> io::Result<()> {
 }
 
 #[cfg(windows)]
-#[allow(unsafe_code)]
 pub(crate) fn sync_directory_file(file: &File) -> io::Result<()> {
-    use std::os::windows::io::{AsRawHandle, FromRawHandle};
-    use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE};
-    use windows_sys::Win32::Storage::FileSystem::{
-        ReOpenFile, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ,
-        FILE_SHARE_WRITE,
-    };
-    // SAFETY: the borrowed handle remains live throughout ReOpenFile. A successful
-    // return is a new owned handle, transferred exactly once into File.
-    let handle = unsafe {
-        ReOpenFile(
-            file.as_raw_handle(),
-            GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            FILE_FLAG_BACKUP_SEMANTICS,
-        )
-    };
-    if handle == INVALID_HANDLE_VALUE {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: ReOpenFile returned a valid, newly owned handle above.
-    unsafe { File::from_raw_handle(handle) }.sync_all()
+    use cap_std::fs::{OpenOptions, OpenOptionsExt};
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+    let directory = Dir::from_std_file(file.try_clone()?);
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .write(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
+    directory.open_with(".", &options)?.sync_all()
 }
 
 /// Rename one basename relative to held parents, without resolving ambient paths.
@@ -59,10 +46,14 @@ pub(crate) fn rename_at(
 ) -> io::Result<()> {
     use cap_std::fs::{OpenOptions, OpenOptionsExt};
     use std::os::windows::{ffi::OsStrExt, io::AsRawHandle};
-    use windows_sys::Win32::Storage::FileSystem::{
-        FileRenameInfo, SetFileInformationByHandle, DELETE, FILE_FLAG_BACKUP_SEMANTICS,
-        FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ, FILE_RENAME_INFO,
+    use windows_sys::Wdk::Storage::FileSystem::{
+        FileRenameInformation, NtSetInformationFile, FILE_RENAME_INFORMATION,
     };
+    use windows_sys::Win32::Foundation::RtlNtStatusToDosError;
+    use windows_sys::Win32::Storage::FileSystem::{
+        DELETE, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
+    };
+    use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
     for name in [source_name, target_name] {
         let mut components = std::path::Path::new(name).components();
         if !matches!(components.next(), Some(std::path::Component::Normal(_)))
@@ -93,26 +84,36 @@ pub(crate) fn rename_at(
             "rename name contains NUL",
         ));
     }
-    let offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    let offset = std::mem::offset_of!(FILE_RENAME_INFORMATION, FileName);
     let bytes = offset
         .checked_add(name.len() * 2)
         .and_then(|size| u32::try_from(size).ok())
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "rename name too long"))?;
-    // Word storage gives FILE_RENAME_INFO its required pointer alignment and
+    // Word storage gives FILE_RENAME_INFORMATION its required pointer alignment and
     // enough initialized space for the variable-length UTF-16 tail.
     let mut storage = vec![0usize; (bytes as usize).div_ceil(std::mem::size_of::<usize>())];
-    let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    let info = storage.as_mut_ptr().cast::<FILE_RENAME_INFORMATION>();
     // SAFETY: storage is aligned, initialized, and sized for the header and name.
     // Both handles and all pointers remain live for this synchronous call.
     let result = unsafe {
+        let mut status: IO_STATUS_BLOCK = std::mem::zeroed();
         (*info).Anonymous.ReplaceIfExists = u8::from(replace);
         (*info).RootDirectory = target_parent.as_raw_handle();
         (*info).FileNameLength = (name.len() * 2) as u32;
         std::ptr::copy_nonoverlapping(name.as_ptr(), (*info).FileName.as_mut_ptr(), name.len());
-        SetFileInformationByHandle(source.as_raw_handle(), FileRenameInfo, info.cast(), bytes)
+        NtSetInformationFile(
+            source.as_raw_handle(),
+            &mut status,
+            info.cast(),
+            bytes,
+            FileRenameInformation,
+        )
     };
-    if result == 0 {
-        Err(io::Error::last_os_error())
+    if result < 0 {
+        // SAFETY: this pure conversion accepts any NTSTATUS value.
+        Err(io::Error::from_raw_os_error(
+            unsafe { RtlNtStatusToDosError(result) } as i32,
+        ))
     } else {
         Ok(())
     }

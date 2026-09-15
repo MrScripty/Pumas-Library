@@ -459,9 +459,19 @@ impl RecoveryRoot {
         options
             .read(true)
             .write(true)
-            .create(true)
+            .create_new(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-        let lock = self.root.open_with(LIBRARY_ID_LOCK, &options)?.into_std();
+        // Concurrent non-exclusive creation can return ENOENT on macOS. Elect
+        // one creator atomically, then open the winner's stable lock file.
+        let lock = match self.root.open_with(LIBRARY_ID_LOCK, &options) {
+            Ok(lock) => lock,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                options.create_new(false);
+                self.root.open_with(LIBRARY_ID_LOCK, &options)?
+            }
+            Err(error) => return Err(error.into()),
+        }
+        .into_std();
         if !lock.metadata()?.is_file() {
             return Err(invalid_library_id().into());
         }
@@ -2195,33 +2205,41 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn concurrent_configured_roots_initialize_one_durable_library_identity() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
-        let handles = (0..8)
-            .map(|_| {
-                let barrier = barrier.clone();
-                let path = temp.path().to_path_buf();
-                std::thread::spawn(move || {
-                    barrier.wait();
-                    super::DownloadDestinationRoot::open(&path)
-                        .unwrap()
-                        .resolve(std::path::Path::new("model"))
-                        .unwrap()
-                        .persisted_identity()
-                        .unwrap()
+        for _ in 0..16 {
+            let temp = tempfile::TempDir::new().unwrap();
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+            let handles = (0..8)
+                .map(|_| {
+                    let barrier = barrier.clone();
+                    let path = temp.path().to_path_buf();
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        super::DownloadDestinationRoot::open(&path)
+                            .unwrap()
+                            .resolve(std::path::Path::new("model"))
+                            .unwrap()
+                            .persisted_identity()
+                            .unwrap()
+                    })
                 })
-            })
-            .collect::<Vec<_>>();
-        let identities = handles
-            .into_iter()
-            .map(|handle| handle.join().unwrap())
-            .collect::<Vec<_>>();
-        assert!(identities.iter().all(|id| id == &identities[0]));
-        let reopened = super::DownloadDestinationRoot::open(temp.path())
-            .unwrap()
-            .resolve(std::path::Path::new("model"))
-            .unwrap();
-        assert_eq!(reopened.persisted_identity().unwrap(), identities[0]);
+                .collect::<Vec<_>>();
+            // Join every worker before propagating a panic so the temporary root
+            // remains alive and does not turn one failure into unrelated ENOENTs.
+            let results = handles
+                .into_iter()
+                .map(|handle| handle.join())
+                .collect::<Vec<_>>();
+            let identities = results
+                .into_iter()
+                .map(|result| result.unwrap())
+                .collect::<Vec<_>>();
+            assert!(identities.iter().all(|id| id == &identities[0]));
+            let reopened = super::DownloadDestinationRoot::open(temp.path())
+                .unwrap()
+                .resolve(std::path::Path::new("model"))
+                .unwrap();
+            assert_eq!(reopened.persisted_identity().unwrap(), identities[0]);
+        }
     }
 
     #[cfg(unix)]

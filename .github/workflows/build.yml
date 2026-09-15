@@ -230,13 +230,10 @@ jobs:
           if-no-files-found: error
 
   windows-candidate:
-    name: Windows candidate (best effort)
+    name: Windows candidate
     needs: [lint-workflows, build-frontend]
     runs-on: windows-2025
     timeout-minutes: 150
-    # Failure stays visible in the job summary, but cannot block Linux/macOS.
-    # No candidate is uploaded unless every Windows check succeeds.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
       - name: Install repository Rust toolchain
@@ -284,21 +281,15 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: pnpm --dir electron exec electron-builder --win --publish never
+      - name: Verify installed and portable Windows applications
+        run: python scripts/release/smoke-windows-packages.py electron/release
       - name: Verify and assemble Windows candidate
         run: node scripts/release/check-artifacts.mjs electron/release win windows-candidate
       - uses: actions/upload-artifact@v7.0.1
         with:
-          name: windows-candidate
+          name: desktop-windows
           path: windows-candidate/
           if-no-files-found: error
-      - name: Record best-effort outcome
-        if: always()
-        shell: bash
-        env:
-          WINDOWS_JOB_STATUS: ${{ job.status }}
-        run: |
-          echo "Windows candidate outcome: $WINDOWS_JOB_STATUS" >> "$GITHUB_STEP_SUMMARY"
-          echo "Windows is best effort for 0.7.0. Only a passing run produces a candidate; native installer acceptance is still required before publication." >> "$GITHUB_STEP_SUMMARY"
 
   verify-launcher:
     name: Linux release startup
@@ -335,7 +326,7 @@ jobs:
 
   release-candidate:
     name: Assemble release candidate
-    needs: [rust-quality, headless, torch-quality, build-electron, verify-launcher]
+    needs: [rust-quality, headless, torch-quality, build-electron, windows-candidate, verify-launcher]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

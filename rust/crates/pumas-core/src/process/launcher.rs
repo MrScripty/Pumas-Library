@@ -652,6 +652,10 @@ mod tests {
         );
 
         assert_eq!(config.binary_path, archive_dir.join(binary_name));
+        if !cfg!(any(target_os = "linux", target_os = "macos")) {
+            assert!(config.env_vars.is_empty());
+            return;
+        }
         let library_path_key = if cfg!(target_os = "macos") {
             "DYLD_LIBRARY_PATH"
         } else {

@@ -6069,9 +6069,9 @@
     }
   ],
   "input_sha256": {
-    "rust/Cargo.lock": "fd63bf37f7e97c6b3eed18c2f2579ed030d5b85bb260e99d47e7a4fe898fc48c",
-    "rust/Cargo.toml": "2d3afafb5fc4131e18a9b4820a3d578b6aab8e54073f090a7b91a1584b88c305",
-    "rust/crates/pumas-core/Cargo.toml": "b7d699ad43fcb0bddad32cd42e292b9153cd76c84842a7b8d37e976acd0b4f12",
+    "rust/Cargo.lock": "8a6a244244d3bc5fbc91bfd5425ce24d1d329b356367733a6f402d90c413c11e",
+    "rust/Cargo.toml": "f1336a1bdf25b20a45207e3fe1a332c422fb13d6e9bf63ecfe0601384ecf7f29",
+    "rust/crates/pumas-core/Cargo.toml": "920dfa71dc7160c14c753b656d16f65ad2b3fcdc7cbe1c56525e195588897022",
     "rust/crates/pumas-rpc/Cargo.toml": "bcaa5a10cc8bbe9ef90bb51257644e6ca9243dea7b66c66fd062cbc3b695319d",
     "rust/crates/pumas-app-manager/Cargo.toml": "d5c9c33758a64d5db0d379abba14db300788977e5bae1957d44ff7ea32702c70",
     "pnpm-lock.yaml": "8ef64f92ef3734992ce825b3253a6edef6586cf87b0a22494096bb12b9c86304",

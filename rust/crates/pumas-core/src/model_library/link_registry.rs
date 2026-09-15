@@ -205,7 +205,11 @@ impl LinkRegistry {
         for entry in &entries {
             let symlink = match fs::symlink_metadata(&entry.target).await {
                 Ok(metadata) => metadata.file_type().is_symlink(),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    crate::platform::capability_fs::check_missing_path(&entry.target)
+                        .map_err(|error| crate::PumasError::io_with_path(error, &entry.target))?;
+                    false
+                }
                 Err(error) => return Err(crate::PumasError::io_with_path(error, &entry.target)),
             };
             let inspected = if symlink {
@@ -219,6 +223,8 @@ impl LinkRegistry {
             {
                 healthy += 1;
             } else {
+                crate::platform::capability_fs::check_missing_path(inspected)
+                    .map_err(|error| crate::PumasError::io_with_path(error, inspected))?;
                 broken.push(entry.target.to_string_lossy().into_owned());
             }
         }

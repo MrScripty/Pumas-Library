@@ -419,7 +419,9 @@ fn acquire(root: &Path) -> std::result::Result<(PathBuf, SetupLease), Failure> {
         .open(&path)
         .map_err(|e| failed("Opening setup lock", e))?;
     fs2::FileExt::try_lock_exclusive(&file).map_err(|error| {
-        if error.kind() == std::io::ErrorKind::WouldBlock {
+        if error.kind() == std::io::ErrorKind::WouldBlock
+            || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
+        {
             Failure::Failed(
                 "Conversion environment is busy (setup or conversion already running)".into(),
             )

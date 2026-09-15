@@ -355,6 +355,23 @@ async fn test_runtime_profile_snapshot_preserves_singleton_ollama_status() {
     assert_eq!(status.ollama_running, singleton_ollama_running);
 }
 
+// Linux owns binary runtime processes. Other platforms must reject the launch
+// explicitly; their in-process runtime profile tests still run normally.
+fn expect_binary_launch_result(
+    result: pumas_library::Result<pumas_library::models::LaunchResponse>,
+) -> Option<pumas_library::models::LaunchResponse> {
+    if cfg!(target_os = "linux") {
+        Some(result.unwrap())
+    } else {
+        assert!(
+            matches!(&result, Err(PumasError::Other(message))
+                if message == "Owned binary runtime profiles are currently supported only on Linux"),
+            "expected unsupported binary launch, got {result:?}"
+        );
+        None
+    }
+}
+
 #[tokio::test]
 async fn test_launch_runtime_profile_reports_profile_scoped_failure() {
     let temp_dir = create_test_env();
@@ -376,8 +393,10 @@ async fn test_launch_runtime_profile_reports_profile_scoped_failure() {
             "missing-bin",
             &version_dir,
         )
-        .await
-        .unwrap();
+        .await;
+    let Some(response) = expect_binary_launch_result(response) else {
+        return;
+    };
 
     assert!(!response.success);
     assert!(response
@@ -429,8 +448,10 @@ async fn test_launch_llama_cpp_router_profile_reports_profile_scoped_failure() {
             "local-build",
             &version_dir,
         )
-        .await
-        .unwrap();
+        .await;
+    let Some(response) = expect_binary_launch_result(response) else {
+        return;
+    };
 
     assert!(!response.success);
     assert!(
@@ -499,8 +520,10 @@ async fn test_launch_llama_cpp_dedicated_profile_requires_model_binding() {
             &version_dir,
             Some("llm/test/dedicated-model"),
         )
-        .await
-        .unwrap();
+        .await;
+    let Some(response) = expect_binary_launch_result(response) else {
+        return;
+    };
 
     assert!(!response.success);
     assert!(response

@@ -5852,7 +5852,7 @@ mod tests {
             if record.metadata["download_incomplete"].as_bool() == Some(true) {
                 let model_dir = temp.path().join(&record.id);
                 std::fs::create_dir_all(&model_dir).unwrap();
-                record.path = model_dir.display().to_string();
+                record.path = model_dir.canonicalize().unwrap().display().to_string();
             }
         }
         ModelsOutcome::from_records(records, temp.path())
@@ -7002,6 +7002,9 @@ mod tests {
         let temp = tempfile::TempDir::new().unwrap();
         let model_dir = temp.path().join(&model.id);
         std::fs::create_dir_all(&model_dir).unwrap();
+        // Catalog paths are canonical, including when macOS aliases /var to
+        // /private/var or the temporary root otherwise contains a symlink.
+        let model_dir = model_dir.canonicalize().unwrap();
         let mut model = model;
         model.path = model_dir.display().to_string();
         let models = RpcOutcome::Models(Box::new(

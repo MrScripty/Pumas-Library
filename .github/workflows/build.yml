@@ -34,7 +34,7 @@ jobs:
           RUSTFLAGS: -D warnings
         run: cargo check --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --all-targets
       - name: Windows filesystem primitives
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --lib -- platform::capability_fs metadata::atomic model_library::download_recovery
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --features test-support,uniffi --lib -- platform::capability_fs metadata::atomic model_library::download_recovery
       - name: All Windows Rust tests
         id: tests
         continue-on-error: true

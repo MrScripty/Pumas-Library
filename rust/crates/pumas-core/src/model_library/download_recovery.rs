@@ -1848,7 +1848,7 @@ mod tests {
         assert!(!temp.path().join("target/weights").exists());
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     #[test]
     fn held_model_relocation_moves_between_roots_and_never_overwrites() {
         let temp = tempfile::TempDir::new().unwrap();
@@ -2212,8 +2212,26 @@ mod tests {
             let root = super::DownloadDestinationRoot::open(&path).unwrap();
             let grant = root.try_acquire_execution_grant().unwrap();
             if replace_root {
-                std::fs::rename(&path, temp.path().join("old")).unwrap();
-                std::fs::create_dir(&path).unwrap();
+                let moved = temp.path().join("old");
+                let renamed = std::fs::rename(&path, &moved);
+                #[cfg(windows)]
+                {
+                    // The pinned lock file also prevents renaming its ancestor
+                    // on Windows. After release, replacement must still invalidate
+                    // the old directory authority.
+                    assert!(matches!(renamed.unwrap_err().raw_os_error(), Some(5 | 32)));
+                    grant.validate_root(&root).unwrap();
+                    drop(grant);
+                    std::fs::rename(&path, &moved).unwrap();
+                    std::fs::create_dir(&path).unwrap();
+                    assert!(root.try_acquire_execution_grant().is_err());
+                    continue;
+                }
+                #[cfg(not(windows))]
+                {
+                    renamed.unwrap();
+                    std::fs::create_dir(&path).unwrap();
+                }
             } else {
                 std::fs::write(
                     path.join(super::LIBRARY_ID_MARKER),
@@ -2410,10 +2428,9 @@ mod tests {
             moved.join(".pumas-library-id.json"),
         )
         .unwrap();
-        let second = super::DownloadDestinationRoot::open(&moved)
-            .unwrap()
-            .resolve(std::path::Path::new("model"))
-            .unwrap();
+        let copied_root = super::DownloadDestinationRoot::open(&moved).unwrap();
+        let _grant = copied_root.try_acquire_execution_grant().unwrap();
+        let second = copied_root.resolve(std::path::Path::new("model")).unwrap();
         assert_ne!(first.identity(), second.identity());
         assert_eq!(
             first.persisted_identity().unwrap(),

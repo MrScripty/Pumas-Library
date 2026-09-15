@@ -10,6 +10,7 @@ pub(crate) mod mmproj;
 mod process_owner;
 #[path = "runtime_profiles/router_model_operation.rs"]
 mod router_model_operation;
+#[cfg(target_os = "linux")]
 #[path = "runtime_profiles/router_observer.rs"]
 pub(crate) mod router_observer;
 pub use router_model_operation::OwnedRouterModelOperation;

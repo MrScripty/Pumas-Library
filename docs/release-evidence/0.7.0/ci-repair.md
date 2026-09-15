@@ -1,5 +1,37 @@
 # 0.7.0 CI repair
 
+## Follow-up from run 34914326630
+
+[The next tag run](https://github.com/MrScripty/Pumas-Library/actions/runs/34914326630)
+passed frontend conformance and the IPC restart tests, then exposed two
+package-facts selection failures. Execution descriptors chose the largest file
+in the directory without respecting `selected_artifact_files`. The fixture's
+equally sized GGUF files made the result depend on filesystem traversal order.
+Making the unselected sibling larger reproduced both failures locally.
+
+Execution descriptors now restrict file selection to the declared artifact
+files. Legacy packages without a selection still use the largest model file,
+with a stable path tie-break. Tests cover a larger unselected sibling and a
+missing selected file, which must never silently switch to another artifact.
+
+The same run showed native compiler and action deprecation warnings. Linux-only
+router observers, mutation workers, and their test helpers now have matching
+platform compilation guards. Windows-only unused parameters are explicitly
+handled. Shared atomic-publication result types retain their complete contract;
+their non-Unix unused-code annotations explain that this platform refuses
+publication admission. These annotations do not claim Windows publication works.
+
+The workflow explicitly installs the repository Rust toolchain and uses maintained
+Node 24 actions (`pnpm/action-setup@v6.1.0`, `actions/upload-artifact@v7.0.1`, and
+`actions/download-artifact@v8.0.1`). Native platform checks reject compiler warnings
+before optimized compilation. The artifact archive layout remains unchanged.
+
+Initial follow-up validation: all-feature Clippy, actionlint, release version and
+attribution checks, 66 runtime-profile tests, and 39 serving tests passed. Full
+workspace and native CI verification continues before moving the release tag.
+
+## First repair
+
 Investigated [Build run 34904132053](https://github.com/MrScripty/Pumas-Library/actions/runs/34904132053)
 at commit `3a6e0309b8cabe891d0d4792d8b9704fc394773e`.
 

@@ -25,6 +25,13 @@ use std::os::unix::io::AsRawFd;
 
 /// Cleanup state for a staging file owned by a durable publication attempt.
 #[derive(Debug)]
+#[cfg_attr(
+    not(unix),
+    allow(
+        dead_code,
+        reason = "non-Unix publication refuses admission; retain the shared durability contract"
+    )
+)]
 pub(crate) enum StagingCleanup {
     NotRequired,
     Removed,
@@ -40,6 +47,13 @@ pub(crate) enum AtomicPublishStage {
     )]
     TargetAdmission,
     Serialization,
+    #[cfg_attr(
+        not(unix),
+        allow(
+            dead_code,
+            reason = "non-Unix publication refuses admission; retain the shared durability contract"
+        )
+    )]
     Staging,
     Rename,
 }
@@ -84,6 +98,13 @@ impl AtomicPublishFailure {
 
 /// Publication result for callers that require explicit durability classification.
 #[derive(Debug)]
+#[cfg_attr(
+    not(unix),
+    allow(
+        dead_code,
+        reason = "non-Unix publication refuses admission; retain the shared durability contract"
+    )
+)]
 pub(crate) enum AtomicPublication {
     /// File contents and the held parent directory entry were synchronized.
     Durable,
@@ -119,11 +140,32 @@ fn target_unavailable_failure(path: &Path) -> Box<AtomicPublishFailure> {
 /// Held authority for one JSON file in an already-existing parent directory.
 pub(crate) struct AtomicJsonTarget {
     parent: Dir,
+    #[cfg_attr(
+        not(unix),
+        allow(
+            dead_code,
+            reason = "non-Unix publication refuses admission; retain the shared durability contract"
+        )
+    )]
     parent_sync_file: File,
     parent_path: PathBuf,
+    #[cfg_attr(
+        not(unix),
+        allow(
+            dead_code,
+            reason = "non-Unix publication refuses admission; retain the shared durability contract"
+        )
+    )]
     parent_identity: ParentIdentity,
     name: OsString,
     display_path: PathBuf,
+    #[cfg_attr(
+        not(unix),
+        allow(
+            dead_code,
+            reason = "non-Unix publication refuses admission; retain the shared durability contract"
+        )
+    )]
     capability_validation: Option<Box<dyn Fn() -> Result<bool> + Send + Sync>>,
 }
 
@@ -135,6 +177,13 @@ enum ParentIdentity {
     Unsupported,
 }
 
+#[cfg_attr(
+    not(unix),
+    allow(
+        dead_code,
+        reason = "non-Unix publication refuses admission; retain the shared durability contract"
+    )
+)]
 trait DurablePublicationAdapter {
     fn temp_name(&self, target: &OsStr, attempt: u8) -> OsString;
 

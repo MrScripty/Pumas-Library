@@ -235,10 +235,10 @@ fn llama_cpp_server_binary_path(version_dir: &Path) -> PathBuf {
         .unwrap_or(legacy_path)
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn llama_cpp_runtime_env(binary_path: &Path) -> HashMap<String, String> {
     let mut env_vars = HashMap::new();
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
     if let Some(binary_dir) = binary_path.parent() {
         let key = if cfg!(target_os = "macos") {
             "DYLD_LIBRARY_PATH"
@@ -254,6 +254,11 @@ fn llama_cpp_runtime_env(binary_path: &Path) -> HashMap<String, String> {
     }
 
     env_vars
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn llama_cpp_runtime_env(_binary_path: &Path) -> HashMap<String, String> {
+    HashMap::new()
 }
 
 fn find_llama_cpp_runtime_binary(root: &Path, binary_name: &str) -> Option<PathBuf> {

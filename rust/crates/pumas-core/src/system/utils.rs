@@ -3,7 +3,9 @@
 use crate::error::{PumasError, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tracing::{debug, warn};
+#[cfg(target_os = "linux")]
+use tracing::debug;
+use tracing::warn;
 
 /// Disk space information.
 #[derive(Debug, Clone)]

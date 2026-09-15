@@ -66,6 +66,7 @@ impl ServingState {
         snapshot
     }
 
+    #[cfg(target_os = "linux")]
     pub(super) fn reserves_target(&self, row: &ServedModelStatus) -> bool {
         self.pending
             .iter()
@@ -74,6 +75,7 @@ impl ServingState {
 
     /// A fresh provider observation supersedes a settled, known failure only.
     /// Active and uncertain receipts remain owned by their original invocation.
+    #[cfg(target_os = "linux")]
     pub(super) fn retire_settled_failure(&mut self, row: &ServedModelStatus) {
         self.pending
             .retain(|load| load.reserves_target() || !same_target(&load.status, row));

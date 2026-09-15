@@ -115,6 +115,17 @@ async fn create_selected_artifact_gguf_model(library: &ModelLibrary, model_id: &
         ],
     );
 
+    // A larger unselected sibling must not determine the execution path.
+    {
+        use std::io::Write;
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(model_dir.join("model-Q4_K_M.gguf"))
+            .unwrap()
+            .write_all(&[0; 64])
+            .unwrap();
+    }
+
     let metadata = ModelMetadata {
         model_id: Some(model_id.to_string()),
         model_type: Some("llm".to_string()),
@@ -1373,6 +1384,26 @@ async fn scopes_package_facts_cache_to_selected_artifact_id() {
         .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
         .unwrap()
         .is_none());
+}
+
+#[tokio::test]
+async fn selected_execution_path_never_falls_back_to_an_unselected_sibling() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/llama/multi-quant-gguf";
+    create_selected_artifact_gguf_model(&library, model_id).await;
+    let model_dir = library.library_root().join(model_id);
+    tokio::fs::remove_file(model_dir.join("model-Q5_K_M.gguf"))
+        .await
+        .unwrap();
+
+    let descriptor = library
+        .resolve_model_execution_descriptor(model_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::path::PathBuf::from(descriptor.entry_path),
+        std::fs::canonicalize(model_dir).unwrap()
+    );
 }
 
 #[tokio::test]

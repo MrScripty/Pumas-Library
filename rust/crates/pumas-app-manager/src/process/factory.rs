@@ -176,6 +176,8 @@ impl AppProcessManager for BinaryProcessManager {
         if path_exists(&pid_file).await? {
             if let Ok(pid_str) = fs::read_to_string(&pid_file).await {
                 if let Ok(pid) = pid_str.trim().parse::<i32>() {
+                    #[cfg(not(unix))]
+                    let _ = pid;
                     #[cfg(unix)]
                     {
                         use nix::sys::signal::{self, Signal};
@@ -363,6 +365,8 @@ impl AppProcessManager for PythonProcessManager {
         if path_exists(&pid_file).await? {
             if let Ok(pid_str) = fs::read_to_string(&pid_file).await {
                 if let Ok(pid) = pid_str.trim().parse::<i32>() {
+                    #[cfg(not(unix))]
+                    let _ = pid;
                     #[cfg(unix)]
                     {
                         use nix::sys::signal::{self, Signal};

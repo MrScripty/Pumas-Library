@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@v6
       # Reads the repository's rust-toolchain.toml; no second toolchain pin.
       - name: Install repository Rust toolchain
-        run: rustup show active-toolchain
+        run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
@@ -60,7 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install repository Rust toolchain
-        run: rustup show active-toolchain
+        run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
@@ -81,13 +81,13 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6.1.0
       - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
           cache: pnpm
       - name: Install repository Rust toolchain
-        run: rustup show active-toolchain
+        run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
@@ -106,7 +106,7 @@ jobs:
       - run: pnpm --dir electron test:desktop-contract-generator
       - run: pnpm --dir electron test:desktop-contract-conformance
       - run: pnpm --dir frontend test:desktop-contract
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: frontend-dist
           path: frontend/dist/
@@ -142,11 +142,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install repository Rust toolchain
-        run: rustup show active-toolchain
+        run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
           key: release
+      - name: Check platform warnings
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --all-targets
       - name: Build release backend
         run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release
       - name: Test release workspace
@@ -156,7 +160,7 @@ jobs:
         run: |
           python scripts/release/stage-rpc.py
           python scripts/release/smoke-rpc.py electron/resources/bin
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: rpc-${{ matrix.os }}
           path: electron/resources/bin/
@@ -177,17 +181,17 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6.1.0
       - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: rpc-${{ matrix.os }}
           path: electron/resources/bin
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: frontend-dist
           path: frontend/dist
@@ -215,7 +219,7 @@ jobs:
       - name: Verify installed macOS application
         if: runner.os == 'macOS'
         run: python3 scripts/release/smoke-macos-package.py electron/release/*.dmg
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: desktop-${{ matrix.platform }}
           path: |
@@ -236,21 +240,25 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Install repository Rust toolchain
-        run: rustup show active-toolchain
+        run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust -> target
           key: windows-release
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6.1.0
       - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: frontend-dist
           path: frontend/dist
+      - name: Check Windows warnings
+        env:
+          RUSTFLAGS: -D warnings
+        run: cargo check --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --all-targets
       - name: Build Windows backend
         run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release
       - name: Run Windows release tests
@@ -268,7 +276,7 @@ jobs:
         run: pnpm --dir electron exec electron-builder --win --publish never
       - name: Verify and assemble Windows candidate
         run: node scripts/release/check-artifacts.mjs electron/release win windows-candidate
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: windows-candidate
           path: windows-candidate/
@@ -289,17 +297,17 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6.1.0
       - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: rpc-ubuntu-24.04
           path: rust/target/release
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.1
         with:
           name: frontend-dist
           path: frontend/dist
@@ -325,12 +333,12 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.1
         with:
           pattern: desktop-*
           path: candidate-input
       - run: node scripts/release/check-artifacts.mjs candidate-input required release-candidate
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: release-candidate
           path: release-candidate/

@@ -21,6 +21,7 @@ const MAX_COLLECTION_ITEMS: usize = 512;
 const MAX_HF_REPO_ID_BYTES: usize = 96;
 const MAX_PORTABLE_PATH_COMPONENT_BYTES: usize = 255;
 const LIBRARY_ID_MARKER: &str = ".pumas-library-id.json";
+#[cfg(unix)]
 const LIBRARY_ID_LOCK: &str = ".pumas-library-id.lock";
 const MAX_LIBRARY_ID_BYTES: u64 = 1024;
 
@@ -302,11 +303,14 @@ impl DownloadDestinationRoot {
 
     pub(crate) fn open(path: &Path) -> Result<Self> {
         #[cfg(not(unix))]
-        return Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "Download destination authority requires Unix",
-        )
-        .into());
+        {
+            let _ = path;
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "Download destination authority requires Unix",
+            )
+            .into());
+        }
         #[cfg(unix)]
         {
             let mut root = RecoveryRoot::open(path)?.ok_or_else(invalid_capability_path)?;

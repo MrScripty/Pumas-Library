@@ -976,6 +976,8 @@ impl VersionInstaller {
     }
 
     fn make_binary_executable(path: &Path) -> Result<()> {
+        #[cfg(not(unix))]
+        let _ = path;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -1470,6 +1472,7 @@ impl VersionInstaller {
     }
 }
 
+#[cfg(unix)]
 fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }

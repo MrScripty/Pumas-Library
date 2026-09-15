@@ -110,6 +110,8 @@ pub fn configure_detached_command(command: &mut Command) {
 /// # Returns
 /// `true` if the process was terminated (or wasn't running), `false` on error
 pub fn terminate_process(pid: u32, timeout_ms: u64) -> Result<bool> {
+    #[cfg(not(unix))]
+    let _ = timeout_ms;
     if !is_process_alive(pid) {
         debug!("Process {} is not running", pid);
         return Ok(true);
@@ -222,6 +224,8 @@ fn terminate_process_windows(pid: u32) -> Result<bool> {
 ///   process PID if no matching group exists
 /// - **Windows**: Uses `taskkill /T` which already handles the tree
 pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
+    #[cfg(not(unix))]
+    let _ = timeout_ms;
     #[cfg(unix)]
     {
         use nix::sys::signal::Signal;

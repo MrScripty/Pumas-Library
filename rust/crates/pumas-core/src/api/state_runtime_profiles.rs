@@ -82,6 +82,7 @@ pub(super) async fn launch_runtime_profile_with_receipt(
                 .as_ref()
                 .and_then(|overrides| overrides.context_size),
             operation_guard,
+            #[cfg(target_os = "linux")]
             Some(
                 crate::runtime_profiles::router_observer::RouterObserverContext {
                     owner: std::sync::Arc::downgrade(

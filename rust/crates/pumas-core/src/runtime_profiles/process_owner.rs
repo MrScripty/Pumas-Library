@@ -51,7 +51,7 @@ struct Registry {
     #[cfg(target_os = "linux")]
     generation: u64,
     sessions: HashMap<RuntimeProfileId, Arc<Session>>,
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     launch_reply_gate: Option<Arc<tokio::sync::Notify>>,
 }
 
@@ -114,7 +114,7 @@ impl RuntimeProfileProcessOwner {
         Ok(())
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(crate) async fn launch(
         &self,
         config: BinaryLaunchConfig,
@@ -134,7 +134,7 @@ impl RuntimeProfileProcessOwner {
         model_path: Option<PathBuf>,
         context_size: Option<u32>,
         guard: RuntimeProfileOperationGuard,
-        observer: Option<super::router_observer::RouterObserverContext>,
+        #[cfg(target_os = "linux")] observer: Option<super::router_observer::RouterObserverContext>,
     ) -> Result<OwnedRuntimeProfileLaunchReceipt> {
         #[cfg(not(target_os = "linux"))]
         {
@@ -349,6 +349,7 @@ impl RuntimeProfileProcessOwner {
         .ok_or_else(|| failure("Runtime endpoint listener is not owned by the admitted child"))?
     }
 
+    #[cfg(target_os = "linux")]
     pub(crate) fn router_observation_preset(
         &self,
         id: &RuntimeProfileId,
@@ -444,7 +445,7 @@ impl RuntimeProfileProcessOwner {
             .collect()
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(crate) async fn stop(&self, id: &RuntimeProfileId) -> Result<bool> {
         match self.stop_with_receipt(id).await? {
             Some((_, result)) => result,

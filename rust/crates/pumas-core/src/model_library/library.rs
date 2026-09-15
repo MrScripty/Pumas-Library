@@ -2502,7 +2502,23 @@ impl ModelLibrary {
             }
         } else if let Some(primary_file) = tokio::task::spawn_blocking({
             let model_dir = model_dir.clone();
-            move || find_primary_model_file(&model_dir)
+            let selected_files = metadata.selected_artifact_files.clone();
+            move || {
+                let selected_paths = selected_files
+                    .map(|files| {
+                        files
+                            .iter()
+                            .map(|name| {
+                                super::external_assets::normalized_component_relative_path(name)
+                            })
+                            .collect::<Result<std::collections::HashSet<_>>>()
+                    })
+                    .transpose()?;
+                Ok::<_, PumasError>(find_primary_model_file_in_selection(
+                    &model_dir,
+                    selected_paths.as_ref(),
+                ))
+            }
         })
         .await
         .map_err(|err| {
@@ -2510,7 +2526,7 @@ impl ModelLibrary {
                 "Failed to join execution descriptor primary file task: {}",
                 err
             ))
-        })? {
+        })?? {
             primary_file.display().to_string()
         } else {
             model_dir.display().to_string()
@@ -5946,6 +5962,13 @@ fn render_migration_execution_markdown(report: &MigrationExecutionReport) -> Str
 /// This is used for hash verification - the hashes in metadata correspond to the
 /// primary (largest) model file in the directory.
 fn find_primary_model_file(model_dir: &Path) -> Option<PathBuf> {
+    find_primary_model_file_in_selection(model_dir, None)
+}
+
+fn find_primary_model_file_in_selection(
+    model_dir: &Path,
+    selected_paths: Option<&std::collections::HashSet<PathBuf>>,
+) -> Option<PathBuf> {
     let mut largest: Option<(PathBuf, u64)> = None;
 
     for entry in WalkDir::new(model_dir)
@@ -5958,6 +5981,14 @@ fn find_primary_model_file(model_dir: &Path) -> Option<PathBuf> {
             continue;
         }
 
+        if selected_paths.is_some_and(|paths| {
+            entry
+                .path()
+                .strip_prefix(model_dir)
+                .is_ok_and(|relative| !paths.contains(relative))
+        }) {
+            continue;
+        }
         let filename = entry.file_name().to_string_lossy();
         // Skip metadata files
         if filename == METADATA_FILENAME || filename == OVERRIDES_FILENAME {
@@ -5978,7 +6009,9 @@ fn find_primary_model_file(model_dir: &Path) -> Option<PathBuf> {
 
         if let Ok(meta) = entry.metadata() {
             let size = meta.len();
-            if largest.as_ref().is_none_or(|(_, s)| size > *s) {
+            if largest.as_ref().is_none_or(|(path, previous_size)| {
+                size > *previous_size || (size == *previous_size && entry.path() < path.as_path())
+            }) {
                 largest = Some((entry.path().to_path_buf(), size));
             }
         }

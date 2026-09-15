@@ -7,12 +7,15 @@
 //! Stop joins, so writes cannot escape into a replacement generation.
 
 use super::process_owner::{OwnedRuntimeProfileObservation, RuntimeProfileProcessOwner};
+#[cfg(target_os = "linux")]
 use super::{
     RuntimeProfileBinaryLaunchKind, RuntimeProfileLaunchSpec, RuntimeProfileLaunchStrategy,
 };
 use crate::models::RuntimeProfileId;
 use crate::{PumasError, Result};
+#[cfg(target_os = "linux")]
 use std::io::Write;
+#[cfg(target_os = "linux")]
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -29,15 +32,18 @@ enum ModelOperationState {
 
 #[derive(Debug)]
 pub(super) struct RouterModelState {
+    #[cfg(target_os = "linux")]
     path: PathBuf,
     expected: Option<Vec<u8>>,
+    #[cfg(target_os = "linux")]
     pending: Option<ModelContextCommand>,
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     command_gate: Option<std::sync::mpsc::Receiver<()>>,
     operation: ModelOperationState,
 }
 
 impl RouterModelState {
+    #[cfg(target_os = "linux")]
     pub(super) fn observation(models: &Mutex<Self>) -> Result<(Vec<u8>, bool, bool)> {
         let state = models
             .lock()
@@ -133,6 +139,7 @@ impl RouterModelState {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[derive(Debug)]
 struct ModelContextCommand {
     receipt: OwnedRuntimeProfileObservation,
@@ -141,6 +148,7 @@ struct ModelContextCommand {
     reply: tokio::sync::oneshot::Sender<Result<bool>>,
 }
 
+#[cfg(target_os = "linux")]
 impl ModelContextCommand {
     #[cfg(target_os = "linux")]
     fn execute(
@@ -291,6 +299,7 @@ impl OwnedRouterModelOperation {
         self.replace_preset(expected, replacement).await
     }
 
+    #[cfg(target_os = "linux")]
     pub(crate) fn preset(&self) -> Result<Vec<u8>> {
         self.models
             .lock()
@@ -305,34 +314,44 @@ impl OwnedRouterModelOperation {
         expected: Vec<u8>,
         replacement: Vec<u8>,
     ) -> Result<bool> {
-        if self.command_pending {
-            return Err(failure("Router preset command completion is unobserved"));
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (expected, replacement);
+            Err(failure(
+                "Owned router preset edits are supported only on Linux",
+            ))
         }
-        self.mark_mutating()?;
-        let (reply, receiver) = tokio::sync::oneshot::channel();
-        self.command_pending = true;
-        self.owner
-            .with_running_session(&self.profile_id, &self.receipt, || {
-                let mut state = self
-                    .models
-                    .lock()
-                    .map_err(|_| failure("Router model state poisoned"))?;
-                if state.pending.is_some() {
-                    return Err(failure("Router preset command is already pending"));
-                }
-                state.pending = Some(ModelContextCommand {
-                    receipt: self.receipt.clone(),
-                    expected,
-                    replacement,
-                    reply,
-                });
-                Ok(())
-            })??;
-        let result = receiver
-            .await
-            .map_err(|_| failure("Owned router preset worker stopped before completion"))?;
-        self.command_pending = false;
-        result
+        #[cfg(target_os = "linux")]
+        {
+            if self.command_pending {
+                return Err(failure("Router preset command completion is unobserved"));
+            }
+            self.mark_mutating()?;
+            let (reply, receiver) = tokio::sync::oneshot::channel();
+            self.command_pending = true;
+            self.owner
+                .with_running_session(&self.profile_id, &self.receipt, || {
+                    let mut state = self
+                        .models
+                        .lock()
+                        .map_err(|_| failure("Router model state poisoned"))?;
+                    if state.pending.is_some() {
+                        return Err(failure("Router preset command is already pending"));
+                    }
+                    state.pending = Some(ModelContextCommand {
+                        receipt: self.receipt.clone(),
+                        expected,
+                        replacement,
+                        reply,
+                    });
+                    Ok(())
+                })??;
+            let result = receiver
+                .await
+                .map_err(|_| failure("Owned router preset worker stopped before completion"))?;
+            self.command_pending = false;
+            result
+        }
     }
 
     /// Release custody only after confirmed completion and a current owner check.
@@ -367,6 +386,7 @@ impl Drop for OwnedRouterModelOperation {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn read_regular_preset(path: &std::path::Path) -> Result<Vec<u8>> {
     let metadata =
         std::fs::symlink_metadata(path).map_err(|e| PumasError::io_with_path(e, path))?;

@@ -1,12 +1,18 @@
 //! Generation-fenced router projections; observation never settles a load receipt.
+#[cfg(target_os = "linux")]
 use super::{bump_snapshot_cursor, ServingService};
+#[cfg(any(target_os = "linux", test))]
+use crate::models::{RouterObservationState, RouterProfileSyncStatus};
 use crate::models::{
-    RouterObservationState, RouterProfileSyncStatus, RuntimeProfileId, ServedModelLoadState,
-    ServedModelStatus, ServingEndpointMode, ServingEndpointStatus, ServingStatusSnapshot,
-    ServingStatusUpdateFeed,
+    RuntimeProfileId, ServedModelLoadState, ServingEndpointMode, ServingEndpointStatus,
+    ServingStatusSnapshot,
 };
+#[cfg(target_os = "linux")]
+use crate::models::{ServedModelStatus, ServingStatusUpdateFeed};
+#[cfg(target_os = "linux")]
 use crate::runtime_profiles::{OwnedRuntimeProfileObservation, RuntimeProfileProcessOwner};
 
+#[cfg(target_os = "linux")]
 impl ServingService {
     pub(crate) fn publish_router_observation(
         &self,
@@ -96,6 +102,7 @@ impl ServingService {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn set_sync(snapshot: &mut ServingStatusSnapshot, mut sync: RouterProfileSyncStatus) {
     if sync.catalog_state == crate::models::RouterCatalogState::Uncertain {
         sync.observation_state = RouterObservationState::Unavailable;
@@ -111,6 +118,7 @@ fn set_sync(snapshot: &mut ServingStatusSnapshot, mut sync: RouterProfileSyncSta
     }
 }
 
+#[cfg(target_os = "linux")]
 fn changed_feed(
     snapshot: &mut ServingStatusSnapshot,
     before: &ServingStatusSnapshot,

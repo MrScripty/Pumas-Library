@@ -1,0 +1,9 @@
+name: Windows native verification
+on:
+  workflow_dispatch:
+jobs:
+  filesystem-probe:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v6
+      - run: python scripts/windows-native-probe.py

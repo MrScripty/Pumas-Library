@@ -9,8 +9,6 @@
 #![warn(unsafe_code)]
 
 use crate::{PumasError, Result};
-#[cfg(not(unix))]
-use cap_std::ambient_authority;
 use cap_std::fs::{Dir, OpenOptions as CapOpenOptions};
 use serde::{de::DeserializeOwned, Serialize};
 use std::ffi::{OsStr, OsString};
@@ -26,10 +24,10 @@ use std::os::unix::io::AsRawFd;
 /// Cleanup state for a staging file owned by a durable publication attempt.
 #[derive(Debug)]
 #[cfg_attr(
-    not(unix),
+    not(any(unix, windows)),
     allow(
         dead_code,
-        reason = "non-Unix publication refuses admission; retain the shared durability contract"
+        reason = "unsupported target publication refuses admission; retain the shared durability contract"
     )
 )]
 pub(crate) enum StagingCleanup {
@@ -42,16 +40,16 @@ pub(crate) enum StagingCleanup {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AtomicPublishStage {
     #[cfg_attr(
-        unix,
-        allow(dead_code, reason = "constructed by the non-Unix target adapter")
+        any(unix, windows),
+        allow(dead_code, reason = "constructed by the unsupported target adapter")
     )]
     TargetAdmission,
     Serialization,
     #[cfg_attr(
-        not(unix),
+        not(any(unix, windows)),
         allow(
             dead_code,
-            reason = "non-Unix publication refuses admission; retain the shared durability contract"
+            reason = "unsupported target publication refuses admission; retain the shared durability contract"
         )
     )]
     Staging,
@@ -61,8 +59,8 @@ pub(crate) enum AtomicPublishStage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AtomicPublishFailureKind {
     #[cfg_attr(
-        unix,
-        allow(dead_code, reason = "constructed by the non-Unix target adapter")
+        any(unix, windows),
+        allow(dead_code, reason = "constructed by the unsupported target adapter")
     )]
     TargetUnavailable,
     InvalidData,
@@ -99,10 +97,10 @@ impl AtomicPublishFailure {
 /// Publication result for callers that require explicit durability classification.
 #[derive(Debug)]
 #[cfg_attr(
-    not(unix),
+    not(any(unix, windows)),
     allow(
         dead_code,
-        reason = "non-Unix publication refuses admission; retain the shared durability contract"
+        reason = "unsupported target publication refuses admission; retain the shared durability contract"
     )
 )]
 pub(crate) enum AtomicPublication {
@@ -141,29 +139,29 @@ fn target_unavailable_failure(path: &Path) -> Box<AtomicPublishFailure> {
 pub(crate) struct AtomicJsonTarget {
     parent: Dir,
     #[cfg_attr(
-        not(unix),
+        not(any(unix, windows)),
         allow(
             dead_code,
-            reason = "non-Unix publication refuses admission; retain the shared durability contract"
+            reason = "unsupported target publication refuses admission; retain the shared durability contract"
         )
     )]
     parent_sync_file: File,
     parent_path: PathBuf,
     #[cfg_attr(
-        not(unix),
+        not(any(unix, windows)),
         allow(
             dead_code,
-            reason = "non-Unix publication refuses admission; retain the shared durability contract"
+            reason = "unsupported target publication refuses admission; retain the shared durability contract"
         )
     )]
     parent_identity: ParentIdentity,
     name: OsString,
     display_path: PathBuf,
     #[cfg_attr(
-        not(unix),
+        not(any(unix, windows)),
         allow(
             dead_code,
-            reason = "non-Unix publication refuses admission; retain the shared durability contract"
+            reason = "unsupported target publication refuses admission; retain the shared durability contract"
         )
     )]
     capability_validation: Option<Box<dyn Fn() -> Result<bool> + Send + Sync>>,
@@ -180,10 +178,10 @@ enum ParentIdentity {
 }
 
 #[cfg_attr(
-    not(unix),
+    not(any(unix, windows)),
     allow(
         dead_code,
-        reason = "non-Unix publication refuses admission; retain the shared durability contract"
+        reason = "unsupported target publication refuses admission; retain the shared durability contract"
     )
 )]
 trait DurablePublicationAdapter {
@@ -272,7 +270,7 @@ impl AtomicJsonTarget {
         #[cfg(not(unix))]
         let (parent, parent_sync_file) = {
             let parent =
-                Dir::open_ambient_dir(&parent_path, ambient_authority()).map_err(|source| {
+                crate::platform::capability_fs::open_directory(&parent_path).map_err(|source| {
                     PumasError::Io {
                         message: format!(
                             "Failed to open existing parent directory {}",
@@ -571,7 +569,7 @@ impl AtomicJsonTarget {
         if let Some(validate) = &self.capability_validation {
             return validate();
         }
-        let current = Dir::open_ambient_dir(&self.parent_path, cap_std::ambient_authority())
+        let current = crate::platform::capability_fs::open_directory(&self.parent_path)
             .map_err(|source| {
                 parent_io_error(&self.parent_path, "reopen for identity check", source)
             })?
@@ -631,15 +629,10 @@ fn parent_identity_from_file(file: &File, parent: &Path) -> Result<ParentIdentit
 pub fn atomic_read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     let mut file = match File::open(path) {
         Ok(file) => file,
-        Err(source)
-            if source.kind() == std::io::ErrorKind::NotFound
-                && !path.ancestors().skip(1).any(|parent| {
-                    // Windows maps a file used as a parent to ERROR_PATH_NOT_FOUND.
-                    // Preserve that invalid-path error instead of reporting absent data.
-                    fs::metadata(parent).is_ok_and(|metadata| !metadata.is_dir())
-                }) =>
-        {
-            return Ok(None)
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => {
+            crate::platform::capability_fs::check_missing_path(path)
+                .map_err(|error| PumasError::io_with_path(error, path))?;
+            return Ok(None);
         }
 
         Err(source) => {
@@ -1458,7 +1451,7 @@ mod tests {
     #[test]
     fn capability_publisher_does_not_reopen_display_path() {
         let temp = TempDir::new().unwrap();
-        let parent = Dir::from_std_file(File::open(temp.path()).unwrap());
+        let parent = crate::platform::capability_fs::open_directory(temp.path()).unwrap();
         let target = AtomicJsonTarget::from_capability(
             parent,
             OsStr::new(".pumas_download"),
@@ -1482,7 +1475,7 @@ mod tests {
     fn capability_publisher_preserves_publication_ambiguity() {
         for (rename_failure, sync_failure) in [(true, false), (false, true)] {
             let temp = TempDir::new().unwrap();
-            let parent = Dir::from_std_file(File::open(temp.path()).unwrap());
+            let parent = crate::platform::capability_fs::open_directory(temp.path()).unwrap();
             let target = AtomicJsonTarget::from_capability(
                 parent,
                 OsStr::new("marker"),
@@ -1528,7 +1521,7 @@ mod tests {
         let valid = Arc::new(AtomicBool::new(true));
         let check = valid.clone();
         let target = AtomicJsonTarget::from_capability(
-            Dir::from_std_file(File::open(temp.path()).unwrap()),
+            crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
             OsStr::new("marker"),
             temp.path().join("marker"),
             move || Ok(check.load(Ordering::SeqCst)),
@@ -1546,8 +1539,8 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("model");
         fs::create_dir(&path).unwrap();
-        let root = Dir::from_std_file(File::open(temp.path()).unwrap());
-        let parent = root.open_dir("model").unwrap();
+        let root = crate::platform::capability_fs::open_directory(temp.path()).unwrap();
+        let parent = crate::platform::capability_fs::open_directory(&path).unwrap();
         let identity =
             parent_identity_from_file(&parent.open(".").unwrap().into_std(), &path).unwrap();
         let display = path.clone();

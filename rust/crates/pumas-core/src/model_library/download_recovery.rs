@@ -1,8 +1,7 @@
 #![deny(unsafe_code)]
 
-use crate::platform::capability_fs::sync_directory;
+use crate::platform::capability_fs::{open_directory, sync_directory};
 use crate::{ModelRecord, PumasError, Result};
-use cap_std::ambient_authority;
 #[cfg(unix)]
 use cap_std::fs::OpenOptionsExt;
 use cap_std::fs::{Dir, Metadata, OpenOptions};
@@ -378,9 +377,7 @@ impl DownloadDestinationRoot {
         // never determine identity, and symlinks below this prefix are rejected.
         let mut relative = (!path.is_absolute()).then(|| path.to_path_buf());
         for ancestor in path.ancestors().skip(1).filter(|_| path.is_absolute()) {
-            if let Ok(metadata) = Dir::open_ambient_dir(ancestor, ambient_authority())
-                .and_then(|dir| dir.dir_metadata())
-            {
+            if let Ok(metadata) = open_directory(ancestor).and_then(|dir| dir.dir_metadata()) {
                 if filesystem_identity(&metadata) == Some(self.0.root_identity) {
                     relative = path.strip_prefix(ancestor).ok().map(Path::to_path_buf);
                     break;
@@ -429,8 +426,7 @@ struct RecoveryRoot {
 
 impl RecoveryRoot {
     fn open(library_root: &Path) -> Result<Option<Self>> {
-        let root =
-            Dir::open_ambient_dir(library_root, ambient_authority()).map_err(PumasError::from)?;
+        let root = open_directory(library_root).map_err(PumasError::from)?;
         let held_metadata = root.dir_metadata()?;
         let Some(root_identity) = filesystem_identity(&held_metadata) else {
             return Ok(None);
@@ -495,7 +491,7 @@ impl RecoveryRoot {
         if canonical != self.root_canonical_path {
             return Err(invalid_capability_path());
         }
-        let current = Dir::open_ambient_dir(&canonical, ambient_authority())?.dir_metadata()?;
+        let current = open_directory(&canonical)?.dir_metadata()?;
         if filesystem_identity(&current) != Some(self.root_identity) {
             return Err(invalid_capability_path());
         }
@@ -1355,20 +1351,19 @@ fn open_directory_chain(root: &Dir, relative: &Path, create: bool) -> io::Result
             let Component::Normal(name) = component else {
                 return Err(invalid_capability_path());
             };
-            let parent = directory.try_clone()?.into_std_file();
-            let file = match cap_primitives::fs::open_dir_nofollow(&parent, Path::new(name)) {
-                Ok(file) => file,
-                Err(error) if create && error.kind() == io::ErrorKind::NotFound => {
-                    match directory.create_dir(name) {
-                        Ok(()) => {}
-                        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                        Err(error) => return Err(error),
+            let child =
+                match crate::platform::capability_fs::open_directory_nofollow(&directory, name) {
+                    Ok(file) => file,
+                    Err(error) if create && error.kind() == io::ErrorKind::NotFound => {
+                        match directory.create_dir(name) {
+                            Ok(()) => {}
+                            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                            Err(error) => return Err(error),
+                        }
+                        crate::platform::capability_fs::open_directory_nofollow(&directory, name)?
                     }
-                    cap_primitives::fs::open_dir_nofollow(&parent, Path::new(name))?
-                }
-                Err(error) => return Err(error),
-            };
-            let child = Dir::from_std_file(file);
+                    Err(error) => return Err(error),
+                };
             if create {
                 sync_directory(&child)?;
                 sync_directory(&directory)?;

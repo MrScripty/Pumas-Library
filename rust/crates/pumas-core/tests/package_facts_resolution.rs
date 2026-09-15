@@ -1401,7 +1401,7 @@ async fn selected_execution_path_never_falls_back_to_an_unselected_sibling() {
         .await
         .unwrap();
     assert_eq!(
-        std::path::PathBuf::from(descriptor.entry_path),
+        std::fs::canonicalize(descriptor.entry_path).unwrap(),
         std::fs::canonicalize(model_dir).unwrap()
     );
 }

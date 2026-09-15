@@ -5,6 +5,78 @@ use cap_std::fs::Dir;
 use std::fs::File;
 use std::io;
 
+/// Disambiguate Windows' missing-path error from a file used as a parent.
+/// Call only after an operation reports a missing path.
+pub(crate) fn check_missing_path(path: &std::path::Path) -> io::Result<()> {
+    #[cfg(windows)]
+    for parent in path
+        .ancestors()
+        .skip(1)
+        .filter(|p| !p.as_os_str().is_empty())
+    {
+        match std::fs::metadata(parent) {
+            Ok(metadata) if metadata.is_dir() => break,
+            Ok(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotADirectory,
+                    "path parent is not a directory",
+                ))
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = path;
+    Ok(())
+}
+
+/// Open a directory while allowing its name to change; callers validate its
+/// physical identity before publishing through the held capability.
+pub(crate) fn open_directory(path: &std::path::Path) -> io::Result<Dir> {
+    #[cfg(not(windows))]
+    {
+        Dir::open_ambient_dir(path, cap_std::ambient_authority())
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)?;
+        if !file.metadata()?.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotADirectory,
+                "expected a directory",
+            ));
+        }
+        Ok(Dir::from_std_file(file))
+    }
+}
+
+#[cfg(windows)]
+pub(crate) fn open_directory_nofollow(parent: &Dir, name: &std::ffi::OsStr) -> io::Result<Dir> {
+    use cap_std::fs::{OpenOptions, OpenOptionsExt};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    };
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+    let file = parent.open_with(name, &options)?.into_std();
+    let metadata = file.metadata()?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "expected a directory without a reparse point",
+        ));
+    }
+    Ok(Dir::from_std_file(file))
+}
+
 /// Flush directory metadata through a handle with the rights the OS requires.
 #[cfg(unix)]
 pub(crate) fn sync_directory(directory: &Dir) -> io::Result<()> {
@@ -164,6 +236,7 @@ mod tests {
         directory.create_dir("source").unwrap();
         directory.create_dir("target").unwrap();
         directory.write("source/payload", b"data").unwrap();
+        let held_source = open_directory_nofollow(&directory, "source".as_ref()).unwrap();
         assert!(rename_at(
             &directory,
             "source".as_ref(),
@@ -181,5 +254,31 @@ mod tests {
         )
         .unwrap();
         assert_eq!(directory.read("moved/payload").unwrap(), b"data");
+        assert_eq!(held_source.read("payload").unwrap(), b"data");
+    }
+
+    #[test]
+    fn windows_directory_authority_rejects_junctions() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("sentinel"), b"preserve").unwrap();
+        let output = std::process::Command::new("cmd.exe")
+            .args(["/d", "/c", "mklink", "/j"])
+            .arg(temp.path().join("junction"))
+            .arg(outside.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let directory = open_directory(temp.path()).unwrap();
+        assert!(open_directory_nofollow(&directory, "junction".as_ref()).is_err());
+        assert_eq!(
+            std::fs::read(outside.path().join("sentinel")).unwrap(),
+            b"preserve"
+        );
+        std::fs::remove_dir(temp.path().join("junction")).unwrap();
     }
 }

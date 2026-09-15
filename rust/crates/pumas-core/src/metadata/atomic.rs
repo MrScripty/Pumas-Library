@@ -631,7 +631,17 @@ fn parent_identity_from_file(file: &File, parent: &Path) -> Result<ParentIdentit
 pub fn atomic_read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
     let mut file = match File::open(path) {
         Ok(file) => file,
-        Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source)
+            if source.kind() == std::io::ErrorKind::NotFound
+                && !path.ancestors().skip(1).any(|parent| {
+                    // Windows maps a file used as a parent to ERROR_PATH_NOT_FOUND.
+                    // Preserve that invalid-path error instead of reporting absent data.
+                    fs::metadata(parent).is_ok_and(|metadata| !metadata.is_dir())
+                }) =>
+        {
+            return Ok(None)
+        }
+
         Err(source) => {
             return Err(PumasError::Io {
                 message: format!("Failed to open {}", path.display()),
@@ -1032,13 +1042,13 @@ mod tests {
 
         fn rename(&self, parent: &Dir, source: &OsStr, target: &OsStr) -> io::Result<()> {
             if self.fail_rename_after_effect {
-                parent.rename(source, parent, target)?;
+                OsDurablePublicationAdapter.rename(parent, source, target)?;
                 return Err(io::Error::other("injected post-effect rename failure"));
             }
             if self.fail_rename {
                 Err(io::Error::other("injected ambiguous rename failure"))
             } else {
-                parent.rename(source, parent, target)
+                OsDurablePublicationAdapter.rename(parent, source, target)
             }
         }
 
@@ -1322,7 +1332,7 @@ mod tests {
         }
 
         fn rename(&self, parent: &Dir, source: &OsStr, target: &OsStr) -> io::Result<()> {
-            parent.rename(source, parent, target)
+            OsDurablePublicationAdapter.rename(parent, source, target)
         }
 
         fn remove_file(&self, parent: &Dir, name: &OsStr) -> io::Result<()> {
@@ -1381,7 +1391,7 @@ mod tests {
         }
 
         fn rename(&self, parent: &Dir, source: &OsStr, target: &OsStr) -> io::Result<()> {
-            parent.rename(source, parent, target)?;
+            OsDurablePublicationAdapter.rename(parent, source, target)?;
             fs::rename(&self.configured_parent, &self.moved_parent)?;
             fs::create_dir(&self.configured_parent)?;
             fs::write(
@@ -1624,7 +1634,7 @@ mod tests {
 
         fn rename(&self, parent: &Dir, source: &OsStr, target: &OsStr) -> io::Result<()> {
             if self.after_effect {
-                parent.rename(source, parent, target)?;
+                OsDurablePublicationAdapter.rename(parent, source, target)?;
                 std::process::exit(72);
             }
             std::process::exit(71);

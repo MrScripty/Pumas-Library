@@ -320,9 +320,17 @@ impl DownloadDestinationRoot {
         let file = {
             use cap_std::fs::OpenOptionsExt;
             let mut options = OpenOptions::new();
-            options.read(true).write(true).custom_flags(
-                windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT,
-            );
+            // Prevent replacement of the lock-file inode while a grant is held.
+            options
+                .read(true)
+                .write(true)
+                .share_mode(
+                    windows_sys::Win32::Storage::FileSystem::FILE_SHARE_READ
+                        | windows_sys::Win32::Storage::FileSystem::FILE_SHARE_WRITE,
+                )
+                .custom_flags(
+                    windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT,
+                );
             let file = self.0.root.open_with(LIBRARY_ID_LOCK, &options)?.into_std();
             if !file.metadata()?.is_file() || file.metadata()?.file_type().is_symlink() {
                 return Err(invalid_capability_path().into());
@@ -331,7 +339,7 @@ impl DownloadDestinationRoot {
         };
         fs2::FileExt::try_lock_exclusive(&file).map_err(|error| {
             if error.kind() == io::ErrorKind::WouldBlock
-                || cfg!(windows) && error.raw_os_error() == Some(33)
+                || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
             {
                 PumasError::DownloadRootBusy
             } else {
@@ -573,7 +581,7 @@ impl RecoveryRoot {
     fn reconfirm_library_id(&self) -> Result<()> {
         self.require_current()?;
         let mut options = OpenOptions::new();
-        options.read(true);
+        options.read(true).write(cfg!(windows));
         nofollow_options(&mut options);
         let marker = self.root.open_with(LIBRARY_ID_MARKER, &options)?.into_std();
         if !marker.metadata()?.is_file() {
@@ -643,14 +651,14 @@ impl DownloadRecoveryDestination {
         let id = self.authority.library_id.ok_or_else(invalid_library_id)?;
         Ok(super::download_store::PersistedDestinationIdentity {
             library_root: format!("uuid:{id}"),
-            relative_target: self.model_relative.to_string_lossy().into_owned(),
+            relative_target: portable_native_path(&self.model_relative),
         })
     }
 
     pub(crate) fn identity(&self) -> DestinationIdentity {
         DestinationIdentity {
             root: self.authority.root_identity,
-            relative: self.model_relative.to_string_lossy().into_owned(),
+            relative: portable_native_path(&self.model_relative),
         }
     }
 
@@ -1153,17 +1161,22 @@ impl DownloadRecoveryDestination {
             crate::config::NetworkConfig::DOWNLOAD_TEMP_SUFFIX
         );
         let mut options = OpenOptions::new();
-        #[cfg(unix)]
-        {
-            use cap_std::fs::OpenOptionsExt;
-            options.custom_flags(libc::O_NOFOLLOW);
-        }
+        nofollow_options(&mut options);
         if append {
             options.append(true);
         } else {
-            options.write(true).create(true).truncate(true);
+            options.write(true).create(true);
         }
-        parent.open_with(name, &options).map(|file| file.into_std())
+        let file = parent.open_with(name, &options)?.into_std();
+        // Windows can open a reparse point itself, unlike O_NOFOLLOW. Check
+        // the held object before truncation so no link or non-file is changed.
+        if !file.metadata()?.is_file() {
+            return Err(invalid_capability_path());
+        }
+        if !append {
+            file.set_len(0)?;
+        }
+        Ok(file)
     }
 
     pub(crate) fn remove_part(&self, file: &str) -> io::Result<()> {
@@ -1205,15 +1218,15 @@ impl DownloadRecoveryDestination {
         if let Some(sync) = &self.cleanup_parent_sync {
             return sync(parent);
         }
-        sync_directory(&parent)
+        sync_directory(parent)
     }
 
     fn regular_file_len(&self, relative: &Path) -> io::Result<Option<u64>> {
         let file = relative
             .strip_prefix(&self.model_relative)
             .map_err(|_| invalid_capability_path())?;
-        let file = file.to_str().ok_or_else(invalid_capability_path)?;
-        let Some((parent, name)) = self.file_parent_if_present(file, false)? else {
+        let file = portable_native_path(file);
+        let Some((parent, name)) = self.file_parent_if_present(&file, false)? else {
             return Ok(None);
         };
         match parent.symlink_metadata(name) {
@@ -1739,6 +1752,15 @@ fn invalid_recovery_metadata() -> PumasError {
     PumasError::Other("Model download recovery metadata is invalid".to_string())
 }
 
+fn portable_native_path(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text.into_owned()
+    }
+}
+
 fn invalid_capability_path() -> io::Error {
     io::Error::new(
         io::ErrorKind::PermissionDenied,
@@ -1748,6 +1770,22 @@ fn invalid_capability_path() -> io::Error {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    #[test]
+    fn windows_root_grant_excludes_competitors_and_pins_lock_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = super::DownloadDestinationRoot::open(temp.path()).unwrap();
+        let grant = root.try_acquire_execution_grant().unwrap();
+        let contender = super::DownloadDestinationRoot::open(temp.path()).unwrap();
+        assert!(matches!(
+            contender.try_acquire_execution_grant(),
+            Err(crate::PumasError::DownloadRootBusy)
+        ));
+        assert!(std::fs::remove_file(temp.path().join(super::LIBRARY_ID_LOCK)).is_err());
+        drop(grant);
+        contender.try_acquire_execution_grant().unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn held_model_metadata_preserves_substituted_destination() {
@@ -1966,7 +2004,7 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn bound_download_integrity_verifies_final_and_partial_without_mutating_bytes() {
         const ABC_SHA256: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
@@ -2046,7 +2084,7 @@ mod tests {
             .is_err());
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn download_provenance_is_read_only_and_preserves_marker_only_pins() {
         let temp = tempfile::TempDir::new().unwrap();
@@ -2161,7 +2199,7 @@ mod tests {
         root.try_acquire_execution_grant().unwrap();
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn root_execution_grants_reject_replaced_root_and_changed_uuid() {
         for replace_root in [false, true] {
@@ -2198,7 +2236,7 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     #[ignore = "subprocess helper invoked by root_execution_grant_releases_after_process_death"]
     fn root_execution_grant_child_holder() {
@@ -2213,7 +2251,7 @@ mod tests {
         std::io::stdin().read_line(&mut String::new()).unwrap();
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn root_execution_grant_releases_after_process_death() {
         use std::io::BufRead;
@@ -2256,7 +2294,7 @@ mod tests {
         root.try_acquire_execution_grant().unwrap();
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn readonly_recovery_inspection_does_not_initialize_library_identity() {
         let temp = tempfile::TempDir::new().unwrap();
@@ -2311,7 +2349,7 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn concurrent_configured_roots_initialize_one_durable_library_identity() {
         for _ in 0..16 {
@@ -2351,7 +2389,7 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     #[test]
     fn persisted_library_identity_survives_a_change_of_physical_root() {
         let temp = tempfile::TempDir::new().unwrap();

@@ -55,8 +55,7 @@ def start_desktop(executable, root):
     # Windows GUI executables may log only to electron-log's file transport.
     logs = [log_path, *user_data.glob("logs/*.log")]
     if not any(
-        "Release smoke startup succeeded" in path.read_text(errors="replace")
-        for path in logs
+        "Release smoke startup succeeded" in path.read_text(errors="replace") for path in logs
     ):
         raise RuntimeError("Desktop did not report successful backend initialization")
 
@@ -73,9 +72,7 @@ def verify(directory):
         try:
             # NSIS requires /D last, with its value unquoted even when it has spaces.
             # Popen receives a native command line directly; no shell is involved.
-            subprocess.run(
-                f'"{installer}" /S /D={installed}', check=True, timeout=120
-            )
+            subprocess.run(f'"{installer}" /S /D={installed}', check=True, timeout=120)
             resources = installed / "resources"
             for bundled, source in [
                 ("pumas-rpc.exe", ROOT / "electron/resources/bin/pumas-rpc.exe"),

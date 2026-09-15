@@ -1,4 +1,5 @@
 import test from 'node:test';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import { parseArgs } from './parse-args.mjs';
 import { buildUsage } from './contract.mjs';
@@ -61,8 +62,8 @@ test('platform factory resolves the Windows Corepack command separately', () => 
 
   assert.equal(windows.corepackCommand, 'corepack.cmd');
   assert.equal(linux.corepackCommand, 'corepack');
-  assert.equal(windows.debugBackendBinary(context), '/repo/rust/target/debug/pumas-rpc.exe');
-  assert.equal(linux.debugBackendBinary(context), '/repo/rust/target/debug/pumas-rpc');
+  assert.equal(windows.debugBackendBinary(context), path.join(context.rustTargetDir, 'debug', 'pumas-rpc.exe'));
+  assert.equal(linux.debugBackendBinary(context), path.join(context.rustTargetDir, 'debug', 'pumas-rpc'));
 });
 
 test('platform factory resolves Python module invocations per host', () => {

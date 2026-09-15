@@ -55,7 +55,7 @@ function createPersistenceAdapter({ failureStage, events = [] } = {}) {
       if (failureStage === 'parent-open') {
         throw persistenceFailure(failureStage);
       }
-      return openSync(directoryPath, 'r');
+      return openSync(directoryPath, process.platform === 'win32' ? 'r+' : 'r');
     },
     createTemporaryName(authorityFilename) {
       events.push('create-temporary-name');
@@ -328,9 +328,7 @@ test('cleanup failure preserves the primary pre-publication cause and old author
   }
 });
 
-test('successful persistence follows the selected publication order on local Linux', {
-  skip: process.platform !== 'linux',
-}, () => {
+test('successful persistence follows the selected publication order on the native host', () => {
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'pumas-launcher-persist-'));
 
   try {
@@ -362,13 +360,13 @@ test('successful persistence follows the selected publication order on local Lin
       'close-parent',
     ]);
     assert.deepEqual(JSON.parse(readFileSync(authorityPath, 'utf8')), config);
-    assert.equal(statSync(authorityPath).mode & 0o777, 0o600);
+    if (process.platform !== 'win32') assert.equal(statSync(authorityPath).mode & 0o777, 0o600);
     assertPersistedRoot(userDataPath, newRoot);
     assert.deepEqual(launcherRootTemporaryFiles(userDataPath), []);
 
     const defaultConfig = persistLauncherRootOverride(userDataPath, defaultAdapterRoot);
     assert.deepEqual(JSON.parse(readFileSync(authorityPath, 'utf8')), defaultConfig);
-    assert.equal(statSync(authorityPath).mode & 0o777, 0o600);
+    if (process.platform !== 'win32') assert.equal(statSync(authorityPath).mode & 0o777, 0o600);
     assertPersistedRoot(userDataPath, defaultAdapterRoot);
     assert.deepEqual(launcherRootTemporaryFiles(userDataPath), []);
   } finally {
@@ -384,7 +382,7 @@ async function interruptPersistenceAtBarrier(barrier, userDataPath, selectedPath
     const barrier = ${JSON.stringify(barrier)};
     const adapter = {
       ensureDirectory: (value) => fs.mkdirSync(value, { recursive: true }),
-      openParentDirectory: (value) => fs.openSync(value, 'r'),
+      openParentDirectory: (value) => fs.openSync(value, process.platform === 'win32' ? 'r+' : 'r'),
       createTemporaryName: (value) => value + '.tmp-child-' + process.pid,
       openTemporaryFile: (value) => fs.openSync(value, 'wx', 0o600),
       writeTemporaryFile: (fd, value) => fs.writeFileSync(fd, value, 'utf8'),
@@ -455,9 +453,7 @@ for (const interruption of [
   { barrier: 'before-replace', expected: 'old' },
   { barrier: 'after-replace', expected: 'new' },
 ]) {
-  test(`SIGKILL ${interruption.barrier} leaves complete ${interruption.expected} authority`, {
-    skip: process.platform !== 'linux',
-  }, async () => {
+  test(`SIGKILL ${interruption.barrier} leaves complete ${interruption.expected} authority`, async () => {
     const fixtureRoot = mkdtempSync(join(tmpdir(), 'pumas-launcher-persist-'));
 
     try {

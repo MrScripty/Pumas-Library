@@ -18,5 +18,12 @@ jobs:
           npm install --global $packageManager
       - run: pnpm install --frozen-lockfile
       - run: npm run test:launcher
+        id: launcher
+        continue-on-error: true
       - run: node electron/node_modules/electron/install.js
       - run: pnpm --dir electron test
+        id: electron
+        continue-on-error: true
+      - name: Require native desktop checks
+        if: always() && (steps.launcher.outcome != 'success' || steps.electron.outcome != 'success')
+        run: exit 1

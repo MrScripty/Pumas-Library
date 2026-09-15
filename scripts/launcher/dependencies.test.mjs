@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import path from 'node:path';
 import {
   createDependencyPlan,
   ensureDependencyPlan,
@@ -23,9 +24,9 @@ test('createDependencyPlan checks command and workspace dependency contracts', a
   const commandChecks = [];
   const runCalls = [];
   const existingPaths = new Set([
-    '/repo/node_modules',
-    '/repo/frontend/node_modules',
-    '/repo/electron/node_modules',
+    path.join('/repo', 'node_modules'),
+    path.join('/repo/frontend', 'node_modules'),
+    path.join('/repo/electron', 'node_modules'),
   ]);
   const dependencies = createDependencyPlan({
     commandExistsFn(command, args) {

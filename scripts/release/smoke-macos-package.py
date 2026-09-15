@@ -73,7 +73,7 @@ def verify(package):
                 raise RuntimeError(f"Packaged resource differs from build input: {bundled}")
         executable = contents / "MacOS" / info["CFBundleExecutable"]
         for binary in [executable, resources / "pumas-rpc"]:
-            subprocess.run(["lipo", "-verify_arch", "arm64", str(binary)], check=True, timeout=10)
+            subprocess.run(["lipo", str(binary), "-verify_arch", "arm64"], check=True, timeout=10)
         for library in (ROOT / "electron/resources/bin").glob("libonnxruntime*.dylib"):
             if digest(resources / library.name) != digest(library):
                 raise RuntimeError(f"Packaged ONNX library differs: {library.name}")

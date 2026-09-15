@@ -60,8 +60,9 @@ fn create_model(root: &Path, model_id: &str, repo_id: &str, revision: Option<&st
         model_dir.join("metadata.json"),
         serde_json::to_vec_pretty(&serde_json::json!({
             "model_id": model_id,
-            "family": "intent-test",
+            "family": model_id.split('/').nth(1).unwrap(),
             "model_type": "llm",
+            "pipeline_tag": "text-generation",
             "official_name": model_id,
             "cleaned_name": model_id.replace('/', "-"),
             "repo_id": repo_id,
@@ -107,6 +108,27 @@ async fn exact_local_match_returns_verified_available_handle_without_reconciliat
     let model_id = "llm/intent/exact";
     create_model(root.path(), model_id, "example/exact", Some("commit-a"));
     let (_guard, api) = api(&root).await;
+    // Finish startup reconciliation before testing the read-only intent path.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match api.rebuild_model_index().await {
+                Err(pumas_library::PumasError::ModelIndexRefreshInProgress) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                result => break result.unwrap(),
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        root.path()
+            .join("shared-resources/models")
+            .join(model_id)
+            .join("model.safetensors")
+            .is_file(),
+        "fixture was relocated by reconciliation"
+    );
     api.resolve_model_package_facts(model_id).await.unwrap();
     assert!(api.get_model(model_id).await.unwrap().is_some());
     let before = api

@@ -218,6 +218,33 @@ async fn rpc_call_raw(port: u16, method: &str, params: Value) -> Result<Value, S
     response.json::<Value>().await.map_err(|e| e.to_string())
 }
 
+/// Await an explicit refresh; a catalog read may skip a clean or busy scan.
+async fn refresh_test_model_index(port: u16) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let response = rpc_call_raw(port, "refresh_model_index", json!({}))
+            .await
+            .unwrap();
+        if response.get("error").is_none() {
+            assert!(
+                response.get("result").is_some(),
+                "missing refresh result: {response}"
+            );
+            return;
+        }
+        assert_eq!(
+            response.pointer("/error/code").and_then(Value::as_i64),
+            Some(-32011),
+            "unexpected refresh error: {response}"
+        );
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "model index refresh remained busy: {response}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
 async fn recovery_token_for_model(port: u16, model_id: &str) -> String {
     let pointer = format!(
         "/models/{}/artifact/recovery/recoveryToken",
@@ -1109,24 +1136,34 @@ mod tests {
             .is_some_and(|value| value.starts_with("text/event-stream")));
         let mut stream = response.bytes_stream();
 
-        // Allow the stream to establish its durable cursor before mutating the
-        // library, otherwise an initial snapshot cursor could legitimately skip
-        // the test event.
-        tokio::time::sleep(Duration::from_millis(1200)).await;
+        // Complete the empty-library read before creating the model.
+        let initial = rpc_call(port, "get_models", json!({})).await.unwrap();
+        assert!(initial
+            .get("models")
+            .and_then(Value::as_object)
+            .unwrap()
+            .is_empty());
 
         let model_id = "llm/llama/sse-reconcile-feed";
         create_indexable_test_model(env.path(), model_id, "SSE Reconcile Feed");
+        refresh_test_model_index(port).await;
 
-        let listed = rpc_call(port, "get_models", json!({})).await.unwrap();
-        assert!(listed
-            .get("models")
-            .and_then(|value| value.as_object())
-            .is_some_and(|models| models.contains_key(model_id)));
-
-        let body = read_stream_until_contains(&mut stream, model_id, Duration::from_secs(10)).await;
-        let body = body.unwrap();
+        // Observe the event committed by reconciliation before checking the
+        // catalog projection.
+        let body = read_stream_until_contains(&mut stream, model_id, Duration::from_secs(10))
+            .await
+            .unwrap();
         assert!(body.contains("event: model-library-update"));
         assert!(body.contains("\"change_kind\":\"model_added\""));
+
+        let listed = rpc_call(port, "get_models", json!({})).await.unwrap();
+        assert!(
+            listed
+                .get("models")
+                .and_then(|value| value.as_object())
+                .is_some_and(|models| models.contains_key(model_id)),
+            "catalog response: {listed}"
+        );
 
         server.stop().await;
     }
@@ -1153,13 +1190,24 @@ mod tests {
             .expect("initial update cursor missing")
             .to_string();
 
+        let initial = rpc_call(port, "get_models", json!({})).await.unwrap();
+        assert!(initial
+            .get("models")
+            .and_then(Value::as_object)
+            .unwrap()
+            .is_empty());
+
         let model_id = "llm/llama/sse-recovered-feed";
         create_indexable_test_model(env.path(), model_id, "SSE Recovered Feed");
+        refresh_test_model_index(port).await;
         let listed = rpc_call(port, "get_models", json!({})).await.unwrap();
-        assert!(listed
-            .get("models")
-            .and_then(|value| value.as_object())
-            .is_some_and(|models| models.contains_key(model_id)));
+        assert!(
+            listed
+                .get("models")
+                .and_then(|value| value.as_object())
+                .is_some_and(|models| models.contains_key(model_id)),
+            "catalog response: {listed}"
+        );
 
         let client = reqwest::Client::new();
         let response = client

@@ -1,13 +1,24 @@
 name: Windows native verification
 on:
   workflow_dispatch:
+    inputs:
+      probe:
+        type: boolean
+        default: false
 permissions:
   contents: read
 env:
   CARGO_INCREMENTAL: '0'
   CARGO_PROFILE_DEV_DEBUG: '0'
 jobs:
+  filesystem-probe:
+    if: inputs.probe
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v6
+      - run: python scripts/windows-native-probe.py
   windows:
+    if: ${{ !inputs.probe }}
     runs-on: windows-2025
     timeout-minutes: 60
     steps:

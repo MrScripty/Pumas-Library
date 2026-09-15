@@ -978,6 +978,7 @@ mod tests {
         assert!(path.exists());
     }
 
+    #[cfg(unix)]
     struct FaultPublicationAdapter {
         fail_staging_write: bool,
         fail_rename: bool,
@@ -987,6 +988,7 @@ mod tests {
         temp_name: Option<OsString>,
     }
 
+    #[cfg(unix)]
     impl DurablePublicationAdapter for FaultPublicationAdapter {
         fn temp_name(&self, target: &OsStr, attempt: u8) -> OsString {
             self.temp_name.clone().unwrap_or_else(|| {
@@ -1033,6 +1035,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     fn temp_publication_files(directory: &Path) -> Vec<std::path::PathBuf> {
         fs::read_dir(directory)
             .unwrap()
@@ -1041,6 +1044,7 @@ mod tests {
             .collect()
     }
 
+    #[cfg(unix)]
     #[test]
     fn atomic_publish_rename_error_is_visibility_unknown_and_cleans_owned_temp() {
         let temp_dir = TempDir::new().unwrap();
@@ -1081,6 +1085,7 @@ mod tests {
         assert!(temp_publication_files(temp_dir.path()).is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn atomic_publish_post_rename_sync_failure_reports_visible_unknown() {
         let temp_dir = TempDir::new().unwrap();
@@ -1118,6 +1123,7 @@ mod tests {
         assert!(temp_publication_files(temp_dir.path()).is_empty());
     }
 
+    #[cfg(unix)]
     #[test]
     fn atomic_publish_syncs_file_and_parent_before_durable_outcome() {
         let temp_dir = TempDir::new().unwrap();
@@ -1140,6 +1146,28 @@ mod tests {
         assert!(temp_publication_files(temp_dir.path()).is_empty());
     }
 
+    #[cfg(not(unix))]
+    #[test]
+    fn atomic_publish_refuses_unsupported_targets_without_effects() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("test.json");
+        fs::write(&path, b"original bytes").unwrap();
+        let target = AtomicJsonTarget::open(&path).unwrap();
+
+        let failure = target
+            .publish_json(&TestData {
+                name: "new".to_string(),
+                value: 2,
+            })
+            .unwrap_err();
+
+        assert_eq!(failure.stage, AtomicPublishStage::TargetAdmission);
+        assert_eq!(failure.kind, AtomicPublishFailureKind::TargetUnavailable);
+        assert!(matches!(failure.cleanup, StagingCleanup::NotRequired));
+        assert_eq!(fs::read(&path).unwrap(), b"original bytes");
+        assert_eq!(fs::read_dir(temp_dir.path()).unwrap().count(), 1);
+    }
+
     #[test]
     fn atomic_publish_requires_a_preexisting_parent() {
         let temp_dir = TempDir::new().unwrap();
@@ -1149,6 +1177,7 @@ mod tests {
         assert!(!missing_parent.exists());
     }
 
+    #[cfg(unix)]
     #[test]
     fn atomic_publish_post_effect_rename_error_remains_visibility_unknown() {
         let temp_dir = TempDir::new().unwrap();
@@ -1183,6 +1212,7 @@ mod tests {
         assert_eq!(atomic_read_json(&path).unwrap(), Some(new));
     }
 
+    #[cfg(unix)]
     #[test]
     fn atomic_publish_reports_cleanup_failure_without_hiding_rename_ambiguity() {
         let temp_dir = TempDir::new().unwrap();
@@ -1217,6 +1247,7 @@ mod tests {
         assert_eq!(temp_publication_files(temp_dir.path()).len(), 1);
     }
 
+    #[cfg(unix)]
     #[test]
     fn atomic_publish_pre_rename_failure_reports_secondary_cleanup_failure() {
         let temp_dir = TempDir::new().unwrap();
@@ -1251,10 +1282,12 @@ mod tests {
         assert_eq!(temp_publication_files(temp_dir.path()).len(), 1);
     }
 
+    #[cfg(unix)]
     struct CollisionAdapter {
         foreign_name: OsString,
     }
 
+    #[cfg(unix)]
     impl DurablePublicationAdapter for CollisionAdapter {
         fn temp_name(&self, _target: &OsStr, _attempt: u8) -> OsString {
             self.foreign_name.clone()
@@ -1277,6 +1310,7 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
     fn atomic_publish_never_truncates_or_cleans_a_foreign_staging_collision() {
         let temp_dir = TempDir::new().unwrap();

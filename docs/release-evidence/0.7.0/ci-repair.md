@@ -26,9 +26,15 @@ Node 24 actions (`pnpm/action-setup@v6.1.0`, `actions/upload-artifact@v7.0.1`, a
 `actions/download-artifact@v8.0.1`). Native platform checks reject compiler warnings
 before optimized compilation. The artifact archive layout remains unchanged.
 
-Initial follow-up validation: all-feature Clippy, actionlint, release version and
-attribution checks, 66 runtime-profile tests, and 39 serving tests passed. Full
-workspace and native CI verification continues before moving the release tag.
+Follow-up validation: the complete local Rust quality and headless suites passed,
+as did all 36 package-facts tests in debug and release builds. Candidate run
+[34915702501](https://github.com/MrScripty/Pumas-Library/actions/runs/34915702501)
+passed Rust quality, frontend contracts, and Linux/macOS compiler-warning checks.
+Its Windows warning check exposed unused publication fault-injection helpers:
+these tests now compile only on Unix, where durable publication is supported.
+A non-Unix regression verifies publication refusal leaves existing bytes and the
+parent directory unchanged. RPC shutdown timeouts include captured diagnostics
+on every platform. Native CI verification continues before moving the release tag.
 
 ## First repair
 

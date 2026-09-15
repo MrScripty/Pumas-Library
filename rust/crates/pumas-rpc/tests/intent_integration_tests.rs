@@ -138,7 +138,12 @@ impl RpcProcess {
         self.child.start_kill().unwrap();
         let status = tokio::time::timeout(Duration::from_secs(30), self.child.wait())
             .await
-            .expect("RPC process did not complete its owned shutdown")
+            .unwrap_or_else(|_| {
+                panic!(
+                    "RPC process did not complete its owned shutdown\n{}",
+                    self.diagnostics.lock().unwrap()
+                )
+            })
             .unwrap();
 
         #[cfg(not(unix))]

@@ -1263,6 +1263,15 @@ impl VersionInstaller {
                 .await;
         }
 
+        // Tokio can acknowledge the final write while its blocking file work
+        // is still queued. Checksum and extraction readers reopen this path,
+        // so finish all writes before reporting the download complete.
+        file.flush().await.map_err(|e| PumasError::Io {
+            message: format!("Failed to flush archive: {}", e),
+            path: Some(archive_path.to_path_buf()),
+            source: Some(e),
+        })?;
+
         // Add to completed items
         {
             let mut tracker = self.progress_tracker.write().await;

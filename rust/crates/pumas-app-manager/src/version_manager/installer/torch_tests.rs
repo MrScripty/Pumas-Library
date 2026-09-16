@@ -146,6 +146,89 @@ async fn bundle_fixture_waits_for_a_complete_request() {
     assert!(response.ends_with(&expected_checksum));
 }
 
+#[test]
+fn completed_download_is_immediately_readable_by_checksum_reader() {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap()
+        .block_on(async {
+            let (installer, root) = create_test_installer();
+            let destination = root.path().join("archive.tar.gz");
+            // A single-byte response guarantees a single write: a later write
+            // would implicitly wait for the first and mask the completion race.
+            let archive = vec![0x5a];
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/archive", listener.local_addr().unwrap());
+            let (body_tx, body_rx) = tokio::sync::oneshot::channel();
+            let body = archive.clone();
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                    let n = socket.read(&mut buffer).await.unwrap();
+                    assert_ne!(n, 0);
+                    request.extend_from_slice(&buffer[..n]);
+                }
+                socket
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+                body_rx.await.unwrap();
+                socket.write_all(&body).await.unwrap();
+            });
+            let (tx, _rx) = mpsc::channel(32);
+            let completed = AtomicBool::new(false);
+            let download = async {
+                installer
+                    .download_archive(&url, &destination, &tx)
+                    .await
+                    .unwrap();
+                completed.store(true, Ordering::SeqCst);
+            };
+            let delayed_disk = async {
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    while !destination.exists() {
+                        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                    }
+                })
+                .await
+                .unwrap();
+                // Occupy Tokio's only filesystem worker after file creation,
+                // then send the body. The final write must remain queued until
+                // this worker is released; download completion must wait for it.
+                let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+                let (release_tx, release_rx) = std::sync::mpsc::channel();
+                let worker = tokio::task::spawn_blocking(move || {
+                    started_tx.send(()).unwrap();
+                    let _ = release_rx.recv();
+                });
+                started_rx.await.unwrap();
+                body_tx.send(()).unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                let premature_completion = completed.load(Ordering::SeqCst);
+                release_tx.send(()).unwrap();
+                worker.await.unwrap();
+                premature_completion
+            };
+            let ((), premature_completion) = tokio::join!(download, delayed_disk);
+            server.await.unwrap();
+            assert!(
+                !premature_completion,
+                "download completed before its file write"
+            );
+            assert_eq!(std::fs::read(destination).unwrap(), archive);
+        });
+}
+
 async fn rejected_bundle_preserves_previous(
     requirements: &str,
     validation: &str,

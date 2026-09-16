@@ -1,3 +1,10 @@
-# Preserve verbatim third-party legal text; source hashes verify integrity.
-scripts/release/licenses/* -whitespace
-docs/release-attribution/**/THIRD-PARTY-NOTICES.txt -whitespace
+# Attribution hashes must match native checkouts even with core.autocrlf=true.
+rust/Cargo.lock text eol=lf
+rust/**/Cargo.toml text eol=lf
+pnpm-lock.yaml text eol=lf
+electron/package.json text eol=lf
+frontend/package.json text eol=lf
+
+# Preserve verbatim third-party legal bytes, including mixed line endings.
+scripts/release/licenses/* -text -whitespace
+docs/release-attribution/**/THIRD-PARTY-NOTICES.txt -text -whitespace

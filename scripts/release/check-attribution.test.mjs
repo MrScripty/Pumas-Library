@@ -5,6 +5,37 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+test('attribution survives a Windows-style Git checkout without changing legal bytes', t => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'pumas-attribution-checkout-'));
+  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  const repository = path.join(temporary, 'repository');
+  const checkout = path.join(temporary, 'checkout');
+  const source = fileURLToPath(new URL('../..', import.meta.url));
+  const version = JSON.parse(fs.readFileSync(path.join(source, 'package.json'))).version;
+  const directory = `docs/release-attribution/${version}`;
+  const inventory = JSON.parse(fs.readFileSync(path.join(source, directory, 'inventory.json')));
+  const files = [
+    '.gitattributes', 'package.json', 'scripts/release/check-attribution.cjs',
+    `${directory}/inventory.json`, `${directory}/THIRD-PARTY-NOTICES.txt`,
+    ...Object.keys(inventory.input_sha256),
+    ...inventory.sources.map(item => `scripts/release/licenses/${item.file}`),
+  ];
+  for (const name of files) {
+    const target = path.join(repository, name);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(source, name), target);
+  }
+  const run = (command, args) => {
+    const result = spawnSync(command, args, { cwd: repository, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  };
+  run('git', ['init', '--quiet']);
+  run('git', ['-c', 'core.autocrlf=false', 'add', '.']);
+  run('git', ['-c', 'core.autocrlf=true', 'checkout-index', '--all', `--prefix=${checkout}/`]);
+  run(process.execPath, [path.join(checkout, 'scripts/release/check-attribution.cjs')]);
+});
 
 test('packaging refuses stale inputs, missing notices and altered upstream texts', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pumas-attribution-'));

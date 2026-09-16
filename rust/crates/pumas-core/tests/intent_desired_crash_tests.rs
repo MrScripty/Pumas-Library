@@ -8,7 +8,6 @@ use pumas_library::intent::{
 };
 use pumas_library::models::PumasModelRef;
 use pumas_library::PumasApi;
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -77,13 +76,10 @@ async fn open(root: &Path) -> PumasApi {
 }
 
 fn durable_marker(path: &Path, bytes: &[u8]) {
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(path)
-        .unwrap();
+    let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap()).unwrap();
     file.write_all(bytes).unwrap();
-    file.sync_all().unwrap();
+    file.as_file().sync_all().unwrap();
+    file.persist_noclobber(path).unwrap();
 }
 
 fn wait_for_release(path: &Path) {
@@ -174,10 +170,13 @@ fn wait_for_ack(child: &mut Child, ack: &Path) {
     panic!("timed out waiting for crash helper acknowledgement");
 }
 
-fn finish_abrupt_exit(mut child: Child, release: &Path) {
+fn finish_abrupt_exit(mut child: Child, release: &Path) -> Child {
     durable_marker(release, b"exit");
     let status = child.wait().unwrap();
     assert!(status.success(), "crash helper failed with {status}");
+    // On Windows this retains the exited process object and pins its PID while
+    // recovery checks liveness. An unrelated process cannot reuse that PID.
+    child
 }
 
 #[tokio::test]
@@ -198,7 +197,7 @@ async fn acknowledged_intent_survives_abrupt_exit_and_release_preserves_aba() {
     wait_for_ack(&mut ensure_child, &ensure_ack);
     let first: ModelDeclaration =
         serde_json::from_slice(&std::fs::read(&ensure_ack).unwrap()).unwrap();
-    finish_abrupt_exit(ensure_child, &ensure_release);
+    let ensure_child = finish_abrupt_exit(ensure_child, &ensure_release);
 
     let registry_guard = RegistryGuard::new(&registry);
     let api = open(&root).await;
@@ -232,7 +231,7 @@ async fn acknowledged_intent_survives_abrupt_exit_and_release_preserves_aba() {
         Some(&reference_path),
     );
     wait_for_ack(&mut release_child, &release_ack);
-    finish_abrupt_exit(release_child, &release_exit);
+    let release_child = finish_abrupt_exit(release_child, &release_exit);
 
     let _registry_guard = RegistryGuard::new(&registry);
     let reopened = open(&root).await;
@@ -265,4 +264,5 @@ async fn acknowledged_intent_survives_abrupt_exit_and_release_preserves_aba() {
         GetEnsureStatusOutcome::Conflict
     ));
     reopened.shutdown_intent().await.unwrap();
+    drop((ensure_child, release_child));
 }

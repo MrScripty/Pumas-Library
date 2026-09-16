@@ -13,7 +13,7 @@ use tracing::{debug, warn};
 ///
 /// # Platform Behavior
 /// - **Linux/macOS**: Uses `kill(pid, 0)` signal check
-/// - **Windows**: Uses `OpenProcess` with `PROCESS_QUERY_LIMITED_INFORMATION`
+/// - **Windows**: Tests the process object's termination signal without waiting
 #[allow(unsafe_code)]
 pub fn is_process_alive(pid: u32) -> bool {
     #[cfg(unix)]
@@ -31,20 +31,27 @@ pub fn is_process_alive(pid: u32) -> bool {
 
     #[cfg(windows)]
     {
-        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::Foundation::{
+            CloseHandle, GetLastError, ERROR_ACCESS_DENIED, WAIT_OBJECT_0,
+        };
         use windows_sys::Win32::System::Threading::{
-            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+            OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
         };
 
-        // SAFETY: OpenProcess is called with query-only access. A non-null
-        // handle is closed exactly once before returning.
+        // SAFETY: The handle has synchronization access, remains open during
+        // the nonblocking wait, and is closed exactly once before returning.
         unsafe {
-            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
             if !handle.is_null() {
+                // OpenProcess can succeed after exit while another handle
+                // retains the process object. Its signaled state proves exit,
+                // even if the exit code happens to equal STILL_ACTIVE (259).
+                let exited = WaitForSingleObject(handle, 0) == WAIT_OBJECT_0;
                 CloseHandle(handle);
-                true
+                !exited
             } else {
-                false
+                // An inaccessible process is not evidence of a dead owner.
+                GetLastError() == ERROR_ACCESS_DENIED
             }
         }
     }

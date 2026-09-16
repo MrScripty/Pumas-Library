@@ -20,5 +20,11 @@ jobs:
           cache-on-failure: true
       - name: Process lifetime regression
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --features test-support,uniffi --lib platform::process::tests -- --nocapture
-      - name: Crash recovery integration
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --test intent_desired_crash_tests -- --nocapture
+      - name: Repeated crash recovery integration
+        run: |
+          for ($i = 0; $i -lt 10; $i++) {
+            cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --test intent_desired_crash_tests -- --nocapture
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Full native Windows workspace tests
+        run: cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --no-fail-fast

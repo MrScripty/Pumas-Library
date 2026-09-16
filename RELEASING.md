@@ -97,11 +97,14 @@ headless-<linux|macos|windows>`.
 
 The no-inference desktop reuses the exact headless backend bytes: stage the
 extracted `pumas-rpc` into `electron/resources/bin`, package with
-`-c.appId=com.pumas.library.no-inference` plus the `-no-inference`
-`artifactName` overrides from the `build-electron-no-inference` /
-`windows-no-inference` CI jobs, then verify with the `linux-no-inference`,
-`mac-no-inference`, or `win-no-inference` checker tokens and the matching
-`smoke-*-packages.py --variant no-inference`. The no-inference installers
+`electron-builder --<platform> --publish never -c
+./electron-builder.no-inference.cjs` (the config file carries the
+`com.pumas.library.no-inference` identity and `-no-inference` artifact
+names; electron-builder has no `-c.key=value` CLI overrides), then verify
+with the `linux-no-inference`, `mac-no-inference`, or `win-no-inference`
+checker tokens and the matching `smoke-*-packages.py --variant no-inference`.
+`scripts/release/check-no-inference-config.test.mjs` pins the config's names
+to the artifact plan. The no-inference installers
 share their product name with the full line, so install only one desktop
 variant per machine; AppImage, portable, and headless archives are
 side-by-side safe. In-process Rust API consumers keep depending on the

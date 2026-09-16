@@ -313,18 +313,18 @@ jobs:
         timeout-minutes: 10
         run: node electron/node_modules/electron/install.js
       - run: pnpm --dir electron test
-      # Distinct artifact names and application identity keep this line
-      # installable alongside the full inference-enabled desktop.
+      # The config file carries the distinct application identity and installer
+      # names that keep this line installable alongside the full desktop.
       - name: Package Linux desktop without inference
         if: matrix.platform == 'linux'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: pnpm --dir electron exec electron-builder --linux --publish never -c.appId=com.pumas.library.no-inference "-c.appImage.artifactName=Pumas.Library-no-inference-\${version}.\${ext}" "-c.deb.artifactName=pumas-library-electron-no-inference_\${version}_amd64.\${ext}"
+        run: pnpm --dir electron exec electron-builder --linux --publish never -c ./electron-builder.no-inference.cjs
       - name: Package macOS desktop without inference
         if: matrix.platform == 'mac'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: pnpm --dir electron exec electron-builder --mac --publish never -c.appId=com.pumas.library.no-inference "-c.dmg.artifactName=Pumas.Library-no-inference-\${version}-arm64.\${ext}"
+        run: pnpm --dir electron exec electron-builder --mac --publish never -c ./electron-builder.no-inference.cjs
       - name: Verify expected installers
         run: node scripts/release/check-artifacts.mjs electron/release ${{ matrix.check }}
       - name: Verify extracted Linux installers
@@ -411,7 +411,7 @@ jobs:
           if-no-files-found: error
 
   windows-no-inference:
-    name: Windows candidate without inference
+    name: Desktop package without inference (win)
     needs: [lint-workflows, build-frontend, headless-rpc]
     runs-on: windows-2025
     timeout-minutes: 60
@@ -458,15 +458,15 @@ jobs:
       - name: Package Windows installers without inference
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: pnpm --dir electron exec electron-builder --win --publish never -c.appId=com.pumas.library.no-inference '-c.nsis.artifactName=Pumas.Library.Setup.no-inference.${version}.${ext}' '-c.portable.artifactName=Pumas.Library.no-inference.${version}.${ext}'
+        run: pnpm --dir electron exec electron-builder --win --publish never -c ./electron-builder.no-inference.cjs
       - name: Verify installed and portable Windows applications
         run: python scripts/release/smoke-windows-packages.py electron/release --variant no-inference
-      - name: Verify and assemble Windows candidate
-        run: node scripts/release/check-artifacts.mjs electron/release win-no-inference windows-no-inference-candidate
+      - name: Verify and assemble Windows release
+        run: node scripts/release/check-artifacts.mjs electron/release win-no-inference windows-no-inference-release
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: desktop-windows-no-inference
-          path: windows-no-inference-candidate/
+          path: windows-no-inference-release/
           if-no-files-found: error
 
   verify-launcher:

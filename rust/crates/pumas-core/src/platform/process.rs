@@ -461,6 +461,21 @@ mod tests {
         assert!(!is_process_alive(4_000_000_000));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn exited_process_with_retained_handle_is_not_alive() {
+        // Retaining Child pins the Windows process object and prevents PID
+        // reuse. Exit code 259 must not be mistaken for STILL_ACTIVE either.
+        let mut child = Command::new("cmd")
+            .args(["/d", "/c", "exit 259"])
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        assert_eq!(child.wait().unwrap().code(), Some(259));
+        assert!(!is_process_alive(pid));
+        drop(child);
+    }
+
     #[test]
     fn test_terminate_nonexistent() {
         // Terminating a nonexistent process should succeed

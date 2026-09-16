@@ -6075,7 +6075,7 @@
     "rust/crates/pumas-rpc/Cargo.toml": "bcaa5a10cc8bbe9ef90bb51257644e6ca9243dea7b66c66fd062cbc3b695319d",
     "rust/crates/pumas-app-manager/Cargo.toml": "d5c9c33758a64d5db0d379abba14db300788977e5bae1957d44ff7ea32702c70",
     "pnpm-lock.yaml": "8ef64f92ef3734992ce825b3253a6edef6586cf87b0a22494096bb12b9c86304",
-    "electron/package.json": "0d31f484b895a996f48bd0a794534c9fb0dafb820359323dfdd66572551d01bc",
+    "electron/package.json": "1f2b68e5819cbea84a2d8f25bbdda5d8288b3c1bf90a52162dc414c5938d72d8",
     "frontend/package.json": "0f3d0d26b1155cdabd7a5b1f93d2b99aff64b70105760284343adeb1afb6ca2e"
   },
   "notices_sha256": "e4fca768460b0db777f4a2f226f5f20a71a9d0bf349a4aab5cf89fb1581fdcd2"

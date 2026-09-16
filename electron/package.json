@@ -166,6 +166,6 @@
     "dmg": {
       "artifactName": "Pumas.Library-${version}-arm64.${ext}"
     },
-    "beforePack": "../scripts/release/check-attribution.cjs"
+    "beforePack": "./build/check-attribution.cjs"
   }
 }

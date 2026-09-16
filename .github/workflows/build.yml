@@ -274,8 +274,6 @@ jobs:
         run: cargo check --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --all-targets
       - name: Build Windows backend
         run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release
-      - name: Run Windows release tests
-        run: cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --profile ci-test
       - run: python scripts/release/stage-rpc.py
       - run: python scripts/release/smoke-rpc.py electron/resources/bin
       - name: Package Windows installers
@@ -284,6 +282,8 @@ jobs:
         run: pnpm --dir electron exec electron-builder --win --publish never
       - name: Verify installed and portable Windows applications
         run: python scripts/release/smoke-windows-packages.py electron/release
+      - name: Run Windows release tests
+        run: cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --profile ci-test
       - name: Verify and assemble Windows candidate
         run: node scripts/release/check-artifacts.mjs electron/release win windows-candidate
       - uses: actions/upload-artifact@v7.0.1

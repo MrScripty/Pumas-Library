@@ -103,6 +103,36 @@ Windows supports download/library operations and durable metadata publication.
 The release candidate requires native Windows tests and startup checks for both
 the installed application and portable executable, alongside Linux and macOS.
 
+### Distribution lines
+
+0.7.0 ships three product lines, all verified by the same candidate workflow:
+
+- Full desktop (GUI with inference plugins): `Pumas.Library-{version}.AppImage`,
+  `pumas-library-electron_{version}_amd64.deb`,
+  `Pumas.Library.Setup.{version}.exe`,
+  `Pumas.Library.{version}.exe` (portable), and
+  `Pumas.Library-{version}-arm64.dmg`.
+- Desktop without inference (GUI with an inference-disabled backend):
+  the same five installer types with `-no-inference` in the filename and
+  application identity `com.pumas.library.no-inference`. Packaged backends
+  answer `/health` but return 404 on the inference routes. Install only one
+  desktop variant per machine; AppImage and portable are side-by-side safe.
+- Headless embedding archives (inference-disabled `pumas-rpc` for
+  sidecar/subprocess embedding):
+  `pumas-rpc-no-inference-{version}-linux-x86_64.tar.gz`,
+  `pumas-rpc-no-inference-{version}-macos-arm64.tar.gz`, and
+  `pumas-rpc-no-inference-{version}-windows-x86_64.zip`. Each archive holds
+  a single backend binary plus `LICENSE.txt` and `THIRD-PARTY-NOTICES.txt`.
+  The binary is the whole library: `pumas-rpc` has the `pumas-library` core
+  compiled into it, so embedding needs no second binary — spawn it and call
+  HTTP, or depend on the `pumas-library` crate to link the core in-process.
+  AppImage and portable executables keep their own filesystem dir: library
+  data lives in a `pumas-data` directory next to the file (or a
+  user-selected root), never fully inside the single binary.
+
+In-process Rust API consumers depend on the immutable Git revision, not on a
+binary archive. Host-language binding bundles remain unsupported.
+
 - Use the `pumas-library` Rust crate in `pumas-core` for direct integration, or
   `pumas-rpc` when process separation is useful. Language-binding adapters remain
   in the source tree, but no host-binding release bundle is currently supported.

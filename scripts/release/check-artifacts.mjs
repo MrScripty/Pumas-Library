@@ -8,17 +8,44 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const plan = JSON.parse(fs.readFileSync(path.join(root, 'scripts/release/artifact-plan.json')));
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'))).version;
 const platforms = { linux: 'linux', win: 'windows', mac: 'macos' };
+// Variant tokens: `<os>` (full GUI+inference), `<os>-no-inference` (GUI without
+// inference plugins), `headless-<os>` (inference-disabled RPC archives).
+const headlessPlatforms = {
+  'headless-linux': 'linux',
+  'headless-macos': 'macos',
+  'headless-windows': 'windows',
+};
+const osByTarget = new Map([
+  ...plan.desktop_targets.map(target => [target.id, target.os]),
+  ...(plan.headless_targets ?? []).map(target => [target.id, target.os]),
+]);
+
+function expectedNames(platform) {
+  const wanted = plan.artifacts.filter(artifact => {
+    if (platform === 'all' || platform === 'required') return true;
+    const os = osByTarget.get(artifact.target);
+    if (platform in platforms) {
+      return os === platforms[platform] && (artifact.variant ?? 'full') === 'full';
+    }
+    if (platform.endsWith('-no-inference')) {
+      const osKey = platform.replace(/-no-inference$/, '');
+      return os === platforms[osKey] && artifact.variant === 'no-inference';
+    }
+    if (platform in headlessPlatforms) {
+      return os === headlessPlatforms[platform] && artifact.variant === 'headless';
+    }
+    throw new Error(`Unknown platform: ${platform}`);
+  });
+  return wanted.map(artifact => artifact.filename.replaceAll('{version}', version)).sort();
+}
 
 export function checkArtifacts(directory, platform) {
-  if (!['all', 'required'].includes(platform) && !(platform in platforms)) throw new Error(`Unknown platform: ${platform}`);
-  const targets = plan.desktop_targets.filter(target => platform === 'all'
-    || (platform === 'required' ? target.release_gating !== 'best-effort' : target.os === platforms[platform]));
-  const expected = plan.artifacts.filter(artifact => targets.some(target => target.id === artifact.target))
-    .map(artifact => artifact.filename.replaceAll('{version}', version)).sort();
+  const expected = expectedNames(platform);
+  if (expected.length === 0) throw new Error(`Unknown platform: ${platform}`);
   // A packaging directory also contains unpacked application executables.
   // Only assembly inputs recurse: upload-artifact carries installers alone.
   const files = fs.readdirSync(directory, { recursive: ['all', 'required'].includes(platform), withFileTypes: true })
-    .filter(entry => entry.isFile() && /\.(AppImage|deb|exe|dmg|zip|crate)$/.test(entry.name))
+    .filter(entry => entry.isFile() && /\.(AppImage|deb|exe|dmg|zip|tar\.gz|tgz|crate)$/.test(entry.name))
     .map(entry => path.join(entry.parentPath, entry.name));
   const names = files.map(file => path.basename(file)).sort();
   if (JSON.stringify(names) !== JSON.stringify(expected)) {

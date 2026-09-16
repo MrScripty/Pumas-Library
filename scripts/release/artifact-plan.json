@@ -111,10 +111,58 @@
       ]
     }
   ],
+  "headless_targets": [
+    {
+      "id": "headless-linux-x86_64",
+      "os": "linux",
+      "architecture": "x86_64",
+      "rust_target": "x86_64-unknown-linux-gnu",
+      "runner": "ubuntu-24.04",
+      "backend_features": "--no-default-features",
+      "artifacts": [
+        "headless-linux-archive"
+      ],
+      "required_real_evidence": [
+        "headless-rpc-start",
+        "inference-route-absence"
+      ]
+    },
+    {
+      "id": "headless-windows-x86_64",
+      "os": "windows",
+      "architecture": "x86_64",
+      "rust_target": "x86_64-pc-windows-msvc",
+      "runner": "windows-2025",
+      "backend_features": "--no-default-features",
+      "artifacts": [
+        "headless-windows-archive"
+      ],
+      "required_real_evidence": [
+        "headless-rpc-start",
+        "inference-route-absence"
+      ]
+    },
+    {
+      "id": "headless-macos-arm64",
+      "os": "macos",
+      "architecture": "arm64",
+      "rust_target": "aarch64-apple-darwin",
+      "runner": "macos-14",
+      "backend_features": "--no-default-features",
+      "artifacts": [
+        "headless-macos-archive"
+      ],
+      "required_real_evidence": [
+        "headless-rpc-start",
+        "inference-route-absence"
+      ]
+    }
+  ],
   "artifacts": [
     {
       "id": "desktop-linux-appimage",
       "role": "desktop_application",
+      "variant": "full",
       "target": "linux-x86_64-gnu",
       "format": "appimage",
       "filename": "Pumas.Library-{version}.AppImage",
@@ -140,7 +188,8 @@
         "pumas-rpc",
         "LICENSE.txt",
         "THIRD-PARTY-NOTICES.txt"
-      ]
+      ],
+      "variant": "full"
     },
     {
       "id": "desktop-windows-nsis",
@@ -155,7 +204,8 @@
         "pumas-rpc.exe",
         "LICENSE.txt",
         "THIRD-PARTY-NOTICES.txt"
-      ]
+      ],
+      "variant": "full"
     },
     {
       "id": "desktop-windows-portable",
@@ -170,7 +220,8 @@
         "pumas-rpc.exe",
         "LICENSE.txt",
         "THIRD-PARTY-NOTICES.txt"
-      ]
+      ],
+      "variant": "full"
     },
     {
       "id": "desktop-macos-dmg",
@@ -183,6 +234,129 @@
         "electron-main",
         "renderer",
         "pumas-rpc",
+        "LICENSE.txt",
+        "THIRD-PARTY-NOTICES.txt"
+      ],
+      "variant": "full"
+    },
+    {
+      "id": "desktop-linux-appimage-no-inference",
+      "role": "desktop_application",
+      "variant": "no-inference",
+      "target": "linux-x86_64-gnu",
+      "format": "appimage",
+      "filename": "Pumas.Library-no-inference-{version}.AppImage",
+      "consumer_install": "download, mark executable, and run",
+      "required_contents": [
+        "electron-main",
+        "renderer",
+        "pumas-rpc-no-inference",
+        "LICENSE.txt",
+        "THIRD-PARTY-NOTICES.txt"
+      ]
+    },
+    {
+      "id": "desktop-linux-deb-no-inference",
+      "role": "desktop_application",
+      "variant": "no-inference",
+      "target": "linux-x86_64-gnu",
+      "format": "deb",
+      "filename": "pumas-library-electron-no-inference_{version}_amd64.deb",
+      "consumer_install": "install with a Debian-compatible package manager",
+      "required_contents": [
+        "electron-main",
+        "renderer",
+        "pumas-rpc-no-inference",
+        "LICENSE.txt",
+        "THIRD-PARTY-NOTICES.txt"
+      ]
+    },
+    {
+      "id": "desktop-windows-nsis-no-inference",
+      "role": "desktop_application",
+      "variant": "no-inference",
+      "target": "windows-x86_64-msvc",
+      "format": "nsis",
+      "filename": "Pumas.Library.Setup.no-inference.{version}.exe",
+      "consumer_install": "run the interactive installer",
+      "required_contents": [
+        "electron-main",
+        "renderer",
+        "pumas-rpc-no-inference.exe",
+        "LICENSE.txt",
+        "THIRD-PARTY-NOTICES.txt"
+      ]
+    },
+    {
+      "id": "desktop-windows-portable-no-inference",
+      "role": "desktop_application",
+      "variant": "no-inference",
+      "target": "windows-x86_64-msvc",
+      "format": "portable-exe",
+      "filename": "Pumas.Library.no-inference.{version}.exe",
+      "consumer_install": "download and run without installation",
+      "required_contents": [
+        "electron-main",
+        "renderer",
+        "pumas-rpc-no-inference.exe",
+        "LICENSE.txt",
+        "THIRD-PARTY-NOTICES.txt"
+      ]
+    },
+    {
+      "id": "desktop-macos-dmg-no-inference",
+      "role": "desktop_application",
+      "variant": "no-inference",
+      "target": "macos-arm64",
+      "format": "dmg",
+      "filename": "Pumas.Library-no-inference-{version}-arm64.dmg",
+      "consumer_install": "mount and copy the application bundle",
+      "required_contents": [
+        "electron-main",
+        "renderer",
+        "pumas-rpc-no-inference",
+        "LICENSE.txt",
+        "THIRD-PARTY-NOTICES.txt"
+      ]
+    },
+    {
+      "id": "headless-linux-archive",
+      "role": "headless_service",
+      "variant": "headless",
+      "target": "headless-linux-x86_64",
+      "format": "targz",
+      "filename": "pumas-rpc-no-inference-{version}-linux-x86_64.tar.gz",
+      "consumer_install": "extract and run the self-contained pumas-rpc binary --launcher-root <dir> alongside your application; the library core is compiled in, no second binary is needed",
+      "required_contents": [
+        "pumas-rpc",
+        "LICENSE.txt",
+        "THIRD-PARTY-NOTICES.txt"
+      ]
+    },
+    {
+      "id": "headless-macos-archive",
+      "role": "headless_service",
+      "variant": "headless",
+      "target": "headless-macos-arm64",
+      "format": "targz",
+      "filename": "pumas-rpc-no-inference-{version}-macos-arm64.tar.gz",
+      "consumer_install": "extract and run the self-contained pumas-rpc binary --launcher-root <dir> alongside your application; the library core is compiled in, no second binary is needed",
+      "required_contents": [
+        "pumas-rpc",
+        "LICENSE.txt",
+        "THIRD-PARTY-NOTICES.txt"
+      ]
+    },
+    {
+      "id": "headless-windows-archive",
+      "role": "headless_service",
+      "variant": "headless",
+      "target": "headless-windows-x86_64",
+      "format": "zip",
+      "filename": "pumas-rpc-no-inference-{version}-windows-x86_64.zip",
+      "consumer_install": "extract and run the self-contained pumas-rpc binary --launcher-root <dir> alongside your application; the library core is compiled in, no second binary is needed",
+      "required_contents": [
+        "pumas-rpc.exe",
         "LICENSE.txt",
         "THIRD-PARTY-NOTICES.txt"
       ]
@@ -211,7 +385,7 @@
         "id": "release-provenance",
         "format": "in-toto-jsonl",
         "filename": "pumas-library-{version}.provenance.jsonl",
-        "covers": "all desktop artifacts"
+        "covers": "all release artifacts"
       }
     ],
     "per_artifact": [
@@ -219,7 +393,7 @@
         "id_suffix": "sbom",
         "format": "spdx-json",
         "filename": "{artifact_filename}.spdx.json",
-        "covers": "one extracted final desktop artifact"
+        "covers": "one final release artifact"
       }
     ],
     "dependency_authorities": [
@@ -259,10 +433,6 @@
     {
       "id": "pumas-library-crate",
       "reason": "no release-asset consumer; Pantograph consumes an immutable Git revision"
-    },
-    {
-      "id": "pumas-rpc-standalone",
-      "reason": "RPC is an internal desktop cohort member, not a standalone product"
     },
     {
       "id": "host-binding-bundles",

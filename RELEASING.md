@@ -16,9 +16,12 @@ a tag is not the first opportunity to discover packaging failures.
    against the manifests automatically.
 4. Complete local QA below, then run the workflow against the candidate commit
    once it is available remotely. Inspect every platform's result.
-5. Review the `release-candidate` workflow artifact. It contains all five required
-   Linux, macOS, and Windows installers selected by [the artifact plan](scripts/release/artifact-plan.json)
-   and checksums over those final installer bytes.
+5. Review the `release-candidate` workflow artifact. It contains all thirteen
+   required files selected by [the artifact plan](scripts/release/artifact-plan.json):
+   five full desktop installers (GUI with inference plugins), five
+   no-inference desktop installers (GUI with an inference-disabled backend),
+   and three headless no-inference RPC archives for embedding. It also carries
+   checksums over those final bytes.
 
 The workflow deliberately assembles **candidates**, with read-only repository
 permissions. It does not create or publish a GitHub release. Publication requires
@@ -82,6 +85,30 @@ RPC separately with `--no-default-features`, then run `smoke-rpc.py` with
 uses no Node, Electron, or frontend build. The launcher wrappers themselves
 still require Node.
 
+The headless embedding archives are assembled with
+`python3 scripts/release/make-headless-archive.py --binary rust/target/release
+--output-dir headless-output --os <linux|macos|windows>` after that smoke
+check; the binary inside keeps its plain `pumas-rpc` (`pumas-rpc.exe`) name
+while the archive filename carries the `-no-inference-` marker. The binary
+is self-contained: the `pumas-library` core is compiled into `pumas-rpc`,
+so embedders run one binary, not a core-plus-RPC pair. Verify one
+archive with `node scripts/release/check-artifacts.mjs headless-output
+headless-<linux|macos|windows>`.
+
+The no-inference desktop reuses the exact headless backend bytes: stage the
+extracted `pumas-rpc` into `electron/resources/bin`, package with
+`-c.appId=com.pumas.library.no-inference` plus the `-no-inference`
+`artifactName` overrides from the `build-electron-no-inference` /
+`windows-no-inference` CI jobs, then verify with the `linux-no-inference`,
+`mac-no-inference`, or `win-no-inference` checker tokens and the matching
+`smoke-*-packages.py --variant no-inference`. The no-inference installers
+share their product name with the full line, so install only one desktop
+variant per machine; AppImage, portable, and headless archives are
+side-by-side safe. In-process Rust API consumers keep depending on the
+immutable Git revision (the plan's `pantograph` source consumer); the archives
+cover sidecar/subprocess embedding, not host-language bindings, which still
+have no accepted tuple.
+
 The Rust workspace checks exclude `pumas_rustler` because it requires an Erlang
 host. `bindings/support-matrix.json` currently accepts no host-binding tuple;
 crate archives and host-binding bundles are not release assets.
@@ -142,7 +169,10 @@ Windows is a required native target. Its CI job runs the build, release tests,
 staged RPC startup, launcher/Electron tests, and packaging. The installer check
 silently installs the NSIS candidate, compares installed resources with the build
 inputs, starts the installed RPC and desktop, and starts the portable executable.
-The combined candidate requires both Windows installers alongside Linux and macOS.
+The combined candidate requires all thirteen files: both Windows installer
+pairs (full and no-inference) alongside the Linux and macOS pairs and the
+three headless archives. Each no-inference desktop additionally asserts
+inference-route absence from its packaged backend.
 
 Windows download authority uses held directory handles and physical file identity,
 no-follow traversal, a pinned execution lock file, native handle-relative rename,
@@ -162,6 +192,9 @@ installer and metadata set into a draft release and use the reviewed notes from
 
 Do not move a published tag to repair a broken release. Fix and rehearse a new
 version. Failed workflow artifacts are diagnostics, never distribution assets.
+(The v0.7.0 tag was moved once before any publication because its original
+commit never passed CI and no release was cut from it; that pre-publication
+move is the exception, not the practice.)
 
 ## Why this workflow changed for 0.7
 

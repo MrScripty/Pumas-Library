@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "JSON-RPC server for Pumas - Electron backend"
+description = "JSON-RPC server with the Pumas library compiled in; one binary serves the full library over HTTP"
 publish = false
 
 [[bin]]

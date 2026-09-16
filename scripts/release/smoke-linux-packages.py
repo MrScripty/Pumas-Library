@@ -11,12 +11,21 @@ import tempfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument("directory", type=Path)
+parser.add_argument("--variant", choices=("full", "no-inference"), default="full")
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[2]
 version = json.loads((root / "package.json").read_text())["version"]
 packages = args.directory.resolve()
+inference_disabled = args.variant == "no-inference"
+check_token = "linux-no-inference" if inference_disabled else "linux"
+if inference_disabled:
+    appimage_name = f"Pumas.Library-no-inference-{version}.AppImage"
+    deb_name = f"pumas-library-electron-no-inference_{version}_amd64.deb"
+else:
+    appimage_name = f"Pumas.Library-{version}.AppImage"
+    deb_name = f"pumas-library-electron_{version}_amd64.deb"
 subprocess.run(
-    ["node", str(root / "scripts/release/check-artifacts.mjs"), str(packages), "linux"],
+    ["node", str(root / "scripts/release/check-artifacts.mjs"), str(packages), check_token],
     check=True,
 )
 
@@ -28,7 +37,7 @@ def digest(path: Path) -> bytes:
 
 with tempfile.TemporaryDirectory(prefix="pumas-installer-smoke-") as temporary:
     extracted = Path(temporary)
-    appimage = packages / f"Pumas.Library-{version}.AppImage"
+    appimage = packages / appimage_name
     appimage.chmod(appimage.stat().st_mode | 0o100)
     subprocess.run(
         [str(appimage), "--appimage-extract"],
@@ -40,7 +49,7 @@ with tempfile.TemporaryDirectory(prefix="pumas-installer-smoke-") as temporary:
         [
             "dpkg-deb",
             "-x",
-            str(packages / f"pumas-library-electron_{version}_amd64.deb"),
+            str(packages / deb_name),
             str(extracted / "deb"),
         ],
         check=True,
@@ -65,8 +74,8 @@ with tempfile.TemporaryDirectory(prefix="pumas-installer-smoke-") as temporary:
                 raise RuntimeError(f"Packaged native dependency differs: {library.name}")
         if not (resources / "app.asar").is_file():
             raise RuntimeError("Packaged Electron application is missing")
-        subprocess.run(
-            [sys.executable, str(root / "scripts/release/smoke-rpc.py"), str(resources)],
-            check=True,
-        )
+        command = [sys.executable, str(root / "scripts/release/smoke-rpc.py"), str(resources)]
+        if inference_disabled:
+            command.append("--inference-disabled")
+        subprocess.run(command, check=True)
         print(f"Verified extracted installer resources and RPC: {resources}")

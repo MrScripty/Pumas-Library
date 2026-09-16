@@ -74,6 +74,45 @@ jobs:
       - run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release --no-default-features
       - run: python3 scripts/release/smoke-rpc.py rust/target/release/pumas-rpc --inference-disabled
 
+  headless-rpc:
+    name: Headless archive (${{ matrix.headless_os }})
+    needs: lint-workflows
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            headless_os: linux
+          - os: macos-14
+            headless_os: macos
+          - os: windows-2025
+            headless_os: windows
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: headless-archive
+      - run: cargo fetch --locked --manifest-path rust/Cargo.toml
+      - run: python scripts/release/check-dependency-features.py
+      - name: Build inference-disabled backend
+        run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release --no-default-features
+      - name: Verify inference routes are absent
+        run: python scripts/release/smoke-rpc.py rust/target/release --inference-disabled
+      - name: Assemble headless archive
+        run: python scripts/release/make-headless-archive.py --binary rust/target/release --output-dir headless-output --os ${{ matrix.headless_os }}
+      - name: Verify expected archive
+        run: node scripts/release/check-artifacts.mjs headless-output headless-${{ matrix.headless_os }}
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: headless-${{ matrix.headless_os }}
+          path: headless-output/
+          if-no-files-found: error
+
   build-frontend:
     name: Frontend and desktop contracts
     needs: lint-workflows
@@ -229,6 +268,85 @@ jobs:
             electron/release/*.dmg
           if-no-files-found: error
 
+  build-electron-no-inference:
+    name: Desktop package without inference (${{ matrix.platform }})
+    needs: [headless-rpc, build-frontend]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+            headless: headless-linux
+            check: linux-no-inference
+          - os: macos-14
+            platform: mac
+            headless: headless-macos
+            check: mac-no-inference
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6.1.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The no-inference desktop embeds the exact backend bytes shipped in the
+      # headless archive; it never rebuilds the backend with other features.
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: ${{ matrix.headless }}
+          path: ${{ runner.temp }}/headless-archive
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: frontend-dist
+          path: frontend/dist
+      - name: Stage inference-disabled backend
+        run: |
+          mkdir -p electron/resources/bin
+          tar -xzf ${{ runner.temp }}/headless-archive/*.tar.gz -C electron/resources/bin pumas-rpc
+          chmod +x electron/resources/bin/pumas-rpc
+      - run: npm run test:launcher
+      - name: Install Electron runtime before native tests
+        timeout-minutes: 10
+        run: node electron/node_modules/electron/install.js
+      - run: pnpm --dir electron test
+      # Distinct artifact names and application identity keep this line
+      # installable alongside the full inference-enabled desktop.
+      - name: Package Linux desktop without inference
+        if: matrix.platform == 'linux'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm --dir electron exec electron-builder --linux --publish never -c.appId=com.pumas.library.no-inference '-c.appImage.artifactName=Pumas.Library-no-inference-${version}.${ext}' '-c.deb.artifactName=pumas-library-electron-no-inference_${version}_amd64.${ext}'
+      - name: Package macOS desktop without inference
+        if: matrix.platform == 'mac'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm --dir electron exec electron-builder --mac --publish never -c.appId=com.pumas.library.no-inference '-c.dmg.artifactName=Pumas.Library-no-inference-${version}-arm64.${ext}'
+      - name: Verify expected installers
+        run: node scripts/release/check-artifacts.mjs electron/release ${{ matrix.check }}
+      - name: Verify extracted Linux installers
+        if: runner.os == 'Linux'
+        run: python3 scripts/release/smoke-linux-packages.py electron/release --variant no-inference
+      - uses: actions/setup-python@v6
+        if: runner.os == 'macOS'
+        with:
+          python-version-file: .python-version
+      - name: Verify installed macOS application
+        if: runner.os == 'macOS'
+        run: python3 scripts/release/smoke-macos-package.py electron/release/*.dmg --variant no-inference
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-${{ matrix.platform }}-no-inference
+          path: |
+            electron/release/*.AppImage
+            electron/release/*.deb
+            electron/release/*.exe
+            electron/release/*.dmg
+          if-no-files-found: error
+
   windows-candidate:
     name: Windows candidate
     needs: [lint-workflows, build-frontend]
@@ -292,6 +410,65 @@ jobs:
           path: windows-candidate/
           if-no-files-found: error
 
+  windows-no-inference:
+    name: Windows candidate without inference
+    needs: [lint-workflows, build-frontend, headless-rpc]
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      # action-setup v6 invokes a deprecated shell/argument combination on Windows.
+      - name: Install repository pnpm version
+        run: |
+          $packageManager = (Get-Content package.json | ConvertFrom-Json).packageManager
+          npm install --global $packageManager
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: frontend-dist
+          path: ${{ runner.temp }}/frontend-archive
+          skip-decompress: true
+      # Avoid the action's deprecated Windows Buffer API; digest checks still run above.
+      - name: Extract frontend artifact
+        run: |
+          $archives = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/frontend-archive" -File)
+          if ($archives.Count -ne 1) { throw "Expected exactly one frontend archive" }
+          Expand-Archive -LiteralPath $archives[0].FullName -DestinationPath frontend/dist
+      # The no-inference desktop embeds the exact backend bytes shipped in the
+      # headless archive; it never rebuilds the backend with other features.
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: headless-windows
+          path: ${{ runner.temp }}/headless-archive
+      - name: Stage inference-disabled backend
+        run: |
+          New-Item -ItemType Directory -Force electron/resources/bin | Out-Null
+          $archive = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/headless-archive" -Filter *.zip)
+          if ($archive.Count -ne 1) { throw "Expected exactly one headless archive" }
+          Expand-Archive -LiteralPath $archive[0].FullName -DestinationPath "$env:RUNNER_TEMP/headless-staged"
+          Copy-Item "$env:RUNNER_TEMP/headless-staged/pumas-rpc.exe" electron/resources/bin/
+      - run: npm run test:launcher
+      - name: Install Electron runtime before native tests
+        timeout-minutes: 10
+        run: node electron/node_modules/electron/install.js
+      - run: pnpm --dir electron test
+      - name: Package Windows installers without inference
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm --dir electron exec electron-builder --win --publish never -c.appId=com.pumas.library.no-inference '-c.nsis.artifactName=Pumas.Library.Setup.no-inference.${version}.${ext}' '-c.portable.artifactName=Pumas.Library.no-inference.${version}.${ext}'
+      - name: Verify installed and portable Windows applications
+        run: python scripts/release/smoke-windows-packages.py electron/release --variant no-inference
+      - name: Verify and assemble Windows candidate
+        run: node scripts/release/check-artifacts.mjs electron/release win-no-inference windows-no-inference-candidate
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-windows-no-inference
+          path: windows-no-inference-candidate/
+          if-no-files-found: error
+
   verify-launcher:
     name: Linux release startup
     needs: [build-rust, build-frontend]
@@ -327,7 +504,7 @@ jobs:
 
   release-candidate:
     name: Assemble release candidate
-    needs: [rust-quality, headless, torch-quality, build-electron, windows-candidate, verify-launcher]
+    needs: [rust-quality, headless, headless-rpc, torch-quality, build-electron, build-electron-no-inference, windows-candidate, windows-no-inference, verify-launcher]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -338,6 +515,10 @@ jobs:
       - uses: actions/download-artifact@v8.0.1
         with:
           pattern: desktop-*
+          path: candidate-input
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: headless-*
           path: candidate-input
       - run: node scripts/release/check-artifacts.mjs candidate-input required release-candidate
       - uses: actions/upload-artifact@v7.0.1

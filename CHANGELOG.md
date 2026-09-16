@@ -15,6 +15,9 @@ upgrade guidance, and scope.
 ### Added
 
 - Headless build/run paths independent of the desktop, with independent GUI and inference selections.
+- Thirteen-file release distribution: full desktop installers, no-inference
+  desktop installers, and headless no-inference RPC archives for Linux,
+  macOS, and Windows, all assembled and inventoried by CI.
 - Model Intent API, immutable upstream revision resolution, and durable consumer model declarations.
 - Backend-owned conversion setup, cancellation, recovery, and FP8/NVFP4 Safetensors output.
 - In-process ONNX Runtime embeddings and optional Torch image-generation adapters.

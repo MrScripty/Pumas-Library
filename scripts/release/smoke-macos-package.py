@@ -25,9 +25,10 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def verify(package):
+def verify(package, variant="full"):
     if sys.platform != "darwin":
         raise RuntimeError("DMG verification requires native macOS")
+    inference_disabled = variant == "no-inference"
     version = json.loads((ROOT / "electron/package.json").read_text())["version"]
     with tempfile.TemporaryDirectory(prefix="pumas-dmg-smoke-") as temporary:
         root = Path(temporary)
@@ -77,15 +78,14 @@ def verify(package):
         for library in (ROOT / "electron/resources/bin").glob("libonnxruntime*.dylib"):
             if digest(resources / library.name) != digest(library):
                 raise RuntimeError(f"Packaged ONNX library differs: {library.name}")
-        subprocess.run(
-            [
-                sys.executable,
-                str(ROOT / "scripts/release/smoke-rpc.py"),
-                str(resources / "pumas-rpc"),
-            ],
-            check=True,
-            timeout=75,
-        )
+        command = [
+            sys.executable,
+            str(ROOT / "scripts/release/smoke-rpc.py"),
+            str(resources / "pumas-rpc"),
+        ]
+        if inference_disabled:
+            command.append("--inference-disabled")
+        subprocess.run(command, check=True, timeout=75)
         library_root = root / "library"
         (library_root / "shared-resources/models").mkdir(parents=True)
         process = subprocess.Popen(
@@ -122,4 +122,6 @@ def verify(package):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("package", type=Path)
-    verify(parser.parse_args().package.resolve())
+    parser.add_argument("--variant", choices=("full", "no-inference"), default="full")
+    args = parser.parse_args()
+    verify(args.package.resolve(), args.variant)

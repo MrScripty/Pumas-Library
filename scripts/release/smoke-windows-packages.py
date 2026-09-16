@@ -60,12 +60,17 @@ def start_desktop(executable, root):
         raise RuntimeError("Desktop did not report successful backend initialization")
 
 
-def verify(directory):
+def verify(directory, variant="full"):
     if sys.platform != "win32":
         raise RuntimeError("Windows installer verification requires native Windows")
     version = json.loads((ROOT / "electron/package.json").read_text())["version"]
-    installer = directory / f"Pumas.Library.Setup.{version}.exe"
-    portable = directory / f"Pumas.Library.{version}.exe"
+    inference_disabled = variant == "no-inference"
+    if inference_disabled:
+        installer = directory / f"Pumas.Library.Setup.no-inference.{version}.exe"
+        portable = directory / f"Pumas.Library.no-inference.{version}.exe"
+    else:
+        installer = directory / f"Pumas.Library.Setup.{version}.exe"
+        portable = directory / f"Pumas.Library.{version}.exe"
     with tempfile.TemporaryDirectory(prefix="pumas-windows-smoke-") as temporary:
         root = Path(temporary)
         installed = root / "installed"
@@ -89,11 +94,14 @@ def verify(directory):
             for library in (ROOT / "electron/resources/bin").glob("*.dll"):
                 if digest(resources / library.name) != digest(library):
                     raise RuntimeError(f"Installed DLL differs: {library.name}")
-            subprocess.run(
-                [sys.executable, str(ROOT / "scripts/release/smoke-rpc.py"), str(resources)],
-                check=True,
-                timeout=75,
-            )
+            command = [
+                sys.executable,
+                str(ROOT / "scripts/release/smoke-rpc.py"),
+                str(resources),
+            ]
+            if inference_disabled:
+                command.append("--inference-disabled")
+            subprocess.run(command, check=True, timeout=75)
             start_desktop(installed / "Pumas Library.exe", root / "nsis-smoke")
             start_desktop(portable, root / "portable-smoke")
         finally:
@@ -111,4 +119,6 @@ def verify(directory):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("directory", type=Path)
-    verify(parser.parse_args().directory.resolve())
+    parser.add_argument("--variant", choices=("full", "no-inference"), default="full")
+    args = parser.parse_args()
+    verify(args.directory.resolve(), args.variant)

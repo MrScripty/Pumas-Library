@@ -347,8 +347,8 @@ jobs:
             electron/release/*.dmg
           if-no-files-found: error
 
-  windows-candidate:
-    name: Windows candidate
+  windows-release:
+    name: Rust release (windows-2025)
     needs: [lint-workflows, build-frontend]
     runs-on: windows-2025
     timeout-minutes: 150
@@ -402,12 +402,12 @@ jobs:
         run: python scripts/release/smoke-windows-packages.py electron/release
       - name: Run Windows release tests
         run: cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --profile ci-test
-      - name: Verify and assemble Windows candidate
-        run: node scripts/release/check-artifacts.mjs electron/release win windows-candidate
+      - name: Verify and assemble Windows release
+        run: node scripts/release/check-artifacts.mjs electron/release win windows-release
       - uses: actions/upload-artifact@v7.0.1
         with:
           name: desktop-windows
-          path: windows-candidate/
+          path: windows-release/
           if-no-files-found: error
 
   windows-no-inference:
@@ -504,7 +504,7 @@ jobs:
 
   release-candidate:
     name: Assemble release candidate
-    needs: [rust-quality, headless, headless-rpc, torch-quality, build-electron, build-electron-no-inference, windows-candidate, windows-no-inference, verify-launcher]
+    needs: [rust-quality, headless, headless-rpc, torch-quality, build-electron, build-electron-no-inference, windows-release, windows-no-inference, verify-launcher]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

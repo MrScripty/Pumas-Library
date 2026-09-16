@@ -154,7 +154,7 @@ jobs:
       - name: Build release backend
         run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release
       - name: Test release workspace
-        run: cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --release
+        run: cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --profile ci-test
       - name: Verify backend startup from isolated staging
         shell: bash
         run: |
@@ -275,7 +275,7 @@ jobs:
       - name: Build Windows backend
         run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release
       - name: Run Windows release tests
-        run: cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --release
+        run: cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --profile ci-test
       - run: python scripts/release/stage-rpc.py
       - run: python scripts/release/smoke-rpc.py electron/resources/bin
       - name: Package Windows installers

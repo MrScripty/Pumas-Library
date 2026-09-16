@@ -37,7 +37,7 @@ npm run check:dependency-ownership
 npm run check:release-versions -- v0.7.0
 node --test scripts/release/*.test.mjs
 ./scripts/rust/check.sh
-cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --release
+cargo test --locked --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler --profile ci-test
 cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features
 cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features
 pnpm --dir frontend lint
@@ -68,6 +68,13 @@ pnpm --dir electron exec electron-builder --linux --publish never
 node scripts/release/check-artifacts.mjs electron/release linux
 python3 scripts/release/smoke-linux-packages.py electron/release
 ```
+
+Native workspace tests use `ci-test`, which inherits release optimizations and
+assertion settings but disables whole-program LTO and uses 16 code-generation
+units to avoid repeatedly optimizing every test executable. Installers still
+contain the fully optimized `release` backend, verified by native startup smoke.
+Torch installer tests use small local HTTP fixtures and offline requirements;
+they do not download Torch wheels and fail with stage logs after 60 seconds.
 
 Use Xvfb for Linux GUI smoke on a machine without a display. Build the headless
 RPC separately with `--no-default-features`, then run `smoke-rpc.py` with

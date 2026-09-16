@@ -136,3 +136,10 @@ pumas-app-manager = { path = "crates/pumas-app-manager" }
 lto = true
 codegen-units = 1
 strip = "debuginfo"
+
+# Keep release semantics for native tests without repeating whole-program LTO
+# for every test executable. Shipped binaries still use the release profile.
+[profile.ci-test]
+inherits = "release"
+lto = false
+codegen-units = 16

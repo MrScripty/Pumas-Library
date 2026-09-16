@@ -195,13 +195,41 @@ async fn open(root: &Path, base_url: &str) -> PumasApi {
 }
 
 fn write_marker(path: &Path, reference: &ModelEnsureRef) {
-    let file = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(path)
-        .unwrap();
-    serde_json::to_writer(&file, reference).unwrap();
-    file.sync_all().unwrap();
+    publish_marker(path, |file| serde_json::to_writer(file, reference).unwrap());
+}
+
+fn publish_marker(path: &Path, write: impl FnOnce(&std::fs::File)) {
+    // Existence is the parent's readiness signal. Publish only complete JSON,
+    // even when the scheduler pauses this child between serialization writes.
+    let file = tempfile::NamedTempFile::new_in(path.parent().unwrap()).unwrap();
+    write(file.as_file());
+    file.as_file().sync_all().unwrap();
+    file.persist_noclobber(path).unwrap();
+}
+
+#[test]
+fn acknowledgement_is_hidden_until_json_is_complete() {
+    use std::io::Write;
+    let root = tempfile::tempdir().unwrap();
+    let ack = root.path().join("ack.json");
+    let (started_tx, started_rx) = std::sync::mpsc::channel();
+    let (finish_tx, finish_rx) = std::sync::mpsc::channel();
+    let writer_path = ack.clone();
+    let writer = std::thread::spawn(move || {
+        publish_marker(&writer_path, |mut file| {
+            file.write_all(b"{\"reference\":").unwrap();
+            started_tx.send(()).unwrap();
+            finish_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            file.write_all(b"\"complete\"}").unwrap();
+        });
+    });
+    started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let visible_during_write = ack.exists();
+    finish_tx.send(()).unwrap();
+    writer.join().unwrap();
+    assert!(!visible_during_write, "partial acknowledgement was visible");
+    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(ack).unwrap()).unwrap();
+    assert_eq!(value["reference"], "complete");
 }
 
 async fn wait_for_file(path: &Path) {

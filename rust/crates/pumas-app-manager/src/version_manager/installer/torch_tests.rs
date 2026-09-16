@@ -59,9 +59,19 @@ async fn fixture_release(
     let server = tokio::spawn(async move {
         for _ in 0..2 {
             let (mut stream, _) = listener.accept().await.unwrap();
-            let mut request = vec![0; 8192];
-            let n = stream.read(&mut request).await.unwrap();
-            let body = if String::from_utf8_lossy(&request[..n]).contains(".sha256") {
+            let mut request = Vec::new();
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                let mut buffer = [0; 1024];
+                while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                    let n = stream.read(&mut buffer).await.unwrap();
+                    assert_ne!(n, 0, "fixture request ended before its headers");
+                    request.extend_from_slice(&buffer[..n]);
+                    assert!(request.len() <= 8192, "fixture request headers too large");
+                }
+            })
+            .await
+            .expect("fixture request headers did not arrive");
+            let body = if String::from_utf8_lossy(&request).contains(".sha256") {
                 checksum.as_bytes()
             } else {
                 &archive
@@ -102,6 +112,40 @@ async fn fixture_release(
     (release, server)
 }
 
+#[tokio::test]
+async fn bundle_fixture_waits_for_a_complete_request() {
+    let archive = bundle("--no-index\n", "");
+    let expected_checksum = format!("{:x}", Sha256::digest(&archive));
+    let (release, server) = fixture_release(archive, true).await;
+    let address = release.html_url.strip_prefix("http://").unwrap();
+    let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+    stream
+        .write_all(b"GET /pumas-torch-runtime-linux-x86_64.tar.gz")
+        .await
+        .unwrap();
+    let premature_response =
+        tokio::time::timeout(std::time::Duration::from_millis(100), stream.readable())
+            .await
+            .is_ok();
+    stream
+        .write_all(b".sha256 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+    let mut response = String::new();
+    let read = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        stream.read_to_string(&mut response),
+    )
+    .await;
+    server.abort();
+    assert!(
+        !premature_response,
+        "fixture answered an incomplete request"
+    );
+    read.unwrap().unwrap();
+    assert!(response.ends_with(&expected_checksum));
+}
+
 async fn rejected_bundle_preserves_previous(
     requirements: &str,
     validation: &str,
@@ -128,14 +172,13 @@ async fn rejected_bundle_preserves_previous(
         )
         .unwrap();
     let (release, server) = fixture_release(bundle(requirements, validation), valid_checksum).await;
-    let (tx, mut rx) = mpsc::channel(32);
-    let progress = async { while rx.recv().await.is_some() {} };
-    let (result, ()) = tokio::join!(
-        installer.install_version(&release.tag_name, &release, tx),
-        progress
+    let result = install_fixture(&installer, &release).await;
+    let error = result.unwrap_err().to_string();
+    assert!(
+        error.contains(expected),
+        "expected {expected:?}, got {error}"
     );
-    server.await.unwrap();
-    assert!(result.unwrap_err().to_string().contains(expected));
+    finish_fixture(server).await;
     assert!(!root
         .path()
         .join("torch-versions/torch-runtime-0.1.0")
@@ -168,6 +211,46 @@ async fn rejected_bundle_preserves_previous(
             .count(),
         1
     );
+}
+
+async fn install_fixture(installer: &VersionInstaller, release: &GitHubRelease) -> Result<()> {
+    let (tx, mut rx) = mpsc::channel(32);
+    let mut updates = Vec::new();
+    let progress = async {
+        while let Some(update) = rx.recv().await {
+            updates.push(format!("{update:?}"));
+        }
+    };
+    let install = async {
+        tokio::join!(
+            installer.install_version(&release.tag_name, release, tx),
+            progress
+        )
+        .0
+    };
+    match tokio::time::timeout(std::time::Duration::from_secs(60), install).await {
+        Ok(result) => result,
+        Err(_) => {
+            let logs: Vec<_> = std::fs::read_dir(installer.logs_dir())
+                .unwrap()
+                .map(|entry| {
+                    let path = entry.unwrap().path();
+                    (
+                        path.clone(),
+                        std::fs::read_to_string(path).unwrap_or_default(),
+                    )
+                })
+                .collect();
+            panic!("Local Torch fixture exceeded 60s; progress: {updates:?}; logs: {logs:?}");
+        }
+    }
+}
+
+async fn finish_fixture(server: tokio::task::JoinHandle<()>) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), server)
+        .await
+        .expect("installer did not request both the fixture checksum and archive")
+        .unwrap();
 }
 
 #[tokio::test]
@@ -227,14 +310,8 @@ async fn cancellation_reaps_installer_and_its_child() {
 async fn validated_bundle_publishes_relocatable_python_and_shared_metadata() {
     let (installer, root) = create_test_installer();
     let (release, server) = fixture_release(bundle("--no-index\n", ""), true).await;
-    let (tx, mut rx) = mpsc::channel(32);
-    let progress = async { while rx.recv().await.is_some() {} };
-    let (result, ()) = tokio::join!(
-        installer.install_version(&release.tag_name, &release, tx),
-        progress
-    );
-    result.unwrap();
-    server.await.unwrap();
+    install_fixture(&installer, &release).await.unwrap();
+    finish_fixture(server).await;
     let runtime = root.path().join("torch-versions/torch-runtime-0.1.0");
     let python = tokio::process::Command::new(runtime.join("venv/bin/python"))
         .args(["-c", "import sys; print(sys.prefix)"])

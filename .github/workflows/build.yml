@@ -319,12 +319,12 @@ jobs:
         if: matrix.platform == 'linux'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: pnpm --dir electron exec electron-builder --linux --publish never -c.appId=com.pumas.library.no-inference '-c.appImage.artifactName=Pumas.Library-no-inference-${version}.${ext}' '-c.deb.artifactName=pumas-library-electron-no-inference_${version}_amd64.${ext}'
+        run: pnpm --dir electron exec electron-builder --linux --publish never -c.appId=com.pumas.library.no-inference "-c.appImage.artifactName=Pumas.Library-no-inference-\${version}.\${ext}" "-c.deb.artifactName=pumas-library-electron-no-inference_\${version}_amd64.\${ext}"
       - name: Package macOS desktop without inference
         if: matrix.platform == 'mac'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: pnpm --dir electron exec electron-builder --mac --publish never -c.appId=com.pumas.library.no-inference '-c.dmg.artifactName=Pumas.Library-no-inference-${version}-arm64.${ext}'
+        run: pnpm --dir electron exec electron-builder --mac --publish never -c.appId=com.pumas.library.no-inference "-c.dmg.artifactName=Pumas.Library-no-inference-\${version}-arm64.\${ext}"
       - name: Verify expected installers
         run: node scripts/release/check-artifacts.mjs electron/release ${{ matrix.check }}
       - name: Verify extracted Linux installers

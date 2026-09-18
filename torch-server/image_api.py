@@ -24,7 +24,8 @@ class ImageRequest(BaseModel):
     model: str = Field(min_length=1, max_length=256)
     prompt: str = Field(min_length=1, max_length=4000)
     n: Literal[1] = 1
-    size: str = "1024x1024"
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
     response_format: Literal["b64_json"] = "b64_json"
     seed: int | None = Field(default=None, ge=0, le=4294967295)
 
@@ -35,13 +36,6 @@ class ImageRequest(BaseModel):
             raise ValueError("Value must not be blank")
         return value
 
-    @field_validator("size")
-    @classmethod
-    def dimensions(cls, value):
-        if value not in {f"{w}x{h}" for w in (512, 768, 1024) for h in (512, 768, 1024)}:
-            raise ValueError("Width and height must each be 512, 768, or 1024")
-        return value
-
 
 def failure(status: int, code: str, message: str):
     return HTTPException(status_code=status, detail={"code": code, "message": message})
@@ -50,7 +44,7 @@ def failure(status: int, code: str, message: str):
 async def owned_generation(adapter, payload: ImageRequest, request: Request):
     cancel = threading.Event()
     seed = payload.seed if payload.seed is not None else secrets.randbits(32)
-    width, height = map(int, payload.size.split("x"))
+    width, height = payload.width, payload.height
     started = time.monotonic()
     worker = asyncio.create_task(
         asyncio.to_thread(adapter.generate, payload.prompt, width, height, seed, cancel)

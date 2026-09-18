@@ -19,17 +19,22 @@ models with that capability for image generation.
   "model": "<ID returned by /v1/models>",
   "prompt": "A watercolor kingfisher beside a quiet stream",
   "n": 1,
-  "size": "1024x1024",
+  "width": 1024,
+  "height": 1024,
   "response_format": "b64_json",
   "seed": 12345
 }
 ```
 
-`model` and a nonblank `prompt` are required (256 and 4,000 characters maximum).
-Other fields use the illustrated defaults, except omitted `seed`, which is
-random. Seed accepts integers from 0 through 4,294,967,295. Each dimension may
-be 512, 768 or 1024. Unknown fields, batches, URL responses and unsupported sizes
-are rejected before backend admission. Request bodies are limited to 32 KiB.
+`model`, a nonblank `prompt`, `width`, and `height` are required (`model` 256
+and `prompt` 4,000 characters maximum; dimensions required positive integers
+with no defaults). Other fields use the illustrated defaults, except omitted
+`seed`, which is random. Seed accepts integers from 0 through 4,294,967,295.
+Dimensions are passed to the backend unchanged; the backend rejects resolutions
+it cannot produce with its normal backend error. There is no allowlist and no
+universal resolution support. The former `size` string is rejected. Unknown
+fields, batches, and URL responses are rejected before backend admission.
+Request bodies are limited to 32 KiB.
 
 The response contains one PNG:
 

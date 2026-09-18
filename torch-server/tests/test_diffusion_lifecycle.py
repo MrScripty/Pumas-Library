@@ -83,7 +83,9 @@ class DiffusionLeaseTests(unittest.IsolatedAsyncioTestCase):
         async def run():
             async with manager.image_lease("image"):
                 return await owned_generation(
-                    Adapter(), ImageRequest(model="image", prompt="x"), Request()
+                    Adapter(),
+                    ImageRequest(model="image", prompt="x", width=512, height=512),
+                    Request(),
                 )
 
         task = asyncio.create_task(run())

@@ -52,7 +52,7 @@ class ImageFailureTests(unittest.IsolatedAsyncioTestCase):
                     raise error
 
                 adapter.generate = fail
-                payload = ImageRequest(model="fixture", prompt="test", size="512x512")
+                payload = ImageRequest(model="fixture", prompt="test", width=512, height=512)
                 with self.assertRaises(HTTPException) as caught:
                     await generate_image(payload, request)
                 self.assertEqual(
@@ -82,7 +82,7 @@ class ImageFailureTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.wait_for(
                     owned_generation(
                         SimpleNamespace(generate=generate),
-                        ImageRequest(model="fixture", prompt="test"),
+                        ImageRequest(model="fixture", prompt="test", width=512, height=512),
                         SimpleNamespace(is_disconnected=connected),
                     ),
                     4,

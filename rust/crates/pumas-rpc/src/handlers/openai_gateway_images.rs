@@ -15,8 +15,8 @@ struct ImageRequest {
     prompt: String,
     #[serde(default = "one")]
     n: u8,
-    #[serde(default = "default_size")]
-    size: String,
+    width: u32,
+    height: u32,
     #[serde(default = "default_format")]
     response_format: String,
     #[serde(default)]
@@ -24,9 +24,6 @@ struct ImageRequest {
 }
 fn one() -> u8 {
     1
-}
-fn default_size() -> String {
-    "1024x1024".into()
 }
 fn default_format() -> String {
     "b64_json".into()
@@ -44,20 +41,8 @@ pub(super) fn validate(body: &Value) -> Result<(), &'static str> {
     if request.n != 1 || request.response_format != "b64_json" {
         return Err("Only one base64 PNG per request is supported");
     }
-    if ![
-        "512x512",
-        "512x768",
-        "512x1024",
-        "768x512",
-        "768x768",
-        "768x1024",
-        "1024x512",
-        "1024x768",
-        "1024x1024",
-    ]
-    .contains(&request.size.as_str())
-    {
-        return Err("Width and height must each be 512, 768, or 1024");
+    if request.width == 0 || request.height == 0 {
+        return Err("width and height must be positive integers");
     }
     let _ = request.seed;
     Ok(())
@@ -145,23 +130,35 @@ pub(super) async fn response(mut upstream: reqwest::Response) -> Response {
 mod tests {
     use super::*;
     #[test]
-    fn rejects_unknown_fields_batching_and_invalid_sizes_before_backend_admission() {
+    fn rejects_unknown_fields_batching_and_invalid_dimensions_before_backend_admission() {
         for extra in [
             json!({"n": 2}),
             json!({"seed": -1}),
             json!({"seed": true}),
-            json!({"size":"4096x4096"}),
+            json!({"size": "512x512"}),
+            json!({"width": 0}),
+            json!({"height": -1}),
+            json!({"width": "512"}),
+            json!({"width": true}),
             json!({"prompt":"  "}),
             json!({"steps":30}),
         ] {
-            let mut body = json!({"model":"image", "prompt":"a watercolor bird"});
+            let mut body =
+                json!({"model":"image", "prompt":"a watercolor bird", "width":512, "height":512});
             body.as_object_mut()
                 .unwrap()
                 .extend(extra.as_object().unwrap().clone());
             assert!(validate(&body).is_err(), "{body}");
         }
+        for missing in [json!({"height": 720}), json!({"width": 1280})] {
+            let mut body = json!({"model":"image", "prompt":"a watercolor bird"});
+            body.as_object_mut()
+                .unwrap()
+                .extend(missing.as_object().unwrap().clone());
+            assert!(validate(&body).is_err(), "{body}");
+        }
         assert!(validate(
-            &json!({"model":"image", "prompt":"a watercolor bird", "size":"768x1024", "seed":0})
+            &json!({"model":"image", "prompt":"a watercolor bird", "width":1280, "height":720, "seed":0})
         )
         .is_ok());
     }

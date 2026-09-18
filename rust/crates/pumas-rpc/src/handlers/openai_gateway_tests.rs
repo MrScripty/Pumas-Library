@@ -736,7 +736,7 @@ async fn image_client_disconnect_closes_backend_request() {
     let client = tokio::spawn(async move {
         reqwest::Client::new()
             .post(format!("http://{address}/v1/images/generations"))
-            .json(&json!({"model":"image", "prompt":"a bird"}))
+            .json(&json!({"model":"image", "prompt":"a bird", "width":512, "height":512}))
             .send()
             .await
     });

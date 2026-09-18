@@ -1,6 +1,6 @@
 {
-  "recipe_id": "torch-runtime-0.1.4",
-  "protocol": 1,
+  "recipe_id": "torch-runtime-0.1.5",
+  "protocol": 2,
   "python": "3.12",
   "platform": "linux-x86_64"
 }

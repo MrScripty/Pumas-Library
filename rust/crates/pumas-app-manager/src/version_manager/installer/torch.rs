@@ -1,6 +1,7 @@
 //! Managed Torch bundle installation; lifecycle and state remain in VersionManager.
 
 use super::*;
+use crate::torch_client::SUPPORTED_TORCH_PROTOCOL;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::process::Stdio;
@@ -195,7 +196,7 @@ impl VersionInstaller {
         )
         .map_err(|e| failed(format!("Invalid runtime recipe: {e}")))?;
         if recipe.recipe_id != tag
-            || recipe.protocol != 1
+            || recipe.protocol != SUPPORTED_TORCH_PROTOCOL
             || recipe.python != "3.12"
             || recipe.platform != "linux-x86_64"
         {

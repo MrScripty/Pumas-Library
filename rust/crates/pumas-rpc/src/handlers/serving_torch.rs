@@ -212,6 +212,18 @@ pub(super) async fn serve_torch_model(
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
+    // The handshake (protocol plus capability) must pass before any model
+    // load or publication through this runtime.
+    if client.verify_image_runtime().await.is_err() {
+        return non_critical_failure_response(
+            state,
+            fail(
+                ModelServeErrorCode::ProviderLoadFailed,
+                "Torch runtime is incompatible; install and activate a qualified Torch runtime",
+            ),
+        )
+        .await;
+    }
     let slots = client.list_slots().await?;
     if slots.iter().any(|slot| slot.model_name == request.model_id) {
         return non_critical_failure_response(

@@ -1,4 +1,10 @@
-"""Bounded image generation with a lease retained until GPU work stops."""
+"""Private image generation provider operation for the Pumas gateway.
+
+The public OpenAI-compatible image route is gateway-owned. This module
+exposes only the private provider operation mounted under ``/api``: a
+strict request with an explicit ``model_id`` and numeric dimensions, and
+a private result carrying the PNG payload plus run metadata.
+"""
 
 import asyncio
 import base64
@@ -6,7 +12,6 @@ import io
 import secrets
 import threading
 import time
-from typing import Literal
 
 import torch
 from fastapi import APIRouter, HTTPException, Request
@@ -21,15 +26,13 @@ MAX_PNG_BYTES = 8 * 1024 * 1024
 
 class ImageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    model: str = Field(min_length=1, max_length=256)
+    model_id: str = Field(min_length=1, max_length=256)
     prompt: str = Field(min_length=1, max_length=4000)
-    n: Literal[1] = 1
     width: int = Field(gt=0)
     height: int = Field(gt=0)
-    response_format: Literal["b64_json"] = "b64_json"
     seed: int | None = Field(default=None, ge=0, le=4294967295)
 
-    @field_validator("prompt", "model")
+    @field_validator("prompt", "model_id")
     @classmethod
     def nonblank(cls, value):
         if not value.strip():
@@ -79,15 +82,12 @@ async def owned_generation(adapter, payload: ImageRequest, request: Request):
         if image.size != (width, height) or len(content) > MAX_PNG_BYTES:
             raise failure(502, "invalid_backend_response", "Runtime returned an invalid image")
         return {
-            "created": int(time.time()),
-            "data": [{"b64_json": base64.b64encode(content).decode("ascii")}],
-            "metadata": {
-                "seed": seed,
-                "steps": adapter.steps,
-                "guidance": adapter.guidance,
-                "memory_policy": adapter.memory_policy,
-                "duration_seconds": round(time.monotonic() - started, 3),
-            },
+            "png_base64": base64.b64encode(content).decode("ascii"),
+            "seed": seed,
+            "steps": adapter.steps,
+            "guidance": adapter.guidance,
+            "memory_policy": adapter.memory_policy,
+            "duration_seconds": round(time.monotonic() - started, 3),
         }
     finally:
         cancel.set()
@@ -104,10 +104,10 @@ async def owned_generation(adapter, payload: ImageRequest, request: Request):
             worker.exception()  # retrieve a failure after transport cancellation
 
 
-@router.post("/images/generations")
+@router.post("/images/generate")
 async def generate_image(payload: ImageRequest, request: Request):
     try:
-        async with request.app.state.model_manager.image_lease(payload.model) as adapter:
+        async with request.app.state.model_manager.image_lease(payload.model_id) as adapter:
             return await owned_generation(adapter, payload, request)
     except HTTPException:
         raise

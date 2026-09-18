@@ -19,6 +19,7 @@ available through Git history rather than in the working tree.
 ## Durable Decisions
 
 - [ADR 0001: ONNX Runtime provider model](adr/0001-onnx-runtime-provider-model.md)
+- [ADR 0002: Torch image provider protocol](adr/0002-torch-image-provider-protocol.md)
 
 ## Point-in-Time Audits
 

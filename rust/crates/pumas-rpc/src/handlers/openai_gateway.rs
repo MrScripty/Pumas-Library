@@ -36,20 +36,25 @@ pub async fn handle_openai_models(State(state): State<Arc<AppState>>) -> impl In
                 .filter(|model| model.provider == RuntimeProviderId::Torch)
             {
                 let ready = match model.endpoint_url.as_ref() {
-                    Some(endpoint) => pumas_app_manager::TorchClient::new(Some(endpoint.as_str()))
-                        .list_slots()
-                        .await
-                        .is_ok_and(|slots| {
-                            slots.iter().any(|slot| {
-                                slot.model_name == model.model_id
-                                    && slot.state
-                                        == pumas_app_manager::torch_client::SlotState::Ready
-                                    && matches!(
-                                        slot.model_type.as_deref(),
-                                        Some("nunchaku-z-image-turbo" | "flux2-klein-9b-kv-fp8")
-                                    )
+                    Some(endpoint) => {
+                        let client = pumas_app_manager::TorchClient::new(Some(endpoint.as_str()));
+                        // Image capability is exposed only when the runtime is
+                        // compatible (protocol plus capability) AND the slot is ready.
+                        client.verify_image_runtime().await.is_ok()
+                            && client.list_slots().await.is_ok_and(|slots| {
+                                slots.iter().any(|slot| {
+                                    slot.model_name == model.model_id
+                                        && slot.state
+                                            == pumas_app_manager::torch_client::SlotState::Ready
+                                        && matches!(
+                                            slot.model_type.as_deref(),
+                                            Some(
+                                                "nunchaku-z-image-turbo" | "flux2-klein-9b-kv-fp8"
+                                            )
+                                        )
+                                })
                             })
-                        }),
+                    }
                     None => false,
                 };
                 if !ready {
@@ -135,13 +140,17 @@ pub async fn handle_openai_proxy(
     };
 
     if policy.endpoint == OpenAiGatewayEndpoint::ImagesGenerations {
-        if let Err(message) = super::openai_gateway_images::validate(&body) {
-            return super::openai_gateway_images::error(
-                StatusCode::BAD_REQUEST,
-                "invalid_request",
-                message,
-            );
-        }
+        let request = match super::openai_gateway_images::parse(&body) {
+            Ok(request) => request,
+            Err(message) => {
+                return super::openai_gateway_images::error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_request",
+                    message,
+                );
+            }
+        };
+        return handle_image_generation(&state, request_path, request).await;
     }
 
     let Some(requested_model) = body
@@ -230,11 +239,86 @@ pub async fn handle_openai_proxy(
         .send()
         .await
     {
-        Ok(response) if policy.endpoint == OpenAiGatewayEndpoint::ImagesGenerations => {
-            super::openai_gateway_images::response(response).await
-        }
         Ok(response) => proxy_response(response).await,
         Err(_) => openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable()),
+    }
+}
+
+/// Route an image generation through the Torch provider adapter.
+///
+/// Keeps gateway routing, model lookup, body limits and disconnect
+/// propagation; the adapter owns the private sidecar boundary and this
+/// projects its typed result into the public response shape.
+async fn handle_image_generation(
+    state: &Arc<AppState>,
+    request_path: &str,
+    request: super::openai_gateway_images::PublicImageGenerationRequest,
+) -> Response {
+    let served = match find_openai_served_model(state, request.model.as_str()).await {
+        Ok(OpenAiServedModelLookup::Found(model)) => model,
+        Ok(OpenAiServedModelLookup::NotFound) => {
+            return openai_error_response(
+                StatusCode::NOT_FOUND,
+                format!("model is not served: {}", request.model.as_str()),
+            );
+        }
+        Ok(OpenAiServedModelLookup::Unavailable) => {
+            return openai_error_response_with_code(
+                StatusCode::SERVICE_UNAVAILABLE,
+                ModelServeErrorCode::EndpointUnavailable,
+                "Selected router model observation is unavailable",
+            );
+        }
+        Ok(OpenAiServedModelLookup::Ambiguous { code, message }) => {
+            return openai_error_response_with_code(StatusCode::CONFLICT, code, message);
+        }
+        Err(error) => {
+            return openai_public_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                PublicError::from(&error),
+            );
+        }
+    };
+
+    if !provider_supports_openai_gateway_endpoint(
+        served.provider,
+        OpenAiGatewayEndpoint::ImagesGenerations,
+        &state.provider_registry,
+    ) || served.provider != RuntimeProviderId::Torch
+    {
+        return openai_error_response_with_code(
+            StatusCode::BAD_REQUEST,
+            ModelServeErrorCode::EndpointUnavailable,
+            format!(
+                "provider {:?} does not support {request_path}",
+                served.provider
+            ),
+        );
+    }
+
+    let Some(endpoint) = served.endpoint_url.as_ref() else {
+        return openai_error_response(
+            StatusCode::BAD_GATEWAY,
+            "served model does not have a provider endpoint",
+        );
+    };
+    debug_assert_eq!(request.n, 1);
+    debug_assert_eq!(request.response_format, "b64_json");
+
+    // Awaiting inline keeps disconnect propagation: dropping this future
+    // drops the sidecar request at a denoising checkpoint.
+    match pumas_app_manager::TorchClient::new(Some(endpoint.as_str()))
+        .generate_image(
+            provider_request_model_id(&served, &state.provider_registry).as_str(),
+            request.prompt.as_str(),
+            request.width,
+            request.height,
+            request.seed,
+        )
+        .await
+    {
+        Ok(result) => super::openai_gateway_images::success(&result),
+        Err(error) => super::openai_gateway_images::provider_error(&error),
     }
 }
 

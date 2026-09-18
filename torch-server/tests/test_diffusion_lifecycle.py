@@ -84,7 +84,7 @@ class DiffusionLeaseTests(unittest.IsolatedAsyncioTestCase):
             async with manager.image_lease("image"):
                 return await owned_generation(
                     Adapter(),
-                    ImageRequest(model="image", prompt="x", width=512, height=512),
+                    ImageRequest(model_id="image", prompt="x", width=512, height=512),
                     Request(),
                 )
 

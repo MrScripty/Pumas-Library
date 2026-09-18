@@ -3,6 +3,7 @@
 Starts a FastAPI server that provides:
   - /v1/*   OpenAI-compatible API endpoints
   - /api/*  Pumas control endpoints (load/unload/status/devices)
+            plus the private image provider operation
   - /health Health check endpoint
 """
 
@@ -64,12 +65,12 @@ def create_app(host: str = "127.0.0.1", port: int = 8400, max_models: int = 4) -
         install_token_auth(app, api_token)
 
     app.include_router(openai_router, prefix="/v1")
-    app.include_router(image_router, prefix="/v1")
     app.include_router(control_router, prefix="/api")
+    app.include_router(image_router, prefix="/api")
 
     @app.get("/health")
     async def health_check():
-        return {"status": "ok", "protocol": 1}
+        return {"status": "ok", "protocol": 2, "capabilities": ["image_generation"]}
 
     return app
 

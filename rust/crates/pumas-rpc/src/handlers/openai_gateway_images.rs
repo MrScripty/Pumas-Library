@@ -1,10 +1,17 @@
-//! Image-specific bounds at the existing gateway transport boundary.
+//! Public image-generation contract authority and Torch provider projection.
+//!
+//! This module owns the public `/v1/images/generations` contract: [`parse`]
+//! decodes and validates untrusted gateway JSON into a
+//! [`PublicImageGenerationRequest`], and the [`success`]/[`provider_error`]
+//! projections render the typed Torch adapter result back into the public
+//! response shape. No other module may admit image fields.
 
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
+use pumas_app_manager::{TorchImageError, TorchImageResult};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -29,7 +36,20 @@ fn default_format() -> String {
     "b64_json".into()
 }
 
-pub(super) fn validate(body: &Value) -> Result<(), &'static str> {
+/// Validated public image-generation request: the single contract authority.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicImageGenerationRequest {
+    pub model: String,
+    pub prompt: String,
+    pub width: u32,
+    pub height: u32,
+    pub seed: Option<u32>,
+    pub n: u8,
+    pub response_format: String,
+}
+
+/// Decode and validate untrusted gateway JSON into the public request.
+pub(super) fn parse(body: &Value) -> Result<PublicImageGenerationRequest, &'static str> {
     let request: ImageRequest = serde_json::from_value(body.clone())
         .map_err(|_| "Unsupported or invalid image request fields")?;
     if request.model.trim().is_empty() || request.model.chars().count() > 256 {
@@ -44,8 +64,15 @@ pub(super) fn validate(body: &Value) -> Result<(), &'static str> {
     if request.width == 0 || request.height == 0 {
         return Err("width and height must be positive integers");
     }
-    let _ = request.seed;
-    Ok(())
+    Ok(PublicImageGenerationRequest {
+        model: request.model,
+        prompt: request.prompt,
+        width: request.width,
+        height: request.height,
+        seed: request.seed,
+        n: request.n,
+        response_format: request.response_format,
+    })
 }
 
 pub(super) fn error(status: StatusCode, code: &str, message: &str) -> Response {
@@ -56,79 +83,82 @@ pub(super) fn error(status: StatusCode, code: &str, message: &str) -> Response {
         .into_response()
 }
 
-pub(super) async fn response(mut upstream: reqwest::Response) -> Response {
-    const MAX_RESPONSE_BYTES: usize = 12 * 1024 * 1024;
-    let status = upstream.status();
-    let mut bytes = Vec::new();
-    loop {
-        match upstream.chunk().await {
-            Ok(Some(chunk)) if bytes.len().saturating_add(chunk.len()) <= MAX_RESPONSE_BYTES => {
-                bytes.extend_from_slice(&chunk)
+/// Project the typed Torch result into the public response shape.
+pub(super) fn success(result: &TorchImageResult) -> Response {
+    let created = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    (
+        StatusCode::OK,
+        Json(json!({
+            "created": created,
+            "data": [{"b64_json": result.png_base64}],
+            "metadata": {
+                "seed": result.seed,
+                "steps": result.steps,
+                "guidance": result.guidance,
+                "memory_policy": result.memory_policy,
+                "duration_seconds": result.duration_seconds
             }
-            Ok(None) => break,
-            _ => {
-                return error(
-                    StatusCode::BAD_GATEWAY,
-                    "invalid_backend_response",
-                    "Image response exceeded its limit or could not be read",
-                )
-            }
+        })),
+    )
+        .into_response()
+}
+
+/// Map decoded Torch provider errors to the existing public messages.
+pub(super) fn provider_error(failure: &TorchImageError) -> Response {
+    match failure {
+        TorchImageError::RuntimeBusy => error(
+            StatusCode::CONFLICT,
+            "runtime_busy",
+            "Image runtime is busy",
+        ),
+        TorchImageError::ModelUnavailable => error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "model_unavailable",
+            "Load the image model in Pumas first",
+        ),
+        TorchImageError::UnsupportedModel => error(
+            StatusCode::BAD_REQUEST,
+            "unsupported_model",
+            "Selected model does not support image generation",
+        ),
+        TorchImageError::OutOfMemory => error(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "out_of_memory",
+            "Insufficient GPU memory",
+        ),
+        TorchImageError::DeadlineExceeded => error(
+            StatusCode::GATEWAY_TIMEOUT,
+            "deadline_exceeded",
+            "Image generation exceeded its deadline",
+        ),
+        TorchImageError::Cancelled => {
+            error(cancelled_status(), "cancelled", "Image generation stopped")
         }
-    }
-    let body: Value = match serde_json::from_slice(&bytes) {
-        Ok(body) => body,
-        Err(_) => {
-            return error(
-                StatusCode::BAD_GATEWAY,
-                "invalid_backend_response",
-                "Image runtime returned invalid JSON",
-            )
-        }
-    };
-    if !status.is_success() {
-        // Accept only known runtime codes; never forward a backend traceback,
-        // filesystem path or arbitrary error string to clients.
-        let (code, message) = match body.pointer("/detail/code").and_then(Value::as_str) {
-            Some("runtime_busy") => ("runtime_busy", "Image runtime is busy"),
-            Some("out_of_memory") => ("out_of_memory", "Insufficient GPU memory"),
-            Some("model_unavailable") => {
-                ("model_unavailable", "Load the image model in Pumas first")
-            }
-            Some("deadline_exceeded") => (
-                "deadline_exceeded",
-                "Image generation exceeded its deadline",
-            ),
-            Some("cancelled") => ("cancelled", "Image generation stopped"),
-            Some("unsupported_model") => (
-                "unsupported_model",
-                "Selected model does not support image generation",
-            ),
-            _ => (
-                "backend_failure",
-                "Image runtime failed; inspect its Pumas log",
-            ),
-        };
-        return error(status, code, message);
-    }
-    if body
-        .get("data")
-        .and_then(Value::as_array)
-        .is_none_or(|items| {
-            items.len() != 1 || items[0].get("b64_json").and_then(Value::as_str).is_none()
-        })
-    {
-        return error(
+        TorchImageError::BackendFailure | TorchImageError::Transport => error(
+            StatusCode::BAD_GATEWAY,
+            "backend_failure",
+            "Image runtime failed; inspect its Pumas log",
+        ),
+        TorchImageError::InvalidBackendResult => error(
             StatusCode::BAD_GATEWAY,
             "invalid_backend_response",
             "Image runtime returned an invalid image response",
-        );
+        ),
     }
-    (status, Json(body)).into_response()
+}
+
+fn cancelled_status() -> StatusCode {
+    StatusCode::from_u16(499).unwrap_or(StatusCode::BAD_GATEWAY)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
+
     #[test]
     fn rejects_unknown_fields_batching_and_invalid_dimensions_before_backend_admission() {
         for extra in [
@@ -148,18 +178,111 @@ mod tests {
             body.as_object_mut()
                 .unwrap()
                 .extend(extra.as_object().unwrap().clone());
-            assert!(validate(&body).is_err(), "{body}");
+            assert!(parse(&body).is_err(), "{body}");
         }
         for missing in [json!({"height": 720}), json!({"width": 1280})] {
             let mut body = json!({"model":"image", "prompt":"a watercolor bird"});
             body.as_object_mut()
                 .unwrap()
                 .extend(missing.as_object().unwrap().clone());
-            assert!(validate(&body).is_err(), "{body}");
+            assert!(parse(&body).is_err(), "{body}");
         }
-        assert!(validate(
-            &json!({"model":"image", "prompt":"a watercolor bird", "width":1280, "height":720, "seed":0})
+        let request = parse(
+            &json!({"model":"image", "prompt":"a watercolor bird", "width":1280, "height":720, "seed":0}),
         )
-        .is_ok());
+        .unwrap();
+        assert_eq!(request.model, "image");
+        assert_eq!(request.prompt, "a watercolor bird");
+        assert_eq!(request.width, 1280);
+        assert_eq!(request.height, 720);
+        assert_eq!(request.seed, Some(0));
+        assert_eq!(request.n, 1);
+        assert_eq!(request.response_format, "b64_json");
+    }
+
+    #[tokio::test]
+    async fn success_projects_typed_result_into_public_shape() {
+        let response = success(&TorchImageResult {
+            png_base64: "aGVsbG8=".to_string(),
+            seed: 7,
+            steps: 8,
+            guidance: 0.0,
+            memory_policy: "sequential_cpu_offload".to_string(),
+            duration_seconds: 1.5,
+        });
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
+                .unwrap();
+        assert_eq!(body["data"][0]["b64_json"], "aGVsbG8=");
+        assert_eq!(body["data"].as_array().unwrap().len(), 1);
+        assert_eq!(body["metadata"]["seed"], 7);
+        assert_eq!(body["metadata"]["steps"], 8);
+        assert_eq!(body["metadata"]["memory_policy"], "sequential_cpu_offload");
+        assert!(body["created"].as_u64().is_some());
+    }
+
+    #[tokio::test]
+    async fn provider_errors_keep_existing_messages() {
+        for (error, code, message) in [
+            (
+                TorchImageError::RuntimeBusy,
+                "runtime_busy",
+                "Image runtime is busy",
+            ),
+            (
+                TorchImageError::ModelUnavailable,
+                "model_unavailable",
+                "Load the image model in Pumas first",
+            ),
+            (
+                TorchImageError::UnsupportedModel,
+                "unsupported_model",
+                "Selected model does not support image generation",
+            ),
+            (
+                TorchImageError::OutOfMemory,
+                "out_of_memory",
+                "Insufficient GPU memory",
+            ),
+            (
+                TorchImageError::DeadlineExceeded,
+                "deadline_exceeded",
+                "Image generation exceeded its deadline",
+            ),
+            (
+                TorchImageError::Cancelled,
+                "cancelled",
+                "Image generation stopped",
+            ),
+            (
+                TorchImageError::BackendFailure,
+                "backend_failure",
+                "Image runtime failed; inspect its Pumas log",
+            ),
+        ] {
+            let response = provider_error(&error);
+            assert_eq!(response.status(), provider_expected_status(&error));
+            let status = response.status();
+            let body: Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
+                    .unwrap();
+            assert_eq!(status, provider_expected_status(&error));
+            assert_eq!(body["error"]["code"], code, "{error:?}");
+            assert_eq!(body["error"]["message"], message, "{error:?}");
+        }
+    }
+
+    fn provider_expected_status(error: &TorchImageError) -> StatusCode {
+        match error {
+            TorchImageError::RuntimeBusy => StatusCode::CONFLICT,
+            TorchImageError::ModelUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+            TorchImageError::UnsupportedModel => StatusCode::BAD_REQUEST,
+            TorchImageError::OutOfMemory => StatusCode::INSUFFICIENT_STORAGE,
+            TorchImageError::DeadlineExceeded => StatusCode::GATEWAY_TIMEOUT,
+            TorchImageError::Cancelled => cancelled_status(),
+            TorchImageError::BackendFailure => StatusCode::BAD_GATEWAY,
+            _ => StatusCode::BAD_GATEWAY,
+        }
     }
 }

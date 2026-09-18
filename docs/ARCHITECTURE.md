@@ -119,12 +119,17 @@ Optional inference support distinguishes:
 - gateway endpoint capabilities.
 
 Ollama and llama.cpp use external processes, ONNX Runtime is hosted in the Rust
-process, and Torch uses the Python sidecar. External clients should target the
-Pumas `/v1` gateway rather than provider-internal endpoints when the provider is
-served through Pumas.
+process, and Torch uses the Python sidecar. The `/v1` gateway is the public
+facade: external clients target it, never provider-internal endpoints.
+Provider processes expose private protocols (versioned handshakes,
+capability advertisements, and internal request shapes) that the gateway
+adapts into the public contracts; compatibility between the two sides is
+established inside Pumas, not by clients.
 
 The durable provider decision is recorded in
-[ADR 0001](adr/0001-onnx-runtime-provider-model.md).
+[ADR 0001](adr/0001-onnx-runtime-provider-model.md); the Torch image
+boundary split is recorded in
+[ADR 0002](adr/0002-torch-image-provider-protocol.md).
 
 ## Build Variants
 

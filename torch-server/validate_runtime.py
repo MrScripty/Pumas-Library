@@ -62,6 +62,10 @@ def validate() -> None:
                     health = json.load(response)
                 if health.get("protocol") != recipe["protocol"]:
                     raise RuntimeError("Sidecar protocol does not match runtime recipe")
+                if "image_generation" not in health.get("capabilities", []):
+                    raise RuntimeError(
+                        "Sidecar handshake does not advertise image_generation capability"
+                    )
                 print(
                     json.dumps(
                         {

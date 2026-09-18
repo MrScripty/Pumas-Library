@@ -28,7 +28,7 @@ fn bundle(requirements: &str, validation: &str) -> Vec<u8> {
     for (name, data) in [
         (
             "runtime.json",
-            r#"{"recipe_id":"torch-runtime-0.1.0","protocol":1,"python":"3.12","platform":"linux-x86_64"}"#,
+            r#"{"recipe_id":"torch-runtime-0.1.0","protocol":2,"python":"3.12","platform":"linux-x86_64"}"#,
         ),
         ("serve.py", ""),
         ("requirements.txt", requirements),

@@ -1,5 +1,15 @@
 # Pumas image generation
 
+This is the public, Pumas-owned image contract. Pumas owns
+`POST /v1/images/generations` and all validation, adaptation, error mapping,
+timeout, and cancellation behavior described here. Provider internals execute
+behind the gateway and are not part of this contract; they are covered by the
+private [Torch provider protocol](torch-provider-protocol.md).
+
+External clients must target this gateway contract. Compatibility with any
+provider-internal endpoint is established inside Pumas (gateway adaptation
+plus provider handshake), never by clients addressing the provider directly.
+
 This contract is implemented behind `inference-plugins`. Nunchaku and FLUX.2 Klein with a locally converted FP8 Qwen3-8B encoder have
 passed the real GPU and Tuldok display/save workflow.
 Only the concrete adapters below are supported.

@@ -1,7 +1,11 @@
 # Torch Inference Sidecar
 
-The Torch sidecar is an experimental Python service for loading compatible model
-artifacts. A managed runtime bundle is being qualified; it is not yet a published
+The Torch sidecar is a provider process managed by Pumas, not a public
+endpoint. External clients must use the Pumas `/v1` gateway
+([public image contract](../docs/contracts/image-generation.md)); the
+sidecar's own routes are private and defined by the
+[Torch provider protocol](../docs/contracts/torch-provider-protocol.md).
+A managed runtime bundle is being qualified; it is not yet a published
 or accepted Pumas runtime.
 Promotion requires a resolved production dependency set and real ASGI,
 model-loader, generation, device, responsiveness, and shutdown evidence.
@@ -11,11 +15,13 @@ model-loader, generation, device, responsiveness, and shutdown evidence.
 - `GET /v1/models`: OpenAI-shaped model-list response
 - `POST /v1/chat/completions`: text-only, non-streaming chat request subset
 - `POST /v1/completions`: single-text, non-streaming completion request subset
-- `POST /v1/images/generations`: one PNG through the concrete diffusion adapters
-  ([bounded image contract](../docs/contracts/image-generation.md)); Nunchaku and Klein with an FP8 text encoder
+- `POST /api/images/generate`: private single-PNG generation through the
+  concrete diffusion adapters
+  ([provider protocol](../docs/contracts/torch-provider-protocol.md));
+  Nunchaku and Klein with an FP8 text encoder
   passed real Tuldok generation, display and save
 - `/api/*`: Pumas load, unload, status, and device controls
-- `/health`: process health
+- `/health`: process health with the provider protocol version and capabilities
 
 The text routes accept the following request subset:
 

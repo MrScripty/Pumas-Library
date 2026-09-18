@@ -78,8 +78,11 @@ Finalize and document this bounded contract in M2 before integrating Tuldok:
   capability field containing `image_generation` for eligible ready models.
   Keep existing text clients compatible and expose no filesystem paths.
 - `POST /v1/images/generations` accepts `model`, nonempty `prompt`, `n: 1`,
-  `size: "WIDTHxHEIGHT"`, `response_format: "b64_json"`, and optional integer
-  `seed`. Validate supported dimensions and pixel/response limits per adapter.
+  numeric `width`/`height`, `response_format: "b64_json"`, and optional integer
+  `seed` ([public contract](../../contracts/image-generation.md); the former
+  `size` string is rejected). Provider execution uses the private
+  [Torch provider protocol](../../contracts/torch-provider-protocol.md).
+  Validate supported dimensions and pixel/response limits per adapter.
   Use documented model-specific defaults for steps and guidance initially.
 - Return `{"created": <unix seconds>, "data": [{"b64_json": "<PNG bytes in base64>"}]}`.
   Record actual seed/settings in an additive metadata field for reproducibility;

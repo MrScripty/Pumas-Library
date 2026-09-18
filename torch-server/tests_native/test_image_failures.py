@@ -1,6 +1,8 @@
 """Real transport dependencies with controlled worker failures; no GPU claim."""
 
 import asyncio
+import base64
+import io
 from contextlib import asynccontextmanager
 from pathlib import Path
 import sys
@@ -52,7 +54,7 @@ class ImageFailureTests(unittest.IsolatedAsyncioTestCase):
                     raise error
 
                 adapter.generate = fail
-                payload = ImageRequest(model="fixture", prompt="test", width=512, height=512)
+                payload = ImageRequest(model_id="fixture", prompt="test", width=512, height=512)
                 with self.assertRaises(HTTPException) as caught:
                     await generate_image(payload, request)
                 self.assertEqual(
@@ -61,7 +63,8 @@ class ImageFailureTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(held)
                 adapter.generate = lambda *_args: Image.new("RGB", (512, 512))
                 result = await generate_image(payload, request)
-                self.assertEqual(len(result["data"]), 1)
+                raw = base64.b64decode(result["png_base64"])
+                self.assertEqual(Image.open(io.BytesIO(raw)).size, (512, 512))
                 self.assertFalse(held)
 
     async def test_deadline_keeps_lease_until_cancelled_worker_has_stopped(self):
@@ -82,7 +85,7 @@ class ImageFailureTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.wait_for(
                     owned_generation(
                         SimpleNamespace(generate=generate),
-                        ImageRequest(model="fixture", prompt="test", width=512, height=512),
+                        ImageRequest(model_id="fixture", prompt="test", width=512, height=512),
                         SimpleNamespace(is_disconnected=connected),
                     ),
                     4,

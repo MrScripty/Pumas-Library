@@ -1,6 +1,6 @@
 # Plan: Torch Image Provider Contract Correction
 
-**Plan status:** `Planned`
+**Plan status:** `Active`
 
 **Objective:** Establish one reusable generation lifetime in which an admitted
 image, text, or future generation remains active until completion,
@@ -11,8 +11,9 @@ immutable runtime installation model.
 
 **Acceptance status:** `pending`
 
-**Current phase:** Reconciled planning authority is complete; provider source
-implementation has not started.
+**Current phase:** `TIPC-M1` is admitted under `start`; its bounded Pumas and
+Tuldok allocations are recorded. Product implementation awaits the required
+project-scoped Passeur registrations and a Codex session exposing their tools.
 
 **Next integration slice:** `TIPC-M1` — implement and verify the reusable Pumas
 generation lifetime and coherent Torch image provider correction, including
@@ -227,7 +228,7 @@ including the three named handoffs, pass.
 
 ## TIPC-M1 — shared generation lifetime and provider correction
 
-**Status:** `Planned`
+**Status:** `Active`
 
 **Goal:** Establish the shared Pumas generation lifetime and correct the live
 Pumas/Torch image compatibility and result contract as one implementation unit.

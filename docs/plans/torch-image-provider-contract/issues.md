@@ -110,3 +110,19 @@
   separately prove continued execution beyond the old boundary with controlled
   time.
 - Evidence: focused native-suite execution plus TIPC-01/TIPC-03.
+
+## TIPC-I10 — Required project-scoped Passeur servers are not registered
+
+- Finding: installed Passeur and Muse diagnostics succeed for Passeur's own
+  profile, but no Pumas or Tuldok profile exists and this Codex session exposes
+  none of the four required Passeur MCP tools. The installed registration helper
+  owns one default `muse_bridge` name, while this assignment requires distinct
+  project-scoped Pumas and Tuldok servers.
+- Disposition: retain the admitted allocations without dispatch. Configure
+  separate profiles with worktree roots outside both source checkouts, register
+  distinct server names without replacing another project's default, confirm
+  human elicitation/model/subscription policy, restart Codex, and run Doctor
+  before delegation. Do not substitute native Codex subagents or direct Muse
+  sessions.
+- Evidence: Passeur Doctor/profile lookup and current MCP tool inventory. This
+  blocks implementation execution, not plan admission or read-only preparation.

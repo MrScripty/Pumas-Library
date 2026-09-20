@@ -107,6 +107,12 @@ pub(super) fn success(result: &TorchImageResult) -> Response {
 }
 
 /// Map decoded Torch provider errors to the existing public messages.
+///
+/// There is no generation-deadline outcome: admitted generation has no total,
+/// read, idle, or elapsed deadline, so no `deadline_exceeded` code is
+/// produced here. A connection-establishment failure surfaces as
+/// `backend_failure`, which reports that the runtime failed without claiming
+/// that admitted generation was cancelled or completed.
 pub(super) fn provider_error(failure: &TorchImageError) -> Response {
     match failure {
         TorchImageError::RuntimeBusy => error(
@@ -128,11 +134,6 @@ pub(super) fn provider_error(failure: &TorchImageError) -> Response {
             StatusCode::INSUFFICIENT_STORAGE,
             "out_of_memory",
             "Insufficient GPU memory",
-        ),
-        TorchImageError::DeadlineExceeded => error(
-            StatusCode::GATEWAY_TIMEOUT,
-            "deadline_exceeded",
-            "Image generation exceeded its deadline",
         ),
         TorchImageError::Cancelled => {
             error(cancelled_status(), "cancelled", "Image generation stopped")
@@ -246,11 +247,6 @@ mod tests {
                 "Insufficient GPU memory",
             ),
             (
-                TorchImageError::DeadlineExceeded,
-                "deadline_exceeded",
-                "Image generation exceeded its deadline",
-            ),
-            (
                 TorchImageError::Cancelled,
                 "cancelled",
                 "Image generation stopped",
@@ -273,13 +269,76 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn public_projection_exposes_only_safe_owned_fields() {
+        let response = success(&TorchImageResult {
+            png_base64: "aGVsbG8=".to_string(),
+            seed: 7,
+            steps: 8,
+            guidance: 0.0,
+            memory_policy: "sequential_cpu_offload".to_string(),
+            duration_seconds: 1.5,
+        });
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
+                .unwrap();
+        // Private additive fields are never projected: the public shape owns
+        // exactly these keys.
+        let data_keys: Vec<&str> = body["data"][0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(data_keys, vec!["b64_json"]);
+        let mut metadata_keys: Vec<&str> = body["metadata"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        metadata_keys.sort_unstable();
+        assert_eq!(
+            metadata_keys,
+            vec![
+                "duration_seconds",
+                "guidance",
+                "memory_policy",
+                "seed",
+                "steps"
+            ]
+        );
+        assert!(body.get("peak_vram_bytes").is_none());
+        assert!(body["metadata"].get("peak_vram_bytes").is_none());
+    }
+
+    #[tokio::test]
+    async fn public_projection_has_no_deadline_outcome() {
+        for error in [
+            TorchImageError::RuntimeBusy,
+            TorchImageError::ModelUnavailable,
+            TorchImageError::UnsupportedModel,
+            TorchImageError::OutOfMemory,
+            TorchImageError::Cancelled,
+            TorchImageError::BackendFailure,
+            TorchImageError::Transport,
+            TorchImageError::InvalidBackendResult,
+        ] {
+            let response = provider_error(&error);
+            let body: Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), 1024 * 1024).await.unwrap())
+                    .unwrap();
+            let code = body["error"]["code"].as_str().unwrap();
+            assert_ne!(code, "deadline_exceeded", "{error:?}");
+        }
+    }
+
     fn provider_expected_status(error: &TorchImageError) -> StatusCode {
         match error {
             TorchImageError::RuntimeBusy => StatusCode::CONFLICT,
             TorchImageError::ModelUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             TorchImageError::UnsupportedModel => StatusCode::BAD_REQUEST,
             TorchImageError::OutOfMemory => StatusCode::INSUFFICIENT_STORAGE,
-            TorchImageError::DeadlineExceeded => StatusCode::GATEWAY_TIMEOUT,
             TorchImageError::Cancelled => cancelled_status(),
             TorchImageError::BackendFailure => StatusCode::BAD_GATEWAY,
             _ => StatusCode::BAD_GATEWAY,

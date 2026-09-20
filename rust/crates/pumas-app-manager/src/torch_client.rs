@@ -33,13 +33,17 @@ const API_TIMEOUT: Duration = Duration::from_secs(10);
 /// Timeout for model loading (can take minutes for large models).
 const LOAD_TIMEOUT: Duration = Duration::from_secs(600);
 
-/// Timeout for image generation. The sidecar deadline is 600 seconds and the
-/// gateway transport allowance is 615 seconds, so this stays inside both.
-const IMAGE_TIMEOUT: Duration = Duration::from_secs(600);
+/// Connection-establishment budget for image generation requests.
+///
+/// Generation itself is duration-unbounded (see
+/// `docs/contracts/generation-lifetime.md`): once connected, an admitted
+/// request may remain silent until its terminal result. Only establishing the
+/// transport connection is bounded here.
+pub const GENERATION_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Single owner of the Torch sidecar protocol version spoken by this build.
 /// The installer recipe check and the runtime handshake both use this value.
-pub const SUPPORTED_TORCH_PROTOCOL: u32 = 2;
+pub const SUPPORTED_TORCH_PROTOCOL: u32 = 3;
 
 /// Capability advertised by image-capable Torch sidecars.
 pub const TORCH_IMAGE_GENERATION_CAPABILITY: &str = "image_generation";
@@ -252,29 +256,153 @@ struct HealthResponse {
 }
 
 /// Sidecar handshake: liveness, protocol version and capability advertisement.
+///
+/// `status` and `protocol` are required: a body that omits them or reports
+/// them with the wrong JSON type is malformed, not merely incompatible.
+/// `capabilities` is additive and defaults to empty, so a legacy body without
+/// it parses as incompatible (missing capability) rather than malformed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TorchHandshake {
     /// Liveness marker reported by the sidecar (`ok` when healthy).
-    #[serde(default)]
     pub status: String,
     /// Sidecar protocol version; must equal [`SUPPORTED_TORCH_PROTOCOL`].
-    #[serde(default)]
     pub protocol: u32,
     /// Capability names advertised by the sidecar.
     #[serde(default)]
     pub capabilities: Vec<String>,
 }
 
+/// One owned incompatibility reason for a Torch sidecar handshake.
+///
+/// Each variant maps to a distinct boundary outcome so callers can tell
+/// malformed handshakes, protocol mismatches, missing capabilities, and
+/// unreachable sidecars apart instead of sharing one generic error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TorchCompatibilityError {
+    /// The sidecar process is not alive (`status` is not `"ok"`).
+    NotLive { status: String },
+    /// The sidecar speaks a different protocol than this build requires.
+    ProtocolMismatch { actual: u32, expected: u32 },
+    /// The sidecar protocol matches but it does not advertise image work.
+    MissingCapability { capability: &'static str },
+}
+
+impl TorchCompatibilityError {
+    /// Stable code identifying the incompatibility reason.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::NotLive { .. } => "torch_not_live",
+            Self::ProtocolMismatch { .. } => "torch_protocol_mismatch",
+            Self::MissingCapability { .. } => "torch_missing_capability",
+        }
+    }
+}
+
+impl std::fmt::Display for TorchCompatibilityError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotLive { status } => {
+                write!(f, "Torch sidecar is not live (status {status:?})")
+            }
+            Self::ProtocolMismatch { actual, expected } => write!(
+                f,
+                "Torch sidecar protocol {actual} is incompatible; this build requires protocol {expected}"
+            ),
+            Self::MissingCapability { capability } => write!(
+                f,
+                "Torch sidecar does not advertise the '{capability}' capability"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for TorchCompatibilityError {}
+
+/// Typed failure for fetching and checking a Torch sidecar handshake.
+///
+/// Unreachable, malformed, and incompatible sidecars fail with distinct
+/// reasons so serving, listing, and admission boundaries can map each one to
+/// its owning outcome instead of sharing a generic error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TorchHandshakeFailure {
+    /// The sidecar could not be reached or did not answer successfully.
+    Unavailable(String),
+    /// The sidecar answered, but not with the handshake shape.
+    Malformed(String),
+    /// The handshake parsed but is not live, current-protocol, or capable.
+    Incompatible(TorchCompatibilityError),
+}
+
+impl TorchHandshakeFailure {
+    /// Stable code identifying the failure reason.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Unavailable(_) => "torch_unavailable",
+            Self::Malformed(_) => "torch_malformed_handshake",
+            Self::Incompatible(error) => error.code(),
+        }
+    }
+}
+
+impl std::fmt::Display for TorchHandshakeFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unavailable(message) | Self::Malformed(message) => f.write_str(message),
+            Self::Incompatible(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for TorchHandshakeFailure {}
+
 impl TorchHandshake {
+    /// Liveness check, independent of protocol and capability state.
+    pub fn is_live(&self) -> bool {
+        self.status == "ok"
+    }
+
+    /// Exact protocol agreement with this build, independent of liveness
+    /// and capability state.
+    pub fn protocol_matches(&self) -> bool {
+        self.protocol == SUPPORTED_TORCH_PROTOCOL
+    }
+
+    /// Image-capability advertisement, independent of liveness, protocol,
+    /// and ready-slot state. A ready slot is checked separately through
+    /// [`TorchClient::list_slots`]; this advertisement alone never admits
+    /// a model for image work.
+    pub fn has_image_capability(&self) -> bool {
+        self.capabilities
+            .iter()
+            .any(|capability| capability == TORCH_IMAGE_GENERATION_CAPABILITY)
+    }
+
+    /// Require liveness, the supported protocol, and the image-generation
+    /// capability, reporting the first failure with its owning reason.
+    pub fn check_image_compatible(&self) -> std::result::Result<(), TorchCompatibilityError> {
+        if !self.is_live() {
+            return Err(TorchCompatibilityError::NotLive {
+                status: self.status.clone(),
+            });
+        }
+        if !self.protocol_matches() {
+            return Err(TorchCompatibilityError::ProtocolMismatch {
+                actual: self.protocol,
+                expected: SUPPORTED_TORCH_PROTOCOL,
+            });
+        }
+        if !self.has_image_capability() {
+            return Err(TorchCompatibilityError::MissingCapability {
+                capability: TORCH_IMAGE_GENERATION_CAPABILITY,
+            });
+        }
+        Ok(())
+    }
+
     /// Returns true when the sidecar speaks the supported protocol and
     /// advertises image generation.
     pub fn is_image_compatible(&self) -> bool {
-        self.status == "ok"
-            && self.protocol == SUPPORTED_TORCH_PROTOCOL
-            && self
-                .capabilities
-                .iter()
-                .any(|capability| capability == TORCH_IMAGE_GENERATION_CAPABILITY)
+        self.check_image_compatible().is_ok()
     }
 }
 
@@ -307,8 +435,6 @@ pub enum TorchImageError {
     UnsupportedModel,
     /// The sidecar ran out of GPU memory.
     OutOfMemory,
-    /// Generation exceeded the sidecar deadline (or the client timeout).
-    DeadlineExceeded,
     /// Generation was cancelled (client disconnect or explicit stop).
     Cancelled,
     /// The sidecar reported an unclassified failure.
@@ -327,7 +453,6 @@ impl TorchImageError {
             Self::ModelUnavailable => "model_unavailable",
             Self::UnsupportedModel => "unsupported_model",
             Self::OutOfMemory => "out_of_memory",
-            Self::DeadlineExceeded => "deadline_exceeded",
             Self::Cancelled => "cancelled",
             Self::BackendFailure => "backend_failure",
             Self::InvalidBackendResult => "invalid_backend_result",
@@ -364,6 +489,11 @@ struct ImageSuccessBody {
 /// Decode a sidecar error body (`detail.code`) into the typed failure.
 /// Only known runtime codes are admitted; anything else is a backend failure
 /// so backend paths and tracebacks are never forwarded.
+///
+/// There is no generation-deadline outcome: admitted generation has no total,
+/// read, idle, or elapsed deadline. A legacy `deadline_exceeded` code is
+/// therefore decoded as an unclassified backend failure, never as proof that
+/// work stopped on time.
 fn decode_image_error(body: &[u8]) -> TorchImageError {
     let code = serde_json::from_slice::<serde_json::Value>(body)
         .ok()
@@ -378,13 +508,149 @@ fn decode_image_error(body: &[u8]) -> TorchImageError {
         Some("model_unavailable") => TorchImageError::ModelUnavailable,
         Some("unsupported_model") => TorchImageError::UnsupportedModel,
         Some("out_of_memory") => TorchImageError::OutOfMemory,
-        Some("deadline_exceeded") => TorchImageError::DeadlineExceeded,
         Some("cancelled") => TorchImageError::Cancelled,
         Some("invalid_backend_result") | Some("invalid_backend_response") => {
             TorchImageError::InvalidBackendResult
         }
         _ => TorchImageError::BackendFailure,
     }
+}
+
+/// Decoded PNG payload limit: the sidecar must not return more than 8 MiB of
+/// PNG bytes for one image.
+const MAX_PNG_BYTES: usize = 8 * 1024 * 1024;
+
+/// Decode one base64 character into its 6-bit value. Rejects whitespace and
+/// non-alphabet characters so sidecar payloads are checked strictly.
+fn base64_value(byte: u8) -> Option<u32> {
+    match byte {
+        b'A'..=b'Z' => Some((byte - b'A') as u32),
+        b'a'..=b'z' => Some((byte - b'a' + 26) as u32),
+        b'0'..=b'9' => Some((byte - b'0' + 52) as u32),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    }
+}
+
+/// Strictly decode standard base64 without whitespace. Returns `None` for any
+/// malformed input, including incorrect padding or trailing bits.
+fn decode_base64_strict(input: &str) -> Option<Vec<u8>> {
+    let bytes = input.as_bytes();
+    if bytes.is_empty() || bytes.len() % 4 != 0 {
+        return None;
+    }
+    let mut output = Vec::with_capacity(bytes.len() / 4 * 3);
+    let total = bytes.len() / 4;
+    for (index, chunk) in bytes.chunks_exact(4).enumerate() {
+        let pad = chunk.iter().rev().take_while(|&&b| b == b'=').count();
+        if pad > 2 {
+            return None;
+        }
+        // Padding is only valid on the final quantum.
+        if pad > 0 && index + 1 != total {
+            return None;
+        }
+        let mut sextets = [0u32; 4];
+        for (position, &byte) in chunk.iter().enumerate() {
+            if byte == b'=' {
+                // Padding may only fill the trailing pad slots.
+                if position < 4 - pad {
+                    return None;
+                }
+                sextets[position] = 0;
+            } else {
+                sextets[position] = base64_value(byte)?;
+            }
+        }
+        let triple = (sextets[0] << 18) | (sextets[1] << 12) | (sextets[2] << 6) | sextets[3];
+        output.push((triple >> 16) as u8);
+        if pad < 2 {
+            output.push((triple >> 8) as u8);
+        }
+        if pad == 0 {
+            output.push(triple as u8);
+        }
+        // Non-zero trailing bits indicate a non-canonical encoding.
+        if pad == 1 && (triple & 0xFF) != 0 {
+            return None;
+        }
+        if pad == 2 && (triple & 0xFFFF) != 0 {
+            return None;
+        }
+    }
+    Some(output)
+}
+
+/// Read the `IHDR` dimensions of a PNG without image decoding. Returns
+/// `(width, height)` or `None` when the bytes are not a PNG with a leading
+/// `IHDR` chunk.
+fn png_dimensions(png: &[u8]) -> Option<(u32, u32)> {
+    const SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+    // Signature (8) plus length (4), type (4), and IHDR data (13) = 29 bytes.
+    if png.len() < 29 || &png[..8] != SIGNATURE {
+        return None;
+    }
+    let length = u32::from_be_bytes([png[8], png[9], png[10], png[11]]);
+    if length != 13 || &png[12..16] != b"IHDR" {
+        return None;
+    }
+    let width = u32::from_be_bytes([png[16], png[17], png[18], png[19]]);
+    let height = u32::from_be_bytes([png[20], png[21], png[22], png[23]]);
+    if width == 0 || height == 0 {
+        return None;
+    }
+    Some((width, height))
+}
+
+/// Validate a decoded sidecar success body against the private result
+/// contract: every canonical required value must be present and well-formed,
+/// the PNG must decode to the requested dimensions within the PNG bound, and
+/// the whole-payload bound applies to the entire received body.
+///
+/// Unknown additive fields (for example `peak_vram_bytes`) are ignored here
+/// and never projected publicly; invalid required data fails closed.
+fn decode_image_result(
+    body: &[u8],
+    expected_width: u32,
+    expected_height: u32,
+) -> std::result::Result<TorchImageResult, TorchImageError> {
+    let parsed = serde_json::from_slice::<ImageSuccessBody>(body).ok();
+    let Some(ImageSuccessBody {
+        png_base64: Some(png_base64),
+        seed: Some(seed),
+        steps: Some(steps),
+        guidance: Some(guidance),
+        memory_policy: Some(memory_policy),
+        duration_seconds: Some(duration_seconds),
+    }) = parsed
+    else {
+        return Err(TorchImageError::InvalidBackendResult);
+    };
+    if png_base64.is_empty()
+        || memory_policy.trim().is_empty()
+        || !guidance.is_finite()
+        || !duration_seconds.is_finite()
+        || duration_seconds < 0.0
+    {
+        return Err(TorchImageError::InvalidBackendResult);
+    }
+    let png = decode_base64_strict(&png_base64).ok_or(TorchImageError::InvalidBackendResult)?;
+    if png.len() > MAX_PNG_BYTES {
+        return Err(TorchImageError::InvalidBackendResult);
+    }
+    match png_dimensions(&png) {
+        Some((width, height)) if width == expected_width && height == expected_height => {}
+        _ => return Err(TorchImageError::InvalidBackendResult),
+    }
+    Ok(TorchImageResult {
+        png_base64,
+        seed,
+        steps,
+        guidance,
+        memory_policy,
+        duration_seconds,
+    })
 }
 
 // =============================================================================
@@ -397,7 +663,9 @@ pub struct TorchClient {
     client: reqwest::Client,
     /// Client with extended timeout for model loading operations.
     load_client: reqwest::Client,
-    /// Client with the image-generation timeout (600s class).
+    /// Connection-bounded but duration-unbounded client for image generation:
+    /// only connection establishment is bounded; an admitted request may stay
+    /// connected and silent until its terminal result.
     image_client: reqwest::Client,
 }
 
@@ -424,7 +692,7 @@ impl TorchClient {
             .expect("failed to build reqwest load client");
 
         let image_client = reqwest::Client::builder()
-            .timeout(IMAGE_TIMEOUT)
+            .connect_timeout(GENERATION_CONNECT_TIMEOUT)
             .user_agent("pumas-library")
             .build()
             .expect("failed to build reqwest image client");
@@ -458,52 +726,90 @@ impl TorchClient {
     }
 
     /// Fetch the sidecar handshake (`status`, `protocol`, `capabilities`).
+    ///
+    /// A missing or mistyped body is malformed and fails here, before any
+    /// protocol or capability classification.
     pub async fn handshake(&self) -> Result<TorchHandshake> {
+        self.fetch_handshake()
+            .await
+            .map_err(|failure| match failure {
+                TorchHandshakeFailure::Unavailable(message)
+                | TorchHandshakeFailure::Malformed(message) => net_err(message),
+                TorchHandshakeFailure::Incompatible(error) => PumasError::TorchInference {
+                    message: error.to_string(),
+                },
+            })
+    }
+
+    /// Fetch the handshake with its owning failure reason: unreachable,
+    /// malformed, or incompatible. Ready-slot state stays separate.
+    async fn fetch_handshake(&self) -> std::result::Result<TorchHandshake, TorchHandshakeFailure> {
         let url = format!("{}/health", self.base_url);
         debug!("Torch handshake: {}", url);
 
         let response = self.client.get(&url).send().await.map_err(|e| {
-            net_err(format!(
-                "Failed to connect to Torch server at {}: {}",
-                url, e
+            TorchHandshakeFailure::Unavailable(format!(
+                "Failed to connect to Torch server at {url}: {e}"
             ))
         })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body: String = response.text().await.unwrap_or_default();
-            return Err(net_err(format!(
-                "Torch handshake API returned {}: {}",
-                status, body
+            return Err(TorchHandshakeFailure::Unavailable(format!(
+                "Torch handshake API returned {status}: {body}"
             )));
         }
 
-        response
-            .json()
-            .await
-            .map_err(|e| net_err(format!("Failed to parse Torch handshake response: {}", e)))
+        response.json().await.map_err(|e| {
+            TorchHandshakeFailure::Malformed(format!(
+                "Failed to parse Torch handshake response: {e}"
+            ))
+        })
+    }
+
+    /// Fetch the handshake and require the supported protocol plus the
+    /// image-generation capability, keeping each failure reason distinct.
+    pub async fn check_image_runtime(
+        &self,
+    ) -> std::result::Result<TorchHandshake, TorchHandshakeFailure> {
+        let handshake = self.fetch_handshake().await?;
+        handshake
+            .check_image_compatible()
+            .map(|()| handshake)
+            .map_err(TorchHandshakeFailure::Incompatible)
     }
 
     /// Require the supported protocol plus the image-generation capability.
+    ///
+    /// Each incompatibility keeps its owning reason: a malformed handshake
+    /// body fails inside [`TorchClient::handshake`], while liveness, protocol
+    /// mismatch, and missing capability fail here with distinct messages.
+    /// An unreachable sidecar fails as a network error. Ready-slot state is
+    /// checked separately through [`TorchClient::list_slots`]: compatibility
+    /// alone never admits a model, and a ready slot never proves
+    /// compatibility.
     pub async fn verify_image_runtime(&self) -> Result<TorchHandshake> {
         let handshake = self.handshake().await?;
-        if handshake.is_image_compatible() {
-            Ok(handshake)
-        } else {
-            Err(PumasError::TorchInference {
-                message: format!(
-                    "Torch sidecar protocol {} is incompatible; this build requires protocol {} with the '{TORCH_IMAGE_GENERATION_CAPABILITY}' capability",
-                    handshake.protocol, SUPPORTED_TORCH_PROTOCOL
-                ),
+        handshake
+            .check_image_compatible()
+            .map(|()| handshake)
+            .map_err(|error| PumasError::TorchInference {
+                message: error.to_string(),
             })
-        }
     }
 
     /// Generate one image through the sidecar's private image boundary.
     ///
     /// Posts normalized values as private JSON (`model_id`, not the public
-    /// `model` contract) and returns the typed result. Awaiting inline keeps
-    /// disconnect propagation: dropping the future closes the sidecar request.
+    /// `model` contract) and returns the typed result. The transport is
+    /// connection-bounded but duration-unbounded: an admitted request may
+    /// remain connected and silent until its terminal result, and elapsed
+    /// time alone never fails it. Awaiting inline keeps disconnect
+    /// propagation: dropping the future closes the sidecar request, which
+    /// requests cancellation without proving that sidecar work stopped. A
+    /// lost transport before a terminal result is an unknown outcome and is
+    /// never replayed here.
     pub async fn generate_image(
         &self,
         model_id: &str,
@@ -529,13 +835,7 @@ impl TorchClient {
             .json(&body)
             .send()
             .await
-            .map_err(|error| {
-                if error.is_timeout() {
-                    TorchImageError::DeadlineExceeded
-                } else {
-                    TorchImageError::Transport
-                }
-            })?;
+            .map_err(|_| TorchImageError::Transport)?;
 
         let status = response.status();
         // Bound the body while streaming, mirroring the gateway JSON limit,
@@ -552,24 +852,7 @@ impl TorchClient {
         if !status.is_success() {
             return Err(decode_image_error(&bytes));
         }
-        match serde_json::from_slice::<ImageSuccessBody>(&bytes).ok() {
-            Some(ImageSuccessBody {
-                png_base64: Some(png_base64),
-                seed: Some(seed),
-                steps: Some(steps),
-                guidance: Some(guidance),
-                memory_policy: Some(memory_policy),
-                duration_seconds: Some(duration_seconds),
-            }) if !png_base64.is_empty() => Ok(TorchImageResult {
-                png_base64,
-                seed,
-                steps,
-                guidance,
-                memory_policy,
-                duration_seconds,
-            }),
-            _ => Err(TorchImageError::InvalidBackendResult),
-        }
+        decode_image_result(&bytes, width, height)
     }
 
     /// List all model slots (loaded and unloaded).
@@ -932,8 +1215,17 @@ mod tests {
     }
 
     #[test]
-    fn supported_protocol_is_two() {
-        assert_eq!(SUPPORTED_TORCH_PROTOCOL, 2);
+    fn supported_protocol_is_three() {
+        assert_eq!(SUPPORTED_TORCH_PROTOCOL, 3);
+    }
+
+    #[test]
+    fn generation_transport_is_connect_bounded_without_total_timeout() {
+        // Only connection establishment is bounded; there is no total, read,
+        // idle, or elapsed generation deadline anywhere on this path.
+        assert_eq!(GENERATION_CONNECT_TIMEOUT, Duration::from_secs(10));
+        assert_eq!(MAX_IMAGE_RESPONSE_BYTES, 12 * 1024 * 1024);
+        assert_eq!(MAX_PNG_BYTES, 8 * 1024 * 1024);
     }
 
     #[test]
@@ -944,6 +1236,7 @@ mod tests {
             capabilities: vec![TORCH_IMAGE_GENERATION_CAPABILITY.to_string()],
         };
         assert!(compatible.is_image_compatible());
+        assert!(compatible.check_image_compatible().is_ok());
 
         for handshake in [
             TorchHandshake {
@@ -967,10 +1260,84 @@ mod tests {
     }
 
     #[test]
+    fn handshake_compat_distinguishes_each_incompatibility() {
+        // A protocol-2 sidecar speaks the old lifetime: exact protocol 3 is
+        // required, so mixed versions cannot be admitted.
+        let protocol_two = TorchHandshake {
+            status: "ok".to_string(),
+            protocol: 2,
+            capabilities: vec![TORCH_IMAGE_GENERATION_CAPABILITY.to_string()],
+        };
+        assert_eq!(
+            protocol_two.check_image_compatible(),
+            Err(TorchCompatibilityError::ProtocolMismatch {
+                actual: 2,
+                expected: SUPPORTED_TORCH_PROTOCOL,
+            })
+        );
+
+        let not_live = TorchHandshake {
+            status: "starting".to_string(),
+            protocol: SUPPORTED_TORCH_PROTOCOL,
+            capabilities: vec![TORCH_IMAGE_GENERATION_CAPABILITY.to_string()],
+        };
+        assert_eq!(
+            not_live.check_image_compatible(),
+            Err(TorchCompatibilityError::NotLive {
+                status: "starting".to_string(),
+            })
+        );
+
+        let missing_capability = TorchHandshake {
+            status: "ok".to_string(),
+            protocol: SUPPORTED_TORCH_PROTOCOL,
+            capabilities: vec!["other".to_string()],
+        };
+        assert_eq!(
+            missing_capability.check_image_compatible(),
+            Err(TorchCompatibilityError::MissingCapability {
+                capability: TORCH_IMAGE_GENERATION_CAPABILITY,
+            })
+        );
+
+        // Liveness, protocol, and capability checks stay independent of the
+        // ready-slot check: no handshake result admits a model by itself.
+        assert!(!protocol_two.protocol_matches());
+        assert!(missing_capability.protocol_matches());
+        assert!(missing_capability.is_live());
+        assert!(!missing_capability.has_image_capability());
+    }
+
+    #[test]
     fn handshake_parses_legacy_health_without_capabilities_as_incompatible() {
         let handshake: TorchHandshake =
-            serde_json::from_str(r#"{"status":"ok","protocol":1}"#).unwrap();
+            serde_json::from_str(r#"{"status":"ok","protocol":3}"#).unwrap();
         assert!(!handshake.is_image_compatible());
+        assert_eq!(
+            handshake.check_image_compatible(),
+            Err(TorchCompatibilityError::MissingCapability {
+                capability: TORCH_IMAGE_GENERATION_CAPABILITY,
+            })
+        );
+    }
+
+    #[test]
+    fn handshake_rejects_malformed_bodies_before_compat_classification() {
+        // Missing `status` or `protocol`, or a mistyped protocol, is
+        // malformed: it fails parsing rather than classifying as a protocol
+        // mismatch or a missing capability.
+        for body in [
+            r#"{"protocol":3,"capabilities":["image_generation"]}"#,
+            r#"{"status":"ok","capabilities":["image_generation"]}"#,
+            r#"{"status":"ok","protocol":"3","capabilities":["image_generation"]}"#,
+            r#"{"status":"ok","protocol":null}"#,
+            r#"not json"#,
+        ] {
+            assert!(
+                serde_json::from_str::<TorchHandshake>(body).is_err(),
+                "{body}"
+            );
+        }
     }
 
     #[test]
@@ -993,10 +1360,6 @@ mod tests {
                 TorchImageError::OutOfMemory,
             ),
             (
-                r#"{"detail":{"code":"deadline_exceeded"}}"#,
-                TorchImageError::DeadlineExceeded,
-            ),
-            (
                 r#"{"detail":{"code":"cancelled"}}"#,
                 TorchImageError::Cancelled,
             ),
@@ -1016,8 +1379,10 @@ mod tests {
             assert_eq!(decode_image_error(body.as_bytes()), expected, "{body}");
         }
         // Unknown codes, tracebacks and non-JSON bodies never forward backend detail.
+        // A legacy deadline code is unclassified: there is no deadline outcome.
         for body in [
             r#"{"detail":{"code":"totally_new","trace":"/srv/x.py"}}"#,
+            r#"{"detail":{"code":"deadline_exceeded"}}"#,
             r#"{"detail":"plain string"}"#,
             r#"not json"#,
             r#""#,
@@ -1049,6 +1414,157 @@ mod tests {
         });
         let parsed: ImageSuccessBody = serde_json::from_value(missing).unwrap();
         assert!(parsed.steps.is_none());
+    }
+
+    /// Minimal PNG with the given `IHDR` dimensions (signature plus `IHDR`
+    /// header only; sufficient for the contract dimension check).
+    fn fixture_png_bytes(width: u32, height: u32) -> Vec<u8> {
+        let mut png = Vec::new();
+        png.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+        png.extend_from_slice(&13u32.to_be_bytes());
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&width.to_be_bytes());
+        png.extend_from_slice(&height.to_be_bytes());
+        png.extend_from_slice(&[8, 2, 0, 0, 0]);
+        png
+    }
+
+    fn fixture_base64(data: &[u8]) -> String {
+        const ALPHABET: &[u8; 64] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut output = String::new();
+        for chunk in data.chunks(3) {
+            let mut triple = 0u32;
+            for &byte in chunk {
+                triple = (triple << 8) | byte as u32;
+            }
+            triple <<= 8 * (3 - chunk.len());
+            let quads = [18, 12, 6, 0].map(|shift| ALPHABET[((triple >> shift) & 63) as usize]);
+            let pad = 3 - chunk.len();
+            for (index, &quad) in quads.iter().enumerate() {
+                output.push(if index >= 4 - pad { '=' } else { quad as char });
+            }
+        }
+        output
+    }
+
+    fn fixture_result_body(png_base64: &str) -> Vec<u8> {
+        serde_json::json!({
+            "png_base64": png_base64,
+            "seed": 7,
+            "steps": 8,
+            "guidance": 0.0,
+            "memory_policy": "sequential_cpu_offload",
+            "duration_seconds": 1.5
+        })
+        .to_string()
+        .into_bytes()
+    }
+
+    #[test]
+    fn strict_base64_vectors_round_trip() {
+        for (raw, encoded) in [
+            (vec![0x68, 0x65, 0x6c, 0x6c, 0x6f], "aGVsbG8="),
+            (vec![0x00], "AA=="),
+            (vec![0xff, 0xff, 0xfe], "///+"),
+            (vec![0x01, 0x02, 0x03], "AQID"),
+            (vec![0x01, 0x02], "AQI="),
+        ] {
+            assert_eq!(fixture_base64(&raw), encoded, "{raw:?}");
+            assert_eq!(decode_base64_strict(encoded), Some(raw), "{encoded}");
+        }
+        for bad in [
+            "aGVsbG8",
+            "aGVsbG8==",
+            "a GVsbG8=",
+            "aGVsbG8!",
+            "====",
+            "",
+            "AB=C",
+            "=ABC",
+        ] {
+            assert_eq!(decode_base64_strict(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn image_result_accepts_canonical_fields_and_additive_private_data() {
+        let png = fixture_base64(&fixture_png_bytes(512, 512));
+        // Additive private fields (for example `peak_vram_bytes`) must not
+        // fail decoding and must not appear in the typed result.
+        let body = serde_json::json!({
+            "png_base64": png,
+            "seed": 7,
+            "steps": 8,
+            "guidance": 0.0,
+            "memory_policy": "sequential_cpu_offload",
+            "duration_seconds": 1.5,
+            "peak_vram_bytes": 123456,
+            "future_private_field": {"nested": true}
+        })
+        .to_string()
+        .into_bytes();
+        let result = decode_image_result(&body, 512, 512).unwrap();
+        assert_eq!(result.seed, 7);
+        assert_eq!(result.steps, 8);
+        assert_eq!(result.png_base64, png);
+        let projected = serde_json::to_value(&result.png_base64).unwrap();
+        assert_eq!(projected, serde_json::Value::String(png));
+    }
+
+    #[test]
+    fn image_result_rejects_invalid_required_data_and_dimension_mismatch() {
+        let good_png = fixture_base64(&fixture_png_bytes(1280, 720));
+        let good = fixture_result_body(&good_png);
+        assert!(decode_image_result(&good, 1280, 720).is_ok());
+
+        // Dimension mismatch, non-PNG bytes, and malformed base64 fail closed.
+        assert_eq!(
+            decode_image_result(&good, 512, 512),
+            Err(TorchImageError::InvalidBackendResult)
+        );
+        let not_png = fixture_result_body(&fixture_base64(b"hello"));
+        assert_eq!(
+            decode_image_result(&not_png, 1280, 720),
+            Err(TorchImageError::InvalidBackendResult)
+        );
+        let bad_b64 = fixture_result_body("!!!not-base64!!!");
+        assert_eq!(
+            decode_image_result(&bad_b64, 1280, 720),
+            Err(TorchImageError::InvalidBackendResult)
+        );
+        // Missing required values, blank policy, and non-finite scalars fail.
+        let missing_steps = serde_json::json!({
+            "png_base64": good_png, "seed": 7,
+            "guidance": 0.0, "memory_policy": "x", "duration_seconds": 1.5
+        })
+        .to_string()
+        .into_bytes();
+        assert_eq!(
+            decode_image_result(&missing_steps, 1280, 720),
+            Err(TorchImageError::InvalidBackendResult)
+        );
+        let blank_policy = serde_json::json!({
+            "png_base64": good_png, "seed": 7, "steps": 8,
+            "guidance": 0.0, "memory_policy": "  ", "duration_seconds": 1.5
+        })
+        .to_string()
+        .into_bytes();
+        assert_eq!(
+            decode_image_result(&blank_policy, 1280, 720),
+            Err(TorchImageError::InvalidBackendResult)
+        );
+        // A PNG beyond the 8 MiB decoded bound fails even with valid
+        // dimensions (the whole-payload bound is enforced separately on the
+        // transport while streaming).
+        let mut oversized = fixture_png_bytes(64, 64);
+        oversized.extend(vec![0u8; MAX_PNG_BYTES]);
+        let oversized_body = fixture_result_body(&fixture_base64(&oversized));
+        assert!(oversized_body.len() < MAX_IMAGE_RESPONSE_BYTES);
+        assert_eq!(
+            decode_image_result(&oversized_body, 64, 64),
+            Err(TorchImageError::InvalidBackendResult)
+        );
     }
 
     #[test]

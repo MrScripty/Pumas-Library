@@ -237,9 +237,9 @@ including the three named handoffs, pass.
 **Goal:** Establish the shared Pumas generation lifetime and correct the live
 Pumas/Torch image compatibility and result contract as one implementation unit.
 
-**Allowed write set:** `torch-server/{image_api.py,serve.py,validate_runtime.py,README.md,runtime/runtime.json,tests/**}` and
+**Allowed write set:** `torch-server/{image_api.py,model_manager.py,serve.py,validate_runtime.py,README.md,runtime/runtime.json,tests/**}` and
 `torch-server/tests_native/test_image_failures.py`;
-`rust/crates/pumas-app-manager/src/torch_client.rs` and focused tests;
+`rust/crates/pumas-app-manager/src/{lib.rs,torch_client.rs}` and focused tests;
 `rust/crates/pumas-app-manager/src/version_manager/installer/{torch.rs,torch_tests.rs}`;
 `rust/crates/pumas-rpc/src/handlers/{serving_torch.rs,openai_gateway.rs,openai_gateway_images.rs,openai_gateway_tests.rs}`;
 `rust/crates/pumas-rpc/src/server.rs` where it owns the active shared gateway
@@ -248,6 +248,16 @@ three image/Torch contract/ADR documents named above; relevant existing module
 documentation; and this plan directory.
 Dependency locks, public runtime defaults, release metadata, and Tuldok are
 excluded. Expand only after recording a newly proved semantic owner.
+
+`torch-server/model_manager.py` was added during execution after the existing
+repeated load-cancellation test proved that its shield loop could retain task
+cancellation indefinitely instead of observing the executor worker's terminal
+state. It is the load/device-custody owner for the same cleanup invariant; no
+unrelated model-loading behavior is admitted by this expansion.
+
+`rust/crates/pumas-app-manager/src/lib.rs` was added after the RPC integration
+proved it is the public re-export owner for the new typed Torch handshake and
+image errors consumed by `pumas-rpc`; no unrelated app-manager API is admitted.
 
 **Tasks:**
 

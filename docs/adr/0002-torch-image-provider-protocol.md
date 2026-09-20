@@ -81,3 +81,44 @@ before any model loads.
 - capability negotiation outgrows a static advertisement list;
 - the gateway's authentication or external compatibility contract changes; or
 - generation becomes asynchronous with durable job identity.
+
+## Amendment 2026-09-20: shared generation lifetime and protocol 3 (TIPC-M1)
+
+The decision above is preserved as history. Only its Torch-specific
+lifetime, compatibility, and result-evolution clauses are replaced:
+
+- **Lifetime.** The provider-owned 600-second generation deadline and the
+  gateway 615-second transport allowance are removed. Admitted image
+  generation follows the shared
+  [generation lifetime](../contracts/generation-lifetime.md): one
+  connection-bounded but duration-unbounded transport for
+  `/v1/chat/completions`, `/v1/completions`, `/v1/images/generations`, and
+  future generation routes, with no total, response-read, idle, or elapsed
+  deadline. Disconnect requests cancellation without proving that sidecar
+  work stopped; a lost transport is an unknown outcome and is never replayed.
+  There is no generation-deadline outcome and no public cancellation API.
+- **Compatibility.** The wire protocol is now exactly `3`: a protocol-2
+  sidecar speaks the old lifetime and is rejected as incompatible, so mixed
+  versions cannot be admitted. The handshake stays strict and closed on
+  requests: malformed bodies fail before classification, and liveness,
+  protocol mismatch, missing capability, unavailability, and process/profile
+  replacement each keep their owning outcome at the serving, listing, and
+  admission boundaries. Compatibility is rechecked live before model load and
+  again before admission, bound to the current process/profile identity.
+  Ready-slot state and supported-operation checks stay independent of the
+  handshake. Packaging remains immutable; the installer qualifies artifact
+  identity, checksum, recipe identity, recipe protocol `3`, and environment
+  separately.
+- **Results.** Valid results still require `png_base64`, `seed`, `steps`,
+  `guidance`, `memory_policy`, and `duration_seconds`, with canonical PNG,
+  dimension, base64, and size validation and the whole-payload bound enforced
+  over the entire received payload. Unknown additive private result fields
+  (for example `peak_vram_bytes`) are accepted within that bound and never
+  projected publicly: the public shape owns exactly `data[].b64_json` plus
+  `metadata` with the five canonical values, and no deadline outcome exists.
+
+Ownership is otherwise unchanged: the gateway still owns validation,
+adaptation, error mapping, transport policy, and disconnect propagation; the
+Torch provider process still owns execution, checkpoint cancellation, and the
+device lease. The broader Torch surface (text handlers, responsiveness,
+shutdown) stays with its existing remediation owner.

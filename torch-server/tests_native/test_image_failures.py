@@ -9,7 +9,6 @@ import sys
 import threading
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -67,7 +66,7 @@ class ImageFailureTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(Image.open(io.BytesIO(raw)).size, (512, 512))
                 self.assertFalse(held)
 
-    async def test_deadline_keeps_lease_until_cancelled_worker_has_stopped(self):
+    async def test_disconnect_keeps_lease_until_cancelled_worker_has_stopped(self):
         from image_api import owned_generation
 
         stopped = threading.Event()
@@ -77,19 +76,18 @@ class ImageFailureTests(unittest.IsolatedAsyncioTestCase):
             stopped.set()
             raise GenerationCancelled()
 
-        async def connected():
-            return False
+        async def disconnected():
+            return True
 
-        with patch("image_api.GENERATION_DEADLINE_SECONDS", 0):
-            with self.assertRaises(HTTPException) as caught:
-                await asyncio.wait_for(
-                    owned_generation(
-                        SimpleNamespace(generate=generate),
-                        ImageRequest(model_id="fixture", prompt="test", width=512, height=512),
-                        SimpleNamespace(is_disconnected=connected),
-                    ),
-                    4,
-                )
+        with self.assertRaises(HTTPException) as caught:
+            await asyncio.wait_for(
+                owned_generation(
+                    SimpleNamespace(generate=generate),
+                    ImageRequest(model_id="fixture", prompt="test", width=512, height=512),
+                    SimpleNamespace(is_disconnected=disconnected),
+                ),
+                4,
+            )
         self.assertTrue(stopped.is_set())
-        self.assertEqual(caught.exception.status_code, 504)
-        self.assertEqual(caught.exception.detail["code"], "deadline_exceeded")
+        self.assertEqual(caught.exception.status_code, 499)
+        self.assertEqual(caught.exception.detail["code"], "cancelled")

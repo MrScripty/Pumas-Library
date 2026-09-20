@@ -2,7 +2,7 @@
 
 This is the public, Pumas-owned image contract. Pumas owns
 `POST /v1/images/generations` and all validation, adaptation, error mapping,
-timeout, and cancellation behavior described here. Provider internals execute
+transport policy, and cancellation behavior described here. Provider internals execute
 behind the gateway and are not part of this contract; they are covered by the
 private [Torch provider protocol](torch-provider-protocol.md).
 
@@ -70,18 +70,26 @@ BF16 execution with CPU offload. Seed and settings aid reproducibility but do no
 bitwise deterministic GPU output.
 
 The runtime admits one image operation per device and rejects additional work as
-busy. Unload is refused while that device is busy. A disconnected or expired
+busy. Unload is refused while that device is busy. Admitted generation follows
+the shared [generation lifetime](generation-lifetime.md): it has no total,
+response-read, idle, or elapsed deadline and may remain silent until its
+terminal result; only connection establishment is bounded. A disconnected
 operation requests cancellation at a denoising checkpoint and retains the device
-lease until its worker and CUDA work stop. The runtime deadline is 600 seconds;
-the gateway transport allowance is 615 seconds. Clients must not automatically
-retry after an uncertain result. A controlled TCP integration test verifies gateway disconnect propagation;
-real GPU cancellation acceptance is still pending.
+lease until its worker and CUDA work stop. Transport loss before a terminal
+result is an unknown outcome. Clients must not automatically retry after an
+uncertain result. A controlled TCP integration test verifies gateway disconnect
+propagation; real GPU cancellation acceptance is still pending.
 
 Image errors use `error.code` and a safe `error.message`; known codes include
 `invalid_request`, `runtime_busy`, `model_unavailable`, `unsupported_model`,
-`out_of_memory`, `deadline_exceeded`, `cancelled`, `backend_failure`, and
-`invalid_backend_response`. Existing gateway model-lookup errors retain their
-existing shape. Backend paths and tracebacks are not forwarded.
+`out_of_memory`, `cancelled`, `backend_failure`, and
+`invalid_backend_response`. There is no deadline outcome. A
+connection-establishment failure surfaces as `backend_failure` without claiming
+that admitted generation was cancelled or completed. Existing gateway
+model-lookup errors retain their existing shape. Backend paths and tracebacks
+are not forwarded. Private additive result fields are never projected publicly;
+the public shape owns exactly `data[].b64_json` plus `metadata` with `seed`,
+`steps`, `guidance`, `memory_policy`, and `duration_seconds`.
 
 The initial adapter resolves the Nunchaku FP4 rank-128 checkpoint and exactly one
 library-managed `Tongyi-MAI/Z-Image-Turbo` bundle. Missing or ambiguous components

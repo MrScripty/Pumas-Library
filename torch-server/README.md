@@ -23,6 +23,13 @@ model-loader, generation, device, responsiveness, and shutdown evidence.
 - `/api/*`: Pumas load, unload, status, and device controls
 - `/health`: process health with the provider protocol version and capabilities
 
+Protocol 3 image generation is connection-bounded and duration-unbounded after
+admission. Elapsed time and response silence do not fail valid work. Disconnect
+requests cancellation, while the sidecar keeps worker and device custody until
+cleanup actually finishes; a lost response remains uncertain and is never
+automatically replayed. See the shared
+[generation lifetime](../docs/contracts/generation-lifetime.md).
+
 The text routes accept the following request subset:
 
 - an exact set of known fields;
@@ -61,7 +68,8 @@ These commands are for direct development only. Managed installations use
 The shared VersionManager discovers `torch-runtime-*` releases from the Pumas
 repository with `pumas-torch-runtime-linux-x86_64.tar.gz` and its `.sha256`
 companion. It validates the staged environment before publishing installed state.
-The candidate supports Linux x86_64, CPython 3.12 and NVIDIA sm_120 only.
+Source candidate `torch-runtime-0.1.6` supports Linux x86_64, CPython 3.12 and
+NVIDIA sm_120 only. It is not a published or activated default runtime.
 
 Create candidate assets with:
 

@@ -104,6 +104,20 @@ class ImageRequestDimensionsTests(unittest.TestCase):
         asyncio.run(run())
         self.assertEqual(seen["seed"], 12345)
 
+    def test_elapsed_time_beyond_former_deadline_does_not_cancel(self):
+        samples = iter((10.0, 611.0))
+
+        def generate(_prompt, _width, _height, _seed, cancel):
+            self.assertFalse(cancel.is_set())
+            return _image((64, 64))
+
+        payload = ImageRequest(model_id="fixture", prompt="kingfisher", width=64, height=64)
+        result = asyncio.run(
+            owned_generation(_adapter(generate), payload, _request(), clock=lambda: next(samples))
+        )
+
+        self.assertEqual(result["duration_seconds"], 601.0)
+
     def test_removed_openai_fields_are_rejected_not_ignored(self):
         with self.assertRaises(ValidationError):
             ImageRequest(model_id="fixture", prompt="kingfisher", size="1024x1024")

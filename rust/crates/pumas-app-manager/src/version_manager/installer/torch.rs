@@ -195,13 +195,27 @@ impl VersionInstaller {
                 .map_err(PumasError::from)?,
         )
         .map_err(|e| failed(format!("Invalid runtime recipe: {e}")))?;
-        if recipe.recipe_id != tag
-            || recipe.protocol != SUPPORTED_TORCH_PROTOCOL
-            || recipe.python != "3.12"
-            || recipe.platform != "linux-x86_64"
-        {
+        // Each qualification dimension fails with its owning reason so artifact
+        // identity, recipe identity, recipe protocol, and environment are
+        // verified separately. Recipe-to-sidecar agreement (bundled
+        // handshake protocol/capabilities) is checked by the bundled
+        // validation below; client-to-live-sidecar agreement is owned by
+        // `TorchClient` handshake verification, not by installation.
+        if recipe.recipe_id != tag {
+            return Err(failed(format!(
+                "Runtime recipe identity '{}' does not match release tag '{tag}'",
+                recipe.recipe_id
+            )));
+        }
+        if recipe.protocol != SUPPORTED_TORCH_PROTOCOL {
+            return Err(failed(format!(
+                "Runtime recipe protocol {} does not match required protocol {SUPPORTED_TORCH_PROTOCOL}",
+                recipe.protocol
+            )));
+        }
+        if recipe.python != "3.12" || recipe.platform != "linux-x86_64" {
             return Err(failed(
-                "Runtime recipe does not match version, protocol, Python or platform",
+                "Runtime recipe does not match Python 3.12 on linux-x86_64",
             ));
         }
         for required in ["serve.py", "validate_runtime.py", "requirements.txt"] {

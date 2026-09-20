@@ -111,7 +111,21 @@
   time.
 - Evidence: focused native-suite execution plus TIPC-01/TIPC-03.
 
-## TIPC-I10 — Required project-scoped Passeur tools are not callable
+## TIPC-I10 — Repeated cancellation can stall load-worker cleanup
+
+- Finding: the existing repeated load-cancellation regression hangs because
+  `ModelManager.load` re-enters `asyncio.shield` while its owning task still
+  carries cancellation. A second cancellation can repeatedly interrupt cleanup
+  even after the executor worker returns, preventing the device lease and task
+  from reaching a terminal state.
+- Disposition: admit `torch-server/model_manager.py` as the proved load/device
+  custody owner. Consume cancellation only while polling the independently
+  owned worker to completion, clear abandoned loaded objects, mark the slot
+  failed, and then re-raise the original owner cancellation.
+- Evidence: the pre-existing repeated-cancellation regression plus the complete
+  sidecar unit suite.
+
+## TIPC-I11 — Required project-scoped Passeur tools are not callable
 
 - Finding: initial intake found no Pumas or Tuldok profile and no Passeur tools
   in the current Codex session. The installed registration helper owns one

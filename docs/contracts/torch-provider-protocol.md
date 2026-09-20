@@ -11,24 +11,26 @@ Carry one bounded image request from the gateway to a ready Torch slot and
 return one PNG result, without duplicating the public contract inside the
 provider process.
 
-## Producer and consumer
+## Producers and consumers
 
-- Producer: the Torch sidecar (`torch-server/`), a provider process managed
-  by Pumas.
-- Consumer: the Pumas `/v1` gateway (`pumas-rpc` open gateway handlers),
-  which owns validation, adaptation, error mapping, timeout allowance, and
-  cancellation propagation.
+- Request producer: Rust `TorchClient` in `pumas-app-manager`; request consumer:
+  the Torch sidecar (`torch-server/`).
+- Handshake, private result, and provider-failure producer: the Torch sidecar;
+  consumer: `TorchClient` and the Pumas `/v1` gateway.
+- Public response/error producer: the Pumas gateway; consumer: the external
+  application. The gateway owns public validation, adaptation, safe error
+  projection, generation transport policy, and disconnect propagation.
 
 ## Protocol version
 
-Current protocol: `2`.
+Current protocol: `3`.
 
 ## Handshake
 
 `GET /health` returns:
 
 ```json
-{"status": "ok", "protocol": 2, "capabilities": ["image_generation"]}
+{"status": "ok", "protocol": 3, "capabilities": ["image_generation"]}
 ```
 
 - `status`: `"ok"` when the process is alive.
@@ -83,7 +85,9 @@ A successful result is:
 
 The PNG must match the requested dimensions and is limited to 8 MiB.
 `steps`, `guidance`, and `memory_policy` are adapter-reported values the
-gateway relays into public metadata unchanged.
+gateway relays into public metadata unchanged. These six canonical fields are
+required. Unknown additive private result fields are accepted within the
+12 MiB whole-response bound, but the gateway never projects them publicly.
 
 ## Provider error outcomes
 
@@ -96,37 +100,39 @@ errors; tracebacks and filesystem paths are never forwarded:
 | `unsupported_model` | Slot exists but does not support image generation |
 | `runtime_busy` | One image operation per device; excess work rejected |
 | `out_of_memory` | Insufficient GPU memory |
-| `deadline_exceeded` | Provider deadline reached; work stopped |
 | `cancelled` | Gateway disconnect; work stopped at a checkpoint |
 | `backend_failure` | Adapter or pipeline failure |
 | `invalid_backend_response` | Adapter returned an unusable image |
 
-## Timeout and cancellation ownership
+## Lifetime and cancellation ownership
 
-- The provider owns the 600-second generation deadline and disconnect
-  cancellation: it stops work at a supported denoising checkpoint and
-  retains the device lease until its worker and CUDA work have actually
-  stopped.
-- The gateway owns the 615-second transport allowance and maps provider
-  outcomes to public errors. Gateway disconnect propagates as provider
-  cancellation.
-- Clients must not automatically retry after an uncertain result.
+- Admitted generation has no total, response-read, idle, or elapsed-duration
+  deadline. Connection establishment remains independently bounded. The shared
+  rule is defined by [generation-lifetime.md](generation-lifetime.md).
+- The provider owns execution and disconnect cancellation: it requests a stop
+  at supported denoising checkpoints and retains worker/device custody through
+  cleanup. Diagnostics distinguish cancellation requested, cleanup pending,
+  cancellation completed, normal completion, and runtime failure.
+- Dropping the gateway request or provider connection requests cancellation but
+  does not prove compute stopped. A lost response is an unknown outcome and is
+  never replayed automatically.
 
 ## Compatibility policy
 
 - `protocol` requires an exact match between sidecar and qualified recipe;
   mismatch fails validation before any model loads.
 - Capability entries are additive and optional.
-- Request and result shapes are closed: unknown fields are rejected, and any
-  shape change requires a protocol bump, never silent extension.
+- Requests are closed and reject unknown fields. Results require the canonical
+  fields but permit bounded additive fields; changing required semantics still
+  requires a protocol bump.
 
 ## Runtime recipe relationship
 
 The runtime recipe (`torch-server/runtime/runtime.json`, `recipe_id`
-`torch-runtime-0.1.5`) pins both the validated dependency set (CPython 3.12,
-Linux x86_64, sm_120 CUDA) and the wire shape (`"protocol": 2`). Both must
-agree: `validate_runtime.py` fails qualification when the sidecar handshake
-protocol differs from its recipe.
+`torch-runtime-0.1.6`) pins both the validated dependency set (CPython 3.12,
+Linux x86_64, sm_120 CUDA) and protocol/capabilities (`3` plus
+`image_generation`). `validate_runtime.py` fails qualification unless the
+recipe and the bundled live sidecar agree exactly on both values.
 
 ## Verification locations
 

@@ -22,8 +22,9 @@ pub use ollama_client::{
 };
 pub use process::{AppProcessManager, ProcessHandle, ProcessManagerFactory, ProcessStatus};
 pub use torch_client::{
-    ComputeDevice, DeviceInfo, ModelSlot, SlotState, TorchClient, TorchHandshake, TorchImageError,
-    TorchImageResult, TorchServerConfig, TorchServerStatus, SUPPORTED_TORCH_PROTOCOL,
+    ComputeDevice, DeviceInfo, ModelSlot, SlotState, TorchClient, TorchCompatibilityError,
+    TorchHandshake, TorchHandshakeFailure, TorchImageError, TorchImageResult, TorchServerConfig,
+    TorchServerStatus, GENERATION_CONNECT_TIMEOUT, SUPPORTED_TORCH_PROTOCOL,
     TORCH_IMAGE_GENERATION_CAPABILITY,
 };
 pub use version_manager::{ReleaseSize, SizeBreakdown, SizeCalculator, VersionManager};

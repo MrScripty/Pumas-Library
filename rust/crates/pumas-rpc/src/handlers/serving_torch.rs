@@ -267,6 +267,45 @@ pub(super) async fn serve_torch_model(
             .await;
         }
     };
+    // Re-verify live compatibility and process identity before publication:
+    // the sidecar may have been replaced while the model loaded, and a stale
+    // admission must not publish. Replacement, incompatibility, load failure,
+    // busy rejection, and unsupported operation each keep their owning
+    // outcome: the model-type gate above owns unsupported-operation, the load
+    // result above owns load/busy failure, and these checks own replacement
+    // and post-load incompatibility.
+    if state
+        .api
+        .observe_owned_runtime_profile(&request.config.profile_id)?
+        .as_ref()
+        != Some(&owned)
+    {
+        if let Err(cleanup) = client.unload_model(&slot.slot_id).await {
+            tracing::warn!(%cleanup, "Failed to compensate Torch slot after replacement");
+        }
+        return non_critical_failure_response(
+            state,
+            fail(
+                ModelServeErrorCode::EndpointUnavailable,
+                "Torch process ownership changed while loading; retry the request",
+            ),
+        )
+        .await;
+    }
+    if let Err(error) = client.verify_image_runtime().await {
+        tracing::warn!(%error, "Torch runtime became incompatible while loading");
+        if let Err(cleanup) = client.unload_model(&slot.slot_id).await {
+            tracing::warn!(%cleanup, "Failed to compensate Torch slot after incompatibility");
+        }
+        return non_critical_failure_response(
+            state,
+            fail(
+                ModelServeErrorCode::ProviderLoadFailed,
+                "Torch runtime is incompatible; install and activate a qualified Torch runtime",
+            ),
+        )
+        .await;
+    }
     let status = ServedModelStatus {
         model_id: request.model_id.clone(),
         model_alias: request.config.model_alias.clone(),

@@ -139,24 +139,31 @@ class ModelManager:
                     )
                     try:
                         loaded = await asyncio.shield(task)
-                    except asyncio.CancelledError:
+                    except asyncio.CancelledError as cancellation:
                         # A disconnected load cannot release the GPU while its
                         # executor thread still allocates tensors.
+                        current = asyncio.current_task()
+                        if current is not None:
+                            current.uncancel()
                         try:
                             while not task.done():
                                 try:
-                                    await asyncio.shield(task)
+                                    # Poll so another owner cancellation cannot
+                                    # mark the thread wrapper done before the
+                                    # executor worker has actually returned.
+                                    await asyncio.sleep(0.01)
                                 except asyncio.CancelledError:
+                                    current = asyncio.current_task()
+                                    if current is not None:
+                                        current.uncancel()
                                     continue
-                                except Exception:
-                                    break
                             if not task.cancelled() and task.exception() is None:
                                 abandoned = task.result()
                                 abandoned.model = None
                                 abandoned.tokenizer = None
                         finally:
                             await self._mark_slot_error(slot_id)
-                        raise
+                        raise cancellation
                 else:
                     loaded = await self._load_model(model_path, resolved_device, model_type)
 

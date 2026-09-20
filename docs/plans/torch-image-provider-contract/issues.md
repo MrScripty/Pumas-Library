@@ -131,3 +131,16 @@ schema-version-2 tools through a read-only MCP SDK client, but the resumed
 conversation's callable-tool inventory still omits both server namespaces. A
 new conversation attachment, rather than another profile/configuration change,
 is required before this issue can close.
+
+Second-session diagnostic: both namespaces are now callable. The first Pumas
+batch reached worker startup and failed deterministically because Passeur used
+`clientInfo.name = "muse-bridge"`, which Muse 1.3 rejects under its
+`^[a-z0-9_]+$` machine-identifier rule. Tuldok first rejected a cross-repository
+plan path before worker startup, then reached the same client-name failure after
+its context list was corrected. A minimal handshake reproduced the failure and
+passed with `muse_bridge`; the local Passeur source, probe, regression test, and
+ignored built runtime were corrected in local commit `4f4ef0f`, and the full
+test suite, typecheck, and build passed. The attached MCP processes retain the
+pre-build module, so one further Codex restart is required. All six zero-change
+failed allocations were explicitly archived and retired; no product task
+remains live.

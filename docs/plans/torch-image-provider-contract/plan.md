@@ -12,9 +12,11 @@ immutable runtime installation model.
 **Acceptance status:** `pending`
 
 **Current phase:** `TIPC-M1` was admitted under `start`; its bounded Pumas and
-Tuldok allocations are recorded. The required project-scoped Passeur profiles
-and named MCP registrations now pass Doctor/configuration checks; product
-implementation remains blocked until Codex restarts and exposes their tools.
+Tuldok allocations are recorded. The project-scoped Passeur tools are attached,
+but the first live delegations exposed an invalid Passeur-to-Muse client name.
+The local Passeur source and built runtime are corrected and verified; product
+implementation remains blocked until Codex restarts the already-attached MCP
+server processes so they load that correction.
 
 **Next integration slice:** `TIPC-M1` — implement and verify the reusable Pumas
 generation lifetime and coherent Torch image provider correction, including
@@ -372,9 +374,15 @@ shutdown remain deferred unless a specific TIPC claim demonstrates a prerequisit
 ## Blockers
 
 - Pumas and Tuldok Passeur profiles and named registrations are configured with
-  the user-confirmed subscription and pass Doctor/configuration checks. This
-  already-running Codex session cannot expose newly registered MCP tools;
-  restart Codex before TIPC-M1 execution can resume.
+  the user-confirmed subscription, pass Doctor/configuration checks, and are
+  attached to this conversation. Live delegation found that Passeur revision
+  `b0c162d` passed the invalid Muse client name `muse-bridge`; Muse 1.3 requires
+  a machine identifier matching `^[a-z0-9_]+$`. The local Passeur source,
+  regression test, probe, and ignored built runtime now use `muse_bridge` (or
+  `muse_bridge_probe`) in local commit `4f4ef0f`; the full test suite,
+  typecheck, build, and direct handshake pass. The attached MCP processes
+  retain the old module in memory, so restart Codex once more before retrying
+  the recorded assignments.
 - Required-real GPU and browser availability may delay TIPC-04/TIPC-10 only.
 - Candidate build/install access may delay TIPC-09 only.
 

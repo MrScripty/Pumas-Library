@@ -224,3 +224,40 @@
   required human elicitation path and remains prohibited. The plan stays
   `Blocked` until a newly created Codex conversation exposes both registered
   namespaces.
+
+## 2026-09-20 — Live delegation reveals Passeur/Muse identity incompatibility
+
+- The new conversation exposes both `passeur_pumas` and `passeur_tuldok`, each
+  with the expected four schema-version-2 operations. The prior attachment
+  blocker is therefore resolved.
+- Rechecked the recorded bases and allocations before dispatch. Pumas
+  coordinator source remains clean at
+  `96f859443460ad8e4799d563528aaba113ccff21`; Tuldok remains clean at
+  `6e9e6ec32d4dd719af0e051baafacecd190864c2`; protocol `3` and
+  `torch-runtime-0.1.6` have no new source allocation. The primary Pumas checkout
+  still contains only the preserved unrelated `docs/breif/future.md`.
+- Dispatched Pumas batch keys `TIPC-M1-R` and `TIPC-M1-P`. Both stopped before a
+  Muse session with `SS1.4.1`: Passeur supplied `clientInfo.name` as
+  `muse-bridge`, while Muse 1.3 requires `^[a-z0-9_]+$`. Dispatched Tuldok key
+  `M3-TIPC-T`; it stopped before worker start because its `context_files`
+  incorrectly named the cross-repository Pumas plan. All three allocations had
+  zero commits and zero changed files and were explicitly archived/retired.
+- Applied the diagnosing-bugs loop to the tooling boundary. A direct handshake
+  reproduced the exact error with `muse-bridge` and passed with `muse_bridge`.
+  Local Passeur commit `4f4ef0f` now uses `muse_bridge` in the adapter and
+  `muse_bridge_probe` in the probe, with a focused adapter regression. The
+  ignored `dist/` runtime was rebuilt. The full Passeur suite passed (53 core
+  tests and 35 Vitest tests), TypeScript check passed, build passed, and
+  `git diff --check` passed. The pre-existing unrelated
+  `passeur-parallel-workers-changes.zip` remains untouched.
+- Retried with fresh Pumas keys `TIPC-M1-R-v2`/`TIPC-M1-P-v2` and Tuldok key
+  `M3-TIPC-T-v2`, limiting Tuldok `context_files` to files present in that
+  repository. The already-attached MCP server processes retained the old
+  Passeur module and reproduced the same initialization failure. These three
+  allocations also had zero commits and zero changed files and were explicitly
+  archived/retired.
+- No custom MCP client was used to delegate, no approval path was bypassed, and
+  no product source, test, runtime installation, candidate, GPU process,
+  launcher root, publication, or remote state changed. `TIPC-M1` remains
+  `Blocked` until Codex restarts the two attached MCP processes and the recorded
+  assignments are retried against the rebuilt Passeur runtime.

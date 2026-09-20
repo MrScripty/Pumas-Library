@@ -12,9 +12,9 @@ immutable runtime installation model.
 **Acceptance status:** `pending`
 
 **Current phase:** `TIPC-M1` was admitted under `start`; its bounded Pumas and
-Tuldok allocations are recorded. Product implementation is blocked on the
-required project-scoped Passeur registrations, human subscription confirmation,
-and a restarted Codex session exposing their tools.
+Tuldok allocations are recorded. The required project-scoped Passeur profiles
+and named MCP registrations now pass Doctor/configuration checks; product
+implementation remains blocked until Codex restarts and exposes their tools.
 
 **Next integration slice:** `TIPC-M1` — implement and verify the reusable Pumas
 generation lifetime and coherent Torch image provider correction, including
@@ -371,10 +371,10 @@ shutdown remain deferred unless a specific TIPC claim demonstrates a prerequisit
 
 ## Blockers
 
-- TIPC-M1 execution requires project-scoped Pumas and Tuldok Passeur profiles
-  and named MCP registrations. They are absent from this Codex session; profile
-  creation requires human confirmation of the intended Muse subscription and
-  changing Codex configuration requires a restart before tools become usable.
+- Pumas and Tuldok Passeur profiles and named registrations are configured with
+  the user-confirmed subscription and pass Doctor/configuration checks. This
+  already-running Codex session cannot expose newly registered MCP tools;
+  restart Codex before TIPC-M1 execution can resume.
 - Required-real GPU and browser availability may delay TIPC-04/TIPC-10 only.
 - Candidate build/install access may delay TIPC-09 only.
 

@@ -173,3 +173,34 @@
   MCP registration changes require configuration authority, and newly
   registered tools cannot appear until Codex restarts. The blocker does not
   authorize direct implementation or another delegation mechanism.
+
+## 2026-09-20 — Configure project-scoped Passeur servers
+
+- User confirmed `muse-spark-1.3-contributor` is the intended model and uses the
+  intended subscription, and authorized Pumas/Tuldok profiles plus named Codex
+  registrations.
+- Configured Pumas profile
+  `/home/jeremy/.config/muse-bridge/projects/57bbd005b8a2f399ae95fd99.json`
+  for clean coordinator source
+  `/media/jeremy/OrangeCream/passeur_cache/pumas-coordinator-source` and task
+  root `/media/jeremy/OrangeCream/passeur_cache/pumas-tasks`.
+- Configured Tuldok profile
+  `/home/jeremy/.config/muse-bridge/projects/00ba9d9685e64d372f3403fe.json`
+  for the canonical Tuldok checkout and task root
+  `/media/jeremy/OrangeCream/passeur_cache/tuldok-tasks`.
+- Both profiles enable implementation, use Muse Code/SDK `1.3.0`, retain the
+  documented two-worker/eight-queue limits and 30-minute task budget, and carry
+  current `user_confirmed` subscription provenance. Doctor maps them to Pumas
+  Git common-directory identity `6aaae9e5ae2b753918ac7478` and Tuldok identity
+  `6240622ff4d89463e085c67b`, respectively.
+- Added distinct Codex servers `passeur_pumas` and `passeur_tuldok`. Both enable
+  exactly `delegate_to_muse`, `delegate_to_muse_batch`, `muse_result`, and
+  `muse_finalize`, with 10-second startup and 2100-second tool timeouts. Existing
+  MCP registrations and the Passeur repository's own profile were preserved;
+  the pre-field-update Codex configuration is backed up at
+  `/home/jeremy/.codex/config.toml.passeur-multi-backup-20260920`.
+- `codex mcp get` and both Doctor runs passed. Doctor is non-inference evidence:
+  it does not prove provider parallelism, elicitation, sandbox enforcement,
+  hooks, signing, or a live Muse turn. The current Codex process still exposes
+  none of the newly registered tools, so the plan remains `Blocked` pending the
+  documented restart rather than attempting direct implementation.

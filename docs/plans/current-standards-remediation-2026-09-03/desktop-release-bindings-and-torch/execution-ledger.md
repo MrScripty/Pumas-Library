@@ -51,6 +51,9 @@
   shapes, sampling, usage, responsiveness, and shutdown. It no longer selects a
   text-generation deadline. Launcher/process deadlines are unrelated and remain
   unchanged.
+- Torch's synchronous text handlers are not public gateway generation providers;
+  their lifecycle remains Milestone 3 work and does not gate TIPC-M1's shared
+  Ollama/llama.cpp transport proof.
 
 ## Entries
 

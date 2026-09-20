@@ -49,9 +49,33 @@
   Text shapes, sampling, usage, and other broader remediation remain with their
   existing owner.
 - Coding-Standards was not modified because this repository task remains limited
-  to Pumas planning; the Pumas contract now states that the general deadline rule
-  is inapplicable to generation.
+  to Pumas planning; the explicit Pumas generation contract takes precedence
+  over the generic remote-operation deadline requirement for generation.
 - No production implementation or runtime mutation was performed.
 - Validation: TIPC-01 through TIPC-12 each have one evidence owner, reciprocal
   plan references agree, and no prospective Pumas plan assigns an elapsed
   deadline to generation.
+
+## 2026-09-20 — Tighten proof and handoff boundaries after review
+
+- Reviewed committed reconciliation `c93a648c6b96785ab82dd63c47452002b784d23b`
+  and current source; unrelated untracked `docs/breif/future.md` remains untouched.
+- Kept the generation-wide policy and separated its Pumas transport proof from
+  provider-native cleanup. Current chat/completions registration is Ollama and
+  llama.cpp through one generic buffered handler; Torch remains image-only at
+  the public registry. One controlled transport case may cover the shared
+  implementation only when route tests prove every registered path uses it.
+- TIPC-12 no longer claims Ollama/llama.cpp worker cleanup. Their serving owners
+  retain that obligation; Torch image cleanup remains TIPC-03/04; unregistered
+  synchronous Torch text remains with broader Torch remediation.
+- Restored acceptance kind, environment, and mode; marked TIPC-M1 `Planned` and
+  composed-design applicability `applicable`; added independence reasoning and
+  supporting Rust, Ruff, Python unit, and native gates.
+- Explicitly admitted `torch-server/tests_native/test_image_failures.py` and
+  directed its obsolete deadline trigger to become cancellation/disconnect
+  cleanup evidence, separate from the controlled-clock lifetime regression.
+- The diffusion plan now preserves original M3 as completed within its recorded
+  scope, marks `M3-TIPC` planned, and returns each TIPC handoff as soon as its
+  own evidence passes rather than waiting for M5 or publication-dependent A1.
+- Planning documentation only; no production source, tests, runtime, or release
+  state changed.

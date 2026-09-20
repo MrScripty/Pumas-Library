@@ -56,7 +56,7 @@
   Distribution consumes the result later under separate authority.
 - Evidence: TIPC-04, TIPC-09, and TIPC-10.
 
-## TIPC-I06 — General resilience deadline guidance does not govern generation
+## TIPC-I06 — Explicit generation contract takes precedence
 
 - Finding: adopted Resilience guidance requires an end-to-end deadline for
   remote calls, while the explicit Pumas product policy says elapsed time alone
@@ -84,3 +84,29 @@
   shutdown on their independently justified policies.
 - Evidence: TIPC-12 plus configuration inspection proving no client-wide,
   request-total, response-read, idle, or middleware generation deadline remains.
+
+## TIPC-I08 — Shared transport proof does not prove external provider cleanup
+
+- Finding: Ollama and llama.cpp chat/completions share the generic buffered
+  gateway implementation, while Torch uses a dedicated image adapter. A
+  controlled provider can prove Pumas transport behavior but cannot prove that
+  actual Ollama or llama.cpp workers stopped after disconnect.
+- Disposition: TIPC-12 owns only the shared Pumas transport, route wiring,
+  disconnect signal, uncertainty, and no-replay claim. The current-route table
+  names each provider lifecycle owner. Torch image cleanup remains TIPC-03/04;
+  unregistered Torch text remains with broader Torch remediation. Future routes
+  inherit the contract only as an admission requirement.
+- Evidence: route/registry construction tests plus one controlled long/silent
+  non-image transport integration; provider-specific cleanup requires separate
+  owner evidence and is not inferred from TIPC-12.
+
+## TIPC-I09 — Native deadline fixture directly conflicts with the correction
+
+- Finding: `torch-server/tests_native/test_image_failures.py` patches the
+  600-second constant and expects HTTP 504/`deadline_exceeded` while also
+  asserting the valuable cleanup-before-lease-release invariant.
+- Disposition: the file is explicitly admitted. Replace its deadline trigger
+  with owner cancellation or disconnect and retain the cleanup assertion;
+  separately prove continued execution beyond the old boundary with controlled
+  time.
+- Evidence: focused native-suite execution plus TIPC-01/TIPC-03.

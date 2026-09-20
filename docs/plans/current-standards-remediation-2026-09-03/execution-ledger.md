@@ -20,6 +20,15 @@ not an image-only exception. PRG-A4 retains independently bounded connection,
 setup, cleanup, and termination operations and the broader lifecycle claims.
 The program's current phase and next slice remain unchanged.
 
+### Proof-boundary correction after review
+
+TIPC-12 now proves only the shared Pumas transport across actual registered
+Ollama/llama.cpp chat and completion routes. It does not infer that either
+external provider stopped work after disconnect; those provider serving owners
+retain that evidence obligation. Torch image cleanup remains under TIPC-03/04,
+and synchronous unregistered Torch text remains broader Milestone 3 work. PRG-A4
+stays blocked and the program's current next slice is unchanged.
+
 ## 2026-09-12 — Cached Runtime Liveness Read Contracts
 
 Accepted FE-I60: `is_ollama_running` / `is_torch_running` now use typed empty RPC

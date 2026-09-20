@@ -6,6 +6,10 @@
 
 **Next slice:** Complete shared-release distribution acceptance for the qualified Torch package, retaining the working FP8 image workflow and the user-requested reduced verification scope. Native NVFP4 encoder serving and T16 desktop shutdown work remain outside the completed conversion extension.
 
+**Independent companion preparation:** `M3-TIPC` is `Planned`: remove Tuldok's
+remaining generation deadline and qualify the exact-candidate 1280×720 workflow.
+This does not replace the sole next slice above.
+
 **Acceptance status:** `partial`
 
 **Brief:** [Torch diffusion serving](../../breif/torch-diffusion-runtime.md)
@@ -171,14 +175,16 @@ Finalize and document this bounded contract in M2 before integrating Tuldok:
 
 ## Milestones
 
-M1/M2/M5 remain `Active` for distribution and remaining failure acceptance; M3/M4 are `Completed`. M1 publication acceptance is
+M1/M2/M5 remain `Active` for distribution and remaining failure acceptance.
+Original M3 and M4 are `Completed` within their recorded evidence; `M3-TIPC` is
+`Planned` and pending. M1 publication acceptance is
 deferred until M2 supplies the final sidecar payload: publishing the control-only
 candidate first would require an immediate second publication. Source work may
 continue during package qualification; real model loading still requires a healthy
-qualified runtime. A1 remains mandatory for final acceptance. M3 client source work may use the
-tested M2 contract while large assets download; no fixture or source completion
-satisfies the required real-image gates. M4 source preparation may proceed while
-the large Nunchaku bundle transfers: a header-only strict layout check now passes
+qualified runtime. A1 remains mandatory for final acceptance. M3-TIPC source
+work may use the tested M2 contract while large assets download; no fixture or
+source completion satisfies the required real-image gates. M4 source preparation
+may proceed while the large Nunchaku bundle transfers: a header-only strict layout check now passes
 against the installed Diffusers architecture. Nunchaku remains first for GPU,
 gateway and browser acceptance; FLUX asset transfers must not delay its acquisition.
 Each milestone
@@ -259,21 +265,44 @@ associated client bindings only as required by M2 contracts; Tuldok `ai_http.py`
 `image_generation.py` (bounded image transport and cancellation), `app.py` (existing HTTP route owner), `static/app.js`,
 `static/index.html`, associated styles, tests and user documentation.
 
-**Tasks:** Expose the gateway URL and managed Torch serving state in Pumas. Add
+**Historical tasks:** Expose the gateway URL and managed Torch serving state in Pumas. Add
 Tuldok image-generation controls separate from corner detection, capability-filtered
 selection-only model list, prompt, size and optional seed, pending/cancel/error
 states, image display and save. Decode bounded validated image responses; preserve
-existing corner workflow. Preserve the already-correct numeric width/height request,
-requested dimensions, 1280×720 defaults, and explicit socket/watcher cancellation;
-remove the remaining consumer generation deadline and deadline-specific outcome,
-preserve unknown outcomes without automatic replay, and do not narrow legitimate
-public metadata to current examples. Provide a useful unsupported-endpoint message
+existing corner workflow. Provide a useful unsupported-endpoint message
 when configured with the llama.cpp router instead of Pumas gateway.
 
-**Gate:** Browser fixture coverage for failure/cancel/output handling and
-TIPC-10: a supporting model completes a real 1280×720 Tuldok-to-Pumas request
-through the exact installed corrected candidate, displays it, and saves it.
-Record `reports/tuldok.md` without relabeling the earlier smaller-image evidence.
+**Historical gate:** Browser fixture coverage for failure/cancel/output handling
+and the recorded real Tuldok-to-Pumas image display/save workflow passed within
+the original candidate, resolution, and protocol scope in `reports/tuldok.md`.
+
+**Status:** `Completed` within that historical scope.
+
+#### M3-TIPC — Tuldok contract companion
+
+**Goal:** Align the existing Tuldok image consumer with `TIPC-GEN-01` and return
+TIPC-10 without changing discovery, datasets, or VLM transport.
+
+**Status:** `Planned`
+
+**Allowed write set:** Tuldok `image_generation.py`, its focused tests,
+`tests/browser_images_real.cjs`, relevant user documentation, and this plan's
+`reports/tuldok.md`, ledger, and issues.
+
+**Tasks:** Preserve the already-correct numeric width/height request, requested
+dimensions, 1280×720 defaults, and explicit socket/watcher cancellation. Remove
+the remaining consumer generation deadline and deadline-specific outcome;
+preserve uncertain outcomes without automatic replay; and avoid narrowing
+legitimate public metadata to current examples.
+
+**Gate:** TIPC-10: a supporting model completes a real 1280×720 Tuldok-to-Pumas
+request through the exact installed corrected candidate, displays it, and saves
+it. Record new evidence without relabeling the earlier smaller-image result.
+
+This companion may be prepared against the current public contract independently
+of TIPC-M1 source completion, but its required-real gate waits for the exact
+installed corrected candidate.
+
 **Re-plan:** Tuldok's current app structure or dataset import boundary materially differs.
 
 ### M4 — FLUX.2 through the same path
@@ -319,11 +348,14 @@ VLM behavior. Use current GPU telemetry before loads and explicitly manage
 competing models. Record usable latency/defaults and known limitations; preserve
 evidence rather than declaring success from build completion.
 
-**Gate:** TIPC-04, TIPC-09, and TIPC-10 are returned to the focused plan; all
-A1–A7 are satisfied with release identity and reproducible commands in
-`reports/release-acceptance.md`. No required installed-artifact, GPU, or browser
-check may be replaced by mocks. Qualification does not authorize publication or
-production-default selection.
+**TIPC handoff gate:** Return TIPC-04, TIPC-09, and TIPC-10 individually when
+their specific evidence passes. No handoff waits for acceptance of all M5, for
+publication, or for publication-dependent A1.
+
+**Milestone gate:** All A1–A7 are satisfied with release identity and
+reproducible commands in `reports/release-acceptance.md`. No required installed-
+artifact, GPU, or browser check may be replaced by mocks. Qualification does not
+authorize publication or production-default selection.
 **Re-plan:** Any required acceptance fails, the selected model does not support
 1280×720, or the reserved recipe identity collides; fix/select a supported model
 or identity and rerun only the affected evidence.

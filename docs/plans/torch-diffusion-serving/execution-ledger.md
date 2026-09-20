@@ -27,6 +27,19 @@
 - This clarification does not expand this plan into text semantics or usage
   accounting and does not change its current distribution next slice.
 
+### Handoff-state correction after review
+
+- Original M3 remains completed only for its recorded workflow. New Tuldok
+  deadline removal, uncertain-outcome handling, metadata permissiveness, and the
+  exact-candidate 1280×720 workflow are now the explicit `M3-TIPC` Planned
+  companion; they are not retroactively accepted by the old evidence.
+- TIPC-04, TIPC-09, and TIPC-10 return independently when their exact evidence
+  passes. They do not wait for whole-M5 acceptance, publication, or A1's
+  publication-dependent discovery evidence.
+- The existing distribution next slice remains the plan's sole current
+  priority; M3-TIPC is independently preparable and its required-real gate waits
+  for the installed corrected candidate.
+
 ## 2026-09-13 — Brief and implementation plan
 
 - Moved runtime requirements from `docs/torch-diffusion-runtime.md` to

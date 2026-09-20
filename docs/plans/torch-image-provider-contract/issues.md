@@ -111,7 +111,7 @@
   time.
 - Evidence: focused native-suite execution plus TIPC-01/TIPC-03.
 
-## TIPC-I10 — Required project-scoped Passeur servers are not registered
+## TIPC-I10 — Required project-scoped Passeur tools are not callable
 
 - Finding: initial intake found no Pumas or Tuldok profile and no Passeur tools
   in the current Codex session. The installed registration helper owns one
@@ -156,3 +156,31 @@ four tools. The remaining failure is conversation attachment, not Passeur
 source, profile, registration, task state, or a live worker. Start a newly
 created conversation that explicitly requests `passeur_pumas` and
 `passeur_tuldok`; do not use a custom client that bypasses elicitation.
+
+Fourth-session diagnostic: the user created another conversation and explicitly
+named both servers. `codex mcp get` still resolves both enabled registrations
+with the four-tool allowlist, and both Doctors pass. Host-visible inspection now
+shows one live exact-command process for each server; the Pumas process owns the
+repository coordination lease. The model's complete callable inventory still
+contains neither namespace. Consequently, a resource-list request and a
+bounded read-only SDK handshake start duplicate processes and close; outside
+the restricted sandbox the duplicate reports `Another coordinator or offline
+mutation owns this repository`. This is expected contention with the healthy
+attached owner, not evidence that the profile or lease is stale. Do not kill
+the owner or use a custom client. The remaining blocker is host-to-model tool
+exposure for the already attached processes.
+
+Material tooling drift observed during this diagnostic: the clean Passeur
+source advanced from compatibility commit `4f4ef0f` to `49724a8`, while the
+ignored configured `dist/` runtime retains the older CLI surface (for example,
+`--version` prints the old usage text). Reconcile and verify that build/runtime
+identity after callable attachment is restored and before dispatch.
+
+Official Codex MCP configuration documentation states that optional servers get
+a one-second grace while the initial tool catalog is built, unless the global
+grace is disabled, while required servers use their startup timeouts. The two
+Passeur registrations set a 10-second startup timeout but have no `required`
+flag, and the global optional grace is unset. That configuration matches the
+observed live-process/missing-catalog shape but remains a hypothesis until an
+authorized change marks only these requested servers required and a fresh
+session verifies the resulting catalog.

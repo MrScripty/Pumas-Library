@@ -292,3 +292,51 @@
   source or Tuldok state changed. `TIPC-M1` remains `Blocked` until a newly
   created conversation explicitly naming both configured servers exposes their
   callable tools.
+
+## 2026-09-20 — Named servers run, but their operations remain unexposed
+
+- The user created another conversation and explicitly requested the configured
+  `passeur_pumas` and `passeur_tuldok` servers. The complete callable-tool
+  inventory still omits both namespaces and all eight task operations.
+- `codex mcp get` resolves both enabled stdio registrations with the recorded
+  project/profile arguments, four-tool allowlists, 10-second startup timeout,
+  and 2100-second tool timeout. Both project Doctors pass; they remain
+  non-inference diagnostics.
+- Host-visible process inspection found one live exact-command Passeur process
+  for Pumas and one for Tuldok, both parented by the Codex host. Passeur
+  inspection shows only the four previously archived, retired, zero-change
+  Pumas attempts. No Muse worker or product task is live.
+- Built a sub-second deterministic feedback loop with a bounded read-only MCP
+  SDK initialization against the exact registered Pumas command. In the managed
+  sandbox it closes with MCP `-32000` and empty stderr. Outside that sandbox the
+  same duplicate startup closes with `Another coordinator or offline mutation
+  owns this repository`, proving that the already attached Pumas process holds
+  the repository coordination lease. Resource listing fails for the same
+  duplicate-start reason; it is not a substitute for the omitted task tools.
+- The diagnosis rules out a missing profile, dead registered process, stale
+  orphan lock, or SDK-version-only failure. The blocker is the Codex
+  host-to-model callable inventory: the server processes are attached and own
+  their resources, but their task operations were not supplied to this model
+  turn. Killing those owners or using a custom client would be destructive or
+  bypass required elicitation and was not attempted.
+- Official Codex MCP documentation records a one-second default grace for
+  optional servers during initial tool-catalog construction; servers marked
+  required instead use their startup timeouts. The configured Passeur entries
+  specify 10-second startup timeouts but are not required, and no global grace
+  override is present. This is the leading host-side explanation for live
+  processes with omitted tools. Changing the global configuration and starting
+  another session requires explicit authority and remains untested.
+- Material external tooling drift was recorded before dispatch: the clean
+  Passeur source is now `49724a8` (`feat: add discoverable startup runtime`),
+  while the ignored configured `dist/` still presents the older CLI surface;
+  its `--version` invocation prints the old usage text. The compatibility fix
+  commit `4f4ef0f` remains in its ancestry. Rebuild/registration reconciliation
+  is required after callable attachment is restored and before fresh task keys
+  are allocated.
+- Pumas remains at `05855f1b`, its clean coordinator source remains at
+  `96f859443460ad8e4799d563528aaba113ccff21`, and Tuldok remains clean at
+  `6e9e6ec32d4dd719af0e051baafacecd190864c2`. The unrelated untracked
+  `docs/breif/future.md` remains untouched. No delegation, product edit,
+  candidate, GPU/browser action, publication, or remote mutation occurred;
+  `TIPC-M1` remains `Blocked` pending exposure of the existing named servers'
+  callable operations.

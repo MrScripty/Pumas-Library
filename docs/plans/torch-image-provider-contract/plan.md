@@ -12,11 +12,12 @@ immutable runtime installation model.
 **Acceptance status:** `pending`
 
 **Current phase:** `TIPC-M1` was admitted under `start`; its bounded Pumas and
-Tuldok allocations are recorded. The local Passeur source and built runtime are
-corrected and verified, and their configured commands expose the expected four
-tools. This resumed conversation nevertheless omits both registered Passeur
-namespaces from its callable inventory, so product implementation remains
-blocked pending a newly created conversation that attaches them.
+Tuldok allocations are recorded. Both named Passeur processes are running under
+the Codex host and the Pumas process holds its repository coordination lease,
+but this conversation's callable inventory omits both namespaces. Product
+implementation remains blocked until the existing attached processes' four
+operations are exposed to the model; starting a duplicate server cannot recover
+the inventory and correctly conflicts with the held lease.
 
 **Next integration slice:** `TIPC-M1` — implement and verify the reusable Pumas
 generation lifetime and coherent Torch image provider correction, including
@@ -376,13 +377,22 @@ shutdown remain deferred unless a specific TIPC claim demonstrates a prerequisit
 - Pumas and Tuldok Passeur profiles and named registrations are configured with
   the user-confirmed subscription and pass Doctor/configuration checks. The
   Passeur/Muse client-name incompatibility is corrected in local Passeur commit
-  `4f4ef0f`; its full tests, typecheck, build, direct Muse handshake, and a fresh
-  read-only MCP `listTools` handshake pass. No host-visible Passeur/Muse process
-  or live repository lease remains. This resumed conversation still exposes
-  neither `passeur_pumas` nor `passeur_tuldok`; create a new conversation that
-  explicitly names both configured servers and confirm their tools are present
-  before retrying the recorded assignments. Do not substitute a custom MCP
-  client, because it cannot preserve the required human approval elicitation.
+  `4f4ef0f`; its full tests, typecheck, build, direct Muse handshake, and a
+  read-only MCP `listTools` handshake passed. Passeur source has since advanced
+  independently to clean commit `49724a8`, while the ignored configured `dist/`
+  runtime still has the older CLI surface and corrected client identifier; this
+  drift must be reconciled before the next dispatch. The Codex host currently
+  runs one exact configured process for each named server, and the Pumas process
+  owns its repository lease, but this conversation exposes neither namespace's
+  four task operations. A duplicate SDK/resource startup closes because the
+  healthy attached owner already holds that lease. Recover the host-to-model
+  tool attachment before retrying the recorded assignments. The current Codex
+  configuration neither marks these servers `required` nor overrides the
+  documented one-second optional-server catalog grace; setting the two servers
+  required is the narrow next diagnostic, but needs global configuration
+  authority and a fresh session. Do not kill the owner, start a competing
+  coordinator, or substitute a custom MCP client that bypasses human approval
+  elicitation.
 - Required-real GPU and browser availability may delay TIPC-04/TIPC-10 only.
 - Candidate build/install access may delay TIPC-09 only.
 

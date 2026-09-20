@@ -144,3 +144,15 @@ test suite, typecheck, and build passed. The attached MCP processes retain the
 pre-build module, so one further Codex restart is required. All six zero-change
 failed allocations were explicitly archived and retired; no product task
 remains live.
+
+Third-session diagnostic: after the requested restart, the corrected Passeur
+runtime and registrations remain present but the resumed conversation's
+callable inventory again omits both namespaces. A sandboxed startup reports the
+generic repository-in-use error because it cannot acquire Passeur's external
+state lease; host-visible process inspection and state-directory inspection
+show no running coordinator or surviving lock. The same configured command,
+launched read-only with its required state access, initializes and lists all
+four tools. The remaining failure is conversation attachment, not Passeur
+source, profile, registration, task state, or a live worker. Start a newly
+created conversation that explicitly requests `passeur_pumas` and
+`passeur_tuldok`; do not use a custom client that bypasses elicitation.

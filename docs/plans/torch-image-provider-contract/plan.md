@@ -12,11 +12,11 @@ immutable runtime installation model.
 **Acceptance status:** `pending`
 
 **Current phase:** `TIPC-M1` was admitted under `start`; its bounded Pumas and
-Tuldok allocations are recorded. The project-scoped Passeur tools are attached,
-but the first live delegations exposed an invalid Passeur-to-Muse client name.
-The local Passeur source and built runtime are corrected and verified; product
-implementation remains blocked until Codex restarts the already-attached MCP
-server processes so they load that correction.
+Tuldok allocations are recorded. The local Passeur source and built runtime are
+corrected and verified, and their configured commands expose the expected four
+tools. This resumed conversation nevertheless omits both registered Passeur
+namespaces from its callable inventory, so product implementation remains
+blocked pending a newly created conversation that attaches them.
 
 **Next integration slice:** `TIPC-M1` — implement and verify the reusable Pumas
 generation lifetime and coherent Torch image provider correction, including
@@ -374,15 +374,15 @@ shutdown remain deferred unless a specific TIPC claim demonstrates a prerequisit
 ## Blockers
 
 - Pumas and Tuldok Passeur profiles and named registrations are configured with
-  the user-confirmed subscription, pass Doctor/configuration checks, and are
-  attached to this conversation. Live delegation found that Passeur revision
-  `b0c162d` passed the invalid Muse client name `muse-bridge`; Muse 1.3 requires
-  a machine identifier matching `^[a-z0-9_]+$`. The local Passeur source,
-  regression test, probe, and ignored built runtime now use `muse_bridge` (or
-  `muse_bridge_probe`) in local commit `4f4ef0f`; the full test suite,
-  typecheck, build, and direct handshake pass. The attached MCP processes
-  retain the old module in memory, so restart Codex once more before retrying
-  the recorded assignments.
+  the user-confirmed subscription and pass Doctor/configuration checks. The
+  Passeur/Muse client-name incompatibility is corrected in local Passeur commit
+  `4f4ef0f`; its full tests, typecheck, build, direct Muse handshake, and a fresh
+  read-only MCP `listTools` handshake pass. No host-visible Passeur/Muse process
+  or live repository lease remains. This resumed conversation still exposes
+  neither `passeur_pumas` nor `passeur_tuldok`; create a new conversation that
+  explicitly names both configured servers and confirm their tools are present
+  before retrying the recorded assignments. Do not substitute a custom MCP
+  client, because it cannot preserve the required human approval elicitation.
 - Required-real GPU and browser availability may delay TIPC-04/TIPC-10 only.
 - Candidate build/install access may delay TIPC-09 only.
 

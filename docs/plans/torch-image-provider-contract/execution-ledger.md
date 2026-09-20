@@ -261,3 +261,34 @@
   launcher root, publication, or remote state changed. `TIPC-M1` remains
   `Blocked` until Codex restarts the two attached MCP processes and the recorded
   assignments are retried against the rebuilt Passeur runtime.
+
+## 2026-09-20 — Corrected runtime passes; resumed thread omits namespaces
+
+- The user reported restarting and authorized continuation. Pumas remains at
+  plan commit `63863942`, its clean coordinator source remains at
+  `96f859443460ad8e4799d563528aaba113ccff21`, and Tuldok remains clean at
+  `6e9e6ec32d4dd719af0e051baafacecd190864c2`. The unrelated untracked Pumas
+  `docs/breif/future.md` and Passeur
+  `passeur-parallel-workers-changes.zip` remain untouched.
+- Both named registrations remain enabled with the expected commands, profiles,
+  tool allowlists, startup timeout, and task timeout. Passeur remains at local
+  compatibility commit `4f4ef0f`, and its ignored built adapter contains the
+  corrected `muse_bridge` identity.
+- This resumed conversation exposes neither Passeur namespace in its callable
+  tool inventory. A forced sandboxed resource/startup probe closed during MCP
+  initialization; a minimal sandboxed reproduction reported Passeur's generic
+  repository-in-use error while attempting to acquire its external state lease.
+- Host-visible process inspection found no Passeur or Muse process, and state
+  inspection found no surviving repository lock. A read-only MCP SDK handshake
+  against the exact configured Pumas command with normal state access
+  initialized successfully and listed `delegate_to_muse`,
+  `delegate_to_muse_batch`, `muse_result`, and `muse_finalize`.
+- Official Codex documentation confirms that configured stdio MCP servers and
+  their enabled-tool allowlists are loaded through Codex configuration; it does
+  not provide a supported mechanism for injecting a missing namespace into an
+  already-running conversation. A custom client remains prohibited because it
+  would bypass Passeur's human approval elicitation.
+- No task was dispatched, no task resource or lease remains live, and no product
+  source or Tuldok state changed. `TIPC-M1` remains `Blocked` until a newly
+  created conversation explicitly naming both configured servers exposes their
+  callable tools.

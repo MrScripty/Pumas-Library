@@ -123,16 +123,18 @@
   contribution with Ruff, Python unit, controlled lifetime, and available
   native cleanup evidence for the sidecar portions of TIPC-01/03/05–07/11.
 - `TIPC-M1-R` and `TIPC-M1-P` are independent after the recorded protocol
-  agreement and are intended for one Pumas batch at the same exact base. Serial
-  integration order is R then P unless returned commit assumptions require a
-  repair assignment. Shared plan lifecycle, ledger, issues, final contract
+  agreement and are intended for one Pumas batch at exact implementation base
+  `96f859443460ad8e4799d563528aaba113ccff21`, targeting
+  `refs/heads/integration/torch-image-provider-contract`. Serial integration
+  order is R then P unless returned commit assumptions require a repair
+  assignment. Shared plan lifecycle, ledger, issues, final contract
   reconciliation, candidate construction, GPU allocation, and qualification
   roots remain coordinator-owned and serialized.
 - Planned companion assignment `M3-TIPC-T` (Tuldok): governing Pumas plan
   `docs/plans/torch-diffusion-serving/plan.md`, operation `continue`, milestone
   `M3-TIPC`; exact Tuldok base
-  `6e9e6ec32d4dd719af0e051baafacecd190864c2`; target to be a full local Tuldok
-  integration ref. Write set is `image_generation.py`,
+  `6e9e6ec32d4dd719af0e051baafacecd190864c2`; target
+  `refs/heads/integration/torch-image-provider-contract`. Write set is `image_generation.py`,
   `tests/test_image_generation.py`, `tests/browser_images_real.cjs`, and
   relevant Tuldok user documentation. Preserve numeric dimensions, 1280×720,
   socket/watcher cancellation, and no replay; remove the 630-second generation
@@ -153,6 +155,15 @@
   dispatched. Separate project registrations and a Codex restart are required;
   the missing Tuldok server does not broaden or block independent Pumas scope,
   while the missing Pumas implementation server prevents source execution.
+- Because Passeur rejects any dirty configured source checkout and the primary
+  Pumas checkout intentionally retains unrelated untracked
+  `docs/breif/future.md`, the coordinator created the clean, repository-linked
+  source worktree `/media/jeremy/OrangeCream/passeur_cache/pumas-coordinator-source`
+  on `refs/heads/passeur/pumas-coordinator` at the admitted implementation base.
+  It belongs to this orchestration only, is not an integration target, and must
+  remain clean and retained until Passeur resources are finalized; afterward
+  its exact head must remain reachable before ordinary safe worktree/branch
+  retirement. No existing `.muse` or other-owner worktree was changed.
 - Preserved unrelated untracked `docs/breif/future.md`. No product/test source,
   runtime installation, candidate, GPU process, launcher root, publication, or
   remote state changed.

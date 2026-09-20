@@ -1,6 +1,6 @@
 # Plan: Torch Image Provider Contract Correction
 
-**Plan status:** `Blocked`
+**Plan status:** `Active`
 
 **Objective:** Establish one reusable generation lifetime in which an admitted
 image, text, or future generation remains active until completion,
@@ -11,17 +11,15 @@ immutable runtime installation model.
 
 **Acceptance status:** `pending`
 
-**Current phase:** `TIPC-M1` was admitted under `start`; its bounded Pumas and
-Tuldok allocations are recorded. Both named Passeur processes are running under
-the Codex host and the Pumas process holds its repository coordination lease,
-but this conversation's callable inventory omits both namespaces. Product
-implementation remains blocked until the existing attached processes' four
-operations are exposed to the model; starting a duplicate server cannot recover
-the inventory and correctly conflicts with the held lease.
+**Current phase:** `TIPC-M1` source is committed at Pumas
+`826a270958f7182bd8108c879b4b7fa1da5cab7d`; the Tuldok companion is committed
+at `a61daeec83779868cf03b14fb5c811fcdc608fc2`. Controlled Pumas, sidecar, and
+Tuldok evidence passes. The qualified native Torch failure test and the exact
+candidate/GPU/browser handoffs remain pending in their declared environments.
 
-**Next integration slice:** `TIPC-M1` — implement and verify the reusable Pumas
-generation lifetime and coherent Torch image provider correction, including
-their owned tests and documentation.
+**Next integration slice:** execute the updated native failure test in the
+qualified Torch environment, then hand source commit `826a2709` to the Tuldok
+image plan for exact-candidate construction and TIPC-04/TIPC-09/TIPC-10.
 
 **Execution ledger:** [execution-ledger.md](execution-ledger.md)
 
@@ -210,18 +208,18 @@ evidence but do not independently prescribe or re-prove the same correction.
 
 | ID | Claim and deciding evidence | Kind | Environment | Mode | Execution/evidence owner | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| TIPC-01 | Elapsed time beyond the former limit does not cancel valid work — controlled worker/clock regression | integration | representative controlled worker/clock | automated | This plan | pending |
-| TIPC-02 | Production image transport permits a connected, silent, long request — configuration inspection plus controlled transport integration | integration | representative real gateway/private transport | automated | This plan | pending |
-| TIPC-03 | Disconnect and explicit owner cancellation propagate while resources remain held through pending cleanup — current-route transport/lifecycle evidence | system | representative real Pumas/Torch route with controlled worker | automated | This plan | pending |
+| TIPC-01 | Elapsed time beyond the former limit does not cancel valid work — controlled worker/clock regression | integration | representative controlled worker/clock | automated | This plan | passed |
+| TIPC-02 | Production image transport permits a connected, silent, long request — configuration inspection plus controlled transport integration | integration | representative real gateway/private transport | automated | This plan | passed |
+| TIPC-03 | Disconnect and explicit owner cancellation propagate while resources remain held through pending cleanup — current-route transport/lifecycle evidence | system | representative real Pumas/Torch route with controlled worker | automated | This plan | partial — controlled route/worker passed; qualified native run pending |
 | TIPC-04 | Actual GPU cancellation permits reuse only after sufficient worker/device cleanup — required-real device evidence | system | required-real supported GPU and exact candidate | either | [Tuldok image plan M5](../torch-diffusion-serving/plan.md#m5--release-and-optional-build-acceptance) | pending |
-| TIPC-05 | Malformed, incompatible, missing-capability, unavailable, and replaced runtimes cannot gain false listing/readiness/admission — handshake, serving, listing, and admission tests | integration | representative controlled sidecars/process replacement | automated | This plan | pending |
-| TIPC-06 | Artifact consistency and live interoperability are independently checked, including mixed versions — installer/qualifier and client tests | integration | representative isolated installer plus mixed clients/sidecars | automated | This plan | pending |
-| TIPC-07 | Additive results succeed while invalid required data and oversized whole payloads fail — decoder contract tests | contract | deterministic decoder fixtures | automated | This plan | pending |
-| TIPC-08 | Private additions do not leak publicly and safe error projection remains coherent — gateway projection tests | integration | representative gateway/provider fixtures | automated | This plan | pending |
+| TIPC-05 | Malformed, incompatible, missing-capability, unavailable, and replaced runtimes cannot gain false listing/readiness/admission — handshake, serving, listing, and admission tests | integration | representative controlled sidecars/process replacement | automated | This plan | passed |
+| TIPC-06 | Artifact consistency and live interoperability are independently checked, including mixed versions — installer/qualifier and client tests | integration | representative isolated installer plus mixed clients/sidecars | automated | This plan | passed |
+| TIPC-07 | Additive results succeed while invalid required data and oversized whole payloads fail — decoder contract tests | contract | deterministic decoder fixtures | automated | This plan | passed |
+| TIPC-08 | Private additions do not leak publicly and safe error projection remains coherent — gateway projection tests | integration | representative gateway/provider fixtures | automated | This plan | passed |
 | TIPC-09 | The exact candidate installs and runs through production installation — isolated installed-artifact qualification | release-artifact | required-real isolated launcher root and candidate bytes | either | [Tuldok image plan M1/M5](../torch-diffusion-serving/plan.md) | pending |
 | TIPC-10 | A supported real 1280×720 request traverses Tuldok → Pumas → installed candidate, displays, and saves — required-real browser/GPU evidence | user-workflow | required-real browser, GPU, Tuldok, Pumas, exact candidate | either | [Tuldok image plan M3-TIPC](../torch-diffusion-serving/plan.md#m3-tipc--tuldok-contract-companion) | pending |
-| TIPC-11 | A lost response preserves uncertainty and causes no automatic replay — controlled transport-failure evidence | integration | representative controlled gateway/private transport | automated | This plan | pending |
-| TIPC-12 | Registered non-image generation routes necessarily use the shared duration-unbounded Pumas transport; a connected silent request has no duration/byte-cadence failure, disconnect drops the Pumas request, and Pumas does not replay. This claim does not assert provider-native cleanup. | integration | representative real route wiring plus controlled gateway/provider transport | automated | This plan | pending |
+| TIPC-11 | A lost response preserves uncertainty and causes no automatic replay — controlled transport-failure evidence | integration | representative controlled gateway/private transport | automated | This plan | passed |
+| TIPC-12 | Registered non-image generation routes necessarily use the shared duration-unbounded Pumas transport; a connected silent request has no duration/byte-cadence failure, disconnect drops the Pumas request, and Pumas does not replay. This claim does not assert provider-native cleanup. | integration | representative real route wiring plus controlled gateway/provider transport | automated | This plan | passed |
 
 Controlled time must replace ten-minute regression waits. A short wait does not
 prove the absence of a long production timeout, and harness watchdogs are not
@@ -232,7 +230,7 @@ including the three named handoffs, pass.
 
 ## TIPC-M1 — shared generation lifetime and provider correction
 
-**Status:** `Blocked`
+**Status:** `Active — source complete; qualified native evidence pending`
 
 **Goal:** Establish the shared Pumas generation lifetime and correct the live
 Pumas/Torch image compatibility and result contract as one implementation unit.
@@ -261,26 +259,26 @@ image errors consumed by `pumas-rpc`; no unrelated app-manager API is admitted.
 
 **Tasks:**
 
-- [ ] Recheck current source, local changes, protocol and recipe allocation;
+- [x] Recheck current source, local changes, protocol and recipe allocation;
   record any material drift before expanding the write set.
-- [ ] Implement one generation transport/lifecycle seam without total/read/idle
+- [x] Implement one generation transport/lifecycle seam without total/read/idle
   duration failure for current text and image generation routes; preserve
   independently bounded non-generation operations.
-- [ ] Implement cancellation/cleanup, unknown-outcome, handshake, process-
+- [x] Implement cancellation/cleanup, unknown-outcome, handshake, process-
   identity, admission, strict-request, extensible-result, payload-bound,
   PNG/dimension, and public-projection decisions above.
-- [ ] Replace the native deadline fixture with owner cancellation or disconnect
+- [x] Replace the native deadline fixture with owner cancellation or disconnect
   while retaining its cleanup-before-lease-release assertion. Put continued
   execution beyond the former 600-second boundary in the controlled-clock
   lifetime regression rather than a wall-clock wait.
-- [ ] Evolve the bundled sidecar and recipe coherently to protocol `3`; verify
+- [x] Evolve the bundled sidecar and recipe coherently to protocol `3`; verify
   recipe/sidecar consistency separately from live client interoperability.
-- [ ] Add the controlled and real-route evidence for TIPC-01–TIPC-03,
+- [x] Add the controlled and real-route evidence for TIPC-01–TIPC-03,
   TIPC-05–TIPC-08, TIPC-11, and TIPC-12, including mixed protocol versions,
   replacement, and a representative non-image generation route.
-- [ ] Update the named contracts, ADR, README, module docs, and qualification
+- [x] Update the named contracts, ADR, README, module docs, and qualification
   instructions only after their behavior is implemented.
-- [ ] Hand the corrected source identity and passing owned evidence to the
+- [x] Hand the corrected source identity and passing owned evidence to the
   Tuldok image plan for candidate construction and TIPC-04/TIPC-09/TIPC-10.
 
 **Gate:** TIPC-01–TIPC-03, TIPC-05–TIPC-08, TIPC-11, and TIPC-12 pass at their

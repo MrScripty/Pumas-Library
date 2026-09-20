@@ -40,6 +40,26 @@
   priority; M3-TIPC is independently preparable and its required-real gate waits
   for the installed corrected candidate.
 
+### M3-TIPC source companion completed
+
+- Consumed accepted Pumas source identity
+  `826a270958f7182bd8108c879b4b7fa1da5cab7d` and integrated the Muse-assisted
+  Tuldok companion as `a61daeec83779868cf03b14fb5c811fcdc608fc2` on
+  `integration/torch-image-provider-contract`.
+- Tuldok now bounds only connection establishment, leaves admitted reads
+  duration-unbounded, distinguishes pre-connect unavailability from uncertain
+  response loss, never retries automatically, preserves explicit
+  socket/watcher cancellation, accepts additive public metadata without saving
+  unknown fields, and drives the real browser script at 1280×720.
+- The full Tuldok unit suite passed: 47 tests. Two timed-out Passeur worktrees
+  were confirmed stopped, reconciled, and finalized as retained audit evidence;
+  only the broader v5 work was adapted, so competing partial contributions were
+  not combined.
+- This is source completion only. No candidate was built or installed, no GPU
+  was allocated, and no browser was run. TIPC-10 remains pending until the exact
+  corrected candidate traverses Tuldok → Pumas at 1280×720 and both displayed
+  and saved outputs are recorded.
+
 ## 2026-09-13 — Brief and implementation plan
 
 - Moved runtime requirements from `docs/torch-diffusion-runtime.md` to

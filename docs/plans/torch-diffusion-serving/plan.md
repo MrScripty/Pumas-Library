@@ -6,9 +6,10 @@
 
 **Next slice:** Complete shared-release distribution acceptance for the qualified Torch package, retaining the working FP8 image workflow and the user-requested reduced verification scope. Native NVFP4 encoder serving and T16 desktop shutdown work remain outside the completed conversion extension.
 
-**Independent companion preparation:** `M3-TIPC` is `Planned`: remove Tuldok's
-remaining generation deadline and qualify the exact-candidate 1280×720 workflow.
-This does not replace the sole next slice above.
+**Independent companion preparation:** `M3-TIPC` source is complete in Tuldok
+`a61daeec83779868cf03b14fb5c811fcdc608fc2`; the exact-candidate 1280×720
+browser/GPU gate remains pending. This does not replace the sole next slice
+above.
 
 **Acceptance status:** `partial`
 
@@ -176,8 +177,8 @@ Finalize and document this bounded contract in M2 before integrating Tuldok:
 ## Milestones
 
 M1/M2/M5 remain `Active` for distribution and remaining failure acceptance.
-Original M3 and M4 are `Completed` within their recorded evidence; `M3-TIPC` is
-`Planned` and pending. M1 publication acceptance is
+Original M3 and M4 are `Completed` within their recorded evidence; `M3-TIPC`
+source is complete and its required-real gate is pending. M1 publication acceptance is
 deferred until M2 supplies the final sidecar payload: publishing the control-only
 candidate first would require an immediate second publication. Source work may
 continue during package qualification; real model loading still requires a healthy
@@ -283,17 +284,18 @@ the original candidate, resolution, and protocol scope in `reports/tuldok.md`.
 **Goal:** Align the existing Tuldok image consumer with `TIPC-GEN-01` and return
 TIPC-10 without changing discovery, datasets, or VLM transport.
 
-**Status:** `Planned`
+**Status:** `Active — source complete; exact-candidate gate pending`
 
 **Allowed write set:** Tuldok `image_generation.py`, its focused tests,
 `tests/browser_images_real.cjs`, relevant user documentation, and this plan's
 `reports/tuldok.md`, ledger, and issues.
 
-**Tasks:** Preserve the already-correct numeric width/height request, requested
+**Completed source tasks:** Preserve the already-correct numeric width/height request, requested
 dimensions, 1280×720 defaults, and explicit socket/watcher cancellation. Remove
 the remaining consumer generation deadline and deadline-specific outcome;
 preserve uncertain outcomes without automatic replay; and avoid narrowing
-legitimate public metadata to current examples.
+legitimate public metadata to current examples. Tuldok commit `a61daee` passed
+all 47 unit tests.
 
 **Gate:** TIPC-10: a supporting model completes a real 1280×720 Tuldok-to-Pumas
 request through the exact installed corrected candidate, displays it, and saves

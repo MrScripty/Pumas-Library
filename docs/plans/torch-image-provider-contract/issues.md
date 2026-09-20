@@ -190,6 +190,16 @@ ignored configured `dist/` runtime retains the older CLI surface (for example,
 `--version` prints the old usage text). Reconcile and verify that build/runtime
 identity after callable attachment is restored and before dispatch.
 
+Fifth-session resolution: both configured namespaces and their four operations
+were callable. Pumas and Tuldok Muse workers ran in repository-scoped
+worktrees; their useful committed or dirty output was reviewed and adapted into
+Pumas `826a2709` and Tuldok `a61daee`. Timed-out workers were confirmed stopped
+before offline reconciliation, and every surviving task resource was finalized
+with an explicit retained disposition. The attachment issue is resolved for
+this execution; after the coordinators were intentionally stopped for safe
+reconciliation, a later delegation requires normal server reattachment rather
+than another workaround or direct Muse invocation.
+
 Official Codex MCP configuration documentation states that optional servers get
 a one-second grace while the initial tool catalog is built, unless the global
 grace is disabled, while required servers use their startup timeouts. The two

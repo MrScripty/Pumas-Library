@@ -340,3 +340,104 @@
   candidate, GPU/browser action, publication, or remote mutation occurred;
   `TIPC-M1` remains `Blocked` pending exposure of the existing named servers'
   callable operations.
+
+## 2026-09-20 — Callable Passeur execution, source integration, and controlled acceptance
+
+- This conversation exposed all four configured operations for both
+  `passeur_pumas` and `passeur_tuldok`, resolving the recorded attachment
+  blocker. `/status` and `/usage` in an interactive Muse UI remained blank
+  because Passeur launched headless Muse SDK workers rather than UI-owned
+  sessions; task worktrees, live child processes, and Passeur results supplied
+  the authoritative observations.
+- Initial Pumas dispatch was rejected by `PROJECT_IN_USE`. Host process
+  inspection identified two older-session Passeur coordinators holding the
+  Pumas and Tuldok leases, distinct from this conversation's configured
+  processes. After explicit approval, only the two stale coordinators were
+  terminated; the current Pumas and Tuldok servers remained live.
+- Pumas batch assignments:
+  - Rust `TIPC-M1-R-v4`, task
+    `a6f404a7-91bf-4f23-8d9a-ee03242e7fd9`, produced commit
+    `92aa516d99a33a6259c0ddf586bf21829d00af9e`. Passeur rejected the delivery
+    because `pumas-app-manager/src/lib.rs` was a newly proved public re-export
+    owner outside the original write set and the worker report was malformed.
+    Independent compilation then found four custom-error signatures incorrectly
+    using the crate's one-parameter `Result<T>` alias.
+  - Repair `TIPC-M1-R-REPAIR-v1`, task
+    `693c0b78-3e0a-4153-a380-ac038e98f2a5`, made the four correct
+    `std::result::Result` edits but timed out before committing.
+  - Python `TIPC-M1-P-v4`, task
+    `1066fb46-8ccd-47cc-a522-ba2e87aee4e1`, made a useful uncommitted
+    `image_api.py` partial and timed out.
+  Host inspection confirmed both timed-out workers had exited. The Pumas
+  coordinator was stopped with approval, both shutdowns were reconciled
+  offline, and all three resources were finalized as retained evidence rather
+  than inaccurately marked integrated. Their reviewed work was adapted into the
+  accepted Pumas commit below.
+- Applied the diagnosing-bugs loop to the one failing Rust silent-transport
+  regression. The ranked leading hypothesis was confirmed: starting Tokio time
+  paused let the bounded connection timer auto-advance before POST admission.
+  The test now waits for backend admission before pausing and advancing 300
+  controlled seconds; the production transport was unchanged.
+- Integration review added the missing live process/profile identity fence.
+  Image listing and admission now require one stable owned observation before
+  and after strict handshake plus ready-slot verification; a same-URL process
+  replacement is rejected by generation/PID identity. Unit TCP fixtures answer
+  the newly required slot query and explicitly prove same-endpoint replacement.
+- The sidecar now has no generation deadline. It polls an independently owned
+  thread-wrapper task, requests cancellation on disconnect/owner cancellation,
+  records requested/pending/completed/failure diagnostics, and retains the
+  device lease until the wrapper reaches a terminal state. Controlled time
+  proves successful work 601 seconds beyond its start. The native deadline
+  fixture now exercises disconnect cancellation and HTTP 499 instead.
+- The existing repeated load-cancellation regression exposed the same shield
+  problem in `ModelManager.load`: a second cancellation could indefinitely
+  interrupt cleanup. `torch-server/model_manager.py` was recorded as a newly
+  proved load/device-custody owner and now polls its independent executor task,
+  preserves custody, clears abandoned objects, marks the slot failed, and then
+  re-raises owner cancellation.
+- The bundled source recipe is now `torch-runtime-0.1.6`, protocol `3`, with an
+  exact `image_generation` capability list. Sidecar health advertises the same
+  values; qualification rejects recipe protocol, capability, status, or live
+  handshake drift. Requests stay closed; private results require all canonical
+  typed fields, allow bounded additive data, and public projection exposes only
+  gateway-owned fields.
+- Accepted Pumas source commit:
+  `826a270958f7182bd8108c879b4b7fa1da5cab7d`. Verification passed:
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-app-manager`: 106 passed;
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-rpc --features inference-plugins`:
+    241 unit, 16 active integration, and 2 active intent tests passed; 12
+    environment/network tests remained explicitly ignored;
+  - Ruff lint and format checks passed for all 23 Torch-server files;
+  - 37 Torch-server unit tests passed. The managed Codex seccomp environment
+    cannot join even an idle Python default executor at interpreter teardown,
+    so an equivalent temporary runner skipped only executor teardown and used
+    explicit process exit after the complete suite result;
+  - Rust formatting and `git diff --check` passed.
+  No qualified native Torch environment exists in this checkout, so
+  `tests_native/test_image_failures.py` is updated but its required native run
+  remains the only TIPC-03 evidence gap.
+- A dispatch race allocated two Tuldok attempts:
+  `M3-TIPC-T-v4` (`219a705e-2561-4710-914a-fc0cb8fccac9`) and
+  `M3-TIPC-T-v5` (`a06f60b6-3ee0-4019-9cde-b75f085e9854`). Both timed out with
+  unconfirmed shutdown and uncommitted work. Host inspection confirmed both
+  workers exited; the idle Tuldok coordinator was stopped with approval and
+  both records were reconciled. Only the broader v5 contribution was reviewed,
+  adapted, and integrated; v4 was not combined with it.
+- Accepted Tuldok companion commit:
+  `a61daeec83779868cf03b14fb5c811fcdc608fc2`. It removes the 630-second
+  consumer deadline, bounds connection establishment only, distinguishes
+  pre-connect failure from uncertain response loss, never retries
+  automatically, tolerates additive public metadata without persisting unknown
+  fields, and updates the real browser flow to 1280×720 display/save evidence.
+  The complete Tuldok unit suite passed: 47 tests. One server-observation
+  assertion was stabilized by waiting for the fixture handler to observe EOF
+  after the client worker had already stopped.
+- Both Tuldok timed-out resources were finalized as retained audit evidence;
+  v5 maps to accepted commit `a61daee`, while v4 remains an explicitly
+  non-integrated alternate. No task worktree or branch was deleted.
+- Source-controlled acceptance now passes TIPC-01, TIPC-02, TIPC-05–TIPC-08,
+  TIPC-11, and TIPC-12. TIPC-03 is partial pending its qualified native run.
+  TIPC-04, TIPC-09, and TIPC-10 remain with the Tuldok image plan's exact
+  candidate/GPU/browser handoff. No candidate was built, no runtime was
+  installed or activated, no GPU process was started, and nothing was
+  published. Unrelated `docs/breif/future.md` remains untouched.

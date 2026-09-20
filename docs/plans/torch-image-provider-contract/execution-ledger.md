@@ -204,3 +204,23 @@
   hooks, signing, or a live Muse turn. The current Codex process still exposes
   none of the newly registered tools, so the plan remains `Blocked` pending the
   documented restart rather than attempting direct implementation.
+
+## 2026-09-20 — Post-restart MCP attachment diagnostic
+
+- The user reported restarting the session and authorized `continue`.
+- The active conversation runtime still exposes neither `passeur_pumas` nor
+  `passeur_tuldok`; its complete callable-tool inventory contains none of the
+  four Passeur operations.
+- A read-only MCP SDK diagnostic started the configured Pumas server, advertised
+  elicitation capability, listed tools, and closed it without invoking a task.
+  The server successfully returned the installed schema-version-2 definitions
+  for `delegate_to_muse`, `delegate_to_muse_batch`, `muse_result`, and
+  `muse_finalize`. This proves server startup and tool registration only; it
+  does not prove a live Muse turn, subscription execution, approval routing, or
+  parallelism.
+- Therefore the remaining blocker is Codex conversation attachment, not the
+  Passeur profile, MCP server, repository route, or schema. Direct Muse shell
+  execution or a custom client that accepts approval prompts would bypass the
+  required human elicitation path and remains prohibited. The plan stays
+  `Blocked` until a newly created Codex conversation exposes both registered
+  namespaces.

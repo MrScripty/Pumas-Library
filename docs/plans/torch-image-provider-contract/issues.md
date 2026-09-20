@@ -125,3 +125,9 @@
 - Evidence: Passeur Doctor/profile lookup and current MCP tool inventory. This
   blocks implementation execution only until restart, not plan admission or
   read-only preparation.
+
+Post-restart diagnostic: both configured servers start and list the exact four
+schema-version-2 tools through a read-only MCP SDK client, but the resumed
+conversation's callable-tool inventory still omits both server namespaces. A
+new conversation attachment, rather than another profile/configuration change,
+is required before this issue can close.

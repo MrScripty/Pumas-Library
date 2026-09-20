@@ -1,5 +1,32 @@
 # Execution ledger
 
+## 2026-09-20 — Reconcile Torch Image Provider Contract Correction
+
+- Planning-only operation. The focused
+  [Torch Image Provider Contract Correction](../torch-image-provider-contract/plan.md)
+  now solely owns the Pumas/Torch lifetime, live compatibility, extensible
+  private result, and public projection correction.
+- Superseded this plan's prospective 600/615/client generation-deadline
+  instructions. Historical runtime and image reports retain their recorded
+  protocol, dimensions, bytes, and acceptance scope.
+- This plan retains Tuldok's remaining consumer adaptation, corrected
+  `torch-runtime-0.1.6` candidate construction/isolated installation, real GPU
+  cleanup TIPC-04, exact-byte TIPC-09, 1280×720 browser TIPC-10, and later
+  distribution consumption. Recipe allocation must be rechecked before build.
+- The current distribution next slice and the user's reduced-verification,
+  NVFP4, broad GPU-matrix, and T16 desktop-shutdown deferrals remain unchanged.
+- No implementation, test, runtime, installation, activation, publication, or
+  commit action was performed.
+
+### Generation-wide lifetime clarification
+
+- The user's follow-up makes the no-elapsed-deadline policy apply to every
+  admitted generation, not only images. This plan's image/Tuldok handoffs consume
+  the shared `TIPC-GEN-01` lifecycle; the focused plan owns the reusable gateway
+  transport evidence in TIPC-12.
+- This clarification does not expand this plan into text semantics or usage
+  accounting and does not change its current distribution next slice.
+
 ## 2026-09-13 — Brief and implementation plan
 
 - Moved runtime requirements from `docs/torch-diffusion-runtime.md` to

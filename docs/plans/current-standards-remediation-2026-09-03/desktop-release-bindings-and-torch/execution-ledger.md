@@ -30,6 +30,28 @@
   with exact implementation admission and terminal-outcome oracle before
   source changes. No whole milestone is accepted by the selected checkpoint.
 
+## 2026-09-20 — Delegate the image-provider correction
+
+- Planning-only reconciliation delegated the image lifetime, live compatibility,
+  private result evolution, and gateway projection subset to the focused
+  [Torch Image Provider Contract Correction](../../torch-image-provider-contract/plan.md).
+- Milestone 3 retains broader text semantics, usage accounting, health/control
+  responsiveness, overload, and shutdown. TIPC evidence is necessary for the
+  image subset but cannot satisfy whole DRBT-A5.
+- The current DRBT-I11 next slice and all unrelated milestone priorities remain
+  unchanged. No source, tests, runtime, dependencies, installation, or release
+  state changed.
+
+### Generation-wide lifetime clarification
+
+- The user clarified that elapsed time never makes any admitted generation fail.
+  The focused plan now owns one reusable generation transport/lifecycle seam and
+  TIPC-12 covers a representative non-image generation route.
+- Milestone 3 consumes `TIPC-GEN-01` for text generation while retaining text
+  shapes, sampling, usage, responsiveness, and shutdown. It no longer selects a
+  text-generation deadline. Launcher/process deadlines are unrelated and remain
+  unchanged.
+
 ## Entries
 
 ### 2026-09-03 — Start Milestone 0 authority investigation

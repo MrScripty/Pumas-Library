@@ -874,8 +874,9 @@ unavailable until required-real target runners execute it.
 
 ## Objective
 
-Remediate every finding in the 2026-09-03 standards audit through four focused
-owners, so Pumas preserves authoritative model state, rejects invalid or
+Remediate every finding in the 2026-09-03 standards audit through four audit-
+focused owners and registered bounded corrections, so Pumas preserves
+authoritative model state, rejects invalid or
 unauthorized cross-process input, completes asynchronous work truthfully,
 presents state accessibly, and ships only configurations and artifacts backed
 by the evidence their support claims require.
@@ -905,7 +906,7 @@ owned by the focused plans.
 | PRG-A1 | A hostile or malformed caller cannot disclose credentials/internal locators or invoke protected remote RPC operations, while authorized supported operations retain typed results. | `system` | `representative` (real debug RPC process and isolated network clients) | `automated` | `blocked` | [Rust RUST-A1 satisfied](rust-library-and-rpc/reports/rpc-disclosure-evidence.md) and [RUST-A3 loopback-only exposure satisfied](rust-library-and-rpc/reports/rpc-contract-and-threat-model.md#accepted-exposure-decision); platform DRBT-A2 remains |
 | PRG-A2 | Requests, responses, errors, and events traverse Rust, Electron, preload, and renderer through one producer-owned contract; invalid, unsupported, unavailable, and failed outcomes never become valid-looking defaults. | `system` | `required-real` (built RPC and Electron process path) | `automated` | `blocked` | Loopback-only exposure accepted; Rust RUST-A2, platform DRBT-A1/DRBT-A2, and frontend FE-A1 remain |
 | PRG-A3 | Interrupted model mutations/events, supported schema migrations, and launcher-root updates recover without missing durable history or silently selecting another library authority. | `system` | `required-real` (real SQLite and every accepted desktop filesystem/OS target) | `either` | `blocked` | Conservative desktop target matrix plus [incremental persisted-authority and Linux-local atomic-publication evidence](desktop-release-bindings-and-torch/reports/desktop-lifecycle-evidence.md) at `1964760d` and `767e71f0` accepted; Rust RUST-A4/RUST-A5 and renderer-recovery/required-real platform DRBT-A3 remain |
-| PRG-A4 | Rust, Electron, frontend, launcher, and Torch work owners observe admission, supersession, cancellation, failure, deadlines, and bounded shutdown without detached work, false completion, or starvation of control traffic. | `system` | `required-real` (real runtimes, accepted OS targets, and resolved Torch stack) | `automated` | `blocked` | [Frontend FE-A3 restored](frontend-and-ui/execution-ledger.md) after PRG-I12; plugin failure/disabled and non-shipped Torch dispositions accepted; Rust RUST-A6 and platform DRBT-A4/DRBT-A5/DRBT-A6 remain |
+| PRG-A4 | Rust, Electron, frontend, launcher, and Torch work owners observe admission, supersession, cancellation, failure, and bounded cleanup/shutdown without detached work, false completion, or starvation of control traffic. No admitted generation fails because of elapsed duration or response silence; independently bounded connection/setup/termination operations remain explicit. | `system` | `required-real` (real runtimes, accepted OS targets, and resolved Torch stack) | `automated` | `blocked` | [Frontend FE-A3 restored](frontend-and-ui/execution-ledger.md) after PRG-I12; focused TIPC-01–TIPC-12 are required for generation lifetime and the image subset; Rust RUST-A6 and platform DRBT-A4/DRBT-A5/DRBT-A6 remain |
 | PRG-A5 | Cached model state, recovery, dialogs, popups, progress, motion preference, and both renderer modes behave truthfully and accessibly through representative built-renderer workflows. | `user-workflow` | `representative` (built renderer in supported Electron/Chromium runtime) | `automated` | `pending` | [Frontend FE-A4 satisfied](frontend-and-ui/execution-ledger.md#2026-09-03--m2-s4-representative-chromium-evidence-accepted) and [FE-A5 satisfied](frontend-and-ui/execution-ledger.md#2026-09-03--m3-s3b-popover-motion-and-terminal-semantics-accepted); FE-A2/FE-A6 remain |
 | PRG-A6 | Every accepted feature configuration, host binding tuple, desktop target, and release artifact is supported by an explicit consumer matrix and matching real-target/cohort/final-byte evidence. | `release-artifact` | `required-real` (every accepted target, host/runtime, and assembly environment) | `either` | `blocked` | [Conservative support contract accepted](desktop-release-bindings-and-torch/reports/release-and-host-contract-decision.md); Rust RUST-A7/RUST-A8 and platform DRBT-A7/DRBT-A8/DRBT-A9 evidence remain |
 | PRG-A7 | Contributor guidance and every retained permanent gate follow the current standards route and state their exact claim, oracle, schedule, overlap, and blocking authority. | `contract` | `representative` (repository and Linux pinned toolchain) | `either` | `satisfied` | [Governance GOV-A1 through GOV-A5](governance-and-verification/reports/final-governance-evidence.md) |
@@ -942,6 +943,7 @@ owned by the focused plans.
 | [Governance and verification](governance-and-verification/plan.md) | Standards routing, count/error gate disposition, permanent-gate claims and schedules | G-01–G-06; CS-10, CS-13, CS-14 and G-06 evidence routing |
 | [Rust library and RPC](rust-library-and-rpc/plan.md) | Rust/server RPC and local IPC contracts, public errors/redaction, SQLite state/events/migrations, Rust lifecycle/features, Rust binding placement, plugin startup | R-01–R-09; CS-01–CS-03, Rust portions of CS-04/CS-07/CS-08, CS-11 |
 | [Desktop, release, bindings, and Torch](desktop-release-bindings-and-torch/plan.md) | Generated Electron projections/decoding, desktop authority/lifecycle, Torch, launcher, host cohorts, release artifact/dependency evidence | P-01–P-10; desktop portions of CS-02/CS-04/CS-06/CS-07, CS-12, CS-15 |
+| [Torch Image Provider Contract Correction](../torch-image-provider-contract/plan.md) | Reusable generation lifetime, focused image live compatibility/private result/gateway projection, and exact candidate/user-workflow handoffs | Delegated generation-lifetime and image subset of PRG-A4/DRBT-A5; does not own text semantics/usage, broader Torch remediation, or distribution |
 | [Frontend and UI](frontend-and-ui/plan.md) | Renderer consumption, cached model provenance, installation lifecycle, interaction Modules, status/motion, renderer variants | F-01–F-08; CS-05, CS-09, renderer portions of CS-02/CS-04/CS-08 |
 
 Shared findings close only when every named producer and consumer claim passes;
@@ -1001,7 +1003,7 @@ one focused plan cannot accept another owner's behavior by agreement alone.
 | PRG-A1 | Security/diagnostics | Captured real-process responses and diagnostics plus hostile-client outcomes | Safe public-error and accepted exposure contracts | Arbitrary future log sinks | Sentinel secret/path appears, or unauthorized operation succeeds |
 | PRG-A2 | Cross-process semantics | Real Rust-to-Electron-to-renderer scenario plus closed negative contract corpus | Producer contract and independently observed consumer result | Domain correctness unrelated to transport | Malformed value reaches presentation or becomes empty/default success |
 | PRG-A3 | Durable authority | Controlled interruption, cold reopen, and authoritative row/event/root comparison | Accepted store/root formats and recovery policy | Hardware failures outside declared filesystem contract | Missing event, duplicate effect, guessed migration, or silent root switch |
-| PRG-A4 | Lifecycle | Owners expose and tests observe every applicable terminal state at real runtime seams | Accepted state machines, deadlines, and external responsiveness | Unclaimed hardware/provider behavior | Detached work, stale completion, starvation, hang, or false shutdown success |
+| PRG-A4 | Lifecycle | Owners expose and tests observe every applicable terminal state at real runtime seams | Accepted state machines, generation-wide `TIPC-GEN-01`, independently bounded connection/setup/termination, and external responsiveness | Unclaimed hardware/provider behavior | Duration-only generation failure, detached work, stale completion, starvation, hang, or false shutdown success |
 | PRG-A5 | User workflows | Built-renderer keyboard/accessibility/state/mode observations | Browser accessibility tree, controlled backend outcomes, and build-mode configuration | General certification or packaged contents | Cached state appears fresh, focus/status/motion contract fails, or wrong mode UI appears |
 | PRG-A6 | Shipped support | Real target/host execution and exact extracted final artifact inspection | Accepted consumer/support matrices and final resolved bytes | Unadvertised tuple/channel | Mismatch, missing/extra file, incomplete provenance/notices, or absent target evidence |
 | PRG-A7 | Governance | Executable config cross-review and affected retained command results | Current standards and named gate claims | Product behavior owned by focused plans | Count/regex proxy or unmapped scheduled gate remains |
@@ -1012,9 +1014,10 @@ one focused plan cannot accept another owner's behavior by agreement alone.
   durable state, lifecycle, renderer truth/accessibility, support/release
   evidence, and governance each have the focused owner named above.
 - Bounded authority, representation, and reachable consumer population: the
-  four focused plans enumerate their Rust, Electron, frontend, Torch, launcher,
-  binding, release, documentation, and tooling populations. The program owns
-  only cross-plan handoffs and combined acceptance paths.
+  four audit-focused plans plus the registered TIPC correction enumerate their
+  Rust, Electron, frontend, Torch, launcher, binding, release, documentation,
+  and tooling populations. The program owns only cross-plan handoffs and
+  combined acceptance paths.
 - Expansion facts: add a population only for a new semantic owner, reachable
   consumer, persisted/public promise, supported tuple, or material risk in the
   same invariant family.

@@ -184,6 +184,7 @@ artifact, dependency, license, version, and target promises.
 | Each accepted release uses `scripts/release/artifact-plan.json` as the exact artifact-plan authority consumed through the `scripts/release/artifacts.mjs` Interface by validation, assembly, SBOM/checksum production, and release review. | Milestones 0 and 6 | P-03, current Node toolchain, multiple real release consumers, and release artifact-plan rule | Narrative/workflow disagreement |
 | A binding package contains generated host material and native binaries only from one recorded build cohort, and every advertised tuple requires real-host load/call evidence. | Milestone 5 | P-04 and Rust Language Binding profile | Source-generation or native-only evidence as host support |
 | Torch exposes an explicitly selected subset rather than accepting and ignoring fields. Its work owner must keep ASGI control traffic schedulable and observe admission, completion, cancellation, failure, and shutdown. | Milestone 3 | P-06 and Concurrency/Resilience standards | Silent field dropping and synchronous event-loop inference |
+| The [Torch Image Provider Contract Correction](../../torch-image-provider-contract/plan.md) solely owns the reusable no-elapsed-deadline generation lifetime plus image live compatibility, private result evolution, and gateway projection. This plan retains text shapes/semantics, usage, control responsiveness, and shutdown; focused TIPC evidence is necessary but not sufficient for DRBT-A5. | Focused TIPC plan, then Milestone 3 consumption | Explicit 2026-09-20 ownership reconciliation and user clarification | Duplicate generation-lifetime implementation or whole-DRBT-A5 acceptance from a subset |
 | Launcher-root states distinguish absent, valid, invalid, and unavailable authority; environment override precedes argument override, and either explicit source must name only an exact root, `shared-resources`, or `shared-resources/models`; only the accepted recovery path may replace a bad persisted owner. | Milestone 2 | P-08, current invocation precedence, and persistence/resilience rules | Corrupt/unreadable state mapped to absence or arbitrary descendant discovery |
 | Launcher wrappers delegate the same validated actions to one process-execution Module; target and termination behavior remain explicit per accepted OS. | Milestone 4 | P-09 and Launcher/Cross-Platform standards | Unknown-to-Linux fallback and wrapper-specific release path |
 | Obsolete release documents, snapshots, and notice inventories stay deleted. Current evidence is derived from accepted inputs and final shipped artifacts. | Milestone 6 | Planning baseline `d84e2b35` and P-05 | Restoring stale checked-in evidence |
@@ -202,7 +203,7 @@ artifact, dependency, license, version, and target promises.
 | DRBT-A2 | Real producer/consumer agreement | Spawned built RPC process exercised through Electron's HTTP/SSE and preload Interfaces | Rust producer behavior, transport status/correlation, and generated schema are compared independently | Renderer presentation and full user workflow | Wrong ID/status/envelope, malformed JSON/SSE, unknown event, or leaked credential makes the test fail; no log-and-drop path passes |
 | DRBT-A3 | Persisted authority and interruption | Cold-process filesystem scenarios on each accepted OS, including interrupted replacement and permission/corruption cases | On-disk bytes plus accepted launcher-root format and recovery policy | Renderer wording | Invalid/unreadable state returns its explicit outcome and cannot fall through to discovery |
 | DRBT-A4 | Async stream lifecycle | Electron lifecycle harness observes subscribe/event/unsubscribe/close/shutdown results through the stream Interface | Main-process owner state and transport outcome | UI rendering of the result | Rejection, duplicate close, omitted model-download owner, late event, or leaked task fails rather than relying on global logging |
-| DRBT-A5 | Torch subset and responsiveness | Real ASGI requests against resolved production dependencies and production loading/generation path with bounded concurrency scenarios | Accepted local OpenAI subset, production dependency graph, and model/device fixture | Unclaimed model architectures, fields, devices, or OpenAI behavior | Unsupported field/value, overload, disconnect, cancellation, loader failure, or incomplete shutdown returns the selected observable outcome; event-loop starvation fails the responsiveness budget |
+| DRBT-A5 | Torch subset and responsiveness | Real ASGI requests against resolved production dependencies and production loading/generation path with bounded concurrency scenarios; consume TIPC-01–TIPC-12 for delegated generation lifetime and image-provider behavior | Accepted local OpenAI subset, production dependency graph, model/device fixture, and focused generation/image contract | Unclaimed model architectures, fields, devices, or OpenAI behavior | Unsupported field/value, overload, disconnect, cancellation, loader failure, or incomplete shutdown returns the selected observable outcome; event-loop starvation fails the responsiveness budget; TIPC alone cannot pass this broader claim |
 | DRBT-A6 | Launcher target/process behavior | Wrapper and process integration tests executed on each accepted OS with controllable child fixtures | Accepted launcher action/target/deadline contract and real OS process semantics | An OS absent from the target contract | Unknown platform, hung graceful exit, orphaned child, divergent wrapper action, or false success fails the suite |
 | DRBT-A7 | Host binding support | Real host loads the exact staged native cohort and invokes selected synchronous/async/error paths | Accepted host matrix, adapter contract, generator identity, and cohort manifest | Any unadvertised host/target/capability | Wrong library, mismatched cohort, async failure/cancellation loss, unknown error, or unsupported host prevents package promotion |
 | DRBT-A8 | Release artifact closure | Release-plan verifier compares exact staged inputs and final bytes before draft/promotion | Accepted release unit/channel/consumer plan, manifests, dependency resolvers, license authority, and target evidence | Publication/signing claims outside the accepted release contract | Tag/version mismatch, missing or extra artifact, wrong cohort, incomplete SBOM/checksum/notices, or absent target evidence blocks assembly |
@@ -478,10 +479,12 @@ path cannot starve control traffic or lose accepted work at shutdown.
 - [ ] Reject or implement every currently accepted role, prompt, sampling,
   `stop`, token, and streaming behavior; never accept and ignore a value or
   manufacture zero usage as success.
-- [ ] Select one composition-owned inference work Interface after validating
+- [ ] Select one composition-owned text-inference work Interface after validating
   model, tokenizer, loader, and device threading/process constraints. Record
-  admission capacity, overload, fairness, cancellation/deadline, disconnect,
-  result delivery, and bounded shutdown before implementing it.
+  admission capacity, overload, fairness, disconnect, result delivery, and
+  bounded cleanup/shutdown before implementing it. Consume `TIPC-GEN-01` for
+  generation lifetime: elapsed duration or silence never fails admitted text
+  generation. Do not prescribe or implement a second lifetime policy here.
 - [ ] Keep health and control routes schedulable during inference; make accepted
   work reach one observed result, failure, cancellation, or typed incomplete
   shutdown outcome, without detached work or an alternate runtime.
@@ -497,7 +500,10 @@ path cannot starve control traffic or lose accepted work at shutdown.
   executor, or new package; re-plan if the selected model/runtime constraints
   require materially different composition.
 
-**Acceptance gate:** DRBT-A5 is satisfied; Ruff/unit evidence remains green,
+**Acceptance gate:** DRBT-A5 is satisfied only after its broader text, usage,
+responsiveness, overload, failure, and shutdown claims pass and TIPC-01–TIPC-12
+are consumed for delegated generation lifetime and image-provider behavior.
+Ruff/unit evidence remains green,
 and a resolved real-runtime suite proves the supported subset and responsiveness
 budget on each accepted runtime/device class.
 
@@ -718,6 +724,7 @@ admitted by this plan.
 | Governance and verification plan | Current CI/gate ownership and schedules | `.github/workflows/build.yml`, package scripts, `docs/DEVELOPMENT.md` | Integrate its relevant CI cleanup before this plan edits shared workflow registrations |
 | Rust library and RPC plan | Canonical DTO/error declaration, Rust-side lifecycle/error semantics, core/Adapter placement | This plan must not edit `pumas-core` or re-own semantic code in `pumas-uniffi/src/bindings.rs` | Accept canonical contract before Milestone 1; accept binding semantics before Milestone 5 |
 | Frontend and UI plan | Renderer use of decoded/recovery outcomes and library-only UI behavior | This plan stops at preload/main decoded Interfaces | Integrate generated outcome Interface before renderer adoption; include the adopted path in final system review |
+| [Torch Image Provider Contract Correction](../../torch-image-provider-contract/plan.md) | Accepted shared generation lifetime, image live compatibility, result/projection, and exact-candidate handoff evidence | It solely owns generation duration policy and the image correction; this plan must not duplicate either implementation | Consume TIPC evidence when evaluating generation/image portions of DRBT-A5; text shape/usage work may proceed independently |
 | This plan | Desktop projection/decoding, launcher/Torch lifecycle, host cohorts, release artifact proof | Owns the write sets above after prerequisites | Integrates last at shared release/CI surfaces |
 
 ## Final Acceptance

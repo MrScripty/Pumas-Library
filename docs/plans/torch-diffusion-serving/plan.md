@@ -16,6 +16,15 @@
 
 **Evidence:** [Baseline and evidence index](reports/baseline.md)
 
+**Provider correction dependency:** The
+[Torch Image Provider Contract Correction](../torch-image-provider-contract/plan.md)
+is the sole implementation owner for the reusable generation lifetime and image
+live compatibility, private result-evolution, and public projection correction.
+This plan retains Tuldok companion adaptation, exact corrected-candidate
+qualification, required-real GPU/browser evidence, and distribution. Its
+historical evidence remains valid only for the scope and bytes originally
+recorded.
+
 ## Objective
 
 From Tuldok, a user selects an image-generation model served by Pumas, submits a
@@ -31,7 +40,7 @@ Pumas release, while preserving the optional inference-free serving build.
 | A2 | Nunchaku Z-Image-Turbo produces a decodable PNG through the Pumas gateway; capability discovery excludes text-only models from image selection | integration | RTX 5090 Laptop GPU, complete pipeline | automated and manual | passed | [Real image](reports/nunchaku.md) |
 | A3 | Tuldok discovers a served image model, sends a prompt, displays the returned PNG and saves matching image content | end-to-end | real browser, Tuldok, Pumas release, GPU | automated and manual | passed | [Real Tuldok workflow](reports/tuldok.md) |
 | A4 | The local FLUX.2 Klein FP8 checkpoint generates through the same Tuldok flow with its memory policy reported | end-to-end | same host, verified matching assets | manual | passed | [FLUX.2 FP8 image](reports/flux2.md) |
-| A5 | Invalid inputs, missing assets, OOM, busy/unloaded model, cancellation and runtime exit terminate predictably without corrupting lifecycle or duplicating generation | integration | fault fixtures plus GPU cancellation | automated and manual | pending | M2/M5 reports |
+| A5 | Invalid inputs, missing assets, OOM, busy/unloaded model, cancellation and runtime exit terminate predictably without corrupting lifecycle or duplicating generation | integration | fault fixtures plus GPU cancellation | automated and manual | pending | M2/M5 reports; image subset consumes TIPC-03/TIPC-04/TIPC-05/TIPC-08/TIPC-11 |
 | A6 | Inference-enabled release works; disabled build has no Torch/llama.cpp serving or management routes and no installation/startup side effects or controls | artifact and integration | enabled and disabled release builds | automated and manual | passed | [Release evidence](reports/release-acceptance.md) |
 | A7 | Existing llama.cpp installation/serving and Tuldok VLM corner detection still work | regression | fixtures plus available Qwen VLM | automated and manual | passed | [Real VLM and fixture evidence](reports/tuldok.md), [shared manager tests](reports/runtime.md) |
 
@@ -69,6 +78,7 @@ Pumas release, while preserving the optional inference-free serving build.
 | Explicit model load before generation; advertise ready models with capabilities | Pumas serving manager/gateway | Existing loaded-model policy; deferred broader gateway brief |
 | Single synchronous image response initially, bounded admission, explicit cancellation ownership | Gateway and Torch job owner | Small usable client contract without permanent job storage |
 | Tuldok displays and saves the actual response | Tuldok client | User's end goal |
+| Admitted image generation uses the generation-wide no-elapsed-deadline lifecycle; uncertainty is not replay authority | [Torch Image Provider Contract Correction](../torch-image-provider-contract/plan.md) | Explicit product contract `TIPC-GEN-01` |
 
 ## Proposed API contract
 
@@ -88,15 +98,17 @@ Finalize and document this bounded contract in M2 before integrating Tuldok:
   Record actual seed/settings in an additive metadata field for reproducibility;
   do not promise bitwise deterministic GPU output.
 - Reject unsupported options and operation/model mismatches before allocation.
-  Distinguish invalid input, unavailable model, busy runtime, OOM, deadline and
-  backend failure through stable error codes with safe user-facing messages.
+  Distinguish invalid input, unavailable model, busy runtime, OOM, cancellation,
+  uncertain transport loss, and backend failure through stable safe outcomes.
+  Elapsed duration and response silence are not image-generation failures.
 - Reuse existing gateway access policy, routing and provider registry. A Torch
   sidecar address is an internal execution detail, not Tuldok configuration.
-- Own each request through completion/cancellation. Disconnect or deadline stops
-  further work at a supported checkpoint; retain the GPU lease until compute has
-  actually stopped. If interruption requires process termination, invalidate
-  readiness and make reload explicit. Never retry generation automatically after
-  an uncertain result. Bound concurrency and reject excess requests as busy.
+- Own each request through completion, backend/runtime failure, owner
+  cancellation or disconnect, or explicit runtime shutdown. Cancellation is a
+  request until cleanup has stopped work sufficiently for safe reuse; retain the
+  GPU lease through that point. If interruption requires process termination,
+  invalidate readiness and make reload explicit. Never retry after an uncertain
+  result. Bound concurrency and reject excess requests as busy.
 
 ## Simplicity and ownership review
 
@@ -222,7 +234,11 @@ relevant tests in these crates, and new image API documentation under `docs/cont
 APIs; use the FP4 checkpoint appropriate to the verified GPU. Add a concrete image
 adapter and lifecycle-safe GPU execution. Integrate Torch provider readiness,
 load/unload and image capabilities with the existing serving path. Implement the
-bounded image contract, error mapping, response limits, deadlines and cancellation.
+bounded image contract, error mapping, response limits, and cancellation. The
+focused provider correction now solely owns the shared generation lifetime plus
+image live compatibility, private result evolution, and gateway projection;
+this milestone consumes its accepted source and evidence rather than
+implementing a duplicate.
 Keep every executable integration under the existing inference gate. Measure a
 real prompt before adding the second adapter.
 
@@ -247,12 +263,17 @@ associated client bindings only as required by M2 contracts; Tuldok `ai_http.py`
 Tuldok image-generation controls separate from corner detection, capability-filtered
 selection-only model list, prompt, size and optional seed, pending/cancel/error
 states, image display and save. Decode bounded validated image responses; preserve
-existing corner workflow. Align client/server deadlines with measured generation
-rather than token-stream inactivity. Provide a useful unsupported-endpoint message
+existing corner workflow. Preserve the already-correct numeric width/height request,
+requested dimensions, 1280×720 defaults, and explicit socket/watcher cancellation;
+remove the remaining consumer generation deadline and deadline-specific outcome,
+preserve unknown outcomes without automatic replay, and do not narrow legitimate
+public metadata to current examples. Provide a useful unsupported-endpoint message
 when configured with the llama.cpp router instead of Pumas gateway.
 
-**Gate:** Browser fixture coverage for failure/cancel/output handling and a real
-Tuldok-to-Pumas Nunchaku image saved successfully. Record `reports/tuldok.md`.
+**Gate:** Browser fixture coverage for failure/cancel/output handling and
+TIPC-10: a supporting model completes a real 1280×720 Tuldok-to-Pumas request
+through the exact installed corrected candidate, displays it, and saves it.
+Record `reports/tuldok.md` without relabeling the earlier smaller-image evidence.
 **Re-plan:** Tuldok's current app structure or dataset import boundary materially differs.
 
 ### M4 — FLUX.2 through the same path
@@ -284,7 +305,13 @@ Cargo feature declarations if gate closure requires changes, related frontend
 feature guards, release documentation, and this plan's evidence. Product fixes
 return to their owning milestone rather than broadening this slice implicitly.
 
-**Tasks:** Build the normal release and run the actual Tuldok flow for both models.
+**Tasks:** After the focused correction passes its owned gate, construct an
+identifiable `torch-runtime-0.1.6` candidate (rechecking that allocation first)
+and record source revision, recipe, lock, archive checksum, bundled sidecar
+protocol/capabilities, and client interoperability. Install those exact bytes
+through production VersionInstaller in an isolated launcher root while preserving
+existing installations. Build the normal release and run the actual Tuldok flow
+for both models.
 Build with `PUMAS_INFERENCE_PLUGINS=false`, check route/control absence and no Torch
 startup/install side effects. Exercise runtime failure, cancel followed by another
 request, unload during work, insufficient memory, and existing llama.cpp/Tuldok
@@ -292,14 +319,20 @@ VLM behavior. Use current GPU telemetry before loads and explicitly manage
 competing models. Record usable latency/defaults and known limitations; preserve
 evidence rather than declaring success from build completion.
 
-**Gate:** All A1–A7 satisfied with release identity and reproducible commands in
-`reports/release-acceptance.md`. No required GPU/browser check may be replaced by mocks.
-**Re-plan:** Any required acceptance fails or measured latency exceeds the configured
-client deadline; fix and rerun affected evidence before acceptance.
+**Gate:** TIPC-04, TIPC-09, and TIPC-10 are returned to the focused plan; all
+A1–A7 are satisfied with release identity and reproducible commands in
+`reports/release-acceptance.md`. No required installed-artifact, GPU, or browser
+check may be replaced by mocks. Qualification does not authorize publication or
+production-default selection.
+**Re-plan:** Any required acceptance fails, the selected model does not support
+1280×720, or the reserved recipe identity collides; fix/select a supported model
+or identity and rerun only the affected evidence.
 
 ## Blockers and unresolved facts
 
-M1 source implementation and package qualification are active. The selected Pumas
+M1 source implementation and package qualification are active. The corrected
+candidate additionally depends on the focused provider correction's owned gate.
+The selected Pumas
 release source has no published Torch runtime bundle (T7), preventing real shared
 UI discovery acceptance until qualification and publication. Both complete pipelines now generate through Tuldok. A5 remains pending for
 the unperformed GPU fault cases; further matrix expansion was deferred at the

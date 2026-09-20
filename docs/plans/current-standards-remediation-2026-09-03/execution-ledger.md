@@ -1,5 +1,25 @@
 # Current Standards Remediation Execution Ledger
 
+## 2026-09-20 — Register Torch Image Provider Contract Correction
+
+Planning-only reconciliation registered the focused
+[Torch Image Provider Contract Correction](../torch-image-provider-contract/plan.md)
+as the sole owner of the image-specific lifetime, compatibility, private result,
+and gateway projection subset of PRG-A4/DRBT-A5. The program retains objective-
+level integration; the desktop/Torch remediation retains its broader work; and
+the existing Tuldok image plan retains exact-candidate, GPU/browser, and
+distribution handoffs. The current program phase and next slice are unchanged.
+No implementation or runtime mutation occurred.
+
+### Generation-wide lifetime clarification
+
+The user clarified that elapsed duration and response silence are never failure
+conditions for an admitted generation. The focused correction now owns the
+reusable generation transport/lifecycle contract and TIPC-12 non-image evidence,
+not an image-only exception. PRG-A4 retains independently bounded connection,
+setup, cleanup, and termination operations and the broader lifecycle claims.
+The program's current phase and next slice remain unchanged.
+
 ## 2026-09-12 — Cached Runtime Liveness Read Contracts
 
 Accepted FE-I60: `is_ollama_running` / `is_torch_running` now use typed empty RPC

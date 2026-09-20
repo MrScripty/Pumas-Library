@@ -167,3 +167,9 @@
 - Preserved unrelated untracked `docs/breif/future.md`. No product/test source,
   runtime installation, candidate, GPU process, launcher root, publication, or
   remote state changed.
+- After completing all independent intake and allocation work available in the
+  current session, set the plan and `TIPC-M1` to `Blocked`: creating verified
+  project profiles requires the user's subscription confirmation, named Codex
+  MCP registration changes require configuration authority, and newly
+  registered tools cannot appear until Codex restarts. The blocker does not
+  authorize direct implementation or another delegation mechanism.

@@ -1,6 +1,6 @@
 # Plan: Torch Image Provider Contract Correction
 
-**Plan status:** `Active`
+**Plan status:** `Blocked`
 
 **Objective:** Establish one reusable generation lifetime in which an admitted
 image, text, or future generation remains active until completion,
@@ -11,9 +11,10 @@ immutable runtime installation model.
 
 **Acceptance status:** `pending`
 
-**Current phase:** `TIPC-M1` is admitted under `start`; its bounded Pumas and
-Tuldok allocations are recorded. Product implementation awaits the required
-project-scoped Passeur registrations and a Codex session exposing their tools.
+**Current phase:** `TIPC-M1` was admitted under `start`; its bounded Pumas and
+Tuldok allocations are recorded. Product implementation is blocked on the
+required project-scoped Passeur registrations, human subscription confirmation,
+and a restarted Codex session exposing their tools.
 
 **Next integration slice:** `TIPC-M1` — implement and verify the reusable Pumas
 generation lifetime and coherent Torch image provider correction, including
@@ -228,7 +229,7 @@ including the three named handoffs, pass.
 
 ## TIPC-M1 — shared generation lifetime and provider correction
 
-**Status:** `Active`
+**Status:** `Blocked`
 
 **Goal:** Establish the shared Pumas generation lifetime and correct the live
 Pumas/Torch image compatibility and result contract as one implementation unit.
@@ -370,7 +371,10 @@ shutdown remain deferred unless a specific TIPC claim demonstrates a prerequisit
 
 ## Blockers
 
-- None for TIPC-M1 source work.
+- TIPC-M1 execution requires project-scoped Pumas and Tuldok Passeur profiles
+  and named MCP registrations. They are absent from this Codex session; profile
+  creation requires human confirmation of the intended Muse subscription and
+  changing Codex configuration requires a restart before tools become usable.
 - Required-real GPU and browser availability may delay TIPC-04/TIPC-10 only.
 - Candidate build/install access may delay TIPC-09 only.
 

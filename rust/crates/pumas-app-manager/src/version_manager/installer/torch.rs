@@ -1,7 +1,7 @@
 //! Managed Torch bundle installation; lifecycle and state remain in VersionManager.
 
 use super::*;
-use crate::torch_client::SUPPORTED_TORCH_PROTOCOL;
+use crate::torch_client::{SUPPORTED_TORCH_PROTOCOL, TORCH_IMAGE_GENERATION_CAPABILITY};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::process::Stdio;
@@ -22,6 +22,7 @@ pub(crate) fn is_torch_runtime_release(release: &GitHubRelease) -> bool {
 struct RuntimeRecipe {
     recipe_id: String,
     protocol: u32,
+    capabilities: Vec<String>,
     python: String,
     platform: String,
 }
@@ -211,6 +212,15 @@ impl VersionInstaller {
             return Err(failed(format!(
                 "Runtime recipe protocol {} does not match required protocol {SUPPORTED_TORCH_PROTOCOL}",
                 recipe.protocol
+            )));
+        }
+        if !recipe
+            .capabilities
+            .iter()
+            .any(|capability| capability == TORCH_IMAGE_GENERATION_CAPABILITY)
+        {
+            return Err(failed(format!(
+                "Runtime recipe is missing required capability {TORCH_IMAGE_GENERATION_CAPABILITY}"
             )));
         }
         if recipe.python != "3.12" || recipe.platform != "linux-x86_64" {

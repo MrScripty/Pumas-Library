@@ -27,8 +27,24 @@ fn bundle_with_recipe(
     requirements: &str,
     validation: &str,
 ) -> Vec<u8> {
+    bundle_with_recipe_and_capabilities(
+        recipe_id,
+        protocol,
+        r#"["image_generation"]"#,
+        requirements,
+        validation,
+    )
+}
+
+fn bundle_with_recipe_and_capabilities(
+    recipe_id: &str,
+    protocol: u32,
+    capabilities: &str,
+    requirements: &str,
+    validation: &str,
+) -> Vec<u8> {
     let recipe = format!(
-        r#"{{"recipe_id":"{recipe_id}","protocol":{protocol},"python":"3.12","platform":"linux-x86_64"}}"#
+        r#"{{"recipe_id":"{recipe_id}","protocol":{protocol},"capabilities":{capabilities},"python":"3.12","platform":"linux-x86_64"}}"#
     );
     let mut archive = tar::Builder::new(flate2::write::GzEncoder::new(
         Vec::new(),
@@ -392,6 +408,22 @@ async fn recipe_protocol_mismatch_preserves_previous_runtime_on_restart() {
         bundle_with_recipe("torch-runtime-0.1.0", 2, "--no-index\n", ""),
         true,
         "required protocol 3",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn recipe_missing_image_capability_preserves_previous_runtime_on_restart() {
+    rejected_archive_preserves_previous(
+        bundle_with_recipe_and_capabilities(
+            "torch-runtime-0.1.0",
+            SUPPORTED_TORCH_PROTOCOL,
+            "[]",
+            "--no-index\n",
+            "",
+        ),
+        true,
+        "missing required capability image_generation",
     )
     .await;
 }

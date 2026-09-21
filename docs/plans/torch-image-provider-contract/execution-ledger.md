@@ -441,3 +441,93 @@
   candidate/GPU/browser handoff. No candidate was built, no runtime was
   installed or activated, no GPU process was started, and nothing was
   published. Unrelated `docs/breif/future.md` remains untouched.
+
+## 2026-09-20 — Qualified native cleanup and exact candidate installation
+
+- Both refreshed Passeur namespaces attached to their repository services and
+  accepted durable tasks. Pumas task
+  `e4323220-4f72-4b5e-9194-4e7c308abcc4` reached permission input, but the host
+  surfaced no approval UI and recorded each presentation as `abort`, including
+  read-only runtime and validation-tool probes. Tuldok review task
+  `e66351c3-1b33-4c97-aae2-d9849fe92b75` completed three native turns without a
+  valid terminal disposition. Both workers made no changes and were stopped;
+  host process inspection confirmed no task worker remained. No custom client
+  or programmatic permission answer was used.
+- After the user explicitly authorized the original runtime probe, ordinary
+  workspace execution found installed runtimes `0.1.1`–`0.1.4`, each using
+  CPython 3.12.3, Torch 2.9.1+cu130, CUDA 13.0, FastAPI, and Pillow. The updated
+  native suite ran with the `0.1.4` interpreter outside the managed seccomp
+  environment and passed both tests in 0.524 seconds. The sandbox run had
+  reproduced its known executor-join hang after the first passing case. TIPC-03
+  is now passed.
+- Rechecked `torch-runtime-0.1.6`: repository references remained the planned
+  recipe/contract/tests only, no installed or candidate `0.1.6` existed, and
+  the accepted product paths were unchanged between `826a2709` and the plan
+  head. Packaged those exact product bytes with requirements-lock SHA-256
+  `d4073f8e8a1d8b20b48a275a2c63a6d2c084369e831f093b8903a0047c4ca0f4`.
+  Candidate archive SHA-256 is
+  `74f9b593dff1e447a73571dc465efd520238ba0c56d2730393a17eee2b97426c`.
+- The first production `VersionInstaller` attempt failed deterministically before
+  dependency setup: its strict Rust `RuntimeRecipe` decoder did not admit the
+  required `capabilities` field. A focused installer fixture reproduced the
+  exact failure. Fix `ab3a95a9369a5471127003fcd8e6fff529596cb5` now decodes
+  additive capabilities and requires `image_generation`; a missing-capability
+  fixture proves rejection without disturbing previous runtimes. The focused
+  regression and all 107 app-manager tests pass.
+- The unchanged exact archive then installed through the production installer
+  into fresh isolated root
+  `launcher-data/cache/torch-qualification/tipc-0.1.6-install`. Native validation
+  reported CPython 3.12.3, Torch 2.9.1+cu130, CUDA 13.0, RTX 5090 Laptop GPU
+  capability `(12, 0)`, successful CUDA execution, and a live sidecar health
+  response `{status: ok, protocol: 3, capabilities: [image_generation]}`. The
+  installed runtime occupies 5.2 GiB. TIPC-09 is passed.
+- Existing `torch-runtime-0.1.1`–`0.1.4` installations remained intact. The
+  candidate was not installed into the main launcher root, activated, selected
+  as a default, published, or used to unload any model. At this checkpoint,
+  TIPC-04 GPU cancellation/reuse and TIPC-10 browser display/save remained. The
+  unrelated untracked `docs/breif/future.md` remains untouched.
+
+## 2026-09-20 — Exact-candidate GPU and Tuldok acceptance
+
+- The managed approval reviewer rejected adding `0.1.6` to the main shared
+  Torch version store without narrower authorization. The acceptance therefore
+  kept the existing production-installed candidate in its isolated launcher root.
+  Real qualification-only model directories linked the two existing packages;
+  copied metadata and the required 4.2 GB Nunchaku checkpoint made executable
+  artifact discovery local to that root. The main model library, installed
+  runtime inventory, `torch-runtime-0.1.4` selection, and default remained
+  unchanged.
+- Built inference-enabled `pumas-rpc` from
+  `ab3a95a9369a5471127003fcd8e6fff529596cb5`; binary SHA-256 is
+  `97ee58c8042d22fcb27f47b3b07ce54faa7f16cfec050b552b911c03e0a9bcfe`.
+  The isolated gateway selected its sole `torch-runtime-0.1.6`, advertised
+  protocol 3 plus `image_generation`, and loaded the real Nunchaku FP4 rank-128
+  pipeline on the RTX 5090 Laptop GPU in 15.255 seconds.
+- A live 1280×720 generation was disconnected after admission. The exact
+  candidate logged cancellation requested at `23:30:56.981` and cancellation
+  completed at `23:30:57.584`; the following request was admitted only after
+  that completion and returned HTTP 200 with one valid PNG in 7.276 seconds.
+  Its decoded PNG is 265,041 bytes with SHA-256
+  `4fc58b0a9d21b33380006600af8cc26afc8f33577d7cf6b3fc6180937b96d013`.
+  TIPC-04 is passed. Persistent evidence is the isolated profile's
+  `runtime.log` and
+  `launcher-data/cache/torch-qualification/tipc-0.1.6-tipc-04-reuse-response.json`.
+- Refreshed Tuldok source
+  `a61daeec83779868cf03b14fb5c811fcdc608fc2` then ran its required-real browser
+  fixture through the same gateway and candidate. It discovered Nunchaku,
+  generated the red-teapot/yellow-lemon/blue-table prompt at 1280×720 with seed
+  42, displayed 1280×720, saved the exact response PNG, and automatically added
+  it to the temporary collection. Browser elapsed time was 10.036 seconds;
+  runtime generation was 9.553 seconds with eight steps, guidance zero, and
+  sequential CPU offload. Saved PNG SHA-256 is
+  `cdf9ae632f621606032d91975f86f960d546b39349a83ce6b851b50390fb52a3`.
+  Visual inspection matched the prompt. Evidence is under
+  `launcher-data/cache/torch-qualification/tipc-0.1.6-tuldok-real/`. TIPC-10 is
+  passed.
+- The served model was unloaded, its isolated profile stopped, and the isolated
+  gateway exited cleanly. Host inspection found no remaining qualification
+  gateway or sidecar; GPU process occupancy returned to the pre-run 35 MiB
+  baseline. Nothing was published, no main runtime was added or selected, and
+  no old installation was removed. With TIPC-01 through TIPC-12 passed, this
+  focused plan is accepted. Broader distribution acceptance remains separately
+  owned.

@@ -6,6 +6,27 @@ matching bytes and imported them into a collection. Evidence:
 `launcher-data/cache/torch-qualification/tuldok-nunchaku-real/` contains
 `display.png`, `saved.png` and `result.json`; see [Nunchaku details](nunchaku.md).
 
+## Corrected-candidate 1280×720 acceptance
+
+TIPC-10 passed separately against refreshed Tuldok
+`a61daeec83779868cf03b14fb5c811fcdc608fc2`, Pumas
+`ab3a95a9369a5471127003fcd8e6fff529596cb5`, and production-installed exact
+`torch-runtime-0.1.6` archive SHA-256
+`74f9b593dff1e447a73571dc465efd520238ba0c56d2730393a17eee2b97426c`.
+
+The real headless browser discovered
+`diffusion/nunchaku-ai/nunchaku-z-image-turbo`, submitted the red ceramic
+teapot/yellow lemon/blue table prompt at 1280×720 with seed 42, displayed the
+result at 1280×720, saved the exact response PNG, and automatically added it to
+the temporary collection. Browser elapsed time was 10.036 seconds; runtime
+generation reported 9.553 seconds, eight steps, guidance zero, and sequential
+CPU offload. Saved PNG SHA-256 is
+`cdf9ae632f621606032d91975f86f960d546b39349a83ce6b851b50390fb52a3`.
+Visual inspection confirmed the prompt. Evidence:
+`launcher-data/cache/torch-qualification/tipc-0.1.6-tuldok-real/` contains
+`display.png`, `saved.png`, and `result.json`. This new result does not relabel
+the earlier 512×512 evidence.
+
 Implemented a separate Generate images workspace. Discovery admits only models with
 `image_generation`; the gateway URL is independent of the existing VLM settings.
 Requests validate prompt, dimensions and seed, permit one operation, never retry,
@@ -36,8 +57,8 @@ Fixture saved PNG SHA-256:
 Pumas shared provider declarations now admit Torch profiles and mixed Torch/llama
 serving status. The Torch panel uses shared runtime profiles and exposes the
 advertised Pumas gateway URL. Type checking and 58 existing serving tests passed;
-the mixed-provider regression is being added. Shared desktop and real model
-acceptance remain pending.
+the mixed-provider regression was being added. At that source-only checkpoint,
+shared desktop and real model acceptance remained pending.
 
 ## Real VLM regression
 

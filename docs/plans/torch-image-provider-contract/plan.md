@@ -1,6 +1,6 @@
 # Plan: Torch Image Provider Contract Correction
 
-**Plan status:** `Active`
+**Plan status:** `Completed`
 
 **Objective:** Establish one reusable generation lifetime in which an admitted
 image, text, or future generation remains active until completion,
@@ -9,17 +9,22 @@ shutdown. Correct the Torch image provider against that lifetime, prove live
 compatibility before admission, and preserve the public image contract and
 immutable runtime installation model.
 
-**Acceptance status:** `pending`
+**Acceptance status:** `Accepted`
 
-**Current phase:** `TIPC-M1` source is committed at Pumas
-`826a270958f7182bd8108c879b4b7fa1da5cab7d`; the Tuldok companion is committed
-at `a61daeec83779868cf03b14fb5c811fcdc608fc2`. Controlled Pumas, sidecar, and
-Tuldok evidence passes. The qualified native Torch failure test and the exact
-candidate/GPU/browser handoffs remain pending in their declared environments.
+**Current phase:** accepted. `TIPC-M1` is complete at Pumas
+`ab3a95a9369a5471127003fcd8e6fff529596cb5` (provider source `826a2709` plus the
+production-installer capability correction); the Tuldok companion is committed
+at `a61daeec83779868cf03b14fb5c811fcdc608fc2`. The qualified native failure test
+passes. Exact candidate `torch-runtime-0.1.6`, SHA-256
+`74f9b593dff1e447a73571dc465efd520238ba0c56d2730393a17eee2b97426c`, installs
+and validates through the production installer. Real RTX 5090 cancellation
+retained the device through cleanup and the following request succeeded. The
+same installed candidate completed the refreshed Tuldok 1280×720 display/save
+workflow. TIPC-01 through TIPC-12 are passed.
 
-**Next integration slice:** execute the updated native failure test in the
-qualified Torch environment, then hand source commit `826a2709` to the Tuldok
-image plan for exact-candidate construction and TIPC-04/TIPC-09/TIPC-10.
+**Next integration slice:** none in this focused plan. Publication,
+production-default selection, and the broader image plan's remaining
+distribution acceptance retain their own authorization and gates.
 
 **Execution ledger:** [execution-ledger.md](execution-ledger.md)
 
@@ -210,14 +215,14 @@ evidence but do not independently prescribe or re-prove the same correction.
 | --- | --- | --- | --- | --- | --- | --- |
 | TIPC-01 | Elapsed time beyond the former limit does not cancel valid work — controlled worker/clock regression | integration | representative controlled worker/clock | automated | This plan | passed |
 | TIPC-02 | Production image transport permits a connected, silent, long request — configuration inspection plus controlled transport integration | integration | representative real gateway/private transport | automated | This plan | passed |
-| TIPC-03 | Disconnect and explicit owner cancellation propagate while resources remain held through pending cleanup — current-route transport/lifecycle evidence | system | representative real Pumas/Torch route with controlled worker | automated | This plan | partial — controlled route/worker passed; qualified native run pending |
-| TIPC-04 | Actual GPU cancellation permits reuse only after sufficient worker/device cleanup — required-real device evidence | system | required-real supported GPU and exact candidate | either | [Tuldok image plan M5](../torch-diffusion-serving/plan.md#m5--release-and-optional-build-acceptance) | pending |
+| TIPC-03 | Disconnect and explicit owner cancellation propagate while resources remain held through pending cleanup — current-route transport/lifecycle evidence | system | representative real Pumas/Torch route with controlled worker | automated | This plan | passed |
+| TIPC-04 | Actual GPU cancellation permits reuse only after sufficient worker/device cleanup — required-real device evidence | system | required-real supported GPU and exact candidate | either | [Tuldok image plan M5](../torch-diffusion-serving/plan.md#m5--release-and-optional-build-acceptance) | passed |
 | TIPC-05 | Malformed, incompatible, missing-capability, unavailable, and replaced runtimes cannot gain false listing/readiness/admission — handshake, serving, listing, and admission tests | integration | representative controlled sidecars/process replacement | automated | This plan | passed |
 | TIPC-06 | Artifact consistency and live interoperability are independently checked, including mixed versions — installer/qualifier and client tests | integration | representative isolated installer plus mixed clients/sidecars | automated | This plan | passed |
 | TIPC-07 | Additive results succeed while invalid required data and oversized whole payloads fail — decoder contract tests | contract | deterministic decoder fixtures | automated | This plan | passed |
 | TIPC-08 | Private additions do not leak publicly and safe error projection remains coherent — gateway projection tests | integration | representative gateway/provider fixtures | automated | This plan | passed |
-| TIPC-09 | The exact candidate installs and runs through production installation — isolated installed-artifact qualification | release-artifact | required-real isolated launcher root and candidate bytes | either | [Tuldok image plan M1/M5](../torch-diffusion-serving/plan.md) | pending |
-| TIPC-10 | A supported real 1280×720 request traverses Tuldok → Pumas → installed candidate, displays, and saves — required-real browser/GPU evidence | user-workflow | required-real browser, GPU, Tuldok, Pumas, exact candidate | either | [Tuldok image plan M3-TIPC](../torch-diffusion-serving/plan.md#m3-tipc--tuldok-contract-companion) | pending |
+| TIPC-09 | The exact candidate installs and runs through production installation — isolated installed-artifact qualification | release-artifact | required-real isolated launcher root and candidate bytes | either | [Tuldok image plan M1/M5](../torch-diffusion-serving/plan.md) | passed |
+| TIPC-10 | A supported real 1280×720 request traverses Tuldok → Pumas → installed candidate, displays, and saves — required-real browser/GPU evidence | user-workflow | required-real browser, GPU, Tuldok, Pumas, exact candidate | either | [Tuldok image plan M3-TIPC](../torch-diffusion-serving/plan.md#m3-tipc--tuldok-contract-companion) | passed |
 | TIPC-11 | A lost response preserves uncertainty and causes no automatic replay — controlled transport-failure evidence | integration | representative controlled gateway/private transport | automated | This plan | passed |
 | TIPC-12 | Registered non-image generation routes necessarily use the shared duration-unbounded Pumas transport; a connected silent request has no duration/byte-cadence failure, disconnect drops the Pumas request, and Pumas does not replay. This claim does not assert provider-native cleanup. | integration | representative real route wiring plus controlled gateway/provider transport | automated | This plan | passed |
 
@@ -230,7 +235,7 @@ including the three named handoffs, pass.
 
 ## TIPC-M1 — shared generation lifetime and provider correction
 
-**Status:** `Active — source complete; qualified native evidence pending`
+**Status:** `Completed`
 
 **Goal:** Establish the shared Pumas generation lifetime and correct the live
 Pumas/Torch image compatibility and result contract as one implementation unit.
@@ -284,8 +289,8 @@ image errors consumed by `pumas-rpc`; no unrelated app-manager API is admitted.
 **Gate:** TIPC-01–TIPC-03, TIPC-05–TIPC-08, TIPC-11, and TIPC-12 pass at their
 declared fidelity; documentation matches implementation; no production
 total/read/idle generation timeout remains; protocol-2 or malformed/replaced
-sidecars cannot be admitted. The plan remains pending until TIPC-04, TIPC-09,
-and TIPC-10 are returned by their owner.
+sidecars cannot be admitted. TIPC-04, TIPC-09, and TIPC-10 have been returned by
+their owner against the exact installed candidate, so the plan gate is closed.
 
 ### Supporting gates
 
@@ -300,7 +305,7 @@ and TIPC-10 are returned by their owner.
 
 The unit suite may use local fakes for contract behavior. The native failure
 test proves real Torch worker/lease cleanup without claiming GPU execution;
-TIPC-04 still requires the named real GPU evidence.
+TIPC-04 additionally passed with the named real GPU evidence recorded below.
 
 **Re-plan triggers:** Protocol `3` or recipe `0.1.6` is allocated before work;
 the existing process/profile identity cannot close replacement races; safe
@@ -329,10 +334,10 @@ error, avoiding closed metadata examples, controlled unknown-outcome evidence,
 and a real 1280×720 browser run on a supporting model. It does not redesign
 discovery, datasets, or VLM transport.
 
-GPU/browser absence blocks TIPC-04/TIPC-10, not TIPC-M1 source work. Candidate
-construction waits for the corrected bundle. Publication is neither authorized
-by nor a prerequisite of this correction. Shared files are integrated serially
-between these plans.
+GPU/browser orchestration completed TIPC-04/TIPC-10 without changing completed
+TIPC-M1 source. The corrected candidate remains installed only in the isolated
+qualification root. Publication is neither authorized by nor a prerequisite of
+this correction. Shared files were integrated serially between these plans.
 
 ## Reconciliation dispositions and exclusions
 
@@ -380,33 +385,26 @@ shutdown remain deferred unless a specific TIPC claim demonstrates a prerequisit
 8. **Complexity:** protocol `3`, process-bound revalidation, and retained cleanup
    custody are required to distinguish old live behavior and safe reuse.
 
-## Blockers
+## Blockers and follow-ups
 
-- Pumas and Tuldok Passeur profiles and named registrations are configured with
-  the user-confirmed subscription and pass Doctor/configuration checks. The
-  Passeur/Muse client-name incompatibility is corrected in local Passeur commit
-  `4f4ef0f`; its full tests, typecheck, build, direct Muse handshake, and a
-  read-only MCP `listTools` handshake passed. Passeur source has since advanced
-  independently to clean commit `49724a8`, while the ignored configured `dist/`
-  runtime still has the older CLI surface and corrected client identifier; this
-  drift must be reconciled before the next dispatch. The Codex host currently
-  runs one exact configured process for each named server, and the Pumas process
-  owns its repository lease, but this conversation exposes neither namespace's
-  four task operations. A duplicate SDK/resource startup closes because the
-  healthy attached owner already holds that lease. Recover the host-to-model
-  tool attachment before retrying the recorded assignments. The current Codex
-  configuration neither marks these servers `required` nor overrides the
-  documented one-second optional-server catalog grace; setting the two servers
-  required is the narrow next diagnostic, but needs global configuration
-  authority and a fresh session. Do not kill the owner, start a competing
-  coordinator, or substitute a custom MCP client that bypasses human approval
-  elicitation.
-- Required-real GPU and browser availability may delay TIPC-04/TIPC-10 only.
-- Candidate build/install access may delay TIPC-09 only.
+- Both refreshed Passeur namespaces attach and accept durable tasks. In this
+  continuation the host did not surface Muse permission choices: every request
+  was recorded as `abort`, including read-only probes, while a Tuldok review
+  repeatedly returned no valid terminal disposition. Both stopped tasks made no
+  changes. This tooling defect is recorded evidence but no longer blocks the
+  completed native, candidate, GPU, and browser work, which used the ordinary
+  workspace permission path after explicit user authorization. Do not bypass
+  Passeur with a custom client; re-use it only after its
+  elicitation/finalization path is repaired or for tasks that need neither
+  operation.
+- No focused-plan acceptance blocker remains. The Passeur elicitation and
+  terminal-disposition defect remains an operational follow-up.
 
 ## Final acceptance
 
-The plan becomes `Accepted` only when TIPC-01 through TIPC-12 are passed by their
-named owners and the exact candidate/source identities are recorded. Qualification
-does not authorize publication, activation as the production default, removal of
-old installations, or completion of either broader plan.
+Accepted: TIPC-01 through TIPC-12 passed by their named owners. Pumas source is
+`ab3a95a9369a5471127003fcd8e6fff529596cb5`, Tuldok source is
+`a61daeec83779868cf03b14fb5c811fcdc608fc2`, and the exact candidate archive is
+`74f9b593dff1e447a73571dc465efd520238ba0c56d2730393a17eee2b97426c`.
+Qualification does not authorize publication, activation as the production
+default, removal of old installations, or completion of either broader plan.

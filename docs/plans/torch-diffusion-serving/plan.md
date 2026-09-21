@@ -7,9 +7,13 @@
 **Next slice:** Complete shared-release distribution acceptance for the qualified Torch package, retaining the working FP8 image workflow and the user-requested reduced verification scope. Native NVFP4 encoder serving and T16 desktop shutdown work remain outside the completed conversion extension.
 
 **Independent companion preparation:** `M3-TIPC` source is complete in Tuldok
-`a61daeec83779868cf03b14fb5c811fcdc608fc2`; the exact-candidate 1280×720
-browser/GPU gate remains pending. This does not replace the sole next slice
-above.
+`a61daeec83779868cf03b14fb5c811fcdc608fc2`. Exact
+`torch-runtime-0.1.6` candidate
+`74f9b593dff1e447a73571dc465efd520238ba0c56d2730393a17eee2b97426c`
+passes production installation and native GPU/sidecar validation; TIPC-09 is
+returned. Real cancellation/reuse on the RTX 5090 Laptop GPU returns TIPC-04,
+and the refreshed Tuldok 1280×720 display/save run returns TIPC-10. This does
+not replace the sole next slice above.
 
 **Acceptance status:** `partial`
 
@@ -178,7 +182,7 @@ Finalize and document this bounded contract in M2 before integrating Tuldok:
 
 M1/M2/M5 remain `Active` for distribution and remaining failure acceptance.
 Original M3 and M4 are `Completed` within their recorded evidence; `M3-TIPC`
-source is complete and its required-real gate is pending. M1 publication acceptance is
+is `Completed` with its required-real gate passed. M1 publication acceptance is
 deferred until M2 supplies the final sidecar payload: publishing the control-only
 candidate first would require an immediate second publication. Source work may
 continue during package qualification; real model loading still requires a healthy
@@ -284,7 +288,7 @@ the original candidate, resolution, and protocol scope in `reports/tuldok.md`.
 **Goal:** Align the existing Tuldok image consumer with `TIPC-GEN-01` and return
 TIPC-10 without changing discovery, datasets, or VLM transport.
 
-**Status:** `Active — source complete; exact-candidate gate pending`
+**Status:** `Completed`
 
 **Allowed write set:** Tuldok `image_generation.py`, its focused tests,
 `tests/browser_images_real.cjs`, relevant user documentation, and this plan's
@@ -304,6 +308,11 @@ it. Record new evidence without relabeling the earlier smaller-image result.
 This companion may be prepared against the current public contract independently
 of TIPC-M1 source completion, but its required-real gate waits for the exact
 installed corrected candidate.
+
+**Result:** Passed against isolated production-installed
+`torch-runtime-0.1.6`. The browser displayed 1280×720, saved exact PNG SHA-256
+`cdf9ae632f621606032d91975f86f960d546b39349a83ce6b851b50390fb52a3`,
+and automatically imported it. TIPC-10 is returned.
 
 **Re-plan:** Tuldok's current app structure or dataset import boundary materially differs.
 
@@ -364,8 +373,9 @@ or identity and rerun only the affected evidence.
 
 ## Blockers and unresolved facts
 
-M1 source implementation and package qualification are active. The corrected
-candidate additionally depends on the focused provider correction's owned gate.
+M1 source implementation, exact-candidate package qualification, GPU
+cancellation/reuse, and browser acceptance are complete for TIPC-04, TIPC-09,
+and TIPC-10.
 The selected Pumas
 release source has no published Torch runtime bundle (T7), preventing real shared
 UI discovery acceptance until qualification and publication. Both complete pipelines now generate through Tuldok. A5 remains pending for

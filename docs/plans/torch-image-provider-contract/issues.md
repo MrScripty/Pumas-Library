@@ -208,3 +208,31 @@ flag, and the global optional grace is unset. That configuration matches the
 observed live-process/missing-catalog shape but remains a hypothesis until an
 authorized change marks only these requested servers required and a fresh
 session verifies the resulting catalog.
+
+Latest refreshed-server diagnostic: both namespaces exposed the new durable
+submit/wait/input operations and accepted tasks. The host nevertheless surfaced
+no Muse permission UI; presenting pending inputs recorded `abort`, including for
+read-only shell probes. The Tuldok read-only worker separately completed three
+turns without a valid assignment disposition. Both tasks were stopped with no
+changes, and host process inspection confirmed no task worker remained. The
+ordinary Codex workspace permission path then completed the explicitly
+authorized native/candidate work. Future Passeur execution should wait for its
+permission-elicitation and terminal-disposition path to be repaired; a custom
+client remains prohibited.
+
+## TIPC-I12 — Production installer rejected the corrected recipe capability field
+
+- Finding: exact-candidate qualification reached the production
+  `VersionInstaller` and rejected `torch-runtime-0.1.6` before dependency setup:
+  its strict Rust recipe decoder still knew only recipe identity, protocol,
+  Python, and platform, while the corrected immutable recipe necessarily also
+  declares `capabilities`.
+- Disposition: `RuntimeRecipe` now consumes the additive capability list and
+  requires `image_generation` while tolerating unknown additional capabilities,
+  matching the private protocol's capability semantics. Installer fixtures now
+  use the real protocol-3 recipe shape and prove a missing required capability
+  cannot publish or disturb a previous runtime.
+- Evidence: the focused regression first failed with the production error and
+  then passed; all 107 app-manager tests passed; the same exact candidate bytes
+  installed and completed native GPU plus live sidecar validation through the
+  production installer. Fix commit: `ab3a95a9369a5471127003fcd8e6fff529596cb5`.

@@ -1,6 +1,7 @@
-# Nunchaku evidence (in progress)
+# Nunchaku evidence
 
-A2 and A5 remain pending. No real image has been generated.
+A2 is passed. The image-specific TIPC-04 cancellation/reuse gate is also passed;
+A5 remains pending only for the broader plan's remaining failure matrix.
 
 Source includes an offline Nunchaku FP4 rank-128 adapter with sequential CPU
 offload, device admission/unload exclusion, cancellation checkpoints, bounded
@@ -98,3 +99,25 @@ Evidence under `launcher-data/cache/torch-qualification/`:
 `nunchaku-browser-telemetry.json`. One-second Pumas samples observed GPU usage up
 to 988,807,168 bytes and RAM usage up to 20.57%; sampling can miss brief peaks.
 The pipeline used real local weights and no mock backend. A2 and A3 are passed.
+
+## Exact-candidate cancellation and reuse
+
+TIPC-04 passed separately against production-installed exact
+`torch-runtime-0.1.6` archive SHA-256
+`74f9b593dff1e447a73571dc465efd520238ba0c56d2730393a17eee2b97426c`
+and Pumas `ab3a95a9369a5471127003fcd8e6fff529596cb5`. The runtime loaded the real
+FP4 rank-128 pipeline on the RTX 5090 Laptop GPU in 15.255 seconds.
+
+A live 1280×720 generation was disconnected after admission. Runtime evidence
+records cancellation requested at `23:30:56.981`, with the worker/device cleanup
+completed at `23:30:57.584`. A following request was admitted only after that
+completion and returned HTTP 200 with one 265,041-byte PNG in 7.276 seconds;
+decoded PNG SHA-256 is
+`4fc58b0a9d21b33380006600af8cc26afc8f33577d7cf6b3fc6180937b96d013`.
+Evidence is the isolated profile `runtime.log` plus
+`launcher-data/cache/torch-qualification/tipc-0.1.6-tipc-04-reuse-response.json`.
+
+The model was unloaded, the isolated profile and gateway stopped, and GPU
+occupancy returned to the pre-run baseline. The main launcher retained runtimes
+`0.1.1`–`0.1.4`, selected `0.1.4`, and no default. No candidate was published or
+installed into the main version store.

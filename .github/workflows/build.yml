@@ -11,7 +11,7 @@ on:
 permissions:
   contents: read
 
-# Only superseded PR work is obsolete. Never cancel a tag or manual rehearsal.
+# Only superseded PR work is obsolete. Never cancel a version-tag build.
 concurrency:
   group: build-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -71,12 +71,17 @@ jobs:
       # silently enabling the features this gate is supposed to exclude.
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library --no-default-features
       - run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-rpc --no-default-features
-      - run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release --no-default-features
-      - run: python3 scripts/release/smoke-rpc.py rust/target/release/pumas-rpc --inference-disabled
+      - name: Build inference-disabled release backend
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc --release --no-default-features
+      - name: Verify inference-disabled release backend
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        run: python3 scripts/release/smoke-rpc.py rust/target/release/pumas-rpc --inference-disabled
 
   headless-rpc:
     name: Headless archive (${{ matrix.headless_os }})
     needs: lint-workflows
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     strategy:
       fail-fast: false
       matrix:
@@ -135,17 +140,24 @@ jobs:
       - run: pnpm --dir frontend lint
       - run: pnpm --dir frontend check:types
       - run: pnpm --dir frontend test:run
-      - run: pnpm --dir frontend build:library-only
+      - name: Build library-only renderer
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        run: pnpm --dir frontend build:library-only
       # Restore the default renderer before publishing the packaging input.
-      - run: pnpm --dir frontend build
+      - name: Build default renderer
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        run: pnpm --dir frontend build
       - run: pnpm --dir electron lint
       - run: pnpm --dir electron validate
+      - run: npm run test:launcher
+      - run: pnpm --dir electron test
       - run: cargo fetch --locked --manifest-path rust/Cargo.toml
       - run: pnpm --dir electron check:desktop-contract
       - run: pnpm --dir electron test:desktop-contract-generator
       - run: pnpm --dir electron test:desktop-contract-conformance
       - run: pnpm --dir frontend test:desktop-contract
       - uses: actions/upload-artifact@v7.0.1
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
         with:
           name: frontend-dist
           path: frontend/dist/
@@ -172,6 +184,7 @@ jobs:
   build-rust:
     name: Rust release (${{ matrix.os }})
     needs: lint-workflows
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     strategy:
       fail-fast: false
       matrix:
@@ -208,6 +221,7 @@ jobs:
   build-electron:
     name: Desktop package (${{ matrix.platform }})
     needs: [build-rust, build-frontend]
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     strategy:
       fail-fast: false
       matrix:
@@ -271,6 +285,7 @@ jobs:
   build-electron-no-inference:
     name: Desktop package without inference (${{ matrix.platform }})
     needs: [headless-rpc, build-frontend]
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     strategy:
       fail-fast: false
       matrix:
@@ -350,6 +365,7 @@ jobs:
   windows-release:
     name: Rust release (windows-2025)
     needs: [lint-workflows, build-frontend]
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     runs-on: windows-2025
     timeout-minutes: 150
     steps:
@@ -413,6 +429,7 @@ jobs:
   windows-no-inference:
     name: Desktop package without inference (win)
     needs: [lint-workflows, build-frontend, headless-rpc]
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
@@ -472,6 +489,7 @@ jobs:
   verify-launcher:
     name: Linux release startup
     needs: [build-rust, build-frontend]
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -505,6 +523,7 @@ jobs:
   release-candidate:
     name: Assemble release candidate
     needs: [rust-quality, headless, headless-rpc, torch-quality, build-electron, build-electron-no-inference, windows-release, windows-no-inference, verify-launcher]
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

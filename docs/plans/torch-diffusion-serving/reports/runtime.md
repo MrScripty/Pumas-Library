@@ -171,3 +171,42 @@ gateway was gracefully restarted and shared `switch_version` selected 0.1.2.
 Real-image acceptance remains pending. Subsequent Ruff formatting changes only
 whitespace in the compatibility and validation modules; the next runtime payload
 will include that formatting.
+
+## Corrected runtime 0.1.6 exact-candidate qualification
+
+TIPC source `826a270958f7182bd8108c879b4b7fa1da5cab7d` supplies the candidate
+sidecar; no candidate-owned product path differs between that commit and the
+packaging head. The immutable recipe is protocol `3` with
+`["image_generation"]`. Requirements-lock SHA-256 is
+`d4073f8e8a1d8b20b48a275a2c63a6d2c084369e831f093b8903a0047c4ca0f4`.
+
+The exact archive is
+`launcher-data/cache/torch-qualification/assets/0.1.6/pumas-torch-runtime-linux-x86_64.tar.gz`,
+SHA-256 `74f9b593dff1e447a73571dc465efd520238ba0c56d2730393a17eee2b97426c`.
+It installed through the production `VersionInstaller` into isolated root
+`launcher-data/cache/torch-qualification/tipc-0.1.6-install`; the installed
+runtime is 5.2 GiB.
+
+The first attempt exposed that the strict Rust recipe decoder had not evolved
+with the required capability field. Fix
+`ab3a95a9369a5471127003fcd8e6fff529596cb5` consumes additive capabilities and
+requires `image_generation`. Its regression first reproduced the exact failure,
+then passed; all 107 app-manager tests pass. The same archive bytes were reused,
+so the fix did not obscure artifact identity.
+
+Production staged validation passed with CPython 3.12.3, Torch 2.9.1+cu130,
+CUDA 13.0, RTX 5090 Laptop GPU capability `(12, 0)`, real CUDA execution, and a
+live sidecar health response with status `ok`, protocol `3`, and capability
+`image_generation`. TIPC-09 is passed. Existing runtime installations were not
+changed; the candidate was not installed into the main launcher root, selected,
+activated, published, or made a default.
+
+The installed candidate then served the real Nunchaku FP4 rank-128 pipeline from
+an isolated launcher/model index. A disconnected 1280×720 request logged
+cancellation requested at `23:30:56.981` and completed at `23:30:57.584`; a
+following request began only after cleanup and produced a valid PNG in 7.276
+seconds. TIPC-04 passed. The refreshed Tuldok flow then generated, displayed,
+saved, and imported a real 1280×720 result in 10.036 seconds; saved PNG SHA-256
+is `cdf9ae632f621606032d91975f86f960d546b39349a83ce6b851b50390fb52a3`.
+TIPC-10 passed. The model/profile/gateway were stopped afterward, GPU occupancy
+returned to baseline, and main-root runtime selection remained `0.1.4`.

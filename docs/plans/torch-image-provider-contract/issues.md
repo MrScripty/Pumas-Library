@@ -110,3 +110,129 @@
   separately prove continued execution beyond the old boundary with controlled
   time.
 - Evidence: focused native-suite execution plus TIPC-01/TIPC-03.
+
+## TIPC-I10 — Repeated cancellation can stall load-worker cleanup
+
+- Finding: the existing repeated load-cancellation regression hangs because
+  `ModelManager.load` re-enters `asyncio.shield` while its owning task still
+  carries cancellation. A second cancellation can repeatedly interrupt cleanup
+  even after the executor worker returns, preventing the device lease and task
+  from reaching a terminal state.
+- Disposition: admit `torch-server/model_manager.py` as the proved load/device
+  custody owner. Consume cancellation only while polling the independently
+  owned worker to completion, clear abandoned loaded objects, mark the slot
+  failed, and then re-raise the original owner cancellation.
+- Evidence: the pre-existing repeated-cancellation regression plus the complete
+  sidecar unit suite.
+
+## TIPC-I11 — Required project-scoped Passeur tools are not callable
+
+- Finding: initial intake found no Pumas or Tuldok profile and no Passeur tools
+  in the current Codex session. The installed registration helper owns one
+  default `muse_bridge` name, while this assignment requires distinct
+  project-scoped Pumas and Tuldok servers.
+- Disposition: configured separate outside-checkout worktree roots and the named
+  `passeur_pumas`/`passeur_tuldok` servers after human model/subscription and
+  configuration authorization. Both profiles and registrations pass Doctor and
+  `codex mcp get`. A Codex restart remains required before the tools can appear;
+  do not substitute native Codex subagents or direct Muse sessions.
+- Evidence: Passeur Doctor/profile lookup and current MCP tool inventory. This
+  blocks implementation execution only until restart, not plan admission or
+  read-only preparation.
+
+Post-restart diagnostic: both configured servers start and list the exact four
+schema-version-2 tools through a read-only MCP SDK client, but the resumed
+conversation's callable-tool inventory still omits both server namespaces. A
+new conversation attachment, rather than another profile/configuration change,
+is required before this issue can close.
+
+Second-session diagnostic: both namespaces are now callable. The first Pumas
+batch reached worker startup and failed deterministically because Passeur used
+`clientInfo.name = "muse-bridge"`, which Muse 1.3 rejects under its
+`^[a-z0-9_]+$` machine-identifier rule. Tuldok first rejected a cross-repository
+plan path before worker startup, then reached the same client-name failure after
+its context list was corrected. A minimal handshake reproduced the failure and
+passed with `muse_bridge`; the local Passeur source, probe, regression test, and
+ignored built runtime were corrected in local commit `4f4ef0f`, and the full
+test suite, typecheck, and build passed. The attached MCP processes retain the
+pre-build module, so one further Codex restart is required. All six zero-change
+failed allocations were explicitly archived and retired; no product task
+remains live.
+
+Third-session diagnostic: after the requested restart, the corrected Passeur
+runtime and registrations remain present but the resumed conversation's
+callable inventory again omits both namespaces. A sandboxed startup reports the
+generic repository-in-use error because it cannot acquire Passeur's external
+state lease; host-visible process inspection and state-directory inspection
+show no running coordinator or surviving lock. The same configured command,
+launched read-only with its required state access, initializes and lists all
+four tools. The remaining failure is conversation attachment, not Passeur
+source, profile, registration, task state, or a live worker. Start a newly
+created conversation that explicitly requests `passeur_pumas` and
+`passeur_tuldok`; do not use a custom client that bypasses elicitation.
+
+Fourth-session diagnostic: the user created another conversation and explicitly
+named both servers. `codex mcp get` still resolves both enabled registrations
+with the four-tool allowlist, and both Doctors pass. Host-visible inspection now
+shows one live exact-command process for each server; the Pumas process owns the
+repository coordination lease. The model's complete callable inventory still
+contains neither namespace. Consequently, a resource-list request and a
+bounded read-only SDK handshake start duplicate processes and close; outside
+the restricted sandbox the duplicate reports `Another coordinator or offline
+mutation owns this repository`. This is expected contention with the healthy
+attached owner, not evidence that the profile or lease is stale. Do not kill
+the owner or use a custom client. The remaining blocker is host-to-model tool
+exposure for the already attached processes.
+
+Material tooling drift observed during this diagnostic: the clean Passeur
+source advanced from compatibility commit `4f4ef0f` to `49724a8`, while the
+ignored configured `dist/` runtime retains the older CLI surface (for example,
+`--version` prints the old usage text). Reconcile and verify that build/runtime
+identity after callable attachment is restored and before dispatch.
+
+Fifth-session resolution: both configured namespaces and their four operations
+were callable. Pumas and Tuldok Muse workers ran in repository-scoped
+worktrees; their useful committed or dirty output was reviewed and adapted into
+Pumas `826a2709` and Tuldok `a61daee`. Timed-out workers were confirmed stopped
+before offline reconciliation, and every surviving task resource was finalized
+with an explicit retained disposition. The attachment issue is resolved for
+this execution; after the coordinators were intentionally stopped for safe
+reconciliation, a later delegation requires normal server reattachment rather
+than another workaround or direct Muse invocation.
+
+Official Codex MCP configuration documentation states that optional servers get
+a one-second grace while the initial tool catalog is built, unless the global
+grace is disabled, while required servers use their startup timeouts. The two
+Passeur registrations set a 10-second startup timeout but have no `required`
+flag, and the global optional grace is unset. That configuration matches the
+observed live-process/missing-catalog shape but remains a hypothesis until an
+authorized change marks only these requested servers required and a fresh
+session verifies the resulting catalog.
+
+Latest refreshed-server diagnostic: both namespaces exposed the new durable
+submit/wait/input operations and accepted tasks. The host nevertheless surfaced
+no Muse permission UI; presenting pending inputs recorded `abort`, including for
+read-only shell probes. The Tuldok read-only worker separately completed three
+turns without a valid assignment disposition. Both tasks were stopped with no
+changes, and host process inspection confirmed no task worker remained. The
+ordinary Codex workspace permission path then completed the explicitly
+authorized native/candidate work. Future Passeur execution should wait for its
+permission-elicitation and terminal-disposition path to be repaired; a custom
+client remains prohibited.
+
+## TIPC-I12 — Production installer rejected the corrected recipe capability field
+
+- Finding: exact-candidate qualification reached the production
+  `VersionInstaller` and rejected `torch-runtime-0.1.6` before dependency setup:
+  its strict Rust recipe decoder still knew only recipe identity, protocol,
+  Python, and platform, while the corrected immutable recipe necessarily also
+  declares `capabilities`.
+- Disposition: `RuntimeRecipe` now consumes the additive capability list and
+  requires `image_generation` while tolerating unknown additional capabilities,
+  matching the private protocol's capability semantics. Installer fixtures now
+  use the real protocol-3 recipe shape and prove a missing required capability
+  cannot publish or disturb a previous runtime.
+- Evidence: the focused regression first failed with the production error and
+  then passed; all 107 app-manager tests passed; the same exact candidate bytes
+  installed and completed native GPU plus live sidecar validation through the
+  production installer. Fix commit: `ab3a95a9369a5471127003fcd8e6fff529596cb5`.

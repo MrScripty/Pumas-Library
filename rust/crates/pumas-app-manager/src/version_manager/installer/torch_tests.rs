@@ -1,5 +1,6 @@
 //! HTTP bundle fixtures exercise the production installer, without model downloads.
 use super::*;
+use crate::torch_client::SUPPORTED_TORCH_PROTOCOL;
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 
@@ -20,16 +21,37 @@ fn create_test_installer() -> (VersionInstaller, tempfile::TempDir) {
     (installer, root)
 }
 
-fn bundle(requirements: &str, validation: &str) -> Vec<u8> {
+fn bundle_with_recipe(
+    recipe_id: &str,
+    protocol: u32,
+    requirements: &str,
+    validation: &str,
+) -> Vec<u8> {
+    bundle_with_recipe_and_capabilities(
+        recipe_id,
+        protocol,
+        r#"["image_generation"]"#,
+        requirements,
+        validation,
+    )
+}
+
+fn bundle_with_recipe_and_capabilities(
+    recipe_id: &str,
+    protocol: u32,
+    capabilities: &str,
+    requirements: &str,
+    validation: &str,
+) -> Vec<u8> {
+    let recipe = format!(
+        r#"{{"recipe_id":"{recipe_id}","protocol":{protocol},"capabilities":{capabilities},"python":"3.12","platform":"linux-x86_64"}}"#
+    );
     let mut archive = tar::Builder::new(flate2::write::GzEncoder::new(
         Vec::new(),
         flate2::Compression::default(),
     ));
     for (name, data) in [
-        (
-            "runtime.json",
-            r#"{"recipe_id":"torch-runtime-0.1.0","protocol":2,"python":"3.12","platform":"linux-x86_64"}"#,
-        ),
+        ("runtime.json", recipe.as_str()),
         ("serve.py", ""),
         ("requirements.txt", requirements),
         ("validate_runtime.py", validation),
@@ -229,9 +251,29 @@ fn completed_download_is_immediately_readable_by_checksum_reader() {
         });
 }
 
+/// Fixture bundle whose recipe matches the release tag and the required
+/// protocol: the only bundle shape the installer may publish.
+fn bundle(requirements: &str, validation: &str) -> Vec<u8> {
+    bundle_with_recipe(
+        "torch-runtime-0.1.0",
+        SUPPORTED_TORCH_PROTOCOL,
+        requirements,
+        validation,
+    )
+}
+
 async fn rejected_bundle_preserves_previous(
     requirements: &str,
     validation: &str,
+    valid_checksum: bool,
+    expected: &str,
+) {
+    rejected_archive_preserves_previous(bundle(requirements, validation), valid_checksum, expected)
+        .await;
+}
+
+async fn rejected_archive_preserves_previous(
+    archive: Vec<u8>,
     valid_checksum: bool,
     expected: &str,
 ) {
@@ -254,7 +296,7 @@ async fn rejected_bundle_preserves_previous(
             Some(AppId::Torch),
         )
         .unwrap();
-    let (release, server) = fixture_release(bundle(requirements, validation), valid_checksum).await;
+    let (release, server) = fixture_release(archive, valid_checksum).await;
     let result = install_fixture(&installer, &release).await;
     let error = result.unwrap_err().to_string();
     assert!(
@@ -353,6 +395,53 @@ async fn validation_failure_preserves_previous_runtime_on_restart() {
         "raise RuntimeError('fixture validation failure')",
         true,
         "Validating GPU and sidecar protocol failed",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn recipe_protocol_mismatch_preserves_previous_runtime_on_restart() {
+    // A protocol-2 bundle speaks the old lifetime and must not install next
+    // to (or over) protocol-3 state: recipe protocol is qualified separately
+    // from artifact checksum and recipe identity.
+    rejected_archive_preserves_previous(
+        bundle_with_recipe("torch-runtime-0.1.0", 2, "--no-index\n", ""),
+        true,
+        "required protocol 3",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn recipe_missing_image_capability_preserves_previous_runtime_on_restart() {
+    rejected_archive_preserves_previous(
+        bundle_with_recipe_and_capabilities(
+            "torch-runtime-0.1.0",
+            SUPPORTED_TORCH_PROTOCOL,
+            "[]",
+            "--no-index\n",
+            "",
+        ),
+        true,
+        "missing required capability image_generation",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn recipe_identity_mismatch_preserves_previous_runtime_on_restart() {
+    // Recipe identity is qualified separately from artifact checksum and
+    // recipe protocol: a bundle whose recipe names another release tag cannot
+    // publish under this tag.
+    rejected_archive_preserves_previous(
+        bundle_with_recipe(
+            "torch-runtime-9.9.9",
+            SUPPORTED_TORCH_PROTOCOL,
+            "--no-index\n",
+            "",
+        ),
+        true,
+        "does not match release tag",
     )
     .await;
 }

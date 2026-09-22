@@ -124,7 +124,10 @@ facade: external clients target it, never provider-internal endpoints.
 Provider processes expose private protocols (versioned handshakes,
 capability advertisements, and internal request shapes) that the gateway
 adapts into the public contracts; compatibility between the two sides is
-established inside Pumas, not by clients.
+established inside Pumas, not by clients. Every admitted generation uses the
+one shared generation lifetime: connection-bounded but duration-unbounded
+transport with no total, read, idle, or elapsed deadline, as defined in
+[generation lifetime](contracts/generation-lifetime.md).
 
 The durable provider decision is recorded in
 [ADR 0001](adr/0001-onnx-runtime-provider-model.md); the Torch image

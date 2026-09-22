@@ -40,6 +40,74 @@
   priority; M3-TIPC is independently preparable and its required-real gate waits
   for the installed corrected candidate.
 
+### M3-TIPC source companion completed
+
+- Consumed accepted Pumas source identity
+  `826a270958f7182bd8108c879b4b7fa1da5cab7d` and integrated the Muse-assisted
+  Tuldok companion as `a61daeec83779868cf03b14fb5c811fcdc608fc2` on
+  `integration/torch-image-provider-contract`.
+- Tuldok now bounds only connection establishment, leaves admitted reads
+  duration-unbounded, distinguishes pre-connect unavailability from uncertain
+  response loss, never retries automatically, preserves explicit
+  socket/watcher cancellation, accepts additive public metadata without saving
+  unknown fields, and drives the real browser script at 1280×720.
+- The full Tuldok unit suite passed: 47 tests. Two timed-out Passeur worktrees
+  were confirmed stopped, reconciled, and finalized as retained audit evidence;
+  only the broader v5 work was adapted, so competing partial contributions were
+  not combined.
+- This is source completion only. No candidate was built or installed, no GPU
+  was allocated, and no browser was run. TIPC-10 remains pending until the exact
+  corrected candidate traverses Tuldok → Pumas at 1280×720 and both displayed
+  and saved outputs are recorded.
+
+### TIPC-09 exact candidate returned
+
+- Rechecked the reserved identity and built `torch-runtime-0.1.6` from accepted
+  provider source `826a270958f7182bd8108c879b4b7fa1da5cab7d`. Archive SHA-256
+  is `74f9b593dff1e447a73571dc465efd520238ba0c56d2730393a17eee2b97426c`;
+  requirements-lock SHA-256 is
+  `d4073f8e8a1d8b20b48a275a2c63a6d2c084369e831f093b8903a0047c4ca0f4`.
+- The production installer initially exposed a stale strict recipe decoder that
+  rejected the required capability list. Pumas fix
+  `ab3a95a9369a5471127003fcd8e6fff529596cb5` adds the capability contract and
+  regression; all 107 app-manager tests pass.
+- The unchanged exact archive installed atomically into isolated root
+  `launcher-data/cache/torch-qualification/tipc-0.1.6-install`. Native validation
+  passed on the RTX 5090 Laptop GPU with Torch 2.9.1+cu130/CUDA 13.0 and live
+  health `{status: ok, protocol: 3, capabilities: [image_generation]}`. TIPC-09
+  is returned independently.
+- No main-root installation, activation, default selection, publication, model
+  unload, real cancellation, or browser run occurred. TIPC-04 and TIPC-10 remain
+  pending and do not block the returned installed-artifact claim.
+
+### TIPC-04 and TIPC-10 returned
+
+- Kept the production-installed candidate in its isolated launcher root after
+  the managed approval reviewer rejected adding it to the main shared version
+  store without narrower authorization. An isolated model index used
+  qualification-only links plus a copied Nunchaku FP4 rank-128 checkpoint; main
+  runtime and model state remained unchanged.
+- Release gateway binary SHA-256
+  `97ee58c8042d22fcb27f47b3b07ce54faa7f16cfec050b552b911c03e0a9bcfe`
+  loaded Nunchaku through exact runtime `0.1.6`. A live 1280×720 request was
+  disconnected; runtime cancellation was requested at `23:30:56.981` and
+  completed at `23:30:57.584`. Only afterward, a new request returned a valid
+  265,041-byte PNG in 7.276 seconds, SHA-256
+  `4fc58b0a9d21b33380006600af8cc26afc8f33577d7cf6b3fc6180937b96d013`.
+  TIPC-04 is returned.
+- Refreshed Tuldok `a61daeec83779868cf03b14fb5c811fcdc608fc2`
+  completed its required-real browser flow through the same exact candidate:
+  model discovery, 1280×720 generation/display, save, and automatic temporary
+  collection import. The prompt-matching result took 10.036 seconds browser
+  elapsed and 9.553 seconds runtime; saved PNG SHA-256 is
+  `cdf9ae632f621606032d91975f86f960d546b39349a83ce6b851b50390fb52a3`.
+  TIPC-10 is returned. Evidence is under
+  `launcher-data/cache/torch-qualification/tipc-0.1.6-tuldok-real/`.
+- Unloaded the model, stopped the profile, and shut down the isolated gateway.
+  No qualification process remained and GPU occupancy returned to baseline.
+  TIPC-04, TIPC-09, and TIPC-10 are now all independently returned; publication
+  and this broader plan's remaining distribution/A1/A5 acceptance stay pending.
+
 ## 2026-09-13 — Brief and implementation plan
 
 - Moved runtime requirements from `docs/torch-diffusion-runtime.md` to

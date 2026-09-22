@@ -10,6 +10,20 @@ import urllib.request
 from pathlib import Path
 
 
+def validate_recipe_handshake(recipe: dict, health: dict) -> None:
+    """Require the staged recipe and its bundled live sidecar to agree."""
+    if recipe.get("protocol") != 3:
+        raise RuntimeError("Runtime recipe does not declare Torch protocol 3")
+    if recipe.get("capabilities") != ["image_generation"]:
+        raise RuntimeError("Runtime recipe capabilities are not the qualified set")
+    if health.get("status") != "ok":
+        raise RuntimeError("Sidecar health status is not ready")
+    if health.get("protocol") != recipe["protocol"]:
+        raise RuntimeError("Sidecar protocol does not match runtime recipe")
+    if health.get("capabilities") != recipe["capabilities"]:
+        raise RuntimeError("Sidecar capabilities do not match runtime recipe")
+
+
 def validate() -> None:
     if sys.version_info[:2] != (3, 12) or sys.platform != "linux":
         raise RuntimeError("This runtime requires CPython 3.12 on Linux")
@@ -60,12 +74,7 @@ def validate() -> None:
                     f"http://127.0.0.1:{port}/health", timeout=1
                 ) as response:
                     health = json.load(response)
-                if health.get("protocol") != recipe["protocol"]:
-                    raise RuntimeError("Sidecar protocol does not match runtime recipe")
-                if "image_generation" not in health.get("capabilities", []):
-                    raise RuntimeError(
-                        "Sidecar handshake does not advertise image_generation capability"
-                    )
+                validate_recipe_handshake(recipe, health)
                 print(
                     json.dumps(
                         {

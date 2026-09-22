@@ -100,7 +100,11 @@ class ModelManager:
         pipeline_path: Optional[str] = None,
         vae_path: Optional[str] = None,
     ) -> ModelSlot:
-        """Load a model into a new slot."""
+        """Load and publish a slot while retaining device custody through cancellation.
+
+        Cancellation waits for the loader and abandoned-result cleanup before
+        publishing ERROR and propagating the caller's cancellation.
+        """
         resolved_device = self.device_manager.resolve_device(device_str)
         device_label = str(resolved_device)
 
@@ -124,66 +128,114 @@ class ModelManager:
             self.slots[slot_id] = slot
             lock = self._get_device_lock(device_label)
 
+        worker = None
         try:
             async with lock:
-                if pipeline_path is not None:
-                    task = asyncio.create_task(
-                        asyncio.to_thread(
-                            self._load_diffusion,
-                            model_path,
-                            pipeline_path,
-                            resolved_device,
-                            model_type,
-                            vae_path,
+                loaded = None
+                try:
+                    if pipeline_path is not None:
+                        worker = asyncio.create_task(
+                            asyncio.to_thread(
+                                self._load_diffusion,
+                                model_path,
+                                pipeline_path,
+                                resolved_device,
+                                model_type,
+                                vae_path,
+                            )
                         )
-                    )
-                    try:
-                        loaded = await asyncio.shield(task)
-                    except asyncio.CancelledError:
-                        # A disconnected load cannot release the GPU while its
-                        # executor thread still allocates tensors.
-                        try:
-                            while not task.done():
-                                try:
-                                    await asyncio.shield(task)
-                                except asyncio.CancelledError:
-                                    continue
-                                except Exception:
-                                    break
-                            if not task.cancelled() and task.exception() is None:
-                                abandoned = task.result()
-                                abandoned.model = None
-                                abandoned.tokenizer = None
-                        finally:
-                            await self._mark_slot_error(slot_id)
-                        raise
-                else:
-                    loaded = await self._load_model(model_path, resolved_device, model_type)
-
-            async with self._registry_lock:
-                slot._loaded = loaded
-                slot.model_type = loaded.model_type or model_type
-                slot.state = SlotState.READY
-
-                # Update memory usage
-                if resolved_device.type == "cuda":
-                    slot.gpu_memory_bytes = self.device_manager.get_device_memory_used(
-                        resolved_device
-                    )
-                else:
-                    slot.ram_memory_bytes = _estimate_model_ram(loaded.model)
-
-            logger.info("Model loaded: %s on %s (slot %s)", model_name, device_label, slot_id)
-        except EXPECTED_LOAD_ERRORS:
-            await self._mark_slot_error(slot_id)
-            logger.exception("Failed to load model %s", model_name)
+                    else:
+                        worker = asyncio.create_task(
+                            self._load_model(model_path, resolved_device, model_type)
+                        )
+                    loaded = await asyncio.shield(worker)
+                    # Every loader retains the device until READY is published,
+                    # or an abandoned result is disposed and ERROR is published.
+                    await self._publish_loaded(slot, loaded, model_type, resolved_device)
+                except asyncio.CancelledError:
+                    current = asyncio.current_task()
+                    if current is not None:
+                        current.uncancel()
+                    await self._finish_abandoned_load(slot_id, worker, loaded)
+                    raise
+                except EXPECTED_LOAD_ERRORS:
+                    cancellation = await self._finish_abandoned_load(slot_id, worker, loaded)
+                    logger.exception("Failed to load model %s", model_name)
+                    if cancellation is not None:
+                        raise cancellation
+                    raise
+                except Exception:
+                    cancellation = await self._finish_abandoned_load(slot_id, worker, loaded)
+                    logger.exception("Unexpected failure while loading model %s", model_name)
+                    if cancellation is not None:
+                        raise cancellation
+                    raise
+        except asyncio.CancelledError:
+            if worker is None:
+                # The slot was reserved, but no device worker was started.
+                current = asyncio.current_task()
+                if current is not None:
+                    current.uncancel()
+                await self._finish_abandoned_load(slot_id, None, None)
             raise
-        except Exception:
-            await self._mark_slot_error(slot_id)
-            logger.exception("Unexpected failure while loading model %s", model_name)
-            raise
-
+        logger.info("Model loaded: %s on %s (slot %s)", model_name, device_label, slot_id)
         return slot
+
+    async def _publish_loaded(
+        self,
+        slot: ModelSlot,
+        loaded: LoadedModel,
+        model_type: Optional[str],
+        resolved_device: torch.device,
+    ) -> None:
+        async with self._registry_lock:
+            if resolved_device.type == "cuda":
+                gpu_memory_bytes = self.device_manager.get_device_memory_used(resolved_device)
+                ram_memory_bytes = None
+            else:
+                gpu_memory_bytes = None
+                ram_memory_bytes = _estimate_model_ram(loaded.model)
+            slot._loaded = loaded
+            slot.model_type = loaded.model_type or model_type
+            slot.gpu_memory_bytes = gpu_memory_bytes
+            slot.ram_memory_bytes = ram_memory_bytes
+            slot.state = SlotState.READY
+
+    async def _finish_abandoned_load(
+        self,
+        slot_id: str,
+        worker: Optional[asyncio.Task],
+        loaded: Optional[LoadedModel],
+    ) -> Optional[asyncio.CancelledError]:
+        """Own slot terminalization through repeated cancellation of the caller."""
+
+        async def cleanup() -> None:
+            abandoned = loaded
+            if worker is not None:
+                # Poll instead of awaiting the wrapper: cancelling that task
+                # could release the device before its executor thread stops.
+                while not worker.done():
+                    await asyncio.sleep(0.01)
+                if not worker.cancelled() and worker.exception() is None:
+                    abandoned = worker.result()
+            if abandoned is not None:
+                abandoned.model = None
+                abandoned.tokenizer = None
+            await self._mark_slot_error(slot_id)
+
+        cleanup_task = asyncio.create_task(cleanup())
+        owner_cancellation = None
+        while not cleanup_task.done():
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError as cancellation:
+                if owner_cancellation is None:
+                    owner_cancellation = cancellation
+                current = asyncio.current_task()
+                if current is not None:
+                    current.uncancel()
+        cleanup_task.result()
+        return owner_cancellation
 
     @staticmethod
     def _load_diffusion(

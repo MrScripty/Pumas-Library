@@ -3,9 +3,13 @@
 ## Prepare and rehearse before tagging
 
 The `Build` workflow runs on pull requests, `main`, version tags, and manual
-`workflow_dispatch`. Every trigger runs the same release-candidate gates and
-installer assembly for Linux, macOS, and Windows. Rehearse the intended commit before creating a version tag;
-a tag is not the first opportunity to discover packaging failures.
+`workflow_dispatch`. Pull requests, ordinary branch pushes, and branch-targeted
+manual runs execute source quality and contract tests only. Fully optimized
+backends, renderer bundles, installers, archives, artifact uploads, startup
+smoke, and release-candidate assembly run only for a `v*` version tag (including
+a manual dispatch explicitly targeting that tag). Complete the local release QA
+before creating the tag; CI then qualifies the exact tagged commit and assembles
+its candidate artifacts.
 
 1. Update `CHANGELOG.md` and the version's release notes. Keep an empty
    `Unreleased` section for subsequent changes.
@@ -14,8 +18,8 @@ a tag is not the first opportunity to discover packaging failures.
    versions in `rust/Cargo.lock` without resolving new dependencies.
 3. Run `npm run check:release-versions -- vX.Y.Z`. CI also compares version tags
    against the manifests automatically.
-4. Complete local QA below, then run the workflow against the candidate commit
-   once it is available remotely. Inspect every platform's result.
+4. Complete local QA below, push the candidate commit, and create its version
+   tag. Inspect every platform result produced for that exact tag.
 5. Review the `release-candidate` workflow artifact. It contains all thirteen
    required files selected by [the artifact plan](scripts/release/artifact-plan.json):
    five full desktop installers (GUI with inference plugins), five

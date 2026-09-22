@@ -10,19 +10,139 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use pumas_library::models::{
-    ModelServeErrorCode, RuntimeProviderId, ServedModelLoadState, ServedModelStatus,
-    ServingStatusSnapshot,
+use futures::StreamExt;
+use pumas_app_manager::{
+    SlotState, TorchClient, TorchCompatibilityError, TorchHandshakeFailure, TorchImageError,
+    GENERATION_CONNECT_TIMEOUT,
 };
+use pumas_library::models::{
+    ModelServeErrorCode, RuntimeEndpointUrl, RuntimeLifecycleState, RuntimeProviderId,
+    ServedModelLoadState, ServedModelStatus, ServingStatusSnapshot,
+};
+use pumas_library::runtime_profiles::OwnedRuntimeProfileObservation;
 use pumas_library::{OpenAiGatewayEndpoint, ProviderRegistry};
 use serde_json::{json, Map, Value};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 const OPENAI_CHAT_COMPLETIONS_BODY_BYTES: usize = 32 * 1024 * 1024;
 const OPENAI_COMPLETIONS_BODY_BYTES: usize = 32 * 1024 * 1024;
 const OPENAI_EMBEDDINGS_BODY_BYTES: usize = 32 * 1024 * 1024;
+const OPENAI_GATEWAY_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
+/// Total timeout for non-generation gateway routes (models, embeddings).
+/// Generation routes never use this budget.
 const OPENAI_GATEWAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// The one shared generation transport seam for current and future generation
+/// routes (`/v1/chat/completions`, `/v1/completions`, and image generation
+/// through `TorchClient`).
+///
+/// Connection establishment is bounded by [`GENERATION_CONNECT_TIMEOUT`]; no
+/// total, response-read, idle, or elapsed deadline is set, so an admitted
+/// generation may remain connected and silent until its terminal result (see
+/// `docs/contracts/generation-lifetime.md`). Non-generation routes
+/// (models, embeddings, health, startup, loading, installation, shutdown)
+/// keep their independently bounded policies and must not use this client.
+fn generation_http_client() -> &'static reqwest::Client {
+    static GENERATION_HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    GENERATION_HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(GENERATION_CONNECT_TIMEOUT)
+            .build()
+            .expect("failed to build generation HTTP client")
+    })
+}
+
+#[derive(Debug)]
+enum TorchLiveCheckError {
+    ProcessIdentity,
+    Handshake(TorchHandshakeFailure),
+    Slots,
+    ModelNotReady,
+}
+
+fn torch_process_is_current(
+    observation: Option<&OwnedRuntimeProfileObservation>,
+    endpoint: &RuntimeEndpointUrl,
+) -> bool {
+    match observation {
+        Some(observation) => {
+            observation.state == RuntimeLifecycleState::Running
+                && &observation.endpoint_url == endpoint
+        }
+        // Gateway unit fixtures use an in-process TCP stub rather than a
+        // managed runtime. Production Torch serving is always profile-owned.
+        #[cfg(test)]
+        None => true,
+        #[cfg(not(test))]
+        None => false,
+    }
+}
+
+fn torch_process_is_stable(
+    before: Option<&OwnedRuntimeProfileObservation>,
+    after: Option<&OwnedRuntimeProfileObservation>,
+    endpoint: &RuntimeEndpointUrl,
+) -> bool {
+    before == after
+        && torch_process_is_current(before, endpoint)
+        && torch_process_is_current(after, endpoint)
+}
+
+fn torch_slot_supports_images(
+    model: &ServedModelStatus,
+    slot: &pumas_app_manager::ModelSlot,
+) -> bool {
+    slot.model_name == model.model_id
+        && slot.state == SlotState::Ready
+        && matches!(
+            slot.model_type.as_deref(),
+            Some("nunchaku-z-image-turbo" | "flux2-klein-9b-kv-fp8")
+        )
+}
+
+/// Observe one compatible, ready Torch runtime without crossing a process
+/// replacement. The process observation, protocol/capability handshake and
+/// ready-slot check remain distinct facts, but all must describe one current
+/// owned profile before admission or listing.
+async fn check_live_torch_image_runtime(
+    state: &AppState,
+    model: &ServedModelStatus,
+    endpoint: &RuntimeEndpointUrl,
+) -> Result<TorchClient, TorchLiveCheckError> {
+    let before = state
+        .api
+        .observe_owned_runtime_profile(&model.profile_id)
+        .map_err(|_| TorchLiveCheckError::ProcessIdentity)?;
+    if !torch_process_is_current(before.as_ref(), endpoint) {
+        return Err(TorchLiveCheckError::ProcessIdentity);
+    }
+
+    let client = TorchClient::new(Some(endpoint.as_str()));
+    client
+        .check_image_runtime()
+        .await
+        .map_err(TorchLiveCheckError::Handshake)?;
+    let slots = client
+        .list_slots()
+        .await
+        .map_err(|_| TorchLiveCheckError::Slots)?;
+    if !slots
+        .iter()
+        .any(|slot| torch_slot_supports_images(model, slot))
+    {
+        return Err(TorchLiveCheckError::ModelNotReady);
+    }
+
+    let after = state
+        .api
+        .observe_owned_runtime_profile(&model.profile_id)
+        .map_err(|_| TorchLiveCheckError::ProcessIdentity)?;
+    if !torch_process_is_stable(before.as_ref(), after.as_ref(), endpoint) {
+        return Err(TorchLiveCheckError::ProcessIdentity);
+    }
+    Ok(client)
+}
 
 /// OpenAI-compatible served-model listing backed by Pumas serving status.
 pub async fn handle_openai_models(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -36,25 +156,9 @@ pub async fn handle_openai_models(State(state): State<Arc<AppState>>) -> impl In
                 .filter(|model| model.provider == RuntimeProviderId::Torch)
             {
                 let ready = match model.endpoint_url.as_ref() {
-                    Some(endpoint) => {
-                        let client = pumas_app_manager::TorchClient::new(Some(endpoint.as_str()));
-                        // Image capability is exposed only when the runtime is
-                        // compatible (protocol plus capability) AND the slot is ready.
-                        client.verify_image_runtime().await.is_ok()
-                            && client.list_slots().await.is_ok_and(|slots| {
-                                slots.iter().any(|slot| {
-                                    slot.model_name == model.model_id
-                                        && slot.state
-                                            == pumas_app_manager::torch_client::SlotState::Ready
-                                        && matches!(
-                                            slot.model_type.as_deref(),
-                                            Some(
-                                                "nunchaku-z-image-turbo" | "flux2-klein-9b-kv-fp8"
-                                            )
-                                        )
-                                })
-                            })
-                    }
+                    Some(endpoint) => check_live_torch_image_runtime(&state, model, endpoint)
+                        .await
+                        .is_ok(),
                     None => false,
                 };
                 if !ready {
@@ -231,14 +335,26 @@ pub async fn handle_openai_proxy(
     }
 
     let target_url = format!("{}{}", endpoint.as_str().trim_end_matches('/'), path.path());
-    match state
-        .gateway_http_client
-        .post(target_url)
-        .timeout(policy.request_timeout)
-        .json(&body)
-        .send()
-        .await
-    {
+    // Generation routes use the shared duration-unbounded transport without
+    // any per-request total/read/idle deadline; non-generation routes keep
+    // their independently bounded budget on the gateway client.
+    let send = if policy.generation {
+        generation_http_client().post(target_url).json(&body).send()
+    } else {
+        let Some(bounded) = policy.request_timeout else {
+            return openai_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "non-generation gateway route is missing its bounded policy",
+            );
+        };
+        state
+            .gateway_http_client
+            .post(target_url)
+            .timeout(bounded)
+            .json(&body)
+            .send()
+    };
+    match send.await {
         Ok(response) => proxy_response(response).await,
         Err(_) => openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable()),
     }
@@ -305,9 +421,70 @@ async fn handle_image_generation(
     debug_assert_eq!(request.n, 1);
     debug_assert_eq!(request.response_format, "b64_json");
 
+    // Recheck process identity, protocol/capability and the ready image slot
+    // immediately before admission. Endpoint equality alone is insufficient:
+    // the same URL may belong to a replacement process.
+    let torch_client = match check_live_torch_image_runtime(state, &served, endpoint).await {
+        Ok(client) => client,
+        Err(TorchLiveCheckError::ProcessIdentity) => {
+            return openai_error_response_with_code(
+                StatusCode::SERVICE_UNAVAILABLE,
+                ModelServeErrorCode::EndpointUnavailable,
+                "Torch process ownership changed before admission; retry the request",
+            );
+        }
+        Err(TorchLiveCheckError::Handshake(TorchHandshakeFailure::Unavailable(_))) => {
+            return super::openai_gateway_images::provider_error(&TorchImageError::Transport);
+        }
+        Err(TorchLiveCheckError::Handshake(TorchHandshakeFailure::Malformed(_)))
+        | Err(TorchLiveCheckError::Slots) => {
+            return super::openai_gateway_images::provider_error(
+                &TorchImageError::InvalidBackendResult,
+            );
+        }
+        Err(TorchLiveCheckError::Handshake(TorchHandshakeFailure::Incompatible(
+            TorchCompatibilityError::MissingCapability { .. },
+        ))) => {
+            return super::openai_gateway_images::provider_error(
+                &TorchImageError::UnsupportedModel,
+            );
+        }
+        Err(TorchLiveCheckError::Handshake(TorchHandshakeFailure::Incompatible(_))) => {
+            return super::openai_gateway_images::provider_error(&TorchImageError::BackendFailure);
+        }
+        Err(TorchLiveCheckError::ModelNotReady) => {
+            return super::openai_gateway_images::provider_error(
+                &TorchImageError::ModelUnavailable,
+            );
+        }
+    };
+    // Bind admission to the current process/profile identity: when serving
+    // state moved to another endpoint while we handshook, the observation is
+    // stale and the request is not admitted against the old process.
+    match find_openai_served_model(state, request.model.as_str()).await {
+        Ok(OpenAiServedModelLookup::Found(fresh))
+            if fresh.endpoint_url.as_ref() == Some(endpoint) => {}
+        Ok(_) => {
+            return openai_error_response_with_code(
+                StatusCode::SERVICE_UNAVAILABLE,
+                ModelServeErrorCode::EndpointUnavailable,
+                "Torch process ownership changed before admission; retry the request",
+            );
+        }
+        Err(error) => {
+            return openai_public_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                PublicError::from(&error),
+            );
+        }
+    }
+
     // Awaiting inline keeps disconnect propagation: dropping this future
-    // drops the sidecar request at a denoising checkpoint.
-    match pumas_app_manager::TorchClient::new(Some(endpoint.as_str()))
+    // drops the sidecar request at a denoising checkpoint, which requests
+    // cancellation without proving that sidecar work stopped. A lost
+    // transport before a terminal result is an unknown outcome and is never
+    // replayed here.
+    match torch_client
         .generate_image(
             provider_request_model_id(&served, &state.provider_registry).as_str(),
             request.prompt.as_str(),
@@ -326,7 +503,11 @@ async fn handle_image_generation(
 struct OpenAiGatewayEndpointPolicy {
     endpoint: OpenAiGatewayEndpoint,
     max_request_body_bytes: usize,
-    request_timeout: Duration,
+    /// When `generation` is true this is always `None`: the route uses the
+    /// shared duration-unbounded generation transport with no total, read,
+    /// idle, or elapsed deadline. Non-generation routes carry `Some` budget.
+    generation: bool,
+    request_timeout: Option<Duration>,
 }
 
 fn openai_gateway_policy_for_path(path: &str) -> Option<OpenAiGatewayEndpointPolicy> {
@@ -334,27 +515,32 @@ fn openai_gateway_policy_for_path(path: &str) -> Option<OpenAiGatewayEndpointPol
         "/v1/images/generations" => Some(OpenAiGatewayEndpointPolicy {
             endpoint: OpenAiGatewayEndpoint::ImagesGenerations,
             max_request_body_bytes: 32 * 1024,
-            request_timeout: Duration::from_secs(615),
+            generation: true,
+            request_timeout: None,
         }),
         "/v1/models" => Some(OpenAiGatewayEndpointPolicy {
             endpoint: OpenAiGatewayEndpoint::Models,
             max_request_body_bytes: 0,
-            request_timeout: OPENAI_GATEWAY_REQUEST_TIMEOUT,
+            generation: false,
+            request_timeout: Some(OPENAI_GATEWAY_REQUEST_TIMEOUT),
         }),
         "/v1/chat/completions" => Some(OpenAiGatewayEndpointPolicy {
             endpoint: OpenAiGatewayEndpoint::ChatCompletions,
             max_request_body_bytes: OPENAI_CHAT_COMPLETIONS_BODY_BYTES,
-            request_timeout: OPENAI_GATEWAY_REQUEST_TIMEOUT,
+            generation: true,
+            request_timeout: None,
         }),
         "/v1/completions" => Some(OpenAiGatewayEndpointPolicy {
             endpoint: OpenAiGatewayEndpoint::Completions,
             max_request_body_bytes: OPENAI_COMPLETIONS_BODY_BYTES,
-            request_timeout: OPENAI_GATEWAY_REQUEST_TIMEOUT,
+            generation: true,
+            request_timeout: None,
         }),
         "/v1/embeddings" => Some(OpenAiGatewayEndpointPolicy {
             endpoint: OpenAiGatewayEndpoint::Embeddings,
             max_request_body_bytes: OPENAI_EMBEDDINGS_BODY_BYTES,
-            request_timeout: OPENAI_GATEWAY_REQUEST_TIMEOUT,
+            generation: false,
+            request_timeout: Some(OPENAI_GATEWAY_REQUEST_TIMEOUT),
         }),
         _ => None,
     }
@@ -479,6 +665,14 @@ fn resolve_openai_served_model(
     }
 }
 
+/// Buffer one provider generation response into the public shape.
+///
+/// Dropping this future drops the provider request, which requests
+/// cancellation through the closed transport without proving that provider
+/// work stopped. A lost transport before a terminal result is an unknown
+/// outcome: this proxy never claims provider cleanup and never replays.
+/// Streaming bytes are progress information, not lease renewal; a connected
+/// generation may legitimately remain silent until completion.
 async fn proxy_response(response: reqwest::Response) -> Response {
     let status = response.status();
     if !status.is_success() {
@@ -489,10 +683,27 @@ async fn proxy_response(response: reqwest::Response) -> Response {
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| HeaderValue::from_str(value).ok());
-    match response.bytes().await {
-        Ok(bytes) => response_with_bytes(status, content_type, bytes),
-        Err(_) => openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable()),
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(_) => {
+                return openai_public_error_response(
+                    StatusCode::BAD_GATEWAY,
+                    PublicError::unavailable(),
+                );
+            }
+        };
+        if bytes.len().saturating_add(chunk.len()) > OPENAI_GATEWAY_RESPONSE_BYTES {
+            return openai_public_error_response(
+                StatusCode::BAD_GATEWAY,
+                PublicError::unavailable(),
+            );
+        }
+        bytes.extend_from_slice(&chunk);
     }
+    response_with_bytes(status, content_type, Bytes::from(bytes))
 }
 
 fn response_with_bytes(

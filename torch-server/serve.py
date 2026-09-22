@@ -31,6 +31,8 @@ from validation import (
 )
 
 logger = logging.getLogger(__name__)
+TORCH_PROTOCOL = 3
+TORCH_CAPABILITIES = ("image_generation",)
 
 
 def create_app(host: str = "127.0.0.1", port: int = 8400, max_models: int = 4) -> FastAPI:
@@ -70,7 +72,11 @@ def create_app(host: str = "127.0.0.1", port: int = 8400, max_models: int = 4) -
 
     @app.get("/health")
     async def health_check():
-        return {"status": "ok", "protocol": 2, "capabilities": ["image_generation"]}
+        return {
+            "status": "ok",
+            "protocol": TORCH_PROTOCOL,
+            "capabilities": list(TORCH_CAPABILITIES),
+        }
 
     return app
 

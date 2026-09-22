@@ -28,6 +28,7 @@ from test_validation_and_app import (  # noqa: E402
 _install_dependency_stubs()
 
 import serve  # noqa: E402
+import validate_runtime  # noqa: E402
 from image_api import ImageRequest, generate_image  # noqa: E402
 
 
@@ -56,7 +57,23 @@ class ImageProviderBoundaryTests(unittest.TestCase):
 
         self.assertEqual(health["status"], "ok")
         self.assertEqual(health["protocol"], recipe["protocol"])
-        self.assertIn("image_generation", health["capabilities"])
+        self.assertEqual(health["capabilities"], recipe["capabilities"])
+        self.assertEqual(recipe["protocol"], 3)
+        self.assertEqual(recipe["recipe_id"], "torch-runtime-0.1.6")
+
+    def test_runtime_qualification_rejects_recipe_sidecar_drift(self):
+        recipe = {"protocol": 3, "capabilities": ["image_generation"]}
+        validate_runtime.validate_recipe_handshake(
+            recipe,
+            {"status": "ok", "protocol": 3, "capabilities": ["image_generation"]},
+        )
+        for health in (
+            {"status": "ok", "protocol": 2, "capabilities": ["image_generation"]},
+            {"status": "ok", "protocol": 3, "capabilities": []},
+            {"status": "starting", "protocol": 3, "capabilities": ["image_generation"]},
+        ):
+            with self.subTest(health=health), self.assertRaises(RuntimeError):
+                validate_runtime.validate_recipe_handshake(recipe, health)
 
     def test_generate_image_leases_by_model_id(self):
         seen = {}

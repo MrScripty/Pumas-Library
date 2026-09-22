@@ -1,7 +1,7 @@
 //! Managed Torch bundle installation; lifecycle and state remain in VersionManager.
 
 use super::*;
-use crate::torch_client::SUPPORTED_TORCH_PROTOCOL;
+use crate::torch_client::{SUPPORTED_TORCH_PROTOCOL, TORCH_IMAGE_GENERATION_CAPABILITY};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::process::Stdio;
@@ -22,6 +22,7 @@ pub(crate) fn is_torch_runtime_release(release: &GitHubRelease) -> bool {
 struct RuntimeRecipe {
     recipe_id: String,
     protocol: u32,
+    capabilities: Vec<String>,
     python: String,
     platform: String,
 }
@@ -195,13 +196,36 @@ impl VersionInstaller {
                 .map_err(PumasError::from)?,
         )
         .map_err(|e| failed(format!("Invalid runtime recipe: {e}")))?;
-        if recipe.recipe_id != tag
-            || recipe.protocol != SUPPORTED_TORCH_PROTOCOL
-            || recipe.python != "3.12"
-            || recipe.platform != "linux-x86_64"
+        // Each qualification dimension fails with its owning reason so artifact
+        // identity, recipe identity, recipe protocol, and environment are
+        // verified separately. Recipe-to-sidecar agreement (bundled
+        // handshake protocol/capabilities) is checked by the bundled
+        // validation below; client-to-live-sidecar agreement is owned by
+        // `TorchClient` handshake verification, not by installation.
+        if recipe.recipe_id != tag {
+            return Err(failed(format!(
+                "Runtime recipe identity '{}' does not match release tag '{tag}'",
+                recipe.recipe_id
+            )));
+        }
+        if recipe.protocol != SUPPORTED_TORCH_PROTOCOL {
+            return Err(failed(format!(
+                "Runtime recipe protocol {} does not match required protocol {SUPPORTED_TORCH_PROTOCOL}",
+                recipe.protocol
+            )));
+        }
+        if !recipe
+            .capabilities
+            .iter()
+            .any(|capability| capability == TORCH_IMAGE_GENERATION_CAPABILITY)
         {
+            return Err(failed(format!(
+                "Runtime recipe is missing required capability {TORCH_IMAGE_GENERATION_CAPABILITY}"
+            )));
+        }
+        if recipe.python != "3.12" || recipe.platform != "linux-x86_64" {
             return Err(failed(
-                "Runtime recipe does not match version, protocol, Python or platform",
+                "Runtime recipe does not match Python 3.12 on linux-x86_64",
             ));
         }
         for required in ["serve.py", "validate_runtime.py", "requirements.txt"] {

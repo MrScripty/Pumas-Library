@@ -78,7 +78,8 @@ operation requests cancellation at a denoising checkpoint and retains the device
 lease until its worker and CUDA work stop. Transport loss before a terminal
 result is an unknown outcome. Clients must not automatically retry after an
 uncertain result. A controlled TCP integration test verifies gateway disconnect
-propagation; real GPU cancellation acceptance is still pending.
+propagation. TIPC-04 also passed real GPU cancellation and reuse acceptance:
+the following request succeeded after cancellation cleanup completed.
 
 Image errors use `error.code` and a safe `error.message`; known codes include
 `invalid_request`, `runtime_busy`, `model_unavailable`, `unsupported_model`,

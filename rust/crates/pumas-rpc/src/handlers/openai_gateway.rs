@@ -10,6 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use futures::StreamExt;
 use pumas_app_manager::{
     SlotState, TorchClient, TorchCompatibilityError, TorchHandshakeFailure, TorchImageError,
     GENERATION_CONNECT_TIMEOUT,
@@ -27,6 +28,7 @@ use std::time::Duration;
 const OPENAI_CHAT_COMPLETIONS_BODY_BYTES: usize = 32 * 1024 * 1024;
 const OPENAI_COMPLETIONS_BODY_BYTES: usize = 32 * 1024 * 1024;
 const OPENAI_EMBEDDINGS_BODY_BYTES: usize = 32 * 1024 * 1024;
+const OPENAI_GATEWAY_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
 /// Total timeout for non-generation gateway routes (models, embeddings).
 /// Generation routes never use this budget.
 const OPENAI_GATEWAY_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
@@ -681,10 +683,27 @@ async fn proxy_response(response: reqwest::Response) -> Response {
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| HeaderValue::from_str(value).ok());
-    match response.bytes().await {
-        Ok(bytes) => response_with_bytes(status, content_type, bytes),
-        Err(_) => openai_public_error_response(StatusCode::BAD_GATEWAY, PublicError::unavailable()),
+    let mut bytes = Vec::new();
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(_) => {
+                return openai_public_error_response(
+                    StatusCode::BAD_GATEWAY,
+                    PublicError::unavailable(),
+                );
+            }
+        };
+        if bytes.len().saturating_add(chunk.len()) > OPENAI_GATEWAY_RESPONSE_BYTES {
+            return openai_public_error_response(
+                StatusCode::BAD_GATEWAY,
+                PublicError::unavailable(),
+            );
+        }
+        bytes.extend_from_slice(&chunk);
     }
+    response_with_bytes(status, content_type, Bytes::from(bytes))
 }
 
 fn response_with_bytes(

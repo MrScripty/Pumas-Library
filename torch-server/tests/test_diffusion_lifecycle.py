@@ -5,6 +5,7 @@ import threading
 import unittest
 
 from test_model_manager import _FakeDeviceManager, _TestModelManager
+from model_manager import SlotState
 from diffusion import GenerationCancelled, NUNCHAKU_Z_IMAGE
 
 
@@ -28,16 +29,56 @@ class DiffusionLeaseTests(unittest.IsolatedAsyncioTestCase):
             async with manager.image_lease("text"):
                 self.fail("Text model entered the image adapter")
 
-    async def test_repeated_load_cancellation_retains_device_until_worker_returns(self):
-        started, release = threading.Event(), threading.Event()
-        manager = _TestModelManager(_FakeDeviceManager())
+    async def test_load_cancellation_before_device_lock_marks_error_and_reuses_capacity(self):
+        manager = _TestModelManager(_FakeDeviceManager(), max_loaded_models=1)
+        device_label = str(manager.device_manager.resolve_device("auto"))
+        device_lock = manager._get_device_lock(device_label)
+        await device_lock.acquire()
+        worker_started = threading.Event()
 
         def load(*_args):
             from model_manager import LoadedModel
 
+            worker_started.set()
+            return LoadedModel(object(), object(), None, NUNCHAKU_Z_IMAGE)
+
+        manager._load_diffusion = load
+        task = asyncio.create_task(
+            manager.load(
+                "/fixture", "image", model_type=NUNCHAKU_Z_IMAGE, pipeline_path="/components"
+            )
+        )
+        await asyncio.sleep(0)
+        self.assertEqual(len(manager.slots), 1)
+        slot = next(iter(manager.slots.values()))
+        self.assertEqual(slot.state, SlotState.LOADING)
+
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertFalse(worker_started.is_set())
+        self.assertEqual(slot.state, SlotState.ERROR)
+        self.assertTrue(device_lock.locked())
+
+        device_lock.release()
+        self.assertFalse(device_lock.locked())
+        replacement = await manager.load("/fixture", "replacement")
+        self.assertEqual(replacement.state, SlotState.READY)
+
+    async def test_repeated_load_cancellation_retains_device_until_worker_returns(self):
+        started, release = threading.Event(), threading.Event()
+        manager = _TestModelManager(_FakeDeviceManager(), max_loaded_models=1)
+        model_ref, tokenizer_ref = object(), object()
+        worker_result = []
+
+        def load(*_args):
+            from model_manager import LoadedModel
+
+            loaded = LoadedModel(model_ref, tokenizer_ref, None, NUNCHAKU_Z_IMAGE)
+            worker_result.append(loaded)
             started.set()
             release.wait(5)
-            return LoadedModel(object(), None, None, NUNCHAKU_Z_IMAGE)
+            return loaded
 
         manager._load_diffusion = load
         task = asyncio.create_task(
@@ -46,18 +87,121 @@ class DiffusionLeaseTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         try:
-            self.assertTrue(await asyncio.to_thread(started.wait, 3))
-            task.cancel()
-            await asyncio.sleep(0.02)
+            for _ in range(300):
+                if started.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            self.assertTrue(started.is_set())
+            slot = next(iter(manager.slots.values()))
+            device_lock = next(iter(manager._device_locks.values()))
+            self.assertEqual(slot.state, SlotState.LOADING)
+            self.assertTrue(device_lock.locked())
+
             task.cancel()
             await asyncio.sleep(0.02)
             self.assertFalse(task.done())
-            self.assertTrue(any(lock.locked() for lock in manager._device_locks.values()))
+
+            task.cancel()
+            await asyncio.sleep(0.02)
+            self.assertFalse(task.done())
+            self.assertTrue(device_lock.locked())
+
+            release.set()
         finally:
             release.set()
             with self.assertRaises(asyncio.CancelledError):
                 await task
-        self.assertFalse(any(lock.locked() for lock in manager._device_locks.values()))
+
+        self.assertEqual(slot.state, SlotState.ERROR)
+        self.assertIsNone(worker_result[0].model)
+        self.assertIsNone(worker_result[0].tokenizer)
+        self.assertFalse(device_lock.locked())
+        replacement = await manager.load("/fixture", "replacement")
+        self.assertEqual(replacement.state, SlotState.READY)
+
+    async def test_cancel_after_worker_completion_waits_for_abandoned_finalization(self):
+        started, release, worker_done = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
+        manager = _TestModelManager(_FakeDeviceManager(), max_loaded_models=1)
+        model_ref, tokenizer_ref = object(), object()
+        worker_result = []
+
+        def load(*_args):
+            from model_manager import LoadedModel
+
+            loaded = LoadedModel(model_ref, tokenizer_ref, None, NUNCHAKU_Z_IMAGE)
+            worker_result.append(loaded)
+            started.set()
+            release.wait(5)
+            worker_done.set()
+            return loaded
+
+        manager._load_diffusion = load
+        task = asyncio.create_task(
+            manager.load(
+                "/fixture", "image", model_type=NUNCHAKU_Z_IMAGE, pipeline_path="/components"
+            )
+        )
+        registry_locked = False
+        try:
+            for _ in range(300):
+                if started.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            self.assertTrue(started.is_set())
+            slot = next(iter(manager.slots.values()))
+            device_lock = next(iter(manager._device_locks.values()))
+            self.assertEqual(slot.state, SlotState.LOADING)
+            self.assertTrue(device_lock.locked())
+
+            self.assertFalse(manager._registry_lock.locked())
+            await asyncio.wait_for(manager._registry_lock.acquire(), timeout=3)
+            registry_locked = True
+            release.set()
+            for _ in range(300):
+                if worker_done.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            self.assertTrue(worker_done.is_set())
+            await asyncio.sleep(0.02)
+            self.assertFalse(task.done())
+            self.assertIsNotNone(worker_result[0].model)
+            self.assertEqual(slot.state, SlotState.LOADING)
+            self.assertTrue(device_lock.locked())
+
+            task.cancel()
+            for _ in range(300):
+                if worker_result[0].model is None:
+                    break
+                await asyncio.sleep(0.01)
+            self.assertIsNone(worker_result[0].model)
+            self.assertIsNone(worker_result[0].tokenizer)
+            self.assertFalse(task.done())
+            self.assertEqual(slot.state, SlotState.LOADING)
+            self.assertTrue(device_lock.locked())
+
+            task.cancel()
+            await asyncio.sleep(0.02)
+            self.assertFalse(task.done())
+            self.assertTrue(device_lock.locked())
+        finally:
+            release.set()
+            if registry_locked:
+                manager._registry_lock.release()
+            if not task.done():
+                task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        self.assertEqual(slot.state, SlotState.ERROR)
+        self.assertIsNone(worker_result[0].model)
+        self.assertIsNone(worker_result[0].tokenizer)
+        self.assertFalse(device_lock.locked())
+        replacement = await manager.load("/fixture", "replacement")
+        self.assertEqual(replacement.state, SlotState.READY)
 
     async def test_cancelled_image_task_keeps_lease_until_worker_stops(self):
         from image_api import ImageRequest, owned_generation

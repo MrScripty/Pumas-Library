@@ -3,7 +3,7 @@ use crate::provider_clients::{LlamaCppRouterClient, OllamaClientFactory};
 use crate::server::AppState;
 use axum::body::{to_bytes, Bytes};
 use axum::extract::{OriginalUri, State};
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 use pumas_app_manager::SizeCalculator;
 use pumas_library::models::{
     RuntimeDeviceMode, RuntimeEndpointUrl, RuntimeProfileId, RuntimeProviderId,
@@ -192,6 +192,93 @@ async fn spawn_gateway_response_server(status: StatusCode, body: &'static str) -
         socket.write_all(response.as_bytes()).await.unwrap();
     });
     format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn proxy_response_preserves_success_status_content_type_and_body_under_limit() {
+    let endpoint = spawn_gateway_response_server(StatusCode::CREATED, "created").await;
+    let provider_response = reqwest::Client::new().get(endpoint).send().await.unwrap();
+
+    let response = proxy_response(provider_response).await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        "application/json"
+    );
+    let body = to_bytes(response.into_body(), OPENAI_GATEWAY_RESPONSE_BYTES)
+        .await
+        .unwrap();
+    assert_eq!(body, "created");
+}
+
+#[tokio::test]
+async fn proxy_response_rejects_streamed_overflow_without_content_length() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = [0_u8; 1024];
+        let _ = socket.read(&mut request).await;
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: application/octet-stream\r\ntransfer-encoding: chunked\r\nconnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+
+        let chunk = vec![b'x'; 64 * 1024];
+        let mut remaining = OPENAI_GATEWAY_RESPONSE_BYTES + 1;
+        while remaining > 0 {
+            let chunk_len = remaining.min(chunk.len());
+            let chunk_header = format!("{chunk_len:X}\r\n");
+            if socket.write_all(chunk_header.as_bytes()).await.is_err()
+                || socket.write_all(&chunk[..chunk_len]).await.is_err()
+                || socket.write_all(b"\r\n").await.is_err()
+            {
+                return;
+            }
+            remaining -= chunk_len;
+        }
+        let _ = socket.write_all(b"0\r\n\r\n").await;
+    });
+
+    let provider_response = reqwest::Client::new().get(endpoint).send().await.unwrap();
+    assert!(provider_response
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .is_none());
+    let response = proxy_response(provider_response).await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body = to_bytes(response.into_body(), 1_048_576).await.unwrap();
+    let error: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["error"]["type"], "pumas_error");
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn proxy_response_maps_truncated_body_to_bad_gateway() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = [0_u8; 1024];
+        let _ = socket.read(&mut request).await;
+        socket
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 32\r\nconnection: close\r\n\r\nshort",
+            )
+            .await
+            .unwrap();
+        socket.shutdown().await.unwrap();
+    });
+
+    let provider_response = reqwest::Client::new().get(endpoint).send().await.unwrap();
+    let response = proxy_response(provider_response).await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body = to_bytes(response.into_body(), 1_048_576).await.unwrap();
+    let error: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(error["error"]["type"], "pumas_error");
+    server.await.unwrap();
 }
 
 async fn spawn_hanging_gateway_server() -> String {
@@ -843,25 +930,36 @@ async fn spawn_torch_stub_inner(
     endpoint
 }
 
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn generation_transport_survives_silence_beyond_former_policy() {
     // Chat and completions share the generic buffered gateway handler, client
     // seam, and response function, so one silent request per registered route
     // proves the shared construction. Silence past the former 120-second
     // policy is not a failure on either route.
-    for (path, body) in [
+    let routes = [
         (
             "/v1/chat/completions",
             json!({"model": "llama", "messages": [{"role": "user", "content": "hi"}]}),
         ),
         ("/v1/completions", json!({"model": "llama", "prompt": "hi"})),
-    ] {
+    ];
+    let mut temp_dirs = Vec::new();
+    let mut requests = Vec::new();
+    let mut admissions = Vec::new();
+    let mut response_releases = Vec::new();
+    let mut servers = Vec::new();
+
+    for (path, body) in routes {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
+        let admitted = Arc::new(Notify::new());
+        let backend_admitted = admitted.clone();
+        let (release_response, response_released) = tokio::sync::oneshot::channel();
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let _request = read_test_backend_request(&mut socket).await;
-            tokio::time::sleep(Duration::from_secs(300)).await;
+            backend_admitted.notify_one();
+            let _ = response_released.await;
             write_test_backend_response(
                 &mut socket,
                 StatusCode::OK,
@@ -869,20 +967,57 @@ async fn generation_transport_survives_silence_beyond_former_policy() {
             )
             .await;
         });
-        let (_temp_dir, state) = gateway_test_state().await;
+        let (temp_dir, state) = gateway_test_state().await;
         record_llama_served_model(&state, &format!("http://{addr}")).await;
-        let request = tokio::spawn(openai_proxy_json(state, path, body));
-        tokio::task::yield_now().await;
-        tokio::time::advance(Duration::from_secs(295)).await;
-        // Still connected and silent well past the former 120-second policy:
-        // no total, read, idle, or elapsed deadline has fired.
-        tokio::pin!(request);
-        assert!(futures::poll!(&mut request).is_pending(), "{path}");
-        tokio::time::advance(Duration::from_secs(5)).await;
+        requests.push((path, tokio::spawn(openai_proxy_json(state, path, body))));
+        admissions.push(admitted);
+        response_releases.push(release_response);
+        servers.push(server);
+        temp_dirs.push(temp_dir);
+    }
+
+    // Keep normal time running until both backends have received their full
+    // requests. Each backend then stays silent behind its response gate.
+    for (index, (path, request)) in requests.iter_mut().enumerate() {
+        tokio::select! {
+            () = admissions[index].notified() => {}
+            result = request => panic!("{path} request ended before backend admission: {result:?}"),
+            () = tokio::time::sleep(Duration::from_secs(15)) => {
+                panic!("{path} backend did not receive the complete request within 15 seconds")
+            }
+        }
+    }
+
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(295)).await;
+    tokio::time::sleep(Duration::from_millis(1)).await;
+    // Both requests remain connected and silent well past the former
+    // 120-second policy: no total, read, idle, or elapsed deadline has fired.
+    for (path, request) in &requests {
+        assert!(
+            !request.is_finished(),
+            "{path} request finished before 300 seconds"
+        );
+    }
+    tokio::time::advance(Duration::from_secs(5)).await;
+    tokio::time::sleep(Duration::from_millis(1)).await;
+    for (path, request) in &requests {
+        assert!(
+            !request.is_finished(),
+            "{path} request finished at the 300-second silence mark"
+        );
+    }
+    for release in response_releases {
+        let _ = release.send(());
+    }
+    for (path, request) in requests {
         let (status, _) = request.await.unwrap();
         assert_eq!(status, StatusCode::OK, "{path}");
+    }
+    for server in servers {
         server.await.unwrap();
     }
+    drop(temp_dirs);
 }
 
 #[tokio::test]

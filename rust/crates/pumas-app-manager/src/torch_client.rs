@@ -537,7 +537,7 @@ fn base64_value(byte: u8) -> Option<u32> {
 /// malformed input, including incorrect padding or trailing bits.
 fn decode_base64_strict(input: &str) -> Option<Vec<u8>> {
     let bytes = input.as_bytes();
-    if bytes.is_empty() || bytes.len() % 4 != 0 {
+    if bytes.is_empty() || !bytes.len().is_multiple_of(4) {
         return None;
     }
     let mut output = Vec::with_capacity(bytes.len() / 4 * 3);

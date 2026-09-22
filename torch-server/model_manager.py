@@ -100,7 +100,11 @@ class ModelManager:
         pipeline_path: Optional[str] = None,
         vae_path: Optional[str] = None,
     ) -> ModelSlot:
-        """Load a model into a new slot."""
+        """Load and publish a slot while retaining device custody through cancellation.
+
+        Cancellation waits for the loader and abandoned-result cleanup before
+        publishing ERROR and propagating the caller's cancellation.
+        """
         resolved_device = self.device_manager.resolve_device(device_str)
         device_label = str(resolved_device)
 
@@ -124,13 +128,13 @@ class ModelManager:
             self.slots[slot_id] = slot
             lock = self._get_device_lock(device_label)
 
-        if pipeline_path is not None:
-            task = None
-            try:
-                async with lock:
-                    loaded = None
-                    try:
-                        task = asyncio.create_task(
+        worker = None
+        try:
+            async with lock:
+                loaded = None
+                try:
+                    if pipeline_path is not None:
+                        worker = asyncio.create_task(
                             asyncio.to_thread(
                                 self._load_diffusion,
                                 model_path,
@@ -140,62 +144,41 @@ class ModelManager:
                                 vae_path,
                             )
                         )
-                        loaded = await asyncio.shield(task)
-                        # Keep the device until READY is published, or until an
-                        # abandoned result is disposed and ERROR is published.
-                        await self._publish_loaded(slot, loaded, model_type, resolved_device)
-                    except asyncio.CancelledError:
-                        current = asyncio.current_task()
-                        if current is not None:
-                            current.uncancel()
-                        await self._finish_abandoned_load(slot_id, task, loaded)
-                        raise
-                    except EXPECTED_LOAD_ERRORS:
-                        cancellation = await self._finish_abandoned_load(slot_id, task, loaded)
-                        logger.exception("Failed to load model %s", model_name)
-                        if cancellation is not None:
-                            raise cancellation
-                        raise
-                    except Exception:
-                        cancellation = await self._finish_abandoned_load(slot_id, task, loaded)
-                        logger.exception("Unexpected failure while loading model %s", model_name)
-                        if cancellation is not None:
-                            raise cancellation
-                        raise
-            except asyncio.CancelledError:
-                if task is None:
-                    # The slot was reserved, but no device worker was started.
+                    else:
+                        worker = asyncio.create_task(
+                            self._load_model(model_path, resolved_device, model_type)
+                        )
+                    loaded = await asyncio.shield(worker)
+                    # Every loader retains the device until READY is published,
+                    # or an abandoned result is disposed and ERROR is published.
+                    await self._publish_loaded(slot, loaded, model_type, resolved_device)
+                except asyncio.CancelledError:
                     current = asyncio.current_task()
                     if current is not None:
                         current.uncancel()
-                    await self._finish_abandoned_load(slot_id, None, None)
-                raise
-            logger.info("Model loaded: %s on %s (slot %s)", model_name, device_label, slot_id)
-            return slot
-
-        device_acquired = False
-        try:
-            async with lock:
-                device_acquired = True
-                loaded = await self._load_model(model_path, resolved_device, model_type)
-            await self._publish_loaded(slot, loaded, model_type, resolved_device)
-            logger.info("Model loaded: %s on %s (slot %s)", model_name, device_label, slot_id)
+                    await self._finish_abandoned_load(slot_id, worker, loaded)
+                    raise
+                except EXPECTED_LOAD_ERRORS:
+                    cancellation = await self._finish_abandoned_load(slot_id, worker, loaded)
+                    logger.exception("Failed to load model %s", model_name)
+                    if cancellation is not None:
+                        raise cancellation
+                    raise
+                except Exception:
+                    cancellation = await self._finish_abandoned_load(slot_id, worker, loaded)
+                    logger.exception("Unexpected failure while loading model %s", model_name)
+                    if cancellation is not None:
+                        raise cancellation
+                    raise
         except asyncio.CancelledError:
-            if not device_acquired:
+            if worker is None:
+                # The slot was reserved, but no device worker was started.
                 current = asyncio.current_task()
                 if current is not None:
                     current.uncancel()
                 await self._finish_abandoned_load(slot_id, None, None)
             raise
-        except EXPECTED_LOAD_ERRORS:
-            await self._mark_slot_error(slot_id)
-            logger.exception("Failed to load model %s", model_name)
-            raise
-        except Exception:
-            await self._mark_slot_error(slot_id)
-            logger.exception("Unexpected failure while loading model %s", model_name)
-            raise
-
+        logger.info("Model loaded: %s on %s (slot %s)", model_name, device_label, slot_id)
         return slot
 
     async def _publish_loaded(

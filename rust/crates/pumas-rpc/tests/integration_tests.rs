@@ -54,6 +54,32 @@ fn create_indexable_test_model(root: &std::path::Path, model_id: &str, official_
     .unwrap();
 }
 
+fn create_valid_test_diffusers_bundle(root: &std::path::Path, model_id: &str, repo_id: &str) {
+    let model_dir = root.join("shared-resources/models").join(model_id);
+    std::fs::create_dir_all(model_dir.join("transformer")).unwrap();
+    std::fs::write(
+        model_dir.join("model_index.json"),
+        r#"{"_class_name":"DiffusionPipeline","transformer":["transformers","Transformer2DModel"]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        model_dir.join("metadata.json"),
+        serde_json::to_string_pretty(&json!({
+            "model_id": model_id,
+            "family": "diffusion",
+            "model_type": "diffusion",
+            "official_name": repo_id,
+            "cleaned_name": repo_id.to_ascii_lowercase().replace('/', "-"),
+            "repo_id": repo_id,
+            "storage_kind": "library_owned",
+            "bundle_format": "diffusers_directory",
+            "validation_state": "valid"
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
 fn create_partial_test_model(root: &std::path::Path) -> &'static str {
     const MODEL_ID: &str = "llm/acme/partial-model";
     let model_dir = root.join("shared-resources/models").join(MODEL_ID);
@@ -976,6 +1002,133 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("missing_runtime" | "provider_load_failed")
         ));
+
+        server.stop().await;
+    }
+
+    #[cfg(feature = "inference-plugins")]
+    #[tokio::test]
+    async fn test_serving_torch_missing_checkpoint_is_non_critical_and_not_loaded() {
+        if !can_bind_local_tcp_for_tests() {
+            return;
+        }
+        let env = create_test_env();
+        const MODEL_ID: &str = "diffusion/nunchaku-ai/nunchaku-z-image-turbo";
+        const CHECKPOINT: &str = "svdq-fp4_r128-z-image-turbo.safetensors";
+
+        create_valid_test_diffusers_bundle(
+            env.path(),
+            "diffusion/tongyi-mai/z-image-turbo",
+            "Tongyi-MAI/Z-Image-Turbo",
+        );
+        let model_dir = env.path().join("shared-resources/models").join(MODEL_ID);
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(
+            model_dir.join("transformer.safetensors"),
+            b"unselected fixture artifact",
+        )
+        .unwrap();
+        std::fs::write(
+            model_dir.join("metadata.json"),
+            serde_json::to_string_pretty(&json!({
+                "model_id": MODEL_ID,
+                "family": "nunchaku",
+                "model_type": "diffusion",
+                "official_name": "Nunchaku Z-Image Turbo",
+                "cleaned_name": "nunchaku-z-image-turbo",
+                "repo_id": "nunchaku-ai/nunchaku-z-image-turbo",
+                "selected_artifact_files": [CHECKPOINT],
+                "runtime_engine_hints": ["torch"]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(!model_dir.join(CHECKPOINT).exists());
+
+        let server = start_rpc_server(env.path()).await.unwrap();
+        let port = server.port;
+        let profile_id = "torch-image-missing-checkpoint-test";
+        let upserted = rpc_call(
+            port,
+            "upsert_runtime_profile",
+            json!({
+                "profile": {
+                    "profile_id": profile_id,
+                    "provider": "torch",
+                    "provider_mode": "torch_serve",
+                    "management_mode": "managed",
+                    "name": "Torch Missing Checkpoint Test",
+                    "enabled": true,
+                    "device": {"mode": "auto"},
+                    "scheduler": {"auto_load": true}
+                }
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(upserted.get("success").and_then(Value::as_bool), Some(true));
+        let request = json!({
+            "request": {
+                "model_id": MODEL_ID,
+                "config": {
+                    "provider": "torch",
+                    "profile_id": profile_id,
+                    "device_mode": "auto",
+                    "keep_loaded": false
+                }
+            }
+        });
+        let validation = rpc_call(port, "validate_model_serving_config", request.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            validation.get("valid").and_then(Value::as_bool),
+            Some(true),
+            "fixture must pass generic validation before exercising Torch asset resolution"
+        );
+        let served = rpc_call(port, "serve_model", request).await.unwrap();
+
+        assert_eq!(served.get("success").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(served.get("loaded").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            served
+                .get("loaded_models_unchanged")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            served
+                .pointer("/load_error/severity")
+                .and_then(|v| v.as_str()),
+            Some("non_critical")
+        );
+        assert_eq!(
+            served.pointer("/load_error/code").and_then(|v| v.as_str()),
+            Some("model_not_executable")
+        );
+
+        let status = rpc_call(port, "get_serving_status", json!({}))
+            .await
+            .unwrap();
+        let served_models = status
+            .pointer("/snapshot/served_models")
+            .and_then(Value::as_array)
+            .expect("serving snapshot must expose the failed load");
+        assert_eq!(served_models.len(), 1);
+        assert_eq!(
+            served_models[0].get("model_id").and_then(Value::as_str),
+            Some(MODEL_ID)
+        );
+        assert_eq!(
+            served_models[0].get("load_state").and_then(Value::as_str),
+            Some("failed")
+        );
+        assert_eq!(
+            served_models[0]
+                .pointer("/last_error/code")
+                .and_then(Value::as_str),
+            Some("model_not_executable")
+        );
 
         server.stop().await;
     }

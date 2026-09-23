@@ -13,6 +13,7 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 TORCH_SERVER_ROOT = Path(__file__).resolve().parents[1]
@@ -29,7 +30,9 @@ _install_dependency_stubs()
 
 import serve  # noqa: E402
 import validate_runtime  # noqa: E402
+from fastapi import HTTPException  # noqa: E402
 from image_api import ImageRequest, generate_image  # noqa: E402
+from model_manager import LoadedModel, ModelSlot, SlotState  # noqa: E402
 
 
 class ImageProviderBoundaryTests(unittest.TestCase):
@@ -112,6 +115,84 @@ class ImageProviderBoundaryTests(unittest.TestCase):
         self.assertEqual(seen["width"], 64)
         self.assertEqual(base64.b64decode(result["png_base64"]), b"private-png")
         self.assertEqual(result["seed"], 3)
+
+    def test_route_maps_lease_states_and_releases_after_backend_failure(self):
+        from diffusion import FLUX2_KLEIN
+        import torch
+
+        out_of_memory_error = getattr(
+            torch.cuda, "OutOfMemoryError", type("OutOfMemoryError", (Exception,), {})
+        )
+
+        class Adapter:
+            steps = 8
+            guidance = 0.0
+            memory_policy = "fixture"
+
+            def __init__(self):
+                self.calls = 0
+
+            def generate(self, _prompt, width, height, _seed, _cancel):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("fixture backend failure")
+                image = SimpleNamespace(size=(width, height))
+                image.save = lambda output, format="PNG": output.write(b"private-png")
+                return image
+
+        async def exercise_route():
+            app = serve.create_app()
+            manager = app.state.model_manager
+            adapter = Adapter()
+            manager.slots["fixture"] = ModelSlot(
+                slot_id="fixture",
+                model_name="img-model",
+                model_path="fixture",
+                device="cpu",
+                state=SlotState.READY,
+                model_type=FLUX2_KLEIN,
+                _loaded=LoadedModel(adapter, None, torch.device("cpu"), FLUX2_KLEIN),
+            )
+            endpoint = next(
+                route.endpoint for route in app.routes if route.path == "/api/images/generate"
+            )
+
+            async def is_disconnected():
+                return False
+
+            request = SimpleNamespace(
+                app=SimpleNamespace(state=SimpleNamespace(model_manager=manager)),
+                is_disconnected=is_disconnected,
+            )
+            payload = ImageRequest(
+                model_id="img-model", prompt="kingfisher", width=64, height=64, seed=3
+            )
+            unavailable_payload = ImageRequest(
+                model_id="missing", prompt="kingfisher", width=64, height=64, seed=3
+            )
+
+            with self.assertRaises(HTTPException) as unavailable:
+                await endpoint(unavailable_payload, request)
+            self.assertEqual(unavailable.exception.status_code, 503)
+            self.assertEqual(unavailable.exception.detail["code"], "model_unavailable")
+
+            async with manager.image_lease("img-model"):
+                with self.assertRaises(HTTPException) as busy:
+                    await endpoint(payload, request)
+            self.assertEqual(busy.exception.status_code, 409)
+            self.assertEqual(busy.exception.detail["code"], "runtime_busy")
+
+            with self.assertRaises(HTTPException) as failed:
+                await endpoint(payload, request)
+            self.assertEqual(failed.exception.status_code, 502)
+            self.assertEqual(failed.exception.detail["code"], "backend_failure")
+
+            result = await endpoint(payload, request)
+            self.assertEqual(base64.b64decode(result["png_base64"]), b"private-png")
+            self.assertEqual(adapter.calls, 2)
+
+        with patch.object(torch.cuda, "OutOfMemoryError", out_of_memory_error, create=True):
+            asyncio.run(exercise_route())
 
 
 if __name__ == "__main__":

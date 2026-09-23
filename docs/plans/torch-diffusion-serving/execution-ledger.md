@@ -455,3 +455,35 @@ after 21 Python tests and the local browser regression passed. The local intent
 API was committed as `22388e70` after its focused verification recorded in that
 plan's ledger. Four pre-existing Pumas file deletions remain uncommitted pending
 clarification of their intent.
+
+### A1/A5 continuation (2026-09-22)
+
+Work is isolated on `work/torch-runtime-a1-a5`, based on merged PR #1 at
+`516ad94aabbfc4f82fc7c72719f46d7dd4fd63d0`. A1 source review found the shared
+Torch version controls, validated installation flow, independent active-version
+marker, and failure-preservation paths already present. The app-manager tests
+(107 passed) and full frontend suite (678 passed) also passed on this baseline.
+Public catalog discovery remains unaccepted: the last release inventory check
+in this task found only the general Pumas releases `v0.7.0` through `v0.1.0`,
+with no `torch-runtime-*` release. A1 remains pending; no publication or
+runtime-default change is claimed.
+
+A5 coverage now includes public gateway responses for `runtime_busy` (409),
+`model_unavailable` (503), and admitted transport loss (`backend_failure`, 502)
+with one generation admission and no replay; public `serve_model` coverage for
+a missing Nunchaku checkpoint after generic validation succeeds; and the
+registered Python image route using the real manager lease with unavailable,
+busy, backend-failure, and subsequent-success outcomes. The missing-checkpoint
+fixture retains an unrelated selected-artifact boundary so it reaches Torch's
+asset resolution rather than stopping at generic artifact validation. Failed
+loads remain visible as `failed` rows and are not reported as loaded.
+
+The full Rust check passed. Focused RPC tests passed (3 gateway, 1 missing
+checkpoint), the Torch image-provider boundary module passed (6), Ruff check and
+format checks passed, and Rust formatting plus `git diff --check` passed. The
+Python route test invokes the registered handler directly because the local
+test environment lacks an ASGI test client. These fixtures do not establish
+real GPU OOM recovery or managed sidecar process-death/restart cleanup; those
+A5 acceptance cases remain open. The final `nvidia-smi` check could not
+communicate with the NVIDIA driver, so GPU fault qualification was unavailable.
+No production defect was exposed by this source-and-caller review.

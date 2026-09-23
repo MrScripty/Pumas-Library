@@ -1,0 +1,175 @@
+import { useState } from 'react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import type { ModelManagerProps } from '../ModelManager';
+import type { VersionRelease } from '../../types/versions';
+import type { AppVersionState } from '../../utils/appVersionState';
+import { UNSUPPORTED_VERSION_STATE } from '../../utils/appVersionState';
+import { TorchPanel } from './TorchPanel';
+
+vi.mock('../ModelManager', () => ({
+  ModelManager: () => <div>Model manager omitted from version flow</div>,
+}));
+
+vi.mock('./sections/RuntimeProfileSettingsSection', () => ({
+  RuntimeProfileSettingsSection: () => null,
+}));
+
+const oldTag = 'torch-runtime-0.1.0';
+const candidateTag = 'torch-runtime-0.2.0';
+
+const availableVersions: VersionRelease[] = [
+  {
+    tagName: candidateTag,
+    name: 'Torch Runtime 0.2.0',
+    publishedAt: '2026-04-12T00:00:00Z',
+    prerelease: false,
+    totalSize: 1024,
+  },
+  {
+    tagName: oldTag,
+    name: 'Torch Runtime 0.1.0',
+    publishedAt: '2026-04-11T00:00:00Z',
+    prerelease: false,
+    totalSize: 512,
+  },
+];
+
+const modelManagerProps: ModelManagerProps = {
+  libraryLoadStatus: 'ready',
+  excludedModels: new Set(),
+  modelGroups: [],
+  onToggleLink: vi.fn(),
+  onToggleStar: vi.fn(),
+  selectedAppId: 'torch',
+  starredModels: new Set(),
+};
+
+interface TorchPanelHarnessActions {
+  refreshAll: AppVersionState['refreshAll'];
+  installVersion: AppVersionState['installVersion'];
+  switchVersion: AppVersionState['switchVersion'];
+  removeVersion: AppVersionState['removeVersion'];
+  setDefaultVersion: AppVersionState['setDefaultVersion'];
+}
+
+function TorchPanelHarness({ actions }: { actions: TorchPanelHarnessActions }) {
+  const [installedVersions, setInstalledVersions] = useState([oldTag]);
+  const [activeVersion, setActiveVersion] = useState<string | null>(oldTag);
+  const [showVersionManager, setShowVersionManager] = useState(false);
+
+  const versions: AppVersionState = {
+    ...UNSUPPORTED_VERSION_STATE,
+    appId: 'torch',
+    isSupported: true,
+    installedVersions,
+    activeVersion,
+    availableVersions,
+    defaultVersion: null,
+    refreshAll: actions.refreshAll,
+    installVersion: async (tag) => {
+      const installed = await actions.installVersion(tag);
+      if (installed) {
+        setInstalledVersions((current) => current.includes(tag) ? current : [...current, tag]);
+      }
+      return installed;
+    },
+    switchVersion: async (tag) => {
+      const switched = await actions.switchVersion(tag);
+      if (switched) setActiveVersion(tag);
+      return switched;
+    },
+    removeVersion: async (tag) => {
+      const removed = await actions.removeVersion(tag);
+      if (removed) setInstalledVersions((current) => current.filter((version) => version !== tag));
+      return removed;
+    },
+    setDefaultVersion: actions.setDefaultVersion,
+  };
+
+  return (
+    <TorchPanel
+      appDisplayName="Torch"
+      versions={versions}
+      showVersionManager={showVersionManager}
+      onShowVersionManager={setShowVersionManager}
+      diskSpacePercent={0}
+      modelManagerProps={modelManagerProps}
+      isTorchRunning={false}
+      modelGroups={[]}
+    />
+  );
+}
+
+function getVersionRow(tag: string): HTMLElement {
+  let node: HTMLElement | null = screen.getByRole('heading', { name: tag });
+  while (node) {
+    if (node.querySelectorAll('button').length >= 2) return node;
+    node = node.parentElement;
+  }
+  throw new Error(`Could not find the version row for ${tag}`);
+}
+
+function expectActiveVersionNotDefault(tag: string) {
+  const triggerGroup = screen.getByRole('button', { name: tag }).parentElement;
+  if (!triggerGroup) throw new Error('Expected the version selector trigger group');
+  expect(within(triggerGroup).getByTitle('Click to set as default')).toBeInTheDocument();
+}
+
+describe('TorchPanel shared version controls', () => {
+  it('installs, activates, and removes versions through the shared manager flow', async () => {
+    const actions: TorchPanelHarnessActions = {
+      refreshAll: vi.fn(async (_forceRefresh?: boolean) => undefined),
+      installVersion: vi.fn(async (_tag: string) => true),
+      switchVersion: vi.fn(async (_tag: string) => true),
+      removeVersion: vi.fn(async (_tag: string) => true),
+      setDefaultVersion: vi.fn(async (_tag: string | null) => undefined),
+    };
+
+    render(<TorchPanelHarness actions={actions} />);
+
+    // The selector's real manager control exposes the available Torch candidate.
+    fireEvent.click(screen.getByTitle(/New version available/));
+    expect(screen.getByText('1 installed')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: candidateTag })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(actions.refreshAll).toHaveBeenCalledWith(true));
+
+    const candidateRow = getVersionRow(candidateTag);
+    fireEvent.click(within(candidateRow).getAllByRole('button')[0]!);
+    await waitFor(() => {
+      expect(actions.installVersion).toHaveBeenCalledWith(candidateTag);
+      expect(within(getVersionRow(candidateTag)).getByRole('button', { name: 'Ready' }))
+        .toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    fireEvent.click(screen.getByRole('button', { name: oldTag }));
+    fireEvent.click(screen.getByRole('button', { name: `Switch to ${candidateTag}` }));
+
+    await waitFor(() => {
+      expect(actions.switchVersion).toHaveBeenCalledWith(candidateTag);
+      expect(screen.getByRole('button', { name: candidateTag })).toBeInTheDocument();
+    });
+    expectActiveVersionNotDefault(candidateTag);
+    expect(actions.setDefaultVersion).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTitle('Install new version'));
+    const oldRow = getVersionRow(oldTag);
+    fireEvent.pointerEnter(oldRow);
+    const uninstallButton = await within(oldRow).findByRole('button', { name: 'Uninstall' });
+    fireEvent.click(uninstallButton);
+
+    await waitFor(() => {
+      expect(actions.removeVersion).toHaveBeenCalledWith(oldTag);
+      expect(within(getVersionRow(oldTag)).queryByRole('button', { name: 'Ready' }))
+        .not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByRole('button', { name: candidateTag })).toBeInTheDocument();
+    expectActiveVersionNotDefault(candidateTag);
+    expect(actions.setDefaultVersion).not.toHaveBeenCalled();
+  });
+});

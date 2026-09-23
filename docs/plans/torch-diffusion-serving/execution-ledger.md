@@ -523,8 +523,47 @@ unverified; A1 public catalogue and normal UI install/update acceptance still
 require a qualified, published `torch-runtime-*` bundle. No bundle was
 published, no runtime default changed, and no tag was created.
 
-Passeur remained unavailable for code assignments: inherited task
-`e4323220-4f72-4b5e-9194-4e7c308abcc4` is cancelled with native shutdown
-unconfirmed, both attach attempts returned `not_attached`, and coordination
-remains frozen. Native collaboration agents performed the implementation and
-review; no new Passeur task was accepted.
+### A1/A5 local lifecycle and route regressions (2026-09-22)
+
+A1 now has a manager-level offline install/update lifecycle test using the real
+`VersionManager` and installer, a seeded `ReleasesCache`, and loopback bundle
+and checksum assets. It verifies Torch release filtering, installation and
+terminal progress cleanup for two versions, activation under the Torch-specific
+marker, unchanged llama marker and unset default, refusal to remove the active
+version, and removal of the inactive version. A TorchPanel integration fixture
+also exercises refresh, install, activation and removal through the shared
+version controls while confirming activation does not set a default. These
+fixtures establish local manager/UI behavior only; they do not establish public
+catalogue availability or usability of a published bundle. A1 remains pending
+until the qualified runtime is published and the normal UI path is checked.
+
+A5 source review confirmed that the registered image route previously caught
+admission errors around both lease acquisition and adapter execution, so an
+admitted adapter `KeyError`, `ValueError` or busy-text `RuntimeError` could be
+reported as 503, 400 or 409. The route now scopes those mappings to
+`image_lease` admission while retaining the lease around owned generation.
+Registered-route tests verify true admission errors retain their 503/400/409
+responses, the three admitted adapter errors produce sanitized 502 responses,
+synthetic CUDA OOM remains 507, and a blocked worker keeps the real device lock
+until it stops before a later request succeeds. Existing owner-cancellation
+coverage continues to verify that cancellation does not release the lease while
+the worker is active.
+
+The new manager lifecycle test passed; `./scripts/rust/check.sh` passed with
+localhost socket permission after its sandboxed run failed on loopback binding.
+The frontend suite passed (118 files, 679 tests) and TypeScript checking passed.
+The image boundary module passed (7 tests) under a test-only direct executor
+shutdown harness. The exact Python unittest command hangs in this host's Python
+3.12.3 `asyncio.run()` executor shutdown; a minimal `asyncio.to_thread` script
+reproduces that environment issue. Ruff check/format and `git diff --check`
+passed. Independent review found no blocking regression in the four-file code
+scope. Real GPU OOM recovery remains unverified.
+
+For inherited Passeur task `e4323220-4f72-4b5e-9194-4e7c308abcc4`, the user
+confirmed attachment and the task is visible to this session at control
+generation 2. Its result still reports `cancelled`, no changed files,
+`worker_stop=unconfirmed`, an unknown native run with outstanding obligations,
+and three permission inputs with delivery unknown. `passeur_prepare` continues
+to report `PROJECT_NEEDS_RECONCILIATION`; coordination remains frozen. The
+stale permissions were not approved and no new Passeur task was accepted.
+Native collaboration agents performed the implementation and review.

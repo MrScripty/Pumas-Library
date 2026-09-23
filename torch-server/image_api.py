@@ -19,6 +19,7 @@ import logging
 import secrets
 import threading
 import time
+from contextlib import AsyncExitStack
 
 import torch
 from fastapi import APIRouter, HTTPException, Request
@@ -161,24 +162,33 @@ async def owned_generation(adapter, payload: ImageRequest, request: Request, clo
 
 @router.post("/images/generate")
 async def generate_image(payload: ImageRequest, request: Request):
-    try:
-        async with request.app.state.model_manager.image_lease(payload.model_id) as adapter:
+    async with AsyncExitStack() as lease:
+        try:
+            adapter = await lease.enter_async_context(
+                request.app.state.model_manager.image_lease(payload.model_id)
+            )
+        except KeyError:
+            raise failure(503, "model_unavailable", "Load the image model in Pumas first") from None
+        except ValueError:
+            raise failure(
+                400, "unsupported_model", "Selected model does not support this operation"
+            ) from None
+        except RuntimeError as error:
+            if str(error) == "Image runtime is busy":
+                raise failure(409, "runtime_busy", "Image runtime is busy") from None
+            raise failure(
+                502, "backend_failure", "Image runtime failed; inspect the Pumas runtime log"
+            ) from None
+
+        try:
             return await owned_generation(adapter, payload, request)
-    except HTTPException:
-        raise
-    except KeyError:
-        raise failure(503, "model_unavailable", "Load the image model in Pumas first") from None
-    except ValueError:
-        raise failure(
-            400, "unsupported_model", "Selected model does not support this operation"
-        ) from None
-    except torch.cuda.OutOfMemoryError:
-        raise failure(
-            507, "out_of_memory", "Insufficient GPU memory; free memory before retrying"
-        ) from None
-    except RuntimeError as error:
-        if str(error) == "Image runtime is busy":
-            raise failure(409, "runtime_busy", "Image runtime is busy") from None
-        raise failure(
-            502, "backend_failure", "Image runtime failed; inspect the Pumas runtime log"
-        ) from None
+        except HTTPException:
+            raise
+        except torch.cuda.OutOfMemoryError:
+            raise failure(
+                507, "out_of_memory", "Insufficient GPU memory; free memory before retrying"
+            ) from None
+        except Exception:
+            raise failure(
+                502, "backend_failure", "Image runtime failed; inspect the Pumas runtime log"
+            ) from None

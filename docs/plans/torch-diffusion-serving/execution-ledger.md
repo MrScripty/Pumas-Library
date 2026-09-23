@@ -455,3 +455,219 @@ after 21 Python tests and the local browser regression passed. The local intent
 API was committed as `22388e70` after its focused verification recorded in that
 plan's ledger. Four pre-existing Pumas file deletions remain uncommitted pending
 clarification of their intent.
+
+### A1/A5 continuation (2026-09-22)
+
+Work is isolated on `work/torch-runtime-a1-a5`, based on merged PR #1 at
+`516ad94aabbfc4f82fc7c72719f46d7dd4fd63d0`. A1 source review found the shared
+Torch version controls, validated installation flow, independent active-version
+marker, and failure-preservation paths already present. The app-manager tests
+(107 passed) and full frontend suite (678 passed) also passed on this baseline.
+Public catalog discovery remains unaccepted: the last release inventory check
+in this task found only the general Pumas releases `v0.7.0` through `v0.1.0`,
+with no `torch-runtime-*` release. A1 remains pending; no publication or
+runtime-default change is claimed.
+
+A5 coverage now includes public gateway responses for `runtime_busy` (409),
+`model_unavailable` (503), and admitted transport loss (`backend_failure`, 502)
+with one generation admission and no replay; public `serve_model` coverage for
+a missing Nunchaku checkpoint after generic validation succeeds; and the
+registered Python image route using the real manager lease with unavailable,
+busy, backend-failure, and subsequent-success outcomes. The missing-checkpoint
+fixture retains an unrelated selected-artifact boundary so it reaches Torch's
+asset resolution rather than stopping at generic artifact validation. Failed
+loads remain visible as `failed` rows and are not reported as loaded.
+
+The full Rust check passed. Focused RPC tests passed (3 gateway, 1 missing
+checkpoint), the Torch image-provider boundary module passed (6), Ruff check and
+format checks passed, and Rust formatting plus `git diff --check` passed. The
+Python route test invokes the registered handler directly because the local
+test environment lacks an ASGI test client. These fixtures do not establish
+real GPU OOM recovery or managed sidecar process-death/restart cleanup; those
+A5 acceptance cases remain open. The final `nvidia-smi` check could not
+communicate with the NVIDIA driver, so GPU fault qualification was unavailable.
+No production defect was exposed by this source-and-caller review.
+
+### A1 cancellation and A5 managed Torch exit follow-up (2026-09-22)
+
+A1 now has a deterministic cancellation-during-validation regression. The
+validator starts a child and signals readiness before cancellation. The test
+checks that the candidate and staging directory disappear, the validator child
+is no longer computing, the previous runtime files and installed metadata are
+byte-identical, and `.active-version-torch` is unchanged. After reconstructing
+`VersionState`, the previous tag remains the active valid install and its
+fixture `serve.py` sentinel runs under that version's `venv/bin/python`, checking
+its recipe, required files, interpreter version, and virtual-environment prefix.
+The focused test passed; the full Rust check includes all 108 app-manager tests.
+This proves the cancellation-preservation path with a valid fixture sidecar,
+not startup or GPU usability of a published runtime.
+
+A5 now has a CPU managed TorchServe child test that publishes a Torch serving
+row alongside an unrelated profile row, signals natural child exit, waits for
+the terminal cleanup result, and drains the owner. Before the fix the row
+remained after cleanup. Non-router managed sessions now retain and join a
+terminal-only observer; it invalidates serving state and publishes
+`ModelUnloaded` only after the process group is confirmed clean, using the
+existing generation fence. The test verifies that the unrelated row remains.
+The existing stopped/replaced-generation regression still passes. Review
+confirmed that failed cleanup sends `Some(false)`, retains the child in owner
+custody, and blocks replacement; no separate cleanup-failure injection fixture
+was added.
+
+`./scripts/rust/check.sh` passed after the sandboxed run first returned `EPERM`
+for loopback HTTP fixtures and the same local check was rerun with localhost
+socket permission. This covers formatting, all-feature checks and Clippy,
+workspace tests, doc tests, and the no-default-features check. `nvidia-smi`
+still cannot communicate with the NVIDIA driver. Real GPU OOM recovery remains
+unverified; A1 public catalogue and normal UI install/update acceptance still
+require a qualified, published `torch-runtime-*` bundle. No bundle was
+published, no runtime default changed, and no tag was created.
+
+### A1/A5 local lifecycle and route regressions (2026-09-22)
+
+A1 now has a manager-level offline install/update lifecycle test using the real
+`VersionManager` and installer, a seeded `ReleasesCache`, and loopback bundle
+and checksum assets. It verifies Torch release filtering, installation and
+terminal progress cleanup for two versions, activation under the Torch-specific
+marker, unchanged llama marker and unset default, refusal to remove the active
+version, and removal of the inactive version. A TorchPanel integration fixture
+starts with no available releases, then has the shared refresh action populate
+the release fixture before exercising install, activation and removal; it also
+confirms activation does not set a default. These fixtures establish local
+manager/UI behavior only; they do not establish public catalogue availability
+or usability of a published bundle. A1 remains pending until the qualified
+runtime is published and the normal UI path is checked.
+
+A5 source review confirmed that the registered image route previously caught
+admission errors around both lease acquisition and adapter execution, so an
+admitted adapter `KeyError`, `ValueError` or busy-text `RuntimeError` could be
+reported as 503, 400 or 409. The route now scopes those mappings to
+`image_lease` admission while retaining the lease around owned generation.
+Registered-route tests verify true admission errors retain their 503/400/409
+responses, the three admitted adapter errors produce sanitized 502 responses,
+synthetic CUDA OOM remains 507, and a delayed synthetic OOM keeps the real
+device lock while blocked, rejects a concurrent request as busy, returns 507
+only after worker termination, releases the lock, and permits a later explicit
+request. Existing owner-cancellation coverage continues to verify that
+cancellation does not release the lease while the worker is active.
+
+The new manager lifecycle test passed; `./scripts/rust/check.sh` passed with
+localhost socket permission after its sandboxed run failed on loopback binding.
+The frontend suite passed (118 files, 679 tests) and TypeScript checking passed.
+The image boundary module passed (8 tests) under a test-only direct executor
+shutdown harness. The exact Python unittest command hangs in this host's Python
+3.12.3 `asyncio.run()` executor shutdown; a minimal `asyncio.to_thread` script
+reproduces that environment issue. Ruff check/format and `git diff --check`
+passed. Independent review found no blocking regression in the four-file code
+scope at this checkpoint. Real GPU OOM recovery was still unverified then; the
+later allocator recovery run is recorded below.
+
+For inherited Passeur task `e4323220-4f72-4b5e-9194-4e7c308abcc4`, the user
+confirmed attachment and the task is visible to this session at control
+generation 2. Its result still reports `cancelled`, no changed files,
+`worker_stop=unconfirmed`, an unknown native run with outstanding obligations,
+and three permission inputs with delivery unknown. `passeur_prepare` continues
+to report `PROJECT_NEEDS_RECONCILIATION`; coordination remains frozen. The
+task worktree is clean at its recorded base commit and no matching Muse run
+process appears in the host process table, but these observations do not confirm
+native shutdown. Inspecting each old permission input returns `STALE_INPUT`,
+while the task snapshot still lists delivery unknown. The stale permissions
+were not approved and no new Passeur task was accepted. Native collaboration
+agents performed the implementation and review.
+
+### A1 globe refresh and A5 real CUDA OOM recovery (2026-09-22)
+
+The shared version manager now waits for initial version loading, then forces a
+catalogue refresh when opened from the version-selector globe. It keeps the
+manager loading state until that request completes, so cached releases are not
+offered as current install choices during refresh. A regression first failed
+because opening the manager made zero forced refresh calls; it now holds a
+cached release fixture behind the startup and forced refreshes, then checks that
+the entry appears and preserves the manual Refresh action. The complete frontend
+suite passed (118 files, 679 tests), TypeScript checking passed, and
+`git diff --check` passed. A fresh release/tag inventory still contains no
+`torch-runtime-*` release with the required runtime archive and checksum, so the
+live manager correctly has no remotely installable Torch release to display.
+The active launcher remains on 0.1.4 with 0.1.1–0.1.4 installed and no default.
+A1 remains pending publication and normal shared-UI installation of a qualified
+bundle.
+
+A5's remaining real-GPU recovery case passed on the RTX 5090 Laptop GPU using
+the isolated `torch-runtime-0.1.6` environment (archive SHA-256
+`74f9b593dff1e447a73571dc465efd520238ba0c56d2730393a17eee2b97426c`) and the
+real Nunchaku Z-Image-Turbo model. For the test only, the isolated sidecar was
+overlaid with the current branch's Torch source and a one-shot fault hook that
+requested the currently free CUDA memory plus 256 MiB from `torch.empty`; no
+large image dimensions or host allocation were used. Through the public Pumas
+image gateway, the first request returned sanitized HTTP 507
+`out_of_memory`. A separate request then generated a decodable 512×512 PNG
+(302,715 bytes, SHA-256
+`cddd2386cb8ca5105325aca2d202db68885dd71402dca04f55949b87f379120d`) in
+10.309 seconds using the same loaded model. The profile remained healthy after
+the OOM; model unload and profile shutdown succeeded. GPU memory returned from
+657 MiB before the run to 662 MiB after cleanup, with only the existing desktop
+process using CUDA. The main runtime's installed versions, active 0.1.4, and
+unset default were unchanged. The candidate's 15 source files were restored and
+SHA-256 checked after the test; no runtime was published, tagged, or selected
+as the main default. This demonstrates an actual CUDA allocator OOM and
+post-OOM inference recovery, not a naturally induced high-resolution pipeline
+OOM. See [the A5 GPU report](reports/a5-gpu-oom-recovery.md).
+
+### Terminal observer error propagation (2026-09-22)
+
+A review of T20 found that both retained router-observer tasks discarded errors
+from the generation-guarded serving invalidation. The observer tasks now return
+`Result<()>`, and `drain_session` records returned failures and join failures in
+the existing observer-error state while completing worker and observer cleanup.
+Serving invalidation still goes through the current-generation fence; a stale
+observer remains a no-op, and an observer panic is rethrown after the terminal
+update attempt.
+
+Registry-poison regressions verify that terminal invalidation errors from both
+observer variants are observable, that draining records the session as failed,
+and that repeated draining retains the failure. The TorchServe natural-exit
+invalidation, replacement-generation rejection, observer join-failure, and
+already-stopped observer tests also passed. The six focused `pumas-library`
+tests, `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+`./scripts/rust/check.sh`, and `git diff --check` passed. The full gate needed a
+test-only lexical-scope correction after its first run identified
+`clippy::await_holding_lock`.
+These tests make a failed generation lookup visible; they do not repair a
+poisoned registry or bypass its ownership check to clear serving state.
+
+### PyTorch upstream discovery and installer publication boundary (2026-09-23)
+
+The prior assumption that A1 requires a Pumas-hosted `torch-runtime-*` release
+was incorrect. Torch discovery now targets the official `pytorch/pytorch`
+repository and exposes only the qualified `v2.9.1` tag. That tag maps to the
+independent recipe `torch-upstream-2.9.1-r1`; the app embeds its sidecar and
+dependency lock and installs the direct SHA-256-pinned Torch and torchvision
+wheels from the official PyTorch wheel host. Other upstream tags remain hidden
+until their full app recipe is qualified. The PyTorch GitHub source archive size
+is not presented as an install size. The prior historical Pumas-bundle
+qualification remains historical evidence only.
+
+Fixtures verify supported/unsupported release filtering, no dependence on
+Pumas bundle assets, embedded sidecar materialization outside the checkout,
+official wheel URLs and hashes, rejection before staging, and preservation of
+installed `0.1.1`–`0.1.4`, active `0.1.4`, and unset default. Torch cancellation
+accepted by `VersionManager` and the publication transition now compete through
+one atomic state change; once publication begins, manager cancellation returns
+false without setting the cancellation flag. A per-installer attempt lock also
+rejects a concurrent direct call before it can alter the active attempt, with a
+deterministic publication regression. The constructor documents that direct
+stores to its cooperative cancellation flag have no acceptance result and may
+arrive after the final cancellation checkpoint.
+
+`cargo fmt --manifest-path rust/Cargo.toml --all -- --check`, all-target
+`pumas-app-manager` Clippy with warnings denied, the 111-test app-manager suite,
+`./scripts/rust/check.sh`, and `git diff --check` passed. The full Rust script
+ran with localhost socket permission for its fixtures; the workspace library
+suite reported 1,415 passed and 6 ignored. No native GPU qualification was
+rerun because these changes do not alter the qualified runtime or A5 GPU path.
+A1 still needs packaged-app discovery and fresh shared-UI installation
+acceptance; this does not require publishing a Torch release through Pumas.
+The recorded A5 allocator OOM and subsequent inference recovery evidence is
+unchanged, including its limitation that the fault was not a naturally
+oversized diffusion request. Installed versions, active version, default,
+runtime publication state, and tags were not changed.

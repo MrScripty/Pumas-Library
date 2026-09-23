@@ -189,7 +189,7 @@ impl AppId {
         match self {
             AppId::Ollama => "ollama/ollama",
             AppId::LlamaCpp => "ggml-org/llama.cpp",
-            AppId::Torch => "MrScripty/Pumas-Library",
+            AppId::Torch => "pytorch/pytorch",
             AppId::OnnxRuntime => "",
         }
     }

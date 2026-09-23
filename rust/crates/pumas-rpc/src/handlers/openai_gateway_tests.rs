@@ -930,6 +930,122 @@ async fn spawn_torch_stub_inner(
     endpoint
 }
 
+/// Answer Torch admission checks, then return the selected generation error
+/// or close after accepting the complete generation request.
+async fn spawn_torch_generation_result_stub(
+    result: Option<(StatusCode, &'static str)>,
+    generate_hits: Arc<std::sync::atomic::AtomicUsize>,
+) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = read_test_backend_request(&mut socket).await;
+            if request.starts_with("GET /health") {
+                write_test_backend_response(
+                    &mut socket,
+                    StatusCode::OK,
+                    TORCH_PROTOCOL_3_HANDSHAKE,
+                )
+                .await;
+            } else if request.starts_with("GET /api/slots") {
+                write_test_backend_response(&mut socket, StatusCode::OK, TORCH_READY_IMAGE_SLOTS)
+                    .await;
+            } else if request.starts_with("POST /api/images/generate") {
+                generate_hits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if let Some((status, body)) = result {
+                    write_test_backend_response(&mut socket, status, body).await;
+                }
+                // A missing response leaves the generation outcome unknown.
+            }
+        }
+    });
+    endpoint
+}
+
+#[tokio::test]
+async fn image_sidecar_runtime_busy_maps_to_public_conflict_once() {
+    let generate_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let endpoint = spawn_torch_generation_result_stub(
+        Some((
+            StatusCode::CONFLICT,
+            r#"{"detail":{"code":"runtime_busy"}}"#,
+        )),
+        generate_hits.clone(),
+    )
+    .await;
+    let (_temp_dir, state) = gateway_test_state().await;
+    record_torch_image_model(&state, endpoint.as_str()).await;
+
+    let (status, body) = openai_proxy_json(
+        state,
+        "/v1/images/generations",
+        json!({"model": "image", "prompt": "a bird", "width": 512, "height": 512}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        body.pointer("/error/code").and_then(Value::as_str),
+        Some("runtime_busy")
+    );
+    assert_eq!(generate_hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn image_sidecar_model_unavailable_maps_to_public_unavailable_once() {
+    let generate_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let endpoint = spawn_torch_generation_result_stub(
+        Some((
+            StatusCode::SERVICE_UNAVAILABLE,
+            r#"{"detail":{"code":"model_unavailable"}}"#,
+        )),
+        generate_hits.clone(),
+    )
+    .await;
+    let (_temp_dir, state) = gateway_test_state().await;
+    record_torch_image_model(&state, endpoint.as_str()).await;
+
+    let (status, body) = openai_proxy_json(
+        state,
+        "/v1/images/generations",
+        json!({"model": "image", "prompt": "a bird", "width": 512, "height": 512}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        body.pointer("/error/code").and_then(Value::as_str),
+        Some("model_unavailable")
+    );
+    assert_eq!(generate_hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn image_sidecar_transport_close_reports_backend_failure_without_replay() {
+    let generate_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let endpoint = spawn_torch_generation_result_stub(None, generate_hits.clone()).await;
+    let (_temp_dir, state) = gateway_test_state().await;
+    record_torch_image_model(&state, endpoint.as_str()).await;
+
+    let (status, body) = openai_proxy_json(
+        state,
+        "/v1/images/generations",
+        json!({"model": "image", "prompt": "a bird", "width": 512, "height": 512}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert_eq!(
+        body.pointer("/error/code").and_then(Value::as_str),
+        Some("backend_failure")
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        generate_hits.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "gateway replayed an image request whose outcome is unknown"
+    );
+}
+
 #[tokio::test]
 async fn generation_transport_survives_silence_beyond_former_policy() {
     // Chat and completions share the generic buffered gateway handler, client

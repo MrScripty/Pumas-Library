@@ -106,6 +106,11 @@ pub struct VersionManager {
     progress_tracker: Arc<RwLock<InstallationProgressTracker>>,
     /// Cancellation flag for installations.
     cancel_flag: Arc<AtomicBool>,
+    torch_control: Arc<installer::TorchInstallControl>,
+    #[cfg(test)]
+    torch_publication_pause: Option<Arc<installer::TorchPublicationPause>>,
+    #[cfg(test)]
+    torch_stage_override: Option<installer::TorchStageOverride>,
     /// Lock for serializing installations.
     install_lock: Arc<Mutex<()>>,
     /// Currently installing tag (exclusive access only).
@@ -213,6 +218,11 @@ impl VersionManager {
             state,
             progress_tracker,
             cancel_flag: Arc::new(AtomicBool::new(false)),
+            torch_control: Arc::new(installer::TorchInstallControl::new()),
+            #[cfg(test)]
+            torch_publication_pause: None,
+            #[cfg(test)]
+            torch_stage_override: None,
             install_lock: Arc::new(Mutex::new(())),
             installing_tag: Arc::new(Mutex::new(None)),
         })
@@ -366,6 +376,12 @@ impl VersionManager {
             .await?;
         if self.app_id == AppId::Torch {
             releases.retain(installer::is_torch_runtime_release);
+            for release in &mut releases {
+                // GitHub's archive is PyTorch source, not the managed wheel recipe.
+                release.archive_size = None;
+                release.total_size = None;
+                release.dependencies_size = None;
+            }
         }
         Ok(releases)
     }
@@ -380,9 +396,18 @@ impl VersionManager {
             .github_client
             .get_release_by_tag(self.app_id.github_repo(), tag, force_refresh)
             .await?;
-        Ok(release.filter(|release| {
-            self.app_id != AppId::Torch || installer::is_torch_runtime_release(release)
-        }))
+        Ok(release
+            .filter(|release| {
+                self.app_id != AppId::Torch || installer::is_torch_runtime_release(release)
+            })
+            .map(|mut release| {
+                if self.app_id == AppId::Torch {
+                    release.archive_size = None;
+                    release.total_size = None;
+                    release.dependencies_size = None;
+                }
+                release
+            }))
     }
 
     /// Get cache status for GitHub releases.
@@ -414,7 +439,14 @@ impl VersionManager {
 
     /// Cancel the current installation.
     pub async fn cancel_installation(&self) -> Result<bool> {
-        if !self.is_installing().await {
+        // Keep the tag lock until both the control transition and progress
+        // update are recorded, so this request cannot spill into a new attempt.
+        let installing = self.installing_tag.lock().await;
+        if installing.is_none() {
+            return Ok(false);
+        }
+
+        if self.app_id == AppId::Torch && !self.torch_control.request_cancel() {
             return Ok(false);
         }
 
@@ -426,6 +458,8 @@ impl VersionManager {
             let mut tracker = self.progress_tracker.write().await;
             tracker.set_error("Installation cancelled by user");
         }
+
+        drop(installing);
 
         Ok(true)
     }
@@ -458,6 +492,10 @@ impl VersionManager {
         // Reset cancellation flag
         self.cancel_flag.store(false, Ordering::SeqCst);
 
+        if self.app_id == AppId::Torch {
+            self.torch_control.start();
+        }
+
         // Set installing tag
         {
             let mut installing = self.installing_tag.lock().await;
@@ -474,17 +512,36 @@ impl VersionManager {
             self.metadata_manager.clone(),
             self.progress_tracker.clone(),
             self.cancel_flag.clone(),
-        );
+        )
+        .with_torch_control(self.torch_control.clone());
+        #[cfg(test)]
+        let installer = if let Some(pause) = &self.torch_publication_pause {
+            installer.with_torch_publication_pause(pause.clone())
+        } else {
+            installer
+        };
+        #[cfg(test)]
+        let installer = if let Some(stage) = &self.torch_stage_override {
+            installer.with_torch_stage_override(stage.clone())
+        } else {
+            installer
+        };
 
         // Spawn installation task
         let tag = tag.to_string();
         let state = self.state.clone();
         let installing_tag = self.installing_tag.clone();
         let progress_tracker = self.progress_tracker.clone();
+        let torch_control = self.torch_control.clone();
+        let app_id = self.app_id;
 
         tokio::spawn(async move {
             let _install_guard = install_guard;
             let result = installer.install_version(&tag, &release, tx.clone()).await;
+
+            if app_id == AppId::Torch {
+                torch_control.finish();
+            }
 
             // Clear installing tag
             {
@@ -519,6 +576,24 @@ impl VersionManager {
         });
 
         Ok(rx)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_torch_publication_pause(
+        mut self,
+        pause: Arc<installer::TorchPublicationPause>,
+    ) -> Self {
+        self.torch_publication_pause = Some(pause);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_torch_stage_override<F>(mut self, stage: F) -> Self
+    where
+        F: Fn(&Path) -> Result<PathBuf> + Send + Sync + 'static,
+    {
+        self.torch_stage_override = Some(Arc::new(stage));
+        self
     }
 
     async fn resolve_installable_release(

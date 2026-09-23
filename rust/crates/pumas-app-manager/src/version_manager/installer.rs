@@ -6,6 +6,8 @@ mod torch;
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod torch_tests;
 pub(crate) use torch::is_torch_runtime_release;
+#[cfg(test)]
+pub(crate) use torch::TorchPublicationPause;
 
 use crate::version_manager::progress::{InstallationProgressTracker, ProgressUpdate};
 use chrono::Utc;
@@ -17,11 +19,11 @@ use pumas_library::{PumasError, Result};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{info, warn};
 
 async fn path_exists(path: &Path) -> Result<bool> {
@@ -31,6 +33,68 @@ async fn path_exists(path: &Path) -> Result<bool> {
         source: Some(e),
     })
 }
+
+/// Coordinates Torch cancellation with the irreversible publication boundary.
+pub(crate) struct TorchInstallControl(AtomicU8);
+
+impl TorchInstallControl {
+    const IDLE: u8 = 0;
+    const ACTIVE: u8 = 1;
+    const CANCEL_REQUESTED: u8 = 2;
+    const PUBLISHING: u8 = 3;
+    const FINISHED: u8 = 4;
+
+    pub(crate) fn new() -> Self {
+        Self(AtomicU8::new(Self::IDLE))
+    }
+
+    /// Starts a new attempt without undoing a cancellation of an active attempt.
+    pub(crate) fn start(&self) -> bool {
+        let mut current = self.0.load(Ordering::SeqCst);
+        loop {
+            if current != Self::IDLE && current != Self::FINISHED {
+                return false;
+            }
+            match self
+                .0
+                .compare_exchange(current, Self::ACTIVE, Ordering::SeqCst, Ordering::SeqCst)
+            {
+                Ok(_) => return true,
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
+    pub(crate) fn request_cancel(&self) -> bool {
+        match self.0.compare_exchange(
+            Self::ACTIVE,
+            Self::CANCEL_REQUESTED,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) | Err(Self::CANCEL_REQUESTED) => true,
+            Err(_) => false,
+        }
+    }
+
+    pub(crate) fn try_begin_publication(&self) -> bool {
+        self.0
+            .compare_exchange(
+                Self::ACTIVE,
+                Self::PUBLISHING,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            )
+            .is_ok()
+    }
+
+    pub(crate) fn finish(&self) {
+        self.0.store(Self::FINISHED, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+pub(crate) type TorchStageOverride = Arc<dyn Fn(&Path) -> Result<PathBuf> + Send + Sync>;
 
 /// Handles version installation.
 pub struct VersionInstaller {
@@ -44,10 +108,25 @@ pub struct VersionInstaller {
     progress_tracker: Arc<RwLock<InstallationProgressTracker>>,
     /// Cancellation flag.
     cancel_flag: Arc<AtomicBool>,
+    torch_control: Arc<TorchInstallControl>,
+    torch_attempt_lock: Mutex<()>,
+    #[cfg(test)]
+    torch_stage_override: Option<TorchStageOverride>,
+    #[cfg(test)]
+    torch_publication_pause: Option<Arc<torch::TorchPublicationPause>>,
+    #[cfg(test)]
+    torch_stage_pause: Option<Arc<torch::TorchPublicationPause>>,
 }
 
 impl VersionInstaller {
     /// Create a new version installer.
+    ///
+    /// The supplied cancellation flag is a cooperative request observed at
+    /// installer checkpoints; setting it directly does not report whether the
+    /// request was accepted. Torch cancellation acknowledged by `VersionManager`
+    /// is serialized with runtime publication. A direct flag update after the
+    /// installer's final cancellation checkpoint may race with successful
+    /// publication.
     pub fn new(
         launcher_root: PathBuf,
         app_id: AppId,
@@ -61,7 +140,44 @@ impl VersionInstaller {
             metadata_manager,
             progress_tracker,
             cancel_flag,
+            torch_control: Arc::new(TorchInstallControl::new()),
+            torch_attempt_lock: Mutex::new(()),
+            #[cfg(test)]
+            torch_stage_override: None,
+            #[cfg(test)]
+            torch_publication_pause: None,
+            #[cfg(test)]
+            torch_stage_pause: None,
         }
+    }
+
+    pub(crate) fn with_torch_control(mut self, control: Arc<TorchInstallControl>) -> Self {
+        self.torch_control = control;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_torch_publication_pause(
+        mut self,
+        pause: Arc<torch::TorchPublicationPause>,
+    ) -> Self {
+        self.torch_publication_pause = Some(pause);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_torch_stage_pause(
+        mut self,
+        pause: Arc<torch::TorchPublicationPause>,
+    ) -> Self {
+        self.torch_stage_pause = Some(pause);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_torch_stage_override(mut self, stage: TorchStageOverride) -> Self {
+        self.torch_stage_override = Some(stage);
+        self
     }
 
     /// Install a version from a GitHub release.
@@ -1417,8 +1533,16 @@ impl VersionInstaller {
             git_commit: None, // Could extract from git log if needed
             release_date: Some(release.published_at.clone()),
             release_notes: release.body.clone(),
-            download_url: release.zipball_url.clone().or(release.tarball_url.clone()),
-            size: release.total_size,
+            download_url: if self.app_id == AppId::Torch {
+                torch::torch_recipe_for_tag(tag).map(|recipe| recipe.torch_wheel_url.to_string())
+            } else {
+                release.zipball_url.clone().or(release.tarball_url.clone())
+            },
+            size: if self.app_id == AppId::Torch {
+                None
+            } else {
+                release.total_size
+            },
             requirements_hash: None, // Could compute if needed
             dependencies_installed: Some(true),
         };
@@ -1489,6 +1613,22 @@ fn shell_single_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn torch_cancel_and_publication_are_mutually_exclusive() {
+        let control = TorchInstallControl::new();
+        assert!(control.start());
+        assert!(control.request_cancel());
+        assert!(control.request_cancel());
+        assert!(!control.try_begin_publication());
+        control.finish();
+
+        assert!(control.start());
+        assert!(control.try_begin_publication());
+        assert!(!control.request_cancel());
+        control.finish();
+        assert!(!control.request_cancel());
+    }
 
     #[test]
     fn runtime_zip_extraction_preserves_stored_and_deflated_payloads() {

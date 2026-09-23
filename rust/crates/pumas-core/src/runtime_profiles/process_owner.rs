@@ -75,7 +75,8 @@ struct SessionState {
     launch: Option<std::result::Result<OwnedRuntimeProfileObservation, String>>,
     terminal: Option<std::result::Result<bool, String>>,
     worker: Option<JoinHandle<()>>,
-    observer: Option<JoinHandle<()>>,
+    observer: Option<JoinHandle<Result<()>>>,
+    terminal_observer: Option<JoinHandle<Result<()>>>,
     observer_error: Option<String>,
     joined: bool,
     // A failed cleanup never releases child custody or permits replacement.
@@ -104,6 +105,7 @@ impl RuntimeProfileProcessOwner {
                 || state.residual_child.is_some()
                 || !state.joined
                 || state.observer.is_some()
+                || state.terminal_observer.is_some()
             {
                 return Err(failure(format!(
                     "Managed runtime profile {} still owns a process or worker",
@@ -164,6 +166,7 @@ impl RuntimeProfileProcessOwner {
                         || state.residual_child.is_some()
                         || !state.joined
                         || state.observer.is_some()
+                        || state.terminal_observer.is_some()
                     {
                         return Err(failure(
                             "Managed runtime profile already owns a process or worker",
@@ -199,6 +202,7 @@ impl RuntimeProfileProcessOwner {
                         worker: None,
                         joined: false,
                         observer: None,
+                        terminal_observer: None,
                         observer_error: None,
                         residual_child: None,
                     }),
@@ -210,18 +214,25 @@ impl RuntimeProfileProcessOwner {
                 session
             };
             // No await between registration, worker retention and gate release.
-            if let Some(observer) = observer.filter(|_| session.router_models.is_some()) {
-                let task = observer.spawn(
-                    session.spec.clone(),
-                    session.generation,
-                    session.observer_stop.subscribe(),
-                    session.observer_terminal.subscribe(),
-                );
-                session
+            if let Some(observer) = observer {
+                let mut state = session
                     .state
                     .lock()
-                    .map_err(|_| failure("Runtime process session poisoned"))?
-                    .observer = Some(task);
+                    .map_err(|_| failure("Runtime process session poisoned"))?;
+                if session.router_models.is_some() {
+                    state.observer = Some(observer.spawn(
+                        session.spec.clone(),
+                        session.generation,
+                        session.observer_stop.subscribe(),
+                        session.observer_terminal.subscribe(),
+                    ));
+                } else {
+                    state.terminal_observer = Some(observer.spawn_terminal(
+                        session.spec.profile_id.clone(),
+                        session.generation,
+                        session.observer_terminal.subscribe(),
+                    ));
+                }
             }
             let (start, gate) = std::sync::mpsc::channel();
             let worker_session = session.clone();
@@ -561,12 +572,45 @@ async fn drain_session(session: &Session) -> Result<bool> {
             }
         };
         if let Some(observer) = observer {
-            if let Err(error) = observer.await {
+            let outcome = match observer.await {
+                Ok(result) => result.map_err(|error| error.to_string()),
+                Err(error) => Err(error.to_string()),
+            };
+            if let Err(error) = outcome {
                 let mut state = session
                     .state
                     .lock()
                     .map_err(|_| failure("Runtime process session poisoned"))?;
                 state.observer_error = Some(format!("Router observer failed: {error}"));
+                state.status.state = RuntimeLifecycleState::Failed;
+            }
+        }
+        let terminal_observer = {
+            let mut state = session
+                .state
+                .lock()
+                .map_err(|_| failure("Runtime process session poisoned"))?;
+            if state
+                .terminal_observer
+                .as_ref()
+                .is_some_and(JoinHandle::is_finished)
+            {
+                state.terminal_observer.take()
+            } else {
+                None
+            }
+        };
+        if let Some(terminal_observer) = terminal_observer {
+            let outcome = match terminal_observer.await {
+                Ok(result) => result.map_err(|error| error.to_string()),
+                Err(error) => Err(error.to_string()),
+            };
+            if let Err(error) = outcome {
+                let mut state = session
+                    .state
+                    .lock()
+                    .map_err(|_| failure("Runtime process session poisoned"))?;
+                state.observer_error = Some(format!("Terminal observer failed: {error}"));
                 state.status.state = RuntimeLifecycleState::Failed;
             }
         }
@@ -601,7 +645,7 @@ async fn drain_session(session: &Session) -> Result<bool> {
                 .state
                 .lock()
                 .map_err(|_| failure("Runtime process session poisoned"))?;
-            if state.joined && state.observer.is_none() {
+            if state.joined && state.observer.is_none() && state.terminal_observer.is_none() {
                 if let Some(error) = &state.observer_error {
                     return Err(failure(error.clone()));
                 }
@@ -927,6 +971,18 @@ mod tests {
         std::thread::sleep(Duration::from_secs(30));
     }
 
+    #[test]
+    fn torchserve_listener_fixture_entry() {
+        let Ok(address) = std::env::var("PUMAS_OWNED_LISTENER_FIXTURE") else {
+            return;
+        };
+        let exit_file = std::env::var("PUMAS_OWNED_TORCHSERVE_EXIT_FILE").unwrap();
+        let _listener = std::net::TcpListener::bind(address).unwrap();
+        while !PathBuf::from(&exit_file).exists() {
+            std::thread::sleep(OBSERVATION_INTERVAL);
+        }
+    }
+
     async fn wait_for_listener(receipt: &OwnedRuntimeProfileObservation) {
         tokio::time::timeout(Duration::from_secs(3), async {
             loop {
@@ -1096,6 +1152,235 @@ mod tests {
         assert!(fixture.owner.snapshot(&id).unwrap().unwrap().pid.is_none());
         assert!(!fixture.root.path().join("runtime.pid").exists());
     }
+
+    #[tokio::test]
+    async fn torchserve_natural_exit_invalidates_serving_after_cleanup() {
+        use crate::models::{
+            RuntimeDeviceMode, ServedModelLoadState, ServedModelStatus, ServingStatusEventKind,
+        };
+        use crate::serving::ServingService;
+
+        let fixture = Fixture::new();
+        let serving = Arc::new(ServingService::with_provider_registry(
+            crate::providers::ProviderRegistry::builtin(),
+        ));
+        let mut updates = serving.subscribe_updates();
+        let library = Arc::new(
+            crate::model_library::ModelLibrary::new(fixture.root.path().join("library"))
+                .await
+                .unwrap(),
+        );
+        let observer = crate::runtime_profiles::router_observer::RouterObserverContext {
+            owner: Arc::downgrade(&fixture.owner),
+            library,
+            serving: serving.clone(),
+        };
+
+        let (mut config, mut spec, guard) = listener_launch(&fixture, vacant_address());
+        let exit_file = fixture.root.path().join("torchserve.exit");
+        spec.provider = RuntimeProviderId::Torch;
+        spec.provider_mode = RuntimeProviderMode::TorchServe;
+        spec.launch_strategy =
+            RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::TorchServe);
+        config.extra_args = vec![
+            "--exact".into(),
+            "runtime_profiles::process_owner::tests::torchserve_listener_fixture_entry".into(),
+            "--nocapture".into(),
+        ];
+        config.env_vars.insert(
+            "PUMAS_OWNED_TORCHSERVE_EXIT_FILE".into(),
+            exit_file.to_string_lossy().into_owned(),
+        );
+        let id = spec.profile_id.clone();
+        let receipt = fixture
+            .owner
+            .launch_observed(config, spec, None, None, guard, Some(observer))
+            .await
+            .unwrap()
+            .observation
+            .unwrap();
+        wait_for_listener(&receipt).await;
+
+        let session = {
+            let registry = fixture.owner.registry.lock().unwrap();
+            registry.sessions[&id].clone()
+        };
+        assert!(session.router_models.is_none());
+        assert!(session.state.lock().unwrap().observer.is_none());
+        let mut terminal = session.observer_terminal.subscribe();
+
+        let served = ServedModelStatus {
+            model_id: "fixture/torch-model".into(),
+            model_alias: None,
+            provider: RuntimeProviderId::Torch,
+            profile_id: id.clone(),
+            load_state: ServedModelLoadState::Loaded,
+            device_mode: RuntimeDeviceMode::Cpu,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
+            context_size: None,
+            keep_loaded: true,
+            endpoint_url: Some(receipt.endpoint_url.clone()),
+            memory_bytes: None,
+            loaded_at: None,
+            last_error: None,
+        };
+        serving
+            .record_loaded_model_for_owned_profile(served.clone(), &fixture.owner, &receipt)
+            .await
+            .unwrap();
+        let loaded = updates.recv().await.unwrap();
+        assert_eq!(
+            loaded.events[0].event_kind,
+            ServingStatusEventKind::ModelLoaded
+        );
+        assert_eq!(loaded.events[0].profile_id.as_ref(), Some(&id));
+
+        let other_profile = RuntimeProfileId::parse("unrelated-profile").unwrap();
+        let unrelated = ServedModelStatus {
+            model_id: "fixture/unrelated-model".into(),
+            model_alias: None,
+            provider: RuntimeProviderId::LlamaCpp,
+            profile_id: other_profile.clone(),
+            load_state: ServedModelLoadState::Loaded,
+            device_mode: RuntimeDeviceMode::Cpu,
+            device_id: None,
+            gpu_layers: None,
+            tensor_split: None,
+            context_size: None,
+            keep_loaded: true,
+            endpoint_url: None,
+            memory_bytes: None,
+            loaded_at: None,
+            last_error: None,
+        };
+        serving.record_loaded_model(unrelated.clone()).await;
+        let _ = updates.recv().await.unwrap();
+        let before_exit = serving.status().await.snapshot;
+        assert!(before_exit.served_models.contains(&served));
+        assert!(before_exit.served_models.contains(&unrelated));
+
+        std::fs::write(&exit_file, "exit").unwrap();
+        tokio::time::timeout(Duration::from_secs(6), terminal.wait_for(Option::is_some))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(*terminal.borrow(), Some(true));
+
+        let drained = fixture.owner.close_and_drain().await.unwrap();
+        assert_eq!(drained.len(), 1);
+        assert!(
+            drained[0].1.is_err(),
+            "natural exit remains a failed receipt"
+        );
+        {
+            let state = session.state.lock().unwrap();
+            assert!(state.joined);
+            assert!(state.worker.is_none());
+            assert!(state.residual_child.is_none());
+            assert!(state
+                .terminal
+                .as_ref()
+                .is_some_and(|result| result.is_err()));
+        }
+
+        let after_cleanup = serving.status().await.snapshot;
+        let cleanup_update = updates.try_recv().ok();
+        let target_row_removed = !after_cleanup
+            .served_models
+            .iter()
+            .any(|status| status.profile_id == id);
+        let target_unload_published = cleanup_update.as_ref().is_some_and(|feed| {
+            feed.events.iter().any(|event| {
+                event.event_kind == ServingStatusEventKind::ModelUnloaded
+                    && event.profile_id.as_ref() == Some(&id)
+            })
+        });
+        assert!(
+            target_row_removed && target_unload_published,
+            "TorchServe's serving row should be invalidated and publish an unload update after confirmed child cleanup"
+        );
+        assert!(after_cleanup.served_models.contains(&unrelated));
+    }
+
+    #[tokio::test]
+    async fn terminal_observer_update_error_survives_cleanup_and_repeated_drain() {
+        use crate::serving::ServingService;
+
+        let fixture = Fixture::new();
+        let (config, mut spec, guard) = fixture.launch("sleep 30 & wait");
+        spec.provider = RuntimeProviderId::Torch;
+        spec.provider_mode = RuntimeProviderMode::TorchServe;
+        spec.launch_strategy =
+            RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::TorchServe);
+        let id = spec.profile_id.clone();
+        fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap();
+        let session = fixture.owner.registry.lock().unwrap().sessions[&id].clone();
+        session.stop.store(true, Ordering::Release);
+        session.observer_stop.send_replace(true);
+        tokio::time::timeout(Duration::from_secs(6), async {
+            while !session
+                .state
+                .lock()
+                .unwrap()
+                .worker
+                .as_ref()
+                .unwrap()
+                .is_finished()
+            {
+                tokio::time::sleep(OBSERVATION_INTERVAL).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(*session.observer_terminal.borrow(), Some(true));
+
+        let owner = fixture.owner.clone();
+        assert!(std::thread::spawn(move || {
+            let _lock = owner.registry.lock().unwrap();
+            panic!("poison registry for terminal observer");
+        })
+        .join()
+        .is_err());
+        let library = Arc::new(
+            crate::model_library::ModelLibrary::new(fixture.root.path().join("library"))
+                .await
+                .unwrap(),
+        );
+        let observer = super::super::router_observer::RouterObserverContext {
+            owner: Arc::downgrade(&fixture.owner),
+            library,
+            serving: Arc::new(ServingService::with_provider_registry(
+                crate::providers::ProviderRegistry::builtin(),
+            )),
+        };
+        session.state.lock().unwrap().terminal_observer = Some(observer.spawn_terminal(
+            id.clone(),
+            session.generation,
+            session.observer_terminal.subscribe(),
+        ));
+
+        let first = drain_session(&session).await.unwrap_err().to_string();
+        assert!(first.contains("Terminal observer failed: Runtime process registry poisoned"));
+        {
+            let state = session.state.lock().unwrap();
+            assert_eq!(state.status.state, RuntimeLifecycleState::Failed);
+            assert!(state.joined);
+            assert!(state.worker.is_none());
+            assert!(state.terminal_observer.is_none());
+            assert!(state.residual_child.is_none());
+        }
+        assert_eq!(
+            drain_session(&session).await.unwrap_err().to_string(),
+            first
+        );
+    }
+
     #[tokio::test]
     async fn serving_publication_rejects_stopped_and_replaced_receipts() {
         use crate::models::{RuntimeDeviceMode, ServedModelLoadState, ServedModelStatus};

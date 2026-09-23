@@ -29,13 +29,41 @@ pub(crate) struct RouterObserverContext {
     pub serving: Arc<ServingService>,
 }
 impl RouterObserverContext {
+    pub(super) fn spawn_terminal(
+        self,
+        profile_id: RuntimeProfileId,
+        generation: u64,
+        mut terminal: watch::Receiver<Option<bool>>,
+    ) -> tokio::task::JoinHandle<Result<()>> {
+        let Self { owner, serving, .. } = self;
+        tokio::spawn(async move {
+            let cleaned = terminal
+                .wait_for(|value| value.is_some())
+                .await
+                .ok()
+                .is_some_and(|value| *value == Some(true));
+            if cleaned {
+                if let Some(owner) = owner.upgrade() {
+                    serving
+                        .record_profile_unavailable_for_owned_generation(
+                            &profile_id,
+                            generation,
+                            &owner,
+                        )
+                        .await?;
+                }
+            }
+            Ok(())
+        })
+    }
+
     pub(super) fn spawn(
         self,
         spec: RuntimeProfileLaunchSpec,
         generation: u64,
         mut stop: watch::Receiver<bool>,
         mut terminal: watch::Receiver<Option<bool>>,
-    ) -> tokio::task::JoinHandle<()> {
+    ) -> tokio::task::JoinHandle<Result<()>> {
         tokio::spawn(async move {
             let mut worker = Observer::new(self, spec, generation);
             let mut panic = None;
@@ -52,9 +80,9 @@ impl RouterObserverContext {
                 .await
                 .ok()
                 .is_some_and(|value| *value == Some(true));
-            if cleaned {
+            let terminal_result = if cleaned {
                 if let Ok(owner) = worker.owner() {
-                    let _ = worker
+                    worker
                         .context
                         .serving
                         .record_profile_unavailable_for_owned_generation(
@@ -62,12 +90,18 @@ impl RouterObserverContext {
                             worker.generation,
                             &owner,
                         )
-                        .await;
+                        .await
+                        .map(|_| ())
+                } else {
+                    Ok(())
                 }
-            }
+            } else {
+                Ok(())
+            };
             if let Some(payload) = panic {
                 std::panic::resume_unwind(payload);
             }
+            terminal_result
         })
     }
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { VersionSelector } from '../VersionSelector';
 import { InstallDialog } from '../InstallDialog';
@@ -23,6 +23,9 @@ export function VersionManagementPanel({
   diskSpacePercent = 0,
 }: VersionManagementPanelProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshOnOpenPending, setRefreshOnOpenPending] = useState(false);
+  const refreshInFlight = useRef(false);
+  const refreshOnOpenStarted = useRef(false);
 
   const latestVersion = versions.availableVersions[0]?.tagName ?? null;
   const hasNewVersion = useMemo(() => {
@@ -30,14 +33,47 @@ export function VersionManagementPanel({
     return !versions.installedVersions.includes(latestVersion);
   }, [latestVersion, versions.installedVersions]);
 
-  const handleRefresh = async () => {
-    if (isRefreshing || versions.isLoading) return;
+  const refreshAvailableVersions = useCallback(async () => {
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
     setIsRefreshing(true);
     try {
       await versions.refreshAll(true);
+    } catch {
+      // refreshAll records and reports its own errors.
     } finally {
+      refreshInFlight.current = false;
       setIsRefreshing(false);
     }
+  }, [versions.refreshAll]);
+
+  useEffect(() => {
+    if (!showManager) {
+      refreshOnOpenStarted.current = false;
+      if (refreshOnOpenPending) setRefreshOnOpenPending(false);
+      return;
+    }
+    if (!refreshOnOpenPending || versions.isLoading || refreshOnOpenStarted.current) return;
+
+    refreshOnOpenStarted.current = true;
+    void (async () => {
+      try {
+        await refreshAvailableVersions();
+      } finally {
+        setRefreshOnOpenPending(false);
+      }
+    })();
+  }, [refreshAvailableVersions, refreshOnOpenPending, showManager, versions.isLoading]);
+
+  const handleRefresh = async () => {
+    if (isRefreshing || versions.isLoading) return;
+    await refreshAvailableVersions();
+  };
+
+  const handleOpenVersionManager = () => {
+    refreshOnOpenStarted.current = false;
+    setRefreshOnOpenPending(true);
+    onShowManager(true);
   };
 
   const handleMakeDefault = async (tag: string | null) => {
@@ -66,7 +102,7 @@ export function VersionManagementPanel({
             icon={<RefreshCw className={isRefreshing ? 'animate-spin' : ''} />}
             tooltip="Refresh"
             onClick={handleRefresh}
-            disabled={isRefreshing || versions.isLoading}
+            disabled={isRefreshing || refreshOnOpenPending || versions.isLoading}
             size="md"
           />
         </div>
@@ -76,7 +112,7 @@ export function VersionManagementPanel({
             onClose={() => onShowManager(false)}
             availableVersions={versions.availableVersions}
             installedVersions={versions.installedVersions}
-            isLoading={versions.isLoading}
+            isLoading={versions.isLoading || isRefreshing || refreshOnOpenPending}
             onInstallVersion={versions.installVersion}
             onCancelInstallation={versions.cancelInstallation}
             onRemoveVersion={versions.removeVersion}
@@ -103,7 +139,7 @@ export function VersionManagementPanel({
         isLoading={versions.isLoading}
         switchVersion={versions.switchVersion}
         openActiveInstall={versions.openActiveInstall}
-        onOpenVersionManager={() => onShowManager(true)}
+        onOpenVersionManager={handleOpenVersionManager}
         installNetworkStatus={versions.installNetworkStatus}
         installationProgress={versions.installationProgress}
         defaultVersion={versions.defaultVersion}

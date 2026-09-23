@@ -64,12 +64,13 @@ torch-server/.venv/bin/python torch-server/serve.py --host 127.0.0.1 --port 8400
 ```
 
 These commands are for direct development only. Managed installations use
-`runtime/requirements.lock`, which pins every dependency and artifact hash.
-The shared VersionManager discovers `torch-runtime-*` releases from the Pumas
-repository with `pumas-torch-runtime-linux-x86_64.tar.gz` and its `.sha256`
-companion. It validates the staged environment before publishing installed state.
-Source candidate `torch-runtime-0.1.6` supports Linux x86_64, CPython 3.12 and
-NVIDIA sm_120 only. It is not a published or activated default runtime.
+`runtime/requirements.lock`, which pins dependencies and artifact hashes. The
+shared VersionManager discovers upstream releases from `pytorch/pytorch`; it
+offers only tags with a qualified Pumas recipe. The current recipe maps upstream
+`v2.9.1` to Torch `2.9.1+cu130` and torchvision `0.24.1+cu130`, using their
+official hash-pinned wheels. The sidecar and lock are embedded in the Pumas app,
+so no Pumas-hosted Torch release bundle is required. The recipe supports Linux
+x86_64, CPython 3.12 and NVIDIA sm_120 only.
 
 Create candidate assets with:
 
@@ -77,12 +78,14 @@ Create candidate assets with:
 python3 scripts/package-torch-runtime.py --output /tmp/pumas-torch-assets
 ```
 
-The bundle contains the sidecar, license, recipe and lock; wheels are downloaded
-only during explicit installation. Model weights remain library-owned. Release
-qualification must pass before publishing these assets. There is currently no
-published Torch runtime release; see the [active plan](../docs/plans/torch-diffusion-serving/plan.md).
-Legacy PyTorch source installations are unregistered as incomplete without
-removing their files. Stop a running Torch process before changing its runtime.
+This script creates the local qualification archive used by earlier candidate
+tests; the shared manager no longer downloads that archive. Managed installation
+downloads the official pinned wheels and other hash-locked dependencies only
+after the user selects a supported upstream release. Model weights remain
+library-owned. Candidate `torch-runtime-0.1.6` remains unpublished and is not the
+default runtime. See the [active plan](../docs/plans/torch-diffusion-serving/plan.md).
+Existing installed `0.1.x` entries remain available. Stop a running Torch
+process before changing its runtime.
 
 ## Network Safety
 

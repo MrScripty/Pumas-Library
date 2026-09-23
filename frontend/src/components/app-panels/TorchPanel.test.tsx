@@ -18,7 +18,7 @@ vi.mock('./sections/RuntimeProfileSettingsSection', () => ({
 const oldTag = 'torch-runtime-0.1.0';
 const candidateTag = 'torch-runtime-0.2.0';
 
-const availableVersions: VersionRelease[] = [
+const releaseFixture: VersionRelease[] = [
   {
     tagName: candidateTag,
     name: 'Torch Runtime 0.2.0',
@@ -56,6 +56,7 @@ interface TorchPanelHarnessActions {
 function TorchPanelHarness({ actions }: { actions: TorchPanelHarnessActions }) {
   const [installedVersions, setInstalledVersions] = useState([oldTag]);
   const [activeVersion, setActiveVersion] = useState<string | null>(oldTag);
+  const [availableVersions, setAvailableVersions] = useState<VersionRelease[]>([]);
   const [showVersionManager, setShowVersionManager] = useState(false);
 
   const versions: AppVersionState = {
@@ -66,7 +67,10 @@ function TorchPanelHarness({ actions }: { actions: TorchPanelHarnessActions }) {
     activeVersion,
     availableVersions,
     defaultVersion: null,
-    refreshAll: actions.refreshAll,
+    refreshAll: async (forceRefresh) => {
+      await actions.refreshAll(forceRefresh);
+      setAvailableVersions(releaseFixture);
+    },
     installVersion: async (tag) => {
       const installed = await actions.installVersion(tag);
       if (installed) {
@@ -128,13 +132,16 @@ describe('TorchPanel shared version controls', () => {
 
     render(<TorchPanelHarness actions={actions} />);
 
-    // The selector's real manager control exposes the available Torch candidate.
-    fireEvent.click(screen.getByTitle(/New version available/));
+    // An installed version opens the manager before release discovery has run.
+    fireEvent.click(screen.getByTitle('Install new version'));
     expect(screen.getByText('1 installed')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: candidateTag })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: candidateTag })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-    await waitFor(() => expect(actions.refreshAll).toHaveBeenCalledWith(true));
+    await waitFor(() => {
+      expect(actions.refreshAll).toHaveBeenCalledWith(true);
+      expect(screen.getByRole('heading', { name: candidateTag })).toBeInTheDocument();
+    });
 
     const candidateRow = getVersionRow(candidateTag);
     fireEvent.click(within(candidateRow).getAllByRole('button')[0]!);

@@ -531,11 +531,12 @@ and checksum assets. It verifies Torch release filtering, installation and
 terminal progress cleanup for two versions, activation under the Torch-specific
 marker, unchanged llama marker and unset default, refusal to remove the active
 version, and removal of the inactive version. A TorchPanel integration fixture
-also exercises refresh, install, activation and removal through the shared
-version controls while confirming activation does not set a default. These
-fixtures establish local manager/UI behavior only; they do not establish public
-catalogue availability or usability of a published bundle. A1 remains pending
-until the qualified runtime is published and the normal UI path is checked.
+starts with no available releases, then has the shared refresh action populate
+the release fixture before exercising install, activation and removal; it also
+confirms activation does not set a default. These fixtures establish local
+manager/UI behavior only; they do not establish public catalogue availability
+or usability of a published bundle. A1 remains pending until the qualified
+runtime is published and the normal UI path is checked.
 
 A5 source review confirmed that the registered image route previously caught
 admission errors around both lease acquisition and adapter execution, so an
@@ -544,15 +545,16 @@ reported as 503, 400 or 409. The route now scopes those mappings to
 `image_lease` admission while retaining the lease around owned generation.
 Registered-route tests verify true admission errors retain their 503/400/409
 responses, the three admitted adapter errors produce sanitized 502 responses,
-synthetic CUDA OOM remains 507, and a blocked worker keeps the real device lock
-until it stops before a later request succeeds. Existing owner-cancellation
-coverage continues to verify that cancellation does not release the lease while
-the worker is active.
+synthetic CUDA OOM remains 507, and a delayed synthetic OOM keeps the real
+device lock while blocked, rejects a concurrent request as busy, returns 507
+only after worker termination, releases the lock, and permits a later explicit
+request. Existing owner-cancellation coverage continues to verify that
+cancellation does not release the lease while the worker is active.
 
 The new manager lifecycle test passed; `./scripts/rust/check.sh` passed with
 localhost socket permission after its sandboxed run failed on loopback binding.
 The frontend suite passed (118 files, 679 tests) and TypeScript checking passed.
-The image boundary module passed (7 tests) under a test-only direct executor
+The image boundary module passed (8 tests) under a test-only direct executor
 shutdown harness. The exact Python unittest command hangs in this host's Python
 3.12.3 `asyncio.run()` executor shutdown; a minimal `asyncio.to_thread` script
 reproduces that environment issue. Ruff check/format and `git diff --check`
@@ -565,5 +567,9 @@ generation 2. Its result still reports `cancelled`, no changed files,
 `worker_stop=unconfirmed`, an unknown native run with outstanding obligations,
 and three permission inputs with delivery unknown. `passeur_prepare` continues
 to report `PROJECT_NEEDS_RECONCILIATION`; coordination remains frozen. The
-stale permissions were not approved and no new Passeur task was accepted.
-Native collaboration agents performed the implementation and review.
+task worktree is clean at its recorded base commit and no matching Muse run
+process appears in the host process table, but these observations do not confirm
+native shutdown. Inspecting each old permission input returns `STALE_INPUT`,
+while the task snapshot still lists delivery unknown. The stale permissions
+were not approved and no new Passeur task was accepted. Native collaboration
+agents performed the implementation and review.

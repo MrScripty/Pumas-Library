@@ -292,6 +292,95 @@ class ImageProviderBoundaryTests(unittest.TestCase):
 
         asyncio.run(exercise_route())
 
+    def test_route_waits_for_blocked_worker_before_mapping_delayed_oom(self):
+        from diffusion import FLUX2_KLEIN
+        import torch
+
+        out_of_memory_error = getattr(
+            torch.cuda, "OutOfMemoryError", type("OutOfMemoryError", (Exception,), {})
+        )
+        started = threading.Event()
+        release = threading.Event()
+
+        class Adapter:
+            steps = 8
+            guidance = 0.0
+            memory_policy = "fixture"
+
+            def __init__(self):
+                self.calls = 0
+
+            def generate(self, _prompt, width, height, _seed, _cancel):
+                self.calls += 1
+                if self.calls == 1:
+                    started.set()
+                    release.wait(10)
+                    raise out_of_memory_error("private memory detail")
+                image = SimpleNamespace(size=(width, height))
+                image.save = lambda output, format="PNG": output.write(b"private-png")
+                return image
+
+        async def exercise_route():
+            app = serve.create_app()
+            manager = app.state.model_manager
+            adapter = Adapter()
+            manager.slots["fixture"] = ModelSlot(
+                slot_id="fixture",
+                model_name="img-model",
+                model_path="fixture",
+                device="cpu",
+                state=SlotState.READY,
+                model_type=FLUX2_KLEIN,
+                _loaded=LoadedModel(adapter, None, torch.device("cpu"), FLUX2_KLEIN),
+            )
+            endpoint = next(
+                route.endpoint for route in app.routes if route.path == "/api/images/generate"
+            )
+
+            async def is_disconnected():
+                return False
+
+            request = SimpleNamespace(
+                app=SimpleNamespace(state=SimpleNamespace(model_manager=manager)),
+                is_disconnected=is_disconnected,
+            )
+            payload = ImageRequest(
+                model_id="img-model", prompt="kingfisher", width=64, height=64, seed=3
+            )
+            task = asyncio.create_task(endpoint(payload, request))
+            delayed_oom = None
+            try:
+                self.assertTrue(await asyncio.to_thread(started.wait, 3))
+                self.assertTrue(manager._get_device_lock("cpu").locked())
+                self.assertFalse(task.done())
+                with self.assertRaises(HTTPException) as busy:
+                    await endpoint(payload, request)
+                self.assertEqual(busy.exception.status_code, 409)
+                self.assertEqual(busy.exception.detail["code"], "runtime_busy")
+                self.assertTrue(manager._get_device_lock("cpu").locked())
+                self.assertEqual(adapter.calls, 1)
+            finally:
+                release.set()
+                try:
+                    await asyncio.wait_for(task, 4)
+                except HTTPException as error:
+                    delayed_oom = error
+
+            self.assertIsNotNone(delayed_oom)
+            self.assertEqual(delayed_oom.status_code, 507)
+            self.assertEqual(delayed_oom.detail["code"], "out_of_memory")
+            self.assertNotIn("private", json.dumps(delayed_oom.detail))
+            self.assertFalse(manager._get_device_lock("cpu").locked())
+            self.assertEqual(adapter.calls, 1)
+
+            result = await endpoint(payload, request)
+            self.assertEqual(base64.b64decode(result["png_base64"]), b"private-png")
+            self.assertEqual(adapter.calls, 2)
+            self.assertFalse(manager._get_device_lock("cpu").locked())
+
+        with patch.object(torch.cuda, "OutOfMemoryError", out_of_memory_error, create=True):
+            asyncio.run(exercise_route())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -117,6 +117,34 @@ class ImageProviderBoundaryTests(unittest.TestCase):
         self.assertEqual(base64.b64decode(result["png_base64"]), b"private-png")
         self.assertEqual(result["seed"], 3)
 
+    def test_route_sanitizes_unexpected_lease_acquisition_failure(self):
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def failing_lease(_model_name):
+            raise RuntimeError("private lease failure")
+            yield  # pragma: no cover - required to define an async context manager
+
+        async def connected():
+            return False
+
+        request = SimpleNamespace(
+            app=SimpleNamespace(
+                state=SimpleNamespace(model_manager=SimpleNamespace(image_lease=failing_lease))
+            ),
+            is_disconnected=connected,
+        )
+        payload = ImageRequest(
+            model_id="img-model", prompt="kingfisher", width=64, height=64, seed=3
+        )
+
+        with self.assertRaises(HTTPException) as failed:
+            asyncio.run(generate_image(payload, request))
+
+        self.assertEqual(failed.exception.status_code, 502)
+        self.assertEqual(failed.exception.detail["code"], "backend_failure")
+        self.assertNotIn("private", json.dumps(failed.exception.detail))
+
     def test_route_maps_lease_states_and_releases_after_backend_failure(self):
         from diffusion import FLUX2_KLEIN
         import torch

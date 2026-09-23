@@ -120,12 +120,12 @@ function getVersionRow(tag: string): HTMLElement {
     if (node.querySelectorAll('button').length >= 2) return node;
     node = node.parentElement;
   }
-  throw new Error(`Could not find the version row for ${tag}`);
+  throw new TypeError(`Could not find the version row for ${tag}`);
 }
 
 function expectActiveVersionNotDefault(tag: string) {
   const triggerGroup = screen.getByRole('button', { name: tag }).parentElement;
-  if (!triggerGroup) throw new Error('Expected the version selector trigger group');
+  if (!triggerGroup) throw new TypeError('Expected the version selector trigger group');
   expect(within(triggerGroup).getByTitle('Click to set as default')).toBeInTheDocument();
 }
 
@@ -186,7 +186,9 @@ describe('TorchPanel shared version controls', () => {
     });
 
     const candidateRow = getVersionRow(candidateTag);
-    fireEvent.click(within(candidateRow).getAllByRole('button')[0]!);
+    const [installButton] = within(candidateRow).getAllByRole('button');
+    if (!installButton) throw new TypeError('Expected the candidate install button');
+    fireEvent.click(installButton);
     await waitFor(() => {
       expect(actions.installVersion).toHaveBeenCalledWith(candidateTag);
       expect(within(getVersionRow(candidateTag)).getByRole('button', { name: 'Ready' }))

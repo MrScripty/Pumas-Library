@@ -559,7 +559,8 @@ shutdown harness. The exact Python unittest command hangs in this host's Python
 3.12.3 `asyncio.run()` executor shutdown; a minimal `asyncio.to_thread` script
 reproduces that environment issue. Ruff check/format and `git diff --check`
 passed. Independent review found no blocking regression in the four-file code
-scope. Real GPU OOM recovery remains unverified.
+scope at this checkpoint. Real GPU OOM recovery was still unverified then; the
+later allocator recovery run is recorded below.
 
 For inherited Passeur task `e4323220-4f72-4b5e-9194-4e7c308abcc4`, the user
 confirmed attachment and the task is visible to this session at control
@@ -611,3 +612,25 @@ SHA-256 checked after the test; no runtime was published, tagged, or selected
 as the main default. This demonstrates an actual CUDA allocator OOM and
 post-OOM inference recovery, not a naturally induced high-resolution pipeline
 OOM. See [the A5 GPU report](reports/a5-gpu-oom-recovery.md).
+
+### Terminal observer error propagation (2026-09-22)
+
+A review of T20 found that both retained router-observer tasks discarded errors
+from the generation-guarded serving invalidation. The observer tasks now return
+`Result<()>`, and `drain_session` records returned failures and join failures in
+the existing observer-error state while completing worker and observer cleanup.
+Serving invalidation still goes through the current-generation fence; a stale
+observer remains a no-op, and an observer panic is rethrown after the terminal
+update attempt.
+
+Registry-poison regressions verify that terminal invalidation errors from both
+observer variants are observable, that draining records the session as failed,
+and that repeated draining retains the failure. The TorchServe natural-exit
+invalidation, replacement-generation rejection, observer join-failure, and
+already-stopped observer tests also passed. The six focused `pumas-library`
+tests, `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+`./scripts/rust/check.sh`, and `git diff --check` passed. The full gate needed a
+test-only lexical-scope correction after its first run identified
+`clippy::await_holding_lock`.
+These tests make a failed generation lookup visible; they do not repair a
+poisoned registry or bypass its ownership check to clear serving state.

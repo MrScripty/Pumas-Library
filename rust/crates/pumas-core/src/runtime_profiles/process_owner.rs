@@ -75,8 +75,8 @@ struct SessionState {
     launch: Option<std::result::Result<OwnedRuntimeProfileObservation, String>>,
     terminal: Option<std::result::Result<bool, String>>,
     worker: Option<JoinHandle<()>>,
-    observer: Option<JoinHandle<()>>,
-    terminal_observer: Option<JoinHandle<()>>,
+    observer: Option<JoinHandle<Result<()>>>,
+    terminal_observer: Option<JoinHandle<Result<()>>>,
     observer_error: Option<String>,
     joined: bool,
     // A failed cleanup never releases child custody or permits replacement.
@@ -572,7 +572,11 @@ async fn drain_session(session: &Session) -> Result<bool> {
             }
         };
         if let Some(observer) = observer {
-            if let Err(error) = observer.await {
+            let outcome = match observer.await {
+                Ok(result) => result.map_err(|error| error.to_string()),
+                Err(error) => Err(error.to_string()),
+            };
+            if let Err(error) = outcome {
                 let mut state = session
                     .state
                     .lock()
@@ -597,7 +601,11 @@ async fn drain_session(session: &Session) -> Result<bool> {
             }
         };
         if let Some(terminal_observer) = terminal_observer {
-            if let Err(error) = terminal_observer.await {
+            let outcome = match terminal_observer.await {
+                Ok(result) => result.map_err(|error| error.to_string()),
+                Err(error) => Err(error.to_string()),
+            };
+            if let Err(error) = outcome {
                 let mut state = session
                     .state
                     .lock()
@@ -1294,6 +1302,83 @@ mod tests {
             "TorchServe's serving row should be invalidated and publish an unload update after confirmed child cleanup"
         );
         assert!(after_cleanup.served_models.contains(&unrelated));
+    }
+
+    #[tokio::test]
+    async fn terminal_observer_update_error_survives_cleanup_and_repeated_drain() {
+        use crate::serving::ServingService;
+
+        let fixture = Fixture::new();
+        let (config, mut spec, guard) = fixture.launch("sleep 30 & wait");
+        spec.provider = RuntimeProviderId::Torch;
+        spec.provider_mode = RuntimeProviderMode::TorchServe;
+        spec.launch_strategy =
+            RuntimeProfileLaunchStrategy::BinaryProcess(RuntimeProfileBinaryLaunchKind::TorchServe);
+        let id = spec.profile_id.clone();
+        fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap();
+        let session = fixture.owner.registry.lock().unwrap().sessions[&id].clone();
+        session.stop.store(true, Ordering::Release);
+        session.observer_stop.send_replace(true);
+        tokio::time::timeout(Duration::from_secs(6), async {
+            while !session
+                .state
+                .lock()
+                .unwrap()
+                .worker
+                .as_ref()
+                .unwrap()
+                .is_finished()
+            {
+                tokio::time::sleep(OBSERVATION_INTERVAL).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(*session.observer_terminal.borrow(), Some(true));
+
+        let owner = fixture.owner.clone();
+        assert!(std::thread::spawn(move || {
+            let _lock = owner.registry.lock().unwrap();
+            panic!("poison registry for terminal observer");
+        })
+        .join()
+        .is_err());
+        let library = Arc::new(
+            crate::model_library::ModelLibrary::new(fixture.root.path().join("library"))
+                .await
+                .unwrap(),
+        );
+        let observer = super::super::router_observer::RouterObserverContext {
+            owner: Arc::downgrade(&fixture.owner),
+            library,
+            serving: Arc::new(ServingService::with_provider_registry(
+                crate::providers::ProviderRegistry::builtin(),
+            )),
+        };
+        session.state.lock().unwrap().terminal_observer = Some(observer.spawn_terminal(
+            id.clone(),
+            session.generation,
+            session.observer_terminal.subscribe(),
+        ));
+
+        let first = drain_session(&session).await.unwrap_err().to_string();
+        assert!(first.contains("Terminal observer failed: Runtime process registry poisoned"));
+        {
+            let state = session.state.lock().unwrap();
+            assert_eq!(state.status.state, RuntimeLifecycleState::Failed);
+            assert!(state.joined);
+            assert!(state.worker.is_none());
+            assert!(state.terminal_observer.is_none());
+            assert!(state.residual_child.is_none());
+        }
+        assert_eq!(
+            drain_session(&session).await.unwrap_err().to_string(),
+            first
+        );
     }
 
     #[tokio::test]

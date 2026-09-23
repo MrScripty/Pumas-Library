@@ -477,8 +477,44 @@ async fn already_stopped_observer_subscription_does_not_wait_for_another_change(
     tokio::time::timeout(Duration::from_secs(1), task)
         .await
         .unwrap()
+        .unwrap()
         .unwrap();
     fixture.owner.stop(&id).await.unwrap();
+}
+
+#[tokio::test]
+async fn router_terminal_update_error_is_returned() {
+    let fixture = Fixture::new();
+    let (serving, library, id, receipt) = start(&fixture).await;
+    let spec = fixture.owner.registry.lock().unwrap().sessions[&id]
+        .spec
+        .clone();
+    fixture.owner.stop(&id).await.unwrap();
+
+    let owner = fixture.owner.clone();
+    assert!(std::thread::spawn(move || {
+        let _lock = owner.registry.lock().unwrap();
+        panic!("poison registry for router terminal update");
+    })
+    .join()
+    .is_err());
+    let (_stop, stop) = tokio::sync::watch::channel(true);
+    let (_terminal, terminal) = tokio::sync::watch::channel(Some(true));
+    let task = RouterObserverContext {
+        owner: Arc::downgrade(&fixture.owner),
+        library,
+        serving,
+    }
+    .spawn(spec, receipt.generation, stop, terminal);
+
+    let error = tokio::time::timeout(Duration::from_secs(1), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("Runtime process registry poisoned"));
 }
 
 #[tokio::test]

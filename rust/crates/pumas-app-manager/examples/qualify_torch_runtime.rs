@@ -1,9 +1,9 @@
-//! Qualify unpublished release assets using the production installation strategy.
-//! This does not establish GitHub discovery or desktop acceptance.
+//! Qualify the supported upstream PyTorch recipe in an empty isolated root.
+//! This exercises the production installer without publishing a release.
 use pumas_app_manager::version_manager::{InstallationProgressTracker, VersionInstaller};
 use pumas_library::config::AppId;
 use pumas_library::metadata::MetadataManager;
-use pumas_library::network::{GitHubAsset, GitHubRelease};
+use pumas_library::network::GitHubRelease;
 use std::path::PathBuf;
 use std::sync::{atomic::AtomicBool, Arc};
 use tokio::sync::{mpsc, RwLock};
@@ -11,12 +11,18 @@ use tokio::sync::{mpsc, RwLock};
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> pumas_library::Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    if !(3..=4).contains(&args.len()) {
+    if args.len() != 2 {
         return Err(pumas_library::PumasError::Other(
-            "Usage: qualify_torch_runtime ISOLATED_ROOT ASSET_BASE_URL [RECIPE_TAG]".to_string(),
+            "Usage: qualify_torch_runtime EMPTY_ISOLATED_ROOT (installs upstream v2.9.1 recipe)"
+                .to_string(),
         ));
     }
     let root = PathBuf::from(&args[1]);
+    if root.exists() && std::fs::read_dir(&root)?.next().is_some() {
+        return Err(pumas_library::PumasError::Other(
+            "Qualification root must be empty to protect existing runtimes".to_string(),
+        ));
+    }
     std::fs::create_dir_all(&root)?;
     let root = root.canonicalize()?;
     let metadata = Arc::new(MetadataManager::new(&root));
@@ -32,29 +38,15 @@ async fn main() -> pumas_library::Result<()> {
         Arc::new(AtomicBool::new(false)),
     );
     let release = GitHubRelease {
-        tag_name: args
-            .get(3)
-            .cloned()
-            .unwrap_or_else(|| "torch-runtime-0.1.0".to_string()),
-        name: "Unpublished runtime qualification".to_string(),
+        tag_name: "v2.9.1".to_string(),
+        name: "PyTorch v2.9.1 upstream recipe qualification".to_string(),
         published_at: chrono::Utc::now().to_rfc3339(),
         body: None,
         tarball_url: None,
         zipball_url: None,
         prerelease: false,
-        assets: [
-            "pumas-torch-runtime-linux-x86_64.tar.gz",
-            "pumas-torch-runtime-linux-x86_64.tar.gz.sha256",
-        ]
-        .into_iter()
-        .map(|name| GitHubAsset {
-            name: name.to_string(),
-            size: 0,
-            download_url: format!("{}/{name}", args[2].trim_end_matches('/')),
-            content_type: None,
-        })
-        .collect(),
-        html_url: args[2].clone(),
+        assets: vec![],
+        html_url: "https://github.com/pytorch/pytorch/releases/tag/v2.9.1".to_string(),
         total_size: None,
         archive_size: None,
         dependencies_size: None,

@@ -106,6 +106,11 @@ pub struct VersionManager {
     progress_tracker: Arc<RwLock<InstallationProgressTracker>>,
     /// Cancellation flag for installations.
     cancel_flag: Arc<AtomicBool>,
+    torch_control: Arc<installer::TorchInstallControl>,
+    #[cfg(test)]
+    torch_publication_pause: Option<Arc<installer::TorchPublicationPause>>,
+    #[cfg(test)]
+    torch_stage_override: Option<installer::TorchStageOverride>,
     /// Lock for serializing installations.
     install_lock: Arc<Mutex<()>>,
     /// Currently installing tag (exclusive access only).
@@ -213,6 +218,11 @@ impl VersionManager {
             state,
             progress_tracker,
             cancel_flag: Arc::new(AtomicBool::new(false)),
+            torch_control: Arc::new(installer::TorchInstallControl::new()),
+            #[cfg(test)]
+            torch_publication_pause: None,
+            #[cfg(test)]
+            torch_stage_override: None,
             install_lock: Arc::new(Mutex::new(())),
             installing_tag: Arc::new(Mutex::new(None)),
         })
@@ -366,6 +376,12 @@ impl VersionManager {
             .await?;
         if self.app_id == AppId::Torch {
             releases.retain(installer::is_torch_runtime_release);
+            for release in &mut releases {
+                // GitHub's archive is PyTorch source, not the managed wheel recipe.
+                release.archive_size = None;
+                release.total_size = None;
+                release.dependencies_size = None;
+            }
         }
         Ok(releases)
     }
@@ -380,9 +396,18 @@ impl VersionManager {
             .github_client
             .get_release_by_tag(self.app_id.github_repo(), tag, force_refresh)
             .await?;
-        Ok(release.filter(|release| {
-            self.app_id != AppId::Torch || installer::is_torch_runtime_release(release)
-        }))
+        Ok(release
+            .filter(|release| {
+                self.app_id != AppId::Torch || installer::is_torch_runtime_release(release)
+            })
+            .map(|mut release| {
+                if self.app_id == AppId::Torch {
+                    release.archive_size = None;
+                    release.total_size = None;
+                    release.dependencies_size = None;
+                }
+                release
+            }))
     }
 
     /// Get cache status for GitHub releases.
@@ -414,7 +439,14 @@ impl VersionManager {
 
     /// Cancel the current installation.
     pub async fn cancel_installation(&self) -> Result<bool> {
-        if !self.is_installing().await {
+        // Keep the tag lock until both the control transition and progress
+        // update are recorded, so this request cannot spill into a new attempt.
+        let installing = self.installing_tag.lock().await;
+        if installing.is_none() {
+            return Ok(false);
+        }
+
+        if self.app_id == AppId::Torch && !self.torch_control.request_cancel() {
             return Ok(false);
         }
 
@@ -426,6 +458,8 @@ impl VersionManager {
             let mut tracker = self.progress_tracker.write().await;
             tracker.set_error("Installation cancelled by user");
         }
+
+        drop(installing);
 
         Ok(true)
     }
@@ -458,6 +492,10 @@ impl VersionManager {
         // Reset cancellation flag
         self.cancel_flag.store(false, Ordering::SeqCst);
 
+        if self.app_id == AppId::Torch {
+            self.torch_control.start();
+        }
+
         // Set installing tag
         {
             let mut installing = self.installing_tag.lock().await;
@@ -474,17 +512,36 @@ impl VersionManager {
             self.metadata_manager.clone(),
             self.progress_tracker.clone(),
             self.cancel_flag.clone(),
-        );
+        )
+        .with_torch_control(self.torch_control.clone());
+        #[cfg(test)]
+        let installer = if let Some(pause) = &self.torch_publication_pause {
+            installer.with_torch_publication_pause(pause.clone())
+        } else {
+            installer
+        };
+        #[cfg(test)]
+        let installer = if let Some(stage) = &self.torch_stage_override {
+            installer.with_torch_stage_override(stage.clone())
+        } else {
+            installer
+        };
 
         // Spawn installation task
         let tag = tag.to_string();
         let state = self.state.clone();
         let installing_tag = self.installing_tag.clone();
         let progress_tracker = self.progress_tracker.clone();
+        let torch_control = self.torch_control.clone();
+        let app_id = self.app_id;
 
         tokio::spawn(async move {
             let _install_guard = install_guard;
             let result = installer.install_version(&tag, &release, tx.clone()).await;
+
+            if app_id == AppId::Torch {
+                torch_control.finish();
+            }
 
             // Clear installing tag
             {
@@ -519,6 +576,24 @@ impl VersionManager {
         });
 
         Ok(rx)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_torch_publication_pause(
+        mut self,
+        pause: Arc<installer::TorchPublicationPause>,
+    ) -> Self {
+        self.torch_publication_pause = Some(pause);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_torch_stage_override<F>(mut self, stage: F) -> Self
+    where
+        F: Fn(&Path) -> Result<PathBuf> + Send + Sync + 'static,
+    {
+        self.torch_stage_override = Some(Arc::new(stage));
+        self
     }
 
     async fn resolve_installable_release(
@@ -742,131 +817,7 @@ pub struct LaunchResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pumas_library::network::{GitHubAsset, GitHubRelease, ReleasesCache};
-    use sha2::{Digest, Sha256};
     use tempfile::TempDir;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-    const TORCH_ARCHIVE_NAME: &str = "pumas-torch-runtime-linux-x86_64.tar.gz";
-    const TORCH_CHECKSUM_NAME: &str = "pumas-torch-runtime-linux-x86_64.tar.gz.sha256";
-
-    fn torch_bundle(tag: &str) -> Vec<u8> {
-        let recipe = format!(
-            r#"{{"recipe_id":"{tag}","protocol":3,"capabilities":["image_generation"],"python":"3.12","platform":"linux-x86_64"}}"#
-        );
-        let mut archive = tar::Builder::new(flate2::write::GzEncoder::new(
-            Vec::new(),
-            flate2::Compression::default(),
-        ));
-        for (name, contents) in [
-            ("runtime.json", recipe.as_str()),
-            ("serve.py", ""),
-            ("requirements.txt", "--no-index\n"),
-            ("validate_runtime.py", ""),
-        ] {
-            let mut header = tar::Header::new_gnu();
-            header.set_size(contents.len() as u64);
-            header.set_mode(0o644);
-            header.set_cksum();
-            archive
-                .append_data(&mut header, name, contents.as_bytes())
-                .unwrap();
-        }
-        archive.into_inner().unwrap().finish().unwrap()
-    }
-
-    fn torch_release(tag: &str, base_url: &str, archive: &[u8]) -> GitHubRelease {
-        GitHubRelease {
-            tag_name: tag.to_string(),
-            name: tag.to_string(),
-            published_at: "2026-01-01T00:00:00Z".to_string(),
-            body: None,
-            tarball_url: None,
-            zipball_url: None,
-            prerelease: false,
-            assets: [TORCH_ARCHIVE_NAME, TORCH_CHECKSUM_NAME]
-                .into_iter()
-                .map(|name| GitHubAsset {
-                    name: name.to_string(),
-                    size: if name == TORCH_ARCHIVE_NAME {
-                        archive.len() as u64
-                    } else {
-                        64
-                    },
-                    download_url: format!("{base_url}/{tag}/{name}"),
-                    content_type: None,
-                })
-                .collect(),
-            html_url: format!("{base_url}/{tag}"),
-            total_size: None,
-            archive_size: None,
-            dependencies_size: None,
-        }
-    }
-
-    async fn serve_torch_assets(
-        assets: std::collections::HashMap<String, Vec<u8>>,
-        request_count: usize,
-    ) -> (String, tokio::task::JoinHandle<()>) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let base_url = format!("http://{}", listener.local_addr().unwrap());
-        let server = tokio::spawn(async move {
-            for _ in 0..request_count {
-                let (mut stream, _) =
-                    tokio::time::timeout(Duration::from_secs(10), listener.accept())
-                        .await
-                        .expect("timed out waiting for a local runtime asset request")
-                        .unwrap();
-                let mut request = Vec::new();
-                tokio::time::timeout(Duration::from_secs(10), async {
-                    let mut buffer = [0; 1024];
-                    while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
-                        let count = stream.read(&mut buffer).await.unwrap();
-                        assert_ne!(count, 0, "fixture request ended before headers");
-                        request.extend_from_slice(&buffer[..count]);
-                        assert!(request.len() <= 8192, "fixture request headers too large");
-                    }
-                })
-                .await
-                .expect("timed out reading local runtime asset request");
-                let request = String::from_utf8(request).unwrap();
-                let path = request
-                    .lines()
-                    .next()
-                    .and_then(|line| line.split_whitespace().nth(1))
-                    .expect("fixture request has a request path");
-                let body = assets
-                    .get(path)
-                    .unwrap_or_else(|| panic!("unexpected local asset request: {path}"));
-                let header = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                    body.len()
-                );
-                stream.write_all(header.as_bytes()).await.unwrap();
-                stream.write_all(body).await.unwrap();
-            }
-        });
-        (base_url, server)
-    }
-
-    async fn install_and_drain(manager: &VersionManager, tag: &str) {
-        let mut progress = manager.install_version(tag).await.unwrap();
-        let terminal = tokio::time::timeout(Duration::from_secs(60), async {
-            while let Some(update) = progress.recv().await {
-                match update {
-                    ProgressUpdate::Completed { success } => return success,
-                    ProgressUpdate::Error { message } => panic!("install {tag} failed: {message}"),
-                    _ => {}
-                }
-            }
-            panic!("install {tag} progress channel closed before completion");
-        })
-        .await
-        .unwrap_or_else(|_| panic!("install {tag} did not reach terminal progress"));
-        assert!(terminal, "install {tag} completed unsuccessfully");
-        assert!(!manager.is_installing().await);
-        assert!(manager.get_installing_tag().await.is_none());
-    }
 
     async fn create_test_manager() -> (VersionManager, TempDir) {
         let temp_dir = TempDir::new().unwrap();
@@ -897,121 +848,6 @@ mod tests {
         ));
         assert!(!manager.is_installing().await);
         assert!(manager.get_installation_progress().await.is_none());
-    }
-
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    #[tokio::test]
-    async fn torch_runtime_update_lifecycle_uses_cached_releases_and_scoped_active_marker() {
-        let root = TempDir::new().unwrap();
-        let llama_marker = root.path().join(".active-version");
-        std::fs::write(&llama_marker, "llama-cpp-fixture\n").unwrap();
-
-        let older_tag = "torch-runtime-0.1.0";
-        let newer_tag = "torch-runtime-0.2.0";
-        let older_archive = torch_bundle(older_tag);
-        let newer_archive = torch_bundle(newer_tag);
-        let older_checksum = format!(
-            "{:x}  {TORCH_ARCHIVE_NAME}\n",
-            Sha256::digest(&older_archive)
-        );
-        let newer_checksum = format!(
-            "{:x}  {TORCH_ARCHIVE_NAME}\n",
-            Sha256::digest(&newer_archive)
-        );
-        let mut assets = std::collections::HashMap::new();
-        for (tag, archive, checksum) in [
-            (
-                older_tag,
-                older_archive.as_slice(),
-                older_checksum.as_bytes(),
-            ),
-            (
-                newer_tag,
-                newer_archive.as_slice(),
-                newer_checksum.as_bytes(),
-            ),
-        ] {
-            assets.insert(format!("/{tag}/{TORCH_ARCHIVE_NAME}"), archive.to_vec());
-            assets.insert(format!("/{tag}/{TORCH_CHECKSUM_NAME}"), checksum.to_vec());
-        }
-        let (base_url, server) = serve_torch_assets(assets, 4).await;
-        let releases = vec![
-            torch_release(older_tag, &base_url, &older_archive),
-            torch_release(newer_tag, &base_url, &newer_archive),
-            torch_release("legacy-pytorch-9.9.0", &base_url, &older_archive),
-        ];
-        let cache = ReleasesCache::new(
-            root.path().join("launcher-data/cache"),
-            Duration::from_secs(3600),
-        );
-        cache
-            .set_disk(AppId::Torch.github_repo(), &releases)
-            .unwrap();
-
-        let manager = VersionManager::new(root.path(), AppId::Torch)
-            .await
-            .unwrap();
-        let discovered = manager.get_available_releases(false).await.unwrap();
-        assert_eq!(
-            discovered
-                .iter()
-                .map(|release| release.tag_name.as_str())
-                .collect::<Vec<_>>(),
-            vec![older_tag, newer_tag]
-        );
-        assert_eq!(manager.get_active_version().await.unwrap(), None);
-        assert_eq!(manager.get_default_version().await.unwrap(), None);
-        assert!(!manager.active_version_file().exists());
-
-        for tag in [older_tag, newer_tag] {
-            install_and_drain(&manager, tag).await;
-            let runtime = manager.version_path(tag);
-            assert!(runtime.join("runtime.json").is_file());
-            assert!(runtime.join("venv/bin/python").is_file());
-        }
-        server.await.unwrap();
-
-        let installed = manager.get_installed_versions().await.unwrap();
-        assert_eq!(installed.len(), 2);
-        assert!(installed.iter().any(|tag| tag == older_tag));
-        assert!(installed.iter().any(|tag| tag == newer_tag));
-        assert_eq!(manager.get_default_version().await.unwrap(), None);
-
-        assert!(manager.set_active_version(newer_tag).await.unwrap());
-        assert_eq!(
-            manager.get_active_version().await.unwrap().as_deref(),
-            Some(newer_tag)
-        );
-        assert_eq!(
-            std::fs::read_to_string(manager.active_version_file()).unwrap(),
-            newer_tag
-        );
-        assert_eq!(
-            std::fs::read_to_string(&llama_marker).unwrap(),
-            "llama-cpp-fixture\n"
-        );
-
-        let active_remove = manager.remove_version(newer_tag).await.unwrap_err();
-        assert!(active_remove
-            .to_string()
-            .contains("Cannot remove the currently active version"));
-        assert!(manager.version_path(newer_tag).exists());
-        assert!(manager.remove_version(older_tag).await.unwrap());
-        assert_eq!(
-            manager.get_installed_versions().await.unwrap(),
-            vec![newer_tag.to_string()]
-        );
-        assert!(!manager.version_path(older_tag).exists());
-        assert!(manager.version_path(newer_tag).exists());
-        assert_eq!(
-            manager.get_active_version().await.unwrap().as_deref(),
-            Some(newer_tag)
-        );
-        assert_eq!(manager.get_default_version().await.unwrap(), None);
-        assert_eq!(
-            std::fs::read_to_string(&llama_marker).unwrap(),
-            "llama-cpp-fixture\n"
-        );
     }
 
     #[tokio::test]

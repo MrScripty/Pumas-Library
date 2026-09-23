@@ -180,18 +180,19 @@ Finalize and document this bounded contract in M2 before integrating Tuldok:
 
 ## Milestones
 
-M1/M2/M5 remain `Active` for distribution and remaining failure acceptance.
-Original M3 and M4 are `Completed` within their recorded evidence; `M3-TIPC`
-is `Completed` with its required-real gate passed. M1 publication acceptance is
-deferred until M2 supplies the final sidecar payload: publishing the control-only
-candidate first would require an immediate second publication. Source work may
-continue during package qualification; real model loading still requires a healthy
-qualified runtime. A1 remains mandatory for final acceptance. M3-TIPC source
-work may use the tested M2 contract while large assets download; no fixture or
-source completion satisfies the required real-image gates. M4 source preparation
-may proceed while the large Nunchaku bundle transfers: a header-only strict layout check now passes
+M1 remains `Active` for packaged-app discovery and fresh shared-UI installation
+acceptance; M2/M5 remain `Active` for their remaining acceptance gates. No
+Pumas-hosted Torch runtime release is required. Original M3 and M4 are
+`Completed` within their recorded evidence; `M3-TIPC` is `Completed` with its
+required-real gate passed. Source work may continue during package
+qualification; real model loading still requires a healthy qualified runtime.
+A1 remains mandatory for final acceptance. M3-TIPC source work may use the
+tested M2 contract while large assets download; no fixture or source completion
+satisfies the required real-image gates. M4 source preparation may proceed while
+the large Nunchaku bundle transfers: a header-only strict layout check now passes
 against the installed Diffusers architecture. Nunchaku remains first for GPU,
-gateway and browser acceptance; FLUX asset transfers must not delay its acquisition.
+gateway and browser acceptance; FLUX asset transfers must not delay its
+acquisition.
 Each milestone
 updates this directory's ledger, issues and evidence reports. Narrow write sets
 against the live checkout before edits; expand the plan for new semantic owners.
@@ -211,19 +212,21 @@ for existing shared control integration.
 
 **Tasks:** Resolve exact supported Python/Torch/CUDA/Diffusers/Nunchaku artifacts
 from primary documentation and verify on the GPU. Define a pinned recipe with
-artifact integrity and sidecar protocol identity. Select a concrete release
-source for recipe/sidecar discovery without repointing to raw PyTorch sources.
-Extend shared release resolution only where required. Stage isolated environments,
-validate imports/device support and health, publish atomically through existing
-state, preserve rollback, and refuse deletion/replacement of an active environment.
-Handle legacy invalid installs explicitly without deleting user assets. Exercise
-normal UI install/activate/remove and install failure/cancellation/restart recovery.
+artifact integrity and sidecar protocol identity. Discover official release tags
+from `pytorch/pytorch`, but expose only tags mapped to a qualified app recipe.
+Embed the sidecar and lock with the Pumas app and install Torch from official
+hash-pinned wheels. Stage isolated environments, validate imports/device support
+and health, publish atomically through existing state, preserve rollback, and
+refuse deletion/replacement of an active environment. Handle legacy installs
+without deleting user assets. Exercise normal UI install/activate/remove and
+install failure/cancellation/restart recovery.
 
 **Gate:** Healthy real sidecar and existing llama.cpp installer checks before model
-loading. A1 shared UI/distribution acceptance remains required before final
-acceptance, after the complete adapter bundle is qualified. Record exact
-dependencies and release-source choice in `reports/runtime.md`.
-**Re-plan:** No compatible supported wheel combination or no distributable runtime source.
+loading. A1 still requires packaged-app discovery and installation acceptance for
+the supported upstream release. Record exact dependencies, supported tags and
+official wheel sources in `reports/runtime.md`.
+**Re-plan:** No compatible supported official wheel combination or no distributable
+sidecar/recipe path.
 
 ### M2 — Nunchaku prompt-to-image through Pumas
 
@@ -375,11 +378,12 @@ or identity and rerun only the affected evidence.
 
 M1 source implementation, exact-candidate package qualification, GPU
 cancellation/reuse, and browser acceptance are complete for TIPC-04, TIPC-09,
-and TIPC-10.
-The selected Pumas
-release source has no published Torch runtime bundle (T7), preventing real shared
-UI discovery acceptance until qualification and publication. Both complete
-pipelines now generate through Tuldok. A5 acceptance passed, including a real
+and TIPC-10. The earlier assumption that Torch discovery required a Pumas-hosted
+runtime bundle was incorrect. The manager now targets official PyTorch releases
+and maps only the qualified `v2.9.1` tag to an embedded, hash-locked recipe.
+Packaged-app discovery and fresh shared-UI installation acceptance remain to be
+verified. Both complete pipelines now generate through Tuldok. A5 acceptance
+passed, including a real
 CUDA allocator OOM returning sanitized HTTP 507; follow-up inference succeeded
 with the same loaded model, and teardown succeeded. This does not verify a
 naturally induced high-resolution pipeline OOM. See [A5 GPU recovery evidence](reports/a5-gpu-oom-recovery.md),

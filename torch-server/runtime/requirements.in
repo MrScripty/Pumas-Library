@@ -1,7 +1,7 @@
 # Linux x86_64 / CPython 3.12; refresh the hash lock only during recipe qualification.
 --extra-index-url https://download.pytorch.org/whl/cu130
-torch==2.9.1+cu130
-torchvision==0.24.1+cu130
+torch @ https://download-r2.pytorch.org/whl/cu130/torch-2.9.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl#sha256=e70e1b18881e6b3c1ce402d0a989da39f956a3a057526e03c354df23d704ce9b
+torchvision @ https://download-r2.pytorch.org/whl/cu130/torchvision-0.24.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl#sha256=6939dd403cc28ab0a46f53e6c86e2e852cf65771c1b0ddd09c44c541a1cdbad9
 diffusers==0.37.0
 transformers==4.57.6
 accelerate==1.12.0

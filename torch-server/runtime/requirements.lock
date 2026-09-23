@@ -1095,51 +1095,12 @@ tokenizers==0.22.2 \
     --hash=sha256:e10bf9113d209be7cd046d40fbabbaf3278ff6d18eb4da4c500443185dc1896c \
     --hash=sha256:f01a9c019878532f98927d2bacb79bbb404b43d3437455522a00a30718cdedb5
     # via transformers
-torch==2.9.1+cu130 \
-    --hash=sha256:32b47b951a9f4e8dc7e132bc2e2f60ac6dd236c5786c07320185bc5062ce5b92 \
-    --hash=sha256:3951834ec2f6daf67e33c940a341dcde7173629202b7e72f247f42621ce088bc \
-    --hash=sha256:3a86534a97179758a1a10eb0ca3197bb484a3c4f865e89702c47300af440ba85 \
-    --hash=sha256:4444e1e23b083e3dc0591e53d3a3f7ba45500a6e24071ffc8df2dc319cbd6302 \
-    --hash=sha256:47cae56331fdec7f7082aad967b25868cc5f94b203fc273e40346a852aa009dd \
-    --hash=sha256:5270e343fc4b1d21308a30656ea922a23d85f3afbf12abd2481672fa94953fd6 \
-    --hash=sha256:542907f2679e38956d0bbdbdc279b482974609d45603cd27547ee696250d2ff0 \
-    --hash=sha256:59a98c01784f7b795ac3532513199ac54e3464ccc0f1dda44c940cc0afb426f8 \
-    --hash=sha256:59c74f9d2b49778b146f23bcfebc35f051d64f10ff0dbdfd22387a7bd1d9ed71 \
-    --hash=sha256:6e7f84cb10c7e7d9f862c318f056d64840544ab4f0bcbf8cf7ed6047fe04051f \
-    --hash=sha256:8db2814e63f2b365bda88526587ca75a6083a0b957a24b2b0d45ddc5ee350176 \
-    --hash=sha256:a4dd4fd6ee07f15e825348608aba5a2815674624d450af4a413f928b0d80fb4d \
-    --hash=sha256:a7b6c5c619d0ecf0613668d54aaea4d9fea0ef72bcd325b13e1ea64a43bf6775 \
-    --hash=sha256:a80fe3b0467b6986741f28e88fcff0054a6a806616946f28f5f601bd95632ba0 \
-    --hash=sha256:bdec3d5e26a472d292ec48d9d56e3feda86f3e60744cb49c92603502ba34d331 \
-    --hash=sha256:c0bb31481c3f505cb5baa630f2b975f07f77be557bbafe5cfc695ac911ea325c \
-    --hash=sha256:cd3232a562ad2a2699d48130255e1b24c07dfe694a40dcd24fad683c752de121 \
-    --hash=sha256:e70e1b18881e6b3c1ce402d0a989da39f956a3a057526e03c354df23d704ce9b \
-    --hash=sha256:f40778951ca1533dc634b3842392641fa0b641181ff2f71d62728ef33cc36a5c \
-    --hash=sha256:f760a8ae4a6cff10f29db09e4ab372e4b8d1f704daf07b4ac39f6f590decc05c \
-    --hash=sha256:fd6c7d297e21758a7fa07624f2b5bb15607ee3b1dcc52519e8e796c6d4fcf960
-    # via
-    #   -r torch-server/runtime/requirements.in
-    #   accelerate
-    #   peft
-    #   torchvision
-torchvision==0.24.1+cu130 \
-    --hash=sha256:1cac548fc20d6bd1da437f1bf586bbf9159ca3225222bacaa79b8a672197a535 \
-    --hash=sha256:461a5f5fdd4b2e9adf972bd4f2e2bd96299fac64b524542c3805bad898438416 \
-    --hash=sha256:6939dd403cc28ab0a46f53e6c86e2e852cf65771c1b0ddd09c44c541a1cdbad9 \
-    --hash=sha256:85c4606ff11773627d325f812628c4ea2d9a83b6c8417a344fdc16305ec0a454 \
-    --hash=sha256:878ce9b16d2c8797cb846709d31c270e9b985bd7cc59e8c8e5bbb0ed372b31c7 \
-    --hash=sha256:8dbd486b3e73bb21df3734bf06e03664bdbc015c3d97b27ddf17eb7fb99c529f \
-    --hash=sha256:ae9ca2c3e6a517a01625404e72f485d0205463cb7c14f4f1dca8f5f368401be4 \
-    --hash=sha256:b0cc84c57c1fd54644698a70a74d1ea1eddfa44ee2df3354b7bb2c619a5d2923 \
-    --hash=sha256:b90101f5ec2125d5bb8c34a61928572ea288cbd918526e1b02564d4c2b8c42e3 \
-    --hash=sha256:d31ceaded0d9b737471fa680ccd9e1acb6d5f0f70f03ef3a8d786a99c79da7cf \
-    --hash=sha256:d688426d623b8ba763087726faf5b34b1fe404f44741656978d855403dbc7444 \
-    --hash=sha256:e342aa662dbd4dcb43a01e697e03f61f615fc34011f13f8c9bfcd1527f8a40c5 \
-    --hash=sha256:f564b9fdbc336ac187780931331fb4253f8511deae914dde12dca5bf17b3045f \
-    --hash=sha256:f6e7a6cb4af75dc378fceba8ef78697b6fd8f90feab302790f6755155d0ab7df
-    # via
-    #   -r torch-server/runtime/requirements.in
-    #   nunchaku
+torch @ https://download-r2.pytorch.org/whl/cu130/torch-2.9.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl \
+    --hash=sha256:e70e1b18881e6b3c1ce402d0a989da39f956a3a057526e03c354df23d704ce9b
+    # qualified Linux x86_64 / CPython 3.12 official PyTorch wheel
+torchvision @ https://download-r2.pytorch.org/whl/cu130/torchvision-0.24.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl \
+    --hash=sha256:6939dd403cc28ab0a46f53e6c86e2e852cf65771c1b0ddd09c44c541a1cdbad9
+    # qualified Linux x86_64 / CPython 3.12 official PyTorch wheel
 tqdm==4.70.1 \
     --hash=sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73 \
     --hash=sha256:cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4

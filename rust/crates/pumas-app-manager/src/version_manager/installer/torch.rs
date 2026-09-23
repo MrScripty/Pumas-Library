@@ -1,20 +1,181 @@
-//! Managed Torch bundle installation; lifecycle and state remain in VersionManager.
+//! Managed upstream PyTorch installation; lifecycle and state remain in VersionManager.
 
 use super::*;
 use crate::torch_client::{SUPPORTED_TORCH_PROTOCOL, TORCH_IMAGE_GENERATION_CAPABILITY};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 
-const ARCHIVE: &str = "pumas-torch-runtime-linux-x86_64.tar.gz";
-const CHECKSUM: &str = "pumas-torch-runtime-linux-x86_64.tar.gz.sha256";
+#[cfg(test)]
+pub(crate) struct TorchPublicationPause {
+    pub(crate) reached: tokio::sync::Notify,
+    pub(crate) resume: tokio::sync::Semaphore,
+}
+
+#[cfg(test)]
+impl TorchPublicationPause {
+    pub(crate) fn new() -> Self {
+        Self {
+            reached: tokio::sync::Notify::new(),
+            resume: tokio::sync::Semaphore::new(0),
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "torch_upstream_contract_tests.rs"]
+mod torch_upstream_contract_tests;
+
+pub(crate) struct TorchRuntimeRecipe {
+    pub(crate) release_tag: &'static str,
+    pub(crate) recipe_id: &'static str,
+    pub(crate) torch_version: &'static str,
+    pub(crate) torch_wheel_url: &'static str,
+    pub(crate) torch_wheel_sha256: &'static str,
+    pub(crate) torchvision_wheel_url: &'static str,
+    pub(crate) torchvision_wheel_sha256: &'static str,
+}
+
+const TORCH_291: TorchRuntimeRecipe = TorchRuntimeRecipe {
+    release_tag: "v2.9.1",
+    recipe_id: "torch-upstream-2.9.1-r1",
+    torch_version: "2.9.1+cu130",
+    torch_wheel_url: "https://download-r2.pytorch.org/whl/cu130/torch-2.9.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl",
+    torch_wheel_sha256: "e70e1b18881e6b3c1ce402d0a989da39f956a3a057526e03c354df23d704ce9b",
+    torchvision_wheel_url: "https://download-r2.pytorch.org/whl/cu130/torchvision-0.24.1%2Bcu130-cp312-cp312-manylinux_2_28_x86_64.whl",
+    torchvision_wheel_sha256: "6939dd403cc28ab0a46f53e6c86e2e852cf65771c1b0ddd09c44c541a1cdbad9",
+};
+
+pub(crate) fn torch_recipe_for_tag(tag: &str) -> Option<&'static TorchRuntimeRecipe> {
+    match tag {
+        "v2.9.1" => Some(&TORCH_291),
+        _ => None,
+    }
+}
 
 pub(crate) fn is_torch_runtime_release(release: &GitHubRelease) -> bool {
-    release.tag_name.starts_with("torch-runtime-")
-        && release.assets.iter().any(|asset| asset.name == ARCHIVE)
-        && release.assets.iter().any(|asset| asset.name == CHECKSUM)
+    cfg!(all(target_os = "linux", target_arch = "x86_64"))
+        && !release.prerelease
+        && torch_recipe_for_tag(&release.tag_name).is_some()
+}
+
+/// Materialize the qualified sidecar and lock from bytes embedded in the app binary.
+pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
+    let lock = include_str!("../../../../../../torch-server/runtime/requirements.lock");
+    for (name, url, hash) in [
+        (
+            "torch",
+            TORCH_291.torch_wheel_url,
+            TORCH_291.torch_wheel_sha256,
+        ),
+        (
+            "torchvision",
+            TORCH_291.torchvision_wheel_url,
+            TORCH_291.torchvision_wheel_sha256,
+        ),
+    ] {
+        if !lock.contains(&format!("{name} @ {url}"))
+            || !lock.contains(&format!("--hash=sha256:{hash}"))
+        {
+            return Err(failed(format!(
+                "Embedded lock disagrees with the qualified {name} wheel"
+            )));
+        }
+    }
+    if !include_str!("../../../../../../torch-server/validate_runtime.py").contains(&format!(
+        "torch.__version__ != \"{}\"",
+        TORCH_291.torch_version
+    )) {
+        return Err(failed(
+            "Embedded runtime validator disagrees with the qualified Torch version",
+        ));
+    }
+    std::fs::create_dir_all(destination).map_err(PumasError::from)?;
+    for (name, contents) in [
+        ("LICENSE", include_str!("../../../../../../LICENSE")),
+        (
+            "serve.py",
+            include_str!("../../../../../../torch-server/serve.py"),
+        ),
+        (
+            "validate_runtime.py",
+            include_str!("../../../../../../torch-server/validate_runtime.py"),
+        ),
+        (
+            "nunchaku_compat.py",
+            include_str!("../../../../../../torch-server/nunchaku_compat.py"),
+        ),
+        (
+            "control_api.py",
+            include_str!("../../../../../../torch-server/control_api.py"),
+        ),
+        (
+            "device_manager.py",
+            include_str!("../../../../../../torch-server/device_manager.py"),
+        ),
+        (
+            "diffusion.py",
+            include_str!("../../../../../../torch-server/diffusion.py"),
+        ),
+        (
+            "flux2.py",
+            include_str!("../../../../../../torch-server/flux2.py"),
+        ),
+        (
+            "image_api.py",
+            include_str!("../../../../../../torch-server/image_api.py"),
+        ),
+        (
+            "model_manager.py",
+            include_str!("../../../../../../torch-server/model_manager.py"),
+        ),
+        (
+            "openai_api.py",
+            include_str!("../../../../../../torch-server/openai_api.py"),
+        ),
+        (
+            "validation.py",
+            include_str!("../../../../../../torch-server/validation.py"),
+        ),
+        (
+            "loaders/__init__.py",
+            include_str!("../../../../../../torch-server/loaders/__init__.py"),
+        ),
+        (
+            "loaders/dllm_loader.py",
+            include_str!("../../../../../../torch-server/loaders/dllm_loader.py"),
+        ),
+        (
+            "loaders/safetensors_loader.py",
+            include_str!("../../../../../../torch-server/loaders/safetensors_loader.py"),
+        ),
+        (
+            "loaders/sherry_loader.py",
+            include_str!("../../../../../../torch-server/loaders/sherry_loader.py"),
+        ),
+        ("requirements.txt", lock),
+    ] {
+        let path = destination.join(name);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(PumasError::from)?;
+        }
+        std::fs::write(path, contents).map_err(PumasError::from)?;
+    }
+    let recipe = serde_json::json!({
+        "recipe_id": TORCH_291.recipe_id,
+        "protocol": SUPPORTED_TORCH_PROTOCOL,
+        "capabilities": [TORCH_IMAGE_GENERATION_CAPABILITY],
+        "python": "3.12",
+        "platform": "linux-x86_64",
+    });
+    std::fs::write(
+        destination.join("runtime.json"),
+        serde_json::to_vec_pretty(&recipe)
+            .map_err(|e| failed(format!("Cannot serialize Torch recipe: {e}")))?,
+    )
+    .map_err(PumasError::from)?;
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -40,12 +201,31 @@ impl VersionInstaller {
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
+        let _attempt = self
+            .torch_attempt_lock
+            .try_lock()
+            .map_err(|_| failed("Torch installation already active"))?;
+        self.torch_control.start();
+        let result = self
+            .install_torch_runtime_inner(tag, release, progress_tx)
+            .await;
+        self.torch_control.finish();
+        result
+    }
+
+    async fn install_torch_runtime_inner(
+        &self,
+        tag: &str,
+        release: &GitHubRelease,
+        progress_tx: mpsc::Sender<ProgressUpdate>,
+    ) -> Result<()> {
         if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
             return Err(failed("Managed Torch requires Linux x86_64"));
         }
-        if !is_torch_runtime_release(release) || tag != release.tag_name {
-            return Err(failed("Not a Pumas Torch runtime release; legacy PyTorch source installs cannot serve models"));
-        }
+        let recipe = torch_recipe_for_tag(tag)
+            .filter(|_| tag == release.tag_name && is_torch_runtime_release(release))
+            .ok_or_else(|| failed("Unsupported upstream PyTorch release or mismatched tag"))?;
+        debug_assert_eq!(recipe.release_tag, tag);
         if !tag
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || b"-._".contains(&c))
@@ -76,17 +256,44 @@ impl VersionInstaller {
         ));
         self.progress_tracker.write().await.start_installation(
             tag,
-            release.total_size,
+            None,
             None,
             Some(log_path.to_string_lossy().as_ref()),
         );
         let result = self
-            .stage_torch_runtime(tag, release, staging.path(), &log_path, &progress_tx)
+            .stage_torch_runtime(recipe, staging.path(), &log_path, &progress_tx)
             .await;
+        #[cfg(test)]
+        if result.is_ok() && self.torch_stage_override.is_some() {
+            if let Some(pause) = &self.torch_stage_pause {
+                pause.reached.notify_one();
+                pause
+                    .resume
+                    .acquire()
+                    .await
+                    .map_err(|e| failed(format!("Staging pause failed: {e}")))?
+                    .forget();
+            }
+        }
         let result = async {
             match result {
                 Ok(runtime) => {
                     self.check_cancelled()?;
+                    if !self.torch_control.try_begin_publication() {
+                        return Err(failed(
+                            "Torch installation was cancelled before publication",
+                        ));
+                    }
+                    #[cfg(test)]
+                    if let Some(pause) = &self.torch_publication_pause {
+                        pause.reached.notify_one();
+                        pause
+                            .resume
+                            .acquire()
+                            .await
+                            .map_err(|e| failed(format!("Publication pause failed: {e}")))?
+                            .forget();
+                    }
                     let publish_to = destination.clone();
                     tokio::task::spawn_blocking(move || {
                         pumas_library::platform::filesystem::rename_directory_noreplace(
@@ -122,91 +329,29 @@ impl VersionInstaller {
 
     async fn stage_torch_runtime(
         &self,
-        tag: &str,
-        release: &GitHubRelease,
+        recipe_spec: &TorchRuntimeRecipe,
         staging: &Path,
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<PathBuf> {
-        let archive = release
-            .assets
-            .iter()
-            .find(|a| a.name == ARCHIVE)
-            .ok_or_else(|| failed("Missing runtime archive"))?;
-        let checksum = release
-            .assets
-            .iter()
-            .find(|a| a.name == CHECKSUM)
-            .ok_or_else(|| failed("Missing runtime checksum"))?;
-        let archive_path = staging.join(ARCHIVE);
-        let checksum_path = staging.join(CHECKSUM);
-        self.download_torch_asset(&checksum.download_url, &checksum_path, progress_tx)
-            .await?;
-        let checksum = fs::read_to_string(checksum_path)
-            .await
-            .map_err(PumasError::from)?;
-        let expected = checksum
-            .split_whitespace()
-            .next()
-            .filter(|value| value.len() == 64 && value.bytes().all(|c| c.is_ascii_hexdigit()))
-            .ok_or_else(|| failed("Malformed runtime SHA-256 checksum"))?
-            .to_ascii_lowercase();
-        self.download_torch_asset(&archive.download_url, &archive_path, progress_tx)
-            .await?;
-        self.check_cancelled()?;
-        let archive_for_hash = archive_path.clone();
-        let actual = tokio::task::spawn_blocking(move || -> Result<String> {
-            let mut file = File::open(archive_for_hash).map_err(PumasError::from)?;
-            let mut hasher = Sha256::new();
-            std::io::copy(&mut file, &mut hasher).map_err(PumasError::from)?;
-            Ok(format!("{:x}", hasher.finalize()))
-        })
-        .await
-        .map_err(|e| failed(format!("Runtime checksum task failed: {e}")))??;
-        if actual != expected {
-            return Err(failed("Runtime archive checksum mismatch"));
+        #[cfg(test)]
+        if let Some(stage) = &self.torch_stage_override {
+            return stage(staging);
         }
         let runtime = staging.join("runtime");
-        fs::create_dir_all(&runtime)
+        let runtime_for_write = runtime.clone();
+        tokio::task::spawn_blocking(move || write_embedded_torch_runtime(&runtime_for_write))
             .await
-            .map_err(PumasError::from)?;
-        // Do not accept symlinks, special files or path traversal in a runtime
-        // bundle, even when its transport checksum matches.
-        let extract_to = runtime.clone();
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            let file = File::open(archive_path).map_err(PumasError::from)?;
-            let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
-            for entry in archive.entries().map_err(PumasError::from)? {
-                let mut entry = entry.map_err(PumasError::from)?;
-                let kind = entry.header().entry_type();
-                if !kind.is_file() && !kind.is_dir() {
-                    return Err(failed("Runtime bundle contains a non-regular entry"));
-                }
-                if !entry.unpack_in(&extract_to).map_err(PumasError::from)? {
-                    return Err(failed("Runtime bundle path escapes installation directory"));
-                }
-            }
-            Ok(())
-        })
-        .await
-        .map_err(|e| failed(format!("Runtime extraction task failed: {e}")))??;
+            .map_err(|e| failed(format!("Runtime staging task failed: {e}")))??;
+        self.check_cancelled()?;
         let recipe: RuntimeRecipe = serde_json::from_slice(
             &fs::read(runtime.join("runtime.json"))
                 .await
                 .map_err(PumasError::from)?,
         )
         .map_err(|e| failed(format!("Invalid runtime recipe: {e}")))?;
-        // Each qualification dimension fails with its owning reason so artifact
-        // identity, recipe identity, recipe protocol, and environment are
-        // verified separately. Recipe-to-sidecar agreement (bundled
-        // handshake protocol/capabilities) is checked by the bundled
-        // validation below; client-to-live-sidecar agreement is owned by
-        // `TorchClient` handshake verification, not by installation.
-        if recipe.recipe_id != tag {
-            return Err(failed(format!(
-                "Runtime recipe identity '{}' does not match release tag '{tag}'",
-                recipe.recipe_id
-            )));
+        if recipe.recipe_id != recipe_spec.recipe_id {
+            return Err(failed("Embedded Torch recipe identity mismatch"));
         }
         if recipe.protocol != SUPPORTED_TORCH_PROTOCOL {
             return Err(failed(format!(
@@ -227,11 +372,6 @@ impl VersionInstaller {
             return Err(failed(
                 "Runtime recipe does not match Python 3.12 on linux-x86_64",
             ));
-        }
-        for required in ["serve.py", "validate_runtime.py", "requirements.txt"] {
-            if !path_exists(&runtime.join(required)).await? {
-                return Err(failed(format!("Runtime bundle missing {required}")));
-            }
         }
         let mut python_check = Command::new("python3.12");
         python_check.args([
@@ -283,23 +423,6 @@ impl VersionInstaller {
         )
         .await?;
         Ok(runtime)
-    }
-
-    async fn download_torch_asset(
-        &self,
-        url: &str,
-        path: &Path,
-        progress: &mpsc::Sender<ProgressUpdate>,
-    ) -> Result<()> {
-        tokio::select! {
-            result = self.download_archive(url, path, progress) => result,
-            _ = async {
-                while !self.cancel_flag.load(Ordering::SeqCst) {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            } => self.check_cancelled(),
-            _ = tokio::time::sleep(Duration::from_secs(3600)) => Err(failed("Runtime artifact download deadline exceeded")),
-        }
     }
 
     pub(super) async fn run_runtime_command(

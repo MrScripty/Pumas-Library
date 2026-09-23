@@ -2,8 +2,10 @@
 
 A6 and A7 passed within the recorded artifact scope. The sections below retain
 chronological evidence; early limitations are superseded by later acceptance
-where explicitly recorded. Distribution and remaining fault acceptance are
-still pending in the plan.
+where explicitly recorded. A1 still needs packaged-app discovery and shared-UI
+installation acceptance for the supported upstream PyTorch recipe. It does not
+require a Pumas-hosted Torch release. A5 GPU allocator OOM and post-OOM recovery
+have passed; the plan records their scope and remaining limits.
 
 ## Historical M1 inference-disabled release
 
@@ -77,7 +79,10 @@ The real desktop FP8 conversion completed in 43.132 seconds. Focused frontend
 checks: 21 existing conversion tests and the added FP8 selection case passed;
 TypeScript and Electron builds passed. General CPU FP8 output reloaded in the
 managed GPU runtime with finite inference, including a zero-weight-block case.
-Core test targets compile. No expanded fault matrix was performed after the
-user requested prioritizing the usable flow. Public runtime discovery/publication
-(A1/T7) and unperformed A5 GPU fault cases remain open; full plan acceptance is
-not claimed.
+At this artifact-evidence checkpoint, A1 upstream discovery and installation, and
+the remaining A5 GPU fault cases, were still open. Subsequent source work now
+discovers qualified tags from `pytorch/pytorch` and installs the official pinned
+wheels without requiring a Pumas-hosted Torch release. Packaged-desktop discovery
+and a fresh shared-UI installation remain to be verified. A5 GPU allocator OOM
+and post-OOM recovery have since passed; see [the A5 recovery report](a5-gpu-oom-recovery.md).
+Full plan acceptance remains pending A1's packaged-app checks.

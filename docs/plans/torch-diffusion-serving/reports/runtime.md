@@ -1,17 +1,18 @@
 # M1 runtime implementation and qualification
 
-Status: native/GPU/sidecar qualification passed for the CUDA 13.0 candidate; **A1 shared UI/distribution acceptance remains pending**.
+Status: native/GPU/sidecar qualification passed for the CUDA 13.0 candidate. The original Pumas-bundle discovery assumption has been superseded by the official PyTorch upstream contract; **packaged-app discovery and shared UI installation acceptance remain pending**.
 
 ## Implemented source
 
 - `VersionManager` still owns discovery, installed state, active/default selection,
-  progress and cancellation. Torch discovery now selects `torch-runtime-*` releases
-  with the platform archive and SHA-256 companion from `MrScripty/Pumas-Library`.
-  Ordinary Pumas releases and PyTorch source releases are not installable Torch runtimes.
-- `VersionInstaller` verifies the archive checksum, rejects special archive entries
-  and escaping paths, checks recipe/platform/Python/protocol identity, creates a
-  staged venv, installs the hash lock, and runs GPU/import/sidecar validation before
-  atomic non-replacing publication and shared metadata registration.
+  progress and cancellation. Torch discovery now queries `pytorch/pytorch` and
+  exposes only the qualified upstream `v2.9.1` release. The upstream tag maps to
+  the independent recipe `torch-upstream-2.9.1-r1`.
+- The app embeds the sidecar and dependency lock. `VersionInstaller` installs the
+  direct SHA-256-pinned Torch and torchvision wheels from the official PyTorch
+  wheel host, installs the remaining hash-locked dependencies, checks
+  recipe/platform/Python/protocol identity, and runs GPU/import/sidecar validation
+  before atomic non-replacing publication and shared metadata registration.
 - The existing platform directory publication primitive is exposed to the app
   manager; its implementation and model-library ownership are unchanged.
 - Failed staging is removed. Previously installed runtime files and metadata are
@@ -24,10 +25,10 @@ Status: native/GPU/sidecar qualification passed for the CUDA 13.0 candidate; **A
 - Legacy source installations missing runtime files lose only their stale installed
   metadata; files remain available for user recovery.
 
-## Candidate recipe
+## Qualified recipe
 
-`torch-runtime-0.1.0`, sidecar protocol 1, Linux x86_64, CPython 3.12, NVIDIA sm_120.
-Candidate dependencies include Torch 2.9.1+cu130, torchvision 0.24.1+cu130,
+Upstream tag `v2.9.1`, recipe `torch-upstream-2.9.1-r1`, sidecar protocol 3,
+Linux x86_64, CPython 3.12, NVIDIA sm_120. Dependencies include Torch 2.9.1+cu130, torchvision 0.24.1+cu130,
 Nunchaku 1.2.0+torch2.9, Diffusers 0.37.0, Transformers 4.57.6,
 Accelerate 1.12.0 and PEFT 0.18.1. The complete transitive pins and artifact hashes
 are in `torch-server/runtime/requirements.lock`. Native/GPU/sidecar qualification passed on this host; model generation
@@ -71,29 +72,37 @@ never resolve new dependencies during model loading and never acquire model asse
   to the official Torch 2.9.1 CUDA 13.0 build; host driver is 595.84.
 - The corrected real installation completed successfully in
   `launcher-data/cache/torch-qualification/install`, using the production installer
-  and locally served unpublished bundle. Dependencies come from the real pinned
-  artifact sources. This is package qualification, not public release discovery
-  or desktop acceptance.
+  and a locally served unpublished candidate bundle. The recipe's Torch and
+  torchvision artifacts came from the official PyTorch wheel index; other
+  dependencies use the pinned sources. This historical bundle qualification is
+  not public release discovery or packaged-app acceptance.
 - The first real attempt exposed missing extraction-root creation. It failed before
   installation, published no runtime, and was corrected before the second attempt.
 
-Reproduction:
+Current upstream installer reproduction (use an empty, isolated root):
 
 ```bash
-python3 scripts/package-torch-runtime.py --output launcher-data/cache/torch-qualification/assets
-python3 -m http.server 18764 --bind 127.0.0.1 --directory launcher-data/cache/torch-qualification/assets
-cargo run --manifest-path rust/Cargo.toml -p pumas-app-manager --example qualify_torch_runtime -- launcher-data/cache/torch-qualification/install http://127.0.0.1:18764
+cargo run --manifest-path rust/Cargo.toml -p pumas-app-manager --example qualify_torch_runtime -- launcher-data/cache/torch-qualification/upstream-install
 ```
 
-The example uses the production installer but deliberately does not claim to test
-GitHub discovery. It must use an isolated root.
+The example uses the sidecar embedded in the app and downloads the official
+hash-pinned wheels. It does not test GitHub release discovery or the packaged
+desktop UI. Installation also requires the supported Python, Linux, network, and
+GPU prerequisites. The preceding local archive-server workflow was for the
+historical unpublished candidate bundle and is no longer the current installer
+reproduction.
 
-## Release-source dependency
+## Upstream release and wheel contract
 
-On 2026-09-13 the official GitHub API returned six Pumas releases and **no
-`torch-runtime-*` release**. The new source and packaging are concrete, but normal
-shared UI discovery cannot accept the candidate until an approved, qualified
-runtime bundle is published. No remote release or tag has been created.
+The official release is `pytorch/pytorch` tag `v2.9.1`; its GitHub release
+metadata identifies the source release, while installable wheels are hosted
+separately. The managed installer uses direct, SHA-256-pinned Torch and
+torchvision wheels from the official PyTorch wheel host.
+The Pumas app embeds the serving sidecar and lock. No Pumas-hosted Torch release
+or tag is required or created. Only `v2.9.1` is currently mapped to a qualified
+recipe; other upstream versions remain unavailable until their full recipe is
+qualified. Packaged-app discovery and shared-UI installation acceptance remain
+pending.
 
 ## Live host baseline
 
@@ -137,9 +146,11 @@ passed CUDA execution and protocol health (`runtime-0.1.0-relocated-health.log`)
 
 The actual enabled Electron desktop, backed by the release RPC on isolated root
 `install`, listed both versions. Selecting 0.1.0 and then 0.1.1 updated shared
-`lastSelectedVersion` metadata accordingly. Public discovery/install/update via
-the remote catalogue still requires a published bundle (T7). Production installer
-qualification does not substitute for that missing distribution acceptance.
+`lastSelectedVersion` metadata accordingly. At that historical checkpoint,
+discovery still pointed at the Pumas repository and required its custom bundle
+assets. The corrected source now discovers supported upstream PyTorch tags and
+installs official wheels; packaged-app discovery and shared-UI installation
+acceptance remain pending, as recorded in the current upstream contract below.
 
 The current 90-test app-manager suite passes on the host. Four HTTP-fixture tests
 cannot bind sockets inside the sandbox; they passed on the host with the rest.

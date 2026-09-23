@@ -634,3 +634,40 @@ test-only lexical-scope correction after its first run identified
 `clippy::await_holding_lock`.
 These tests make a failed generation lookup visible; they do not repair a
 poisoned registry or bypass its ownership check to clear serving state.
+
+### PyTorch upstream discovery and installer publication boundary (2026-09-23)
+
+The prior assumption that A1 requires a Pumas-hosted `torch-runtime-*` release
+was incorrect. Torch discovery now targets the official `pytorch/pytorch`
+repository and exposes only the qualified `v2.9.1` tag. That tag maps to the
+independent recipe `torch-upstream-2.9.1-r1`; the app embeds its sidecar and
+dependency lock and installs the direct SHA-256-pinned Torch and torchvision
+wheels from the official PyTorch wheel host. Other upstream tags remain hidden
+until their full app recipe is qualified. The PyTorch GitHub source archive size
+is not presented as an install size. The prior historical Pumas-bundle
+qualification remains historical evidence only.
+
+Fixtures verify supported/unsupported release filtering, no dependence on
+Pumas bundle assets, embedded sidecar materialization outside the checkout,
+official wheel URLs and hashes, rejection before staging, and preservation of
+installed `0.1.1`–`0.1.4`, active `0.1.4`, and unset default. Torch cancellation
+accepted by `VersionManager` and the publication transition now compete through
+one atomic state change; once publication begins, manager cancellation returns
+false without setting the cancellation flag. A per-installer attempt lock also
+rejects a concurrent direct call before it can alter the active attempt, with a
+deterministic publication regression. The constructor documents that direct
+stores to its cooperative cancellation flag have no acceptance result and may
+arrive after the final cancellation checkpoint.
+
+`cargo fmt --manifest-path rust/Cargo.toml --all -- --check`, all-target
+`pumas-app-manager` Clippy with warnings denied, the 111-test app-manager suite,
+`./scripts/rust/check.sh`, and `git diff --check` passed. The full Rust script
+ran with localhost socket permission for its fixtures; the workspace library
+suite reported 1,415 passed and 6 ignored. No native GPU qualification was
+rerun because these changes do not alter the qualified runtime or A5 GPU path.
+A1 still needs packaged-app discovery and fresh shared-UI installation
+acceptance; this does not require publishing a Torch release through Pumas.
+The recorded A5 allocator OOM and subsequent inference recovery evidence is
+unchanged, including its limitation that the fault was not a naturally
+oversized diffusion request. Installed versions, active version, default,
+runtime publication state, and tags were not changed.

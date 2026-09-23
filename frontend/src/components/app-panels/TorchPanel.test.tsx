@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ModelManagerProps } from '../ModelManager';
 import type { VersionRelease } from '../../types/versions';
@@ -53,16 +53,25 @@ interface TorchPanelHarnessActions {
   setDefaultVersion: AppVersionState['setDefaultVersion'];
 }
 
-function TorchPanelHarness({ actions }: { actions: TorchPanelHarnessActions }) {
+function TorchPanelHarness({
+  actions,
+  isLoading = false,
+  initialAvailableVersions = [],
+}: {
+  actions: TorchPanelHarnessActions;
+  isLoading?: boolean;
+  initialAvailableVersions?: VersionRelease[];
+}) {
   const [installedVersions, setInstalledVersions] = useState([oldTag]);
   const [activeVersion, setActiveVersion] = useState<string | null>(oldTag);
-  const [availableVersions, setAvailableVersions] = useState<VersionRelease[]>([]);
+  const [availableVersions, setAvailableVersions] = useState(initialAvailableVersions);
   const [showVersionManager, setShowVersionManager] = useState(false);
 
   const versions: AppVersionState = {
     ...UNSUPPORTED_VERSION_STATE,
     appId: 'torch',
     isSupported: true,
+    isLoading,
     installedVersions,
     activeVersion,
     availableVersions,
@@ -122,25 +131,58 @@ function expectActiveVersionNotDefault(tag: string) {
 
 describe('TorchPanel shared version controls', () => {
   it('installs, activates, and removes versions through the shared manager flow', async () => {
+    let finishRefresh!: () => void;
+    const forcedRefresh = new Promise<void>((resolve) => {
+      finishRefresh = resolve;
+    });
     const actions: TorchPanelHarnessActions = {
-      refreshAll: vi.fn(async (_forceRefresh?: boolean) => undefined),
+      refreshAll: vi.fn(async (forceRefresh?: boolean) => {
+        if (forceRefresh) await forcedRefresh;
+      }),
       installVersion: vi.fn(async (_tag: string) => true),
       switchVersion: vi.fn(async (_tag: string) => true),
       removeVersion: vi.fn(async (_tag: string) => true),
       setDefaultVersion: vi.fn(async (_tag: string | null) => undefined),
     };
 
-    render(<TorchPanelHarness actions={actions} />);
+    const panel = render(
+      <TorchPanelHarness
+        actions={actions}
+        initialAvailableVersions={releaseFixture}
+        isLoading
+      />
+    );
 
-    // An installed version opens the manager before release discovery has run.
-    fireEvent.click(screen.getByTitle('Install new version'));
+    // Wait for startup loading, then refresh before cached choices become actionable.
+    fireEvent.click(screen.getByTitle(/New version available:/));
     expect(screen.getByText('1 installed')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: candidateTag })).not.toBeInTheDocument();
+    expect(actions.refreshAll).not.toHaveBeenCalled();
+
+    panel.rerender(
+      <TorchPanelHarness
+        actions={actions}
+        initialAvailableVersions={releaseFixture}
+        isLoading={false}
+      />
+    );
+
+    await waitFor(() => {
+      expect(actions.refreshAll).toHaveBeenCalledWith(true);
+    });
+    expect(screen.queryByRole('heading', { name: candidateTag })).not.toBeInTheDocument();
+
+    await act(async () => {
+      finishRefresh();
+      await forcedRefresh;
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: candidateTag })).toBeInTheDocument();
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     await waitFor(() => {
-      expect(actions.refreshAll).toHaveBeenCalledWith(true);
-      expect(screen.getByRole('heading', { name: candidateTag })).toBeInTheDocument();
+      expect(actions.refreshAll).toHaveBeenCalledTimes(2);
     });
 
     const candidateRow = getVersionRow(candidateTag);
@@ -163,6 +205,9 @@ describe('TorchPanel shared version controls', () => {
     expect(actions.setDefaultVersion).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByTitle('Install new version'));
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: oldTag })).toBeInTheDocument();
+    });
     const oldRow = getVersionRow(oldTag);
     fireEvent.pointerEnter(oldRow);
     const uninstallButton = await within(oldRow).findByRole('button', { name: 'Uninstall' });

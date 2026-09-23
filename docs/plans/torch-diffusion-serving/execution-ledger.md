@@ -573,3 +573,41 @@ native shutdown. Inspecting each old permission input returns `STALE_INPUT`,
 while the task snapshot still lists delivery unknown. The stale permissions
 were not approved and no new Passeur task was accepted. Native collaboration
 agents performed the implementation and review.
+
+### A1 globe refresh and A5 real CUDA OOM recovery (2026-09-22)
+
+The shared version manager now waits for initial version loading, then forces a
+catalogue refresh when opened from the version-selector globe. It keeps the
+manager loading state until that request completes, so cached releases are not
+offered as current install choices during refresh. A regression first failed
+because opening the manager made zero forced refresh calls; it now holds a
+cached release fixture behind the startup and forced refreshes, then checks that
+the entry appears and preserves the manual Refresh action. The complete frontend
+suite passed (118 files, 679 tests), TypeScript checking passed, and
+`git diff --check` passed. A fresh release/tag inventory still contains no
+`torch-runtime-*` release with the required runtime archive and checksum, so the
+live manager correctly has no remotely installable Torch release to display.
+The active launcher remains on 0.1.4 with 0.1.1–0.1.4 installed and no default.
+A1 remains pending publication and normal shared-UI installation of a qualified
+bundle.
+
+A5's remaining real-GPU recovery case passed on the RTX 5090 Laptop GPU using
+the isolated `torch-runtime-0.1.6` environment (archive SHA-256
+`74f9b593dff1e447a73571dc465efd520238ba0c56d2730393a17eee2b97426c`) and the
+real Nunchaku Z-Image-Turbo model. For the test only, the isolated sidecar was
+overlaid with the current branch's Torch source and a one-shot fault hook that
+requested the currently free CUDA memory plus 256 MiB from `torch.empty`; no
+large image dimensions or host allocation were used. Through the public Pumas
+image gateway, the first request returned sanitized HTTP 507
+`out_of_memory`. A separate request then generated a decodable 512×512 PNG
+(302,715 bytes, SHA-256
+`cddd2386cb8ca5105325aca2d202db68885dd71402dca04f55949b87f379120d`) in
+10.309 seconds using the same loaded model. The profile remained healthy after
+the OOM; model unload and profile shutdown succeeded. GPU memory returned from
+657 MiB before the run to 662 MiB after cleanup, with only the existing desktop
+process using CUDA. The main runtime's installed versions, active 0.1.4, and
+unset default were unchanged. The candidate's 15 source files were restored and
+SHA-256 checked after the test; no runtime was published, tagged, or selected
+as the main default. This demonstrates an actual CUDA allocator OOM and
+post-OOM inference recovery, not a naturally induced high-resolution pipeline
+OOM. See [the A5 GPU report](reports/a5-gpu-oom-recovery.md).

@@ -2,10 +2,11 @@
 
 A6 and A7 passed within the recorded artifact scope. The sections below retain
 chronological evidence; early limitations are superseded by later acceptance
-where explicitly recorded. A1 still needs packaged-app discovery and shared-UI
-installation acceptance for the supported upstream PyTorch recipe. It does not
-require a Pumas-hosted Torch release. A5 GPU allocator OOM and post-OOM recovery
-have passed; the plan records their scope and remaining limits.
+where explicitly recorded. A1 packaged discovery, shared-UI installation and
+migration, activation, removal, cancellation preservation, and restart
+acceptance passed for the supported upstream PyTorch recipe; see [the A1 report](a1-packaged-acceptance.md).
+It does not require a Pumas-hosted Torch release. A5 GPU allocator OOM and
+post-OOM recovery have passed; the plan records their scope and remaining limits.
 
 ## Historical M1 inference-disabled release
 
@@ -41,7 +42,7 @@ Fresh enabled RPC SHA-256:
 Fresh disabled RPC SHA-256:
 `4e22caf1dd2a6a304374f239b2e40ceb012774c02754fe0aa71001a1eaaf276c`.
 
-The disabled artifact ran against `disabled-m2-root` on port 18769. Health was
+At this checkpoint, the disabled artifact ran against `disabled-m2-root` on port 18769. Health was
 200, models/chat/images routes were 404, and the five inference management calls
 returned -32601. Neither Torch nor llama.cpp installation directories appeared.
 Raw evidence: `disabled-m2-checks.json` and `disabled-m2-release.log`.
@@ -54,7 +55,7 @@ no Torch/llama tabs, runtime install/start controls or serving controls appeared
 The model-library import/search controls remained present. Evidence:
 `disabled-desktop.png`, `disabled-desktop-controls.json`, `disabled-desktop.log`.
 This completes the disabled portion of A6 for these artifacts. Enabled real-model
-acceptance remains pending, so A6 as a whole is still pending.
+acceptance was still pending, so A6 was not yet complete.
 
 ## Real llama.cpp/Tuldok regression
 
@@ -79,10 +80,11 @@ The real desktop FP8 conversion completed in 43.132 seconds. Focused frontend
 checks: 21 existing conversion tests and the added FP8 selection case passed;
 TypeScript and Electron builds passed. General CPU FP8 output reloaded in the
 managed GPU runtime with finite inference, including a zero-weight-block case.
-At this artifact-evidence checkpoint, A1 upstream discovery and installation, and
-the remaining A5 GPU fault cases, were still open. Subsequent source work now
-discovers qualified tags from `pytorch/pytorch` and installs the official pinned
-wheels without requiring a Pumas-hosted Torch release. Packaged-desktop discovery
-and a fresh shared-UI installation remain to be verified. A5 GPU allocator OOM
-and post-OOM recovery have since passed; see [the A5 recovery report](a5-gpu-oom-recovery.md).
-Full plan acceptance remains pending A1's packaged-app checks.
+At this historical artifact-evidence checkpoint, A1 upstream discovery and
+installation, and the remaining A5 GPU fault cases, were still open. Later source
+work targets qualified tags from `pytorch/pytorch` and installs official pinned
+wheels without requiring a Pumas-hosted Torch release. A5 GPU allocator OOM and
+post-OOM recovery passed; see [the A5 recovery report](a5-gpu-oom-recovery.md).
+Packaged-desktop discovery and shared-UI installation, migration, activation,
+removal, cancellation preservation, and restart acceptance passed on
+2026-09-23; see [the A1 report](a1-packaged-acceptance.md).

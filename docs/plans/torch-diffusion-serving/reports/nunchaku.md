@@ -1,7 +1,10 @@
 # Nunchaku evidence
 
-A2 is passed. The image-specific TIPC-04 cancellation/reuse gate is also passed;
-A5 remains pending only for the broader plan's remaining failure matrix.
+A2 and A5 passed within their recorded scopes. The image-specific TIPC-04
+cancellation/reuse gate also passed. A5 includes public failure mapping,
+managed lifecycle cases, a real CUDA allocator OOM, and post-OOM generation;
+it does not claim a naturally oversized pipeline request. See the
+[A5 GPU recovery report](a5-gpu-oom-recovery.md).
 
 Source includes an offline Nunchaku FP4 rank-128 adapter with sequential CPU
 offload, device admission/unload exclusion, cancellation checkpoints, bounded

@@ -479,6 +479,162 @@ async fn cancellation_reaps_installer_and_its_child() {
 }
 
 #[tokio::test]
+async fn cancellation_during_validation_preserves_previous_runtime_on_restart() {
+    let (installer, root) = create_test_installer();
+    let previous_tag = "torch-runtime-old";
+    let previous = root.path().join("torch-versions").join(previous_tag);
+    std::fs::create_dir_all(previous.join("venv/bin")).unwrap();
+    let previous_recipe = format!(
+        r#"{{"recipe_id":"{previous_tag}","protocol":{SUPPORTED_TORCH_PROTOCOL},"capabilities":["image_generation"],"python":"3.12","platform":"linux-x86_64"}}"#
+    );
+    std::fs::write(previous.join("runtime.json"), previous_recipe).unwrap();
+    let previous_sidecar = format!(
+        r#"import json, pathlib, sys
+runtime = pathlib.Path(__file__).resolve().parent
+recipe = json.loads((runtime / "runtime.json").read_text())
+expected = {{"recipe_id": {previous_tag:?}, "protocol": {SUPPORTED_TORCH_PROTOCOL}, "capabilities": ["image_generation"], "python": "3.12", "platform": "linux-x86_64"}}
+assert recipe == expected, recipe
+required = ["runtime.json", "serve.py", "validate_runtime.py", "requirements.txt", "venv/bin/python", "venv/pyvenv.cfg"]
+assert all((runtime / name).is_file() for name in required), required
+assert sys.version_info[:2] == (3, 12), sys.version
+assert pathlib.Path(sys.prefix) == runtime / "venv", sys.prefix
+print("previous-runtime-ok")
+"#
+    );
+    std::fs::write(previous.join("serve.py"), previous_sidecar).unwrap();
+    std::fs::write(
+        previous.join("validate_runtime.py"),
+        "# previous validator fixture\n",
+    )
+    .unwrap();
+    std::fs::write(previous.join("requirements.txt"), "--no-index\n").unwrap();
+    std::os::unix::fs::symlink("/usr/bin/python3.12", previous.join("venv/bin/python")).unwrap();
+    std::fs::write(
+        previous.join("venv/pyvenv.cfg"),
+        "home = /usr/bin\ninclude-system-site-packages = false\n",
+    )
+    .unwrap();
+    installer
+        .metadata_manager
+        .update_installed_version(
+            previous_tag,
+            InstalledVersionMetadata {
+                path: previous_tag.into(),
+                release_tag: previous_tag.into(),
+                ..Default::default()
+            },
+            Some(AppId::Torch),
+        )
+        .unwrap();
+    let mut state = crate::version_manager::VersionState::new(
+        root.path(),
+        AppId::Torch,
+        installer.metadata_manager.clone(),
+    )
+    .await
+    .unwrap();
+    state.set_active_version(previous_tag).await.unwrap();
+
+    let active_path = root.path().join(".active-version-torch");
+    let active_before = std::fs::read(&active_path).unwrap();
+    let metadata_path = root
+        .path()
+        .join("launcher-data/metadata/versions-torch.json");
+    let metadata_before = std::fs::read(&metadata_path).unwrap();
+    let previous_files = [
+        "runtime.json",
+        "serve.py",
+        "validate_runtime.py",
+        "requirements.txt",
+        "venv/pyvenv.cfg",
+    ]
+    .map(|name| (name, std::fs::read(previous.join(name)).unwrap()));
+    let python_link = std::fs::read_link(previous.join("venv/bin/python")).unwrap();
+
+    // The validator runs only after checksum, extraction, environment setup,
+    // and dependency installation. Its marker gives the test a deterministic
+    // point at which to cancel while validation and a child are both alive.
+    let pid_file = root.path().join("validation-child.pid");
+    let validation = format!(
+        "import pathlib,subprocess,sys,time\nmarker=pathlib.Path(__file__).resolve().parents[3] / {:?}\nchild=subprocess.Popen([sys.executable,'-c','import time; time.sleep(60)'])\nmarker.write_text(str(child.pid))\ntime.sleep(60)\n",
+        pid_file.file_name().unwrap().to_string_lossy()
+    );
+    let (release, server) = fixture_release(bundle("--no-index\n", &validation), true).await;
+    let (tx, _rx) = mpsc::channel(32);
+    let install = installer.install_version(&release.tag_name, &release, tx);
+    let cancel = async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
+            while !pid_file.exists() {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("validator did not reach its blocking child");
+        installer.cancel_flag.store(true, Ordering::SeqCst);
+    };
+    let (result, ()) = tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        tokio::join!(install, cancel)
+    })
+    .await
+    .expect("cancelled runtime installation did not finish");
+    let error = result.unwrap_err().to_string();
+    assert!(error.to_ascii_lowercase().contains("cancel"), "{error}");
+    finish_fixture(server).await;
+
+    let child_pid = std::fs::read_to_string(&pid_file).unwrap();
+    if let Ok(status) = std::fs::read_to_string(format!("/proc/{}/stat", child_pid.trim())) {
+        assert!(
+            status.split_whitespace().nth(2) == Some("Z"),
+            "validation child still computing: {status}"
+        );
+    }
+    let mut version_dirs: Vec<_> = std::fs::read_dir(root.path().join("torch-versions"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    version_dirs.sort();
+    assert_eq!(version_dirs, [previous_tag]);
+    for (name, expected) in previous_files {
+        assert_eq!(std::fs::read(previous.join(name)).unwrap(), expected);
+    }
+    assert_eq!(
+        std::fs::read_link(previous.join("venv/bin/python")).unwrap(),
+        python_link
+    );
+    assert_eq!(std::fs::read(&metadata_path).unwrap(), metadata_before);
+    assert_eq!(std::fs::read(&active_path).unwrap(), active_before);
+
+    let mut restarted = crate::version_manager::VersionState::new(
+        root.path(),
+        AppId::Torch,
+        installer.metadata_manager.clone(),
+    )
+    .await
+    .unwrap();
+    let validation = restarted.validate_installations().await.unwrap();
+    assert_eq!(validation.valid_count, 1);
+    assert_eq!(restarted.get_installed_tags(), vec![previous_tag]);
+    assert_eq!(
+        restarted.get_active_version().as_deref(),
+        Some(previous_tag)
+    );
+    let sidecar = tokio::process::Command::new(previous.join("venv/bin/python"))
+        .arg(previous.join("serve.py"))
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        sidecar.status.success(),
+        "previous sidecar failed: {}",
+        String::from_utf8_lossy(&sidecar.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(sidecar.stdout).unwrap().trim(),
+        "previous-runtime-ok"
+    );
+}
+
+#[tokio::test]
 async fn validated_bundle_publishes_relocatable_python_and_shared_metadata() {
     let (installer, root) = create_test_installer();
     let (release, server) = fixture_release(bundle("--no-index\n", ""), true).await;

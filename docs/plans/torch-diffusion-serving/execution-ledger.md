@@ -487,3 +487,44 @@ real GPU OOM recovery or managed sidecar process-death/restart cleanup; those
 A5 acceptance cases remain open. The final `nvidia-smi` check could not
 communicate with the NVIDIA driver, so GPU fault qualification was unavailable.
 No production defect was exposed by this source-and-caller review.
+
+### A1 cancellation and A5 managed Torch exit follow-up (2026-09-22)
+
+A1 now has a deterministic cancellation-during-validation regression. The
+validator starts a child and signals readiness before cancellation. The test
+checks that the candidate and staging directory disappear, the validator child
+is no longer computing, the previous runtime files and installed metadata are
+byte-identical, and `.active-version-torch` is unchanged. After reconstructing
+`VersionState`, the previous tag remains the active valid install and its
+fixture `serve.py` sentinel runs under that version's `venv/bin/python`, checking
+its recipe, required files, interpreter version, and virtual-environment prefix.
+The focused test passed; the full Rust check includes all 108 app-manager tests.
+This proves the cancellation-preservation path with a valid fixture sidecar,
+not startup or GPU usability of a published runtime.
+
+A5 now has a CPU managed TorchServe child test that publishes a Torch serving
+row alongside an unrelated profile row, signals natural child exit, waits for
+the terminal cleanup result, and drains the owner. Before the fix the row
+remained after cleanup. Non-router managed sessions now retain and join a
+terminal-only observer; it invalidates serving state and publishes
+`ModelUnloaded` only after the process group is confirmed clean, using the
+existing generation fence. The test verifies that the unrelated row remains.
+The existing stopped/replaced-generation regression still passes. Review
+confirmed that failed cleanup sends `Some(false)`, retains the child in owner
+custody, and blocks replacement; no separate cleanup-failure injection fixture
+was added.
+
+`./scripts/rust/check.sh` passed after the sandboxed run first returned `EPERM`
+for loopback HTTP fixtures and the same local check was rerun with localhost
+socket permission. This covers formatting, all-feature checks and Clippy,
+workspace tests, doc tests, and the no-default-features check. `nvidia-smi`
+still cannot communicate with the NVIDIA driver. Real GPU OOM recovery remains
+unverified; A1 public catalogue and normal UI install/update acceptance still
+require a qualified, published `torch-runtime-*` bundle. No bundle was
+published, no runtime default changed, and no tag was created.
+
+Passeur remained unavailable for code assignments: inherited task
+`e4323220-4f72-4b5e-9194-4e7c308abcc4` is cancelled with native shutdown
+unconfirmed, both attach attempts returned `not_attached`, and coordination
+remains frozen. Native collaboration agents performed the implementation and
+review; no new Passeur task was accepted.

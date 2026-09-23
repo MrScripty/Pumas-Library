@@ -29,6 +29,33 @@ pub(crate) struct RouterObserverContext {
     pub serving: Arc<ServingService>,
 }
 impl RouterObserverContext {
+    pub(super) fn spawn_terminal(
+        self,
+        profile_id: RuntimeProfileId,
+        generation: u64,
+        mut terminal: watch::Receiver<Option<bool>>,
+    ) -> tokio::task::JoinHandle<()> {
+        let Self { owner, serving, .. } = self;
+        tokio::spawn(async move {
+            let cleaned = terminal
+                .wait_for(|value| value.is_some())
+                .await
+                .ok()
+                .is_some_and(|value| *value == Some(true));
+            if cleaned {
+                if let Some(owner) = owner.upgrade() {
+                    let _ = serving
+                        .record_profile_unavailable_for_owned_generation(
+                            &profile_id,
+                            generation,
+                            &owner,
+                        )
+                        .await;
+                }
+            }
+        })
+    }
+
     pub(super) fn spawn(
         self,
         spec: RuntimeProfileLaunchSpec,

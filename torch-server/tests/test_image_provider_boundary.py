@@ -334,7 +334,7 @@ class ImageProviderBoundaryTests(unittest.TestCase):
 
             def generate(self, _prompt, width, height, _seed, _cancel):
                 started.set()
-                release.wait(5)
+                release.wait()
                 image = SimpleNamespace(size=(width, height))
                 image.save = lambda output, format="PNG": output.write(b"private-png")
                 return image
@@ -407,7 +407,7 @@ class ImageProviderBoundaryTests(unittest.TestCase):
                 self.calls += 1
                 if self.calls == 1:
                     started.set()
-                    release.wait(10)
+                    release.wait()
                     raise out_of_memory_error("private memory detail")
                 image = SimpleNamespace(size=(width, height))
                 image.save = lambda output, format="PNG": output.write(b"private-png")

@@ -378,10 +378,12 @@ cancellation/reuse, and browser acceptance are complete for TIPC-04, TIPC-09,
 and TIPC-10.
 The selected Pumas
 release source has no published Torch runtime bundle (T7), preventing real shared
-UI discovery acceptance until qualification and publication. Both complete pipelines now generate through Tuldok. A5 remains pending for
-the unperformed GPU fault cases; further matrix expansion was deferred at the
-user’s request. See [runtime evidence](reports/runtime.md)
-and [issues](issues.md).
+UI discovery acceptance until qualification and publication. Both complete
+pipelines now generate through Tuldok. A5 acceptance passed, including a real
+CUDA allocator OOM returning sanitized HTTP 507; follow-up inference succeeded
+with the same loaded model, and teardown succeeded. This does not verify a
+naturally induced high-resolution pipeline OOM. See [A5 GPU recovery evidence](reports/a5-gpu-oom-recovery.md),
+[runtime evidence](reports/runtime.md), and [issues](issues.md).
 
 ## Re-plan triggers
 

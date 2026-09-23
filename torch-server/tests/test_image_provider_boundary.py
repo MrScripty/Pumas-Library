@@ -138,12 +138,73 @@ class ImageProviderBoundaryTests(unittest.TestCase):
             model_id="img-model", prompt="kingfisher", width=64, height=64, seed=3
         )
 
-        with self.assertRaises(HTTPException) as failed:
-            asyncio.run(generate_image(payload, request))
+        with self.assertLogs("image_api", level="ERROR") as logged:
+            with self.assertRaises(HTTPException) as failed:
+                asyncio.run(generate_image(payload, request))
 
         self.assertEqual(failed.exception.status_code, 502)
         self.assertEqual(failed.exception.detail["code"], "backend_failure")
         self.assertNotIn("private", json.dumps(failed.exception.detail))
+        self.assertIsInstance(failed.exception.__cause__, RuntimeError)
+        self.assertEqual(str(failed.exception.__cause__), "private lease failure")
+        self.assertTrue(any(record.exc_info is not None for record in logged.records))
+
+    def test_route_logs_generation_causes_without_leaking_them_to_clients(self):
+        from contextlib import asynccontextmanager
+        import torch
+
+        out_of_memory_error = getattr(
+            torch.cuda, "OutOfMemoryError", type("OutOfMemoryError", (Exception,), {})
+        )
+
+        @asynccontextmanager
+        async def available_lease(_model_name):
+            yield object()
+
+        async def connected():
+            return False
+
+        request = SimpleNamespace(
+            app=SimpleNamespace(
+                state=SimpleNamespace(model_manager=SimpleNamespace(image_lease=available_lease))
+            ),
+            is_disconnected=connected,
+        )
+        payload = ImageRequest(
+            model_id="img-model", prompt="kingfisher", width=64, height=64, seed=3
+        )
+        cases = (
+            (RuntimeError("private generation failure"), 502, "backend_failure", "ERROR"),
+            (
+                out_of_memory_error("private GPU allocation failure"),
+                507,
+                "out_of_memory",
+                "WARNING",
+            ),
+        )
+
+        with patch.object(torch.cuda, "OutOfMemoryError", out_of_memory_error, create=True):
+            for error, expected_status, expected_code, log_level in cases:
+
+                async def fail_generation(*_args, failure=error):
+                    raise failure
+
+                with self.subTest(code=expected_code):
+                    with patch("image_api.owned_generation", new=fail_generation):
+                        with self.assertLogs("image_api", level=log_level) as logged:
+                            with self.assertRaises(HTTPException) as failed:
+                                asyncio.run(generate_image(payload, request))
+
+                    self.assertEqual(failed.exception.status_code, expected_status)
+                    self.assertEqual(failed.exception.detail["code"], expected_code)
+                    self.assertNotIn("private", json.dumps(failed.exception.detail))
+                    self.assertIs(failed.exception.__cause__, error)
+                    self.assertTrue(
+                        any(
+                            record.exc_info and record.exc_info[1] is error
+                            for record in logged.records
+                        )
+                    )
 
     def test_route_maps_lease_states_and_releases_after_backend_failure(self):
         from diffusion import FLUX2_KLEIN
@@ -241,11 +302,15 @@ class ImageProviderBoundaryTests(unittest.TestCase):
                 (507, "out_of_memory"),
             ):
                 with self.subTest(code=expected_code, call=adapter.calls):
-                    with self.assertRaises(HTTPException) as failed:
-                        await endpoint(payload, request)
+                    original_error = adapter.failures[0]
+                    with self.assertLogs("image_api", level="WARNING") as logged:
+                        with self.assertRaises(HTTPException) as failed:
+                            await endpoint(payload, request)
                     self.assertEqual(failed.exception.status_code, expected_status)
                     self.assertEqual(failed.exception.detail["code"], expected_code)
                     self.assertNotIn("private", json.dumps(failed.exception.detail))
+                    self.assertIs(failed.exception.__cause__, original_error)
+                    self.assertTrue(any(record.exc_info is not None for record in logged.records))
                     self.assertFalse(manager._get_device_lock("cpu").locked())
 
             result = await endpoint(payload, request)

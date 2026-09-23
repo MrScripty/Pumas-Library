@@ -21,6 +21,21 @@ fn create_test_installer() -> (VersionInstaller, tempfile::TempDir) {
     (installer, root)
 }
 
+fn python312_executable() -> std::path::PathBuf {
+    let output = std::process::Command::new("python3.12")
+        .args(["-c", "import sys; print(sys.executable)"])
+        .output()
+        .expect("python3.12 must be available on PATH for Torch installer fixtures");
+    assert!(
+        output.status.success(),
+        "python3.12 executable lookup failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let executable = std::path::PathBuf::from(String::from_utf8(output.stdout).unwrap().trim());
+    assert!(executable.is_absolute(), "python3.12 path must be absolute");
+    executable
+}
+
 fn bundle_with_recipe(
     recipe_id: &str,
     protocol: u32,
@@ -283,7 +298,8 @@ async fn rejected_archive_preserves_previous(
     for name in ["runtime.json", "serve.py", "requirements.txt"] {
         std::fs::write(previous.join(name), "previous-version").unwrap();
     }
-    std::os::unix::fs::symlink("/usr/bin/python3.12", previous.join("venv/bin/python")).unwrap();
+    let base_python = python312_executable();
+    std::os::unix::fs::symlink(&base_python, previous.join("venv/bin/python")).unwrap();
     installer
         .metadata_manager
         .update_installed_version(
@@ -508,10 +524,17 @@ print("previous-runtime-ok")
     )
     .unwrap();
     std::fs::write(previous.join("requirements.txt"), "--no-index\n").unwrap();
-    std::os::unix::fs::symlink("/usr/bin/python3.12", previous.join("venv/bin/python")).unwrap();
+    let base_python = python312_executable();
+    std::os::unix::fs::symlink(&base_python, previous.join("venv/bin/python")).unwrap();
+    let python_home = base_python
+        .parent()
+        .expect("python3.12 executable must have a parent directory");
     std::fs::write(
         previous.join("venv/pyvenv.cfg"),
-        "home = /usr/bin\ninclude-system-site-packages = false\n",
+        format!(
+            "home = {}\ninclude-system-site-packages = false\n",
+            python_home.display()
+        ),
     )
     .unwrap();
     installer

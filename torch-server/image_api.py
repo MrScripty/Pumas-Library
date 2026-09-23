@@ -176,19 +176,22 @@ async def generate_image(payload: ImageRequest, request: Request):
         except RuntimeError as error:
             if str(error) == "Image runtime is busy":
                 raise failure(409, "runtime_busy", "Image runtime is busy") from None
+            logger.exception("Image lease acquisition failed")
             raise failure(
                 502, "backend_failure", "Image runtime failed; inspect the Pumas runtime log"
-            ) from None
+            ) from error
 
         try:
             return await owned_generation(adapter, payload, request)
         except HTTPException:
             raise
-        except torch.cuda.OutOfMemoryError:
+        except torch.cuda.OutOfMemoryError as error:
+            logger.warning("Image generation ran out of GPU memory", exc_info=True)
             raise failure(
                 507, "out_of_memory", "Insufficient GPU memory; free memory before retrying"
-            ) from None
-        except Exception:
+            ) from error
+        except Exception as error:
+            logger.exception("Image generation failed")
             raise failure(
                 502, "backend_failure", "Image runtime failed; inspect the Pumas runtime log"
-            ) from None
+            ) from error

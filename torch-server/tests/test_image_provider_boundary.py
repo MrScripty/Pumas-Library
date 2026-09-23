@@ -71,6 +71,14 @@ class ImageProviderBoundaryTests(unittest.TestCase):
             recipe,
             {"status": "ok", "protocol": 3, "capabilities": ["image_generation"]},
         )
+        validate_runtime.validate_recipe_handshake(
+            recipe,
+            {
+                "status": "ok",
+                "protocol": 3,
+                "capabilities": ["image_generation", "future_capability"],
+            },
+        )
         for health in (
             {"status": "ok", "protocol": 2, "capabilities": ["image_generation"]},
             {"status": "ok", "protocol": 3, "capabilities": []},

@@ -5,6 +5,7 @@ import { ProgressDetailsView } from './ProgressDetailsView';
 import { VersionListItem } from './VersionListItem';
 
 interface InstallDialogContentProps {
+  appId?: string;
   cancellationNotice: string | null;
   cancelHoverTag: string | null;
   errorMessage: string | null;
@@ -35,6 +36,7 @@ interface InstallDialogContentProps {
 }
 
 export function InstallDialogContent({
+  appId,
   cancellationNotice,
   cancelHoverTag,
   errorMessage,
@@ -134,6 +136,7 @@ export function InstallDialogContent({
 
             return (
               <VersionListItem
+                appId={appId}
                 key={release.tagName}
                 release={release}
                 isInstalled={isInstalled}

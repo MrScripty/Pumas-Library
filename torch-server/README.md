@@ -63,14 +63,17 @@ torch-server/.venv/bin/pip install -r torch-server/requirements-dev.txt
 torch-server/.venv/bin/python torch-server/serve.py --host 127.0.0.1 --port 8400 --max-models 4
 ```
 
-These commands are for direct development only. Managed installations use
-`runtime/requirements.lock`, which pins dependencies and artifact hashes. The
-shared VersionManager discovers upstream releases from `pytorch/pytorch`; it
-offers only tags with a qualified Pumas recipe. The current recipe maps upstream
-`v2.9.1` to Torch `2.9.1+cu130` and torchvision `0.24.1+cu130`, using their
-official hash-pinned wheels. The sidecar and lock are embedded in the Pumas app,
-so no Pumas-hosted Torch release bundle is required. The recipe supports Linux
-x86_64, CPython 3.12 and NVIDIA sm_120 only.
+These commands are for direct development only. The managed `v2.9.1` known-good
+preset uses `runtime/requirements.lock`, including its official hash-pinned
+Torch and torchvision wheels. The shared VersionManager discovers stable
+upstream releases independently of that preset. For other releases it resolves
+an official CPU wheel by default (or an explicitly configured CUDA/ROCm index),
+selects an installed compatible Python 3.10–3.13 interpreter, and records the
+exact wheel URLs, hashes, and package versions in `resolution.json`. It does not
+provision Python or build from source. The sidecar is embedded in the Pumas app,
+so no Pumas-hosted Torch release bundle is required. Adapter dependencies are
+outside the core automatic install; an unavailable adapter affects its feature,
+not the installation of Torch itself.
 
 Create candidate assets with:
 

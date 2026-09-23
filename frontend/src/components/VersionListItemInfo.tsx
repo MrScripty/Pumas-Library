@@ -4,6 +4,7 @@ import { formatVersionDate } from '../utils/installationFormatters';
 import { IconButton } from './ui';
 
 interface VersionListItemInfoProps {
+  appId?: string;
   displayTag: string;
   errorMessage: string | null;
   failedLogPath: string | null;
@@ -14,6 +15,7 @@ interface VersionListItemInfoProps {
 }
 
 export function VersionListItemInfo({
+  appId,
   displayTag,
   errorMessage,
   failedLogPath,
@@ -57,6 +59,14 @@ export function VersionListItemInfo({
           <div className="flex items-center gap-1 text-xs text-[hsl(var(--text-muted))]">
             <span>{formatVersionDate(release.publishedAt)}</span>
           </div>
+          {appId === 'torch' && (
+            <div className="text-xs text-[hsl(var(--text-muted))]">
+              {release.tagName === 'v2.9.1'
+                ? 'Pumas verified preset: Python 3.12, CUDA 13.0, Linux x86_64'
+                : 'Not verified by Pumas · official wheel resolved during install (CPU default) · compatible installed Python selected'}
+              <div>Managed binaries require Linux x86_64. Stable releases only; Python provisioning and source builds are unavailable. Installation does not select or start this version.</div>
+            </div>
+          )}
         </div>
       </div>
 

@@ -184,6 +184,11 @@ impl VersionState {
             }
         }
 
+        // Torch requires an explicit trial/selection before it becomes active.
+        if self.app_id == AppId::Torch {
+            return Ok(None);
+        }
+
         // 4. Newest installed version (lexicographically, which works for semver with v prefix)
         if !self.installed_tags.is_empty() {
             let mut sorted: Vec<_> = self.installed_tags.iter().cloned().collect();

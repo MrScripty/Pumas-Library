@@ -152,7 +152,8 @@ export function InstallDialog({
     availableVersions,
     installedVersions,
     showPreReleases,
-    showInstalled
+    showInstalled,
+    appId === 'torch'
   );
   const stickyFailure = getStickyFailure(progress, failedInstall);
 
@@ -239,6 +240,7 @@ export function InstallDialog({
       title={dialogTitle}
     >
       <InstallDialogContent
+        appId={appId}
         cancellationNotice={cancellationNotice}
         cancelHoverTag={cancelHoverTag}
         errorMessage={errorMessage}

@@ -13,13 +13,15 @@ export function filterVersions(
   availableVersions: VersionRelease[],
   installedVersions: string[],
   showPreReleases: boolean,
-  showInstalled: boolean
+  showInstalled: boolean,
+  showAllPatches = false
 ): VersionRelease[] {
   const installed = new Set(installedVersions);
   const visibleReleases = availableVersions.filter((release) =>
     showPreReleases || !release.prerelease || (showInstalled && installed.has(release.tagName))
   );
-  const latestTags = new Set(filterLatestPatchVersions(visibleReleases).map((release) => release.tagName));
+  const latestTags = new Set((showAllPatches ? visibleReleases : filterLatestPatchVersions(visibleReleases))
+    .map((release) => release.tagName));
   const rows = visibleReleases.filter((release) => installed.has(release.tagName)
     ? showInstalled
     : latestTags.has(release.tagName));

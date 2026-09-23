@@ -14,6 +14,7 @@ import { VersionListItemInfo } from './VersionListItemInfo';
 import { getVersionInstallDisplayState } from './VersionListItemState';
 
 interface VersionListItemProps {
+  appId?: string;
   release: VersionRelease;
   isInstalled: boolean;
   isInstalling: boolean;
@@ -36,6 +37,7 @@ interface VersionListItemProps {
 }
 
 export function VersionListItem({
+  appId,
   release,
   isInstalled,
   isInstalling,
@@ -75,6 +77,7 @@ export function VersionListItem({
     >
       <div className="flex items-center justify-between gap-2">
         <VersionListItemInfo
+          appId={appId}
           displayTag={displayState.displayTag}
           errorMessage={errorMessage}
           failedLogPath={failedLogPath}

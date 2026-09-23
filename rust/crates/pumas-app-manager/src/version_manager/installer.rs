@@ -1534,7 +1534,25 @@ impl VersionInstaller {
             release_date: Some(release.published_at.clone()),
             release_notes: release.body.clone(),
             download_url: if self.app_id == AppId::Torch {
-                torch::torch_recipe_for_tag(tag).map(|recipe| recipe.torch_wheel_url.to_string())
+                if let Some(recipe) = torch::torch_recipe_for_tag(tag) {
+                    Some(recipe.torch_wheel_url.to_string())
+                } else {
+                    std::fs::read(version_dir.join("resolution.json"))
+                        .ok()
+                        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                        .and_then(|resolution| {
+                            resolution["artifacts"]
+                                .as_array()?
+                                .iter()
+                                .find(|artifact| {
+                                    artifact["name"]
+                                        .as_str()
+                                        .is_some_and(|name| name.eq_ignore_ascii_case("torch"))
+                                })?["url"]
+                                .as_str()
+                                .map(str::to_string)
+                        })
+                }
             } else {
                 release.zipball_url.clone().or(release.tarball_url.clone())
             },

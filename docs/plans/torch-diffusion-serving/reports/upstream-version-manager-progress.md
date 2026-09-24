@@ -88,10 +88,15 @@ resolved upstream release.
   bounded official-index discovery returned three `cu126` Torch wheel leads
   matching installed CPython 3.12, 3.10, and 3.11. Those leads were not full
   dependency resolutions or install trials.
-- The host's NVIDIA driver is unavailable (`nvidia-smi` cannot communicate with
-  it). The default sandbox cannot resolve the wheel host, although elevated
-  network access resolved the real CPU tuple. No new CUDA image model was loaded
-  or run here.
+- The host has an NVIDIA GeForce RTX 5090 Laptop GPU with 24,463 MiB and driver
+  595.84. The default execution sandbox has no `/dev/nvidia*` device nodes, so
+  `nvidia-smi` fails there; a read-only unsandboxed query confirms the host GPU
+  is available. The existing Pumas `2.9.1+cu130` environment reports CUDA 13.0,
+  detects the RTX 5090, and completed a CUDA tensor multiplication outside the
+  sandbox. This check is evidence only for that existing runtime. The default
+  sandbox also cannot resolve the wheel host, although
+  elevated network access resolved the real CPU tuple. No new CUDA image model
+  was loaded or run in this evidence set.
 
 ## Open implementation gaps
 

@@ -73,7 +73,7 @@ export function VersionListItemInfo({
               ) : release.tagName === 'v2.9.1'
                 ? 'Qualified preset: Python 3.12, CUDA 13.0, bundled image dependencies'
                 : 'Unverified release · choose an official build and installed Python, then review exact wheel hashes'}
-              {!isInstalled && <div>Managed binaries require Linux x86_64. Stable releases only. Installation does not select or start this version.</div>}
+              {!isInstalled && <div>Managed binaries require Linux x86_64 and stable releases. This flow installs official binary wheels only; source compilation is a separate unsupported path. Installation does not select or start this version.</div>}
             </div>
           )}
         </div>

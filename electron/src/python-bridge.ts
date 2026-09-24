@@ -52,7 +52,10 @@ interface RPCResponse {
 }
 
 export function rpcRequestTimeoutMs(method: string): number {
-  return method === 'preview_torch_runtime' ? 195_000 : 60_000;
+  if (method === 'preview_torch_runtime') return 195_000;
+  if (method === 'trial_torch_runtime') return 90_000;
+  if (method === 'find_torch_alternatives') return 75_000;
+  return 60_000;
 }
 
 export type ModelLibraryUpdateListener = (payload: unknown) => void;

@@ -129,6 +129,7 @@ pub(super) async fn serve_torch_model(
         )
         .await;
     };
+    let torch_lifecycle_lease = manager.torch_lifecycle_lease().await?;
     let Some(tag) = manager.get_active_version().await? else {
         return non_critical_failure_response(
             state,
@@ -186,6 +187,7 @@ pub(super) async fn serve_torch_model(
             }
         }
     };
+    drop(torch_lifecycle_lease);
     let client = TorchClient::new(Some(owned.endpoint_url.as_str()));
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {

@@ -840,6 +840,38 @@ async fn dispatch_admitted_command(
                 .map(RpcOutcome::TorchRuntimeProbe)
         }
         #[cfg(feature = "inference-plugins")]
+        RpcCommand::TrialTorchRuntime { tag, profile_id } => {
+            versions::trial_torch_runtime(state, &tag, profile_id)
+                .await
+                .map(RpcOutcome::TorchRuntimeTrial)
+        }
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::FindTorchAlternatives { tag, build, python } => {
+            let vm = require_version_manager(state, "torch").await?;
+            let discovery = vm
+                .discover_torch_alternatives(&tag, &build, &python)
+                .await?;
+            serde_json::to_value(discovery)
+                .map(RpcOutcome::TorchAlternatives)
+                .map_err(|e| pumas_library::PumasError::Other(e.to_string()))
+        }
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::StopRuntimeProfileIfGeneration {
+            profile_id,
+            generation,
+        } => {
+            let stopped = state
+                .api
+                .stop_runtime_profile_if_generation(profile_id, generation)
+                .await?;
+            Ok(RpcOutcome::RuntimeProfileGenerationStop(
+                crate::contract::StopRuntimeProfileGenerationOutcome {
+                    success: true,
+                    stopped,
+                },
+            ))
+        }
+        #[cfg(feature = "inference-plugins")]
         RpcCommand::SetDefaultVersion { app_id, tag } => {
             versions::set_default_version(state, &app_id, tag.as_deref())
                 .await

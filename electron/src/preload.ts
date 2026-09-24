@@ -69,6 +69,11 @@ import {
   decodeInstallVersionParams,
   decodePreviewTorchRuntimeParams,
   decodeGetTorchRuntimeProbeParams,
+  decodeTrialTorchRuntimeParams,
+  decodeTrialTorchRuntimeOutcome,
+  decodeFindTorchAlternativesParams,
+  decodeStopRuntimeProfileGenerationParams,
+  decodeStopRuntimeProfileGenerationOutcome,
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
@@ -408,6 +413,39 @@ function validateTorchProbe(value: unknown): unknown {
   return result;
 }
 
+function validateTorchTrial(value: unknown): unknown {
+  const result = requireTorchPayload(value, 'trial_torch_runtime');
+  if (typeof result['success'] !== 'boolean' || typeof result['tag'] !== 'string'
+    || typeof result['profileId'] !== 'string'
+    || !['passed', 'failed'].includes(String(result['startupStatus']))
+    || !['passed', 'failed', 'not_checked'].includes(String(result['healthStatus']))
+    || (result['protocol'] !== null && typeof result['protocol'] !== 'number')
+    || (result['generation'] !== null && typeof result['generation'] !== 'string')
+    || !Array.isArray(result['capabilities']) || !result['capabilities'].every((item) => typeof item === 'string')
+    || typeof result['startedByTrial'] !== 'boolean'
+    || (result['error'] !== undefined && result['error'] !== null && typeof result['error'] !== 'string')
+    || !['not_needed', 'stopped_owned_generation', 'manual_stop_required'].includes(String(result['cleanup']))) {
+    throw new TypeError('Invalid trial_torch_runtime response');
+  }
+  return result;
+}
+
+function validateTorchAlternatives(value: unknown): unknown {
+  const result = requireTorchPayload(value, 'find_torch_alternatives');
+  if (!['selectedTag', 'selectedBuild', 'selectedPython'].every((key) => typeof result[key] === 'string')
+    || !['matches', 'none', 'inconclusive'].includes(String(result['status']))
+    || result['incomplete'] !== true || result['dependenciesNotChecked'] !== true
+    || !Array.isArray(result['checkedBuilds']) || !result['checkedBuilds'].every((item) => typeof item === 'string')
+    || !Array.isArray(result['issues']) || !result['issues'].every((item) => typeof item === 'string')
+    || !Array.isArray(result['matches']) || !result['matches'].every((item) => isRecord(item)
+      && ['tag', 'build', 'python'].every((key) => typeof item[key] === 'string')
+      && (item['wheelUrl'] === undefined || typeof item['wheelUrl'] === 'string')
+      && (item['sha256'] === undefined || typeof item['sha256'] === 'string'))) {
+    throw new TypeError('Invalid find_torch_alternatives response');
+  }
+  return result;
+}
+
 function isModelLibraryUpdateEventPayload(value: unknown): boolean {
   if (!isRecord(value)) {
     return false;
@@ -623,6 +661,21 @@ const electronAPI = {
   get_torch_runtime_probe: async (tag: string) => {
     const params = requireDecoded(decodeGetTorchRuntimeProbeParams({ tag }), 'get_torch_runtime_probe request');
     return validateTorchProbe(await apiCall('get_torch_runtime_probe', params));
+  },
+  trial_torch_runtime: async (tag: string, profileId: string) => {
+    const params = requireDecoded(decodeTrialTorchRuntimeParams({ tag, profileId }), 'trial_torch_runtime request');
+    return validateTorchTrial(await validatedApiCall('trial_torch_runtime', decodeTrialTorchRuntimeOutcome, params));
+  },
+  stop_runtime_profile_if_generation: (profileId: string, generation: string) => {
+    if (!profileId || !/^[1-9]\d*$/.test(generation)) {
+      throw new TypeError('Conditional profile stop requires a profile ID and valid generation');
+    }
+    const params = requireDecoded(decodeStopRuntimeProfileGenerationParams({ profileId, generation }), 'stop_runtime_profile_if_generation request');
+    return validatedApiCall('stop_runtime_profile_if_generation', decodeStopRuntimeProfileGenerationOutcome, params);
+  },
+  find_torch_alternatives: async (tag: string, build: string, python: string) => {
+    const params = requireDecoded(decodeFindTorchAlternativesParams({ tag, build, python }), 'find_torch_alternatives request');
+    return validateTorchAlternatives(await apiCall('find_torch_alternatives', params));
   },
   remove_version: (tag: string, appId?: string) =>
     validatedApiCall('remove_version', decodeRemoveVersionOutcome, { tag, app_id: appId }),

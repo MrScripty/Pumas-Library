@@ -26,7 +26,11 @@ resolved upstream release.
   The manager retains the exact pip resolution and a fingerprint of the chosen
   interpreter; installation consumes that retained lock without resolving again.
   An unsupported combination and a network-inconclusive resolution have distinct
-  errors. Nunchaku's known wheel is confined to the fixed 2.9.1 preset.
+  errors. After a definite unsupported preview, the desktop can search a bounded
+  set of official Torch indexes for wheel matches for installed interpreters.
+  These leads are explicitly incomplete: dependencies and adapters are unchecked,
+  and choosing one starts a fresh exact preview. Nunchaku's known wheel is
+  confined to the fixed 2.9.1 preset.
 - Installation stages a hash-locked environment, checks the exact installed
   Torch version and build, and runs core Torch/CPU/sidecar probes before
   publication. A selected adapter import failure is recorded as partial feature
@@ -40,19 +44,29 @@ resolved upstream release.
   serving perform lightweight identity checks; model serving is the socket
   startup and image execution attempt. Probe evidence is tied to its recorded
   environment and hardware context, with staleness diagnostics.
+- An explicit startup trial is available after selecting an installed runtime
+  and an enabled managed TorchServe profile. It checks exact Torch identity,
+  launches an owned sidecar, attributes its listener, and checks health and
+  protocol. The trial returns scoped socket/protocol evidence to the desktop;
+  it does not qualify image generation or persist an acceptance result. A
+  failed or cancelled trial stops only its admitted process generation. The
+  desktop exposes a generation-conditional Stop action after a successful trial.
 
 ## Checks and real configuration
 
-- Deterministic Python resolver/probe fixtures: 15 passed. Ruff checks passed.
+- Deterministic Python resolver/probe fixtures: 20 passed. Ruff checks passed.
   The fixtures include wrong Torch and torchvision builds, origin/hash rejection,
   missing wheels, network-inconclusive failures, scoped adapter failure, and a
   FastAPI route object without a `path` attribute, and bounded probe identity
-  inputs that exclude the virtual environment's source tree.
-- Rust `version_manager::` tests: 100 passed, including legacy migration,
+  inputs that exclude the virtual environment's source tree. New fixtures check
+  bounded official-wheel alternatives without treating them as full resolution.
+- Rust `version_manager::` tests: 102 passed, including legacy migration,
   cancellation, orphan recovery, selection, and preview process-group cleanup.
-  RPC install-contract tests: 7 passed. Frontend suite: 689 passed; Electron
+  Focused owned-launch cancellation and trial retrial tests passed. RPC
+  install-contract tests: 7 passed. Frontend suite: 693 passed; Electron
   suite: 12 passed. Frontend and Electron typechecks/build and lint passed.
-  Rust format, workspace check, Clippy, and no-default-features check passed.
+  Rust format, workspace check, Clippy, and no-default-features check passed
+  (the latter emitted dead-code warnings for disabled feature paths).
   The full Rust gate then failed in 66 existing `pumas-library`
   core tests outside this branch's write set (1349 passed); a representative
   failed download test passed when rerun alone. The broad gate is not green.
@@ -67,6 +81,13 @@ resolved upstream release.
   The probe result was `core_status: passed`, `adapter_status: not selected`.
   This was a direct isolated resolver/environment exercise, not a managed
   desktop installation or image inference run.
+- **Additional real resolver checks:** official `torch-2.9.0+cpu` CPython 3.12
+  Linux x86_64 resolved with 25 wheels; the Torch wheel SHA-256 was
+  `28f6eb31b08180a5c5e98d5bc14eef6909c9f5a1dbff9632c3e02a8773449349`.
+  It was not installed. For `v2.10.0` with an unavailable selected `cu118` build,
+  bounded official-index discovery returned three `cu126` Torch wheel leads
+  matching installed CPython 3.12, 3.10, and 3.11. Those leads were not full
+  dependency resolutions or install trials.
 - The host's NVIDIA driver is unavailable (`nvidia-smi` cannot communicate with
   it). The default sandbox cannot resolve the wheel host, although elevated
   network access resolved the real CPU tuple. No new CUDA image model was loaded
@@ -75,16 +96,15 @@ resolved upstream release.
 ## Open implementation gaps
 
 - Build choices are candidate official indexes, not a precomputed compatibility
-  matrix. An unavailable selected combination remains visible with a specific
-  error and other installed Python/build choices, but compatible alternatives
-  are not yet automatically discovered and verified.
+  matrix. Wheel alternatives are discovered after an unsupported preview, but
+  they remain leads until the selected combination passes full retained preview.
 - The fixed 2.9.1 preset preview highlights three direct wheels; its full
   embedded hash lock is available in the preview report and is checked during
   installation. It does not expose one exact transitive wheel URL per package
   before installation.
-- The saved probe is scoped to installation. There is no standalone socket
-  startup trial RPC or on-demand deep re-probe; actual startup is attempted
-  during model serving. Read-only freshness checks compare the resolved lock,
+- The saved deep probe is scoped to installation; there is no on-demand deep
+  re-probe. The standalone startup trial checks socket health and protocol but
+  does not execute a model. Read-only freshness checks compare the resolved lock,
   shipped sidecar Python files, interpreter binary, full installed distribution
   set, GPU identity, and available driver metadata. A changed context marks
   the saved result stale but does not rerun the expensive model operation.

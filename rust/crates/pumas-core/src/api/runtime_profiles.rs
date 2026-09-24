@@ -6,8 +6,11 @@ use crate::models::{
     RuntimeProfilesSnapshotResponse, RuntimeProviderId,
 };
 use crate::runtime_profiles::RuntimeProfileLaunchOverrides;
+use crate::runtime_profiles::RuntimeProfileProcessOwner;
+use crate::serving::ServingService;
 use crate::{PumasApi, Result};
 use std::path::Path;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManagedRuntimeShutdownSummary {
@@ -16,7 +19,76 @@ pub struct ManagedRuntimeShutdownSummary {
     pub errors: Vec<String>,
 }
 
+/// Cleans only the admitted process generation if a startup caller is dropped.
+/// Disarm it once the caller intentionally keeps the healthy profile running.
+pub struct OwnedRuntimeProfileCleanupTicket {
+    owner: Arc<RuntimeProfileProcessOwner>,
+    serving: Arc<ServingService>,
+    profile_id: RuntimeProfileId,
+    generation: u64,
+    armed: bool,
+}
+
+impl OwnedRuntimeProfileCleanupTicket {
+    pub fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for OwnedRuntimeProfileCleanupTicket {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let owner = self.owner.clone();
+        let serving = self.serving.clone();
+        let profile_id = self.profile_id.clone();
+        let generation = self.generation;
+        handle.spawn(async move {
+            match owner
+                .stop_if_generation_with_receipt(&profile_id, generation)
+                .await
+            {
+                Ok(Some((receipt, Ok(_)))) => {
+                    if let Err(error) = serving
+                        .record_profile_unavailable_for_owned_generation(
+                            &profile_id,
+                            receipt.generation,
+                            &owner,
+                        )
+                        .await
+                    {
+                        tracing::warn!(%error, "Owned trial cleanup could not update serving state");
+                    }
+                }
+                Ok(Some((_, Err(error)))) | Err(error) => {
+                    tracing::warn!(%error, "Owned trial cleanup failed");
+                }
+                Ok(None) => {}
+            }
+        });
+    }
+}
+
 impl PumasApi {
+    /// Return a cancellation guard for the exact owned profile generation.
+    pub fn owned_runtime_profile_cleanup_ticket(
+        &self,
+        profile_id: RuntimeProfileId,
+        generation: u64,
+    ) -> OwnedRuntimeProfileCleanupTicket {
+        OwnedRuntimeProfileCleanupTicket {
+            owner: self.primary().runtime_profile_service.process_owner.clone(),
+            serving: self.primary().serving_service.clone(),
+            profile_id,
+            generation,
+            armed: true,
+        }
+    }
+
     /// Reserve one model operation for an exact owned router generation.
     ///
     /// Busy or uncertain sessions reject immediately. Dropping an armed operation
@@ -241,6 +313,21 @@ impl PumasApi {
 
     pub async fn stop_runtime_profile(&self, profile_id: RuntimeProfileId) -> Result<bool> {
         super::state_runtime_profiles::stop_runtime_profile(self.primary(), profile_id).await
+    }
+
+    /// Stop an owned runtime only if the profile still belongs to the specified
+    /// launch generation. A successor process is left running.
+    pub async fn stop_runtime_profile_if_generation(
+        &self,
+        profile_id: RuntimeProfileId,
+        generation: u64,
+    ) -> Result<bool> {
+        super::state_runtime_profiles::stop_runtime_profile_if_generation(
+            self.primary(),
+            profile_id,
+            generation,
+        )
+        .await
     }
 
     pub async fn stop_all_managed_runtime_profiles(&self) -> Result<ManagedRuntimeShutdownSummary> {

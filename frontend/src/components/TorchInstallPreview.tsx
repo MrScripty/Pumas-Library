@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { api } from '../api/adapter';
-import type { TorchRuntimeOptions, TorchRuntimePreview } from '../types/torch-install';
+import type { TorchAlternativesOutcome, TorchRuntimeOptions, TorchRuntimePreview } from '../types/torch-install';
 
 interface TorchInstallPreviewProps {
   tag: string;
@@ -29,6 +29,9 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
   const [probing, setProbing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checks, setChecks] = useState<CheckedCombination[]>([]);
+  const [alternatives, setAlternatives] = useState<TorchAlternativesOutcome | null>(null);
+  const [alternativesBusy, setAlternativesBusy] = useState(false);
+  const [alternativesError, setAlternativesError] = useState<string | null>(null);
   const requestNumber = useRef(0);
 
   useEffect(() => {
@@ -38,6 +41,9 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     setPreview(null);
     setError(null);
     setChecks([]);
+    setAlternatives(null);
+    setAlternativesError(null);
+    setAlternativesBusy(false);
     void api.get_torch_runtime_options().then((result) => {
       if (!active) return;
       const preset = result.preset.tag === tag ? result.preset : null;
@@ -61,13 +67,16 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     setPreview(null);
     setProbing(false);
     setError(null);
+    setAlternatives(null);
+    setAlternativesError(null);
+    setAlternativesBusy(false);
   };
 
-  const probe = async () => {
-    if (!build || !python || probing) return;
+  const probe = async (selection = { build, python, adapter }) => {
+    if (!selection.build || !selection.python || probing) return;
     const currentRequest = ++requestNumber.current;
-    const key = `${build}|${python}|${adapter}`;
-    const label = `${build} · ${python} · ${adapter}`;
+    const key = `${selection.build}|${selection.python}|${selection.adapter}`;
+    const label = `${selection.build} · ${selection.python} · ${selection.adapter}`;
     const recordCheck = (status: CheckedCombination['status']) => {
       setChecks((previous) => [...previous.filter((item) => item.key !== key), { key, label, status }]);
     };
@@ -75,7 +84,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     setError(null);
     setProbing(true);
     try {
-      const result = await api.preview_torch_runtime({ tag, build, python, adapter });
+      const result = await api.preview_torch_runtime({ tag, ...selection });
       if (requestNumber.current === currentRequest) {
         setPreview(result);
         recordCheck('resolved');
@@ -91,12 +100,29 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     }
   };
 
+  const findAlternatives = async () => {
+    if (!error?.includes('Unsupported combination:') || alternativesBusy) return;
+    const currentRequest = requestNumber.current;
+    setAlternativesBusy(true);
+    setAlternatives(null);
+    setAlternativesError(null);
+    try {
+      const result = await api.find_torch_alternatives(tag, build, python);
+      if (requestNumber.current === currentRequest) setAlternatives(result);
+    } catch (cause) {
+      if (requestNumber.current === currentRequest) setAlternativesError(errorText(cause));
+    } finally {
+      if (requestNumber.current === currentRequest) setAlternativesBusy(false);
+    }
+  };
+
   const fixedPreset = options?.preset.tag === tag;
   const availableBuilds = fixedPreset ? [options.preset.build] : options?.builds ?? [];
   const availablePythons = fixedPreset
     ? [{ id: options.preset.python, label: `Python ${options.preset.python.replace('python', '')} (fixed preset)` }]
     : options?.pythons ?? [];
   const availableAdapters = fixedPreset ? [options.preset.adapter] : options?.adapters ?? [];
+  const hasSelectedPython = options?.pythons.some((choice) => choice.id === python) ?? false;
   const canInstall = preview !== null && Boolean(preview.previewId)
     && preview.tag === tag && preview.build === build
     && preview.python === python && preview.adapter === adapter;
@@ -116,6 +142,12 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
         </p>
         <p className="text-xs text-[hsl(var(--text-secondary))]">
           This check resolves package files and hashes. Device use, image generation, and socket startup need later runtime checks.
+        </p>
+        <p className="text-xs text-[hsl(var(--text-secondary))]">
+          Managed Torch requires Linux x86_64. Pumas uses an already installed compatible CPython 3.10–3.13 interpreter; it does not install Python.
+        </p>
+        <p className="text-xs text-[hsl(var(--text-secondary))]">
+          This flow installs official binary wheels only. Source compilation is a separate unsupported path and is never used as a fallback.
         </p>
       </div>
       {loadingOptions ? <Loader2 aria-label="Loading Torch choices" className="animate-spin" /> : options && (
@@ -138,8 +170,9 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
               </select>
             </label>
           </div>
-          {options.pythons.length === 0 && <p role="status">No supported installed Python interpreter was found.</p>}
-          <button type="button" disabled={!build || !python || probing} onClick={() => void probe()} className="rounded border px-3 py-2 text-sm disabled:opacity-50">
+          {options.pythons.length === 0 && <p role="status">No supported installed Python interpreter was found. Install CPython 3.10–3.13 for Linux x86_64, then reopen this preview.</p>}
+          {fixedPreset && options.pythons.length > 0 && !hasSelectedPython && <p role="status">This fixed preset requires installed CPython 3.12. Install it, then reopen this preview.</p>}
+          <button type="button" disabled={!build || !hasSelectedPython || probing} onClick={() => void probe()} className="rounded border px-3 py-2 text-sm disabled:opacity-50">
             {probing ? 'Checking…' : 'Check selected combination'}
           </button>
         </>
@@ -149,6 +182,34 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
         <ul>{checks.map((check) => <li key={check.key}>{check.label}: {check.status}</li>)}</ul>
       </div>}
       {error && <p role="alert" className="text-sm text-[hsl(var(--accent-error))]">{error.includes('Unsupported combination:') ? 'Unsupported combination' : 'Probe inconclusive'}: {error}</p>}
+      {!fixedPreset && error?.includes('Unsupported combination:') && <div className="space-y-2 text-sm">
+        <button type="button" disabled={alternativesBusy} onClick={() => void findAlternatives()} className="rounded border px-3 py-2 disabled:opacity-50">
+          {alternativesBusy ? 'Checking official wheels…' : 'Find compatible alternatives'}
+        </button>
+        {alternativesError && <p role="alert">Alternative search inconclusive: {alternativesError}</p>}
+        {alternatives && <div className="space-y-2 rounded border p-3">
+          <strong>Official Torch wheel matches only</strong>
+          <p>Other dependencies have not been checked. Choose a match to run the normal exact preview for the full environment.</p>
+          <p>Checked builds: {alternatives.checkedBuilds.join(', ') || 'none'}</p>
+          {alternatives.status === 'none' && <p>No official Torch wheel matches were found for this release and Python.</p>}
+          {alternatives.status === 'inconclusive' && <p>Alternative search was inconclusive.</p>}
+          {alternatives.issues.map((issue, index) => <p key={`${index}-${issue}`}>{issue}</p>)}
+          {alternatives.matches.length > 0 && <ul className="space-y-2">{alternatives.matches.map((match) => (
+            <li key={`${match.tag}|${match.build}|${match.python}`} className="rounded bg-[hsl(var(--surface-control))] p-2">
+              <button type="button" className="underline" onClick={() => {
+                invalidatePreview();
+                setBuild(match.build);
+                setPython(match.python);
+                void probe({ build: match.build, python: match.python, adapter });
+              }}>
+                Preview {match.tag} · {match.build} · {match.python}
+              </button>
+              {match.wheelUrl && <p className="break-all">Torch wheel: {match.wheelUrl}</p>}
+              {match.sha256 && <p className="break-all">SHA-256: {match.sha256}</p>}
+            </li>
+          ))}</ul>}
+        </div>}
+      </div>}
       {preview && (
         <div className="space-y-3 rounded border p-3 text-sm" role="status">
           <p className="font-medium">{fixedPreset ? 'Fixed preset highlights' : 'Exact artifacts resolved'}</p>

@@ -36,7 +36,7 @@ export interface TorchCapabilityProbe {
   status: string;
   scope?: string;
   reason?: string;
-  error?: string;
+  error?: string | null;
 }
 
 export interface TorchRuntimeProbeReport {
@@ -47,4 +47,38 @@ export interface TorchRuntimeProbeReport {
   core_status: 'passed' | 'failed';
   adapter_status: 'not selected' | 'unavailable' | 'inconclusive';
   capabilities: Record<string, TorchCapabilityProbe>;
+}
+
+export interface TorchStartupTrialOutcome {
+  success: boolean;
+  tag: string;
+  profileId: string;
+  startupStatus: 'passed' | 'failed';
+  healthStatus: 'passed' | 'failed' | 'not_checked';
+  protocol: number | null;
+  capabilities: string[];
+  generation: string | null;
+  startedByTrial: boolean;
+  error?: string | null;
+  cleanup: 'not_needed' | 'stopped_owned_generation' | 'manual_stop_required';
+}
+
+export interface TorchAlternativeMatch {
+  tag: string;
+  build: string;
+  python: string;
+  wheelUrl?: string;
+  sha256?: string;
+}
+
+export interface TorchAlternativesOutcome {
+  selectedTag: string;
+  selectedBuild: string;
+  selectedPython: string;
+  status: 'matches' | 'none' | 'inconclusive';
+  incomplete: true;
+  dependenciesNotChecked: true;
+  checkedBuilds: string[];
+  matches: TorchAlternativeMatch[];
+  issues: string[];
 }

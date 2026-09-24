@@ -21,6 +21,7 @@ describe('installed Torch version review', () => {
         ],
       }),
       get_torch_runtime_probe: probe,
+      get_runtime_profiles_snapshot: vi.fn().mockResolvedValue({ success: true, snapshot: { profiles: [] } }),
       switch_version: switchVersion,
     });
 

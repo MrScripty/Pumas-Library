@@ -750,6 +750,11 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         PreviewTorchRuntimeParams,
         GetTorchPreviewReportParams,
         GetTorchRuntimeProbeParams,
+        TrialTorchRuntimeParams,
+        TrialTorchRuntimeOutcome,
+        FindTorchAlternativesParams,
+        StopRuntimeProfileGenerationParams,
+        StopRuntimeProfileGenerationOutcome,
         InstallVersionOutcome,
         RuntimeLaunchParams,
         RuntimeLaunchOutcome,
@@ -853,6 +858,36 @@ fn refine_named(name: &str, schema: &mut Value) {
         for required in alias["required"].as_array_mut().unwrap() {
             if required == "app_id" {
                 *required = "appId".into();
+            }
+        }
+        *schema = serde_json::json!({"anyOf":[canonical, alias]});
+        return;
+    }
+    if matches!(
+        name,
+        "TrialTorchRuntimeParams"
+            | "StopRuntimeProfileGenerationParams"
+            | "GetTorchPreviewReportParams"
+    ) {
+        let (canonical_key, alias_key) = if name == "GetTorchPreviewReportParams" {
+            ("preview_id", "previewId")
+        } else {
+            ("profile_id", "profileId")
+        };
+        let mut canonical = schema.clone();
+        let object = canonical.as_object_mut().expect("request object schema");
+        object.remove("$schema");
+        object.remove("title");
+        let mut alias = canonical.clone();
+        let property = alias["properties"]
+            .as_object_mut()
+            .unwrap()
+            .remove(canonical_key)
+            .unwrap();
+        alias["properties"][alias_key] = property;
+        for required in alias["required"].as_array_mut().unwrap() {
+            if required == canonical_key {
+                *required = alias_key.into();
             }
         }
         *schema = serde_json::json!({"anyOf":[canonical, alias]});

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/adapter';
 import type { TorchInstalledConfig, TorchRuntimeProbeReport } from '../types/torch-install';
+import { TorchStartupTrial } from './TorchStartupTrial';
 
 function labelForCapability(key: string): string {
   return key.replaceAll('_', ' ');
@@ -71,6 +72,7 @@ export function TorchRuntimeProbePanel({ tag }: { tag: string }) {
           )}
         </>
       )}
+      <TorchStartupTrial tag={tag} />
     </section>
   );
 }

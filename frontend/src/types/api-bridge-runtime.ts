@@ -1,5 +1,5 @@
 import type { BaseResponse } from './api-common';
-import type { TorchRuntimeOptions, TorchRuntimePreview, TorchRuntimePreviewRequest, TorchRuntimeProbeReport } from './torch-install';
+import type { TorchAlternativesOutcome, TorchRuntimeOptions, TorchRuntimePreview, TorchRuntimePreviewRequest, TorchRuntimeProbeReport, TorchStartupTrialOutcome } from './torch-install';
 import type {
   LaunchResponse,
   RuntimeLaunchResponse,
@@ -83,6 +83,8 @@ export interface DesktopBridgeRuntimeAPI {
   get_torch_runtime_options(): Promise<TorchRuntimeOptions>;
   preview_torch_runtime(request: TorchRuntimePreviewRequest): Promise<TorchRuntimePreview>;
   get_torch_runtime_probe(tag: string): Promise<TorchRuntimeProbeReport>;
+  trial_torch_runtime(tag: string, profileId: string): Promise<TorchStartupTrialOutcome>;
+  find_torch_alternatives(tag: string, build: string, python: string): Promise<TorchAlternativesOutcome>;
   remove_version(tag: string, appId?: string): Promise<RemoveVersionResponse>;
   switch_version(tag: string, appId?: string): Promise<SwitchVersionResponse>;
   validate_installations(appId?: string): Promise<ValidateInstallationsResponse>;
@@ -135,6 +137,7 @@ export interface DesktopBridgeRuntimeAPI {
     modelId?: string | null
   ): Promise<LaunchResponse>;
   stop_runtime_profile(profileId: string): Promise<StopOllamaResponse>;
+  stop_runtime_profile_if_generation(profileId: string, generation: string): Promise<{ success: boolean; stopped: boolean; error?: string }>;
   get_serving_status(): Promise<ServingStatusResponse>;
   list_serving_status_updates_since(
     cursor?: string | null

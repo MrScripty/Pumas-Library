@@ -148,6 +148,107 @@ class ResolverTests(unittest.TestCase):
             75,
         )
 
+    def test_discovery_matches_only_exact_binary_wheel_tags_and_caps_results(self):
+        requested = []
+
+        def links(build):
+            requested.append(build)
+            return [
+                f"https://download-r2.pytorch.org/whl/{build}/torch-2.10.0%2B{build}-cp312-cp312-manylinux_2_28_x86_64.whl#sha256={'a' * 64}",
+                f"https://download-r2.pytorch.org/whl/{build}/torch-2.10.0%2B{build}-cp312-cp312-manylinux_2_28_x86_64.tar.gz",
+                "https://evil.test/torch-2.10.0+cpu-cp312-cp312-manylinux_2_28_x86_64.whl",
+            ]
+
+        def tags(interpreter):
+            return interpreter, {"cp312-cp312-manylinux_2_28_x86_64"}
+
+        result = resolver.discover_alternatives(
+            "v2.10.0",
+            "cu130",
+            "python3.13",
+            ["3.12", "3.11", "3.10"],
+            index_loader=links,
+            tag_loader=tags,
+        )
+        self.assertEqual(result["status"], "matches")
+        self.assertEqual(len(result["matches"]), 3)
+        self.assertEqual(len(requested), 1)
+        self.assertTrue(result["dependenciesNotChecked"])
+        self.assertTrue(result["incomplete"])
+        self.assertEqual(result["matches"][0]["build"], "cu130")
+        self.assertEqual(result["matches"][0]["sha256"], "a" * 64)
+
+    def test_discovery_network_failure_is_inconclusive_and_never_full_resolution(self):
+        def unavailable(_build):
+            raise OSError("timeout")
+
+        result = resolver.discover_alternatives(
+            "v2.10.0",
+            "cu130",
+            "python3.12",
+            ["3.12"],
+            index_loader=unavailable,
+            tag_loader=lambda _: ("3.12", {"cp312-cp312-manylinux_2_28_x86_64"}),
+        )
+        self.assertEqual(result["status"], "inconclusive")
+        self.assertEqual(result["matches"], [])
+        self.assertEqual(len(result["checkedBuilds"]), resolver.MAX_INDEX_REQUESTS)
+
+    def test_discovery_prefers_selected_build_then_other_build(self):
+        requested = []
+
+        def links(build):
+            requested.append(build)
+            if build == "cu130":
+                return []
+            return [
+                f"https://download.pytorch.org/whl/{build}/torch-2.10.0%2B{build}-cp312-cp312-manylinux_2_28_x86_64.whl"
+            ]
+
+        result = resolver.discover_alternatives(
+            "v2.10.0",
+            "cu130",
+            "python3.13",
+            ["3.12"],
+            index_loader=links,
+            tag_loader=lambda _: ("3.12", {"cp312-cp312-manylinux_2_28_x86_64"}),
+        )
+        self.assertEqual(requested[:2], ["cu130", "cu128"])
+        self.assertEqual(result["matches"][0]["build"], "cu128")
+        self.assertIsNone(result["matches"][0]["sha256"])
+
+    def test_discovery_rejects_untrusted_and_wrong_build_wheels(self):
+        tags = {"cp312-cp312-manylinux_2_28_x86_64"}
+        for href in (
+            "https://evil.test/whl/cpu/torch-2.10.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl",
+            "https://download.pytorch.org/whl/cu128/torch-2.10.0%2Bcu128-cp312-cp312-manylinux_2_28_x86_64.whl",
+            "https://download.pytorch.org/whl/cpu/torch-2.10.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.tar.gz",
+        ):
+            with self.subTest(href=href):
+                self.assertIsNone(resolver.wheel_match(href, "2.10.0", "cpu", tags))
+
+    def test_index_read_has_byte_and_time_limits(self):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def geturl(self):
+                return "https://download.pytorch.org/whl/cpu/torch/"
+
+            def read(self, limit):
+                self.limit = limit
+                return b"x" * limit
+
+        response = Response()
+        opener = type("Opener", (), {"open": lambda self, request, timeout: response})()
+        with patch.object(resolver, "build_opener", return_value=opener):
+            with self.assertRaisesRegex(ValueError, "exceeded"):
+                resolver.torch_index_links("cpu")
+        self.assertEqual(response.limit, resolver.MAX_INDEX_BYTES + 1)
+
 
 if __name__ == "__main__":
     unittest.main()

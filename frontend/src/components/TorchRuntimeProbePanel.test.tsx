@@ -14,6 +14,7 @@ vi.mock('../api/adapter', () => ({
   api: {
     get_torch_runtime_probe: (tag: string) => getProbe(tag),
     get_torch_runtime_options: () => getOptions(),
+    get_runtime_profiles_snapshot: () => Promise.resolve({ success: true, snapshot: { profiles: [] } }),
   },
 }));
 

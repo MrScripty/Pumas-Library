@@ -50,6 +50,7 @@ pub mod ollama;
 mod progress;
 pub mod size_calculator;
 mod state;
+mod torch_alternatives;
 mod torch_preview;
 
 pub use constraints::ConstraintsManager;
@@ -60,6 +61,7 @@ pub use ollama::OllamaVersionManager;
 pub use progress::{InstallationProgressTracker, PackageWeights, ProgressUpdate};
 pub use size_calculator::{ReleaseSize, SizeBreakdown, SizeCalculator};
 pub use state::VersionState;
+pub use torch_alternatives::{TorchAlternativeDiscovery, TorchAlternativeMatch};
 pub use torch_preview::{TorchArtifact, TorchPreview};
 
 use pumas_library::config::{AppId, PathsConfig};
@@ -137,6 +139,17 @@ pub struct VersionManager {
 }
 
 impl VersionManager {
+    /// Hold Torch's selection/removal lease while checking and starting a
+    /// runtime. Drop it after startup admission or a failed attempt.
+    pub async fn torch_lifecycle_lease(&self) -> Result<tokio::sync::OwnedMutexGuard<()>> {
+        if self.app_id != AppId::Torch {
+            return Err(PumasError::Config {
+                message: "Torch lifecycle lease requires a Torch manager".into(),
+            });
+        }
+        Ok(self.lifecycle_lock.clone().lock_owned().await)
+    }
+
     async fn get_installed_version_metadata(
         &self,
         tag: &str,

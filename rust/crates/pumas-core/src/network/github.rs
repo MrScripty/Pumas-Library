@@ -326,13 +326,12 @@ impl Drop for FetchingReset<'_> {
     }
 }
 
-// Before exhaustive Torch pagination, a listing could stop after ten full
-// pages. New caches mark completion even when the exact count is 1,000.
+// Before exhaustive Torch pagination, branch versions could stop after one
+// or ten full pages. New caches mark completion even at those exact counts.
 fn may_be_legacy_truncated(repo: &str, entry: &StoredReleasesCache) -> bool {
-    const LEGACY_CAPPED_RELEASE_COUNT: usize = 1000;
     repo == AppId::Torch.github_repo()
         && !entry.listing_complete
-        && entry.snapshot.releases.len() == LEGACY_CAPPED_RELEASE_COUNT
+        && matches!(entry.snapshot.releases.len(), 100 | 1000)
 }
 
 const TORCH_RELEASES_MAX_PAGES: u32 = 20;
@@ -1208,7 +1207,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn non_torch_listing_keeps_ten_page_budget() {
+    async fn non_torch_listing_keeps_first_page_budget() {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let releases = collect_release_pages(1, page_policy("ggml-org/llama.cpp"), |page| {
             let seen = seen.clone();
@@ -1219,8 +1218,8 @@ mod tests {
         })
         .await
         .unwrap();
-        assert_eq!(releases.len(), 10);
-        assert_eq!(*seen.lock().unwrap(), (1..=10).collect::<Vec<_>>());
+        assert_eq!(releases.len(), 1);
+        assert_eq!(*seen.lock().unwrap(), vec![1]);
     }
 
     #[tokio::test]
@@ -1249,34 +1248,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn marked_exactly_one_thousand_cache_is_reused_offline() {
-        let (client, _root) = create_test_client();
-        let repo = AppId::Torch.github_repo();
-        let releases = vec![github_release(vec![]); 1000];
-        client.cache.set_disk(repo, &releases).unwrap();
-        let entry = client.cache.get_disk_entry(repo).unwrap();
-        assert!(entry.listing_complete);
-        assert!(!may_be_legacy_truncated(repo, &entry));
-        let cached = client.get_releases(repo, false).await.unwrap();
-        assert_eq!(cached.len(), 1000);
-        assert!(client.cache.get_memory(repo).is_some());
+    async fn marked_legacy_cap_sizes_are_reused_offline() {
+        for size in [100, 1000] {
+            let (client, _root) = create_test_client();
+            let repo = AppId::Torch.github_repo();
+            let releases = vec![github_release(vec![]); size];
+            client.cache.set_disk(repo, &releases).unwrap();
+            let entry = client.cache.get_disk_entry(repo).unwrap();
+            assert!(entry.listing_complete);
+            assert!(!may_be_legacy_truncated(repo, &entry));
+            let cached = client.get_releases(repo, false).await.unwrap();
+            assert_eq!(cached.len(), size);
+            assert!(client.cache.get_memory(repo).is_some());
+        }
     }
 
     #[tokio::test]
-    async fn old_unmarked_exactly_one_thousand_cache_requires_refresh() {
-        let (client, _root) = create_test_client();
-        let repo = AppId::Torch.github_repo();
-        let snapshot = GitHubReleasesCache {
-            last_fetched: Utc::now().to_rfc3339(),
-            ttl: 3600,
-            releases: vec![github_release(vec![]); 1000],
-        };
-        let path = client.cache.disk_cache_path(repo);
-        std::fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
-        let entry = client.cache.get_disk_entry(repo).unwrap();
-        assert!(!entry.listing_complete);
-        assert!(may_be_legacy_truncated(repo, &entry));
-        assert!(!client.get_cache_status(repo).await.is_valid);
+    async fn old_unmarked_legacy_cap_sizes_require_refresh() {
+        for size in [100, 1000] {
+            let (client, _root) = create_test_client();
+            let repo = AppId::Torch.github_repo();
+            let snapshot = GitHubReleasesCache {
+                last_fetched: Utc::now().to_rfc3339(),
+                ttl: 3600,
+                releases: vec![github_release(vec![]); size],
+            };
+            let path = client.cache.disk_cache_path(repo);
+            std::fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+            let entry = client.cache.get_disk_entry(repo).unwrap();
+            assert!(!entry.listing_complete);
+            assert!(may_be_legacy_truncated(repo, &entry));
+            assert!(!client.get_cache_status(repo).await.is_valid);
+        }
     }
 
     fn create_test_client() -> (GitHubClient, TempDir) {

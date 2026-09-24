@@ -101,6 +101,12 @@ struct RemovalPause {
     proceed: tokio::sync::Notify,
 }
 
+#[cfg(test)]
+struct TorchAdmissionPause {
+    reached: tokio::sync::Notify,
+    resume: tokio::sync::Semaphore,
+}
+
 /// Main version manager coordinating all version operations.
 #[derive(Clone)]
 pub struct VersionManager {
@@ -119,6 +125,10 @@ pub struct VersionManager {
     /// Cancellation flag for installations.
     cancel_flag: Arc<AtomicBool>,
     torch_control: Arc<installer::TorchInstallControl>,
+    torch_cleanup: Arc<installer::TorchCleanupTasks>,
+    torch_shutting_down: Arc<AtomicBool>,
+    #[cfg(test)]
+    torch_admission_pause: Option<Arc<TorchAdmissionPause>>,
     torch_previews: torch_preview::TorchPreviews,
     #[cfg(test)]
     torch_publication_pause: Option<Arc<installer::TorchPublicationPause>>,
@@ -253,6 +263,10 @@ impl VersionManager {
             progress_tracker,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             torch_control: Arc::new(installer::TorchInstallControl::new()),
+            torch_cleanup: Arc::new(installer::TorchCleanupTasks::default()),
+            torch_shutting_down: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            torch_admission_pause: None,
             torch_previews: Arc::new(Mutex::new(Default::default())),
             #[cfg(test)]
             torch_publication_pause: None,
@@ -556,6 +570,22 @@ impl VersionManager {
         Ok(true)
     }
 
+    /// Stop admitting Torch cleanup work and wait for the current attempt and
+    /// every cleanup task owned by this manager before server shutdown ends.
+    pub async fn shutdown_torch_cleanup(&self) -> Result<()> {
+        if self.app_id != AppId::Torch {
+            return Ok(());
+        }
+        {
+            let _installing = self.installing_tag.lock().await;
+            self.torch_shutting_down.store(true, Ordering::SeqCst);
+        }
+        let _ = self.cancel_installation().await?;
+        let _install_guard = self.install_lock.lock().await;
+        self.torch_cleanup.close();
+        self.torch_cleanup.drain().await
+    }
+
     /// Install a version with progress channel.
     ///
     /// Returns a channel receiver for progress updates.
@@ -580,9 +610,19 @@ impl VersionManager {
 
         // Acquire install lock
         let install_guard = self.install_lock.clone().lock_owned().await;
+        if self.app_id == AppId::Torch && self.torch_shutting_down.load(Ordering::SeqCst) {
+            return Err(PumasError::InstallationFailed {
+                message: "Torch version manager is shutting down".into(),
+            });
+        }
         // Resolve before recording installation state: discovery failure must not
         // leave a phantom installation that can never complete.
         let release = self.resolve_installable_release(tag).await?;
+        #[cfg(test)]
+        if let Some(pause) = &self.torch_admission_pause {
+            pause.reached.notify_one();
+            pause.resume.acquire().await.unwrap().forget();
+        }
         let torch_plan = if self.app_id == AppId::Torch {
             match preview_id {
                 Some(id) => {
@@ -632,16 +672,19 @@ impl VersionManager {
             });
         }
 
-        // Reset cancellation flag
-        self.cancel_flag.store(false, Ordering::SeqCst);
-
-        if self.app_id == AppId::Torch {
-            self.torch_control.start();
-        }
-
-        // Set installing tag
+        // Commit admission under the same lock used by cancellation. Shutdown
+        // may begin during release resolution, before an installing tag exists.
         {
             let mut installing = self.installing_tag.lock().await;
+            if self.app_id == AppId::Torch && self.torch_shutting_down.load(Ordering::SeqCst) {
+                return Err(PumasError::InstallationFailed {
+                    message: "Torch version manager is shutting down".into(),
+                });
+            }
+            self.cancel_flag.store(false, Ordering::SeqCst);
+            if self.app_id == AppId::Torch {
+                self.torch_control.start();
+            }
             *installing = Some(tag.to_string());
         }
 
@@ -656,7 +699,8 @@ impl VersionManager {
             self.progress_tracker.clone(),
             self.cancel_flag.clone(),
         )
-        .with_torch_control(self.torch_control.clone());
+        .with_torch_control(self.torch_control.clone())
+        .with_torch_cleanup(self.torch_cleanup.clone());
         #[cfg(test)]
         let installer = if let Some(pause) = &self.torch_publication_pause {
             installer.with_torch_publication_pause(pause.clone())
@@ -997,6 +1041,112 @@ mod tests {
             .await
             .unwrap();
         (manager, root)
+    }
+
+    #[tokio::test]
+    async fn torch_shutdown_drains_cleanup_scheduled_by_active_install() {
+        let (manager, _root) = create_torch_test_manager().await;
+        let install_guard = manager.install_lock.lock().await;
+        let shutdown_manager = manager.clone();
+        let mut shutdown =
+            tokio::spawn(async move { shutdown_manager.shutdown_torch_cleanup().await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !manager.torch_shutting_down.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let (release, wait) = std::sync::mpsc::channel();
+        let (started, observed) = std::sync::mpsc::channel();
+        manager.torch_cleanup.schedule(move || {
+            started.send(()).unwrap();
+            wait.recv().unwrap();
+        });
+        tokio::task::spawn_blocking(move || observed.recv().unwrap())
+            .await
+            .unwrap();
+        drop(install_guard);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut shutdown)
+                .await
+                .is_err()
+        );
+        release.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), &mut shutdown)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            manager.install_version("v2.9.1").await,
+            Err(PumasError::InstallationFailed { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn torch_shutdown_rejects_install_paused_before_admission() {
+        let root = TempDir::new().unwrap();
+        let cache = root.path().join("launcher-data/cache");
+        let releases = pumas_library::network::ReleasesCache::new(cache, Duration::from_secs(3600));
+        releases
+            .set_disk(
+                AppId::Torch.github_repo(),
+                &[pumas_library::network::GitHubRelease {
+                    tag_name: "v2.9.1".into(),
+                    name: "PyTorch 2.9.1".into(),
+                    published_at: "2025-11-12T00:00:00Z".into(),
+                    body: None,
+                    tarball_url: None,
+                    zipball_url: None,
+                    prerelease: false,
+                    assets: Vec::new(),
+                    html_url: "https://github.com/pytorch/pytorch/releases/tag/v2.9.1".into(),
+                    total_size: None,
+                    archive_size: None,
+                    dependencies_size: None,
+                }],
+            )
+            .unwrap();
+        let mut manager = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        let pause = Arc::new(TorchAdmissionPause {
+            reached: tokio::sync::Notify::new(),
+            resume: tokio::sync::Semaphore::new(0),
+        });
+        manager.torch_admission_pause = Some(pause.clone());
+        let installing_manager = manager.clone();
+        let install =
+            tokio::spawn(async move { installing_manager.install_version("v2.9.1").await });
+        tokio::time::timeout(Duration::from_secs(2), pause.reached.notified())
+            .await
+            .unwrap();
+        let shutdown_manager = manager.clone();
+        let shutdown = tokio::spawn(async move { shutdown_manager.shutdown_torch_cleanup().await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !manager.torch_shutting_down.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        pause.resume.add_permits(1);
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(2), install)
+                .await
+                .unwrap()
+                .unwrap(),
+            Err(PumasError::InstallationFailed { .. })
+        ));
+        tokio::time::timeout(Duration::from_secs(2), shutdown)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(!manager.is_installing().await);
+        assert!(manager.get_installation_progress().await.is_none());
     }
 
     async fn register_test_version(manager: &VersionManager, tag: &str) {

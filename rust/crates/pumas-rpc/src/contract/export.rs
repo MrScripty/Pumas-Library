@@ -892,7 +892,23 @@ fn refine_named(name: &str, schema: &mut Value) {
                 *required = "appId".into();
             }
         }
-        *schema = serde_json::json!({"anyOf":[canonical, alias]});
+        if name == "InstallVersionParams" {
+            let mut variants = Vec::with_capacity(4);
+            for app_variant in [canonical, alias] {
+                let mut preview_alias = app_variant.clone();
+                let property = preview_alias["properties"]
+                    .as_object_mut()
+                    .expect("request properties")
+                    .remove("preview_id")
+                    .expect("optional preview ID property");
+                preview_alias["properties"]["previewId"] = property;
+                variants.push(app_variant);
+                variants.push(preview_alias);
+            }
+            *schema = serde_json::json!({"anyOf":variants});
+        } else {
+            *schema = serde_json::json!({"anyOf":[canonical, alias]});
+        }
         return;
     }
     if matches!(
@@ -1419,4 +1435,32 @@ fn tighten_bounds(object: &mut Map<String, Value>, minimum: f64, maximum: f64) {
         .map_or(maximum, |bound| bound.min(maximum));
     object.insert("minimum".into(), minimum.into());
     object.insert("maximum".into(), maximum.into());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn install_version_schema_covers_app_and_optional_preview_aliases() {
+        let exported = schema::<InstallVersionParams>().expect("install request schema");
+        let variants = exported["anyOf"].as_array().expect("alias variants");
+        assert_eq!(variants.len(), 4);
+        for (variant, (app_key, preview_key)) in variants.iter().zip([
+            ("app_id", "preview_id"),
+            ("app_id", "previewId"),
+            ("appId", "preview_id"),
+            ("appId", "previewId"),
+        ]) {
+            let properties = variant["properties"]
+                .as_object()
+                .expect("request properties");
+            assert_eq!(properties.len(), 3);
+            assert!(properties.contains_key(app_key));
+            assert!(properties.contains_key("tag"));
+            assert!(properties.contains_key(preview_key));
+            assert_eq!(variant["additionalProperties"], false);
+            assert_eq!(variant["required"], serde_json::json!([app_key, "tag"]));
+        }
+    }
 }

@@ -25,8 +25,13 @@ export function VersionManagementPanel({
 }: VersionManagementPanelProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshOnOpenPending, setRefreshOnOpenPending] = useState(false);
+  const [inspectedTorchTag, setInspectedTorchTag] = useState<string | null>(null);
   const refreshInFlight = useRef(false);
   const refreshOnOpenStarted = useRef(false);
+
+  useEffect(() => {
+    setInspectedTorchTag(null);
+  }, [versions.activeVersion]);
 
   const latestVersion = versions.availableVersions[0]?.tagName ?? null;
   const hasNewVersion = useMemo(() => {
@@ -72,6 +77,7 @@ export function VersionManagementPanel({
   };
 
   const handleOpenVersionManager = () => {
+    setInspectedTorchTag(null);
     refreshOnOpenStarted.current = false;
     setRefreshOnOpenPending(true);
     onShowManager(true);
@@ -156,7 +162,12 @@ export function VersionManagementPanel({
             Selecting an installed Torch version does not prove it can start. Startup is attempted when you serve a model
             through a Torch profile. Setting a version as default also selects it on future starts.
           </p>
-          {versions.activeVersion && <TorchRuntimeProbePanel tag={versions.activeVersion} />}
+          {versions.activeVersion && <>
+            <button type="button" className="mt-2 rounded border px-3 py-2 text-xs" onClick={() => setInspectedTorchTag(versions.activeVersion)}>
+              Inspect active Torch runtime
+            </button>
+            {inspectedTorchTag === versions.activeVersion && <TorchRuntimeProbePanel tag={versions.activeVersion} />}
+          </>}
         </>
       )}
     </div>

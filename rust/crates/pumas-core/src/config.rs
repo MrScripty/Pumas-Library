@@ -69,7 +69,7 @@ impl NetworkConfig {
     /// walking every page can leave the install page spinner-bound. The first
     /// page provides the current install choices while keeping UI fetches
     /// bounded.
-    pub const GITHUB_RELEASES_MAX_PAGES: u32 = 10;
+    pub const GITHUB_RELEASES_MAX_PAGES: u32 = 1;
     pub const GITHUB_RELEASES_TTL: Duration = Duration::from_secs(3600);
     /// Maximum retry attempts for HuggingFace model downloads.
     ///
@@ -273,5 +273,10 @@ mod tests {
     fn test_timeouts_are_reasonable() {
         assert!(InstallationConfig::UV_INSTALL_TIMEOUT > Duration::from_secs(60));
         assert!(NetworkConfig::REQUEST_TIMEOUT > Duration::ZERO);
+    }
+
+    #[test]
+    fn non_torch_release_selection_is_limited_to_first_page() {
+        assert_eq!(NetworkConfig::GITHUB_RELEASES_MAX_PAGES, 1);
     }
 }

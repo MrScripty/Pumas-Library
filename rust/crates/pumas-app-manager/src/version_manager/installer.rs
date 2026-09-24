@@ -19,6 +19,8 @@ pub(crate) use torch::TorchPublicationPause;
 
 use crate::version_manager::progress::{InstallationProgressTracker, ProgressUpdate};
 use chrono::Utc;
+use futures::future::{BoxFuture, Shared};
+use futures::FutureExt;
 use pumas_library::config::{AppId, InstallationConfig, PathsConfig};
 use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
 use pumas_library::models::InstallationStage;
@@ -29,9 +31,11 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 async fn path_exists(path: &Path) -> Result<bool> {
@@ -44,6 +48,86 @@ async fn path_exists(path: &Path) -> Result<bool> {
 
 /// Coordinates Torch cancellation with the irreversible publication boundary.
 pub(crate) struct TorchInstallControl(AtomicU8);
+
+#[derive(Default)]
+pub(crate) struct TorchCleanupTasks {
+    state: StdMutex<TorchCleanupState>,
+}
+
+#[derive(Default)]
+struct TorchCleanupState {
+    closed: bool,
+    tasks: Vec<JoinHandle<()>>,
+    failures: Vec<String>,
+    completion: Option<Shared<BoxFuture<'static, std::result::Result<(), Arc<String>>>>>,
+}
+
+impl TorchCleanupTasks {
+    pub(crate) fn schedule(&self, work: impl FnOnce() + Send + 'static) {
+        let mut state = self.state.lock().expect("Torch cleanup lock poisoned");
+        if !state.closed {
+            let tasks = std::mem::take(&mut state.tasks);
+            for mut task in tasks {
+                if task.is_finished() {
+                    match (&mut task).now_or_never() {
+                        Some(Err(error)) => state.failures.push(error.to_string()),
+                        Some(Ok(())) => continue,
+                        None => state.tasks.push(task),
+                    }
+                } else {
+                    state.tasks.push(task);
+                }
+            }
+            state.tasks.push(tokio::task::spawn_blocking(work));
+        }
+    }
+
+    pub(crate) fn close(&self) {
+        self.state
+            .lock()
+            .expect("Torch cleanup lock poisoned")
+            .closed = true;
+    }
+
+    pub(crate) async fn drain(&self) -> Result<()> {
+        let completion = {
+            let mut state = self.state.lock().expect("Torch cleanup lock poisoned");
+            state.closed = true;
+            if let Some(completion) = &state.completion {
+                completion.clone()
+            } else {
+                let tasks = std::mem::take(&mut state.tasks);
+                let mut failures = std::mem::take(&mut state.failures);
+                // This supervisor owns every handle even if all callers waiting
+                // on the shared receipt are cancelled.
+                let supervisor = tokio::spawn(async move {
+                    for task in tasks {
+                        if let Err(error) = task.await {
+                            failures.push(error.to_string());
+                        }
+                    }
+                    if failures.is_empty() {
+                        Ok(())
+                    } else {
+                        Err(Arc::new(failures.join("; ")))
+                    }
+                });
+                let completion = async move {
+                    supervisor
+                        .await
+                        .unwrap_or_else(|error| Err(Arc::new(error.to_string())))
+                }
+                .boxed()
+                .shared();
+                state.completion = Some(completion.clone());
+                completion
+            }
+        };
+        completion
+            .await
+            .map_err(|error| PumasError::Other(format!("Torch cleanup tasks failed: {error}")))
+    }
+}
 
 impl TorchInstallControl {
     const IDLE: u8 = 0;
@@ -117,6 +201,7 @@ pub struct VersionInstaller {
     /// Cancellation flag.
     cancel_flag: Arc<AtomicBool>,
     torch_control: Arc<TorchInstallControl>,
+    torch_cleanup: Arc<TorchCleanupTasks>,
     torch_attempt_lock: Mutex<()>,
     #[cfg(test)]
     torch_stage_override: Option<TorchStageOverride>,
@@ -149,6 +234,7 @@ impl VersionInstaller {
             progress_tracker,
             cancel_flag,
             torch_control: Arc::new(TorchInstallControl::new()),
+            torch_cleanup: Arc::new(TorchCleanupTasks::default()),
             torch_attempt_lock: Mutex::new(()),
             #[cfg(test)]
             torch_stage_override: None,
@@ -159,8 +245,21 @@ impl VersionInstaller {
         }
     }
 
+    /// Drain Torch quarantine cleanup after the last direct install call.
+    /// Owners using `VersionInstaller` without `VersionManager` must await this
+    /// before shutting down their Tokio runtime.
+    pub async fn shutdown_torch_cleanup(&self) -> Result<()> {
+        self.torch_cleanup.close();
+        self.torch_cleanup.drain().await
+    }
+
     pub(crate) fn with_torch_control(mut self, control: Arc<TorchInstallControl>) -> Self {
         self.torch_control = control;
+        self
+    }
+
+    pub(crate) fn with_torch_cleanup(mut self, cleanup: Arc<TorchCleanupTasks>) -> Self {
+        self.torch_cleanup = cleanup;
         self
     }
 

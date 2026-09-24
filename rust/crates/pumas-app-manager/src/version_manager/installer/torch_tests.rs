@@ -200,6 +200,26 @@ async fn interrupted_publication_is_quarantined_before_retry() {
         .install_version("v2.9.1", &upstream_release(), tx)
         .await
         .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let quarantines = std::fs::read_dir(installer.versions_dir())
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".torch-orphan-v2.9.1-")
+                })
+                .count();
+            if quarantines == 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("background cleanup should reclaim the successful tag's quarantine");
     assert!(destination.join("venv/bin/python").exists());
     assert!(!destination.join(".pumas-publishing").exists());
     let recovered: Vec<_> = std::fs::read_dir(installer.versions_dir())
@@ -212,11 +232,98 @@ async fn interrupted_publication_is_quarantined_before_retry() {
                 .starts_with(".torch-orphan-v2.9.1-")
         })
         .collect();
-    assert_eq!(recovered.len(), 1);
-    assert_eq!(
-        std::fs::read_to_string(recovered[0].path().join("keep")).unwrap(),
-        "orphaned attempt"
+    assert!(
+        recovered.is_empty(),
+        "successful retry should reclaim its quarantine"
     );
+}
+
+#[test]
+fn orphan_gc_keeps_two_newest_owned_dirs_and_preserves_unmarked_lookalikes() {
+    let root = tempfile::tempdir().unwrap();
+    let versions_dir = root.path();
+    for (tag, timestamp) in [("v2.8.0", 10), ("v2.9.0", 20), ("v2.9.1", 30)] {
+        let orphan = versions_dir.join(format!(".torch-orphan-{tag}-{timestamp}"));
+        std::fs::create_dir_all(&orphan).unwrap();
+        std::fs::write(
+            orphan.join(".pumas-publishing"),
+            torch::TORCH_PUBLISHING_MARKER,
+        )
+        .unwrap();
+    }
+    let lookalike = versions_dir.join(".torch-orphan-v2.9.2-40");
+    std::fs::create_dir_all(&lookalike).unwrap();
+    std::fs::write(lookalike.join("keep"), "not owned by the manager").unwrap();
+
+    torch::prune_torch_orphan_quarantines(versions_dir, 2, None).unwrap();
+
+    assert!(!versions_dir.join(".torch-orphan-v2.8.0-10").exists());
+    assert!(versions_dir.join(".torch-orphan-v2.9.0-20").exists());
+    assert!(versions_dir.join(".torch-orphan-v2.9.1-30").exists());
+    assert!(lookalike.join("keep").exists());
+}
+
+#[tokio::test]
+async fn direct_installer_shutdown_drains_scheduled_orphan_prune() {
+    let (installer, _root) = fixture_installer();
+    let versions_dir = installer.versions_dir();
+    let orphan = versions_dir.join(".torch-orphan-v2.9.1-1");
+    std::fs::create_dir_all(&orphan).unwrap();
+    std::fs::write(
+        orphan.join(".pumas-publishing"),
+        torch::TORCH_PUBLISHING_MARKER,
+    )
+    .unwrap();
+
+    torch::schedule_torch_orphan_prune(&installer.torch_cleanup, &versions_dir, 0, None, "test");
+    installer.shutdown_torch_cleanup().await.unwrap();
+    assert!(!orphan.exists());
+}
+
+#[tokio::test]
+async fn cancelled_cleanup_drain_waiter_can_retry_without_losing_task() {
+    let (installer, _root) = fixture_installer();
+    let installer = Arc::new(installer);
+    let (started, observed) = tokio::sync::oneshot::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    installer.torch_cleanup.schedule(move || {
+        let _ = started.send(());
+        wait.recv().unwrap();
+    });
+    observed.await.unwrap();
+
+    let first_owner = installer.clone();
+    let first = tokio::spawn(async move { first_owner.shutdown_torch_cleanup().await });
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while installer
+            .torch_cleanup
+            .state
+            .lock()
+            .unwrap()
+            .completion
+            .is_none()
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    first.abort();
+    assert!(first.await.unwrap_err().is_cancelled());
+
+    let retry_owner = installer.clone();
+    let mut retry = tokio::spawn(async move { retry_owner.shutdown_torch_cleanup().await });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut retry)
+            .await
+            .is_err()
+    );
+    release.send(()).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), retry)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test]

@@ -44,7 +44,7 @@ pub async fn trial_torch_runtime(
 ) -> pumas_library::Result<TrialTorchRuntimeOutcome> {
     let manager = require_version_manager(state, "torch").await?;
     // Serializes the selected tag and removal with this startup admission.
-    let _lease = manager.torch_lifecycle_lease().await?;
+    let torch_lifecycle_lease = manager.torch_lifecycle_lease().await?;
     if manager.get_active_version().await?.as_deref() != Some(tag) {
         return Ok(failed(
             tag,
@@ -53,10 +53,11 @@ pub async fn trial_torch_runtime(
         ));
     }
     if let Err(error) = manager.verify_torch_identity(tag).await {
+        tracing::warn!(%error, %tag, "Torch runtime identity check failed during trial");
         return Ok(failed(
             tag,
             &profile_id,
-            format!("Torch runtime identity check failed: {error}"),
+            "Torch runtime identity check failed",
         ));
     }
     let profiles = state.api.get_runtime_profiles_snapshot().await?;
@@ -107,24 +108,15 @@ pub async fn trial_torch_runtime(
     {
         Ok(receipt) => receipt,
         Err(error) => {
-            return Ok(failed(
-                tag,
-                &profile_id,
-                format!("Managed Torch launch failed: {error}"),
-            ))
+            tracing::warn!(%error, %tag, "Managed Torch launch failed during trial");
+            return Ok(failed(tag, &profile_id, "Managed Torch launch failed"));
         }
     };
     // Binary launch failures currently have no observation, but keep the failure
     // path safe if a future launch strategy reports a failed owned generation.
     if !receipt.response.success {
-        let mut outcome = failed(
-            tag,
-            &profile_id,
-            receipt
-                .response
-                .error
-                .unwrap_or_else(|| "Managed Torch launch failed".into()),
-        );
+        tracing::warn!(error = ?receipt.response.error, %tag, "Managed Torch launch returned a failed receipt during trial");
+        let mut outcome = failed(tag, &profile_id, "Managed Torch launch failed");
         if let Some(owned) = receipt.observation {
             let mut cleanup_ticket = state
                 .api
@@ -160,6 +152,7 @@ pub async fn trial_torch_runtime(
             "Managed Torch launch returned no owned process identity",
         ));
     };
+    drop(torch_lifecycle_lease);
     let mut cleanup_ticket = state
         .api
         .owned_runtime_profile_cleanup_ticket(profile_id.clone(), owned.generation);
@@ -183,7 +176,10 @@ pub async fn trial_torch_runtime(
             if state
                 .api
                 .observe_owned_runtime_profile(&profile_id)
-                .map_err(|e| e.to_string())?
+                .map_err(|error| {
+                    tracing::warn!(%error, "Could not observe owned Torch profile during trial startup");
+                    "Could not verify Torch process ownership during startup".to_string()
+                })?
                 .as_ref()
                 != Some(&owned)
             {
@@ -192,7 +188,10 @@ pub async fn trial_torch_runtime(
             if state
                 .api
                 .owned_runtime_profile_has_listener(&profile_id, &owned)
-                .map_err(|e| e.to_string())?
+                .map_err(|error| {
+                    tracing::warn!(%error, "Could not check Torch profile listener during trial startup");
+                    "Could not verify Torch profile listener during startup".to_string()
+                })?
             {
                 match tokio::time::timeout_at(deadline, client.health_check()).await {
                     Ok(Ok(true)) => break,
@@ -216,25 +215,27 @@ pub async fn trial_torch_runtime(
         let handshake = client
             .handshake()
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| {
+                tracing::warn!(%error, "Torch trial handshake failed");
+                "Torch sidecar handshake failed".to_string()
+            })?;
         outcome.protocol = Some(handshake.protocol);
         outcome.capabilities = handshake.capabilities;
         if handshake.status != "ok" {
-            return Err(format!(
-                "Torch sidecar health status is {}",
-                handshake.status
-            ));
+            tracing::warn!(status = %handshake.status, "Torch trial handshake reported an unhealthy status");
+            return Err("Torch sidecar reported an unhealthy status".to_string());
         }
         if handshake.protocol != SUPPORTED_TORCH_PROTOCOL {
-            return Err(format!(
-                "Torch sidecar protocol {} does not match {}",
-                handshake.protocol, SUPPORTED_TORCH_PROTOCOL
-            ));
+            tracing::warn!(protocol = handshake.protocol, expected = SUPPORTED_TORCH_PROTOCOL, "Torch trial handshake reported an incompatible protocol");
+            return Err("Torch sidecar protocol is incompatible".to_string());
         }
         if state
             .api
             .observe_owned_runtime_profile(&profile_id)
-            .map_err(|e| e.to_string())?
+            .map_err(|error| {
+                tracing::warn!(%error, "Could not observe owned Torch profile after trial health check");
+                "Could not verify Torch process ownership after health check".to_string()
+            })?
             .as_ref()
             != Some(&owned)
         {

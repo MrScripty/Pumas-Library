@@ -33,10 +33,11 @@ the current-standards coordination entry is [PRG-I17](../../current-standards-re
   Pumas qualification. Torch pagination continues until a short end-of-list page,
   with a 20-page / 120-second budget; a page error, deadline, or exhausted page
   budget fails without returning a partial list as complete. Non-Torch release
-  listing keeps its existing ten-page budget. A new cache records completeness;
-  an old unmarked cache containing exactly 1,000 entries is refreshed because
-  its completeness cannot be distinguished from the former ten-page cap. Prereleases,
-  nightlies, source builds, and managed installation on platforms other than
+  listing restores the target base's one-page / 100-item budget. A new cache records
+  completeness; an old unmarked Torch cache containing exactly 100 or 1,000
+  entries is refreshed because these counts match earlier one-page and
+  ten-page caps. Prereleases, nightlies, source builds, and managed installation
+  on platforms other than
   Linux x86_64 remain outside this scope. Installed local releases remain visible
   when upstream discovery fails.
 - The qualified 2.9.1 recipe remains a fixed CUDA 13.0 / CPython 3.12 bundled
@@ -50,11 +51,15 @@ the current-standards coordination entry is [PRG-I17](../../current-standards-re
   and SHA-256, with `none` or FLUX.2 adapter dependencies selected separately.
   The manager retains the exact pip resolution and a fingerprint of the chosen
   interpreter; installation consumes that retained lock without resolving again.
+  Previews expire after 30 minutes and the in-memory store retains at most 32;
+  expired reports are discarded when read.
   Resolver results use a typed outcome across the RPC and desktop boundary:
   unsupported, invalid-report, network-inconclusive, and generic-inconclusive
   outcomes remain distinct, including timeouts. The closed qualification value
-  is validated across the generated contract. After a definite unsupported
-  preview, the desktop can search a bounded set of official Torch indexes for
+  is validated across the generated contract. The install request contract
+  accepts both `app_id`/`appId` and optional `preview_id`/`previewId` forms.
+  After a definite unsupported preview, the desktop can search a bounded set of
+  official Torch indexes for
   wheel matches for installed interpreters.
   These leads are explicitly incomplete: dependencies and adapters are unchecked,
   and choosing one starts a fresh exact preview. Nunchaku's known wheel is
@@ -64,20 +69,29 @@ the current-standards coordination entry is [PRG-I17](../../current-standards-re
   publication. A selected adapter import failure is recorded as partial feature
   availability without invalidating an otherwise usable Torch environment.
   Installation never selects or defaults the runtime. A failed stage is removed;
-  an unregistered published directory is quarantined for a safe retry.
+  an unregistered published directory is quarantined for a safe retry. Cleanup
+  keeps at most two manager-marked quarantine directories, removes a tag's old
+  quarantine after successful retry, and logs cleanup errors without blocking
+  installation. The version manager tracks cleanup tasks and drains them during
+  RPC shutdown; direct `VersionInstaller` users have an explicit async drain.
+  The shared completion survives cancellation of a drain waiter.
 - The saved probe reports concrete capabilities separately: Torch import, CPU
   tensor operation, sidecar app construction and protocol, CUDA operation,
   selected image adapter imports, and untested socket startup/image generation.
-  The desktop can inspect installed runtime results. Explicit selection and
-  serving perform lightweight identity checks; model serving is the socket
+  The saved probe is available through the explicit **Inspect active Torch
+  runtime** action; that choice clears when the active tag changes or the
+  version manager opens. Explicit selection and serving perform lightweight identity
+  checks; model serving is the socket
   startup and image execution attempt. Probe evidence is tied to its recorded
   environment and hardware context, with staleness diagnostics.
 - An explicit startup trial is available after selecting an installed runtime
   and an enabled managed TorchServe profile. It checks exact Torch identity,
   launches an owned sidecar, attributes its listener, and checks health and
-  protocol. The trial returns scoped socket/protocol evidence to the desktop;
-  it does not qualify image generation or persist an acceptance result. A
-  failed or cancelled trial stops only its admitted process generation. The
+  protocol. The trial returns scoped socket/protocol evidence to the desktop
+  and releases the selection/removal lease after launch admission. Its client
+  outcomes omit internal error details. The trial does not qualify image
+  generation or persist an acceptance result. A failed or cancelled trial
+  stops only its admitted process generation. The
   desktop exposes a generation-conditional Stop action after a successful trial.
 
 ## Earlier evidence retained from the previous report
@@ -185,18 +199,19 @@ real interactive Pumas desktop run.
 ## 2026-09-24 current-tree gates
 
 - Python resolver: 18 tests passed, including Rust/Python ordered build-vocabulary
-  parity; Ruff passed. The `pumas-app-manager` library suite passed 130 tests.
-  The focused GitHub module: 17 passed, including pagination limits,
-  failure/no-partial-list,
+  parity; Ruff passed. The `pumas-app-manager` library suite passed 136 tests,
+  including shutdown admission, manager/direct-installer drain, and cancelled-
+  waiter retry coverage.
+  The focused `pumas-library` configuration test passed. The focused GitHub
+  module: 17 passed, including pagination limits, failure/no-partial-list,
   cache completeness, request coalescing, cancellation takeover, and stale
   completed-channel replacement. Rust format and `git diff --check` passed.
-- RPC preview contract tests passed in the default and `export-contract` feature
-  modes (3 and 2 tests respectively). The no-default-features export-contract
-  check and current `pumas-rpc` build passed; the feature-disabled check reports
-  dead-code warnings in disabled paths. Frontend passed 125 test files / 698
-  tests, production build, typecheck, and lint. Electron passed 12 test files;
-  its generated contract check, 41-test contract-conformance suite, build, and
-  lint passed.
+- `pumas-rpc` passed 253 unit tests, 17 integration tests, and 2 intent
+  integration tests (12 tests are ignored); the install-alias export test passed
+  with `export-contract`. Frontend passed 125 test files / 699 tests, typecheck,
+  and lint. Electron passed all 12 test files, including install alias coverage;
+  its generated contract check, 41-test contract-conformance suite, and build
+  passed.
   The desktop composed projection test covers discovery failure, preview,
   install, explicit selection, startup health, and generation-owned stop.
 - The historical full workspace Rust test gate remains non-green: 66 existing

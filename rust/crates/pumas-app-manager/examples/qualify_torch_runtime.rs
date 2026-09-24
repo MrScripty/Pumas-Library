@@ -59,5 +59,6 @@ async fn main() -> pumas_library::Result<()> {
         }
     };
     let (result, ()) = tokio::join!(install, progress);
-    result
+    let cleanup = installer.shutdown_torch_cleanup().await;
+    result.and(cleanup)
 }

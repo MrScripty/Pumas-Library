@@ -64,6 +64,27 @@ pub(super) const BUILDS: &[&str] = &[
 pub(super) const PYTHONS: &[&str] = &["python3.10", "python3.11", "python3.12", "python3.13"];
 const ADAPTERS: &[&str] = &["none", "flux2"];
 const PREVIEW_TTL: Duration = Duration::from_secs(30 * 60);
+const MAX_RETAINED_TORCH_PREVIEWS: usize = 32;
+
+fn insert_retained_torch_preview(
+    previews: &mut HashMap<String, RetainedTorchPreview>,
+    preview_id: String,
+    preview: RetainedTorchPreview,
+) {
+    previews.retain(|_, retained| retained.created.elapsed() < PREVIEW_TTL);
+    while previews.len() >= MAX_RETAINED_TORCH_PREVIEWS {
+        let oldest = previews
+            .iter()
+            .min_by_key(|(_, retained)| retained.created)
+            .map(|(id, _)| id.clone());
+        if let Some(oldest) = oldest {
+            previews.remove(&oldest);
+        } else {
+            break;
+        }
+    }
+    previews.insert(preview_id, preview);
+}
 
 fn is_bundled_preset(tag: &str, build: &str, python: &str, adapter: &str) -> bool {
     tag == "v2.9.1" && build == "cu130" && python == "python3.12" && adapter == "bundled"
@@ -81,6 +102,51 @@ pub struct TorchArtifact {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+
+    fn retained_preview(preview_id: &str, created: Instant) -> RetainedTorchPreview {
+        RetainedTorchPreview {
+            preview: TorchPreview {
+                preview_id: preview_id.into(),
+                tag: "v2.9.0".into(),
+                build: "cpu".into(),
+                python: "python3.12".into(),
+                adapter: "none".into(),
+                artifacts: Vec::new(),
+                qualification: "unverified".into(),
+                expires_in_seconds: PREVIEW_TTL.as_secs(),
+            },
+            requirements: String::new(),
+            resolution: String::new(),
+            report: String::new(),
+            interpreter_path: PathBuf::from("/usr/bin/python3.12"),
+            interpreter_hash: String::new(),
+            created,
+        }
+    }
+
+    #[test]
+    fn retained_previews_expire_and_remain_bounded() {
+        let mut previews = HashMap::new();
+        let now = Instant::now();
+        previews.insert(
+            "expired".into(),
+            retained_preview("expired", now - PREVIEW_TTL - Duration::from_secs(1)),
+        );
+
+        for index in 0..=MAX_RETAINED_TORCH_PREVIEWS {
+            let preview_id = format!("preview-{index}");
+            insert_retained_torch_preview(
+                &mut previews,
+                preview_id.clone(),
+                retained_preview(&preview_id, now + Duration::from_secs(index as u64)),
+            );
+        }
+
+        assert_eq!(previews.len(), MAX_RETAINED_TORCH_PREVIEWS);
+        assert!(!previews.contains_key("expired"));
+        assert!(!previews.contains_key("preview-0"));
+        assert!(previews.contains_key(&format!("preview-{MAX_RETAINED_TORCH_PREVIEWS}")));
+    }
 
     #[test]
     fn bundled_preset_is_one_choice_in_the_upstream_range() {
@@ -768,7 +834,9 @@ impl VersionManager {
                 "{:x}",
                 Sha256::digest(std::fs::read(&interpreter_path).map_err(PumasError::from)?)
             );
-            self.torch_previews.lock().await.insert(
+            let mut previews = self.torch_previews.lock().await;
+            insert_retained_torch_preview(
+                &mut previews,
                 preview_id,
                 RetainedTorchPreview {
                     preview: preview.clone(),
@@ -871,8 +939,8 @@ impl VersionManager {
             expires_in_seconds: PREVIEW_TTL.as_secs(),
         };
         let mut previews = self.torch_previews.lock().await;
-        previews.retain(|_, value| value.created.elapsed() < PREVIEW_TTL);
-        previews.insert(
+        insert_retained_torch_preview(
+            &mut previews,
             preview_id,
             RetainedTorchPreview {
                 preview: preview.clone(),
@@ -888,12 +956,18 @@ impl VersionManager {
     }
 
     pub async fn torch_preview_report(&self, preview_id: &str) -> Result<String> {
-        let previews = self.torch_previews.lock().await;
+        let mut previews = self.torch_previews.lock().await;
         let retained = previews
             .get(preview_id)
             .filter(|value| value.created.elapsed() < PREVIEW_TTL)
-            .ok_or_else(|| failed("Torch preview expired or unknown"))?;
-        Ok(retained.report.clone())
+            .map(|value| value.report.clone());
+        match retained {
+            Some(report) => Ok(report),
+            None => {
+                previews.remove(preview_id);
+                Err(failed("Torch preview expired or unknown"))
+            }
+        }
     }
 
     pub async fn torch_installed_probe_report(&self, tag: &str) -> Result<serde_json::Value> {

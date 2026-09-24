@@ -146,7 +146,7 @@ pub(super) async fn serve_torch_model(
             state,
             fail(
                 ModelServeErrorCode::MissingRuntime,
-                &format!("Selected Torch runtime failed its installed identity check: {error}"),
+                "Selected Torch runtime failed its installed identity check",
             ),
         )
         .await;
@@ -233,7 +233,7 @@ pub(super) async fn serve_torch_model(
             state,
             fail(
                 ModelServeErrorCode::ProviderLoadFailed,
-                &format!("Selected Torch runtime cannot serve image models: {error}"),
+                "Selected Torch runtime cannot serve image models",
             ),
         )
         .await;
@@ -319,7 +319,7 @@ pub(super) async fn serve_torch_model(
             state,
             fail(
                 ModelServeErrorCode::ProviderLoadFailed,
-                &format!("Selected Torch runtime lost image compatibility: {error}"),
+                "Selected Torch runtime lost image compatibility",
             ),
         )
         .await;

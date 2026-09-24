@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 8db300212a0eab71ed0601879e843cb27887144f43c11ef2f5ede12663febc86. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 4f6771f852879c4de52ee8d1e66c25a3bba650bf832d9dbba022b3b8b0b4c75c. DO NOT EDIT.
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
@@ -10092,7 +10092,7 @@ function validate79(data, { instancePath = "", parentData, parentDataProperty, r
   return errors === 0;
 }
 var validateInstallVersionParams = validate80;
-var schema90 = { "anyOf": [{ "additionalProperties": false, "properties": { "app_id": { "type": "string" }, "preview_id": { "default": null, "type": ["string", "null"] }, "tag": { "type": "string" } }, "required": ["app_id", "tag"], "type": "object" }, { "additionalProperties": false, "properties": { "appId": { "type": "string" }, "preview_id": { "default": null, "type": ["string", "null"] }, "tag": { "type": "string" } }, "required": ["appId", "tag"], "type": "object" }] };
+var schema90 = { "anyOf": [{ "additionalProperties": false, "properties": { "app_id": { "type": "string" }, "preview_id": { "default": null, "type": ["string", "null"] }, "tag": { "type": "string" } }, "required": ["app_id", "tag"], "type": "object" }, { "additionalProperties": false, "properties": { "app_id": { "type": "string" }, "previewId": { "default": null, "type": ["string", "null"] }, "tag": { "type": "string" } }, "required": ["app_id", "tag"], "type": "object" }, { "additionalProperties": false, "properties": { "appId": { "type": "string" }, "preview_id": { "default": null, "type": ["string", "null"] }, "tag": { "type": "string" } }, "required": ["appId", "tag"], "type": "object" }, { "additionalProperties": false, "properties": { "appId": { "type": "string" }, "previewId": { "default": null, "type": ["string", "null"] }, "tag": { "type": "string" } }, "required": ["appId", "tag"], "type": "object" }] };
 function validate80(data, { instancePath = "", parentData, parentDataProperty, rootData = data } = {}) {
   let vErrors = null;
   let errors = 0;
@@ -10194,7 +10194,7 @@ function validate80(data, { instancePath = "", parentData, parentDataProperty, r
     if (errors === _errs10) {
       if (data && typeof data == "object" && !Array.isArray(data)) {
         let missing1;
-        if (data.appId === void 0 && (missing1 = "appId") || data.tag === void 0 && (missing1 = "tag")) {
+        if (data.app_id === void 0 && (missing1 = "app_id") || data.tag === void 0 && (missing1 = "tag")) {
           const err6 = { instancePath, schemaPath: "#/anyOf/1/required", keyword: "required", params: { missingProperty: missing1 }, message: "must have required property '" + missing1 + "'" };
           if (vErrors === null) {
             vErrors = [err6];
@@ -10205,7 +10205,7 @@ function validate80(data, { instancePath = "", parentData, parentDataProperty, r
         } else {
           const _errs12 = errors;
           for (const key1 in data) {
-            if (!(key1 === "appId" || key1 === "preview_id" || key1 === "tag")) {
+            if (!(key1 === "app_id" || key1 === "previewId" || key1 === "tag")) {
               const err7 = { instancePath, schemaPath: "#/anyOf/1/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key1 }, message: "must NOT have additional properties" };
               if (vErrors === null) {
                 vErrors = [err7];
@@ -10217,10 +10217,10 @@ function validate80(data, { instancePath = "", parentData, parentDataProperty, r
             }
           }
           if (_errs12 === errors) {
-            if (data.appId !== void 0) {
+            if (data.app_id !== void 0) {
               const _errs13 = errors;
-              if (typeof data.appId !== "string") {
-                const err8 = { instancePath: instancePath + "/appId", schemaPath: "#/anyOf/1/properties/appId/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+              if (typeof data.app_id !== "string") {
+                const err8 = { instancePath: instancePath + "/app_id", schemaPath: "#/anyOf/1/properties/app_id/type", keyword: "type", params: { type: "string" }, message: "must be string" };
                 if (vErrors === null) {
                   vErrors = [err8];
                 } else {
@@ -10233,11 +10233,11 @@ function validate80(data, { instancePath = "", parentData, parentDataProperty, r
               var valid2 = true;
             }
             if (valid2) {
-              if (data.preview_id !== void 0) {
-                let data4 = data.preview_id;
+              if (data.previewId !== void 0) {
+                let data4 = data.previewId;
                 const _errs15 = errors;
                 if (typeof data4 !== "string" && data4 !== null) {
-                  const err9 = { instancePath: instancePath + "/preview_id", schemaPath: "#/anyOf/1/properties/preview_id/type", keyword: "type", params: { type: schema90.anyOf[1].properties.preview_id.type }, message: "must be string,null" };
+                  const err9 = { instancePath: instancePath + "/previewId", schemaPath: "#/anyOf/1/properties/previewId/type", keyword: "type", params: { type: schema90.anyOf[1].properties.previewId.type }, message: "must be string,null" };
                   if (vErrors === null) {
                     vErrors = [err9];
                   } else {
@@ -10281,13 +10281,199 @@ function validate80(data, { instancePath = "", parentData, parentDataProperty, r
     }
     var _valid0 = _errs10 === errors;
     valid0 = valid0 || _valid0;
+    if (!valid0) {
+      const _errs19 = errors;
+      if (errors === _errs19) {
+        if (data && typeof data == "object" && !Array.isArray(data)) {
+          let missing2;
+          if (data.appId === void 0 && (missing2 = "appId") || data.tag === void 0 && (missing2 = "tag")) {
+            const err12 = { instancePath, schemaPath: "#/anyOf/2/required", keyword: "required", params: { missingProperty: missing2 }, message: "must have required property '" + missing2 + "'" };
+            if (vErrors === null) {
+              vErrors = [err12];
+            } else {
+              vErrors.push(err12);
+            }
+            errors++;
+          } else {
+            const _errs21 = errors;
+            for (const key2 in data) {
+              if (!(key2 === "appId" || key2 === "preview_id" || key2 === "tag")) {
+                const err13 = { instancePath, schemaPath: "#/anyOf/2/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key2 }, message: "must NOT have additional properties" };
+                if (vErrors === null) {
+                  vErrors = [err13];
+                } else {
+                  vErrors.push(err13);
+                }
+                errors++;
+                break;
+              }
+            }
+            if (_errs21 === errors) {
+              if (data.appId !== void 0) {
+                const _errs22 = errors;
+                if (typeof data.appId !== "string") {
+                  const err14 = { instancePath: instancePath + "/appId", schemaPath: "#/anyOf/2/properties/appId/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                  if (vErrors === null) {
+                    vErrors = [err14];
+                  } else {
+                    vErrors.push(err14);
+                  }
+                  errors++;
+                }
+                var valid3 = _errs22 === errors;
+              } else {
+                var valid3 = true;
+              }
+              if (valid3) {
+                if (data.preview_id !== void 0) {
+                  let data7 = data.preview_id;
+                  const _errs24 = errors;
+                  if (typeof data7 !== "string" && data7 !== null) {
+                    const err15 = { instancePath: instancePath + "/preview_id", schemaPath: "#/anyOf/2/properties/preview_id/type", keyword: "type", params: { type: schema90.anyOf[2].properties.preview_id.type }, message: "must be string,null" };
+                    if (vErrors === null) {
+                      vErrors = [err15];
+                    } else {
+                      vErrors.push(err15);
+                    }
+                    errors++;
+                  }
+                  var valid3 = _errs24 === errors;
+                } else {
+                  var valid3 = true;
+                }
+                if (valid3) {
+                  if (data.tag !== void 0) {
+                    const _errs26 = errors;
+                    if (typeof data.tag !== "string") {
+                      const err16 = { instancePath: instancePath + "/tag", schemaPath: "#/anyOf/2/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                      if (vErrors === null) {
+                        vErrors = [err16];
+                      } else {
+                        vErrors.push(err16);
+                      }
+                      errors++;
+                    }
+                    var valid3 = _errs26 === errors;
+                  } else {
+                    var valid3 = true;
+                  }
+                }
+              }
+            }
+          }
+        } else {
+          const err17 = { instancePath, schemaPath: "#/anyOf/2/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+          if (vErrors === null) {
+            vErrors = [err17];
+          } else {
+            vErrors.push(err17);
+          }
+          errors++;
+        }
+      }
+      var _valid0 = _errs19 === errors;
+      valid0 = valid0 || _valid0;
+      if (!valid0) {
+        const _errs28 = errors;
+        if (errors === _errs28) {
+          if (data && typeof data == "object" && !Array.isArray(data)) {
+            let missing3;
+            if (data.appId === void 0 && (missing3 = "appId") || data.tag === void 0 && (missing3 = "tag")) {
+              const err18 = { instancePath, schemaPath: "#/anyOf/3/required", keyword: "required", params: { missingProperty: missing3 }, message: "must have required property '" + missing3 + "'" };
+              if (vErrors === null) {
+                vErrors = [err18];
+              } else {
+                vErrors.push(err18);
+              }
+              errors++;
+            } else {
+              const _errs30 = errors;
+              for (const key3 in data) {
+                if (!(key3 === "appId" || key3 === "previewId" || key3 === "tag")) {
+                  const err19 = { instancePath, schemaPath: "#/anyOf/3/additionalProperties", keyword: "additionalProperties", params: { additionalProperty: key3 }, message: "must NOT have additional properties" };
+                  if (vErrors === null) {
+                    vErrors = [err19];
+                  } else {
+                    vErrors.push(err19);
+                  }
+                  errors++;
+                  break;
+                }
+              }
+              if (_errs30 === errors) {
+                if (data.appId !== void 0) {
+                  const _errs31 = errors;
+                  if (typeof data.appId !== "string") {
+                    const err20 = { instancePath: instancePath + "/appId", schemaPath: "#/anyOf/3/properties/appId/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                    if (vErrors === null) {
+                      vErrors = [err20];
+                    } else {
+                      vErrors.push(err20);
+                    }
+                    errors++;
+                  }
+                  var valid4 = _errs31 === errors;
+                } else {
+                  var valid4 = true;
+                }
+                if (valid4) {
+                  if (data.previewId !== void 0) {
+                    let data10 = data.previewId;
+                    const _errs33 = errors;
+                    if (typeof data10 !== "string" && data10 !== null) {
+                      const err21 = { instancePath: instancePath + "/previewId", schemaPath: "#/anyOf/3/properties/previewId/type", keyword: "type", params: { type: schema90.anyOf[3].properties.previewId.type }, message: "must be string,null" };
+                      if (vErrors === null) {
+                        vErrors = [err21];
+                      } else {
+                        vErrors.push(err21);
+                      }
+                      errors++;
+                    }
+                    var valid4 = _errs33 === errors;
+                  } else {
+                    var valid4 = true;
+                  }
+                  if (valid4) {
+                    if (data.tag !== void 0) {
+                      const _errs35 = errors;
+                      if (typeof data.tag !== "string") {
+                        const err22 = { instancePath: instancePath + "/tag", schemaPath: "#/anyOf/3/properties/tag/type", keyword: "type", params: { type: "string" }, message: "must be string" };
+                        if (vErrors === null) {
+                          vErrors = [err22];
+                        } else {
+                          vErrors.push(err22);
+                        }
+                        errors++;
+                      }
+                      var valid4 = _errs35 === errors;
+                    } else {
+                      var valid4 = true;
+                    }
+                  }
+                }
+              }
+            }
+          } else {
+            const err23 = { instancePath, schemaPath: "#/anyOf/3/type", keyword: "type", params: { type: "object" }, message: "must be object" };
+            if (vErrors === null) {
+              vErrors = [err23];
+            } else {
+              vErrors.push(err23);
+            }
+            errors++;
+          }
+        }
+        var _valid0 = _errs28 === errors;
+        valid0 = valid0 || _valid0;
+      }
+    }
   }
   if (!valid0) {
-    const err12 = { instancePath, schemaPath: "#/anyOf", keyword: "anyOf", params: {}, message: "must match a schema in anyOf" };
+    const err24 = { instancePath, schemaPath: "#/anyOf", keyword: "anyOf", params: {}, message: "must match a schema in anyOf" };
     if (vErrors === null) {
-      vErrors = [err12];
+      vErrors = [err24];
     } else {
-      vErrors.push(err12);
+      vErrors.push(err24);
     }
     errors++;
     validate80.errors = vErrors;

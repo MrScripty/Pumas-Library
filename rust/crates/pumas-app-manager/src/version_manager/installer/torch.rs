@@ -8,6 +8,15 @@ use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
 
+const MAX_TORCH_ORPHAN_QUARANTINES: usize = 2;
+pub(super) const TORCH_PUBLISHING_MARKER: &[u8] = b"metadata pending";
+
+struct TorchOrphanQuarantine {
+    tag: String,
+    timestamp_ms: u64,
+    path: PathBuf,
+}
+
 #[cfg(test)]
 pub(crate) struct TorchPublicationPause {
     pub(crate) reached: tokio::sync::Notify,
@@ -69,6 +78,84 @@ fn stable_torch_tag(tag: &str) -> Option<&str> {
             .iter()
             .all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_digit())))
     .then_some(version)
+}
+
+fn list_owned_torch_orphan_quarantines(
+    versions_dir: &Path,
+) -> std::io::Result<Vec<TorchOrphanQuarantine>> {
+    let entries = match std::fs::read_dir(versions_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut quarantines = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(suffix) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix(".torch-orphan-"))
+        else {
+            continue;
+        };
+        let Some((tag, timestamp)) = suffix.rsplit_once('-') else {
+            continue;
+        };
+        let (Some(_), Ok(timestamp_ms)) = (stable_torch_tag(tag), timestamp.parse::<u64>()) else {
+            continue;
+        };
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        if !matches!(
+            std::fs::read(path.join(".pumas-publishing")),
+            Ok(contents) if contents.as_slice() == TORCH_PUBLISHING_MARKER
+        ) {
+            continue;
+        }
+        quarantines.push(TorchOrphanQuarantine {
+            tag: tag.to_owned(),
+            timestamp_ms,
+            path,
+        });
+    }
+    Ok(quarantines)
+}
+
+pub(super) fn prune_torch_orphan_quarantines(
+    versions_dir: &Path,
+    max_keep: usize,
+    only_tag: Option<&str>,
+) -> std::io::Result<()> {
+    let mut quarantines = list_owned_torch_orphan_quarantines(versions_dir)?;
+    quarantines.retain(|quarantine| only_tag.is_none_or(|tag| quarantine.tag == tag));
+    quarantines.sort_by(|left, right| right.timestamp_ms.cmp(&left.timestamp_ms));
+    for quarantine in quarantines.into_iter().skip(max_keep) {
+        if let Err(error) = std::fs::remove_dir_all(quarantine.path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                return Err(error);
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn schedule_torch_orphan_prune(
+    cleanup: &TorchCleanupTasks,
+    versions_dir: &Path,
+    max_keep: usize,
+    only_tag: Option<String>,
+    phase: &'static str,
+) {
+    let versions_dir = versions_dir.to_owned();
+    cleanup.schedule(move || {
+        if let Err(error) =
+            prune_torch_orphan_quarantines(&versions_dir, max_keep, only_tag.as_deref())
+        {
+            warn!(%error, phase, "Torch orphan cleanup failed");
+        }
+    });
 }
 
 /// Materialize the qualified sidecar and lock from bytes embedded in the app binary.
@@ -359,7 +446,18 @@ impl VersionInstaller {
         {
             return Err(failed("Invalid Torch runtime version tag"));
         }
-        let destination = self.versions_dir().join(tag);
+        let versions_dir = self.versions_dir();
+        fs::create_dir_all(&versions_dir)
+            .await
+            .map_err(PumasError::from)?;
+        schedule_torch_orphan_prune(
+            &self.torch_cleanup,
+            &versions_dir,
+            MAX_TORCH_ORPHAN_QUARANTINES,
+            None,
+            "before_install",
+        );
+        let destination = versions_dir.join(tag);
         if path_exists(&destination).await? {
             if path_exists(&destination.join(".pumas-publishing")).await?
                 && self
@@ -367,7 +465,7 @@ impl VersionInstaller {
                     .get_installed_version(tag, Some(AppId::Torch))?
                     .is_none()
             {
-                let quarantine = self.versions_dir().join(format!(
+                let quarantine = versions_dir.join(format!(
                     ".torch-orphan-{tag}-{}",
                     Utc::now().timestamp_millis()
                 ));
@@ -381,6 +479,13 @@ impl VersionInstaller {
                 .await
                 .map_err(|e| failed(format!("Orphan recovery task failed: {e}")))?
                 .map_err(PumasError::from)?;
+                schedule_torch_orphan_prune(
+                    &self.torch_cleanup,
+                    &versions_dir,
+                    MAX_TORCH_ORPHAN_QUARANTINES,
+                    None,
+                    "after_interrupted_publish_recovery",
+                );
             } else {
                 return Err(failed(
                     "Runtime directory already exists; refusing to replace existing files",
@@ -399,14 +504,11 @@ impl VersionInstaller {
                 "A retained preview is required for this Torch runtime",
             ));
         }
-        fs::create_dir_all(self.versions_dir())
-            .await
-            .map_err(PumasError::from)?;
         // Staging shares the publication filesystem; failed attempts never enter
         // installed-version state. TempDir removes this attempt on every exit.
         let staging = tempfile::Builder::new()
             .prefix(".torch-install-")
-            .tempdir_in(self.versions_dir())
+            .tempdir_in(&versions_dir)
             .map_err(PumasError::from)?;
         let logs = self.logs_dir();
         fs::create_dir_all(&logs).await.map_err(PumasError::from)?;
@@ -492,6 +594,13 @@ impl VersionInstaller {
                                 "Installed Torch publication marker could not be removed: {error}"
                             );
                         }
+                        schedule_torch_orphan_prune(
+                            &self.torch_cleanup,
+                            &versions_dir,
+                            0,
+                            Some(tag.to_owned()),
+                            "after_successful_install",
+                        );
                     }
                     result
                 }

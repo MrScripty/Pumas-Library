@@ -795,10 +795,79 @@ async fn dispatch_admitted_command(
                 .map(RpcOutcome::InstallVersionDependencies)
         }
         #[cfg(feature = "inference-plugins")]
-        RpcCommand::InstallVersion { app_id, tag } => {
-            versions::install_version(state, &app_id, &tag)
+        RpcCommand::InstallVersion {
+            app_id,
+            tag,
+            preview_id,
+        } => versions::install_version(state, &app_id, &tag, preview_id.as_deref())
+            .await
+            .map(RpcOutcome::InstallVersion),
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::GetTorchRuntimeOptions => {
+            let vm = require_version_manager(state, "torch").await?;
+            vm.torch_runtime_options()
                 .await
-                .map(RpcOutcome::InstallVersion)
+                .map(RpcOutcome::TorchRuntimeOptions)
+        }
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::PreviewTorchRuntime {
+            tag,
+            build,
+            python,
+            adapter,
+        } => {
+            let vm = require_version_manager(state, "torch").await?;
+            let preview = vm
+                .preview_torch_runtime(&tag, &build, &python, &adapter)
+                .await?;
+            Ok(RpcOutcome::TorchRuntimePreview(preview.try_into()?))
+        }
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::GetTorchPreviewReport { preview_id } => {
+            let vm = require_version_manager(state, "torch").await?;
+            let report = vm.torch_preview_report(&preview_id).await?;
+            serde_json::from_str(&report)
+                .map(RpcOutcome::TorchPreviewReport)
+                .map_err(|e| pumas_library::PumasError::Other(e.to_string()))
+        }
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::GetTorchRuntimeProbe { tag } => {
+            let vm = require_version_manager(state, "torch").await?;
+            vm.torch_installed_probe_report(&tag)
+                .await
+                .map(RpcOutcome::TorchRuntimeProbe)
+        }
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::TrialTorchRuntime { tag, profile_id } => {
+            versions::trial_torch_runtime(state, &tag, profile_id)
+                .await
+                .map(RpcOutcome::TorchRuntimeTrial)
+        }
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::FindTorchAlternatives { tag, build, python } => {
+            let vm = require_version_manager(state, "torch").await?;
+            let discovery = vm
+                .discover_torch_alternatives(&tag, &build, &python)
+                .await?;
+            serde_json::to_value(discovery)
+                .map(RpcOutcome::TorchAlternatives)
+                .map_err(|e| pumas_library::PumasError::Other(e.to_string()))
+        }
+        #[cfg(feature = "inference-plugins")]
+        RpcCommand::StopRuntimeProfileIfGeneration {
+            profile_id,
+            generation,
+        } => {
+            let stopped = state
+                .api
+                .stop_runtime_profile_if_generation(profile_id, generation)
+                .await?;
+            Ok(RpcOutcome::RuntimeProfileGenerationStop(
+                crate::contract::StopRuntimeProfileGenerationOutcome {
+                    success: true,
+                    stopped,
+                },
+            ))
         }
         #[cfg(feature = "inference-plugins")]
         RpcCommand::SetDefaultVersion { app_id, tag } => {

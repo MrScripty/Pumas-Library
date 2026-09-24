@@ -1,6 +1,6 @@
 # M1 runtime implementation and qualification
 
-Status: native/GPU/sidecar qualification passed for the CUDA 13.0 candidate. The original Pumas-bundle discovery assumption has been superseded by the official PyTorch upstream contract; **packaged-app discovery and shared UI installation acceptance remain pending**.
+Status: native/GPU/sidecar qualification and packaged-app upstream discovery, installation, legacy-runtime migration, activation, removal, cancellation preservation, and restart acceptance passed for the CUDA 13.0 `v2.9.1` recipe. See [packaged upstream acceptance](a1-packaged-acceptance.md). Only v2.9.1 currently has a qualified upstream recipe, so an upgrade between two PyTorch upstream tags is not claimed.
 
 ## Implemented source
 
@@ -101,8 +101,9 @@ torchvision wheels from the official PyTorch wheel host.
 The Pumas app embeds the serving sidecar and lock. No Pumas-hosted Torch release
 or tag is required or created. Only `v2.9.1` is currently mapped to a qualified
 recipe; other upstream versions remain unavailable until their full recipe is
-qualified. Packaged-app discovery and shared-UI installation acceptance remain
-pending.
+qualified. The packaged globe exposed v2.9.1 as the sole installable upstream
+tag, and the shared-UI install, migration, activation, removal, cancellation,
+health, and restart checks passed; see [packaged upstream acceptance](a1-packaged-acceptance.md).
 
 ## Live host baseline
 
@@ -118,14 +119,16 @@ was started against an isolated telemetry root on port 18765. Its current
 The installation validates only small CUDA execution and sidecar health, not
 pipeline fit. Current telemetry must be queried again before model generation.
 
-## M2 overlap
+## Historical M2 overlap checkpoint
 
-The adapter payload is being completed before runtime publication. Shared UI
-acceptance remains pending; M2 source changes are not GPU acceptance. The Python
-lease suite passes 21 tests on the host. The sandbox cannot reliably deliver the
-threaded event-loop wakeups used by the cancellation fixture; host evidence is
-retained separately. Shared dependency checks recognize the direct-wheel package
-name and refuse in-place repair of an installed Torch bundle.
+At this checkpoint, the adapter payload was being completed before runtime
+publication, and shared-UI acceptance was pending; M2 source changes alone were
+not GPU acceptance. The later packaged shared-UI checks passed as recorded in
+[the A1 report](a1-packaged-acceptance.md). The Python lease suite passed 21
+tests on the host. The sandbox could not reliably deliver the threaded
+event-loop wakeups used by the cancellation fixture; host evidence is retained
+separately. Shared dependency checks recognize the direct-wheel package name
+and refuse in-place repair of an installed Torch bundle.
 
 [Official PyTorch previous-version instructions](https://pytorch.org/get-started/previous-versions/)
 list Torch 2.9.1 and torchvision 0.24.1 with CUDA 13.0. The corrected hash lock
@@ -149,8 +152,8 @@ The actual enabled Electron desktop, backed by the release RPC on isolated root
 `lastSelectedVersion` metadata accordingly. At that historical checkpoint,
 discovery still pointed at the Pumas repository and required its custom bundle
 assets. The corrected source now discovers supported upstream PyTorch tags and
-installs official wheels; packaged-app discovery and shared-UI installation
-acceptance remain pending, as recorded in the current upstream contract below.
+installs official wheels. The later packaged-app discovery and shared-UI
+installation acceptance is recorded in [the A1 report](a1-packaged-acceptance.md).
 
 The current 90-test app-manager suite passes on the host. Four HTTP-fixture tests
 cannot bind sockets inside the sandbox; they passed on the host with the rest.
@@ -179,9 +182,10 @@ transfer subsequently recovered to about 26 MB/s at 75%. Explicit installation
 retry completed (`main-runtime-0.1.2-install-retry.log`): native GPU validation,
 protocol health, atomic publication and shared registration passed. The main
 gateway was gracefully restarted and shared `switch_version` selected 0.1.2.
-Real-image acceptance remains pending. Subsequent Ruff formatting changes only
-whitespace in the compatibility and validation modules; the next runtime payload
-will include that formatting.
+At this runtime-install checkpoint, real-image acceptance remained pending.
+Later Nunchaku and FLUX/Tuldok real-image results are recorded in their reports.
+Subsequent Ruff formatting changed only whitespace in the compatibility and
+validation modules; the next runtime payload included that formatting.
 
 ## Corrected runtime 0.1.6 exact-candidate qualification
 

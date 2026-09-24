@@ -12,9 +12,12 @@ import { IconButton } from './ui';
 import { VersionListItemButton } from './VersionListItemButton';
 import { VersionListItemInfo } from './VersionListItemInfo';
 import { getVersionInstallDisplayState } from './VersionListItemState';
+import type { TorchInstalledConfig } from '../types/torch-install';
 
 interface VersionListItemProps {
+  appId?: string;
   release: VersionRelease;
+  torchInstalledConfig?: TorchInstalledConfig;
   isInstalled: boolean;
   isInstalling: boolean;
   progress: InstallationProgress | null;
@@ -25,6 +28,7 @@ interface VersionListItemProps {
   installNetworkStatus: 'idle' | 'downloading' | 'stalled' | 'failed';
   failedLogPath: string | null;
   onInstall: () => void;
+  onInspectTorchProbe?: () => void;
   onRemove: () => void;
   onCancel: () => void;
   onOpenUrl: (url: string) => void;
@@ -36,7 +40,9 @@ interface VersionListItemProps {
 }
 
 export function VersionListItem({
+  appId,
   release,
+  torchInstalledConfig,
   isInstalled,
   isInstalling,
   progress,
@@ -47,6 +53,7 @@ export function VersionListItem({
   installNetworkStatus,
   failedLogPath,
   onInstall,
+  onInspectTorchProbe,
   onRemove,
   onCancel,
   onOpenUrl,
@@ -75,11 +82,14 @@ export function VersionListItem({
     >
       <div className="flex items-center justify-between gap-2">
         <VersionListItemInfo
+          appId={appId}
           displayTag={displayState.displayTag}
           errorMessage={errorMessage}
           failedLogPath={failedLogPath}
           hasError={hasError}
           release={release}
+          isInstalled={isInstalled}
+          torchInstalledConfig={torchInstalledConfig}
           onOpenLogPath={onOpenLogPath}
           onOpenUrl={onOpenUrl}
         />
@@ -96,11 +106,7 @@ export function VersionListItem({
             onInstall={onInstall}
             onRemove={onRemove}
           />
-          <IconButton
-            icon={<Gear />}
-            tooltip="Settings"
-            size="sm"
-          />
+          <IconButton icon={<Gear />} tooltip={onInspectTorchProbe ? 'Inspect saved checks' : 'Settings'} size="sm" onClick={onInspectTorchProbe} />
         </div>
       </div>
     </motion.div>

@@ -1,8 +1,12 @@
 """Lease evidence only; real GPU and browser acceptance is recorded separately."""
 
 import asyncio
+import contextvars
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 import threading
 import unittest
+from unittest.mock import patch
 
 from test_model_manager import _FakeDeviceManager, _TestModelManager
 from model_manager import SlotState
@@ -10,6 +14,16 @@ from diffusion import GenerationCancelled, NUNCHAKU_Z_IMAGE
 
 
 class DiffusionLeaseTests(unittest.IsolatedAsyncioTestCase):
+    def _use_owned_thread_executor(self, max_workers):
+        executor = self.enterContext(ThreadPoolExecutor(max_workers=max_workers))
+
+        async def owned_to_thread(func, *args, **kwargs):
+            context = contextvars.copy_context()
+            work = partial(context.run, partial(func, *args, **kwargs))
+            return await asyncio.get_running_loop().run_in_executor(executor, work)
+
+        self.enterContext(patch.object(asyncio, "to_thread", new=owned_to_thread))
+
     async def test_busy_generation_rejects_unload_and_second_generation(self):
         manager = _TestModelManager(_FakeDeviceManager())
         slot = await manager.load("/fixture", "image", model_type=NUNCHAKU_Z_IMAGE)
@@ -70,6 +84,7 @@ class DiffusionLeaseTests(unittest.IsolatedAsyncioTestCase):
         manager = _TestModelManager(_FakeDeviceManager(), max_loaded_models=1)
         model_ref, tokenizer_ref = object(), object()
         worker_result = []
+        self._use_owned_thread_executor(max_workers=1)
 
         def load(*_args):
             from model_manager import LoadedModel
@@ -120,23 +135,33 @@ class DiffusionLeaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replacement.state, SlotState.READY)
 
     async def test_cancel_after_worker_completion_waits_for_abandoned_finalization(self):
-        started, release, worker_done = (
-            threading.Event(),
-            threading.Event(),
-            threading.Event(),
-        )
+        started, release = asyncio.Event(), asyncio.Event()
+        publication_started = asyncio.Event()
         manager = _TestModelManager(_FakeDeviceManager(), max_loaded_models=1)
         model_ref, tokenizer_ref = object(), object()
         worker_result = []
+
+        async def controlled_to_thread(func, *args, **kwargs):
+            loaded = func(*args, **kwargs)
+            started.set()
+            await release.wait()
+            return loaded
+
+        self.enterContext(patch.object(asyncio, "to_thread", new=controlled_to_thread))
+
+        publish_loaded = manager._publish_loaded
+
+        async def observe_publication(*args):
+            publication_started.set()
+            await publish_loaded(*args)
+
+        manager._publish_loaded = observe_publication
 
         def load(*_args):
             from model_manager import LoadedModel
 
             loaded = LoadedModel(model_ref, tokenizer_ref, None, NUNCHAKU_Z_IMAGE)
             worker_result.append(loaded)
-            started.set()
-            release.wait(5)
-            worker_done.set()
             return loaded
 
         manager._load_diffusion = load
@@ -147,10 +172,7 @@ class DiffusionLeaseTests(unittest.IsolatedAsyncioTestCase):
         )
         registry_locked = False
         try:
-            for _ in range(300):
-                if started.is_set():
-                    break
-                await asyncio.sleep(0.01)
+            await asyncio.wait_for(started.wait(), timeout=3)
             self.assertTrue(started.is_set())
             slot = next(iter(manager.slots.values()))
             device_lock = next(iter(manager._device_locks.values()))
@@ -161,12 +183,7 @@ class DiffusionLeaseTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(manager._registry_lock.acquire(), timeout=3)
             registry_locked = True
             release.set()
-            for _ in range(300):
-                if worker_done.is_set():
-                    break
-                await asyncio.sleep(0.01)
-            self.assertTrue(worker_done.is_set())
-            await asyncio.sleep(0.02)
+            await asyncio.wait_for(publication_started.wait(), timeout=3)
             self.assertFalse(task.done())
             self.assertIsNotNone(worker_result[0].model)
             self.assertEqual(slot.state, SlotState.LOADING)
@@ -223,6 +240,7 @@ class DiffusionLeaseTests(unittest.IsolatedAsyncioTestCase):
 
         manager = _TestModelManager(_FakeDeviceManager())
         slot = await manager.load("/fixture", "image", model_type=NUNCHAKU_Z_IMAGE)
+        self._use_owned_thread_executor(max_workers=2)
 
         async def run():
             async with manager.image_lease("image"):

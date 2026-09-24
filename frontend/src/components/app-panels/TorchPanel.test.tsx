@@ -80,8 +80,8 @@ function TorchPanelHarness({
       await actions.refreshAll(forceRefresh);
       setAvailableVersions(releaseFixture);
     },
-    installVersion: async (tag) => {
-      const installed = await actions.installVersion(tag);
+    installVersion: async (tag, previewId) => {
+      const installed = await actions.installVersion(tag, previewId);
       if (installed) {
         setInstalledVersions((current) => current.includes(tag) ? current : [...current, tag]);
       }
@@ -188,9 +188,30 @@ describe('TorchPanel shared version controls', () => {
     const candidateRow = getVersionRow(candidateTag);
     const [installButton] = within(candidateRow).getAllByRole('button');
     if (!installButton) throw new TypeError('Expected the candidate install button');
+    vi.stubGlobal('electronAPI', {
+      get_torch_runtime_options: vi.fn().mockResolvedValue({
+        builds: ['cpu'], pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
+        adapters: ['none'], preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
+      }),
+      preview_torch_runtime: vi.fn().mockResolvedValue({
+        status: 'resolved', preview: {
+          previewId: 'preview-1', expiresInSeconds: 300, tag: candidateTag, build: 'cpu', python: 'python3.12',
+          adapter: 'none', qualification: 'unverified', artifacts: [],
+        },
+      }),
+      get_torch_runtime_probe: vi.fn().mockResolvedValue({
+        status: 'passed', core_status: 'passed', adapter_status: 'not selected', capabilities: {},
+      }),
+      get_runtime_profiles_snapshot: vi.fn().mockResolvedValue({ success: true, snapshot: { profiles: [] } }),
+    });
     fireEvent.click(installButton);
+    expect(actions.installVersion).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole('button', { name: 'Check selected combination' }));
+    const reviewedInstallButton = screen.getByRole('button', { name: 'Install reviewed artifacts' });
+    await waitFor(() => expect(reviewedInstallButton).toBeEnabled());
+    fireEvent.click(reviewedInstallButton);
     await waitFor(() => {
-      expect(actions.installVersion).toHaveBeenCalledWith(candidateTag);
+      expect(actions.installVersion).toHaveBeenCalledWith(candidateTag, 'preview-1');
       expect(within(getVersionRow(candidateTag)).getByRole('button', { name: 'Ready' }))
         .toBeInTheDocument();
     });
@@ -225,5 +246,6 @@ describe('TorchPanel shared version controls', () => {
     expect(screen.getByRole('button', { name: candidateTag })).toBeInTheDocument();
     expectActiveVersionNotDefault(candidateTag);
     expect(actions.setDefaultVersion).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });

@@ -671,3 +671,79 @@ The recorded A5 allocator OOM and subsequent inference recovery evidence is
 unchanged, including its limitation that the fault was not a naturally
 oversized diffusion request. Installed versions, active version, default,
 runtime publication state, and tags were not changed.
+
+### Packaged upstream Torch discovery and lifecycle acceptance (2026-09-23)
+
+Built the Linux x86_64 AppImage from source commit
+`5d373bf8791c43f1b995f4ba51a17da1610a6686`; artifact SHA-256 is
+`74d6c6143c5342a9492f7afbc30b301f751f870aca04ec05f231ff6ee140f71c`. The
+packaged app used an explicit isolated launcher root and separate Electron
+profile. The Torch globe fetched 69 `pytorch/pytorch` releases and displayed
+only installable `v2.9.1`, the sole tag mapped to a qualified recipe. A fresh
+shared-UI install registered `torch-upstream-2.9.1-r1`, Python 3.12.3,
+`dependenciesInstalled: true`, and the official SHA-256-pinned CUDA 13.0 Torch
+wheel. The installer validated recipe identity, imports, GPU, and sidecar health.
+The profile started from the packaged Torch UI, returned HTTP 200 from
+`/health` with protocol 3 and `image_generation`, stopped normally, and remained
+stopped after app restart.
+
+A second disposable root held a physical copy of the host's installed
+`torch-runtime-0.1.4`; the host runtime was never modified. Its UI-managed
+profile returned HTTP 200 with protocol 1 on the RTX 5090 Laptop GPU. A v2.9.1
+install was started from the version row and cancelled from the UI confirmation
+while locked dependency setup was in progress. The manager returned to one
+installed version; the staging directory and child process were gone, metadata
+and the active marker still selected `.1.4`, and the default remained unset.
+After restart, the UI still showed `.1.4` installed and v2.9.1 available.
+
+The same isolated root then completed a fresh v2.9.1 install through the UI.
+With both versions registered, the selector activated v2.9.1; its managed
+sidecar returned HTTP 200 with protocol 3 and `image_generation` on the RTX
+5090. After stopping the profile, the UI removed the inactive copied `.1.4`
+runtime. Restart retained v2.9.1, its active marker and last-selected value;
+the profile was stopped and the default remained unset. The host root remained
+at installed `.1.1`–`.1.4`, active `.1.4`, and no default. Temporary package,
+runtime, and profile data were removed after recording the evidence.
+
+A1 passed for the currently qualified recipe, including migration from the
+existing installed runtime, cancellation preservation, activation, removal,
+and restart recovery. This does not claim an upgrade between two different
+PyTorch upstream tags because only v2.9.1 currently has a qualified recipe.
+No Pumas runtime release or tag was created, and no default runtime was changed.
+The A5 GPU OOM and post-OOM inference evidence remains as recorded in
+`reports/a5-gpu-oom-recovery.md`; it was not rerun for this packaged UI check.
+
+### A1/A5 acceptance closeout and lifecycle serialization (2026-09-23)
+
+The packaged A1 trace above is sequential and uses the AppImage built from
+baseline source commit `5d373bf8791c43f1b995f4ba51a17da1610a6686`. An
+independent source review found concurrent selection/removal races in the
+shared `VersionManager`: `remove_version` checked active state and then released
+the state lock before deleting files, while `set_active_version` did not share
+the removal lock. A later review found default selection could validate stale
+installed state after metadata deletion and before refresh. All three operations
+are exposed as separate RPC requests.
+
+`VersionManager` now has a dedicated lifecycle mutex. Active and default
+selection acquire lifecycle before state; removal acquires install, then
+lifecycle, then state. This serializes selection with deletion without making
+selection wait behind a long download or changing public RPC interfaces.
+Deterministic Torch manager tests force removal-first active and default
+selection interleavings, then verify that setters reject the deleted tag after
+cleanup. The selection-first check verifies active removal refusal; default-first
+removal clears the default. The tests verify runtime files, Torch metadata,
+`.active-version-torch`, default selection, and reconstructed state. Removing
+either selection lock made its forced removal-first regression fail; restoring
+both made them pass.
+
+Root acceptance passed: `cargo test --manifest-path rust/Cargo.toml -p
+pumas-app-manager version_manager::tests:: -- --nocapture` (14 passed),
+`cargo fmt --manifest-path rust/Cargo.toml --all -- --check`,
+`./scripts/rust/check.sh` (exit 0, workspace tests, doc tests, lint and
+feature-gate checks), and `git diff --check`. Native GPU qualification was not
+rerun because the change only serializes active/default selection and removal.
+A1 is accepted from the recorded packaged sequential trace plus the
+current-source concurrency regressions. A5 remains accepted within its recorded
+controlled CUDA allocator OOM/recovery and lifecycle scope; it does not establish a
+naturally oversized pipeline request. No runtime was published or tagged and no
+default was changed.

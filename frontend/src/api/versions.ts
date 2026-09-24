@@ -30,9 +30,9 @@ class VersionsAPI {
     return await api.get_active_version(appId);
   }
 
-  async installVersion(tag: string, appId?: string) {
+  async installVersion(tag: string, appId?: string, previewId?: string) {
     const api = this.getAPI();
-    return await api.install_version(tag, appId);
+    return await api.install_version(tag, appId, previewId);
   }
 
   async removeVersion(tag: string, appId?: string) {

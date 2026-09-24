@@ -1,5 +1,5 @@
-// Generated from pumas-rpc contract.rs; SHA256 c47dcf40f195691ed7ba33b2b91c30a4c91cb1a1ec15d122ccc0290d136c45f0. DO NOT EDIT.
-import { validateAvailableVersionsOutcome, validateBackendStatusOutcome, validateCancelInstallationOutcome, validateCatalogSearchOutcome, validateCheckVersionDependenciesOutcome, validateCheckVersionDependenciesParams, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateGetBackendSetupParams, validateGetHfDownloadDetailsParams, validateGetReleaseDependenciesOutcome, validateGetReleaseDependenciesParams, validateGithubCacheStatusOutcome, validateHfDownloadDetailsOutcome, validateInferenceSettingsOutcome, validateInstallVersionDependenciesOutcome, validateInstallVersionDependenciesParams, validateInstallVersionOutcome, validateInstallVersionParams, validateInstallationProgressOutcome, validateInstalledVersionsOutcome, validateLibraryModelMetadataOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePublicError, validateRecoverDownloadParams, validateRemoveVersionOutcome, validateRouterProfileSyncStatus, validateRuntimeLaunchOutcome, validateRuntimeLaunchParams, validateRuntimeRunningOutcome, validateRuntimeStopOutcome, validateSearchCatalogParams, validateSelectedVersionOutcome, validateSetDefaultVersionOutcome, validateSetDefaultVersionParams, validateStartBackendSetupParams, validateStartConversionSetupParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome, validateSwitchVersionOutcome, validateSwitchVersionParams, validateUpdateInferenceSettingsOutcome, validateUpdateInferenceSettingsParams, validateUpdateModelNotesOutcome, validateUpdateModelNotesParams, validateValidateInstallationsOutcome, validateVersionInfoOutcome, validateVersionStatusOutcome } from './desktop-contract.validators.js';
+// Generated from pumas-rpc contract.rs; SHA256 4f6771f852879c4de52ee8d1e66c25a3bba650bf832d9dbba022b3b8b0b4c75c. DO NOT EDIT.
+import { validateAvailableVersionsOutcome, validateBackendStatusOutcome, validateCancelInstallationOutcome, validateCatalogSearchOutcome, validateCheckVersionDependenciesOutcome, validateCheckVersionDependenciesParams, validateConversionCancelledOutcome, validateConversionEnvironmentOutcome, validateConversionListOutcome, validateConversionProgressResponse, validateConversionSetupStartedOutcome, validateConversionSetupStatusOutcome, validateConversionStartedOutcome, validateDownloadIdParams, validateDownloadListOutcome, validateDownloadMutationOutcome, validateDownloadStartedOutcome, validateDownloadStatusOutcome, validateFindTorchAlternativesParams, validateGetBackendSetupParams, validateGetHfDownloadDetailsParams, validateGetReleaseDependenciesOutcome, validateGetReleaseDependenciesParams, validateGetTorchPreviewReportParams, validateGetTorchRuntimeProbeParams, validateGithubCacheStatusOutcome, validateHfDownloadDetailsOutcome, validateInferenceSettingsOutcome, validateInstallVersionDependenciesOutcome, validateInstallVersionDependenciesParams, validateInstallVersionOutcome, validateInstallVersionParams, validateInstallationProgressOutcome, validateInstalledVersionsOutcome, validateLibraryModelMetadataOutcome, validateLinkHealthOutcome, validateModelIndexRefreshOutcome, validateModelsOutcome, validatePartialDownloadOutcome, validatePreviewTorchRuntimeParams, validatePublicError, validateRecoverDownloadParams, validateRemoveVersionOutcome, validateRouterProfileSyncStatus, validateRuntimeLaunchOutcome, validateRuntimeLaunchParams, validateRuntimeRunningOutcome, validateRuntimeStopOutcome, validateSearchCatalogParams, validateSelectedVersionOutcome, validateSetDefaultVersionOutcome, validateSetDefaultVersionParams, validateStartBackendSetupParams, validateStartConversionSetupParams, validateStopRuntimeProfileGenerationOutcome, validateStopRuntimeProfileGenerationParams, validateSuccessOutcome, validateSupportedQuantTypesOutcome, validateSwitchVersionOutcome, validateSwitchVersionParams, validateTorchRuntimePreview, validateTorchRuntimePreviewArtifact, validateTorchRuntimePreviewOutcome, validateTorchRuntimePreviewQualification, validateTorchRuntimePreviewRejectionReason, validateTrialTorchRuntimeOutcome, validateTrialTorchRuntimeParams, validateUpdateInferenceSettingsOutcome, validateUpdateInferenceSettingsParams, validateUpdateModelNotesOutcome, validateUpdateModelNotesParams, validateValidateInstallationsOutcome, validateVersionInfoOutcome, validateVersionStatusOutcome } from './desktop-contract.validators.js';
 export type AvailableVersionsOutcome = (AvailableVersionsSuccess) | (AvailableVersionsRateLimited);
 export type AvailableVersionsRateLimited = { "error": string; "rate_limited": true; "retry_after_secs": number | null; "success": false };
 export type AvailableVersionsSuccess = { "success": true; "versions": ReadonlyArray<VersionReleaseInfo> };
@@ -44,10 +44,13 @@ export type DownloadStatusMissingOutcome = { "error": string; "success": false }
 export type DownloadStatusOutcome = (DownloadStatusFoundOutcome) | (DownloadStatusMissingOutcome);
 export type EmbeddedMetadataResponse = { "file_type": string; "metadata": { readonly [key: string]: DesktopJsonValue } };
 export type FileGroup = { "filenames": ReadonlyArray<string>; "label": string; "shardCount": number };
+export type FindTorchAlternativesParams = { "build": string; "python": string; "tag": string };
 export type GetBackendSetupParams = { "backend": QuantBackend };
 export type GetHfDownloadDetailsParams = ({ "quants"?: ReadonlyArray<string> | null; "repo_id": string }) | ({ "quants"?: ReadonlyArray<string> | null; "repoId": string });
 export type GetReleaseDependenciesOutcome = { "dependencies": ReadonlyArray<string>; "success": true };
 export type GetReleaseDependenciesParams = ({ "app_id": string; "tag": string }) | ({ "appId": string; "tag": string });
+export type GetTorchPreviewReportParams = ({ "preview_id": string }) | ({ "previewId": string });
+export type GetTorchRuntimeProbeParams = { "tag": string };
 export type GithubCacheStatusNoManager = { "has_cache": false; "is_fetching": false; "is_valid": false };
 export type GithubCacheStatusOutcome = (GithubCacheStatusSnapshot) | (GithubCacheStatusNoManager);
 export type GithubCacheStatusSnapshot = { "age_seconds": number | null; "has_cache": boolean; "is_fetching": boolean; "is_valid": boolean; "last_fetched": string | null; "releases_count": number | null };
@@ -65,7 +68,7 @@ export type InstallVersionDependenciesOutcome = { "success": boolean };
 export type InstallVersionDependenciesParams = ({ "app_id": string; "tag": string }) | ({ "appId": string; "tag": string });
 export type InstallVersionFailed = { "error": string; "success": false };
 export type InstallVersionOutcome = (InstallVersionStarted) | (InstallVersionFailed);
-export type InstallVersionParams = ({ "app_id": string; "tag": string }) | ({ "appId": string; "tag": string });
+export type InstallVersionParams = ({ "app_id": string; "preview_id"?: string | null; "tag": string }) | ({ "app_id": string; "previewId"?: string | null; "tag": string }) | ({ "appId": string; "preview_id"?: string | null; "tag": string }) | ({ "appId": string; "previewId"?: string | null; "tag": string });
 export type InstallVersionStarted = { "message": string; "success": true };
 export type LibraryModelMetadataOutcome = { "component_manifest"?: ReadonlyArray<BundleComponentManifestEntry>; "effective_metadata"?: { readonly [key: string]: DesktopJsonValue }; "embedded_metadata"?: EmbeddedMetadataResponse; "model_id": string; "primary_file"?: string; "stored_metadata"?: { readonly [key: string]: DesktopJsonValue }; "success": true };
 export type LinkHealthOutcome = (LinkHealthResponse);
@@ -77,6 +80,7 @@ export type ParamType = "Number" | "Integer" | "String" | "Boolean";
 export type PartialDownloadActionName = "resume" | "recover" | "attach" | "none";
 export type PartialDownloadOutcome = { "action": PartialDownloadActionName; "download_id": string | null; "error": string | null; "reason_code": (PartialDownloadReason) | (null); "status": (DownloadStatus) | (null); "success": boolean };
 export type PartialDownloadReason = "hf_client_unavailable" | "download_root_busy" | "model_not_found" | "model_not_partial" | "recovery_unavailable" | "recovery_context_stale" | "resume_rejected" | "already_completed" | "already_cancelled" | "invalid_repo_id" | "repo_not_found" | "rate_limited" | "permission_denied" | "network_error" | "recover_failed";
+export type PreviewTorchRuntimeParams = { "adapter"?: string; "build": string; "python": string; "tag": string };
 export type PublicError = { "class": PublicErrorClass; "code": number; "message": string };
 export type PublicErrorClass = "invalid_request" | "not_found" | "conflict" | "cancelled" | "unavailable" | "operation_failed" | "internal";
 export type QuantBackend = ("python_conversion") | ("llama_cpp") | ("nvfp4") | ("fp8") | ("sherry");
@@ -103,10 +107,19 @@ export type SetDefaultVersionOutcome = { "success": boolean };
 export type SetDefaultVersionParams = ({ "app_id": string; "tag"?: string | null }) | ({ "appId": string; "tag"?: string | null });
 export type StartBackendSetupParams = { "backend": QuantBackend; "expected_previous_operation_id"?: string | null };
 export type StartConversionSetupParams = { "expected_previous_operation_id"?: string | null };
+export type StopRuntimeProfileGenerationOutcome = { "stopped": boolean; "success": boolean };
+export type StopRuntimeProfileGenerationParams = ({ "generation": string; "profile_id": string }) | ({ "generation": string; "profileId": string });
 export type SuccessOutcome = { "success": true };
 export type SupportedQuantTypesOutcome = { "quant_types": ReadonlyArray<QuantOption>; "success": true };
 export type SwitchVersionOutcome = { "success": boolean };
 export type SwitchVersionParams = ({ "app_id": string; "tag": string }) | ({ "appId": string; "tag": string });
+export type TorchRuntimePreview = { "adapter": string; "artifacts": ReadonlyArray<TorchRuntimePreviewArtifact>; "build": string; "expiresInSeconds": number; "previewId": string; "python": string; "qualification": TorchRuntimePreviewQualification; "tag": string };
+export type TorchRuntimePreviewArtifact = { "name": string; "sha256": string; "url": string; "version": string };
+export type TorchRuntimePreviewOutcome = ({ "preview": TorchRuntimePreview; "status": "resolved" }) | ({ "message": string; "reason": TorchRuntimePreviewRejectionReason; "status": "rejected" });
+export type TorchRuntimePreviewQualification = "qualified" | "unverified";
+export type TorchRuntimePreviewRejectionReason = "unsupported" | "validation_failed" | "network_inconclusive" | "inconclusive";
+export type TrialTorchRuntimeOutcome = { "capabilities": ReadonlyArray<string>; "cleanup": string; "error": string | null; "generation": string | null; "healthStatus": string; "profileId": string; "protocol": number | null; "startedByTrial": boolean; "startupStatus": string; "success": boolean; "tag": string };
+export type TrialTorchRuntimeParams = ({ "profile_id": string; "tag": string }) | ({ "profileId": string; "tag": string });
 export type UpdateInferenceSettingsOutcome = { "model_id": string; "success": true };
 export type UpdateInferenceSettingsParams = ({ "model_id": string; "settings": ReadonlyArray<InferenceSettingInput> }) | ({ "inference_settings": ReadonlyArray<InferenceSettingInput>; "model_id": string }) | ({ "inferenceSettings": ReadonlyArray<InferenceSettingInput>; "model_id": string }) | ({ "modelId": string; "settings": ReadonlyArray<InferenceSettingInput> }) | ({ "inference_settings": ReadonlyArray<InferenceSettingInput>; "modelId": string }) | ({ "inferenceSettings": ReadonlyArray<InferenceSettingInput>; "modelId": string });
 export type UpdateModelNotesFailure = { "error": string; "model_id": string; "success": false };
@@ -170,10 +183,13 @@ export function decodeDownloadListOutcome(input: unknown): DecodeOutcome<Downloa
 export function decodeDownloadMutationOutcome(input: unknown): DecodeOutcome<DownloadMutationOutcome> { return decode(input, validateDownloadMutationOutcome); }
 export function decodeDownloadStartedOutcome(input: unknown): DecodeOutcome<DownloadStartedOutcome> { return decode(input, validateDownloadStartedOutcome); }
 export function decodeDownloadStatusOutcome(input: unknown): DecodeOutcome<DownloadStatusOutcome> { return decode(input, validateDownloadStatusOutcome); }
+export function decodeFindTorchAlternativesParams(input: unknown): DecodeOutcome<FindTorchAlternativesParams> { return decode(input, validateFindTorchAlternativesParams); }
 export function decodeGetBackendSetupParams(input: unknown): DecodeOutcome<GetBackendSetupParams> { return decode(input, validateGetBackendSetupParams); }
 export function decodeGetHfDownloadDetailsParams(input: unknown): DecodeOutcome<GetHfDownloadDetailsParams> { return decode(input, validateGetHfDownloadDetailsParams); }
 export function decodeGetReleaseDependenciesOutcome(input: unknown): DecodeOutcome<GetReleaseDependenciesOutcome> { return decode(input, validateGetReleaseDependenciesOutcome); }
 export function decodeGetReleaseDependenciesParams(input: unknown): DecodeOutcome<GetReleaseDependenciesParams> { return decode(input, validateGetReleaseDependenciesParams); }
+export function decodeGetTorchPreviewReportParams(input: unknown): DecodeOutcome<GetTorchPreviewReportParams> { return decode(input, validateGetTorchPreviewReportParams); }
+export function decodeGetTorchRuntimeProbeParams(input: unknown): DecodeOutcome<GetTorchRuntimeProbeParams> { return decode(input, validateGetTorchRuntimeProbeParams); }
 export function decodeGithubCacheStatusOutcome(input: unknown): DecodeOutcome<GithubCacheStatusOutcome> { return decode(input, validateGithubCacheStatusOutcome); }
 export function decodeHfDownloadDetailsOutcome(input: unknown): DecodeOutcome<HfDownloadDetailsOutcome> { return decode(input, validateHfDownloadDetailsOutcome); }
 export function decodeInferenceSettingsOutcome(input: unknown): DecodeOutcome<InferenceSettingsOutcome> { return decode(input, validateInferenceSettingsOutcome); }
@@ -188,6 +204,7 @@ export function decodeLinkHealthOutcome(input: unknown): DecodeOutcome<LinkHealt
 export function decodeModelIndexRefreshOutcome(input: unknown): DecodeOutcome<ModelIndexRefreshOutcome> { return decode(input, validateModelIndexRefreshOutcome); }
 export function decodeModelsOutcome(input: unknown): DecodeOutcome<ModelsOutcome> { return decode(input, validateModelsOutcome); }
 export function decodePartialDownloadOutcome(input: unknown): DecodeOutcome<PartialDownloadOutcome> { return decode(input, validatePartialDownloadOutcome); }
+export function decodePreviewTorchRuntimeParams(input: unknown): DecodeOutcome<PreviewTorchRuntimeParams> { return decode(input, validatePreviewTorchRuntimeParams); }
 export function decodePublicError(input: unknown): DecodeOutcome<PublicError> { return decode(input, validatePublicError); }
 export function decodeRecoverDownloadParams(input: unknown): DecodeOutcome<RecoverDownloadParams> { return decode(input, validateRecoverDownloadParams); }
 export function decodeRemoveVersionOutcome(input: unknown): DecodeOutcome<RemoveVersionOutcome> { return decode(input, validateRemoveVersionOutcome); }
@@ -202,10 +219,19 @@ export function decodeSetDefaultVersionOutcome(input: unknown): DecodeOutcome<Se
 export function decodeSetDefaultVersionParams(input: unknown): DecodeOutcome<SetDefaultVersionParams> { return decode(input, validateSetDefaultVersionParams); }
 export function decodeStartBackendSetupParams(input: unknown): DecodeOutcome<StartBackendSetupParams> { return decode(input, validateStartBackendSetupParams); }
 export function decodeStartConversionSetupParams(input: unknown): DecodeOutcome<StartConversionSetupParams> { return decode(input, validateStartConversionSetupParams); }
+export function decodeStopRuntimeProfileGenerationOutcome(input: unknown): DecodeOutcome<StopRuntimeProfileGenerationOutcome> { return decode(input, validateStopRuntimeProfileGenerationOutcome); }
+export function decodeStopRuntimeProfileGenerationParams(input: unknown): DecodeOutcome<StopRuntimeProfileGenerationParams> { return decode(input, validateStopRuntimeProfileGenerationParams); }
 export function decodeSuccessOutcome(input: unknown): DecodeOutcome<SuccessOutcome> { return decode(input, validateSuccessOutcome); }
 export function decodeSupportedQuantTypesOutcome(input: unknown): DecodeOutcome<SupportedQuantTypesOutcome> { return decode(input, validateSupportedQuantTypesOutcome); }
 export function decodeSwitchVersionOutcome(input: unknown): DecodeOutcome<SwitchVersionOutcome> { return decode(input, validateSwitchVersionOutcome); }
 export function decodeSwitchVersionParams(input: unknown): DecodeOutcome<SwitchVersionParams> { return decode(input, validateSwitchVersionParams); }
+export function decodeTorchRuntimePreview(input: unknown): DecodeOutcome<TorchRuntimePreview> { return decode(input, validateTorchRuntimePreview); }
+export function decodeTorchRuntimePreviewArtifact(input: unknown): DecodeOutcome<TorchRuntimePreviewArtifact> { return decode(input, validateTorchRuntimePreviewArtifact); }
+export function decodeTorchRuntimePreviewOutcome(input: unknown): DecodeOutcome<TorchRuntimePreviewOutcome> { return decode(input, validateTorchRuntimePreviewOutcome); }
+export function decodeTorchRuntimePreviewQualification(input: unknown): DecodeOutcome<TorchRuntimePreviewQualification> { return decode(input, validateTorchRuntimePreviewQualification); }
+export function decodeTorchRuntimePreviewRejectionReason(input: unknown): DecodeOutcome<TorchRuntimePreviewRejectionReason> { return decode(input, validateTorchRuntimePreviewRejectionReason); }
+export function decodeTrialTorchRuntimeOutcome(input: unknown): DecodeOutcome<TrialTorchRuntimeOutcome> { return decode(input, validateTrialTorchRuntimeOutcome); }
+export function decodeTrialTorchRuntimeParams(input: unknown): DecodeOutcome<TrialTorchRuntimeParams> { return decode(input, validateTrialTorchRuntimeParams); }
 export function decodeUpdateInferenceSettingsOutcome(input: unknown): DecodeOutcome<UpdateInferenceSettingsOutcome> { return decode(input, validateUpdateInferenceSettingsOutcome); }
 export function decodeUpdateInferenceSettingsParams(input: unknown): DecodeOutcome<UpdateInferenceSettingsParams> { return decode(input, validateUpdateInferenceSettingsParams); }
 export function decodeUpdateModelNotesOutcome(input: unknown): DecodeOutcome<UpdateModelNotesOutcome> { return decode(input, validateUpdateModelNotesOutcome); }

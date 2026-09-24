@@ -3,8 +3,10 @@ import { AlertCircle, Loader2 } from 'lucide-react';
 import type { InstallationProgress, VersionRelease } from '../hooks/useVersions';
 import { ProgressDetailsView } from './ProgressDetailsView';
 import { VersionListItem } from './VersionListItem';
+import type { TorchInstalledConfig } from '../types/torch-install';
 
 interface InstallDialogContentProps {
+  appId?: string;
   cancellationNotice: string | null;
   cancelHoverTag: string | null;
   errorMessage: string | null;
@@ -13,6 +15,7 @@ interface InstallDialogContentProps {
   hoveredTag: string | null;
   installNetworkStatus: 'idle' | 'downloading' | 'stalled' | 'failed';
   installedVersions: string[];
+  torchInstalledConfigs?: TorchInstalledConfig[];
   installingVersion: string | null;
   isLoading: boolean;
   isRateLimited: boolean;
@@ -31,10 +34,12 @@ interface InstallDialogContentProps {
   onToggleCompletedItems: () => void;
   onBackToList: () => void;
   onInstallVersion: (tag: string) => void;
+  onInspectTorchProbe?: (tag: string) => void;
   onReportRemoveError: (tag: string, error: unknown) => void;
 }
 
 export function InstallDialogContent({
+  appId,
   cancellationNotice,
   cancelHoverTag,
   errorMessage,
@@ -43,6 +48,7 @@ export function InstallDialogContent({
   hoveredTag,
   installNetworkStatus,
   installedVersions,
+  torchInstalledConfigs = [],
   installingVersion,
   isLoading,
   isRateLimited,
@@ -61,6 +67,7 @@ export function InstallDialogContent({
   onToggleCompletedItems,
   onBackToList,
   onInstallVersion,
+  onInspectTorchProbe,
   onReportRemoveError,
 }: InstallDialogContentProps) {
   return (
@@ -134,8 +141,10 @@ export function InstallDialogContent({
 
             return (
               <VersionListItem
+                appId={appId}
                 key={release.tagName}
                 release={release}
+                torchInstalledConfig={torchInstalledConfigs.find((config) => config.tag === release.tagName)}
                 isInstalled={isInstalled}
                 isInstalling={isInstalling}
                 progress={currentProgress}
@@ -146,6 +155,7 @@ export function InstallDialogContent({
                 installNetworkStatus={installNetworkStatus}
                 failedLogPath={stickyFailedTag === release.tagName ? stickyFailedLogPath : null}
                 onInstall={() => onInstallVersion(release.tagName)}
+                onInspectTorchProbe={appId === 'torch' && isInstalled ? () => onInspectTorchProbe?.(release.tagName) : undefined}
                 onRemove={() => onRemoveVersion(release.tagName).catch((error: unknown) => {
                   onReportRemoveError(release.tagName, error);
                 })}

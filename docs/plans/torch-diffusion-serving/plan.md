@@ -1,10 +1,10 @@
 # Plan: Tuldok Image Generation Through Pumas
 
-**Plan status:** `Active`
+**Plan status:** `Completed`
 
-**Current phase:** Image workflows and FP8/NVFP4 conversion extensions passed within their recorded scope; distribution acceptance remains
+**Current phase:** A1–A7 acceptance is complete within the limits recorded in the evidence reports. A1 includes packaged upstream discovery and migration plus concurrent active/default selection and removal regression coverage. A5 includes CUDA allocator OOM and recovery, without claiming a naturally oversized pipeline request.
 
-**Next slice:** Complete shared-release distribution acceptance for the qualified Torch package, retaining the working FP8 image workflow and the user-requested reduced verification scope. Native NVFP4 encoder serving and T16 desktop shutdown work remain outside the completed conversion extension.
+**Next slice:** No acceptance work remains in this plan. Native NVFP4 encoder serving, T16 desktop shutdown, LLaDA, other-platform qualification, and the broad gateway redesign remain deferred follow-ups.
 
 **Independent companion preparation:** `M3-TIPC` source is complete in Tuldok
 `a61daeec83779868cf03b14fb5c811fcdc608fc2`. Exact
@@ -13,9 +13,9 @@
 passes production installation and native GPU/sidecar validation; TIPC-09 is
 returned. Real cancellation/reuse on the RTX 5090 Laptop GPU returns TIPC-04,
 and the refreshed Tuldok 1280×720 display/save run returns TIPC-10. This does
-not replace the sole next slice above.
+complete the M3-TIPC real acceptance gate; no runtime publication was required.
 
-**Acceptance status:** `partial`
+**Acceptance status:** `Accepted`
 
 **Brief:** [Torch diffusion serving](../../breif/torch-diffusion-runtime.md)
 
@@ -45,7 +45,7 @@ Pumas release, while preserving the optional inference-free serving build.
 
 | ID | Observable criterion | Kind | Environment | Mode | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| A1 | Shared runtime controls discover, install, activate, update and remove Torch; failed/cancelled installation preserves the usable version | integration | isolated install root; network for real artifacts | automated and manual | pending | M1 report |
+| A1 | Shared runtime controls discover, install, activate, update and remove Torch; failed/cancelled installation preserves the usable version | integration | isolated install root; network for real artifacts | automated and manual | passed | [Packaged upstream acceptance](reports/a1-packaged-acceptance.md) |
 | A2 | Nunchaku Z-Image-Turbo produces a decodable PNG through the Pumas gateway; capability discovery excludes text-only models from image selection | integration | RTX 5090 Laptop GPU, complete pipeline | automated and manual | passed | [Real image](reports/nunchaku.md) |
 | A3 | Tuldok discovers a served image model, sends a prompt, displays the returned PNG and saves matching image content | end-to-end | real browser, Tuldok, Pumas release, GPU | automated and manual | passed | [Real Tuldok workflow](reports/tuldok.md) |
 | A4 | The local FLUX.2 Klein FP8 checkpoint generates through the same Tuldok flow with its memory policy reported | end-to-end | same host, verified matching assets | manual | passed | [FLUX.2 FP8 image](reports/flux2.md) |
@@ -180,19 +180,16 @@ Finalize and document this bounded contract in M2 before integrating Tuldok:
 
 ## Milestones
 
-M1 remains `Active` for packaged-app discovery and fresh shared-UI installation
-acceptance; M2/M5 remain `Active` for their remaining acceptance gates. No
-Pumas-hosted Torch runtime release is required. Original M3 and M4 are
-`Completed` within their recorded evidence; `M3-TIPC` is `Completed` with its
-required-real gate passed. Source work may continue during package
-qualification; real model loading still requires a healthy qualified runtime.
-A1 remains mandatory for final acceptance. M3-TIPC source work may use the
-tested M2 contract while large assets download; no fixture or source completion
-satisfies the required real-image gates. M4 source preparation may proceed while
-the large Nunchaku bundle transfers: a header-only strict layout check now passes
-against the installed Diffusers architecture. Nunchaku remains first for GPU,
-gateway and browser acceptance; FLUX asset transfers must not delay its
-acquisition.
+M1 is `Completed` for qualified upstream `v2.9.1`: packaged discovery,
+shared-UI installation, migration from the installed legacy runtime, activation,
+removal, cancellation preservation, restart recovery, and the active/default
+selection/removal concurrency regressions passed. M2 is `Completed` for its
+real Nunchaku gateway and relevant A5 gates. M5 is `Completed` for the A1–A7
+release and optional-build evidence. No Pumas-hosted Torch runtime release is
+required. Original M3 and M4 are `Completed` within their recorded evidence;
+`M3-TIPC` is `Completed` with its exact-candidate real gate passed. Remaining
+work listed at the top of this plan is deferred follow-up, not a blocker to this
+acceptance.
 Each milestone
 updates this directory's ledger, issues and evidence reports. Narrow write sets
 against the live checkout before edits; expand the plan for new semantic owners.
@@ -222,9 +219,12 @@ without deleting user assets. Exercise normal UI install/activate/remove and
 install failure/cancellation/restart recovery.
 
 **Gate:** Healthy real sidecar and existing llama.cpp installer checks before model
-loading. A1 still requires packaged-app discovery and installation acceptance for
-the supported upstream release. Record exact dependencies, supported tags and
-official wheel sources in `reports/runtime.md`.
+loading. Packaged discovery, fresh shared-UI installation, migration from the
+installed legacy runtime, activation, removal, cancellation preservation, and
+restart recovery passed for the supported upstream release; see
+`reports/a1-packaged-acceptance.md`. Only v2.9.1 has a qualified upstream recipe,
+so this does not claim an upgrade between two PyTorch upstream tags. Record exact
+dependencies, supported tags and official wheel sources in `reports/runtime.md`.
 **Re-plan:** No compatible supported official wheel combination or no distributable
 sidecar/recipe path.
 
@@ -362,9 +362,9 @@ VLM behavior. Use current GPU telemetry before loads and explicitly manage
 competing models. Record usable latency/defaults and known limitations; preserve
 evidence rather than declaring success from build completion.
 
-**TIPC handoff gate:** Return TIPC-04, TIPC-09, and TIPC-10 individually when
-their specific evidence passes. No handoff waits for acceptance of all M5, for
-publication, or for publication-dependent A1.
+**TIPC handoff gate:** TIPC-04, TIPC-09, and TIPC-10 were returned individually
+after their specific evidence passed. They do not require M5 closeout or a
+Pumas-hosted runtime publication.
 
 **Milestone gate:** All A1–A7 are satisfied with release identity and
 reproducible commands in `reports/release-acceptance.md`. No required installed-
@@ -381,9 +381,12 @@ cancellation/reuse, and browser acceptance are complete for TIPC-04, TIPC-09,
 and TIPC-10. The earlier assumption that Torch discovery required a Pumas-hosted
 runtime bundle was incorrect. The manager now targets official PyTorch releases
 and maps only the qualified `v2.9.1` tag to an embedded, hash-locked recipe.
-Packaged-app discovery and fresh shared-UI installation acceptance remain to be
-verified. Both complete pipelines now generate through Tuldok. A5 acceptance
-passed, including a real
+Packaged discovery, install, migration from the installed legacy runtime,
+activation, removal, cancellation preservation, and restart recovery passed;
+see [A1 packaged acceptance](reports/a1-packaged-acceptance.md). Only v2.9.1 has
+a qualified upstream recipe, so an upstream-to-upstream upgrade is not claimed.
+Both complete pipelines now generate through Tuldok. A5 acceptance passed,
+including a real
 CUDA allocator OOM returning sanitized HTTP 507; follow-up inference succeeded
 with the same loaded model, and teardown succeeded. This does not verify a
 naturally induced high-resolution pipeline OOM. See [A5 GPU recovery evidence](reports/a5-gpu-oom-recovery.md),
@@ -399,8 +402,8 @@ naturally induced high-resolution pipeline OOM. See [A5 GPU recovery evidence](r
 
 ## Final acceptance
 
-- Acceptance status: `pending`.
-- Deferred follow-ups: LLaDA, other-platform qualification, and the separately
-  deferred broad gateway redesign; revisit after this flow is accepted and the
-  user selects the next scope.
-- Final status: `Active`; operation `start` admitted on 2026-09-13. Acceptance remains pending.
+- Acceptance status: `passed`.
+- Deferred follow-ups: native NVFP4 encoder serving, T16 desktop shutdown,
+  LLaDA, other-platform qualification, and the broad gateway redesign; revisit
+  after the user selects the next scope.
+- Final status: `Completed`; operation `start` admitted on 2026-09-13. A1–A7 acceptance was completed on 2026-09-23 within the limitations in the linked reports.

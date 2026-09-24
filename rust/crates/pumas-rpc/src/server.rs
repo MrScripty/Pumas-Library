@@ -342,7 +342,23 @@ pub async fn start_server(
             result = serving => result.map_err(anyhow::Error::from),
             _ = shutdown.changed() => Ok(()),
         };
-        let (owners, runtimes) = tokio::join!(
+        let torch_cleanup = async {
+            #[cfg(feature = "inference-plugins")]
+            {
+                let managers = state.version_managers.read().await;
+                let mut errors = Vec::new();
+                for manager in managers.values() {
+                    if let Err(error) = manager.shutdown_torch_cleanup().await {
+                        errors.push(error.to_string());
+                    }
+                }
+                if !errors.is_empty() {
+                    return Err(anyhow::anyhow!(errors.join("; ")));
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        };
+        let (owners, runtimes, torch_cleanup) = tokio::join!(
             drain_server_owners(
                 server_result,
                 async {
@@ -360,7 +376,8 @@ pub async fn start_server(
                 state.api.shutdown_conversion_setup(),
                 state.api.shutdown_conversions(),
             ),
-            state.api.stop_all_managed_runtime_profiles()
+            state.api.stop_all_managed_runtime_profiles(),
+            torch_cleanup,
         );
         let runtimes = runtimes.map_err(anyhow::Error::from).and_then(|summary| {
             if summary.errors.is_empty() {
@@ -369,6 +386,12 @@ pub async fn start_server(
                 Err(anyhow::anyhow!(summary.errors.join("; ")))
             }
         });
+        let owners = match (owners, torch_cleanup) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(()), Err(error)) => Err(anyhow::anyhow!("Torch cleanup: {error}")),
+            (Err(owners), Err(error)) => Err(anyhow::anyhow!("{owners}; Torch cleanup: {error}")),
+        };
         match (owners, runtimes) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(error), Ok(())) | (Ok(()), Err(error)) => Err(error),

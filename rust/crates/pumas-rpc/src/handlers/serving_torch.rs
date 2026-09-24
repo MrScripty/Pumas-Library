@@ -46,7 +46,7 @@ pub(super) async fn serve_torch_model(
             state,
             fail(
                 ModelServeErrorCode::InvalidFormat,
-                "Select a qualified Nunchaku Z-Image or Klein 9B KV FP8 library package",
+                "Select a supported Nunchaku Z-Image or Klein 9B KV FP8 library package",
             ),
         )
         .await;
@@ -129,16 +129,28 @@ pub(super) async fn serve_torch_model(
         )
         .await;
     };
+    let torch_lifecycle_lease = manager.torch_lifecycle_lease().await?;
     let Some(tag) = manager.get_active_version().await? else {
         return non_critical_failure_response(
             state,
             fail(
                 ModelServeErrorCode::MissingRuntime,
-                "Install and activate a qualified Torch runtime first",
+                "Install and explicitly select a Torch runtime first",
             ),
         )
         .await;
     };
+    if let Err(error) = manager.verify_torch_identity(&tag).await {
+        tracing::warn!(%error, %tag, "Selected Torch runtime identity check failed");
+        return non_critical_failure_response(
+            state,
+            fail(
+                ModelServeErrorCode::MissingRuntime,
+                "Selected Torch runtime failed its installed identity check",
+            ),
+        )
+        .await;
+    }
     let existing = state
         .api
         .observe_owned_runtime_profile(&request.config.profile_id)?;
@@ -175,6 +187,7 @@ pub(super) async fn serve_torch_model(
             }
         }
     };
+    drop(torch_lifecycle_lease);
     let client = TorchClient::new(Some(owned.endpoint_url.as_str()));
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {
@@ -214,12 +227,13 @@ pub(super) async fn serve_torch_model(
     }
     // The handshake (protocol plus capability) must pass before any model
     // load or publication through this runtime.
-    if client.verify_image_runtime().await.is_err() {
+    if let Err(error) = client.verify_image_runtime().await {
+        tracing::warn!(%error, "Selected Torch runtime cannot serve image models");
         return non_critical_failure_response(
             state,
             fail(
                 ModelServeErrorCode::ProviderLoadFailed,
-                "Torch runtime is incompatible; install and activate a qualified Torch runtime",
+                "Selected Torch runtime cannot serve image models",
             ),
         )
         .await;
@@ -261,7 +275,11 @@ pub(super) async fn serve_torch_model(
                 state,
                 fail(
                     ModelServeErrorCode::ProviderLoadFailed,
-                    "Torch could not load the image pipeline; inspect its runtime log",
+                    if is_flux {
+                        "FLUX.2 image adapter could not load in this Torch runtime; inspect its runtime log. Other Torch uses remain available"
+                    } else {
+                        "Nunchaku image adapter could not load in this Torch runtime; inspect its runtime log. Other Torch uses remain available"
+                    },
                 ),
             )
             .await;
@@ -301,7 +319,7 @@ pub(super) async fn serve_torch_model(
             state,
             fail(
                 ModelServeErrorCode::ProviderLoadFailed,
-                "Torch runtime is incompatible; install and activate a qualified Torch runtime",
+                "Selected Torch runtime lost image compatibility",
             ),
         )
         .await;

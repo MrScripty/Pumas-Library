@@ -3,9 +3,19 @@
 use super::*;
 use crate::torch_client::{SUPPORTED_TORCH_PROTOCOL, TORCH_IMAGE_GENERATION_CAPABILITY};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
+
+const MAX_TORCH_ORPHAN_QUARANTINES: usize = 2;
+pub(super) const TORCH_PUBLISHING_MARKER: &[u8] = b"metadata pending";
+
+struct TorchOrphanQuarantine {
+    tag: String,
+    timestamp_ms: u64,
+    path: PathBuf,
+}
 
 #[cfg(test)]
 pub(crate) struct TorchPublicationPause {
@@ -28,6 +38,7 @@ impl TorchPublicationPause {
 mod torch_upstream_contract_tests;
 
 pub(crate) struct TorchRuntimeRecipe {
+    #[cfg(test)]
     pub(crate) release_tag: &'static str,
     pub(crate) recipe_id: &'static str,
     pub(crate) torch_version: &'static str,
@@ -38,6 +49,7 @@ pub(crate) struct TorchRuntimeRecipe {
 }
 
 const TORCH_291: TorchRuntimeRecipe = TorchRuntimeRecipe {
+    #[cfg(test)]
     release_tag: "v2.9.1",
     recipe_id: "torch-upstream-2.9.1-r1",
     torch_version: "2.9.1+cu130",
@@ -55,9 +67,95 @@ pub(crate) fn torch_recipe_for_tag(tag: &str) -> Option<&'static TorchRuntimeRec
 }
 
 pub(crate) fn is_torch_runtime_release(release: &GitHubRelease) -> bool {
-    cfg!(all(target_os = "linux", target_arch = "x86_64"))
-        && !release.prerelease
-        && torch_recipe_for_tag(&release.tag_name).is_some()
+    !release.prerelease && stable_torch_tag(&release.tag_name).is_some()
+}
+
+fn stable_torch_tag(tag: &str) -> Option<&str> {
+    let version = tag.strip_prefix('v')?;
+    let parts: Vec<_> = version.split('.').collect();
+    (parts.len() == 3
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_digit())))
+    .then_some(version)
+}
+
+fn list_owned_torch_orphan_quarantines(
+    versions_dir: &Path,
+) -> std::io::Result<Vec<TorchOrphanQuarantine>> {
+    let entries = match std::fs::read_dir(versions_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut quarantines = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(suffix) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix(".torch-orphan-"))
+        else {
+            continue;
+        };
+        let Some((tag, timestamp)) = suffix.rsplit_once('-') else {
+            continue;
+        };
+        let (Some(_), Ok(timestamp_ms)) = (stable_torch_tag(tag), timestamp.parse::<u64>()) else {
+            continue;
+        };
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let path = entry.path();
+        if !matches!(
+            std::fs::read(path.join(".pumas-publishing")),
+            Ok(contents) if contents.as_slice() == TORCH_PUBLISHING_MARKER
+        ) {
+            continue;
+        }
+        quarantines.push(TorchOrphanQuarantine {
+            tag: tag.to_owned(),
+            timestamp_ms,
+            path,
+        });
+    }
+    Ok(quarantines)
+}
+
+pub(super) fn prune_torch_orphan_quarantines(
+    versions_dir: &Path,
+    max_keep: usize,
+    only_tag: Option<&str>,
+) -> std::io::Result<()> {
+    let mut quarantines = list_owned_torch_orphan_quarantines(versions_dir)?;
+    quarantines.retain(|quarantine| only_tag.is_none_or(|tag| quarantine.tag == tag));
+    quarantines.sort_by(|left, right| right.timestamp_ms.cmp(&left.timestamp_ms));
+    for quarantine in quarantines.into_iter().skip(max_keep) {
+        if let Err(error) = std::fs::remove_dir_all(quarantine.path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                return Err(error);
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn schedule_torch_orphan_prune(
+    cleanup: &TorchCleanupTasks,
+    versions_dir: &Path,
+    max_keep: usize,
+    only_tag: Option<String>,
+    phase: &'static str,
+) {
+    let versions_dir = versions_dir.to_owned();
+    cleanup.schedule(move || {
+        if let Err(error) =
+            prune_torch_orphan_quarantines(&versions_dir, max_keep, only_tag.as_deref())
+        {
+            warn!(%error, phase, "Torch orphan cleanup failed");
+        }
+    });
 }
 
 /// Materialize the qualified sidecar and lock from bytes embedded in the app binary.
@@ -101,6 +199,14 @@ pub(crate) fn write_embedded_torch_runtime(destination: &Path) -> Result<()> {
         (
             "validate_runtime.py",
             include_str!("../../../../../../torch-server/validate_runtime.py"),
+        ),
+        (
+            "resolve_runtime.py",
+            include_str!("../../../../../../torch-server/resolve_runtime.py"),
+        ),
+        (
+            "probe_runtime.py",
+            include_str!("../../../../../../torch-server/probe_runtime.py"),
         ),
         (
             "nunchaku_compat.py",
@@ -195,11 +301,106 @@ fn failed(message: impl Into<String>) -> PumasError {
 }
 
 impl VersionInstaller {
+    async fn stage_resolved_torch_runtime(
+        &self,
+        plan: &TorchInstallPlan,
+        staging: &Path,
+        log_path: &Path,
+        progress_tx: &mpsc::Sender<ProgressUpdate>,
+    ) -> Result<PathBuf> {
+        let runtime = staging.join("runtime");
+        let runtime_for_write = runtime.clone();
+        tokio::task::spawn_blocking(move || write_embedded_torch_runtime(&runtime_for_write))
+            .await
+            .map_err(|e| failed(format!("Runtime staging task failed: {e}")))??;
+        fs::remove_file(runtime.join("validate_runtime.py"))
+            .await
+            .map_err(PumasError::from)?;
+        let observed_hash = format!(
+            "{:x}",
+            Sha256::digest(std::fs::read(&plan.interpreter_path).map_err(PumasError::from)?)
+        );
+        if observed_hash != plan.interpreter_hash {
+            return Err(failed("Selected Python executable changed after preview"));
+        }
+        let interpreter = &plan.interpreter_path;
+        let mut venv = Command::new(interpreter);
+        venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
+        self.run_runtime_command(
+            venv,
+            log_path,
+            &format!("Creating Python environment with {}", interpreter.display()),
+            progress_tx,
+        )
+        .await?;
+        fs::write(runtime.join("requirements.txt"), &plan.requirements)
+            .await
+            .map_err(PumasError::from)?;
+        fs::write(runtime.join("resolution.json"), &plan.resolution)
+            .await
+            .map_err(PumasError::from)?;
+        fs::write(runtime.join("pip-resolution.json"), &plan.report)
+            .await
+            .map_err(PumasError::from)?;
+        let recipe = serde_json::json!({
+            "recipe_id": format!("upstream-preview-{}-{}-{}-{}", plan.preview.tag, plan.preview.build, plan.preview.python, plan.preview.adapter),
+            "protocol": SUPPORTED_TORCH_PROTOCOL,
+            "capabilities": [TORCH_IMAGE_GENERATION_CAPABILITY],
+            "qualification": "not verified by Pumas",
+            "build": plan.preview.build,
+            "python": plan.preview.python,
+            "adapter": plan.preview.adapter,
+            "artifacts": plan.preview.artifacts,
+        });
+        fs::write(
+            runtime.join("runtime.json"),
+            serde_json::to_vec_pretty(&recipe).map_err(|e| failed(e.to_string()))?,
+        )
+        .await
+        .map_err(PumasError::from)?;
+        let python = runtime.join("venv/bin/python");
+        let mut install = Command::new(&python);
+        install
+            .args([
+                "-I",
+                "-m",
+                "pip",
+                "--isolated",
+                "install",
+                "--no-deps",
+                "--require-hashes",
+                "--only-binary=:all:",
+                "--disable-pip-version-check",
+                "-r",
+            ])
+            .arg(runtime.join("requirements.txt"))
+            .arg("--cache-dir")
+            .arg(self.launcher_root.join("launcher-data/cache/pip"));
+        self.run_runtime_command(
+            install,
+            log_path,
+            "Installing resolved wheel artifacts",
+            progress_tx,
+        )
+        .await?;
+        let mut probe = Command::new(&python);
+        probe.arg(runtime.join("probe_runtime.py"));
+        self.run_runtime_command(
+            probe,
+            log_path,
+            "Checking installed Torch identity and CPU operation",
+            progress_tx,
+        )
+        .await?;
+        Ok(runtime)
+    }
+
     pub(super) async fn install_torch_runtime(
         &self,
         tag: &str,
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
+        plan: Option<TorchInstallPlan>,
     ) -> Result<()> {
         let _attempt = self
             .torch_attempt_lock
@@ -207,7 +408,7 @@ impl VersionInstaller {
             .map_err(|_| failed("Torch installation already active"))?;
         self.torch_control.start();
         let result = self
-            .install_torch_runtime_inner(tag, release, progress_tx)
+            .install_torch_runtime_inner(tag, release, progress_tx, plan)
             .await;
         self.torch_control.finish();
         result
@@ -218,34 +419,96 @@ impl VersionInstaller {
         tag: &str,
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
+        plan: Option<TorchInstallPlan>,
     ) -> Result<()> {
         if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
             return Err(failed("Managed Torch requires Linux x86_64"));
         }
-        let recipe = torch_recipe_for_tag(tag)
-            .filter(|_| tag == release.tag_name && is_torch_runtime_release(release))
-            .ok_or_else(|| failed("Unsupported upstream PyTorch release or mismatched tag"))?;
-        debug_assert_eq!(recipe.release_tag, tag);
+        if tag != release.tag_name || !is_torch_runtime_release(release) {
+            return Err(failed(
+                "Unsupported upstream PyTorch release or mismatched tag",
+            ));
+        }
+        let recipe = if plan
+            .as_ref()
+            .is_none_or(|p| p.preview.qualification == "qualified")
+        {
+            torch_recipe_for_tag(tag)
+        } else {
+            None
+        };
+        if plan.as_ref().is_some_and(|p| p.preview.tag != tag) {
+            return Err(failed("Torch preview tag mismatch"));
+        }
         if !tag
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || b"-._".contains(&c))
         {
             return Err(failed("Invalid Torch runtime version tag"));
         }
-        let destination = self.versions_dir().join(tag);
-        if path_exists(&destination).await? {
-            return Err(failed(
-                "Runtime directory already exists; refusing to replace existing files",
-            ));
-        }
-        fs::create_dir_all(self.versions_dir())
+        let versions_dir = self.versions_dir();
+        fs::create_dir_all(&versions_dir)
             .await
             .map_err(PumasError::from)?;
+        schedule_torch_orphan_prune(
+            &self.torch_cleanup,
+            &versions_dir,
+            MAX_TORCH_ORPHAN_QUARANTINES,
+            None,
+            "before_install",
+        );
+        let destination = versions_dir.join(tag);
+        if path_exists(&destination).await? {
+            if path_exists(&destination.join(".pumas-publishing")).await?
+                && self
+                    .metadata_manager
+                    .get_installed_version(tag, Some(AppId::Torch))?
+                    .is_none()
+            {
+                let quarantine = versions_dir.join(format!(
+                    ".torch-orphan-{tag}-{}",
+                    Utc::now().timestamp_millis()
+                ));
+                let from = destination.clone();
+                tokio::task::spawn_blocking(move || {
+                    pumas_library::platform::filesystem::rename_directory_noreplace(
+                        &from,
+                        &quarantine,
+                    )
+                })
+                .await
+                .map_err(|e| failed(format!("Orphan recovery task failed: {e}")))?
+                .map_err(PumasError::from)?;
+                schedule_torch_orphan_prune(
+                    &self.torch_cleanup,
+                    &versions_dir,
+                    MAX_TORCH_ORPHAN_QUARANTINES,
+                    None,
+                    "after_interrupted_publish_recovery",
+                );
+            } else {
+                return Err(failed(
+                    "Runtime directory already exists; refusing to replace existing files",
+                ));
+            }
+        }
+        if recipe.is_none() && plan.is_none() {
+            #[cfg(test)]
+            if self.torch_stage_override.is_none() {
+                return Err(failed(
+                    "A retained preview is required for this Torch runtime",
+                ));
+            }
+            #[cfg(not(test))]
+            return Err(failed(
+                "A retained preview is required for this Torch runtime",
+            ));
+        }
         // Staging shares the publication filesystem; failed attempts never enter
         // installed-version state. TempDir removes this attempt on every exit.
         let staging = tempfile::Builder::new()
             .prefix(".torch-install-")
-            .tempdir_in(self.versions_dir())
+            .tempdir_in(&versions_dir)
             .map_err(PumasError::from)?;
         let logs = self.logs_dir();
         fs::create_dir_all(&logs).await.map_err(PumasError::from)?;
@@ -261,7 +524,14 @@ impl VersionInstaller {
             Some(log_path.to_string_lossy().as_ref()),
         );
         let result = self
-            .stage_torch_runtime(recipe, staging.path(), &log_path, &progress_tx)
+            .stage_torch_runtime(
+                tag,
+                recipe,
+                plan.as_ref(),
+                staging.path(),
+                &log_path,
+                &progress_tx,
+            )
             .await;
         #[cfg(test)]
         if result.is_ok() && self.torch_stage_override.is_some() {
@@ -279,6 +549,9 @@ impl VersionInstaller {
             match result {
                 Ok(runtime) => {
                     self.check_cancelled()?;
+                    fs::write(runtime.join(".pumas-publishing"), b"metadata pending")
+                        .await
+                        .map_err(PumasError::from)?;
                     if !self.torch_control.try_begin_publication() {
                         return Err(failed(
                             "Torch installation was cancelled before publication",
@@ -313,6 +586,22 @@ impl VersionInstaller {
                             .await
                             .map_err(PumasError::from)?;
                     }
+                    if result.is_ok() {
+                        if let Err(error) =
+                            fs::remove_file(destination.join(".pumas-publishing")).await
+                        {
+                            warn!(
+                                "Installed Torch publication marker could not be removed: {error}"
+                            );
+                        }
+                        schedule_torch_orphan_prune(
+                            &self.torch_cleanup,
+                            &versions_dir,
+                            0,
+                            Some(tag.to_owned()),
+                            "after_successful_install",
+                        );
+                    }
                     result
                 }
                 Err(error) => Err(error),
@@ -329,7 +618,9 @@ impl VersionInstaller {
 
     async fn stage_torch_runtime(
         &self,
-        recipe_spec: &TorchRuntimeRecipe,
+        _tag: &str,
+        recipe_spec: Option<&TorchRuntimeRecipe>,
+        plan: Option<&TorchInstallPlan>,
         staging: &Path,
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
@@ -338,6 +629,12 @@ impl VersionInstaller {
         if let Some(stage) = &self.torch_stage_override {
             return stage(staging);
         }
+        if let Some(plan) = plan.filter(|p| p.preview.qualification != "qualified") {
+            return self
+                .stage_resolved_torch_runtime(plan, staging, log_path, progress_tx)
+                .await;
+        }
+        let recipe_spec = recipe_spec.expect("checked above");
         let runtime = staging.join("runtime");
         let runtime_for_write = runtime.clone();
         tokio::task::spawn_blocking(move || write_embedded_torch_runtime(&runtime_for_write))
@@ -373,7 +670,19 @@ impl VersionInstaller {
                 "Runtime recipe does not match Python 3.12 on linux-x86_64",
             ));
         }
-        let mut python_check = Command::new("python3.12");
+        if let Some(plan) = plan {
+            let observed_hash = format!(
+                "{:x}",
+                Sha256::digest(std::fs::read(&plan.interpreter_path).map_err(PumasError::from)?)
+            );
+            if observed_hash != plan.interpreter_hash {
+                return Err(failed("Selected Python executable changed after preview"));
+            }
+        }
+        let interpreter = plan
+            .map(|p| p.interpreter_path.as_path())
+            .unwrap_or_else(|| Path::new("python3.12"));
+        let mut python_check = Command::new(interpreter);
         python_check.args([
             "-I",
             "-c",
@@ -381,7 +690,7 @@ impl VersionInstaller {
         ]);
         self.run_runtime_command(python_check, log_path, "Checking Python 3.12", progress_tx)
             .await?;
-        let mut venv = Command::new("python3.12");
+        let mut venv = Command::new(interpreter);
         venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
         self.run_runtime_command(venv, log_path, "Creating managed environment", progress_tx)
             .await?;
@@ -419,6 +728,28 @@ impl VersionInstaller {
             validate,
             log_path,
             "Validating GPU and sidecar protocol",
+            progress_tx,
+        )
+        .await?;
+        let resolution = serde_json::json!({
+            "torch": recipe_spec.torch_version,
+            "build": "cu130",
+            "python": "3.12",
+            "adapter": "bundled",
+            "artifacts": plan.map(|p| p.preview.artifacts.clone()).unwrap_or_default(),
+        });
+        fs::write(
+            runtime.join("resolution.json"),
+            serde_json::to_vec_pretty(&resolution).map_err(|e| failed(e.to_string()))?,
+        )
+        .await
+        .map_err(PumasError::from)?;
+        let mut probe = Command::new(&python);
+        probe.arg(runtime.join("probe_runtime.py"));
+        self.run_runtime_command(
+            probe,
+            log_path,
+            "Recording core and adapter probe evidence",
             progress_tx,
         )
         .await?;

@@ -82,12 +82,12 @@ fn official_release_metadata_does_not_need_pumas_bundle_assets() {
     let upstream = release("v2.9.1", false, Vec::new());
     assert!(is_torch_runtime_release(&upstream));
 
-    assert!(!is_torch_runtime_release(&release(
+    assert!(is_torch_runtime_release(&release(
         "v2.10.0",
         false,
         Vec::new()
     )));
-    assert!(!is_torch_runtime_release(&release(
+    assert!(is_torch_runtime_release(&release(
         "v2.9.0",
         false,
         Vec::new()
@@ -161,12 +161,17 @@ async fn manager_filters_upstream_releases_and_preserves_legacy_runtime_state() 
     let metadata_manager = MetadataManager::new(root.path());
     metadata_manager.ensure_directories().unwrap();
 
-    let legacy_tags = ["0.1.1", "0.1.2", "0.1.3", "0.1.4"];
+    let legacy_tags = ["0.1.1", "0.1.2", "0.1.3", "0.1.4", "0.1.6"];
     let mut installed = HashMap::new();
     for tag in legacy_tags {
         let runtime = root.path().join("torch-versions").join(tag);
         std::fs::create_dir_all(runtime.join("venv/bin")).unwrap();
-        std::fs::write(runtime.join("runtime.json"), "{}").unwrap();
+        let recipe = if tag == "0.1.6" {
+            r#"{"recipe_id":"torch-runtime-0.1.6"}"#
+        } else {
+            "{}"
+        };
+        std::fs::write(runtime.join("runtime.json"), recipe).unwrap();
         std::fs::write(runtime.join("serve.py"), "# legacy fixture\n").unwrap();
         std::fs::write(runtime.join("requirements.txt"), "# legacy fixture\n").unwrap();
         std::fs::write(runtime.join("venv/bin/python"), "# fixture\n").unwrap();
@@ -185,13 +190,13 @@ async fn manager_filters_upstream_releases_and_preserves_legacy_runtime_state() 
         .save_versions(
             &VersionsMetadata {
                 installed,
-                last_selected_version: Some("0.1.4".to_string()),
+                last_selected_version: Some("0.1.6".to_string()),
                 default_version: None,
             },
             Some(AppId::Torch),
         )
         .unwrap();
-    std::fs::write(root.path().join(".active-version-torch"), "0.1.4\n").unwrap();
+    std::fs::write(root.path().join(".active-version-torch"), "0.1.6\n").unwrap();
 
     let cache = ReleasesCache::new(
         root.path().join("launcher-data/cache"),
@@ -220,7 +225,7 @@ async fn manager_filters_upstream_releases_and_preserves_legacy_runtime_state() 
             .iter()
             .map(|item| item.tag_name.as_str())
             .collect::<Vec<_>>(),
-        ["v2.9.1"]
+        ["v2.9.1", "v2.10.0", "v2.9.0"]
     );
     assert!(discovered[0].assets.is_empty());
     assert_eq!(discovered[0].total_size, None);
@@ -240,12 +245,12 @@ async fn manager_filters_upstream_releases_and_preserves_legacy_runtime_state() 
     assert_eq!(installed_after, legacy_tags.map(str::to_string).to_vec());
     assert_eq!(
         manager.get_active_version().await.unwrap().as_deref(),
-        Some("0.1.4")
+        Some("0.1.6")
     );
     assert_eq!(manager.get_default_version().await.unwrap(), None);
 
     let saved = metadata_manager.load_versions(Some(AppId::Torch)).unwrap();
-    assert_eq!(saved.installed.len(), 4);
+    assert_eq!(saved.installed.len(), 5);
     for tag in legacy_tags {
         assert_eq!(saved.installed[tag].release_tag, tag);
         assert_eq!(
@@ -256,7 +261,7 @@ async fn manager_filters_upstream_releases_and_preserves_legacy_runtime_state() 
     assert_eq!(saved.default_version, None);
 
     assert!(matches!(
-        manager.install_version("v2.10.0").await,
+        manager.install_version("v2.10.0-rc1").await,
         Err(pumas_library::PumasError::VersionNotFound { .. })
     ));
     assert!(!manager.is_installing().await);
@@ -264,7 +269,7 @@ async fn manager_filters_upstream_releases_and_preserves_legacy_runtime_state() 
 }
 
 #[tokio::test]
-async fn direct_installer_rejects_an_unsupported_upstream_tag_before_downloading() {
+async fn direct_installer_preserves_existing_upstream_directory() {
     let root = TempDir::new().unwrap();
     let metadata = Arc::new(MetadataManager::new(root.path()));
     metadata.ensure_directories().unwrap();
@@ -286,11 +291,11 @@ async fn direct_installer_rejects_an_unsupported_upstream_tag_before_downloading
     let error = installer
         .install_version("v2.10.0", &unsupported, progress_tx)
         .await
-        .expect_err("unsupported tags must be rejected before staging");
+        .expect_err("existing directory must be preserved before staging");
     if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
         assert!(error
             .to_string()
-            .contains("Unsupported upstream PyTorch release or mismatched tag"));
+            .contains("Runtime directory already exists"));
     }
     assert!(destination.is_dir());
 }
@@ -315,6 +320,48 @@ fn mock_runtime_for_publication(
     std::fs::write(runtime.join("venv/bin/python"), "# fake interpreter\n")
         .map_err(PumasError::from)?;
     Ok(runtime)
+}
+
+#[tokio::test]
+async fn unverified_release_installs_without_becoming_active_or_default() {
+    let root = TempDir::new().unwrap();
+    let cache = ReleasesCache::new(
+        root.path().join("launcher-data/cache"),
+        Duration::from_secs(3600),
+    );
+    let upstream = release("v2.10.0", false, Vec::new());
+    cache
+        .set_disk(AppId::Torch.github_repo(), &[upstream])
+        .unwrap();
+    let manager = VersionManager::new(root.path(), AppId::Torch)
+        .await.unwrap()
+        .with_torch_stage_override(|staging| {
+            let runtime = mock_runtime_for_publication(staging)?;
+            std::fs::write(runtime.join("resolution.json"),
+                r#"{"artifacts":[{"name":"torch","url":"https://download.pytorch.org/whl/cpu/torch/example.whl"}]}"#)
+                .map_err(PumasError::from)?;
+            Ok(runtime)
+        });
+    let mut progress = manager.install_version("v2.10.0").await.unwrap();
+    while let Some(update) = progress.recv().await {
+        if matches!(
+            update,
+            crate::version_manager::ProgressUpdate::Completed { success: true }
+        ) {
+            break;
+        }
+        if let crate::version_manager::ProgressUpdate::Error { message } = update {
+            panic!("unverified release fixture failed: {message}");
+        }
+    }
+    assert_eq!(manager.get_active_version().await.unwrap(), None);
+    assert_eq!(manager.get_default_version().await.unwrap(), None);
+    assert!(root.path().join("torch-versions/v2.10.0").is_dir());
+    let reconstructed = VersionManager::new(root.path(), AppId::Torch)
+        .await
+        .unwrap();
+    assert_eq!(reconstructed.get_active_version().await.unwrap(), None);
+    assert_eq!(reconstructed.get_default_version().await.unwrap(), None);
 }
 
 #[tokio::test]

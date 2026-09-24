@@ -39,7 +39,7 @@ interface UseInstallationManagerResult {
   installationProgress: InstallationProgress | null;
   installNetworkStatus: InstallNetworkStatus;
   switchVersion: (tag: string) => Promise<boolean>;
-  installVersion: (tag: string) => Promise<boolean>;
+  installVersion: (tag: string, previewId?: string) => Promise<boolean>;
   cancelInstallation: () => Promise<boolean>;
   removeVersion: (tag: string) => Promise<boolean>;
   getVersionInfo: (tag: string) => Promise<VersionInfo | null>;
@@ -360,7 +360,7 @@ export function useInstallationManager({
     }
   }, [isEnabled, onRefreshVersions, resolvedAppId]);
 
-  const installVersion = useCallback(async (tag: string) => {
+  const installVersion = useCallback(async (tag: string, previewId?: string) => {
     if (!isAPIAvailable() || !isEnabled) {
       throw new APIError('API not available', 'install_version');
     }
@@ -368,7 +368,7 @@ export function useInstallationManager({
     const lifecycle = beginInstallationLifecycle(tag);
 
     try {
-      const result = await api.install_version(tag, resolvedAppId);
+      const result = await api.install_version(tag, resolvedAppId, previewId);
       if (!result.success) {
         throw new APIError(result.error || 'Failed to install version', 'install_version');
       }

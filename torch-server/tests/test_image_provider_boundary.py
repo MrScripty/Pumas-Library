@@ -8,10 +8,13 @@ must match the staged runtime recipe, including the image capability.
 
 import asyncio
 import base64
+import contextvars
+import functools
 import json
 import sys
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -34,6 +37,19 @@ import validate_runtime  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
 from image_api import ImageRequest, generate_image  # noqa: E402
 from model_manager import LoadedModel, ModelSlot, SlotState  # noqa: E402
+
+
+def _run_with_test_executor(coroutine):
+    """Keep real generation threads owned by the test, outside Runner teardown."""
+    with ThreadPoolExecutor(max_workers=2) as executor:
+
+        async def to_thread(func, *args, **kwargs):
+            context = contextvars.copy_context()
+            call = functools.partial(context.run, func, *args, **kwargs)
+            return await asyncio.get_running_loop().run_in_executor(executor, call)
+
+        with patch.object(asyncio, "to_thread", new=to_thread):
+            return asyncio.run(coroutine)
 
 
 class ImageProviderBoundaryTests(unittest.TestCase):
@@ -70,6 +86,14 @@ class ImageProviderBoundaryTests(unittest.TestCase):
         validate_runtime.validate_recipe_handshake(
             recipe,
             {"status": "ok", "protocol": 3, "capabilities": ["image_generation"]},
+        )
+        validate_runtime.validate_recipe_handshake(
+            recipe,
+            {
+                "status": "ok",
+                "protocol": 3,
+                "capabilities": ["image_generation", "future_capability"],
+            },
         )
         for health in (
             {"status": "ok", "protocol": 2, "capabilities": ["image_generation"]},
@@ -110,7 +134,7 @@ class ImageProviderBoundaryTests(unittest.TestCase):
             model_id="img-model", prompt="kingfisher", width=64, height=64, seed=3
         )
 
-        result = asyncio.run(generate_image(payload, request))
+        result = _run_with_test_executor(generate_image(payload, request))
 
         self.assertEqual(seen["lease"], "img-model")
         self.assertEqual(seen["width"], 64)
@@ -318,7 +342,7 @@ class ImageProviderBoundaryTests(unittest.TestCase):
             self.assertEqual(adapter.calls, 5)
 
         with patch.object(torch.cuda, "OutOfMemoryError", out_of_memory_error, create=True):
-            asyncio.run(exercise_route())
+            _run_with_test_executor(exercise_route())
 
     def test_route_keeps_actual_device_lock_until_worker_stops(self):
         from diffusion import FLUX2_KLEIN
@@ -383,7 +407,7 @@ class ImageProviderBoundaryTests(unittest.TestCase):
             second = await endpoint(payload, request)
             self.assertEqual(base64.b64decode(second["png_base64"]), b"private-png")
 
-        asyncio.run(exercise_route())
+        _run_with_test_executor(exercise_route())
 
     def test_route_waits_for_blocked_worker_before_mapping_delayed_oom(self):
         from diffusion import FLUX2_KLEIN
@@ -472,7 +496,7 @@ class ImageProviderBoundaryTests(unittest.TestCase):
             self.assertFalse(manager._get_device_lock("cpu").locked())
 
         with patch.object(torch.cuda, "OutOfMemoryError", out_of_memory_error, create=True):
-            asyncio.run(exercise_route())
+            _run_with_test_executor(exercise_route())
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 c47dcf40f195691ed7ba33b2b91c30a4c91cb1a1ec15d122ccc0290d136c45f0. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 4f6771f852879c4de52ee8d1e66c25a3bba650bf832d9dbba022b3b8b0b4c75c. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -17,10 +17,13 @@ export declare function validateDownloadListOutcome(value: unknown): boolean;
 export declare function validateDownloadMutationOutcome(value: unknown): boolean;
 export declare function validateDownloadStartedOutcome(value: unknown): boolean;
 export declare function validateDownloadStatusOutcome(value: unknown): boolean;
+export declare function validateFindTorchAlternativesParams(value: unknown): boolean;
 export declare function validateGetBackendSetupParams(value: unknown): boolean;
 export declare function validateGetHfDownloadDetailsParams(value: unknown): boolean;
 export declare function validateGetReleaseDependenciesOutcome(value: unknown): boolean;
 export declare function validateGetReleaseDependenciesParams(value: unknown): boolean;
+export declare function validateGetTorchPreviewReportParams(value: unknown): boolean;
+export declare function validateGetTorchRuntimeProbeParams(value: unknown): boolean;
 export declare function validateGithubCacheStatusOutcome(value: unknown): boolean;
 export declare function validateHfDownloadDetailsOutcome(value: unknown): boolean;
 export declare function validateInferenceSettingsOutcome(value: unknown): boolean;
@@ -35,6 +38,7 @@ export declare function validateLinkHealthOutcome(value: unknown): boolean;
 export declare function validateModelIndexRefreshOutcome(value: unknown): boolean;
 export declare function validateModelsOutcome(value: unknown): boolean;
 export declare function validatePartialDownloadOutcome(value: unknown): boolean;
+export declare function validatePreviewTorchRuntimeParams(value: unknown): boolean;
 export declare function validatePublicError(value: unknown): boolean;
 export declare function validateRecoverDownloadParams(value: unknown): boolean;
 export declare function validateRemoveVersionOutcome(value: unknown): boolean;
@@ -49,10 +53,19 @@ export declare function validateSetDefaultVersionOutcome(value: unknown): boolea
 export declare function validateSetDefaultVersionParams(value: unknown): boolean;
 export declare function validateStartBackendSetupParams(value: unknown): boolean;
 export declare function validateStartConversionSetupParams(value: unknown): boolean;
+export declare function validateStopRuntimeProfileGenerationOutcome(value: unknown): boolean;
+export declare function validateStopRuntimeProfileGenerationParams(value: unknown): boolean;
 export declare function validateSuccessOutcome(value: unknown): boolean;
 export declare function validateSupportedQuantTypesOutcome(value: unknown): boolean;
 export declare function validateSwitchVersionOutcome(value: unknown): boolean;
 export declare function validateSwitchVersionParams(value: unknown): boolean;
+export declare function validateTorchRuntimePreview(value: unknown): boolean;
+export declare function validateTorchRuntimePreviewArtifact(value: unknown): boolean;
+export declare function validateTorchRuntimePreviewOutcome(value: unknown): boolean;
+export declare function validateTorchRuntimePreviewQualification(value: unknown): boolean;
+export declare function validateTorchRuntimePreviewRejectionReason(value: unknown): boolean;
+export declare function validateTrialTorchRuntimeOutcome(value: unknown): boolean;
+export declare function validateTrialTorchRuntimeParams(value: unknown): boolean;
 export declare function validateUpdateInferenceSettingsOutcome(value: unknown): boolean;
 export declare function validateUpdateInferenceSettingsParams(value: unknown): boolean;
 export declare function validateUpdateModelNotesOutcome(value: unknown): boolean;

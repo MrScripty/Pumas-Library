@@ -42,7 +42,7 @@ export interface UseVersionsResult {
 
   // Actions
   switchVersion: (tag: string) => Promise<boolean>;
-  installVersion: (tag: string) => Promise<boolean>;
+  installVersion: (tag: string, previewId?: string) => Promise<boolean>;
   cancelInstallation: () => Promise<boolean>;
   removeVersion: (tag: string) => Promise<boolean>;
   getVersionInfo: (tag: string) => Promise<VersionInfo | null>;

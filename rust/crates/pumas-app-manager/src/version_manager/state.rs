@@ -184,6 +184,11 @@ impl VersionState {
             }
         }
 
+        // Torch requires an explicit trial/selection before it becomes active.
+        if self.app_id == AppId::Torch {
+            return Ok(None);
+        }
+
         // 4. Newest installed version (lexicographically, which works for semver with v prefix)
         if !self.installed_tags.is_empty() {
             let mut sorted: Vec<_> = self.installed_tags.iter().cloned().collect();
@@ -426,6 +431,21 @@ impl VersionState {
 
         info!("Set default version: {:?}", tag);
         Ok(true)
+    }
+
+    pub(crate) async fn reset_torch_active_selection(&mut self) -> Result<()> {
+        debug_assert_eq!(self.app_id, AppId::Torch);
+        self.active_version = None;
+        let marker = super::active_version_path(&self.launcher_root, self.app_id);
+        match fs::remove_file(&marker).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(PumasError::io_with_path(error, &marker)),
+        }
+        self.set_last_selected_version_metadata(None).await?;
+        let versions = self.load_versions_metadata().await?;
+        self.active_version = self.determine_active_version(&versions).await?;
+        Ok(())
     }
 
     /// Add a new installed version.

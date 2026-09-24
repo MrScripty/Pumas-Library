@@ -436,6 +436,32 @@ pub(super) async fn stop_runtime_profile(
     Ok(false)
 }
 
+pub(super) async fn stop_runtime_profile_if_generation(
+    primary: &PrimaryState,
+    profile_id: RuntimeProfileId,
+    generation: u64,
+) -> std::result::Result<bool, PumasError> {
+    let Some((receipt, result)) = primary
+        .runtime_profile_service
+        .process_owner
+        .stop_if_generation_with_receipt(&profile_id, generation)
+        .await?
+    else {
+        return Ok(false);
+    };
+    if result.is_ok() {
+        primary
+            .serving_service
+            .record_profile_unavailable_for_owned_generation(
+                &profile_id,
+                receipt.generation,
+                &primary.runtime_profile_service.process_owner,
+            )
+            .await?;
+    }
+    result
+}
+
 pub(super) async fn stop_all_managed_runtime_profiles(
     primary: &PrimaryState,
 ) -> std::result::Result<ManagedRuntimeShutdownSummary, PumasError> {

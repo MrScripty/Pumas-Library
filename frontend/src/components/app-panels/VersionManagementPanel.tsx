@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { VersionSelector } from '../VersionSelector';
 import { InstallDialog } from '../InstallDialog';
+import { TorchRuntimeProbePanel } from '../TorchRuntimeProbePanel';
+import type { createTorchTrialLifecycleStore } from '../TorchTrialLifecycleStore';
 import type { AppVersionState } from '../../utils/appVersionState';
 import { IconButton } from '../ui';
 
@@ -12,6 +14,7 @@ interface VersionManagementPanelProps {
   showManager: boolean;
   onShowManager: (show: boolean) => void;
   diskSpacePercent?: number;
+  trialStore?: ReturnType<typeof createTorchTrialLifecycleStore>;
 }
 
 export function VersionManagementPanel({
@@ -21,11 +24,17 @@ export function VersionManagementPanel({
   showManager,
   onShowManager,
   diskSpacePercent = 0,
+  trialStore,
 }: VersionManagementPanelProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshOnOpenPending, setRefreshOnOpenPending] = useState(false);
+  const [inspectedTorchTag, setInspectedTorchTag] = useState<string | null>(null);
   const refreshInFlight = useRef(false);
   const refreshOnOpenStarted = useRef(false);
+
+  useEffect(() => {
+    setInspectedTorchTag(null);
+  }, [versions.activeVersion]);
 
   const latestVersion = versions.availableVersions[0]?.tagName ?? null;
   const hasNewVersion = useMemo(() => {
@@ -71,6 +80,7 @@ export function VersionManagementPanel({
   };
 
   const handleOpenVersionManager = () => {
+    setInspectedTorchTag(null);
     refreshOnOpenStarted.current = false;
     setRefreshOnOpenPending(true);
     onShowManager(true);
@@ -149,6 +159,23 @@ export function VersionManagementPanel({
         hasNewVersion={hasNewVersion}
         latestVersion={latestVersion}
       />
+      {versions.appId === 'torch' && versions.installedVersions.length > 0 && (
+        <>
+          <p className="mt-2 text-xs text-[hsl(var(--text-secondary))]">
+            Selecting an installed Torch version does not prove it can start. Startup is attempted when you serve a model
+            through a Torch profile. Setting a version as default also selects it on future starts.
+          </p>
+          {versions.activeVersion && <>
+            <button type="button" className="mt-2 rounded border px-3 py-2 text-xs" onClick={() => setInspectedTorchTag(versions.activeVersion)}>
+              Inspect active Torch runtime
+            </button>
+            {inspectedTorchTag === versions.activeVersion && <TorchRuntimeProbePanel
+              tag={versions.activeVersion}
+              trialStore={trialStore}
+            />}
+          </>}
+        </>
+      )}
     </div>
   );
 }

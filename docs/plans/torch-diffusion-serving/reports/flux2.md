@@ -57,7 +57,8 @@ Qwen3-8B acquisition is complete. The user requested reducing encoder storage
 and making its role visible. The initial local FP8 artifact contains
 9,436,626,944 weight bytes (8.79 GiB), versus 16,381,516,776 BF16 bytes
 (15.26 GiB). Native prompt features from the converted encoder were finite.
-Full FLUX/Tuldok acceptance remains pending.
+At this encoder-preparation checkpoint, full FLUX/Tuldok acceptance remained
+pending. Real image display/save/import passed later in this report.
 
 Pumas's existing conversion manager now has a general `fp8` backend and
 `safetensors_to_fp8` direction, available in the existing conversion dialog.

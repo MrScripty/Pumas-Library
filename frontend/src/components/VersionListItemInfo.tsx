@@ -2,23 +2,30 @@ import { ExternalLink, FileText } from 'lucide-react';
 import type { VersionRelease } from '../hooks/useVersions';
 import { formatVersionDate } from '../utils/installationFormatters';
 import { IconButton } from './ui';
+import type { TorchInstalledConfig } from '../types/torch-install';
 
 interface VersionListItemInfoProps {
+  appId?: string;
   displayTag: string;
   errorMessage: string | null;
   failedLogPath: string | null;
   hasError: boolean;
   release: VersionRelease;
+  isInstalled?: boolean;
+  torchInstalledConfig?: TorchInstalledConfig;
   onOpenLogPath: (path: string) => void;
   onOpenUrl: (url: string) => void;
 }
 
 export function VersionListItemInfo({
+  appId,
   displayTag,
   errorMessage,
   failedLogPath,
   hasError,
   release,
+  isInstalled = false,
+  torchInstalledConfig,
   onOpenLogPath,
   onOpenUrl,
 }: VersionListItemInfoProps) {
@@ -57,6 +64,18 @@ export function VersionListItemInfo({
           <div className="flex items-center gap-1 text-xs text-[hsl(var(--text-muted))]">
             <span>{formatVersionDate(release.publishedAt)}</span>
           </div>
+          {appId === 'torch' && (
+            <div className="text-xs text-[hsl(var(--text-muted))]">
+              {isInstalled ? (
+                torchInstalledConfig
+                  ? `Installed ${torchInstalledConfig.build ?? 'unknown build'} · ${torchInstalledConfig.python ?? 'unknown Python'} · ${torchInstalledConfig.adapter ?? 'unknown adapter'} · ${torchInstalledConfig.qualification}`
+                  : 'Installed build details unavailable; inspect saved checks for this version.'
+              ) : release.tagName === 'v2.9.1'
+                ? 'Qualified preset: Python 3.12, CUDA 13.0, bundled image dependencies'
+                : 'Unverified release · choose an official build and installed Python, then review exact wheel hashes'}
+              {!isInstalled && <div>Managed binaries require Linux x86_64 and stable releases. This flow installs official binary wheels only; source compilation is a separate unsupported path. Installation does not select or start this version.</div>}
+            </div>
+          )}
         </div>
       </div>
 

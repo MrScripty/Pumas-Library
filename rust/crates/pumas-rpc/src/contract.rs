@@ -236,6 +236,40 @@ pub(crate) enum RpcCommand {
     InstallVersion {
         app_id: String,
         tag: String,
+        preview_id: Option<String>,
+    },
+    #[cfg(feature = "inference-plugins")]
+    GetTorchRuntimeOptions,
+    #[cfg(feature = "inference-plugins")]
+    PreviewTorchRuntime {
+        tag: String,
+        build: String,
+        python: String,
+        adapter: String,
+    },
+    #[cfg(feature = "inference-plugins")]
+    GetTorchPreviewReport {
+        preview_id: String,
+    },
+    #[cfg(feature = "inference-plugins")]
+    GetTorchRuntimeProbe {
+        tag: String,
+    },
+    #[cfg(feature = "inference-plugins")]
+    TrialTorchRuntime {
+        tag: String,
+        profile_id: pumas_library::models::RuntimeProfileId,
+    },
+    #[cfg(feature = "inference-plugins")]
+    FindTorchAlternatives {
+        tag: String,
+        build: String,
+        python: String,
+    },
+    #[cfg(feature = "inference-plugins")]
+    StopRuntimeProfileIfGeneration {
+        profile_id: pumas_library::models::RuntimeProfileId,
+        generation: u64,
     },
     #[cfg(feature = "inference-plugins")]
     SetDefaultVersion {
@@ -417,6 +451,20 @@ impl RpcCommand {
             #[cfg(feature = "inference-plugins")]
             Self::InstallVersion { .. } => "install_version",
             #[cfg(feature = "inference-plugins")]
+            Self::GetTorchRuntimeOptions => "get_torch_runtime_options",
+            #[cfg(feature = "inference-plugins")]
+            Self::PreviewTorchRuntime { .. } => "preview_torch_runtime",
+            #[cfg(feature = "inference-plugins")]
+            Self::GetTorchPreviewReport { .. } => "get_torch_preview_report",
+            #[cfg(feature = "inference-plugins")]
+            Self::GetTorchRuntimeProbe { .. } => "get_torch_runtime_probe",
+            #[cfg(feature = "inference-plugins")]
+            Self::TrialTorchRuntime { .. } => "trial_torch_runtime",
+            #[cfg(feature = "inference-plugins")]
+            Self::FindTorchAlternatives { .. } => "find_torch_alternatives",
+            #[cfg(feature = "inference-plugins")]
+            Self::StopRuntimeProfileIfGeneration { .. } => "stop_runtime_profile_if_generation",
+            #[cfg(feature = "inference-plugins")]
             Self::CheckVersionDependencies { .. } => "check_version_dependencies",
             #[cfg(feature = "inference-plugins")]
             Self::GetReleaseDependencies { .. } => "get_release_dependencies",
@@ -554,6 +602,20 @@ pub(crate) enum RpcOutcome {
     #[cfg(feature = "inference-plugins")]
     InstallVersion(InstallVersionOutcome),
     #[cfg(feature = "inference-plugins")]
+    TorchRuntimeOptions(Value),
+    #[cfg(feature = "inference-plugins")]
+    TorchRuntimePreview(TorchRuntimePreviewOutcome),
+    #[cfg(feature = "inference-plugins")]
+    TorchPreviewReport(Value),
+    #[cfg(feature = "inference-plugins")]
+    TorchRuntimeProbe(Value),
+    #[cfg(feature = "inference-plugins")]
+    TorchRuntimeTrial(TrialTorchRuntimeOutcome),
+    #[cfg(feature = "inference-plugins")]
+    TorchAlternatives(Value),
+    #[cfg(feature = "inference-plugins")]
+    RuntimeProfileGenerationStop(StopRuntimeProfileGenerationOutcome),
+    #[cfg(feature = "inference-plugins")]
     CheckVersionDependencies(CheckVersionDependenciesOutcome),
     #[cfg(feature = "inference-plugins")]
     GetReleaseDependencies(GetReleaseDependenciesOutcome),
@@ -658,6 +720,17 @@ impl RpcOutcome {
             Self::SetDefaultVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::InstallVersion(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::TorchRuntimeOptions(value)
+            | Self::TorchPreviewReport(value)
+            | Self::TorchRuntimeProbe(value)
+            | Self::TorchAlternatives(value) => Ok(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::TorchRuntimePreview(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::TorchRuntimeTrial(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::RuntimeProfileGenerationStop(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::CheckVersionDependencies(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
@@ -3655,6 +3728,452 @@ pub(crate) struct InstallVersionParams {
     #[serde(alias = "appId")]
     app_id: String,
     tag: String,
+    #[serde(default, alias = "previewId")]
+    preview_id: Option<String>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct PreviewTorchRuntimeParams {
+    tag: String,
+    build: String,
+    python: String,
+    #[serde(default = "default_torch_adapter")]
+    adapter: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum TorchRuntimePreviewOutcome {
+    Resolved {
+        preview: TorchRuntimePreview,
+    },
+    Rejected {
+        reason: TorchRuntimePreviewRejectionReason,
+        message: &'static str,
+    },
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum TorchRuntimePreviewRejectionReason {
+    Unsupported,
+    ValidationFailed,
+    NetworkInconclusive,
+    Inconclusive,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+impl TorchRuntimePreviewRejectionReason {
+    fn message(self) -> &'static str {
+        match self {
+            Self::Unsupported => {
+                "No compatible official wheel and dependencies were found for this selection."
+            }
+            Self::ValidationFailed => "The resolved wheel report failed validation.",
+            Self::NetworkInconclusive => "Network access prevented a conclusive wheel resolution.",
+            Self::Inconclusive => "Wheel resolution did not complete conclusively.",
+        }
+    }
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct TorchRuntimePreview {
+    preview_id: String,
+    tag: String,
+    build: String,
+    python: String,
+    adapter: String,
+    artifacts: Vec<TorchRuntimePreviewArtifact>,
+    qualification: TorchRuntimePreviewQualification,
+    expires_in_seconds: u64,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum TorchRuntimePreviewQualification {
+    Qualified,
+    Unverified,
+}
+
+#[cfg(feature = "inference-plugins")]
+impl TryFrom<&str> for TorchRuntimePreviewQualification {
+    type Error = PumasError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "qualified" => Ok(Self::Qualified),
+            "unverified" => Ok(Self::Unverified),
+            _ => Err(invalid_domain_outcome("Torch preview qualification")),
+        }
+    }
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct TorchRuntimePreviewArtifact {
+    name: String,
+    version: String,
+    url: String,
+    sha256: String,
+}
+
+#[cfg(any(test, feature = "export-contract"))]
+fn torch_runtime_preview_fixture() -> TorchRuntimePreview {
+    TorchRuntimePreview {
+        preview_id: "retained-preview-id".into(),
+        tag: "v2.9.1".into(),
+        build: "cu130".into(),
+        python: "python3.12".into(),
+        adapter: "bundled".into(),
+        artifacts: vec![TorchRuntimePreviewArtifact {
+            name: "torch".into(),
+            version: "2.9.1+cu130".into(),
+            url: "https://download.pytorch.org/whl/cu130/torch-fixture.whl".into(),
+            sha256: "a".repeat(64),
+        }],
+        qualification: TorchRuntimePreviewQualification::Qualified,
+        expires_in_seconds: 1800,
+    }
+}
+
+#[cfg(feature = "inference-plugins")]
+impl TryFrom<pumas_app_manager::version_manager::TorchPreviewOutcome>
+    for TorchRuntimePreviewOutcome
+{
+    type Error = PumasError;
+
+    fn try_from(
+        outcome: pumas_app_manager::version_manager::TorchPreviewOutcome,
+    ) -> Result<Self, Self::Error> {
+        use pumas_app_manager::version_manager::{
+            TorchPreviewOutcome, TorchPreviewRejectionReason,
+        };
+        Ok(match outcome {
+            TorchPreviewOutcome::Resolved { preview } => {
+                let qualification =
+                    TorchRuntimePreviewQualification::try_from(preview.qualification.as_str())?;
+                Self::Resolved {
+                    preview: TorchRuntimePreview {
+                        preview_id: preview.preview_id,
+                        tag: preview.tag,
+                        build: preview.build,
+                        python: preview.python,
+                        adapter: preview.adapter,
+                        artifacts: preview
+                            .artifacts
+                            .into_iter()
+                            .map(|artifact| TorchRuntimePreviewArtifact {
+                                name: artifact.name,
+                                version: artifact.version,
+                                url: artifact.url,
+                                sha256: artifact.sha256,
+                            })
+                            .collect(),
+                        qualification,
+                        expires_in_seconds: preview.expires_in_seconds,
+                    },
+                }
+            }
+            TorchPreviewOutcome::Rejected { reason, .. } => {
+                let reason = match reason {
+                    TorchPreviewRejectionReason::Unsupported => {
+                        TorchRuntimePreviewRejectionReason::Unsupported
+                    }
+                    TorchPreviewRejectionReason::ValidationFailed => {
+                        TorchRuntimePreviewRejectionReason::ValidationFailed
+                    }
+                    TorchPreviewRejectionReason::NetworkInconclusive => {
+                        TorchRuntimePreviewRejectionReason::NetworkInconclusive
+                    }
+                    TorchPreviewRejectionReason::Inconclusive => {
+                        TorchRuntimePreviewRejectionReason::Inconclusive
+                    }
+                };
+                Self::Rejected {
+                    reason,
+                    message: reason.message(),
+                }
+            }
+        })
+    }
+}
+
+#[cfg(test)]
+mod torch_preview_contract_tests {
+    use super::*;
+
+    #[test]
+    fn typed_preview_outcomes_have_closed_wire_shapes() {
+        let resolved = serde_json::to_value(TorchRuntimePreviewOutcome::Resolved {
+            preview: torch_runtime_preview_fixture(),
+        })
+        .unwrap();
+        assert_eq!(resolved["status"], "resolved");
+        assert_eq!(resolved["preview"]["previewId"], "retained-preview-id");
+        assert_eq!(
+            resolved["preview"]["artifacts"][0]["sha256"],
+            "a".repeat(64)
+        );
+        assert_eq!(resolved.as_object().unwrap().len(), 2);
+
+        for (reason, code) in [
+            (
+                TorchRuntimePreviewRejectionReason::Unsupported,
+                "unsupported",
+            ),
+            (
+                TorchRuntimePreviewRejectionReason::ValidationFailed,
+                "validation_failed",
+            ),
+            (
+                TorchRuntimePreviewRejectionReason::NetworkInconclusive,
+                "network_inconclusive",
+            ),
+            (
+                TorchRuntimePreviewRejectionReason::Inconclusive,
+                "inconclusive",
+            ),
+        ] {
+            let rejected = serde_json::to_value(TorchRuntimePreviewOutcome::Rejected {
+                reason,
+                message: reason.message(),
+            })
+            .unwrap();
+            assert_eq!(rejected["status"], "rejected");
+            assert_eq!(rejected["reason"], code);
+            assert_eq!(rejected["message"], reason.message());
+            assert_eq!(rejected.as_object().unwrap().len(), 3);
+        }
+    }
+
+    #[cfg(feature = "inference-plugins")]
+    #[test]
+    fn manager_rejection_message_cannot_cross_rpc_boundary() {
+        let outcome = pumas_app_manager::version_manager::TorchPreviewOutcome::Rejected {
+            reason:
+                pumas_app_manager::version_manager::TorchPreviewRejectionReason::ValidationFailed,
+            message: "private resolver stderr /secret/path",
+        };
+        let projected: TorchRuntimePreviewOutcome = outcome.try_into().unwrap();
+        let value = RpcOutcome::TorchRuntimePreview(projected)
+            .into_value()
+            .unwrap();
+        assert_eq!(value["reason"], "validation_failed");
+        assert_eq!(
+            value["message"],
+            TorchRuntimePreviewRejectionReason::ValidationFailed.message()
+        );
+        assert!(!value.to_string().contains("private resolver"));
+    }
+
+    #[cfg(feature = "inference-plugins")]
+    #[test]
+    fn manager_preview_qualification_must_be_known() {
+        use pumas_app_manager::version_manager::{TorchPreview, TorchPreviewOutcome};
+        for (source, wire) in [("qualified", "qualified"), ("unverified", "unverified")] {
+            let preview = TorchPreview {
+                preview_id: "retained".into(),
+                tag: "v2.9.1".into(),
+                build: "cpu".into(),
+                python: "python3.12".into(),
+                adapter: "none".into(),
+                artifacts: Vec::new(),
+                qualification: source.into(),
+                expires_in_seconds: 1800,
+            };
+            let projected =
+                TorchRuntimePreviewOutcome::try_from(TorchPreviewOutcome::Resolved { preview })
+                    .unwrap();
+            assert_eq!(
+                serde_json::to_value(projected).unwrap()["preview"]["qualification"],
+                wire
+            );
+        }
+        let preview = TorchPreview {
+            preview_id: "retained".into(),
+            tag: "v2.9.1".into(),
+            build: "cpu".into(),
+            python: "python3.12".into(),
+            adapter: "none".into(),
+            artifacts: Vec::new(),
+            qualification: "unexpected qualification".into(),
+            expires_in_seconds: 1800,
+        };
+        assert!(
+            TorchRuntimePreviewOutcome::try_from(TorchPreviewOutcome::Resolved { preview })
+                .is_err()
+        );
+    }
+
+    #[cfg(feature = "export-contract")]
+    #[test]
+    fn export_includes_preview_outcome_and_fixtures() {
+        let schema = desktop_contract_schema().unwrap();
+        assert!(schema["schemas"]["TorchRuntimePreviewOutcome"].is_object());
+        assert!(schema["schemas"]["TorchRuntimePreview"].is_object());
+        assert!(schema["schemas"]["TorchRuntimePreviewArtifact"].is_object());
+        assert!(schema["schemas"]["TorchRuntimePreviewQualification"].is_object());
+        assert!(schema["schemas"]["TorchRuntimePreviewRejectionReason"].is_object());
+        let fixtures = desktop_contract_fixtures().unwrap();
+        assert_eq!(
+            fixtures["torch_runtime_preview_resolved"]["status"],
+            "resolved"
+        );
+        assert_eq!(
+            fixtures["torch_runtime_preview_resolved"]["preview"]["qualification"],
+            "qualified"
+        );
+        assert_eq!(
+            fixtures["torch_runtime_preview_validation_failed"]["reason"],
+            "validation_failed"
+        );
+    }
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+fn default_torch_adapter() -> String {
+    "none".into()
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct GetTorchPreviewReportParams {
+    #[serde(alias = "previewId")]
+    preview_id: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct GetTorchRuntimeProbeParams {
+    tag: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct TrialTorchRuntimeParams {
+    tag: String,
+    #[serde(alias = "profileId")]
+    profile_id: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct FindTorchAlternativesParams {
+    tag: String,
+    build: String,
+    python: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct StopRuntimeProfileGenerationParams {
+    #[serde(alias = "profileId")]
+    profile_id: String,
+    generation: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct StopRuntimeProfileGenerationOutcome {
+    pub(crate) success: bool,
+    pub(crate) stopped: bool,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct TrialTorchRuntimeOutcome {
+    pub(crate) success: bool,
+    pub(crate) tag: String,
+    pub(crate) profile_id: String,
+    pub(crate) startup_status: String,
+    pub(crate) health_status: String,
+    pub(crate) protocol: Option<u32>,
+    pub(crate) capabilities: Vec<String>,
+    pub(crate) generation: Option<String>,
+    pub(crate) started_by_trial: bool,
+    pub(crate) error: Option<String>,
+    pub(crate) cleanup: String,
+}
+
+#[cfg(all(test, feature = "inference-plugins"))]
+mod torch_trial_contract_tests {
+    use super::*;
+
+    #[test]
+    fn trial_and_generation_stop_reject_untrusted_identity_inputs() {
+        let trial = parse_command(
+            "trial_torch_runtime",
+            Some(&serde_json::json!({"tag":"v2.10.0","profileId":"torch.profile"})),
+        )
+        .unwrap();
+        assert!(matches!(trial, RpcCommand::TrialTorchRuntime { tag, .. } if tag == "v2.10.0"));
+        assert!(parse_command(
+            "trial_torch_runtime",
+            Some(&serde_json::json!({"tag":"v2.10.0","profileId":"../bad"}))
+        )
+        .is_err());
+        assert!(parse_command(
+            "stop_runtime_profile_if_generation",
+            Some(&serde_json::json!({"profileId":"torch.profile","generation":"0"}))
+        )
+        .is_err());
+        assert!(matches!(
+            parse_command(
+                "stop_runtime_profile_if_generation",
+                Some(&serde_json::json!({"profileId":"torch.profile","generation":"42"}))
+            ),
+            Ok(RpcCommand::StopRuntimeProfileIfGeneration { generation: 42, .. })
+        ));
+    }
+
+    #[test]
+    fn trial_outcome_has_scoped_startup_and_cleanup_fields() {
+        let outcome = TrialTorchRuntimeOutcome {
+            success: false,
+            tag: "v2.10.0".into(),
+            profile_id: "torch.profile".into(),
+            startup_status: "passed".into(),
+            health_status: "failed".into(),
+            protocol: Some(3),
+            capabilities: vec!["image-generation".into()],
+            generation: Some("42".into()),
+            started_by_trial: true,
+            error: Some("health check failed".into()),
+            cleanup: "stopped_owned_generation".into(),
+        };
+        let wire = serde_json::to_value(outcome).unwrap();
+        assert_eq!(wire["profileId"], "torch.profile");
+        assert_eq!(wire["generation"], "42");
+        assert_eq!(wire["cleanup"], "stopped_owned_generation");
+        assert_eq!(wire["startedByTrial"], true);
+    }
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -5433,6 +5952,66 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             parse_params::<InstallVersionParams>(params).map(|params| RpcCommand::InstallVersion {
                 app_id: params.app_id,
                 tag: params.tag,
+                preview_id: params.preview_id,
+            })
+        }
+        #[cfg(feature = "inference-plugins")]
+        "get_torch_runtime_options" => empty().map(|()| RpcCommand::GetTorchRuntimeOptions),
+        #[cfg(feature = "inference-plugins")]
+        "preview_torch_runtime" => {
+            parse_params::<PreviewTorchRuntimeParams>(params).map(|params| {
+                RpcCommand::PreviewTorchRuntime {
+                    tag: params.tag,
+                    build: params.build,
+                    python: params.python,
+                    adapter: params.adapter,
+                }
+            })
+        }
+        #[cfg(feature = "inference-plugins")]
+        "get_torch_preview_report" => {
+            parse_params::<GetTorchPreviewReportParams>(params).map(|params| {
+                RpcCommand::GetTorchPreviewReport {
+                    preview_id: params.preview_id,
+                }
+            })
+        }
+        #[cfg(feature = "inference-plugins")]
+        "get_torch_runtime_probe" => parse_params::<GetTorchRuntimeProbeParams>(params)
+            .map(|params| RpcCommand::GetTorchRuntimeProbe { tag: params.tag }),
+        #[cfg(feature = "inference-plugins")]
+        "trial_torch_runtime" => {
+            parse_params::<TrialTorchRuntimeParams>(params).and_then(|params| {
+                Ok(RpcCommand::TrialTorchRuntime {
+                    tag: params.tag,
+                    profile_id: pumas_library::models::RuntimeProfileId::parse(&params.profile_id)
+                        .map_err(|_| PublicError::invalid_params())?,
+                })
+            })
+        }
+        #[cfg(feature = "inference-plugins")]
+        "find_torch_alternatives" => {
+            parse_params::<FindTorchAlternativesParams>(params).map(|params| {
+                RpcCommand::FindTorchAlternatives {
+                    tag: params.tag,
+                    build: params.build,
+                    python: params.python,
+                }
+            })
+        }
+        #[cfg(feature = "inference-plugins")]
+        "stop_runtime_profile_if_generation" => {
+            parse_params::<StopRuntimeProfileGenerationParams>(params).and_then(|params| {
+                Ok(RpcCommand::StopRuntimeProfileIfGeneration {
+                    profile_id: pumas_library::models::RuntimeProfileId::parse(&params.profile_id)
+                        .map_err(|_| PublicError::invalid_params())?,
+                    generation: params
+                        .generation
+                        .parse::<u64>()
+                        .ok()
+                        .filter(|generation| *generation > 0)
+                        .ok_or_else(PublicError::invalid_params)?,
+                })
             })
         }
         #[cfg(not(feature = "inference-plugins"))]

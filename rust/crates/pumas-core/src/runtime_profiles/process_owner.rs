@@ -83,6 +83,31 @@ struct SessionState {
     residual_child: Option<Child>,
 }
 
+/// A dropped launch future must not leave its admitted worker running. The
+/// guard owns the exact session, so a later generation cannot be stopped.
+struct LaunchAdmissionCleanup {
+    session: Arc<Session>,
+    armed: bool,
+}
+
+impl Drop for LaunchAdmissionCleanup {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        self.session.stop.store(true, Ordering::Release);
+        self.session.observer_stop.send_replace(true);
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let session = self.session.clone();
+            handle.spawn(async move {
+                if let Err(error) = drain_session(&session).await {
+                    tracing::warn!(%error, "Cancelled runtime launch cleanup failed");
+                }
+            });
+        }
+    }
+}
+
 fn failure(message: impl Into<String>) -> PumasError {
     PumasError::Other(message.into())
 }
@@ -213,6 +238,10 @@ impl RuntimeProfileProcessOwner {
                     .insert(session.spec.profile_id.clone(), session.clone());
                 session
             };
+            let mut cancellation_cleanup = LaunchAdmissionCleanup {
+                session: session.clone(),
+                armed: true,
+            };
             // No await between registration, worker retention and gate release.
             if let Some(observer) = observer {
                 let mut state = session
@@ -270,6 +299,7 @@ impl RuntimeProfileProcessOwner {
                         log_path: Some(session.spec.log_file.to_string_lossy().into_owned()),
                         ready: Some(false),
                     };
+                    cancellation_cleanup.armed = false;
                     return Ok(OwnedRuntimeProfileLaunchReceipt {
                         response,
                         observation: outcome.ok(),
@@ -468,12 +498,34 @@ impl RuntimeProfileProcessOwner {
         &self,
         id: &RuntimeProfileId,
     ) -> Result<Option<(OwnedRuntimeProfileObservation, Result<bool>)>> {
+        self.stop_matching_generation_with_receipt(id, None).await
+    }
+
+    /// Stop only the session admitted by a particular launch generation.
+    /// A later session for the same profile must remain untouched.
+    pub(crate) async fn stop_if_generation_with_receipt(
+        &self,
+        id: &RuntimeProfileId,
+        generation: u64,
+    ) -> Result<Option<(OwnedRuntimeProfileObservation, Result<bool>)>> {
+        self.stop_matching_generation_with_receipt(id, Some(generation))
+            .await
+    }
+
+    async fn stop_matching_generation_with_receipt(
+        &self,
+        id: &RuntimeProfileId,
+        expected_generation: Option<u64>,
+    ) -> Result<Option<(OwnedRuntimeProfileObservation, Result<bool>)>> {
         let session = self
             .registry
             .lock()
             .map_err(|_| failure("Runtime process registry poisoned"))?
             .sessions
             .get(id)
+            .filter(|session| {
+                expected_generation.is_none_or(|expected| session.generation == expected)
+            })
             .cloned();
         let Some(session) = session else {
             return Ok(None);
@@ -1068,6 +1120,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn conditional_stop_rejects_another_generation_without_stopping_it() {
+        let fixture = Fixture::new();
+        let (config, spec, guard) = fixture.launch("sleep 30 & wait");
+        let id = spec.profile_id.clone();
+        let receipt = fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap()
+            .observation
+            .unwrap();
+        assert!(fixture
+            .owner
+            .stop_if_generation_with_receipt(&id, receipt.generation + 1)
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            fixture.owner.snapshot(&id).unwrap().unwrap().generation,
+            receipt.generation
+        );
+        assert_ne!(
+            fixture.owner.snapshot(&id).unwrap().unwrap().state,
+            RuntimeLifecycleState::Stopping
+        );
+        assert!(fixture
+            .owner
+            .stop_if_generation_with_receipt(&id, receipt.generation)
+            .await
+            .unwrap()
+            .is_some());
+    }
+
+    #[tokio::test]
     async fn unowned_pid_file_is_preserved_without_signalling() {
         let fixture = Fixture::new();
         let mut unrelated = std::process::Command::new("sleep")
@@ -1095,10 +1181,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancelled_launch_waiter_leaves_owned_process_for_shutdown() {
+    async fn cancelled_launch_waiter_drains_its_admitted_generation() {
         let fixture = Fixture::new();
         let (config, spec, guard) = fixture.launch("sleep 30 & wait");
         let id = spec.profile_id.clone();
+        fixture.owner.registry.lock().unwrap().launch_reply_gate =
+            Some(Arc::new(tokio::sync::Notify::new()));
         let owner = fixture.owner.clone();
         let waiter =
             tokio::spawn(async move { owner.launch(config, spec, None, None, guard).await });
@@ -1111,9 +1199,16 @@ mod tests {
         .unwrap();
         waiter.abort();
         let _ = waiter.await;
-        let results = fixture.owner.close_and_drain().await.unwrap();
-        assert_eq!(results.len(), 1);
-        // Shutdown may win before spawn; either outcome must retain and observe cleanup.
+        tokio::time::timeout(Duration::from_secs(8), async {
+            loop {
+                if fixture.owner.ensure_inactive(&id).is_ok() {
+                    break;
+                }
+                tokio::time::sleep(OBSERVATION_INTERVAL).await;
+            }
+        })
+        .await
+        .unwrap();
         assert!(fixture.owner.snapshot(&id).unwrap().unwrap().pid.is_none());
         {
             let registry = fixture.owner.registry.lock().unwrap();
@@ -1121,12 +1216,15 @@ mod tests {
             assert!(state.worker.is_none());
             assert!(state.residual_child.is_none());
         }
-        let (config, spec, guard) = fixture.launch("exit 99");
-        assert!(fixture
+        fixture.owner.registry.lock().unwrap().launch_reply_gate = None;
+        let (config, spec, guard) = fixture.launch("sleep 30 & wait");
+        let receipt = fixture
             .owner
             .launch(config, spec, None, None, guard)
             .await
-            .is_err());
+            .unwrap();
+        assert!(receipt.response.success);
+        assert!(fixture.owner.stop(&id).await.unwrap());
     }
 
     #[tokio::test]

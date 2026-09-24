@@ -274,4 +274,9 @@ mod tests {
         assert!(InstallationConfig::UV_INSTALL_TIMEOUT > Duration::from_secs(60));
         assert!(NetworkConfig::REQUEST_TIMEOUT > Duration::ZERO);
     }
+
+    #[test]
+    fn non_torch_release_selection_is_limited_to_first_page() {
+        assert_eq!(NetworkConfig::GITHUB_RELEASES_MAX_PAGES, 1);
+    }
 }

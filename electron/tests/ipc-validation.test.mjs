@@ -135,13 +135,21 @@ test('installation-start IPC uses the generated request contract', () => {
       assert.notEqual(decoded.params, params);
       assert.ok(Object.isFrozen(decoded.params));
     }
+    for (const previewKey of ['preview_id', 'previewId']) {
+      const params = { [appKey]: 'torch', tag: 'v2.10.0', [previewKey]: 'a'.repeat(48) };
+      const decoded = validateApiCallPayload('install_version', params);
+      assert.deepEqual(JSON.parse(JSON.stringify(decoded.params)), params);
+      assert.ok(Object.isFrozen(decoded.params));
+    }
   }
   for (const params of [undefined, null, {}, [], true, 42, 'runtime', { tag: 'v1' },
     { app_id: 'runtime' }, { app_id: null, tag: 'v1' }, { app_id: 42, tag: 'v1' },
     { app_id: 'runtime', tag: null }, { app_id: 'runtime', tag: true },
     { app_id: 'runtime', tag: [] }, { app_id: 'runtime', tag: {} },
     { app_id: 'runtime', tag: 'v1', extra: true },
-    { app_id: 'a', appId: 'a', tag: 'v1' }]) {
+    { app_id: 'a', appId: 'a', tag: 'v1' },
+    { app_id: 'torch', tag: 'v2.10.0', preview_id: 'a', previewId: 'a' },
+    { app_id: 'torch', tag: 'v2.10.0', previewId: 42 }]) {
     assert.throws(() => validateApiCallPayload('install_version', params), /Invalid API params/);
   }
 });

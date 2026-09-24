@@ -67,6 +67,14 @@ import {
   decodeSetDefaultVersionParams,
   decodeInstallVersionOutcome,
   decodeInstallVersionParams,
+  decodePreviewTorchRuntimeParams,
+  decodeTorchRuntimePreviewOutcome,
+  decodeGetTorchRuntimeProbeParams,
+  decodeTrialTorchRuntimeParams,
+  decodeTrialTorchRuntimeOutcome,
+  decodeFindTorchAlternativesParams,
+  decodeStopRuntimeProfileGenerationParams,
+  decodeStopRuntimeProfileGenerationOutcome,
   decodeGetHfDownloadDetailsParams,
   decodePartialDownloadOutcome,
   decodeRecoverDownloadParams,
@@ -356,6 +364,78 @@ function isNullableString(value: unknown): boolean {
   return value === undefined || value === null || typeof value === 'string';
 }
 
+function requireTorchPayload(value: unknown, method: string): Record<string, unknown> {
+  if (!isRecord(value)) throw new TypeError(`Invalid ${method} response`);
+  return value;
+}
+
+function validateTorchOptions(value: unknown): unknown {
+  const result = requireTorchPayload(value, 'get_torch_runtime_options');
+  const preset = result['preset'];
+  if (!Array.isArray(result['builds']) || !result['builds'].every((item) => typeof item === 'string')
+    || !Array.isArray(result['adapters']) || !result['adapters'].every((item) => typeof item === 'string')
+    || !Array.isArray(result['pythons']) || !result['pythons'].every((item) => isRecord(item)
+      && typeof item['id'] === 'string' && typeof item['label'] === 'string')
+    || !Array.isArray(result['installed']) || !result['installed'].every((item) => isRecord(item)
+      && typeof item['tag'] === 'string'
+      && ['build', 'python', 'adapter'].every((key) => item[key] === null || typeof item[key] === 'string')
+      && ['qualified', 'unverified'].includes(String(item['qualification'])))
+    || !isRecord(preset) || !['tag', 'build', 'python', 'adapter'].every((key) => typeof preset[key] === 'string')) {
+    throw new TypeError('Invalid get_torch_runtime_options response');
+  }
+  return result;
+}
+
+function validateTorchProbe(value: unknown): unknown {
+  const result = requireTorchPayload(value, 'get_torch_runtime_probe');
+  const capabilities = result['capabilities'];
+  if (!['passed', 'partial', 'failed'].includes(String(result['status']))
+    || !['passed', 'failed'].includes(String(result['core_status']))
+    || !['not selected', 'unavailable', 'inconclusive'].includes(String(result['adapter_status']))
+    || (result['recorded_at'] !== undefined && typeof result['recorded_at'] !== 'string')
+    || (result['stale'] !== undefined && typeof result['stale'] !== 'boolean')
+    || (result['staleReasons'] !== undefined && (!Array.isArray(result['staleReasons'])
+      || !result['staleReasons'].every((item) => typeof item === 'string')))
+    || !isRecord(capabilities) || !Object.values(capabilities).every((item) => isRecord(item)
+      && typeof item['status'] === 'string')) {
+    throw new TypeError('Invalid get_torch_runtime_probe response');
+  }
+  return result;
+}
+
+function validateTorchTrial(value: unknown): unknown {
+  const result = requireTorchPayload(value, 'trial_torch_runtime');
+  if (typeof result['success'] !== 'boolean' || typeof result['tag'] !== 'string'
+    || typeof result['profileId'] !== 'string'
+    || !['passed', 'failed'].includes(String(result['startupStatus']))
+    || !['passed', 'failed', 'not_checked'].includes(String(result['healthStatus']))
+    || (result['protocol'] !== null && typeof result['protocol'] !== 'number')
+    || (result['generation'] !== null && typeof result['generation'] !== 'string')
+    || !Array.isArray(result['capabilities']) || !result['capabilities'].every((item) => typeof item === 'string')
+    || typeof result['startedByTrial'] !== 'boolean'
+    || (result['error'] !== undefined && result['error'] !== null && typeof result['error'] !== 'string')
+    || !['not_needed', 'stopped_owned_generation', 'manual_stop_required'].includes(String(result['cleanup']))) {
+    throw new TypeError('Invalid trial_torch_runtime response');
+  }
+  return result;
+}
+
+function validateTorchAlternatives(value: unknown): unknown {
+  const result = requireTorchPayload(value, 'find_torch_alternatives');
+  if (!['selectedTag', 'selectedBuild', 'selectedPython'].every((key) => typeof result[key] === 'string')
+    || !['matches', 'none', 'inconclusive'].includes(String(result['status']))
+    || result['incomplete'] !== true || result['dependenciesNotChecked'] !== true
+    || !Array.isArray(result['checkedBuilds']) || !result['checkedBuilds'].every((item) => typeof item === 'string')
+    || !Array.isArray(result['issues']) || !result['issues'].every((item) => typeof item === 'string')
+    || !Array.isArray(result['matches']) || !result['matches'].every((item) => isRecord(item)
+      && ['tag', 'build', 'python'].every((key) => typeof item[key] === 'string')
+      && (item['wheelUrl'] === undefined || typeof item['wheelUrl'] === 'string')
+      && (item['sha256'] === undefined || typeof item['sha256'] === 'string'))) {
+    throw new TypeError('Invalid find_torch_alternatives response');
+  }
+  return result;
+}
+
 function isModelLibraryUpdateEventPayload(value: unknown): boolean {
   if (!isRecord(value)) {
     return false;
@@ -550,12 +630,42 @@ const electronAPI = {
     validatedApiCall('get_available_versions', decodeAvailableVersionsOutcome, { force_refresh: forceRefresh, app_id: appId }),
   get_installed_versions: (appId?: string) => validatedApiCall('get_installed_versions', decodeInstalledVersionsOutcome, { app_id: appId }),
   get_active_version: (appId?: string) => validatedApiCall('get_active_version', decodeSelectedVersionOutcome, { app_id: appId }),
-  install_version: (tag: string, appId?: string) => {
+  install_version: (tag: string, appId?: string, previewId?: string) => {
     const params = requireDecoded(
       decodeInstallVersionParams({ tag, app_id: appId }),
       'install_version request'
     );
+    if (previewId !== undefined) {
+      if (appId !== 'torch' || typeof previewId !== 'string' || !/^[a-f0-9]{48}$/.test(previewId)) {
+        throw new TypeError('Invalid Torch preview ID');
+      }
+      return validatedApiCall('install_version', decodeInstallVersionOutcome, { ...params, preview_id: previewId });
+    }
     return validatedApiCall('install_version', decodeInstallVersionOutcome, params);
+  },
+  get_torch_runtime_options: async () => validateTorchOptions(await apiCall('get_torch_runtime_options')),
+  preview_torch_runtime: async (request: { tag: string; build: string; python: string; adapter: string }) => {
+    const params = requireDecoded(decodePreviewTorchRuntimeParams(request), 'preview_torch_runtime request');
+    return validatedApiCall('preview_torch_runtime', decodeTorchRuntimePreviewOutcome, params);
+  },
+  get_torch_runtime_probe: async (tag: string) => {
+    const params = requireDecoded(decodeGetTorchRuntimeProbeParams({ tag }), 'get_torch_runtime_probe request');
+    return validateTorchProbe(await apiCall('get_torch_runtime_probe', params));
+  },
+  trial_torch_runtime: async (tag: string, profileId: string) => {
+    const params = requireDecoded(decodeTrialTorchRuntimeParams({ tag, profileId }), 'trial_torch_runtime request');
+    return validateTorchTrial(await validatedApiCall('trial_torch_runtime', decodeTrialTorchRuntimeOutcome, params));
+  },
+  stop_runtime_profile_if_generation: (profileId: string, generation: string) => {
+    if (!profileId || !/^[1-9]\d*$/.test(generation)) {
+      throw new TypeError('Conditional profile stop requires a profile ID and valid generation');
+    }
+    const params = requireDecoded(decodeStopRuntimeProfileGenerationParams({ profileId, generation }), 'stop_runtime_profile_if_generation request');
+    return validatedApiCall('stop_runtime_profile_if_generation', decodeStopRuntimeProfileGenerationOutcome, params);
+  },
+  find_torch_alternatives: async (tag: string, build: string, python: string) => {
+    const params = requireDecoded(decodeFindTorchAlternativesParams({ tag, build, python }), 'find_torch_alternatives request');
+    return validateTorchAlternatives(await apiCall('find_torch_alternatives', params));
   },
   remove_version: (tag: string, appId?: string) =>
     validatedApiCall('remove_version', decodeRemoveVersionOutcome, { tag, app_id: appId }),

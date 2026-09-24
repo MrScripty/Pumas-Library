@@ -6,11 +6,21 @@ mod torch;
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod torch_tests;
 pub(crate) use torch::is_torch_runtime_release;
+pub(crate) struct TorchInstallPlan {
+    pub(crate) preview: crate::version_manager::TorchPreview,
+    pub(crate) requirements: String,
+    pub(crate) resolution: String,
+    pub(crate) report: String,
+    pub(crate) interpreter_path: PathBuf,
+    pub(crate) interpreter_hash: String,
+}
 #[cfg(test)]
 pub(crate) use torch::TorchPublicationPause;
 
 use crate::version_manager::progress::{InstallationProgressTracker, ProgressUpdate};
 use chrono::Utc;
+use futures::future::{BoxFuture, Shared};
+use futures::FutureExt;
 use pumas_library::config::{AppId, InstallationConfig, PathsConfig};
 use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
 use pumas_library::models::InstallationStage;
@@ -21,9 +31,11 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, Mutex, RwLock};
+use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
 async fn path_exists(path: &Path) -> Result<bool> {
@@ -36,6 +48,88 @@ async fn path_exists(path: &Path) -> Result<bool> {
 
 /// Coordinates Torch cancellation with the irreversible publication boundary.
 pub(crate) struct TorchInstallControl(AtomicU8);
+
+type TorchCleanupCompletion = Shared<BoxFuture<'static, std::result::Result<(), Arc<String>>>>;
+
+#[derive(Default)]
+pub(crate) struct TorchCleanupTasks {
+    state: StdMutex<TorchCleanupState>,
+}
+
+#[derive(Default)]
+struct TorchCleanupState {
+    closed: bool,
+    tasks: Vec<JoinHandle<()>>,
+    failures: Vec<String>,
+    completion: Option<TorchCleanupCompletion>,
+}
+
+impl TorchCleanupTasks {
+    pub(crate) fn schedule(&self, work: impl FnOnce() + Send + 'static) {
+        let mut state = self.state.lock().expect("Torch cleanup lock poisoned");
+        if !state.closed {
+            let tasks = std::mem::take(&mut state.tasks);
+            for mut task in tasks {
+                if task.is_finished() {
+                    match (&mut task).now_or_never() {
+                        Some(Err(error)) => state.failures.push(error.to_string()),
+                        Some(Ok(())) => continue,
+                        None => state.tasks.push(task),
+                    }
+                } else {
+                    state.tasks.push(task);
+                }
+            }
+            state.tasks.push(tokio::task::spawn_blocking(work));
+        }
+    }
+
+    pub(crate) fn close(&self) {
+        self.state
+            .lock()
+            .expect("Torch cleanup lock poisoned")
+            .closed = true;
+    }
+
+    pub(crate) async fn drain(&self) -> Result<()> {
+        let completion = {
+            let mut state = self.state.lock().expect("Torch cleanup lock poisoned");
+            state.closed = true;
+            if let Some(completion) = &state.completion {
+                completion.clone()
+            } else {
+                let tasks = std::mem::take(&mut state.tasks);
+                let mut failures = std::mem::take(&mut state.failures);
+                // This supervisor owns every handle even if all callers waiting
+                // on the shared receipt are cancelled.
+                let supervisor = tokio::spawn(async move {
+                    for task in tasks {
+                        if let Err(error) = task.await {
+                            failures.push(error.to_string());
+                        }
+                    }
+                    if failures.is_empty() {
+                        Ok(())
+                    } else {
+                        Err(Arc::new(failures.join("; ")))
+                    }
+                });
+                let completion = async move {
+                    supervisor
+                        .await
+                        .unwrap_or_else(|error| Err(Arc::new(error.to_string())))
+                }
+                .boxed()
+                .shared();
+                state.completion = Some(completion.clone());
+                completion
+            }
+        };
+        completion
+            .await
+            .map_err(|error| PumasError::Other(format!("Torch cleanup tasks failed: {error}")))
+    }
+}
 
 impl TorchInstallControl {
     const IDLE: u8 = 0;
@@ -109,6 +203,7 @@ pub struct VersionInstaller {
     /// Cancellation flag.
     cancel_flag: Arc<AtomicBool>,
     torch_control: Arc<TorchInstallControl>,
+    torch_cleanup: Arc<TorchCleanupTasks>,
     torch_attempt_lock: Mutex<()>,
     #[cfg(test)]
     torch_stage_override: Option<TorchStageOverride>,
@@ -141,6 +236,7 @@ impl VersionInstaller {
             progress_tracker,
             cancel_flag,
             torch_control: Arc::new(TorchInstallControl::new()),
+            torch_cleanup: Arc::new(TorchCleanupTasks::default()),
             torch_attempt_lock: Mutex::new(()),
             #[cfg(test)]
             torch_stage_override: None,
@@ -151,8 +247,21 @@ impl VersionInstaller {
         }
     }
 
+    /// Drain Torch quarantine cleanup after the last direct install call.
+    /// Owners using `VersionInstaller` without `VersionManager` must await this
+    /// before shutting down their Tokio runtime.
+    pub async fn shutdown_torch_cleanup(&self) -> Result<()> {
+        self.torch_cleanup.close();
+        self.torch_cleanup.drain().await
+    }
+
     pub(crate) fn with_torch_control(mut self, control: Arc<TorchInstallControl>) -> Self {
         self.torch_control = control;
+        self
+    }
+
+    pub(crate) fn with_torch_cleanup(mut self, cleanup: Arc<TorchCleanupTasks>) -> Self {
+        self.torch_cleanup = cleanup;
         self
     }
 
@@ -188,13 +297,27 @@ impl VersionInstaller {
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
+        self.install_version_with_torch_plan(tag, release, progress_tx, None)
+            .await
+    }
+
+    pub(crate) async fn install_version_with_torch_plan(
+        &self,
+        tag: &str,
+        release: &GitHubRelease,
+        progress_tx: mpsc::Sender<ProgressUpdate>,
+        torch_plan: Option<TorchInstallPlan>,
+    ) -> Result<()> {
         match self.app_id {
             AppId::Ollama => self.install_ollama_binary(tag, release, progress_tx).await,
             AppId::LlamaCpp => {
                 self.install_llama_cpp_binary(tag, release, progress_tx)
                     .await
             }
-            AppId::Torch => self.install_torch_runtime(tag, release, progress_tx).await,
+            AppId::Torch => {
+                self.install_torch_runtime(tag, release, progress_tx, torch_plan)
+                    .await
+            }
             AppId::OnnxRuntime => Err(PumasError::Other(
                 "ONNX Runtime is embedded and cannot be installed as a version".to_string(),
             )),
@@ -1534,7 +1657,25 @@ impl VersionInstaller {
             release_date: Some(release.published_at.clone()),
             release_notes: release.body.clone(),
             download_url: if self.app_id == AppId::Torch {
-                torch::torch_recipe_for_tag(tag).map(|recipe| recipe.torch_wheel_url.to_string())
+                if let Some(recipe) = torch::torch_recipe_for_tag(tag) {
+                    Some(recipe.torch_wheel_url.to_string())
+                } else {
+                    std::fs::read(version_dir.join("resolution.json"))
+                        .ok()
+                        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                        .and_then(|resolution| {
+                            resolution["artifacts"]
+                                .as_array()?
+                                .iter()
+                                .find(|artifact| {
+                                    artifact["name"]
+                                        .as_str()
+                                        .is_some_and(|name| name.eq_ignore_ascii_case("torch"))
+                                })?["url"]
+                                .as_str()
+                                .map(str::to_string)
+                        })
+                }
             } else {
                 release.zipball_url.clone().or(release.tarball_url.clone())
             },

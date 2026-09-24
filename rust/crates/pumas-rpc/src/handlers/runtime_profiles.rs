@@ -167,6 +167,11 @@ pub async fn launch_runtime_profile(
             "ready": false
         }));
     };
+    let _torch_lifecycle_lease = if app_id == "torch" {
+        Some(version_manager.torch_lifecycle_lease().await?)
+    } else {
+        None
+    };
     let tag = match command.tag {
         Some(tag) => tag,
         None => match version_manager.get_active_version().await? {
@@ -180,6 +185,9 @@ pub async fn launch_runtime_profile(
             }
         },
     };
+    if app_id == "torch" {
+        version_manager.verify_torch_identity(&tag).await?;
+    }
     let version_dir = version_manager.version_path(&tag);
     Ok(serde_json::to_value(
         state

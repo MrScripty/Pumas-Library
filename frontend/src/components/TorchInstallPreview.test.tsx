@@ -1,10 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { TorchInstallPreview } from './TorchInstallPreview';
-import type { TorchAlternativesOutcome, TorchRuntimeOptions, TorchRuntimePreview, TorchRuntimePreviewRequest } from '../types/torch-install';
+import type { TorchAlternativesOutcome, TorchRuntimeOptions, TorchRuntimePreview, TorchRuntimePreviewOutcome, TorchRuntimePreviewRequest } from '../types/torch-install';
 
 const getOptions = vi.fn<() => Promise<TorchRuntimeOptions>>();
-const getPreview = vi.fn<(request: TorchRuntimePreviewRequest) => Promise<TorchRuntimePreview>>();
+const getPreview = vi.fn<(request: TorchRuntimePreviewRequest) => Promise<TorchRuntimePreviewOutcome>>();
 const getAlternatives = vi.fn<(tag: string, build: string, python: string) => Promise<TorchAlternativesOutcome>>();
 
 vi.mock('../api/adapter', () => ({
@@ -23,14 +23,16 @@ const options = {
   preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
 };
 
+const resolved = (preview: TorchRuntimePreview): TorchRuntimePreviewOutcome => ({ status: 'resolved', preview });
+
 describe('TorchInstallPreview', () => {
   it('shows exact artifacts and installs only the reviewed selection', async () => {
     getOptions.mockResolvedValue(options);
-    getPreview.mockResolvedValue({
-      previewId: 'review-1', tag: 'v2.10.0', build: 'cpu', python: 'python3.12',
+    getPreview.mockResolvedValue(resolved({
+      previewId: 'review-1', expiresInSeconds: 300, tag: 'v2.10.0', build: 'cpu', python: 'python3.12',
       adapter: 'none', qualification: 'unverified',
       artifacts: [{ name: 'torch', version: '2.10.0', url: 'https://download.pytorch.org/whl/cpu/torch.whl', sha256: 'abc123' }],
-    });
+    }));
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.10.0" onBack={vi.fn()} onInstall={onInstall} />);
 
@@ -53,7 +55,7 @@ describe('TorchInstallPreview', () => {
 
   it('locks the legacy preset and keeps an inconclusive probe from installing', async () => {
     getOptions.mockResolvedValue(options);
-    getPreview.mockRejectedValue(new Error('Network inconclusive: index unreachable'));
+    getPreview.mockResolvedValue({ status: 'rejected', reason: 'network_inconclusive', message: 'index unreachable' });
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
 
@@ -66,6 +68,42 @@ describe('TorchInstallPreview', () => {
     expect(onInstall).not.toHaveBeenCalled();
   });
 
+  it('offers the qualified preset and an unverified exact-wheel choice for the same release', async () => {
+    getOptions.mockResolvedValue(options);
+    getPreview.mockImplementation(async (request) => resolved({
+      previewId: request.adapter === 'bundled' ? 'qualified-preset' : 'upstream-cpu',
+      expiresInSeconds: 300,
+      ...request,
+      qualification: request.adapter === 'bundled' ? 'qualified' : 'unverified',
+      artifacts: [],
+    }));
+    const onInstall = vi.fn();
+    render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
+
+    const presetChoice = await screen.findByRole('button', { name: 'Qualified fixed preset' });
+    expect(presetChoice).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('combobox', { name: 'Torch build' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
+    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({
+      tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled',
+    }));
+    fireEvent.click(screen.getByRole('button', { name: 'Install fixed preset' }));
+    expect(onInstall).toHaveBeenCalledWith('qualified-preset');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Other official wheels (unverified)' }));
+    expect(screen.getByRole('button', { name: 'Install reviewed artifacts' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Torch build' })).toBeEnabled();
+    expect(screen.getByRole('combobox', { name: 'Image adapter' })).toBeEnabled();
+    expect(screen.getByRole('combobox', { name: 'Image adapter' })).toHaveValue('none');
+    fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
+    await waitFor(() => expect(getPreview).toHaveBeenLastCalledWith({
+      tag: 'v2.9.1', build: 'cpu', python: 'python3.12', adapter: 'none',
+    }));
+    expect(screen.getByText(/Artifact resolution is unverified/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Install reviewed artifacts' }));
+    expect(onInstall).toHaveBeenLastCalledWith('upstream-cpu');
+  });
+
   it('requires an already installed compatible Python before checking wheels', async () => {
     getOptions.mockResolvedValue({ ...options, pythons: [] });
     render(<TorchInstallPreview tag="v2.10.0" onBack={vi.fn()} onInstall={vi.fn()} />);
@@ -73,13 +111,37 @@ describe('TorchInstallPreview', () => {
     expect(screen.getByRole('button', { name: 'Check selected combination' })).toBeDisabled();
   });
 
+  it('reports a failed wheel report validation distinctly without offering alternatives', async () => {
+    getOptions.mockResolvedValue(options);
+    getPreview.mockResolvedValue({ status: 'rejected', reason: 'validation_failed', message: 'Unsupported combination: hash missing for torch' });
+    render(<TorchInstallPreview tag="v2.10.0" onBack={vi.fn()} onInstall={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Check selected combination' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Resolved wheel report failed validation: Unsupported combination: hash missing for torch');
+    expect(screen.getByText(/cpu · python3.12 · none: failed validation/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Install reviewed artifacts' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Find compatible alternatives' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Probe inconclusive/)).not.toBeInTheDocument();
+  });
+
+  it('treats transport exceptions as inconclusive even when their text resembles an unsupported outcome', async () => {
+    getOptions.mockResolvedValue(options);
+    getPreview.mockRejectedValue(new Error('Unsupported combination: transport failed'));
+    render(<TorchInstallPreview tag="v2.10.0" onBack={vi.fn()} onInstall={vi.fn()} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Check selected combination' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Probe inconclusive: Unsupported combination: transport failed');
+    expect(screen.queryByRole('button', { name: 'Find compatible alternatives' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Install reviewed artifacts' })).toBeDisabled();
+  });
+
   it('offers official wheel matches only after unsupported preview and rechecks a chosen candidate', async () => {
     getOptions.mockResolvedValue(options);
-    getPreview.mockRejectedValueOnce(new Error('Unsupported combination: no matching wheel'));
-    getPreview.mockResolvedValueOnce({
-      previewId: 'review-cu130', tag: 'v2.10.0', build: 'cu130', python: 'python3.12',
+    getPreview.mockResolvedValueOnce({ status: 'rejected', reason: 'unsupported', message: 'no matching wheel' });
+    getPreview.mockResolvedValueOnce(resolved({
+      previewId: 'review-cu130', expiresInSeconds: 300, tag: 'v2.10.0', build: 'cu130', python: 'python3.12',
       adapter: 'none', qualification: 'unverified', artifacts: [],
-    });
+    }));
     getAlternatives.mockResolvedValue({
       selectedTag: 'v2.10.0', selectedBuild: 'cpu', selectedPython: 'python3.12',
       status: 'matches', incomplete: true, dependenciesNotChecked: true,
@@ -100,15 +162,15 @@ describe('TorchInstallPreview', () => {
 
   it('keeps a long artifact list and its install action inside the scrollable preview region', async () => {
     getOptions.mockResolvedValue(options);
-    getPreview.mockResolvedValue({
-      previewId: 'review-many', tag: 'v2.10.0', build: 'cpu', python: 'python3.12',
+    getPreview.mockResolvedValue(resolved({
+      previewId: 'review-many', expiresInSeconds: 300, tag: 'v2.10.0', build: 'cpu', python: 'python3.12',
       adapter: 'none', qualification: 'unverified',
       artifacts: Array.from({ length: 30 }, (_, index) => ({
         name: `wheel-${index}`, version: '1.0',
         url: `https://download.pytorch.org/whl/cpu/wheel-${index}.whl`,
         sha256: 'a'.repeat(64),
       })),
-    });
+    }));
     render(<TorchInstallPreview tag="v2.10.0" onBack={vi.fn()} onInstall={vi.fn()} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Check selected combination' }));

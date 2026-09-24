@@ -11,6 +11,51 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('Torch preview decodes resolved and all typed rejection outcomes without reading message wording', async () => {
+  const harness = loadCompiledPreload();
+  const request = { tag: 'v2.10.0', build: 'cpu', python: 'python3.12', adapter: 'none' };
+  const resolved = {
+    status: 'resolved',
+    preview: {
+      previewId: 'preview-42', ...request, expiresInSeconds: 300,
+      qualification: 'unverified',
+      artifacts: [{ name: 'torch', version: '2.10.0', url: 'https://download.pytorch.org/torch.whl', sha256: 'abc123' }],
+    },
+  };
+  harness.respondWith(resolved);
+  assert.deepEqual(toPlainValue(await harness.api.preview_torch_runtime(request)), resolved);
+  assert.deepEqual(toPlainValue(harness.invocations.at(-1)?.[2]), request);
+  const qualified = { status: 'resolved', preview: { ...resolved.preview, qualification: 'qualified' } };
+  harness.respondWith(qualified);
+  assert.deepEqual(toPlainValue(await harness.api.preview_torch_runtime(request)), qualified);
+
+  for (const [reason, message] of [
+    ['unsupported', 'Network inconclusive: wording cannot change the reason'],
+    ['validation_failed', 'Unsupported combination: wording cannot change the reason'],
+    ['network_inconclusive', 'Resolved wheel report failed validation: wording cannot change the reason'],
+    ['inconclusive', 'Any diagnostic wording is allowed'],
+  ]) {
+    const rejected = { status: 'rejected', reason, message };
+    harness.respondWith(rejected);
+    assert.deepEqual(toPlainValue(await harness.api.preview_torch_runtime(request)), rejected);
+  }
+
+  for (const malformed of [
+    null,
+    { status: 'rejected', reason: 'unknown', message: 'unsupported' },
+    { status: 'rejected', reason: 'unsupported', message: 42 },
+    { status: 'rejected', reason: 'unsupported', message: 'no wheel', preview: resolved.preview },
+    { status: 'rejected', reason: 'unsupported', message: 'no wheel', extra: true },
+    { status: 'resolved', preview: { ...resolved.preview, artifacts: [], extra: true } },
+    { status: 'resolved', preview: { ...resolved.preview, qualification: 'unexpected-value' } },
+    { status: 'resolved', preview: { ...resolved.preview, expiresInSeconds: '300' } },
+  ]) {
+    harness.respondWith(malformed);
+    await assert.rejects(harness.api.preview_torch_runtime(request), { name: 'DesktopContractError' });
+  }
+  assert.equal(harness.invocations.filter(invocation => invocation[1] === 'preview_torch_runtime').length, 14);
+});
+
 test('installation start validates exact requests and discriminated outcomes without retry', async () => {
   const harness = loadCompiledPreload();
   for (const tag of [null, false, 42, [], {}]) {

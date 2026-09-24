@@ -1,16 +1,41 @@
 # Upstream Torch version manager progress
 
-Date: 2026-09-23 (America/Vancouver). This is an implementation and evidence
+Date: 2026-09-24 (America/Vancouver). This is an implementation and evidence
 inventory, not a completed Pumas desktop acceptance. The prior
 [A1 packaged acceptance](a1-packaged-acceptance.md) applies only to its original
-`v2.9.1` / CPython 3.12 / CUDA 13.0 / Linux x86_64 combination. The prior Tuldok
-image evidence used a different packaged runtime and does not qualify a newly
-resolved upstream release.
+`v2.9.1` / CPython 3.12 / CUDA 13.0 / Linux x86_64 combination. The Tuldok image
+evidence below uses a separate, exact Torch 2.10 tuple and does not qualify a
+newly resolved upstream release.
+
+## Scope handoff authorized 2026-09-24
+
+The repository owner selected the broad release-management scope after reviewing
+this inventory. Every stable upstream `vMAJOR.MINOR.PATCH` tag is discoverable
+independently of Pumas qualification when GitHub pagination completes within the
+20-page / 120-second request budget. A page failure or exhausted budget returns
+an error without a partial list presented as complete. Installation is offered for
+an exact official CPU, CUDA, or ROCm binary wheel plus fully resolved dependencies
+on Linux x86_64 with an already installed CPython 3.10–3.13. Pumas does not
+provision Python or compile Torch from source; XPU and other operating systems
+remain outside this provider contract. A release with no compatible wheel for a
+supported interpreter is discoverable but correctly rejected for that tuple.
+
+The fixed qualified `v2.9.1` / CUDA 13.0 / Python 3.12 bundled preset remains a
+separate recipe. Other exact combinations, including alternate `v2.9.1`
+combinations, use dynamic retained previews and do not inherit the preset's
+qualification. The serialized follow-up and acceptance contract live in the
+[Torch upstream version management plan](../../torch-upstream-version-management/plan.md);
+the current-standards coordination entry is [PRG-I17](../../current-standards-remediation-2026-09-03/issues.md).
 
 ## Current branch behavior
 
 - Stable upstream `vMAJOR.MINOR.PATCH` releases are discovered independently of
-  Pumas qualification, across up to ten GitHub release pages. Prereleases,
+  Pumas qualification. Torch pagination continues until a short end-of-list page,
+  with a 20-page / 120-second budget; a page error, deadline, or exhausted page
+  budget fails without returning a partial list as complete. Non-Torch release
+  listing keeps its existing ten-page budget. A new cache records completeness;
+  an old unmarked cache containing exactly 1,000 entries is refreshed because
+  its completeness cannot be distinguished from the former ten-page cap. Prereleases,
   nightlies, source builds, and managed installation on platforms other than
   Linux x86_64 remain outside this scope. Installed local releases remain visible
   when upstream discovery fails.
@@ -25,9 +50,12 @@ resolved upstream release.
   and SHA-256, with `none` or FLUX.2 adapter dependencies selected separately.
   The manager retains the exact pip resolution and a fingerprint of the chosen
   interpreter; installation consumes that retained lock without resolving again.
-  An unsupported combination and a network-inconclusive resolution have distinct
-  errors. After a definite unsupported preview, the desktop can search a bounded
-  set of official Torch indexes for wheel matches for installed interpreters.
+  Resolver results use a typed outcome across the RPC and desktop boundary:
+  unsupported, invalid-report, network-inconclusive, and generic-inconclusive
+  outcomes remain distinct, including timeouts. The closed qualification value
+  is validated across the generated contract. After a definite unsupported
+  preview, the desktop can search a bounded set of official Torch indexes for
+  wheel matches for installed interpreters.
   These leads are explicitly incomplete: dependencies and adapters are unchecked,
   and choosing one starts a fresh exact preview. Nunchaku's known wheel is
   confined to the fixed 2.9.1 preset.
@@ -52,7 +80,11 @@ resolved upstream release.
   failed or cancelled trial stops only its admitted process generation. The
   desktop exposes a generation-conditional Stop action after a successful trial.
 
-## Checks and real configuration
+## Earlier evidence retained from the previous report
+
+The counts and direct-resolver experiments in this subsection predate the
+2026-09-24 upstream manager acceptance and are historical evidence, not the
+current-tree verification summary.
 
 - Deterministic Python resolver/probe fixtures: 20 passed. Ruff checks passed.
   The fixtures include wrong Torch and torchvision builds, origin/hash rejection,
@@ -122,27 +154,67 @@ resolved upstream release.
   set, GPU identity, and available driver metadata. A changed context marks
   the saved result stale but does not rerun the expensive model operation.
 
-## Acceptance still required before a PR is accepted
+## Runtime-manager acceptance status
 
-1. Through the actual desktop, discover a non-2.9.1 upstream release, review
-   the resolved artifacts, install it, inspect results, explicitly select it,
-   start it, and exercise basic use. Cover an older release and unavailable
-   Python/build combinations with visible actionable alternatives.
-2. Repeat the successful FLUX.2 GPU/Tuldok flow through the actual Pumas
-   desktop controls for preview, install, selection, startup trial, and model
-   load. The RPC-driven real-image path and its exact tuple are recorded in the
-   linked report. Check that a failed optional adapter remains scoped to that
-   feature in the real desktop.
-3. In the real desktop, exercise cancellation, failed trial, switching back to
-   the qualified runtime, restart, and preservation of active/default/installed
-   state. Recheck probe freshness across dependency, sidecar, driver, and
-   hardware changes. Keep expensive image tests separate from activation checks.
-4. Resolve the program inventory's
-   [PRG-I17 deployment gate](../../current-standards-remediation-2026-09-03/issues.md):
-   managed Torch stays non-shipped until an accepted source/dependency/interpreter/
-   sidecar tuple completes isolated install, launch, health, request, and shutdown
-   evidence. This branch does not claim that release disposition from fixtures
-   or the isolated CPU experiment.
+The superseding [Torch upstream version management plan](../../torch-upstream-version-management/plan.md)
+is the current PR acceptance gate for the authorized runtime-management scope.
+Its U4 criterion permits a real older-release RPC lifecycle plus the composed
+desktop control test, matching the user's approved “desktop or API” scope. The
+actual desktop-driven FLUX.2/Tuldok repeat below remains a separate desktop
+product claim; it is not required to prove the RPC installation path.
+
+U1–U4 are accepted for the scope in the plan. On Linux x86_64, the current Pumas
+RPC flow discovered 63 stable tags, previewed `v2.9.0` / CPU / CPython 3.12 as
+25 exact wheel artifacts with URLs and SHA-256 hashes, installed it from the
+retained resolution, inspected a passing core probe, and explicitly selected it.
+A managed Torch profile then passed startup, health, and protocol 3 checks as
+owned generation `1`; the generation-conditional stop succeeded. The host
+interpreter was `/usr/bin/python3.12` on x86_64 Linux with glibc 2.39. The Torch
+wheel was `2.9.0+cpu` with SHA-256
+`28f6eb31b08180a5c5e98d5bc14eef6909c9f5a1dbff9632c3e02a8773449349`.
+The adapter was `none`; no image generation was attempted. The probe result was
+passed, non-stale, with core status passed and adapter status not selected.
+
+The accepted RPC lifecycle summary and complete 25-artifact manifest are now
+retained in the [acceptance evidence JSON](../../torch-upstream-version-management/reports/v2.9.0-cpu-rpc-acceptance.json).
+The original isolated launcher root and temporary acceptance file were under
+`/tmp/pumas-torch-upstream-e2e-20260924-accepted`. This closes PRG-I17's runtime
+management acceptance for the authorized Linux/Python scope. It does not claim a
+real interactive Pumas desktop run.
+
+## 2026-09-24 current-tree gates
+
+- Python resolver: 18 tests passed, including Rust/Python ordered build-vocabulary
+  parity; Ruff passed. The `pumas-app-manager` library suite passed 130 tests.
+  The focused GitHub module: 17 passed, including pagination limits,
+  failure/no-partial-list,
+  cache completeness, request coalescing, cancellation takeover, and stale
+  completed-channel replacement. Rust format and `git diff --check` passed.
+- RPC preview contract tests passed in the default and `export-contract` feature
+  modes (3 and 2 tests respectively). The no-default-features export-contract
+  check and current `pumas-rpc` build passed; the feature-disabled check reports
+  dead-code warnings in disabled paths. Frontend passed 125 test files / 698
+  tests, production build, typecheck, and lint. Electron passed 12 test files;
+  its generated contract check, 41-test contract-conformance suite, build, and
+  lint passed.
+  The desktop composed projection test covers discovery failure, preview,
+  install, explicit selection, startup health, and generation-owned stop.
+- The historical full workspace Rust test gate remains non-green: 66 existing
+  `pumas-library` core failures were previously recorded alongside 1,349 passes,
+  and are outside this change's write set. Do not treat that aggregate result as
+  acceptance evidence for this implementation.
+
+## Separate desktop and image-serving claim
+
+1. The real FLUX.2 GPU/Tuldok result is exercised through RPC and remains scoped
+   to the exact `v2.10.0` / CUDA 13.0 / Python 3.12 / FLUX.2 tuple in the linked
+   report. It does not prove the same actions through the actual Pumas desktop.
+2. A real desktop-driven repeat of preview, install, selection, startup trial,
+   and model load would close that separate desktop claim. It is not required by
+   the upstream runtime-manager U4 gate, which was accepted through RPC plus the
+   composed desktop projection test.
+3. General user-defined PyTorch model plugins, all-release image generation, and
+   image-adapter qualification remain out of scope.
 
 The first serving scope is the existing Nunchaku Z-Image and FLUX.2 Klein image
 models. A general user-defined PyTorch model plugin contract is a separate

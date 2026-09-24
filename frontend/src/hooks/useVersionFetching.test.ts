@@ -224,6 +224,20 @@ describe('useVersionFetching', () => {
     expect(result.current.isLoading).toBe(false);
   });
 
+  it('retains installed Torch versions when upstream release discovery fails', async () => {
+    fetchAvailableVersionsMock.mockRejectedValue(new Error('release discovery unavailable'));
+    getInstalledVersionsMock.mockResolvedValue({ success: true, versions: ['v2.9.1'] });
+    getActiveVersionMock.mockResolvedValue({ success: true, version: 'v2.9.1' });
+
+    const { result } = renderHook(() => useVersionFetching({ appId: 'torch' }));
+    await act(async () => result.current.refreshAll(true));
+
+    expect(result.current.error).toBe('release discovery unavailable');
+    expect(result.current.installedVersions).toEqual(['v2.9.1']);
+    expect(result.current.activeVersion).toBe('v2.9.1');
+    expect(result.current.isLoading).toBe(false);
+  });
+
   it('throws when default version changes are attempted without API availability', async () => {
     isApiAvailableMock.mockReturnValue(false);
 

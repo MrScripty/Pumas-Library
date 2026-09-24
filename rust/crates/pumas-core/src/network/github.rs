@@ -17,16 +17,27 @@ use chrono::{DateTime, Utc};
 use mini_moka::sync::Cache;
 use reqwest::StatusCode;
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::fs;
+#[cfg(test)]
+use tokio::sync::Notify;
 use tokio::sync::{watch, Mutex, RwLock};
 use tracing::{debug, info, warn};
 
 // Re-export for convenience
 pub use crate::models::{GitHubAsset, GitHubRelease};
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredReleasesCache {
+    #[serde(flatten)]
+    snapshot: GitHubReleasesCache,
+    #[serde(default)]
+    listing_complete: bool,
+}
 
 /// Cache for GitHub releases.
 pub struct ReleasesCache {
@@ -60,6 +71,10 @@ impl ReleasesCache {
 
     /// Get releases from disk cache.
     pub fn get_disk(&self, key: &str) -> Option<GitHubReleasesCache> {
+        self.get_disk_entry(key).map(|entry| entry.snapshot)
+    }
+
+    fn get_disk_entry(&self, key: &str) -> Option<StoredReleasesCache> {
         let path = self.disk_cache_path(key);
         if !path.exists() {
             return None;
@@ -97,7 +112,10 @@ impl ReleasesCache {
             releases: releases.to_vec(),
         };
 
-        let contents = serde_json::to_string_pretty(&cache)?;
+        let contents = serde_json::to_string_pretty(&StoredReleasesCache {
+            snapshot: cache,
+            listing_complete: true,
+        })?;
         std::fs::write(&path, contents).map_err(|e| PumasError::Io {
             message: format!("Failed to write disk cache: {}", e),
             path: Some(path),
@@ -109,6 +127,12 @@ impl ReleasesCache {
 
     /// Get releases from disk cache without blocking the async runtime.
     pub async fn get_disk_async(&self, key: &str) -> Option<GitHubReleasesCache> {
+        self.get_disk_entry_async(key)
+            .await
+            .map(|entry| entry.snapshot)
+    }
+
+    async fn get_disk_entry_async(&self, key: &str) -> Option<StoredReleasesCache> {
         let path = self.disk_cache_path(key);
 
         match fs::read_to_string(&path).await {
@@ -146,7 +170,10 @@ impl ReleasesCache {
             releases: releases.to_vec(),
         };
 
-        let contents = serde_json::to_string_pretty(&cache)?;
+        let contents = serde_json::to_string_pretty(&StoredReleasesCache {
+            snapshot: cache,
+            listing_complete: true,
+        })?;
         fs::write(&path, contents)
             .await
             .map_err(|e| PumasError::Io {
@@ -170,14 +197,17 @@ impl ReleasesCache {
 
     /// Get cache status for a key without blocking the async runtime.
     pub async fn get_status_async(&self, key: &str, is_fetching: bool) -> CacheStatus {
-        let disk_cache = self.get_disk_async(key).await;
-        let has_cache = disk_cache.is_some();
-        let is_valid = disk_cache
+        let disk_entry = self.get_disk_entry_async(key).await;
+        let has_cache = disk_entry.is_some();
+        let is_valid = disk_entry
             .as_ref()
-            .map(|c| self.is_disk_cache_valid(c))
+            .map(|entry| {
+                self.is_disk_cache_valid(&entry.snapshot) && !may_be_legacy_truncated(key, entry)
+            })
             .unwrap_or(false);
 
-        let (age_seconds, last_fetched, releases_count) = if let Some(cache) = disk_cache {
+        let (age_seconds, last_fetched, releases_count) = if let Some(entry) = disk_entry {
+            let cache = entry.snapshot;
             let age = DateTime::parse_from_rfc3339(&cache.last_fetched)
                 .map(|t| Utc::now().signed_duration_since(t).num_seconds() as u64)
                 .ok();
@@ -217,8 +247,168 @@ impl ReleasesCache {
     }
 }
 
-/// Result type for pending fetch operations (cloneable for broadcast).
-type FetchResult = std::result::Result<Vec<GitHubRelease>, String>;
+/// Cloneable failure details for callers sharing one fetch. The owner keeps its
+/// original PumasError; followers retain the actionable public category.
+#[derive(Clone)]
+enum FetchFailure {
+    RateLimited {
+        service: String,
+        retry_after_secs: Option<u64>,
+    },
+    GitHubApi {
+        message: String,
+        status_code: Option<u16>,
+    },
+    Network {
+        message: String,
+        cause: Option<String>,
+    },
+    Other(String),
+}
+
+impl FetchFailure {
+    fn from_error(error: &PumasError) -> Self {
+        match error {
+            PumasError::RateLimited {
+                service,
+                retry_after_secs,
+            } => Self::RateLimited {
+                service: service.clone(),
+                retry_after_secs: *retry_after_secs,
+            },
+            PumasError::GitHubApi {
+                message,
+                status_code,
+            } => Self::GitHubApi {
+                message: message.clone(),
+                status_code: *status_code,
+            },
+            PumasError::Network { message, cause } => Self::Network {
+                message: message.clone(),
+                cause: cause.clone(),
+            },
+            _ => Self::Other(error.to_string()),
+        }
+    }
+
+    fn into_error(self) -> PumasError {
+        match self {
+            Self::RateLimited {
+                service,
+                retry_after_secs,
+            } => PumasError::RateLimited {
+                service,
+                retry_after_secs,
+            },
+            Self::GitHubApi {
+                message,
+                status_code,
+            } => PumasError::GitHubApi {
+                message,
+                status_code,
+            },
+            Self::Network { message, cause } => PumasError::Network { message, cause },
+            Self::Other(message) => PumasError::Network {
+                message,
+                cause: None,
+            },
+        }
+    }
+}
+
+type FetchResult = std::result::Result<Vec<GitHubRelease>, FetchFailure>;
+
+struct FetchingReset<'a>(&'a AtomicBool);
+
+impl Drop for FetchingReset<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+// Before exhaustive Torch pagination, a listing could stop after ten full
+// pages. New caches mark completion even when the exact count is 1,000.
+fn may_be_legacy_truncated(repo: &str, entry: &StoredReleasesCache) -> bool {
+    const LEGACY_CAPPED_RELEASE_COUNT: usize = 1000;
+    repo == AppId::Torch.github_repo()
+        && !entry.listing_complete
+        && entry.snapshot.releases.len() == LEGACY_CAPPED_RELEASE_COUNT
+}
+
+const TORCH_RELEASES_MAX_PAGES: u32 = 20;
+const TORCH_RELEASES_DEADLINE: Duration = Duration::from_secs(120);
+
+#[derive(Clone, Copy)]
+struct ReleasePagePolicy {
+    max_pages: u32,
+    require_complete: bool,
+    deadline: Option<Duration>,
+}
+
+fn page_policy(repo: &str) -> ReleasePagePolicy {
+    if repo == AppId::Torch.github_repo() {
+        ReleasePagePolicy {
+            max_pages: TORCH_RELEASES_MAX_PAGES,
+            require_complete: true,
+            deadline: Some(TORCH_RELEASES_DEADLINE),
+        }
+    } else {
+        ReleasePagePolicy {
+            max_pages: NetworkConfig::GITHUB_RELEASES_MAX_PAGES,
+            require_complete: false,
+            deadline: None,
+        }
+    }
+}
+
+/// Torch is complete only after a short page; other repos retain the historical
+/// page budget. An exact multiple needs one final empty request for proof.
+async fn collect_release_pages<F, Fut>(
+    per_page: usize,
+    policy: ReleasePagePolicy,
+    mut fetch_page: F,
+) -> Result<Vec<GitHubRelease>>
+where
+    F: FnMut(u32) -> Fut,
+    Fut: Future<Output = Result<Vec<GitHubRelease>>>,
+{
+    let collect = async {
+        let mut all_releases = Vec::new();
+        for page in 1..=policy.max_pages {
+            let releases = fetch_page(page).await?;
+            let count = releases.len();
+            all_releases.extend(releases);
+            if count < per_page {
+                return Ok(all_releases);
+            }
+            if page == policy.max_pages {
+                if policy.require_complete {
+                    return Err(PumasError::GitHubApi {
+                        message: format!(
+                            "Torch release listing exceeded the {page}-page budget before its end"
+                        ),
+                        status_code: None,
+                    });
+                }
+                return Ok(all_releases);
+            }
+        }
+        Err(PumasError::GitHubApi {
+            message: "GitHub release page budget is zero".into(),
+            status_code: None,
+        })
+    };
+    if let Some(deadline) = policy.deadline {
+        tokio::time::timeout(deadline, collect)
+            .await
+            .map_err(|_| PumasError::GitHubApi {
+                message: "Torch release listing timed out before its end".into(),
+                status_code: None,
+            })?
+    } else {
+        collect.await
+    }
+}
 
 /// GitHub API client.
 pub struct GitHubClient {
@@ -231,6 +421,8 @@ pub struct GitHubClient {
     /// Pending fetch operations - allows request coalescing.
     /// When a fetch is in progress, other callers subscribe to receive the same result.
     pending_fetches: Mutex<HashMap<String, watch::Receiver<Option<FetchResult>>>>,
+    #[cfg(test)]
+    follower_joined: Notify,
 }
 
 struct LlamaCppReleaseVariant {
@@ -259,6 +451,8 @@ impl GitHubClient {
             is_fetching: AtomicBool::new(false),
             fetch_lock: RwLock::new(()),
             pending_fetches: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            follower_joined: Notify::new(),
         })
     }
 
@@ -271,6 +465,8 @@ impl GitHubClient {
             is_fetching: AtomicBool::new(false),
             fetch_lock: RwLock::new(()),
             pending_fetches: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            follower_joined: Notify::new(),
         })
     }
 
@@ -297,10 +493,12 @@ impl GitHubClient {
         }
 
         // 2. Check disk cache
-        if let Some(disk_cache) = self.cache.get_disk_async(&cache_key).await {
+        if let Some(disk_entry) = self.cache.get_disk_entry_async(&cache_key).await {
+            let legacy_truncated = may_be_legacy_truncated(repo, &disk_entry);
+            let disk_cache = disk_entry.snapshot;
             let is_valid = self.cache.is_disk_cache_valid(&disk_cache);
 
-            if !force_refresh && is_valid {
+            if !force_refresh && is_valid && !legacy_truncated {
                 // Valid disk cache - use it and populate memory cache
                 debug!("GitHub releases cache hit (disk) for {}", repo);
                 self.cache
@@ -308,9 +506,10 @@ impl GitHubClient {
                 return Ok(disk_cache.releases);
             }
 
-            // 3. Stale cache available - try network, fall back to stale
+            // 3. Stale or possibly truncated cache: refresh, then use only a
+            // listing known to be complete if the network fails.
             if !force_refresh {
-                debug!("GitHub releases cache stale for {}, trying network", repo);
+                debug!("GitHub releases cache requires refresh for {}", repo);
                 let fetch_result: Result<Vec<GitHubRelease>> =
                     self.fetch_releases_from_network(repo).await;
                 match fetch_result {
@@ -319,7 +518,7 @@ impl GitHubClient {
                         let _ = self.cache.set_disk_async(&cache_key, &releases).await;
                         return Ok(releases);
                     }
-                    Err(e) => {
+                    Err(e) if !legacy_truncated => {
                         warn!(
                             "Network fetch failed for {}, using stale cache: {}",
                             repo, e
@@ -328,6 +527,7 @@ impl GitHubClient {
                             .set_memory(&cache_key, disk_cache.releases.clone());
                         return Ok(disk_cache.releases);
                     }
+                    Err(e) => return Err(e),
                 }
             }
         }
@@ -564,60 +764,68 @@ impl GitHubClient {
     /// If a fetch is already in progress for this repo, wait for and return
     /// the same result instead of making a duplicate request.
     async fn fetch_releases_from_network(&self, repo: &str) -> Result<Vec<GitHubRelease>> {
+        self.coalesced_fetch(repo, || self.do_fetch_releases(repo))
+            .await
+    }
+
+    async fn coalesced_fetch<F, Fut>(&self, repo: &str, fetch: F) -> Result<Vec<GitHubRelease>>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<Vec<GitHubRelease>>>,
+    {
         let cache_key = repo.to_string();
-
-        // Check if there's already a pending fetch for this repo
-        {
-            let pending = self.pending_fetches.lock().await;
-            if let Some(receiver) = pending.get(&cache_key) {
-                // Clone the receiver to wait for the result
-                let mut rx = receiver.clone();
-                drop(pending); // Release the lock while waiting
-
-                debug!(
-                    "Coalescing request for {} - waiting for in-flight fetch",
-                    repo
-                );
-
-                // Wait for the result
-                loop {
-                    if let Some(result) = rx.borrow().as_ref() {
-                        return result.clone().map_err(|e| PumasError::Network {
-                            message: e,
-                            cause: None,
-                        });
-                    }
-                    // Wait for change
-                    if rx.changed().await.is_err() {
-                        // Sender dropped without sending - fall through to make our own request
-                        break;
+        let tx = loop {
+            // Elect the owner while holding the same map lock used for lookup.
+            let election = {
+                let mut pending = self.pending_fetches.lock().await;
+                if pending
+                    .get(&cache_key)
+                    .is_some_and(|receiver| receiver.has_changed().is_err())
+                {
+                    pending.remove(&cache_key);
+                }
+                if let Some(receiver) = pending.get(&cache_key) {
+                    Err(receiver.clone())
+                } else {
+                    let (tx, rx) = watch::channel(None);
+                    pending.insert(cache_key.clone(), rx);
+                    Ok(tx)
+                }
+            };
+            match election {
+                Ok(tx) => break tx,
+                Err(mut rx) => {
+                    debug!(
+                        "Coalescing request for {} - waiting for in-flight fetch",
+                        repo
+                    );
+                    #[cfg(test)]
+                    self.follower_joined.notify_one();
+                    loop {
+                        if let Some(result) = rx.borrow().as_ref() {
+                            return result.clone().map_err(FetchFailure::into_error);
+                        }
+                        if rx.changed().await.is_err() {
+                            // The elected owner was cancelled. Retry election.
+                            break;
+                        }
                     }
                 }
             }
-        }
-
-        // No pending fetch - we'll do the fetch ourselves
-        // Create a channel to broadcast the result
-        let (tx, rx) = watch::channel(None);
-
-        {
-            let mut pending = self.pending_fetches.lock().await;
-            pending.insert(cache_key.clone(), rx);
-        }
+        };
 
         // Acquire fetch lock and do the actual fetch
         let _lock = self.fetch_lock.write().await;
         self.is_fetching.store(true, Ordering::SeqCst);
+        let _fetching_reset = FetchingReset(&self.is_fetching);
 
-        let result = self.do_fetch_releases(repo).await;
-
-        self.is_fetching.store(false, Ordering::SeqCst);
+        let result = fetch().await;
 
         // Convert result to FetchResult and broadcast
         let fetch_result: FetchResult = result
             .as_ref()
             .map(|r| r.clone())
-            .map_err(|e| e.to_string());
+            .map_err(FetchFailure::from_error);
 
         // Broadcast the result to any waiting callers
         let _ = tx.send(Some(fetch_result));
@@ -632,113 +840,106 @@ impl GitHubClient {
     }
 
     async fn do_fetch_releases(&self, repo: &str) -> Result<Vec<GitHubRelease>> {
-        let mut all_releases = Vec::new();
-        let per_page = NetworkConfig::GITHUB_RELEASES_PER_PAGE;
-        let max_pages = NetworkConfig::GITHUB_RELEASES_MAX_PAGES;
-
-        for page in 1..=max_pages {
-            let url = format!(
-                "{}/repos/{}/releases?per_page={}&page={}",
-                NetworkConfig::GITHUB_API_BASE,
-                repo,
-                per_page,
-                page
-            );
-
-            let retry_config = RetryConfig::new()
-                .with_max_attempts(3)
-                .with_base_delay(Duration::from_secs(2));
-
-            let http = self.http.clone();
-            let url_clone = url.clone();
-
-            let (result, stats) = retry_async(
-                &retry_config,
-                || {
-                    let http = http.clone();
-                    let url = url_clone.clone();
-                    async move {
-                        let headers = vec![(
-                            "Accept".to_string(),
-                            "application/vnd.github.v3+json".to_string(),
-                        )];
-                        http.get_with_headers(&url, &headers).await
-                    }
-                },
-                |e| e.is_retryable(),
-            )
-            .await;
-
-            if stats.attempts > 1 {
-                debug!(
-                    "GitHub API request succeeded after {} attempts",
-                    stats.attempts
-                );
-            }
-
-            let response = result?;
-            let status = response.status();
-
-            if status == StatusCode::FORBIDDEN || status == StatusCode::TOO_MANY_REQUESTS {
-                // Rate limited - extract retry information from headers
-                let retry_after = response
-                    .headers()
-                    .get("Retry-After")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|s| s.parse::<u64>().ok())
-                    // Also check X-RateLimit-Reset as fallback
-                    .or_else(|| {
-                        response
-                            .headers()
-                            .get("X-RateLimit-Reset")
-                            .and_then(|v| v.to_str().ok())
-                            .and_then(|s| s.parse::<u64>().ok())
-                            .and_then(|reset| {
-                                let now =
-                                    SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-                                Some(reset.saturating_sub(now))
-                            })
-                    });
-
-                warn!(
-                    "GitHub rate limited ({}), retry after: {:?} seconds",
-                    status, retry_after
-                );
-
-                return Err(PumasError::RateLimited {
-                    service: "GitHub".to_string(),
-                    retry_after_secs: retry_after,
-                });
-            }
-
-            if !status.is_success() {
-                return Err(PumasError::GitHubApi {
-                    message: format!("GitHub API returned {}", status),
-                    status_code: Some(status.as_u16()),
-                });
-            }
-
-            let releases: Vec<GitHubRelease> =
-                response.json().await.map_err(|e| PumasError::Json {
-                    message: format!("Failed to parse GitHub releases: {}", e),
-                    source: None,
-                })?;
-
-            let count = releases.len();
-            all_releases.extend(releases);
-
-            // If we got fewer than per_page, we've reached the end
-            if count < per_page as usize {
-                break;
-            }
-        }
-
+        let all_releases = collect_release_pages(
+            NetworkConfig::GITHUB_RELEASES_PER_PAGE as usize,
+            page_policy(repo),
+            |page| self.fetch_release_page(repo, page),
+        )
+        .await?;
         info!(
             "Fetched {} releases from GitHub for {}",
             all_releases.len(),
             repo
         );
         Ok(all_releases)
+    }
+
+    async fn fetch_release_page(&self, repo: &str, page: u32) -> Result<Vec<GitHubRelease>> {
+        let per_page = NetworkConfig::GITHUB_RELEASES_PER_PAGE;
+        let url = format!(
+            "{}/repos/{}/releases?per_page={}&page={}",
+            NetworkConfig::GITHUB_API_BASE,
+            repo,
+            per_page,
+            page
+        );
+
+        let retry_config = RetryConfig::new()
+            .with_max_attempts(3)
+            .with_base_delay(Duration::from_secs(2));
+
+        let http = self.http.clone();
+        let url_clone = url.clone();
+
+        let (result, stats) = retry_async(
+            &retry_config,
+            || {
+                let http = http.clone();
+                let url = url_clone.clone();
+                async move {
+                    let headers = vec![(
+                        "Accept".to_string(),
+                        "application/vnd.github.v3+json".to_string(),
+                    )];
+                    http.get_with_headers(&url, &headers).await
+                }
+            },
+            |e| e.is_retryable(),
+        )
+        .await;
+
+        if stats.attempts > 1 {
+            debug!(
+                "GitHub API request succeeded after {} attempts",
+                stats.attempts
+            );
+        }
+
+        let response = result?;
+        let status = response.status();
+
+        if status == StatusCode::FORBIDDEN || status == StatusCode::TOO_MANY_REQUESTS {
+            // Rate limited - extract retry information from headers
+            let retry_after = response
+                .headers()
+                .get("Retry-After")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse::<u64>().ok())
+                // Also check X-RateLimit-Reset as fallback
+                .or_else(|| {
+                    response
+                        .headers()
+                        .get("X-RateLimit-Reset")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .and_then(|reset| {
+                            let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+                            Some(reset.saturating_sub(now))
+                        })
+                });
+
+            warn!(
+                "GitHub rate limited ({}), retry after: {:?} seconds",
+                status, retry_after
+            );
+
+            return Err(PumasError::RateLimited {
+                service: "GitHub".to_string(),
+                retry_after_secs: retry_after,
+            });
+        }
+
+        if !status.is_success() {
+            return Err(PumasError::GitHubApi {
+                message: format!("GitHub API returned {}", status),
+                status_code: Some(status.as_u16()),
+            });
+        }
+
+        response.json().await.map_err(|e| PumasError::Json {
+            message: format!("Failed to parse GitHub releases: {}", e),
+            source: None,
+        })
     }
 }
 
@@ -783,8 +984,11 @@ impl WebSource for GitHubClient {
 
         // Check disk cache validity
         self.cache
-            .get_disk(key)
-            .map(|c| self.cache.is_disk_cache_valid(&c))
+            .get_disk_entry(key)
+            .map(|entry| {
+                self.cache.is_disk_cache_valid(&entry.snapshot)
+                    && !may_be_legacy_truncated(key, &entry)
+            })
             .unwrap_or(false)
     }
 
@@ -801,7 +1005,279 @@ impl WebSource for GitHubClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn coalesced_callers_share_one_owner_and_rate_limit_details() {
+        let (client, _root) = create_test_client();
+        let client = Arc::new(client);
+        let started = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let start_barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let mut callers = Vec::new();
+        for _ in 0..2 {
+            let client = client.clone();
+            let started = started.clone();
+            let release = release.clone();
+            let calls = calls.clone();
+            let start_barrier = start_barrier.clone();
+            callers.push(tokio::spawn(async move {
+                start_barrier.wait().await;
+                client
+                    .coalesced_fetch("pytorch/pytorch", move || async move {
+                        calls.fetch_add(1, AtomicOrdering::SeqCst);
+                        started.notify_one();
+                        release.notified().await;
+                        Err(PumasError::RateLimited {
+                            service: "GitHub".into(),
+                            retry_after_secs: Some(37),
+                        })
+                    })
+                    .await
+            }));
+        }
+        start_barrier.wait().await;
+        tokio::time::timeout(Duration::from_secs(2), started.notified())
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), client.follower_joined.notified())
+            .await
+            .unwrap();
+        release.notify_one();
+
+        for caller in callers {
+            let result = caller.await.unwrap();
+            assert!(matches!(
+                result,
+                Err(PumasError::RateLimited {
+                    service,
+                    retry_after_secs: Some(37),
+                }) if service == "GitHub"
+            ));
+        }
+        assert_eq!(calls.load(AtomicOrdering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn cancelled_fetch_owner_allows_waiter_to_take_over() {
+        let (client, _root) = create_test_client();
+        let client = Arc::new(client);
+        let started = Arc::new(Notify::new());
+        let owner = {
+            let client = client.clone();
+            let started = started.clone();
+            tokio::spawn(async move {
+                client
+                    .coalesced_fetch("pytorch/pytorch", move || async move {
+                        started.notify_one();
+                        std::future::pending::<Result<Vec<GitHubRelease>>>().await
+                    })
+                    .await
+            })
+        };
+        tokio::time::timeout(Duration::from_secs(2), started.notified())
+            .await
+            .unwrap();
+        let waiter = {
+            let client = client.clone();
+            tokio::spawn(async move {
+                client
+                    .coalesced_fetch("pytorch/pytorch", || async {
+                        Ok(vec![github_release(vec![])])
+                    })
+                    .await
+            })
+        };
+        tokio::time::timeout(Duration::from_secs(2), client.follower_joined.notified())
+            .await
+            .unwrap();
+        owner.abort();
+        let releases = tokio::time::timeout(Duration::from_secs(2), waiter)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(releases.len(), 1);
+        assert!(!client.is_fetching.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn closed_completed_pending_channel_does_not_satisfy_new_fetch() {
+        let (client, _root) = create_test_client();
+        let mut old_release = github_release(vec![]);
+        old_release.tag_name = "old".into();
+        for stale in [
+            Ok(vec![old_release]),
+            Err(FetchFailure::RateLimited {
+                service: "GitHub".into(),
+                retry_after_secs: Some(99),
+            }),
+        ] {
+            let (tx, rx) = watch::channel(Some(stale));
+            let prior_waiter = rx.clone();
+            client
+                .pending_fetches
+                .lock()
+                .await
+                .insert("pytorch/pytorch".into(), rx);
+            drop(tx);
+
+            let calls = Arc::new(AtomicUsize::new(0));
+            let calls_for_fetch = calls.clone();
+            let releases = tokio::time::timeout(
+                Duration::from_secs(2),
+                client.coalesced_fetch("pytorch/pytorch", move || async move {
+                    calls_for_fetch.fetch_add(1, AtomicOrdering::SeqCst);
+                    let mut release = github_release(vec![]);
+                    release.tag_name = "new".into();
+                    Ok(vec![release])
+                }),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(calls.load(AtomicOrdering::SeqCst), 1);
+            assert_eq!(releases[0].tag_name, "new");
+            assert!(prior_waiter.borrow().is_some());
+        }
+    }
+
+    #[test]
+    fn coalesced_github_api_status_survives_projection() {
+        let error = PumasError::GitHubApi {
+            message: "GitHub API returned 503".into(),
+            status_code: Some(503),
+        };
+        assert!(matches!(
+            FetchFailure::from_error(&error).into_error(),
+            PumasError::GitHubApi {
+                status_code: Some(503),
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn release_pagination_continues_past_page_ten_and_stops_on_short_page() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let releases =
+            collect_release_pages(100, page_policy(AppId::Torch.github_repo()), |page| {
+                let seen = seen.clone();
+                async move {
+                    seen.lock().unwrap().push(page);
+                    let count = if page <= 11 { 100 } else { 1 };
+                    Ok((0..count)
+                        .map(|index| {
+                            let mut release = github_release(vec![]);
+                            release.tag_name = format!("v{page}.{index}.0");
+                            release
+                        })
+                        .collect())
+                }
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(releases.len(), 1101);
+        assert_eq!(releases.last().unwrap().tag_name, "v12.0.0");
+        assert_eq!(*seen.lock().unwrap(), (1..=12).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn release_pagination_returns_error_instead_of_partial_listing() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let result = collect_release_pages(1, page_policy(AppId::Torch.github_repo()), |page| {
+            let seen = seen.clone();
+            async move {
+                seen.lock().unwrap().push(page);
+                if page == 11 {
+                    return Err(PumasError::RateLimited {
+                        service: "GitHub".into(),
+                        retry_after_secs: Some(60),
+                    });
+                }
+                Ok(vec![github_release(vec![])])
+            }
+        })
+        .await;
+
+        assert!(matches!(result, Err(PumasError::RateLimited { .. })));
+        assert_eq!(*seen.lock().unwrap(), (1..=11).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn non_torch_listing_keeps_ten_page_budget() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let releases = collect_release_pages(1, page_policy("ggml-org/llama.cpp"), |page| {
+            let seen = seen.clone();
+            async move {
+                seen.lock().unwrap().push(page);
+                Ok(vec![github_release(vec![])])
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(releases.len(), 10);
+        assert_eq!(*seen.lock().unwrap(), (1..=10).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn torch_page_budget_and_deadline_fail_without_partial_listing() {
+        let budget = collect_release_pages(1, page_policy(AppId::Torch.github_repo()), |_| async {
+            Ok(vec![github_release(vec![])])
+        })
+        .await;
+        let error = budget.unwrap_err();
+        assert!(matches!(&error, PumasError::GitHubApi { .. }));
+        assert!(error.to_string().contains("page budget"));
+
+        let policy = ReleasePagePolicy {
+            max_pages: 20,
+            require_complete: true,
+            deadline: Some(Duration::from_millis(1)),
+        };
+        let timeout = collect_release_pages(1, policy, |_| async {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            Ok(vec![github_release(vec![])])
+        })
+        .await;
+        let error = timeout.unwrap_err();
+        assert!(matches!(&error, PumasError::GitHubApi { .. }));
+        assert!(error.to_string().contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn marked_exactly_one_thousand_cache_is_reused_offline() {
+        let (client, _root) = create_test_client();
+        let repo = AppId::Torch.github_repo();
+        let releases = vec![github_release(vec![]); 1000];
+        client.cache.set_disk(repo, &releases).unwrap();
+        let entry = client.cache.get_disk_entry(repo).unwrap();
+        assert!(entry.listing_complete);
+        assert!(!may_be_legacy_truncated(repo, &entry));
+        let cached = client.get_releases(repo, false).await.unwrap();
+        assert_eq!(cached.len(), 1000);
+        assert!(client.cache.get_memory(repo).is_some());
+    }
+
+    #[tokio::test]
+    async fn old_unmarked_exactly_one_thousand_cache_requires_refresh() {
+        let (client, _root) = create_test_client();
+        let repo = AppId::Torch.github_repo();
+        let snapshot = GitHubReleasesCache {
+            last_fetched: Utc::now().to_rfc3339(),
+            ttl: 3600,
+            releases: vec![github_release(vec![]); 1000],
+        };
+        let path = client.cache.disk_cache_path(repo);
+        std::fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+        let entry = client.cache.get_disk_entry(repo).unwrap();
+        assert!(!entry.listing_complete);
+        assert!(may_be_legacy_truncated(repo, &entry));
+        assert!(!client.get_cache_status(repo).await.is_valid);
+    }
 
     fn create_test_client() -> (GitHubClient, TempDir) {
         let temp_dir = TempDir::new().unwrap();

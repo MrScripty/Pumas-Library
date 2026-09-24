@@ -9,13 +9,65 @@ use std::io::Read;
 use std::time::Instant;
 use tokio::process::Command;
 
-const BUILDS: &[&str] = &[
-    "cpu", "cu118", "cu121", "cu124", "cu126", "cu128", "cu130", "rocm6.1", "rocm6.2", "rocm6.3",
-    "rocm6.4", "rocm7.0", "rocm7.1",
+pub(super) const BUILDS: &[&str] = &[
+    "cpu",
+    "cu75",
+    "cu80",
+    "cu90",
+    "cu91",
+    "cu92",
+    "cu100",
+    "cu101",
+    "cu102",
+    "cu110",
+    "cu111",
+    "cu113",
+    "cu115",
+    "cu116",
+    "cu117",
+    "cu118",
+    "cu121",
+    "cu124",
+    "cu126",
+    "cu128",
+    "cu129",
+    "cu130",
+    "cu132",
+    "cu134",
+    "rocm3.7",
+    "rocm3.8",
+    "rocm3.10",
+    "rocm4.0.1",
+    "rocm4.1",
+    "rocm4.2",
+    "rocm4.3.1",
+    "rocm4.5.2",
+    "rocm5.0",
+    "rocm5.1.1",
+    "rocm5.2",
+    "rocm5.3",
+    "rocm5.4.2",
+    "rocm5.5",
+    "rocm5.6",
+    "rocm5.7",
+    "rocm6.0",
+    "rocm6.1",
+    "rocm6.2",
+    "rocm6.2.4",
+    "rocm6.3",
+    "rocm6.4",
+    "rocm7.0",
+    "rocm7.1",
+    "rocm7.2",
+    "rocm7.14",
 ];
-const PYTHONS: &[&str] = &["python3.10", "python3.11", "python3.12", "python3.13"];
+pub(super) const PYTHONS: &[&str] = &["python3.10", "python3.11", "python3.12", "python3.13"];
 const ADAPTERS: &[&str] = &["none", "flux2"];
 const PREVIEW_TTL: Duration = Duration::from_secs(30 * 60);
+
+fn is_bundled_preset(tag: &str, build: &str, python: &str, adapter: &str) -> bool {
+    tag == "v2.9.1" && build == "cu130" && python == "python3.12" && adapter == "bundled"
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +81,85 @@ pub struct TorchArtifact {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_preset_is_one_choice_in_the_upstream_range() {
+        assert!(is_bundled_preset(
+            "v2.9.1",
+            "cu130",
+            "python3.12",
+            "bundled"
+        ));
+        for (tag, build, python, adapter) in [
+            ("v2.9.0", "cu130", "python3.12", "bundled"),
+            ("v2.9.1", "cpu", "python3.12", "none"),
+            ("v2.9.1", "cu130", "python3.13", "none"),
+            ("v2.9.1", "cu130", "python3.12", "flux2"),
+        ] {
+            assert!(!is_bundled_preset(tag, build, python, adapter));
+        }
+        assert!(BUILDS.contains(&"cu75"));
+        assert!(BUILDS.contains(&"cu134"));
+        assert!(BUILDS.contains(&"rocm3.7"));
+        assert!(BUILDS.contains(&"rocm7.14"));
+        assert!(!BUILDS.contains(&"xpu"));
+        assert!(
+            BUILDS.iter().position(|build| *build == "rocm7.2")
+                < BUILDS.iter().position(|build| *build == "rocm7.14")
+        );
+    }
+
+    #[test]
+    fn resolver_exit_codes_serialize_distinct_safe_rejections() {
+        for (code, expected) in [
+            (Some(2), "unsupported"),
+            (Some(3), "validation_failed"),
+            (Some(75), "network_inconclusive"),
+            (Some(1), "inconclusive"),
+            (None, "inconclusive"),
+        ] {
+            let reason = TorchPreviewRejectionReason::from_exit_code(code);
+            let outcome = TorchPreviewOutcome::Rejected {
+                reason,
+                message: reason.message(),
+            };
+            let value = serde_json::to_value(outcome).unwrap();
+            assert_eq!(value["status"], "rejected");
+            assert_eq!(value["reason"], expected);
+            assert_eq!(value["message"], reason.message());
+            assert_eq!(value.as_object().unwrap().len(), 3);
+        }
+        let timeout =
+            serde_json::to_value(resolver_rejection(PreviewResolverRun::TimedOut).unwrap())
+                .unwrap();
+        assert_eq!(timeout["status"], "rejected");
+        assert_eq!(timeout["reason"], "inconclusive");
+        assert_eq!(
+            timeout["message"],
+            TorchPreviewRejectionReason::Inconclusive.message()
+        );
+    }
+
+    #[test]
+    fn resolved_preview_serializes_under_preview_key() {
+        let outcome = TorchPreviewOutcome::Resolved {
+            preview: TorchPreview {
+                preview_id: "retained-id".into(),
+                tag: "v2.9.1".into(),
+                build: "cu130".into(),
+                python: "python3.12".into(),
+                adapter: "bundled".into(),
+                artifacts: Vec::new(),
+                qualification: "qualified".into(),
+                expires_in_seconds: 1800,
+            },
+        };
+        let value = serde_json::to_value(outcome).unwrap();
+        assert_eq!(value["status"], "resolved");
+        assert_eq!(value["preview"]["previewId"], "retained-id");
+        assert_eq!(value["preview"]["expiresInSeconds"], 1800);
+        assert_eq!(value.as_object().unwrap().len(), 2);
+    }
 
     #[test]
     fn probe_context_comparison_identifies_each_changed_identity() {
@@ -84,10 +215,14 @@ mod tests {
         let workspace = tempfile::tempdir().unwrap();
         let mut command = Command::new("sh");
         command.args(["-c", "sleep 30"]);
-        let error = run_preview_resolver(command, workspace.path(), Duration::from_millis(25))
+        let outcome = run_preview_resolver(command, workspace.path(), Duration::from_millis(25))
             .await
-            .unwrap_err();
-        assert!(error.to_string().contains("timed out"));
+            .unwrap();
+        assert!(matches!(&outcome, PreviewResolverRun::TimedOut));
+        let rejected = resolver_rejection(outcome).unwrap();
+        let value = serde_json::to_value(rejected).unwrap();
+        assert_eq!(value["status"], "rejected");
+        assert_eq!(value["reason"], "inconclusive");
     }
 
     #[tokio::test]
@@ -95,9 +230,12 @@ mod tests {
         let workspace = tempfile::tempdir().unwrap();
         let mut command = Command::new("sh");
         command.args(["-c", "echo $$; sleep 30 &"]);
-        let status = run_preview_resolver(command, workspace.path(), Duration::from_secs(2))
+        let outcome = run_preview_resolver(command, workspace.path(), Duration::from_secs(2))
             .await
             .unwrap();
+        let PreviewResolverRun::Exited(status) = outcome else {
+            panic!("Resolver completed before the deadline");
+        };
         assert!(status.success());
         let pid: i32 = std::fs::read_to_string(workspace.path().join("resolver.stdout"))
             .unwrap()
@@ -119,6 +257,49 @@ pub struct TorchPreview {
     pub artifacts: Vec<TorchArtifact>,
     pub qualification: String,
     pub expires_in_seconds: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TorchPreviewRejectionReason {
+    Unsupported,
+    ValidationFailed,
+    NetworkInconclusive,
+    Inconclusive,
+}
+
+impl TorchPreviewRejectionReason {
+    fn from_exit_code(code: Option<i32>) -> Self {
+        match code {
+            Some(2) => Self::Unsupported,
+            Some(3) => Self::ValidationFailed,
+            Some(75) => Self::NetworkInconclusive,
+            _ => Self::Inconclusive,
+        }
+    }
+
+    fn message(self) -> &'static str {
+        match self {
+            Self::Unsupported => {
+                "No compatible official wheel and dependencies were found for this selection."
+            }
+            Self::ValidationFailed => "The resolved wheel report failed validation.",
+            Self::NetworkInconclusive => "Network access prevented a conclusive wheel resolution.",
+            Self::Inconclusive => "Wheel resolution did not complete conclusively.",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum TorchPreviewOutcome {
+    Resolved {
+        preview: TorchPreview,
+    },
+    Rejected {
+        reason: TorchPreviewRejectionReason,
+        message: &'static str,
+    },
 }
 
 pub(crate) struct RetainedTorchPreview {
@@ -240,6 +421,26 @@ fn safe_torch_tag(tag: &str) -> bool {
 #[cfg(target_os = "linux")]
 struct PreviewGroupGuard(Option<u32>);
 
+#[derive(Debug)]
+enum PreviewResolverRun {
+    Exited(std::process::ExitStatus),
+    TimedOut,
+}
+
+fn resolver_rejection(run: PreviewResolverRun) -> Option<TorchPreviewOutcome> {
+    let reason = match run {
+        PreviewResolverRun::Exited(status) if status.success() => return None,
+        PreviewResolverRun::Exited(status) => {
+            TorchPreviewRejectionReason::from_exit_code(status.code())
+        }
+        PreviewResolverRun::TimedOut => TorchPreviewRejectionReason::Inconclusive,
+    };
+    Some(TorchPreviewOutcome::Rejected {
+        reason,
+        message: reason.message(),
+    })
+}
+
 #[cfg(target_os = "linux")]
 impl Drop for PreviewGroupGuard {
     fn drop(&mut self) {
@@ -254,7 +455,7 @@ async fn run_preview_resolver(
     mut command: Command,
     workspace: &Path,
     deadline: Duration,
-) -> Result<std::process::ExitStatus> {
+) -> Result<PreviewResolverRun> {
     use pumas_library::platform::linux_group;
     linux_group::ensure_supported().map_err(PumasError::from)?;
     let stdout =
@@ -298,11 +499,11 @@ async fn run_preview_resolver(
     child.wait().await.map_err(PumasError::from)?;
     group.0 = None;
     if timed_out {
-        return Err(failed(
-            "Network inconclusive: Torch preview resolution timed out",
-        ));
+        return Ok(PreviewResolverRun::TimedOut);
     }
-    status.ok_or_else(|| failed("Torch preview resolver exited without status"))
+    status
+        .map(PreviewResolverRun::Exited)
+        .ok_or_else(|| failed("Torch preview resolver exited without status"))
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -310,7 +511,7 @@ async fn run_preview_resolver(
     _command: Command,
     _workspace: &Path,
     _deadline: Duration,
-) -> Result<std::process::ExitStatus> {
+) -> Result<PreviewResolverRun> {
     Err(failed("Managed Torch previews require Linux x86_64"))
 }
 
@@ -463,7 +664,7 @@ impl VersionManager {
         build: &str,
         python: &str,
         adapter: &str,
-    ) -> Result<TorchPreview> {
+    ) -> Result<TorchPreviewOutcome> {
         if self.app_id != AppId::Torch
             || !BUILDS.contains(&build)
             || !PYTHONS.contains(&python)
@@ -484,14 +685,9 @@ impl VersionManager {
                         .all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_digit()))
             })
             .ok_or_else(|| failed("Invalid stable Torch tag"))?;
-        if tag == "v2.9.1" && (build != "cu130" || python != "python3.12" || adapter != "bundled") {
+        if adapter == "bundled" && !is_bundled_preset(tag, build, python, adapter) {
             return Err(failed(
-                "The qualified v2.9.1 preset requires CUDA 13.0, Python 3.12, and bundled adapters",
-            ));
-        }
-        if adapter == "bundled" && tag != "v2.9.1" {
-            return Err(failed(
-                "Bundled adapters are only available in the v2.9.1 preset",
+                "Bundled adapters require the v2.9.1 CUDA 13.0/Python 3.12 preset",
             ));
         }
         self.resolve_installable_release(tag).await?;
@@ -510,7 +706,7 @@ impl VersionManager {
         {
             return Err(failed("Selected Python interpreter has the wrong version"));
         }
-        if tag == "v2.9.1" {
+        if is_bundled_preset(tag, build, python, adapter) {
             let lock = include_str!("../../../../../torch-server/runtime/requirements.lock");
             let mut artifacts = Vec::new();
             let mut lines = lock.lines();
@@ -585,7 +781,7 @@ impl VersionManager {
                     created: Instant::now(),
                 },
             );
-            return Ok(preview);
+            return Ok(TorchPreviewOutcome::Resolved { preview });
         }
         // This temporary directory is only a resolver workspace. Retained preview
         // data is held in memory, so restart invalidates every outstanding ID.
@@ -610,18 +806,9 @@ impl VersionManager {
                 "--output",
             ])
             .arg(workspace.path());
-        let status =
-            run_preview_resolver(command, workspace.path(), Duration::from_secs(180)).await?;
-        if !status.success() {
-            let stderr = fs::read_to_string(workspace.path().join("resolver.stderr"))
-                .await
-                .unwrap_or_default();
-            let category = if status.code() == Some(75) {
-                "Network inconclusive"
-            } else {
-                "Unsupported combination"
-            };
-            return Err(failed(format!("{category}: {}", stderr.trim())));
+        let run = run_preview_resolver(command, workspace.path(), Duration::from_secs(180)).await?;
+        if let Some(rejection) = resolver_rejection(run) {
+            return Ok(rejection);
         }
         let resolution = fs::read_to_string(workspace.path().join("resolution.json"))
             .await
@@ -680,12 +867,7 @@ impl VersionManager {
             python: python.into(),
             adapter: adapter.into(),
             artifacts: parsed.artifacts,
-            qualification: if tag == "v2.9.1" {
-                "qualified"
-            } else {
-                "unverified"
-            }
-            .into(),
+            qualification: "unverified".into(),
             expires_in_seconds: PREVIEW_TTL.as_secs(),
         };
         let mut previews = self.torch_previews.lock().await;
@@ -702,7 +884,7 @@ impl VersionManager {
                 created: Instant::now(),
             },
         );
-        Ok(preview)
+        Ok(TorchPreviewOutcome::Resolved { preview })
     }
 
     pub async fn torch_preview_report(&self, preview_id: &str) -> Result<String> {

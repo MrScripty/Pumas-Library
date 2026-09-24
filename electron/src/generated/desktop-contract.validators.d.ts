@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 8f2bd089af0bd4a485cc7aabf716ccff6f6020714b3b7f13963bbb99d9ea5c4c. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 8db300212a0eab71ed0601879e843cb27887144f43c11ef2f5ede12663febc86. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -59,6 +59,11 @@ export declare function validateSuccessOutcome(value: unknown): boolean;
 export declare function validateSupportedQuantTypesOutcome(value: unknown): boolean;
 export declare function validateSwitchVersionOutcome(value: unknown): boolean;
 export declare function validateSwitchVersionParams(value: unknown): boolean;
+export declare function validateTorchRuntimePreview(value: unknown): boolean;
+export declare function validateTorchRuntimePreviewArtifact(value: unknown): boolean;
+export declare function validateTorchRuntimePreviewOutcome(value: unknown): boolean;
+export declare function validateTorchRuntimePreviewQualification(value: unknown): boolean;
+export declare function validateTorchRuntimePreviewRejectionReason(value: unknown): boolean;
 export declare function validateTrialTorchRuntimeOutcome(value: unknown): boolean;
 export declare function validateTrialTorchRuntimeParams(value: unknown): boolean;
 export declare function validateUpdateInferenceSettingsOutcome(value: unknown): boolean;

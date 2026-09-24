@@ -194,8 +194,10 @@ describe('TorchPanel shared version controls', () => {
         adapters: ['none'], preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
       }),
       preview_torch_runtime: vi.fn().mockResolvedValue({
-        previewId: 'preview-1', tag: candidateTag, build: 'cpu', python: 'python3.12',
-        adapter: 'none', qualification: 'unverified', artifacts: [],
+        status: 'resolved', preview: {
+          previewId: 'preview-1', expiresInSeconds: 300, tag: candidateTag, build: 'cpu', python: 'python3.12',
+          adapter: 'none', qualification: 'unverified', artifacts: [],
+        },
       }),
       get_torch_runtime_probe: vi.fn().mockResolvedValue({
         status: 'passed', core_status: 'passed', adapter_status: 'not selected', capabilities: {},

@@ -1,15 +1,11 @@
 //! Bounded discovery of official Torch wheels for installed Python interpreters.
 //! A wheel match is only a lead; dependencies and adapters are not resolved.
 
+use super::torch_preview::{BUILDS, PYTHONS};
 use super::*;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
-const BUILDS: &[&str] = &[
-    "cpu", "cu118", "cu121", "cu124", "cu126", "cu128", "cu130", "rocm6.1", "rocm6.2", "rocm6.3",
-    "rocm6.4", "rocm7.0", "rocm7.1",
-];
-const PYTHONS: &[&str] = &["python3.10", "python3.11", "python3.12", "python3.13"];
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(45);
 const PYTHON_CHECK_TIMEOUT: Duration = Duration::from_secs(3);
 

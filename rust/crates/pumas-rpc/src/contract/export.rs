@@ -467,6 +467,33 @@ pub(crate) fn desktop_contract_fixtures() -> anyhow::Result<Value> {
     }
     fixtures["version_status"] =
         serde_json::to_value(VersionStatusOutcome::new(version_status_fixture())?)?;
+    fixtures["torch_runtime_preview_resolved"] =
+        serde_json::to_value(TorchRuntimePreviewOutcome::Resolved {
+            preview: torch_runtime_preview_fixture(),
+        })?;
+    for (key, reason) in [
+        (
+            "torch_runtime_preview_unsupported",
+            TorchRuntimePreviewRejectionReason::Unsupported,
+        ),
+        (
+            "torch_runtime_preview_validation_failed",
+            TorchRuntimePreviewRejectionReason::ValidationFailed,
+        ),
+        (
+            "torch_runtime_preview_network_inconclusive",
+            TorchRuntimePreviewRejectionReason::NetworkInconclusive,
+        ),
+        (
+            "torch_runtime_preview_inconclusive",
+            TorchRuntimePreviewRejectionReason::Inconclusive,
+        ),
+    ] {
+        fixtures[key] = serde_json::to_value(TorchRuntimePreviewOutcome::Rejected {
+            reason,
+            message: reason.message(),
+        })?;
+    }
     for key in ["version_status_empty", "version_status_no_manager"] {
         fixtures[key] =
             serde_json::to_value(VersionStatusOutcome::new(RuntimeVersionStatus::default())?)?;
@@ -748,6 +775,11 @@ pub(crate) fn desktop_contract_schema() -> Result<Value, serde_json::Error> {
         SetDefaultVersionParams,
         InstallVersionParams,
         PreviewTorchRuntimeParams,
+        TorchRuntimePreviewOutcome,
+        TorchRuntimePreview,
+        TorchRuntimePreviewArtifact,
+        TorchRuntimePreviewQualification,
+        TorchRuntimePreviewRejectionReason,
         GetTorchPreviewReportParams,
         GetTorchRuntimeProbeParams,
         TrialTorchRuntimeParams,

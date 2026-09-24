@@ -32,18 +32,55 @@ NUNCHAKU_URL = (
 NUNCHAKU_SHA256 = "6196fbea888d6719fd7aff7ec58f1618ff37c35d4542f2c595aadd2a242e500f"
 BUILDS = (
     "cpu",
+    "cu75",
+    "cu80",
+    "cu90",
+    "cu91",
+    "cu92",
+    "cu100",
+    "cu101",
+    "cu102",
+    "cu110",
+    "cu111",
+    "cu113",
+    "cu115",
+    "cu116",
+    "cu117",
     "cu118",
     "cu121",
     "cu124",
     "cu126",
     "cu128",
+    "cu129",
     "cu130",
+    "cu132",
+    "cu134",
+    "rocm3.7",
+    "rocm3.8",
+    "rocm3.10",
+    "rocm4.0.1",
+    "rocm4.1",
+    "rocm4.2",
+    "rocm4.3.1",
+    "rocm4.5.2",
+    "rocm5.0",
+    "rocm5.1.1",
+    "rocm5.2",
+    "rocm5.3",
+    "rocm5.4.2",
+    "rocm5.5",
+    "rocm5.6",
+    "rocm5.7",
+    "rocm6.0",
     "rocm6.1",
     "rocm6.2",
+    "rocm6.2.4",
     "rocm6.3",
     "rocm6.4",
     "rocm7.0",
     "rocm7.1",
+    "rocm7.2",
+    "rocm7.14",
 )
 ADAPTERS = ("none", "flux2", "nunchaku")
 MAX_INDEX_REQUESTS = 5
@@ -99,8 +136,10 @@ def discovery_builds(selected_build: str) -> list[str]:
         family = [build for build in BUILDS if build.startswith("cu") and build != selected_build]
         family.sort(key=lambda build: abs(int(build[2:]) - int(selected_build[2:])))
     elif selected_build.startswith("rocm"):
-        family = [build for build in BUILDS if build.startswith("rocm") and build != selected_build]
-        family.sort(key=lambda build: abs(float(build[4:]) - float(selected_build[4:])))
+        rocm_builds = [build for build in BUILDS if build.startswith("rocm")]
+        selected_index = rocm_builds.index(selected_build)
+        family = [build for build in rocm_builds if build != selected_build]
+        family.sort(key=lambda build: abs(rocm_builds.index(build) - selected_index))
     else:
         family = [build for build in reversed(BUILDS) if build.startswith("cu")]
     order = [selected_build, *family[:3], "cpu"]
@@ -391,7 +430,7 @@ def resolution_failure(stderr: str, version: str, build: str) -> tuple[int, str]
     if "resolutionimpossible" in lowered or "conflicting dependencies" in lowered:
         return 2, "The selected package requirements are incompatible."
     return (
-        75,
+        1,
         "Dependency resolution failed; wheel availability is inconclusive. Review pip output.",
     )
 
@@ -459,7 +498,7 @@ def main() -> None:
             report, args.version, args.build, args.adapter
         )
     except (KeyError, TypeError, ValueError, OSError) as error:
-        parser.exit(2, f"Invalid wheel resolution: {error}\n")
+        parser.exit(3, f"Invalid wheel resolution: {error}\n")
     (args.output / "requirements.txt").write_text("\n".join(requirements) + "\n")
     (args.output / "resolution.json").write_text(json.dumps(resolution, indent=2) + "\n")
 

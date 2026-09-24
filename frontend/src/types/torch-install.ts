@@ -1,3 +1,13 @@
+import type {
+  TorchRuntimePreview as DesktopTorchRuntimePreview,
+  TorchRuntimePreviewOutcome as DesktopTorchRuntimePreviewOutcome,
+  TorchRuntimePreviewRejectionReason as DesktopTorchRuntimePreviewRejectionReason,
+} from '../generated/desktop-contract';
+
+export type TorchRuntimePreviewOutcome = DesktopTorchRuntimePreviewOutcome;
+export type TorchRuntimePreviewRejectReason = DesktopTorchRuntimePreviewRejectionReason;
+export type TorchRuntimePreview = DesktopTorchRuntimePreview;
+
 export interface TorchRuntimeOptions {
   builds: string[];
   pythons: Array<{ id: string; label: string }>;
@@ -19,17 +29,6 @@ export interface TorchRuntimePreviewRequest {
   build: string;
   python: string;
   adapter: string;
-}
-
-export interface TorchRuntimePreview {
-  previewId: string;
-  tag: string;
-  build: string;
-  python: string;
-  adapter: string;
-  expiresInSeconds?: number;
-  qualification: 'qualified' | 'unverified';
-  artifacts: Array<{ name: string; version: string; url: string; sha256: string }>;
 }
 
 export interface TorchCapabilityProbe {

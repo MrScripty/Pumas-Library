@@ -820,9 +820,7 @@ async fn dispatch_admitted_command(
             let preview = vm
                 .preview_torch_runtime(&tag, &build, &python, &adapter)
                 .await?;
-            serde_json::to_value(preview)
-                .map(RpcOutcome::TorchRuntimePreview)
-                .map_err(|e| pumas_library::PumasError::Other(e.to_string()))
+            Ok(RpcOutcome::TorchRuntimePreview(preview.try_into()?))
         }
         #[cfg(feature = "inference-plugins")]
         RpcCommand::GetTorchPreviewReport { preview_id } => {

@@ -62,7 +62,9 @@ pub use progress::{InstallationProgressTracker, PackageWeights, ProgressUpdate};
 pub use size_calculator::{ReleaseSize, SizeBreakdown, SizeCalculator};
 pub use state::VersionState;
 pub use torch_alternatives::{TorchAlternativeDiscovery, TorchAlternativeMatch};
-pub use torch_preview::{TorchArtifact, TorchPreview};
+pub use torch_preview::{
+    TorchArtifact, TorchPreview, TorchPreviewOutcome, TorchPreviewRejectionReason,
+};
 
 use pumas_library::config::{AppId, PathsConfig};
 use pumas_library::metadata::MetadataManager;

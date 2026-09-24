@@ -68,6 +68,7 @@ import {
   decodeInstallVersionOutcome,
   decodeInstallVersionParams,
   decodePreviewTorchRuntimeParams,
+  decodeTorchRuntimePreviewOutcome,
   decodeGetTorchRuntimeProbeParams,
   decodeTrialTorchRuntimeParams,
   decodeTrialTorchRuntimeOutcome,
@@ -385,17 +386,6 @@ function validateTorchOptions(value: unknown): unknown {
   return result;
 }
 
-function validateTorchPreview(value: unknown): unknown {
-  const result = requireTorchPayload(value, 'preview_torch_runtime');
-  if (!['previewId', 'tag', 'build', 'python', 'adapter'].every((key) => typeof result[key] === 'string')
-    || !['qualified', 'unverified'].includes(String(result['qualification']))
-    || !Array.isArray(result['artifacts']) || !result['artifacts'].every((artifact) => isRecord(artifact)
-      && ['name', 'version', 'url', 'sha256'].every((key) => typeof artifact[key] === 'string'))) {
-    throw new TypeError('Invalid preview_torch_runtime response');
-  }
-  return result;
-}
-
 function validateTorchProbe(value: unknown): unknown {
   const result = requireTorchPayload(value, 'get_torch_runtime_probe');
   const capabilities = result['capabilities'];
@@ -656,7 +646,7 @@ const electronAPI = {
   get_torch_runtime_options: async () => validateTorchOptions(await apiCall('get_torch_runtime_options')),
   preview_torch_runtime: async (request: { tag: string; build: string; python: string; adapter: string }) => {
     const params = requireDecoded(decodePreviewTorchRuntimeParams(request), 'preview_torch_runtime request');
-    return validateTorchPreview(await apiCall('preview_torch_runtime', params));
+    return validatedApiCall('preview_torch_runtime', decodeTorchRuntimePreviewOutcome, params);
   },
   get_torch_runtime_probe: async (tag: string) => {
     const params = requireDecoded(decodeGetTorchRuntimeProbeParams({ tag }), 'get_torch_runtime_probe request');

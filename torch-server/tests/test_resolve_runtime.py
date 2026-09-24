@@ -1,8 +1,13 @@
 """Deterministic resolution checks; no network or large wheels."""
 
 import importlib.util
+import json
 import pathlib
+import re
+import tempfile
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
 from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -53,6 +58,59 @@ def report(
 
 
 class ResolverTests(unittest.TestCase):
+    def test_build_vocabulary_matches_rust_manager(self):
+        rust_source = (
+            ROOT.parent
+            / "rust/crates/pumas-app-manager/src/version_manager/torch_preview.rs"
+        ).read_text()
+        declaration = re.search(
+            r"pub\(super\) const BUILDS: &\[&str\] = &\[(.*?)\];",
+            rust_source,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(declaration)
+        rust_builds = tuple(re.findall(r'"([^"]+)"', declaration.group(1)))
+        self.assertEqual(rust_builds, resolver.BUILDS)
+
+    def test_official_historical_and_current_build_vocabulary(self):
+        self.assertEqual(
+            resolver.BUILDS,
+            (
+                "cpu",
+                "cu75", "cu80", "cu90", "cu91", "cu92", "cu100", "cu101", "cu102",
+                "cu110", "cu111", "cu113", "cu115", "cu116", "cu117", "cu118",
+                "cu121", "cu124", "cu126", "cu128", "cu129", "cu130", "cu132", "cu134",
+                "rocm3.7", "rocm3.8", "rocm3.10", "rocm4.0.1", "rocm4.1",
+                "rocm4.2", "rocm4.3.1", "rocm4.5.2", "rocm5.0", "rocm5.1.1",
+                "rocm5.2", "rocm5.3", "rocm5.4.2", "rocm5.5", "rocm5.6",
+                "rocm5.7", "rocm6.0", "rocm6.1", "rocm6.2", "rocm6.2.4",
+                "rocm6.3", "rocm6.4", "rocm7.0", "rocm7.1", "rocm7.2",
+                "rocm7.14",
+            ),
+        )
+
+    def test_rocm_alternatives_follow_version_components(self):
+        self.assertEqual(
+            resolver.discovery_builds("rocm3.10")[:3],
+            ["rocm3.10", "rocm3.8", "rocm4.0.1"],
+        )
+
+    def test_historical_build_without_matching_wheel_is_unsupported(self):
+        result = resolver.discover_alternatives(
+            "v1.12.1",
+            "cu102",
+            "python3.12",
+            ["3.12"],
+            index_loader=lambda build: [
+                f"https://download.pytorch.org/whl/{build}/"
+                f"torch-1.12.1%2B{build}-cp39-cp39-linux_x86_64.whl#sha256={'a' * 64}"
+            ],
+            tag_loader=lambda _: ("3.12", {"cp312-cp312-manylinux_2_28_x86_64"}),
+        )
+        self.assertEqual(result["status"], "none")
+        self.assertEqual(result["matches"], [])
+        self.assertEqual(result["checkedBuilds"][0], "cu102")
+
     def test_exact_official_build_and_hashes_are_recorded(self):
         requirements, resolution = resolver.requirements_from_report(report(), "2.10.0", "cpu")
         self.assertEqual(resolution["torch"], "2.10.0+cpu")
@@ -147,6 +205,59 @@ class ResolverTests(unittest.TestCase):
             )[0],
             75,
         )
+        self.assertEqual(
+            resolver.resolution_failure("pip exited unexpectedly", "2.10.0", "cpu")[0],
+            1,
+        )
+
+    def test_invalid_successful_pip_report_has_distinct_failure_code(self):
+        fixtures = {
+            "untrusted origin": report(url="https://example.com/torch.whl"),
+            "wrong build": report(version="2.10.0+cu128"),
+            "missing hash": report(),
+            "missing dependency": report(),
+        }
+        fixtures["missing hash"]["install"][0]["download_info"]["archive_info"] = {}
+        fixtures["missing dependency"]["install"].pop()
+
+        def fake_run(command, **_kwargs):
+            pathlib.Path(command[command.index("--report") + 1]).write_text(json.dumps(fixture))
+            return type("Completed", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+        for name, fixture in fixtures.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                with (
+                    patch.object(resolver.sys, "argv", ["resolve_runtime.py", "--version", "2.10.0", "--build", "cpu", "--output", directory]),
+                    patch.object(resolver.subprocess, "run", side_effect=fake_run),
+                    redirect_stderr(StringIO()),
+                ):
+                    with self.assertRaises(SystemExit) as exit_result:
+                        resolver.main()
+                self.assertEqual(exit_result.exception.code, 3)
+                self.assertFalse((pathlib.Path(directory) / "requirements.txt").exists())
+                self.assertFalse((pathlib.Path(directory) / "resolution.json").exists())
+
+    def test_missing_historical_wheel_does_not_publish_install_lock(self):
+        failed = type(
+            "Completed",
+            (),
+            {
+                "returncode": 1,
+                "stdout": "",
+                "stderr": "No matching distribution found for torch==1.12.1+cu102",
+            },
+        )()
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(resolver.sys, "argv", ["resolve_runtime.py", "--version", "1.12.1", "--build", "cu102", "--output", directory]),
+                patch.object(resolver.subprocess, "run", return_value=failed),
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertFalse((pathlib.Path(directory) / "requirements.txt").exists())
+            self.assertFalse((pathlib.Path(directory) / "resolution.json").exists())
+        self.assertEqual(exit_result.exception.code, 2)
 
     def test_discovery_matches_only_exact_binary_wheel_tags_and_caps_results(self):
         requested = []
@@ -213,8 +324,8 @@ class ResolverTests(unittest.TestCase):
             index_loader=links,
             tag_loader=lambda _: ("3.12", {"cp312-cp312-manylinux_2_28_x86_64"}),
         )
-        self.assertEqual(requested[:2], ["cu130", "cu128"])
-        self.assertEqual(result["matches"][0]["build"], "cu128")
+        self.assertEqual(requested[:2], ["cu130", "cu129"])
+        self.assertEqual(result["matches"][0]["build"], "cu129")
         self.assertIsNone(result["matches"][0]["sha256"])
 
     def test_discovery_rejects_untrusted_and_wrong_build_wheels(self):

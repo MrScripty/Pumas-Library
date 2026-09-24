@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { api } from '../api/adapter';
-import type { TorchAlternativesOutcome, TorchRuntimeOptions, TorchRuntimePreview } from '../types/torch-install';
+import type { TorchAlternativesOutcome, TorchRuntimeOptions, TorchRuntimePreview, TorchRuntimePreviewOutcome, TorchRuntimePreviewRejectReason } from '../types/torch-install';
 
 interface TorchInstallPreviewProps {
   tag: string;
@@ -12,7 +12,22 @@ interface TorchInstallPreviewProps {
 interface CheckedCombination {
   key: string;
   label: string;
-  status: 'resolved' | 'unsupported' | 'inconclusive';
+  status: 'resolved' | TorchRuntimePreviewRejectReason;
+}
+
+function reasonLabel(reason: TorchRuntimePreviewRejectReason): string {
+  switch (reason) {
+    case 'unsupported': return 'Unsupported combination';
+    case 'validation_failed': return 'Resolved wheel report failed validation';
+    case 'network_inconclusive': return 'Network inconclusive';
+    case 'inconclusive': return 'Probe inconclusive';
+  }
+}
+
+function checkStatusLabel(status: CheckedCombination['status']): string {
+  if (status === 'resolved') return 'resolved';
+  if (status === 'validation_failed') return 'failed validation';
+  return reasonLabel(status).toLowerCase();
 }
 
 function errorText(error: unknown): string {
@@ -24,10 +39,12 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
   const [build, setBuild] = useState('');
   const [python, setPython] = useState('');
   const [adapter, setAdapter] = useState('none');
+  const [selectionMode, setSelectionMode] = useState<'preset' | 'upstream'>('upstream');
   const [preview, setPreview] = useState<TorchRuntimePreview | null>(null);
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [probing, setProbing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rejection, setRejection] = useState<Extract<TorchRuntimePreviewOutcome, { status: 'rejected' }> | null>(null);
   const [checks, setChecks] = useState<CheckedCombination[]>([]);
   const [alternatives, setAlternatives] = useState<TorchAlternativesOutcome | null>(null);
   const [alternativesBusy, setAlternativesBusy] = useState(false);
@@ -40,6 +57,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     setOptions(null);
     setPreview(null);
     setError(null);
+    setRejection(null);
     setChecks([]);
     setAlternatives(null);
     setAlternativesError(null);
@@ -48,6 +66,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       if (!active) return;
       const preset = result.preset.tag === tag ? result.preset : null;
       setOptions(result);
+      setSelectionMode(preset ? 'preset' : 'upstream');
       setBuild(preset?.build ?? result.builds[0] ?? '');
       setPython(preset?.python ?? result.pythons[0]?.id ?? '');
       setAdapter(preset?.adapter ?? result.adapters[0] ?? 'none');
@@ -67,6 +86,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     setPreview(null);
     setProbing(false);
     setError(null);
+    setRejection(null);
     setAlternatives(null);
     setAlternativesError(null);
     setAlternativesBusy(false);
@@ -82,18 +102,24 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     };
     setPreview(null);
     setError(null);
+    setRejection(null);
     setProbing(true);
     try {
-      const result = await api.preview_torch_runtime({ tag, ...selection });
+      const outcome = await api.preview_torch_runtime({ tag, ...selection });
       if (requestNumber.current === currentRequest) {
-        setPreview(result);
-        recordCheck('resolved');
+        if (outcome.status === 'resolved') {
+          setPreview(outcome.preview);
+          recordCheck('resolved');
+        } else {
+          setRejection(outcome);
+          recordCheck(outcome.reason);
+        }
       }
     } catch (cause) {
       if (requestNumber.current === currentRequest) {
         const message = errorText(cause);
         setError(message);
-        recordCheck(message.includes('Unsupported combination:') ? 'unsupported' : 'inconclusive');
+        recordCheck('inconclusive');
       }
     } finally {
       if (requestNumber.current === currentRequest) setProbing(false);
@@ -101,7 +127,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
   };
 
   const findAlternatives = async () => {
-    if (!error?.includes('Unsupported combination:') || alternativesBusy) return;
+    if (rejection?.reason !== 'unsupported' || alternativesBusy) return;
     const currentRequest = requestNumber.current;
     setAlternativesBusy(true);
     setAlternatives(null);
@@ -116,7 +142,22 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     }
   };
 
-  const fixedPreset = options?.preset.tag === tag;
+  const isPresetRelease = options?.preset.tag === tag;
+  const fixedPreset = isPresetRelease && selectionMode === 'preset';
+  const chooseMode = (mode: 'preset' | 'upstream') => {
+    if (!options) return;
+    invalidatePreview();
+    setSelectionMode(mode);
+    if (mode === 'preset') {
+      setBuild(options.preset.build);
+      setPython(options.preset.python);
+      setAdapter(options.preset.adapter);
+    } else {
+      setBuild(options.builds[0] ?? '');
+      setPython(options.pythons[0]?.id ?? '');
+      setAdapter(options.adapters[0] ?? 'none');
+    }
+  };
   const availableBuilds = fixedPreset ? [options.preset.build] : options?.builds ?? [];
   const availablePythons = fixedPreset
     ? [{ id: options.preset.python, label: `Python ${options.preset.python.replace('python', '')} (fixed preset)` }]
@@ -152,6 +193,10 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       </div>
       {loadingOptions ? <Loader2 aria-label="Loading Torch choices" className="animate-spin" /> : options && (
         <>
+          {isPresetRelease && <div className="flex flex-wrap gap-2" role="group" aria-label="Torch release choice">
+            <button type="button" aria-pressed={fixedPreset} onClick={() => chooseMode('preset')} className="rounded border px-3 py-2 text-sm">Qualified fixed preset</button>
+            <button type="button" aria-pressed={!fixedPreset} onClick={() => chooseMode('upstream')} className="rounded border px-3 py-2 text-sm">Other official wheels (unverified)</button>
+          </div>}
           {fixedPreset && <p className="text-sm">This release has one qualified Python 3.12 / CUDA 13.0 build.</p>}
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="text-sm">Build
@@ -179,10 +224,11 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       )}
       {checks.length > 0 && <div className="text-xs">
         <strong>Checked combinations</strong>
-        <ul>{checks.map((check) => <li key={check.key}>{check.label}: {check.status}</li>)}</ul>
+        <ul>{checks.map((check) => <li key={check.key}>{check.label}: {checkStatusLabel(check.status)}</li>)}</ul>
       </div>}
-      {error && <p role="alert" className="text-sm text-[hsl(var(--accent-error))]">{error.includes('Unsupported combination:') ? 'Unsupported combination' : 'Probe inconclusive'}: {error}</p>}
-      {!fixedPreset && error?.includes('Unsupported combination:') && <div className="space-y-2 text-sm">
+      {error && <p role="alert" className="text-sm text-[hsl(var(--accent-error))]">Probe inconclusive: {error}</p>}
+      {rejection && <p role="alert" className="text-sm text-[hsl(var(--accent-error))]">{reasonLabel(rejection.reason)}: {rejection.message}</p>}
+      {!fixedPreset && rejection?.reason === 'unsupported' && <div className="space-y-2 text-sm">
         <button type="button" disabled={alternativesBusy} onClick={() => void findAlternatives()} className="rounded border px-3 py-2 disabled:opacity-50">
           {alternativesBusy ? 'Checking official wheels…' : 'Find compatible alternatives'}
         </button>

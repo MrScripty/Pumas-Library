@@ -60,8 +60,7 @@ def report(
 class ResolverTests(unittest.TestCase):
     def test_build_vocabulary_matches_rust_manager(self):
         rust_source = (
-            ROOT.parent
-            / "rust/crates/pumas-app-manager/src/version_manager/torch_preview.rs"
+            ROOT.parent / "rust/crates/pumas-app-manager/src/version_manager/torch_preview.rs"
         ).read_text()
         declaration = re.search(
             r"pub\(super\) const BUILDS: &\[&str\] = &\[(.*?)\];",
@@ -77,14 +76,54 @@ class ResolverTests(unittest.TestCase):
             resolver.BUILDS,
             (
                 "cpu",
-                "cu75", "cu80", "cu90", "cu91", "cu92", "cu100", "cu101", "cu102",
-                "cu110", "cu111", "cu113", "cu115", "cu116", "cu117", "cu118",
-                "cu121", "cu124", "cu126", "cu128", "cu129", "cu130", "cu132", "cu134",
-                "rocm3.7", "rocm3.8", "rocm3.10", "rocm4.0.1", "rocm4.1",
-                "rocm4.2", "rocm4.3.1", "rocm4.5.2", "rocm5.0", "rocm5.1.1",
-                "rocm5.2", "rocm5.3", "rocm5.4.2", "rocm5.5", "rocm5.6",
-                "rocm5.7", "rocm6.0", "rocm6.1", "rocm6.2", "rocm6.2.4",
-                "rocm6.3", "rocm6.4", "rocm7.0", "rocm7.1", "rocm7.2",
+                "cu75",
+                "cu80",
+                "cu90",
+                "cu91",
+                "cu92",
+                "cu100",
+                "cu101",
+                "cu102",
+                "cu110",
+                "cu111",
+                "cu113",
+                "cu115",
+                "cu116",
+                "cu117",
+                "cu118",
+                "cu121",
+                "cu124",
+                "cu126",
+                "cu128",
+                "cu129",
+                "cu130",
+                "cu132",
+                "cu134",
+                "rocm3.7",
+                "rocm3.8",
+                "rocm3.10",
+                "rocm4.0.1",
+                "rocm4.1",
+                "rocm4.2",
+                "rocm4.3.1",
+                "rocm4.5.2",
+                "rocm5.0",
+                "rocm5.1.1",
+                "rocm5.2",
+                "rocm5.3",
+                "rocm5.4.2",
+                "rocm5.5",
+                "rocm5.6",
+                "rocm5.7",
+                "rocm6.0",
+                "rocm6.1",
+                "rocm6.2",
+                "rocm6.2.4",
+                "rocm6.3",
+                "rocm6.4",
+                "rocm7.0",
+                "rocm7.1",
+                "rocm7.2",
                 "rocm7.14",
             ),
         )
@@ -227,7 +266,19 @@ class ResolverTests(unittest.TestCase):
         for name, fixture in fixtures.items():
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 with (
-                    patch.object(resolver.sys, "argv", ["resolve_runtime.py", "--version", "2.10.0", "--build", "cpu", "--output", directory]),
+                    patch.object(
+                        resolver.sys,
+                        "argv",
+                        [
+                            "resolve_runtime.py",
+                            "--version",
+                            "2.10.0",
+                            "--build",
+                            "cpu",
+                            "--output",
+                            directory,
+                        ],
+                    ),
                     patch.object(resolver.subprocess, "run", side_effect=fake_run),
                     redirect_stderr(StringIO()),
                 ):
@@ -249,7 +300,19 @@ class ResolverTests(unittest.TestCase):
         )()
         with tempfile.TemporaryDirectory() as directory:
             with (
-                patch.object(resolver.sys, "argv", ["resolve_runtime.py", "--version", "1.12.1", "--build", "cu102", "--output", directory]),
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "1.12.1",
+                        "--build",
+                        "cu102",
+                        "--output",
+                        directory,
+                    ],
+                ),
                 patch.object(resolver.subprocess, "run", return_value=failed),
                 redirect_stderr(StringIO()),
             ):

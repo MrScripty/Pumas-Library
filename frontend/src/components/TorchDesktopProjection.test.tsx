@@ -142,6 +142,7 @@ describe('Torch desktop projection', () => {
     fireEvent.click(screen.getByRole('button', { name: installedTag }));
     fireEvent.click(screen.getByRole('button', { name: `Switch to ${releaseTag}` }));
     await waitFor(() => expect(switchVersion).toHaveBeenCalledWith(releaseTag));
+    await screen.findByRole('button', { name: releaseTag });
     expect(screen.queryByRole('region', { name: `Torch probe results for ${releaseTag}` })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Inspect active Torch runtime' }));
     expect(await screen.findByRole('region', { name: `Torch probe results for ${releaseTag}` })).toBeInTheDocument();

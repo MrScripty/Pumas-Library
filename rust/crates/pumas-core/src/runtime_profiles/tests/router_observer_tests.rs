@@ -410,8 +410,6 @@ async fn cancelled_launch_waiter_keeps_observer_and_gated_read_cannot_escape_sto
     });
     let initial = wait_snapshot(&serving, |s| s.endpoint.model_count == 1).await;
     assert!(!launch.is_finished());
-    launch.abort();
-    assert!(launch.await.unwrap_err().is_cancelled());
     std::fs::write(fixture.root.path().join("hold_snapshot"), b"").unwrap();
     publish(fixture.root.path(), response("unloaded"));
     tokio::time::timeout(Duration::from_secs(3), async {
@@ -421,6 +419,8 @@ async fn cancelled_launch_waiter_keeps_observer_and_gated_read_cannot_escape_sto
     })
     .await
     .unwrap();
+    launch.abort();
+    assert!(launch.await.unwrap_err().is_cancelled());
     let stopping_owner = fixture.owner.clone();
     let stopping_id = id.clone();
     let stop = tokio::spawn(async move { stopping_owner.stop(&stopping_id).await });

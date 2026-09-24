@@ -1,6 +1,7 @@
 """Ordinary-load custody evidence with real executor threads and controlled models."""
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import threading
 import unittest
 
@@ -55,6 +56,27 @@ class ModelLoadLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def asyncSetUp(self):
         """Give each test its own worker, barriers, registry, and device lock."""
+        loop = asyncio.get_running_loop()
+        self.worker_executor = ThreadPoolExecutor(max_workers=2)
+        self.addCleanup(self.worker_executor.shutdown, wait=True)
+        self.original_run_in_executor = loop.run_in_executor
+        self.addCleanup(setattr, loop, "run_in_executor", self.original_run_in_executor)
+
+        def run_in_owned_executor(executor, func, *args):
+            if executor is not None:
+                return self.original_run_in_executor(executor, func, *args)
+            worker = self.worker_executor.submit(func, *args)
+
+            async def observe_worker():
+                # Poll the real worker from the event loop; this fixture cannot
+                # depend on the default executor's cross-thread wakeup at teardown.
+                while not worker.done():
+                    await asyncio.sleep(0.01)
+                return worker.result()
+
+            return loop.create_task(observe_worker())
+
+        loop.run_in_executor = run_in_owned_executor
         self.manager = _ControlledLoadManager()
         device = self.manager.device_manager.resolve_device("auto")
         self.device_lock = self.manager._get_device_lock(str(device))

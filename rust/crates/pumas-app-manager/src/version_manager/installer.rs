@@ -49,6 +49,8 @@ async fn path_exists(path: &Path) -> Result<bool> {
 /// Coordinates Torch cancellation with the irreversible publication boundary.
 pub(crate) struct TorchInstallControl(AtomicU8);
 
+type TorchCleanupCompletion = Shared<BoxFuture<'static, std::result::Result<(), Arc<String>>>>;
+
 #[derive(Default)]
 pub(crate) struct TorchCleanupTasks {
     state: StdMutex<TorchCleanupState>,
@@ -59,7 +61,7 @@ struct TorchCleanupState {
     closed: bool,
     tasks: Vec<JoinHandle<()>>,
     failures: Vec<String>,
-    completion: Option<Shared<BoxFuture<'static, std::result::Result<(), Arc<String>>>>>,
+    completion: Option<TorchCleanupCompletion>,
 }
 
 impl TorchCleanupTasks {

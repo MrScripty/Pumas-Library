@@ -214,10 +214,25 @@ real interactive Pumas desktop run.
   passed.
   The desktop composed projection test covers discovery failure, preview,
   install, explicit selection, startup health, and generation-owned stop.
-- The historical full workspace Rust test gate remains non-green: 66 existing
-  `pumas-library` core failures were previously recorded alongside 1,349 passes,
-  and are outside this change's write set. Do not treat that aggregate result as
-  acceptance evidence for this implementation.
+- The original PR #3 GitHub Build run at `3688c0c` failed four gates: workspace
+  Clippy type complexity, a desktop projection timing race, Ruff formatting, and
+  a headless observer test ordering race. The current tree fixes each cause. The
+  desktop now waits for the selected release to render; the observer test cancels
+  only after the held read starts; Ruff formatting and the installer alias are
+  corrected.
+- Python source QA now passes Ruff check/format and all 77 tests in
+  `unittest discover -s torch-server/tests`. The executor-sensitive lifecycle
+  fixtures use test-owned pools (and an event-loop poll for the model-load fixture)
+  while retaining real worker execution and the lease/cancellation assertions.
+  Frontend passes 125 test files / 699 tests, typecheck, and lint.
+- `cargo fmt`, workspace `cargo check`, and workspace Clippy pass. The
+  `pumas-library --no-default-features` and `pumas-rpc --no-default-features`
+  package test gates also pass. The full default-feature workspace test phase is
+  not locally qualified: this sandbox run recorded 1,361 passed, 66 failed, and
+  6 ignored. Representative failures are loopback binds returning `EPERM` and
+  SQLite writes rejected as read-only, so this environment cannot establish the
+  status of those existing core tests. The GitHub workflow run after this repair
+  is authoritative for that gate.
 
 ## Separate desktop and image-serving claim
 

@@ -10,6 +10,7 @@ import asyncio
 import base64
 import sys
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -51,6 +52,18 @@ def _adapter(generate, steps=8, guidance=0, memory_policy="fixture"):
     )
 
 
+def _run_generation(coroutine):
+    """Own the worker pool used by ``asyncio.to_thread`` in these tests."""
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        loop = asyncio.new_event_loop()
+        try:
+            loop.set_default_executor(executor)
+            return loop.run_until_complete(coroutine)
+        finally:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.close()
+
+
 class ImageRequestDimensionsTests(unittest.TestCase):
     def test_explicit_dimensions_reach_adapter_unchanged(self):
         seen = {}
@@ -79,7 +92,7 @@ class ImageRequestDimensionsTests(unittest.TestCase):
             )
             self.assertGreaterEqual(result["duration_seconds"], 0)
 
-        asyncio.run(run())
+        _run_generation(run())
         self.assertEqual(
             (seen["width"], seen["height"], seen["prompt"], seen["seed"]),
             (1280, 720, "kingfisher", 7),
@@ -101,7 +114,7 @@ class ImageRequestDimensionsTests(unittest.TestCase):
             self.assertEqual(result["seed"], 12345)
             return result
 
-        asyncio.run(run())
+        _run_generation(run())
         self.assertEqual(seen["seed"], 12345)
 
     def test_elapsed_time_beyond_former_deadline_does_not_cancel(self):
@@ -112,7 +125,7 @@ class ImageRequestDimensionsTests(unittest.TestCase):
             return _image((64, 64))
 
         payload = ImageRequest(model_id="fixture", prompt="kingfisher", width=64, height=64)
-        result = asyncio.run(
+        result = _run_generation(
             owned_generation(_adapter(generate), payload, _request(), clock=lambda: next(samples))
         )
 
@@ -202,7 +215,7 @@ class ImageRequestDimensionsTests(unittest.TestCase):
             self.assertEqual(caught.exception.status_code, 502)
             self.assertEqual(caught.exception.detail["code"], "invalid_backend_response")
 
-        asyncio.run(run())
+        _run_generation(run())
 
     def test_oversized_png_is_rejected(self):
         from fastapi import HTTPException
@@ -218,7 +231,7 @@ class ImageRequestDimensionsTests(unittest.TestCase):
             self.assertEqual(caught.exception.status_code, 502)
             self.assertEqual(caught.exception.detail["code"], "invalid_backend_response")
 
-        asyncio.run(run())
+        _run_generation(run())
 
 
 if __name__ == "__main__":

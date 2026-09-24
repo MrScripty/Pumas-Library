@@ -231,8 +231,9 @@ real interactive Pumas desktop run.
   not locally qualified: this sandbox run recorded 1,361 passed, 66 failed, and
   6 ignored. Representative failures are loopback binds returning `EPERM` and
   SQLite writes rejected as read-only, so this environment cannot establish the
-  status of those existing core tests. The GitHub workflow run after this repair
-  is authoritative for that gate.
+  status of those existing core tests. GitHub Build run 274 for commit `9b76db7`
+  completed successfully on 2026-09-24; all five executed jobs passed, including
+  the default-feature Rust quality and no-inference headless gates.
 
 ## Separate desktop and image-serving claim
 

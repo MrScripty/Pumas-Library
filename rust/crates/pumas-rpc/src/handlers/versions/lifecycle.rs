@@ -68,12 +68,13 @@ pub async fn install_version(
     state: &AppState,
     app_id_str: &str,
     tag: &str,
+    preview_id: Option<&str>,
 ) -> pumas_library::Result<crate::contract::InstallVersionOutcome> {
     use crate::contract::InstallVersionOutcome;
 
     if let Some(vm) = get_version_manager(state, &app_id_str).await {
         // Start the installation (returns a progress receiver)
-        match vm.install_version(tag).await {
+        match vm.install_version_with_preview(tag, preview_id).await {
             Ok(_rx) => {
                 // Installation started successfully
                 // Progress can be monitored via get_installation_progress

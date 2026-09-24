@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { VersionSelector } from '../VersionSelector';
 import { InstallDialog } from '../InstallDialog';
+import { TorchRuntimeProbePanel } from '../TorchRuntimeProbePanel';
 import type { AppVersionState } from '../../utils/appVersionState';
 import { IconButton } from '../ui';
 
@@ -149,6 +150,15 @@ export function VersionManagementPanel({
         hasNewVersion={hasNewVersion}
         latestVersion={latestVersion}
       />
+      {versions.appId === 'torch' && versions.installedVersions.length > 0 && (
+        <>
+          <p className="mt-2 text-xs text-[hsl(var(--text-secondary))]">
+            Selecting an installed Torch version does not prove it can start. Startup is attempted when you serve a model
+            through a Torch profile. Setting a version as default also selects it on future starts.
+          </p>
+          {versions.activeVersion && <TorchRuntimeProbePanel tag={versions.activeVersion} />}
+        </>
+      )}
     </div>
   );
 }

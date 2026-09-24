@@ -3,6 +3,7 @@
 use super::*;
 use crate::torch_client::{SUPPORTED_TORCH_PROTOCOL, TORCH_IMAGE_GENERATION_CAPABILITY};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::process::Command;
@@ -28,6 +29,7 @@ impl TorchPublicationPause {
 mod torch_upstream_contract_tests;
 
 pub(crate) struct TorchRuntimeRecipe {
+    #[cfg(test)]
     pub(crate) release_tag: &'static str,
     pub(crate) recipe_id: &'static str,
     pub(crate) torch_version: &'static str,
@@ -38,6 +40,7 @@ pub(crate) struct TorchRuntimeRecipe {
 }
 
 const TORCH_291: TorchRuntimeRecipe = TorchRuntimeRecipe {
+    #[cfg(test)]
     release_tag: "v2.9.1",
     recipe_id: "torch-upstream-2.9.1-r1",
     torch_version: "2.9.1+cu130",
@@ -213,33 +216,11 @@ fn failed(message: impl Into<String>) -> PumasError {
 impl VersionInstaller {
     async fn stage_resolved_torch_runtime(
         &self,
-        tag: &str,
+        plan: &TorchInstallPlan,
         staging: &Path,
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<PathBuf> {
-        let version = stable_torch_tag(tag).ok_or_else(|| failed("Invalid stable Torch tag"))?;
-        let build = std::env::var("PUMAS_TORCH_BUILD").unwrap_or_else(|_| "cpu".to_string());
-        if !matches!(
-            build.as_str(),
-            "cpu"
-                | "cu118"
-                | "cu121"
-                | "cu124"
-                | "cu126"
-                | "cu128"
-                | "cu130"
-                | "rocm6.1"
-                | "rocm6.2"
-                | "rocm6.3"
-                | "rocm6.4"
-                | "rocm7.0"
-                | "rocm7.1"
-        ) {
-            return Err(failed(
-                "Unknown PUMAS_TORCH_BUILD; use an official CPU, CUDA, or ROCm build",
-            ));
-        }
         let runtime = staging.join("runtime");
         let runtime_for_write = runtime.clone();
         tokio::task::spawn_blocking(move || write_embedded_torch_runtime(&runtime_for_write))
@@ -248,74 +229,41 @@ impl VersionInstaller {
         fs::remove_file(runtime.join("validate_runtime.py"))
             .await
             .map_err(PumasError::from)?;
-        let mut failures = Vec::new();
-        let mut resolved = false;
-        for interpreter in ["python3.13", "python3.12", "python3.11", "python3.10"] {
-            self.check_cancelled()?;
-            if Command::new(interpreter)
-                .arg("--version")
-                .output()
-                .await
-                .is_err()
-            {
-                continue;
-            }
-            let _ = fs::remove_dir_all(runtime.join("venv")).await;
-            let mut venv = Command::new(interpreter);
-            venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
-            if let Err(error) = self
-                .run_runtime_command(
-                    venv,
-                    log_path,
-                    &format!("Creating Python environment with {interpreter}"),
-                    progress_tx,
-                )
-                .await
-            {
-                self.check_cancelled()?;
-                failures.push(format!("{interpreter}: {error}"));
-                continue;
-            }
-            let python = runtime.join("venv/bin/python");
-            let mut resolve = Command::new(&python);
-            resolve
-                .arg(runtime.join("resolve_runtime.py"))
-                .args(["--version", version, "--build", &build])
-                .arg("--output")
-                .arg(&runtime);
-            match self
-                .run_runtime_command(
-                    resolve,
-                    log_path,
-                    &format!(
-                        "Resolving official Torch {version} {build} wheels with {interpreter}"
-                    ),
-                    progress_tx,
-                )
-                .await
-            {
-                Ok(()) => {
-                    resolved = true;
-                    break;
-                }
-                Err(error) => {
-                    self.check_cancelled()?;
-                    if error.to_string().contains("exit status: 75") {
-                        return Err(failed("Official wheel indexes are unreachable; artifact availability is inconclusive. Retry with network access. See installation log."));
-                    }
-                    failures.push(format!("{interpreter}: {error}"));
-                }
-            }
+        let observed_hash = format!(
+            "{:x}",
+            Sha256::digest(std::fs::read(&plan.interpreter_path).map_err(PumasError::from)?)
+        );
+        if observed_hash != plan.interpreter_hash {
+            return Err(failed("Selected Python executable changed after preview"));
         }
-        if !resolved {
-            return Err(failed(format!("No official {build} binary combination for Torch {version} with installed Python interpreters. Interpreter provisioning and source builds are not supported. Try another build or install a compatible Python interpreter. Attempts: {}", failures.join("; "))));
-        }
+        let interpreter = &plan.interpreter_path;
+        let mut venv = Command::new(interpreter);
+        venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
+        self.run_runtime_command(
+            venv,
+            log_path,
+            &format!("Creating Python environment with {}", interpreter.display()),
+            progress_tx,
+        )
+        .await?;
+        fs::write(runtime.join("requirements.txt"), &plan.requirements)
+            .await
+            .map_err(PumasError::from)?;
+        fs::write(runtime.join("resolution.json"), &plan.resolution)
+            .await
+            .map_err(PumasError::from)?;
+        fs::write(runtime.join("pip-resolution.json"), &plan.report)
+            .await
+            .map_err(PumasError::from)?;
         let recipe = serde_json::json!({
-            "recipe_id": format!("upstream-auto-{tag}-{build}"),
+            "recipe_id": format!("upstream-preview-{}-{}-{}-{}", plan.preview.tag, plan.preview.build, plan.preview.python, plan.preview.adapter),
             "protocol": SUPPORTED_TORCH_PROTOCOL,
             "capabilities": [TORCH_IMAGE_GENERATION_CAPABILITY],
             "qualification": "not verified by Pumas",
-            "build": build,
+            "build": plan.preview.build,
+            "python": plan.preview.python,
+            "adapter": plan.preview.adapter,
+            "artifacts": plan.preview.artifacts,
         });
         fs::write(
             runtime.join("runtime.json"),
@@ -365,6 +313,7 @@ impl VersionInstaller {
         tag: &str,
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
+        plan: Option<TorchInstallPlan>,
     ) -> Result<()> {
         let _attempt = self
             .torch_attempt_lock
@@ -372,7 +321,7 @@ impl VersionInstaller {
             .map_err(|_| failed("Torch installation already active"))?;
         self.torch_control.start();
         let result = self
-            .install_torch_runtime_inner(tag, release, progress_tx)
+            .install_torch_runtime_inner(tag, release, progress_tx, plan)
             .await;
         self.torch_control.finish();
         result
@@ -383,6 +332,7 @@ impl VersionInstaller {
         tag: &str,
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
+        plan: Option<TorchInstallPlan>,
     ) -> Result<()> {
         if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
             return Err(failed("Managed Torch requires Linux x86_64"));
@@ -392,7 +342,17 @@ impl VersionInstaller {
                 "Unsupported upstream PyTorch release or mismatched tag",
             ));
         }
-        let recipe = torch_recipe_for_tag(tag);
+        let recipe = if plan
+            .as_ref()
+            .is_none_or(|p| p.preview.qualification == "qualified")
+        {
+            torch_recipe_for_tag(tag)
+        } else {
+            None
+        };
+        if plan.as_ref().is_some_and(|p| p.preview.tag != tag) {
+            return Err(failed("Torch preview tag mismatch"));
+        }
         if !tag
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || b"-._".contains(&c))
@@ -401,8 +361,42 @@ impl VersionInstaller {
         }
         let destination = self.versions_dir().join(tag);
         if path_exists(&destination).await? {
+            if path_exists(&destination.join(".pumas-publishing")).await?
+                && self
+                    .metadata_manager
+                    .get_installed_version(tag, Some(AppId::Torch))?
+                    .is_none()
+            {
+                let quarantine = self.versions_dir().join(format!(
+                    ".torch-orphan-{tag}-{}",
+                    Utc::now().timestamp_millis()
+                ));
+                let from = destination.clone();
+                tokio::task::spawn_blocking(move || {
+                    pumas_library::platform::filesystem::rename_directory_noreplace(
+                        &from,
+                        &quarantine,
+                    )
+                })
+                .await
+                .map_err(|e| failed(format!("Orphan recovery task failed: {e}")))?
+                .map_err(PumasError::from)?;
+            } else {
+                return Err(failed(
+                    "Runtime directory already exists; refusing to replace existing files",
+                ));
+            }
+        }
+        if recipe.is_none() && plan.is_none() {
+            #[cfg(test)]
+            if self.torch_stage_override.is_none() {
+                return Err(failed(
+                    "A retained preview is required for this Torch runtime",
+                ));
+            }
+            #[cfg(not(test))]
             return Err(failed(
-                "Runtime directory already exists; refusing to replace existing files",
+                "A retained preview is required for this Torch runtime",
             ));
         }
         fs::create_dir_all(self.versions_dir())
@@ -428,7 +422,14 @@ impl VersionInstaller {
             Some(log_path.to_string_lossy().as_ref()),
         );
         let result = self
-            .stage_torch_runtime(tag, recipe, staging.path(), &log_path, &progress_tx)
+            .stage_torch_runtime(
+                tag,
+                recipe,
+                plan.as_ref(),
+                staging.path(),
+                &log_path,
+                &progress_tx,
+            )
             .await;
         #[cfg(test)]
         if result.is_ok() && self.torch_stage_override.is_some() {
@@ -446,6 +447,9 @@ impl VersionInstaller {
             match result {
                 Ok(runtime) => {
                     self.check_cancelled()?;
+                    fs::write(runtime.join(".pumas-publishing"), b"metadata pending")
+                        .await
+                        .map_err(PumasError::from)?;
                     if !self.torch_control.try_begin_publication() {
                         return Err(failed(
                             "Torch installation was cancelled before publication",
@@ -480,6 +484,15 @@ impl VersionInstaller {
                             .await
                             .map_err(PumasError::from)?;
                     }
+                    if result.is_ok() {
+                        if let Err(error) =
+                            fs::remove_file(destination.join(".pumas-publishing")).await
+                        {
+                            warn!(
+                                "Installed Torch publication marker could not be removed: {error}"
+                            );
+                        }
+                    }
                     result
                 }
                 Err(error) => Err(error),
@@ -496,8 +509,9 @@ impl VersionInstaller {
 
     async fn stage_torch_runtime(
         &self,
-        tag: &str,
+        _tag: &str,
         recipe_spec: Option<&TorchRuntimeRecipe>,
+        plan: Option<&TorchInstallPlan>,
         staging: &Path,
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
@@ -506,9 +520,9 @@ impl VersionInstaller {
         if let Some(stage) = &self.torch_stage_override {
             return stage(staging);
         }
-        if recipe_spec.is_none() {
+        if let Some(plan) = plan.filter(|p| p.preview.qualification != "qualified") {
             return self
-                .stage_resolved_torch_runtime(tag, staging, log_path, progress_tx)
+                .stage_resolved_torch_runtime(plan, staging, log_path, progress_tx)
                 .await;
         }
         let recipe_spec = recipe_spec.expect("checked above");
@@ -547,7 +561,19 @@ impl VersionInstaller {
                 "Runtime recipe does not match Python 3.12 on linux-x86_64",
             ));
         }
-        let mut python_check = Command::new("python3.12");
+        if let Some(plan) = plan {
+            let observed_hash = format!(
+                "{:x}",
+                Sha256::digest(std::fs::read(&plan.interpreter_path).map_err(PumasError::from)?)
+            );
+            if observed_hash != plan.interpreter_hash {
+                return Err(failed("Selected Python executable changed after preview"));
+            }
+        }
+        let interpreter = plan
+            .map(|p| p.interpreter_path.as_path())
+            .unwrap_or_else(|| Path::new("python3.12"));
+        let mut python_check = Command::new(interpreter);
         python_check.args([
             "-I",
             "-c",
@@ -555,7 +581,7 @@ impl VersionInstaller {
         ]);
         self.run_runtime_command(python_check, log_path, "Checking Python 3.12", progress_tx)
             .await?;
-        let mut venv = Command::new("python3.12");
+        let mut venv = Command::new(interpreter);
         venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
         self.run_runtime_command(venv, log_path, "Creating managed environment", progress_tx)
             .await?;
@@ -593,6 +619,28 @@ impl VersionInstaller {
             validate,
             log_path,
             "Validating GPU and sidecar protocol",
+            progress_tx,
+        )
+        .await?;
+        let resolution = serde_json::json!({
+            "torch": recipe_spec.torch_version,
+            "build": "cu130",
+            "python": "3.12",
+            "adapter": "bundled",
+            "artifacts": plan.map(|p| p.preview.artifacts.clone()).unwrap_or_default(),
+        });
+        fs::write(
+            runtime.join("resolution.json"),
+            serde_json::to_vec_pretty(&resolution).map_err(|e| failed(e.to_string()))?,
+        )
+        .await
+        .map_err(PumasError::from)?;
+        let mut probe = Command::new(&python);
+        probe.arg(runtime.join("probe_runtime.py"));
+        self.run_runtime_command(
+            probe,
+            log_path,
+            "Recording core and adapter probe evidence",
             progress_tx,
         )
         .await?;

@@ -50,6 +50,7 @@ pub mod ollama;
 mod progress;
 pub mod size_calculator;
 mod state;
+mod torch_preview;
 
 pub use constraints::ConstraintsManager;
 pub use dependencies::DependencyManager;
@@ -59,6 +60,7 @@ pub use ollama::OllamaVersionManager;
 pub use progress::{InstallationProgressTracker, PackageWeights, ProgressUpdate};
 pub use size_calculator::{ReleaseSize, SizeBreakdown, SizeCalculator};
 pub use state::VersionState;
+pub use torch_preview::{TorchArtifact, TorchPreview};
 
 use pumas_library::config::{AppId, PathsConfig};
 use pumas_library::metadata::MetadataManager;
@@ -113,6 +115,7 @@ pub struct VersionManager {
     /// Cancellation flag for installations.
     cancel_flag: Arc<AtomicBool>,
     torch_control: Arc<installer::TorchInstallControl>,
+    torch_previews: torch_preview::TorchPreviews,
     #[cfg(test)]
     torch_publication_pause: Option<Arc<installer::TorchPublicationPause>>,
     #[cfg(test)]
@@ -226,7 +229,7 @@ impl VersionManager {
             }
         }
 
-        Ok(Self {
+        let manager = Self {
             launcher_root,
             app_id,
             metadata_manager,
@@ -235,6 +238,7 @@ impl VersionManager {
             progress_tracker,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             torch_control: Arc::new(installer::TorchInstallControl::new()),
+            torch_previews: Arc::new(Mutex::new(Default::default())),
             #[cfg(test)]
             torch_publication_pause: None,
             #[cfg(test)]
@@ -250,7 +254,39 @@ impl VersionManager {
             install_lock: Arc::new(Mutex::new(())),
             lifecycle_lock: Arc::new(Mutex::new(())),
             installing_tag: Arc::new(Mutex::new(None)),
-        })
+        };
+        if app_id == AppId::Torch {
+            if let Some(default) = manager.get_default_version().await? {
+                if let Err(error) = manager.verify_torch_manifest(&default).await {
+                    warn!("Ignoring unusable default Torch runtime {default}: {error}");
+                    manager
+                        .state
+                        .write()
+                        .await
+                        .set_default_version(None)
+                        .await?;
+                }
+            }
+            if let Some(active) = manager.get_active_version().await? {
+                if let Err(error) = manager.verify_torch_manifest(&active).await {
+                    warn!("Ignoring unusable active Torch runtime {active}: {error}");
+                    manager
+                        .state
+                        .write()
+                        .await
+                        .reset_torch_active_selection()
+                        .await?;
+                }
+            } else if manager.get_default_version().await?.is_some() {
+                manager
+                    .state
+                    .write()
+                    .await
+                    .reset_torch_active_selection()
+                    .await?;
+            }
+        }
+        Ok(manager)
     }
 
     // ========================================
@@ -326,6 +362,7 @@ impl VersionManager {
             proceeded.store(true, Ordering::SeqCst);
         }
         if self.app_id == AppId::Torch {
+            self.verify_torch_identity(tag).await?;
             let current = self.get_active_version().await?;
             if current.as_deref() != Some(tag) {
                 if let Some(current) = current {
@@ -340,6 +377,11 @@ impl VersionManager {
     /// Set the default version.
     pub async fn set_default_version(&self, tag: Option<&str>) -> Result<bool> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        if self.app_id == AppId::Torch {
+            if let Some(tag) = tag {
+                self.verify_torch_identity(tag).await?;
+            }
+        }
         #[cfg(test)]
         if let Some(proceeded) = &self.default_selection_proceeded {
             proceeded.store(true, Ordering::SeqCst);
@@ -503,6 +545,14 @@ impl VersionManager {
     ///
     /// Returns a channel receiver for progress updates.
     pub async fn install_version(&self, tag: &str) -> Result<mpsc::Receiver<ProgressUpdate>> {
+        self.install_version_with_preview(tag, None).await
+    }
+
+    pub async fn install_version_with_preview(
+        &self,
+        tag: &str,
+        preview_id: Option<&str>,
+    ) -> Result<mpsc::Receiver<ProgressUpdate>> {
         // Check if already installed
         {
             let state = self.state.read().await;
@@ -518,6 +568,49 @@ impl VersionManager {
         // Resolve before recording installation state: discovery failure must not
         // leave a phantom installation that can never complete.
         let release = self.resolve_installable_release(tag).await?;
+        let torch_plan = if self.app_id == AppId::Torch {
+            match preview_id {
+                Some(id) => {
+                    let mut previews = self.torch_previews.lock().await;
+                    let retained =
+                        previews
+                            .remove(id)
+                            .ok_or_else(|| PumasError::InstallationFailed {
+                                message: "Torch preview expired or unknown".into(),
+                            })?;
+                    if retained.created.elapsed() >= Duration::from_secs(30 * 60)
+                        || retained.preview.tag != tag
+                    {
+                        return Err(PumasError::InstallationFailed {
+                            message: "Torch preview does not match requested tag or has expired"
+                                .into(),
+                        });
+                    }
+                    Some(installer::TorchInstallPlan {
+                        preview: retained.preview,
+                        requirements: retained.requirements,
+                        resolution: retained.resolution,
+                        report: retained.report,
+                        interpreter_path: retained.interpreter_path,
+                        interpreter_hash: retained.interpreter_hash,
+                    })
+                }
+                None if tag == "v2.9.1" => None,
+                #[cfg(test)]
+                None if self.torch_stage_override.is_some() => None,
+                None => {
+                    return Err(PumasError::InstallationFailed {
+                        message: "A retained preview ID is required for this Torch runtime".into(),
+                    })
+                }
+            }
+        } else if preview_id.is_some() {
+            return Err(PumasError::InstallationFailed {
+                message: "Preview IDs are only valid for Torch".into(),
+            });
+        } else {
+            None
+        };
         if self.state.read().await.is_installed(tag) {
             return Err(PumasError::VersionAlreadyInstalled {
                 tag: tag.to_string(),
@@ -572,7 +665,9 @@ impl VersionManager {
 
         tokio::spawn(async move {
             let _install_guard = install_guard;
-            let result = installer.install_version(&tag, &release, tx.clone()).await;
+            let result = installer
+                .install_version_with_torch_plan(&tag, &release, tx.clone(), torch_plan)
+                .await;
 
             if app_id == AppId::Torch {
                 torch_control.finish();
@@ -900,6 +995,17 @@ mod tests {
         ] {
             std::fs::write(manager.version_path(tag).join(required), b"test fixture").unwrap();
         }
+        if manager.app_id == AppId::Torch {
+            std::fs::write(
+                manager.version_path(tag).join("resolution.json"),
+                r#"{"torch":"test-fixture"}"#,
+            )
+            .unwrap();
+            let python = manager.version_path(tag).join("venv/bin/python");
+            std::fs::write(&python, b"#!/bin/sh\necho test-fixture\n").unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
         let metadata = pumas_library::metadata::InstalledVersionMetadata {
             path: tag.to_string(),
             installed_date: "2024-01-01T00:00:00Z".to_string(),
@@ -919,6 +1025,68 @@ mod tests {
             .await
             .add_installed_version(tag, metadata)
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn torch_activation_rejects_unregistered_path_before_reading_it() {
+        let (manager, _root) = create_torch_test_manager().await;
+        assert!(matches!(
+            manager.set_active_version("../outside").await,
+            Err(PumasError::Config { .. })
+        ));
+        assert!(matches!(
+            manager.set_active_version("missing").await,
+            Err(PumasError::VersionNotFound { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn torch_activation_requires_identity_manifest() {
+        let (manager, _root) = create_torch_test_manager().await;
+        register_test_version(&manager, "v2.10.0").await;
+        std::fs::remove_file(manager.version_path("v2.10.0").join("runtime.json")).unwrap();
+        let error = manager.set_active_version("v2.10.0").await.unwrap_err();
+        assert!(error.to_string().contains("identity manifest"));
+    }
+
+    #[tokio::test]
+    async fn qualified_legacy_torch_activation_uses_trusted_recipe_identity() {
+        let (manager, _root) = create_torch_test_manager().await;
+        register_test_version(&manager, "v2.9.1").await;
+        let runtime = manager.version_path("v2.9.1");
+        std::fs::remove_file(runtime.join("resolution.json")).unwrap();
+        std::fs::write(
+            runtime.join("runtime.json"),
+            r#"{"recipe_id":"torch-upstream-2.9.1-r1"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            runtime.join("venv/bin/python"),
+            b"#!/bin/sh\necho 2.9.1+cu130\n",
+        )
+        .unwrap();
+        assert!(manager.set_active_version("v2.9.1").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn restart_falls_back_from_invalid_active_torch_to_verified_default() {
+        let (manager, root) = create_torch_test_manager().await;
+        register_test_version(&manager, "good").await;
+        register_test_version(&manager, "bad").await;
+        manager.set_default_version(Some("good")).await.unwrap();
+        manager.set_active_version("bad").await.unwrap();
+        std::fs::remove_file(manager.version_path("bad").join("runtime.json")).unwrap();
+        let restored = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        assert_eq!(
+            restored.get_active_version().await.unwrap().as_deref(),
+            Some("good")
+        );
+        assert_eq!(
+            restored.get_default_version().await.unwrap().as_deref(),
+            Some("good")
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

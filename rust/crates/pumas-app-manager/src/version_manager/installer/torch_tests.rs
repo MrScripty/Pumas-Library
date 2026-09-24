@@ -188,6 +188,38 @@ async fn existing_upstream_directory_is_never_replaced() {
 }
 
 #[tokio::test]
+async fn interrupted_publication_is_quarantined_before_retry() {
+    let (mut installer, _root) = fixture_installer();
+    let destination = installer.versions_dir().join("v2.9.1");
+    std::fs::create_dir_all(&destination).unwrap();
+    std::fs::write(destination.join(".pumas-publishing"), "metadata pending").unwrap();
+    std::fs::write(destination.join("keep"), "orphaned attempt").unwrap();
+    installer.torch_stage_override = Some(Arc::new(mock_runtime));
+    let (tx, _rx) = mpsc::channel(16);
+    installer
+        .install_version("v2.9.1", &upstream_release(), tx)
+        .await
+        .unwrap();
+    assert!(destination.join("venv/bin/python").exists());
+    assert!(!destination.join(".pumas-publishing").exists());
+    let recovered: Vec<_> = std::fs::read_dir(installer.versions_dir())
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".torch-orphan-v2.9.1-")
+        })
+        .collect();
+    assert_eq!(recovered.len(), 1);
+    assert_eq!(
+        std::fs::read_to_string(recovered[0].path().join("keep")).unwrap(),
+        "orphaned attempt"
+    );
+}
+
+#[tokio::test]
 async fn cancelling_a_runtime_command_reaps_its_process_group() {
     let (installer, root) = fixture_installer();
     let cancel = installer.cancel_flag.clone();

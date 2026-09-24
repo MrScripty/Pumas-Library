@@ -6,12 +6,59 @@ import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import {
   PythonBridge,
+  rpcRequestTimeoutMs,
   parseModelDownloadUpdateSseChunk,
   parseModelLibraryUpdateSseChunk,
   parseRuntimeProfileUpdateSseChunk,
   parseServingStatusUpdateSseChunk,
   parseStatusTelemetryUpdateSseChunk,
 } from '../dist/python-bridge.js';
+
+test('Torch artifact preview has time to complete while other RPC calls keep the normal timeout', () => {
+  assert.equal(rpcRequestTimeoutMs('preview_torch_runtime'), 195_000);
+  assert.equal(rpcRequestTimeoutMs('install_version'), 60_000);
+  assert.equal(rpcRequestTimeoutMs('get_torch_runtime_options'), 60_000);
+});
+
+test('bridge applies the longer timeout only to Torch preview HTTP requests', async () => {
+  const bridgeUrl = new URL('../dist/python-bridge.js', import.meta.url);
+  const requireBridge = createRequire(bridgeUrl);
+  const exports = {};
+  const seen = [];
+  runInNewContext(readFileSync(bridgeUrl, 'utf8'), {
+    exports,
+    Buffer,
+    process: { env: {} },
+    setTimeout,
+    clearTimeout,
+    require(specifier) {
+      if (specifier === 'electron-log') return { info() {}, warn() {}, error() {} };
+      if (specifier === 'http') return {
+        request(options, onResponse) {
+          seen.push(options);
+          const request = new EventEmitter();
+          request.write = () => {};
+          request.end = () => {
+            const response = new EventEmitter();
+            onResponse(response);
+            response.emit('data', JSON.stringify({ result: { ok: true } }));
+            response.emit('end');
+          };
+          return request;
+        },
+      };
+      return requireBridge(specifier);
+    },
+  });
+  const bridge = new exports.PythonBridge({
+    port: 49152, debug: false, rustBinaryPath: process.execPath, launcherRoot: process.cwd(),
+  });
+  bridge.process = {};
+
+  await bridge.call('preview_torch_runtime', { tag: 'v2.10.0' });
+  await bridge.call('get_torch_runtime_options', {});
+  assert.deepEqual(seen.map((request) => request.timeout), [195_000, 60_000]);
+});
 
 class FakeTimerController {
   timers = [];

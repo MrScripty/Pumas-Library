@@ -1,4 +1,5 @@
 import type { BaseResponse } from './api-common';
+import type { TorchRuntimeOptions, TorchRuntimePreview, TorchRuntimePreviewRequest, TorchRuntimeProbeReport } from './torch-install';
 import type {
   LaunchResponse,
   RuntimeLaunchResponse,
@@ -78,7 +79,10 @@ export interface DesktopBridgeRuntimeAPI {
   ): Promise<GetAvailableVersionsResponse>;
   get_installed_versions(appId?: string): Promise<GetInstalledVersionsResponse>;
   get_active_version(appId?: string): Promise<GetActiveVersionResponse>;
-  install_version(tag: string, appId?: string): Promise<VersionActionResponse>;
+  install_version(tag: string, appId?: string, previewId?: string): Promise<VersionActionResponse>;
+  get_torch_runtime_options(): Promise<TorchRuntimeOptions>;
+  preview_torch_runtime(request: TorchRuntimePreviewRequest): Promise<TorchRuntimePreview>;
+  get_torch_runtime_probe(tag: string): Promise<TorchRuntimeProbeReport>;
   remove_version(tag: string, appId?: string): Promise<RemoveVersionResponse>;
   switch_version(tag: string, appId?: string): Promise<SwitchVersionResponse>;
   validate_installations(appId?: string): Promise<ValidateInstallationsResponse>;

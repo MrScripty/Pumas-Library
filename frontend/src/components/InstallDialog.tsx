@@ -19,6 +19,10 @@ import { useInstallationState } from '../hooks/useInstallationState';
 import { ConfirmationDialog } from './ConfirmationDialog';
 import { InstallDialogContent } from './InstallDialogContent';
 import { InstallDialogFrame } from './InstallDialogFrame';
+import { TorchInstallPreview } from './TorchInstallPreview';
+import { TorchRuntimeProbePanel } from './TorchRuntimeProbePanel';
+import { api } from '../api/adapter';
+import type { TorchInstalledConfig } from '../types/torch-install';
 import {
   filterVersions,
   getErrorMessage,
@@ -38,7 +42,7 @@ interface InstallDialogProps {
   availableVersions: VersionRelease[];
   installedVersions: string[];
   isLoading: boolean;
-  onInstallVersion: (tag: string) => Promise<boolean>;
+  onInstallVersion: (tag: string, previewId?: string) => Promise<boolean>;
   onCancelInstallation: () => Promise<boolean>;
   onRefreshAll: (forceRefresh?: boolean) => Promise<void>;
   onRemoveVersion: (tag: string) => Promise<boolean>;
@@ -80,7 +84,23 @@ export function InstallDialog({
   const [errorVersion, setErrorVersion] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
+  const [torchPreviewTag, setTorchPreviewTag] = useState<string | null>(null);
+  const [torchProbeTag, setTorchProbeTag] = useState<string | null>(null);
+  const [torchInstalledConfigs, setTorchInstalledConfigs] = useState<TorchInstalledConfig[]>([]);
   const cancellationRef = useRef(false);
+  const installedKey = installedVersions.join('\0');
+
+  useEffect(() => {
+    if (!isOpen || appId !== 'torch') return;
+    let active = true;
+    setTorchInstalledConfigs([]);
+    void api.get_torch_runtime_options().then((options) => {
+      if (active) setTorchInstalledConfigs(options.installed);
+    }).catch(() => {
+      if (active) setTorchInstalledConfigs([]);
+    });
+    return () => { active = false; };
+  }, [appId, installedKey, isOpen]);
 
   // Custom hooks
   const {
@@ -157,7 +177,7 @@ export function InstallDialog({
   );
   const stickyFailure = getStickyFailure(progress, failedInstall);
 
-  const handleInstall = async (tag: string) => {
+  const handleInstall = async (tag: string, previewId?: string) => {
     logger.info('Starting installation', { tag });
     setInstallingVersion(tag);
     setErrorVersion(null);
@@ -167,7 +187,7 @@ export function InstallDialog({
     cancellationRef.current = false;
 
     try {
-      await onInstallVersion(tag);
+      await onInstallVersion(tag, previewId);
       logger.info('Installation initiated successfully', { tag });
     } catch (error) {
       const isCancellation = isInstallationCancellation(error, cancellationRef.current);
@@ -239,7 +259,23 @@ export function InstallDialog({
       onClose={onClose}
       title={dialogTitle}
     >
-      <InstallDialogContent
+      {appId === 'torch' && torchProbeTag && !installingVersion ? (
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
+          <button type="button" onClick={() => setTorchProbeTag(null)} className="text-sm underline">All versions</button>
+          <TorchRuntimeProbePanel tag={torchProbeTag} />
+        </div>
+      ) : appId === 'torch' && torchPreviewTag && !installingVersion ? (
+        <TorchInstallPreview
+          key={torchPreviewTag}
+          tag={torchPreviewTag}
+          onBack={() => setTorchPreviewTag(null)}
+          onInstall={(previewId) => {
+            const tag = torchPreviewTag;
+            setTorchPreviewTag(null);
+            void handleInstall(tag, previewId);
+          }}
+        />
+      ) : <InstallDialogContent
         appId={appId}
         cancellationNotice={cancellationNotice}
         cancelHoverTag={cancelHoverTag}
@@ -249,6 +285,7 @@ export function InstallDialog({
         hoveredTag={hoveredTag}
         installNetworkStatus={installNetworkStatus}
         installedVersions={installedVersions}
+        torchInstalledConfigs={torchInstalledConfigs}
         installingVersion={installingVersion}
         isLoading={isLoading}
         isRateLimited={isRateLimited}
@@ -267,10 +304,15 @@ export function InstallDialog({
         onToggleCompletedItems={() => setShowCompletedItems(!showCompletedItems)}
         onBackToList={() => setViewMode('list')}
         onInstallVersion={(tag) => {
-          void handleInstall(tag);
+          if (appId === 'torch') {
+            setTorchPreviewTag(tag);
+          } else {
+            void handleInstall(tag);
+          }
         }}
+        onInspectTorchProbe={(tag) => setTorchProbeTag(tag)}
         onReportRemoveError={reportRemoveError}
-      />
+      />}
 
       <ConfirmationDialog
         isOpen={showCancelConfirmation}

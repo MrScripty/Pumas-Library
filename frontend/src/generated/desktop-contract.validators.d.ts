@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 c47dcf40f195691ed7ba33b2b91c30a4c91cb1a1ec15d122ccc0290d136c45f0. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 93bcdfa8b5ae455a09d566be2a9a34b36ae6950ef14910a73f8b6b3fc84478f8. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -21,6 +21,8 @@ export declare function validateGetBackendSetupParams(value: unknown): boolean;
 export declare function validateGetHfDownloadDetailsParams(value: unknown): boolean;
 export declare function validateGetReleaseDependenciesOutcome(value: unknown): boolean;
 export declare function validateGetReleaseDependenciesParams(value: unknown): boolean;
+export declare function validateGetTorchPreviewReportParams(value: unknown): boolean;
+export declare function validateGetTorchRuntimeProbeParams(value: unknown): boolean;
 export declare function validateGithubCacheStatusOutcome(value: unknown): boolean;
 export declare function validateHfDownloadDetailsOutcome(value: unknown): boolean;
 export declare function validateInferenceSettingsOutcome(value: unknown): boolean;
@@ -35,6 +37,7 @@ export declare function validateLinkHealthOutcome(value: unknown): boolean;
 export declare function validateModelIndexRefreshOutcome(value: unknown): boolean;
 export declare function validateModelsOutcome(value: unknown): boolean;
 export declare function validatePartialDownloadOutcome(value: unknown): boolean;
+export declare function validatePreviewTorchRuntimeParams(value: unknown): boolean;
 export declare function validatePublicError(value: unknown): boolean;
 export declare function validateRecoverDownloadParams(value: unknown): boolean;
 export declare function validateRemoveVersionOutcome(value: unknown): boolean;

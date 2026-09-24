@@ -6,6 +6,14 @@ mod torch;
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod torch_tests;
 pub(crate) use torch::is_torch_runtime_release;
+pub(crate) struct TorchInstallPlan {
+    pub(crate) preview: crate::version_manager::TorchPreview,
+    pub(crate) requirements: String,
+    pub(crate) resolution: String,
+    pub(crate) report: String,
+    pub(crate) interpreter_path: PathBuf,
+    pub(crate) interpreter_hash: String,
+}
 #[cfg(test)]
 pub(crate) use torch::TorchPublicationPause;
 
@@ -188,13 +196,27 @@ impl VersionInstaller {
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
+        self.install_version_with_torch_plan(tag, release, progress_tx, None)
+            .await
+    }
+
+    pub(crate) async fn install_version_with_torch_plan(
+        &self,
+        tag: &str,
+        release: &GitHubRelease,
+        progress_tx: mpsc::Sender<ProgressUpdate>,
+        torch_plan: Option<TorchInstallPlan>,
+    ) -> Result<()> {
         match self.app_id {
             AppId::Ollama => self.install_ollama_binary(tag, release, progress_tx).await,
             AppId::LlamaCpp => {
                 self.install_llama_cpp_binary(tag, release, progress_tx)
                     .await
             }
-            AppId::Torch => self.install_torch_runtime(tag, release, progress_tx).await,
+            AppId::Torch => {
+                self.install_torch_runtime(tag, release, progress_tx, torch_plan)
+                    .await
+            }
             AppId::OnnxRuntime => Err(PumasError::Other(
                 "ONNX Runtime is embedded and cannot be installed as a version".to_string(),
             )),

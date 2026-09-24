@@ -236,6 +236,24 @@ pub(crate) enum RpcCommand {
     InstallVersion {
         app_id: String,
         tag: String,
+        preview_id: Option<String>,
+    },
+    #[cfg(feature = "inference-plugins")]
+    GetTorchRuntimeOptions,
+    #[cfg(feature = "inference-plugins")]
+    PreviewTorchRuntime {
+        tag: String,
+        build: String,
+        python: String,
+        adapter: String,
+    },
+    #[cfg(feature = "inference-plugins")]
+    GetTorchPreviewReport {
+        preview_id: String,
+    },
+    #[cfg(feature = "inference-plugins")]
+    GetTorchRuntimeProbe {
+        tag: String,
     },
     #[cfg(feature = "inference-plugins")]
     SetDefaultVersion {
@@ -417,6 +435,14 @@ impl RpcCommand {
             #[cfg(feature = "inference-plugins")]
             Self::InstallVersion { .. } => "install_version",
             #[cfg(feature = "inference-plugins")]
+            Self::GetTorchRuntimeOptions => "get_torch_runtime_options",
+            #[cfg(feature = "inference-plugins")]
+            Self::PreviewTorchRuntime { .. } => "preview_torch_runtime",
+            #[cfg(feature = "inference-plugins")]
+            Self::GetTorchPreviewReport { .. } => "get_torch_preview_report",
+            #[cfg(feature = "inference-plugins")]
+            Self::GetTorchRuntimeProbe { .. } => "get_torch_runtime_probe",
+            #[cfg(feature = "inference-plugins")]
             Self::CheckVersionDependencies { .. } => "check_version_dependencies",
             #[cfg(feature = "inference-plugins")]
             Self::GetReleaseDependencies { .. } => "get_release_dependencies",
@@ -554,6 +580,14 @@ pub(crate) enum RpcOutcome {
     #[cfg(feature = "inference-plugins")]
     InstallVersion(InstallVersionOutcome),
     #[cfg(feature = "inference-plugins")]
+    TorchRuntimeOptions(Value),
+    #[cfg(feature = "inference-plugins")]
+    TorchRuntimePreview(Value),
+    #[cfg(feature = "inference-plugins")]
+    TorchPreviewReport(Value),
+    #[cfg(feature = "inference-plugins")]
+    TorchRuntimeProbe(Value),
+    #[cfg(feature = "inference-plugins")]
     CheckVersionDependencies(CheckVersionDependenciesOutcome),
     #[cfg(feature = "inference-plugins")]
     GetReleaseDependencies(GetReleaseDependenciesOutcome),
@@ -658,6 +692,11 @@ impl RpcOutcome {
             Self::SetDefaultVersion(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::InstallVersion(value) => serde_json::to_value(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::TorchRuntimeOptions(value)
+            | Self::TorchRuntimePreview(value)
+            | Self::TorchPreviewReport(value)
+            | Self::TorchRuntimeProbe(value) => Ok(value),
             #[cfg(feature = "inference-plugins")]
             Self::CheckVersionDependencies(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
@@ -3655,6 +3694,42 @@ pub(crate) struct InstallVersionParams {
     #[serde(alias = "appId")]
     app_id: String,
     tag: String,
+    #[serde(default, alias = "previewId")]
+    preview_id: Option<String>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct PreviewTorchRuntimeParams {
+    tag: String,
+    build: String,
+    python: String,
+    #[serde(default = "default_torch_adapter")]
+    adapter: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+fn default_torch_adapter() -> String {
+    "none".into()
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct GetTorchPreviewReportParams {
+    #[serde(alias = "previewId")]
+    preview_id: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct GetTorchRuntimeProbeParams {
+    tag: String,
 }
 
 #[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
@@ -5433,8 +5508,33 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
             parse_params::<InstallVersionParams>(params).map(|params| RpcCommand::InstallVersion {
                 app_id: params.app_id,
                 tag: params.tag,
+                preview_id: params.preview_id,
             })
         }
+        #[cfg(feature = "inference-plugins")]
+        "get_torch_runtime_options" => empty().map(|()| RpcCommand::GetTorchRuntimeOptions),
+        #[cfg(feature = "inference-plugins")]
+        "preview_torch_runtime" => {
+            parse_params::<PreviewTorchRuntimeParams>(params).map(|params| {
+                RpcCommand::PreviewTorchRuntime {
+                    tag: params.tag,
+                    build: params.build,
+                    python: params.python,
+                    adapter: params.adapter,
+                }
+            })
+        }
+        #[cfg(feature = "inference-plugins")]
+        "get_torch_preview_report" => {
+            parse_params::<GetTorchPreviewReportParams>(params).map(|params| {
+                RpcCommand::GetTorchPreviewReport {
+                    preview_id: params.preview_id,
+                }
+            })
+        }
+        #[cfg(feature = "inference-plugins")]
+        "get_torch_runtime_probe" => parse_params::<GetTorchRuntimeProbeParams>(params)
+            .map(|params| RpcCommand::GetTorchRuntimeProbe { tag: params.tag }),
         #[cfg(not(feature = "inference-plugins"))]
         "install_version" => Err(PublicError::method_not_found()),
         #[cfg(feature = "inference-plugins")]

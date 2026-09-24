@@ -139,6 +139,17 @@ pub(super) async fn serve_torch_model(
         )
         .await;
     };
+    if let Err(error) = manager.verify_torch_identity(&tag).await {
+        tracing::warn!(%error, %tag, "Selected Torch runtime identity check failed");
+        return non_critical_failure_response(
+            state,
+            fail(
+                ModelServeErrorCode::MissingRuntime,
+                &format!("Selected Torch runtime failed its installed identity check: {error}"),
+            ),
+        )
+        .await;
+    }
     let existing = state
         .api
         .observe_owned_runtime_profile(&request.config.profile_id)?;

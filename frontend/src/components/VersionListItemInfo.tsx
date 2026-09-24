@@ -2,6 +2,7 @@ import { ExternalLink, FileText } from 'lucide-react';
 import type { VersionRelease } from '../hooks/useVersions';
 import { formatVersionDate } from '../utils/installationFormatters';
 import { IconButton } from './ui';
+import type { TorchInstalledConfig } from '../types/torch-install';
 
 interface VersionListItemInfoProps {
   appId?: string;
@@ -10,6 +11,8 @@ interface VersionListItemInfoProps {
   failedLogPath: string | null;
   hasError: boolean;
   release: VersionRelease;
+  isInstalled?: boolean;
+  torchInstalledConfig?: TorchInstalledConfig;
   onOpenLogPath: (path: string) => void;
   onOpenUrl: (url: string) => void;
 }
@@ -21,6 +24,8 @@ export function VersionListItemInfo({
   failedLogPath,
   hasError,
   release,
+  isInstalled = false,
+  torchInstalledConfig,
   onOpenLogPath,
   onOpenUrl,
 }: VersionListItemInfoProps) {
@@ -61,10 +66,14 @@ export function VersionListItemInfo({
           </div>
           {appId === 'torch' && (
             <div className="text-xs text-[hsl(var(--text-muted))]">
-              {release.tagName === 'v2.9.1'
-                ? 'Pumas verified preset: Python 3.12, CUDA 13.0, Linux x86_64'
-                : 'Not verified by Pumas · official wheel resolved during install (CPU default) · compatible installed Python selected'}
-              <div>Managed binaries require Linux x86_64. Stable releases only; Python provisioning and source builds are unavailable. Installation does not select or start this version.</div>
+              {isInstalled ? (
+                torchInstalledConfig
+                  ? `Installed ${torchInstalledConfig.build ?? 'unknown build'} · ${torchInstalledConfig.python ?? 'unknown Python'} · ${torchInstalledConfig.adapter ?? 'unknown adapter'} · ${torchInstalledConfig.qualification}`
+                  : 'Installed build details unavailable; inspect saved checks for this version.'
+              ) : release.tagName === 'v2.9.1'
+                ? 'Qualified preset: Python 3.12, CUDA 13.0, bundled image dependencies'
+                : 'Unverified release · choose an official build and installed Python, then review exact wheel hashes'}
+              {!isInstalled && <div>Managed binaries require Linux x86_64. Stable releases only. Installation does not select or start this version.</div>}
             </div>
           )}
         </div>

@@ -161,12 +161,17 @@ async fn manager_filters_upstream_releases_and_preserves_legacy_runtime_state() 
     let metadata_manager = MetadataManager::new(root.path());
     metadata_manager.ensure_directories().unwrap();
 
-    let legacy_tags = ["0.1.1", "0.1.2", "0.1.3", "0.1.4"];
+    let legacy_tags = ["0.1.1", "0.1.2", "0.1.3", "0.1.4", "0.1.6"];
     let mut installed = HashMap::new();
     for tag in legacy_tags {
         let runtime = root.path().join("torch-versions").join(tag);
         std::fs::create_dir_all(runtime.join("venv/bin")).unwrap();
-        std::fs::write(runtime.join("runtime.json"), "{}").unwrap();
+        let recipe = if tag == "0.1.6" {
+            r#"{"recipe_id":"torch-runtime-0.1.6"}"#
+        } else {
+            "{}"
+        };
+        std::fs::write(runtime.join("runtime.json"), recipe).unwrap();
         std::fs::write(runtime.join("serve.py"), "# legacy fixture\n").unwrap();
         std::fs::write(runtime.join("requirements.txt"), "# legacy fixture\n").unwrap();
         std::fs::write(runtime.join("venv/bin/python"), "# fixture\n").unwrap();
@@ -185,13 +190,13 @@ async fn manager_filters_upstream_releases_and_preserves_legacy_runtime_state() 
         .save_versions(
             &VersionsMetadata {
                 installed,
-                last_selected_version: Some("0.1.4".to_string()),
+                last_selected_version: Some("0.1.6".to_string()),
                 default_version: None,
             },
             Some(AppId::Torch),
         )
         .unwrap();
-    std::fs::write(root.path().join(".active-version-torch"), "0.1.4\n").unwrap();
+    std::fs::write(root.path().join(".active-version-torch"), "0.1.6\n").unwrap();
 
     let cache = ReleasesCache::new(
         root.path().join("launcher-data/cache"),
@@ -240,12 +245,12 @@ async fn manager_filters_upstream_releases_and_preserves_legacy_runtime_state() 
     assert_eq!(installed_after, legacy_tags.map(str::to_string).to_vec());
     assert_eq!(
         manager.get_active_version().await.unwrap().as_deref(),
-        Some("0.1.4")
+        Some("0.1.6")
     );
     assert_eq!(manager.get_default_version().await.unwrap(), None);
 
     let saved = metadata_manager.load_versions(Some(AppId::Torch)).unwrap();
-    assert_eq!(saved.installed.len(), 4);
+    assert_eq!(saved.installed.len(), 5);
     for tag in legacy_tags {
         assert_eq!(saved.installed[tag].release_tag, tag);
         assert_eq!(

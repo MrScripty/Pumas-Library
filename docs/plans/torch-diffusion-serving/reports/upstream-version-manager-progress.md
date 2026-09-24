@@ -1,7 +1,7 @@
 # Upstream Torch version manager progress
 
 Date: 2026-09-23 (America/Vancouver). This is an implementation and evidence
-inventory, not a completed desktop/image acceptance. The prior
+inventory, not a completed Pumas desktop acceptance. The prior
 [A1 packaged acceptance](a1-packaged-acceptance.md) applies only to its original
 `v2.9.1` / CPython 3.12 / CUDA 13.0 / Linux x86_64 combination. The prior Tuldok
 image evidence used a different packaged runtime and does not qualify a newly
@@ -94,9 +94,17 @@ resolved upstream release.
   is available. The existing Pumas `2.9.1+cu130` environment reports CUDA 13.0,
   detects the RTX 5090, and completed a CUDA tensor multiplication outside the
   sandbox. This check is evidence only for that existing runtime. The default
-  sandbox also cannot resolve the wheel host, although
-  elevated network access resolved the real CPU tuple. No new CUDA image model
-  was loaded or run in this evidence set.
+  sandbox also cannot resolve the wheel host, although elevated network access
+  resolved the real CPU tuple.
+- **Real upstream CUDA and image tuple:** the current Pumas RPC binary installed
+  `v2.10.0+cu130` with Python 3.12 and the FLUX.2 adapter in an isolated root,
+  selected it explicitly, passed a managed sidecar startup trial, loaded the
+  real FLUX.2 Klein 9B KV FP8 checkpoint, and served a 1280×720 PNG to the
+  actual Tuldok browser. Display, save, automatic temporary collection import,
+  model unload, generation-specific stop, and restart/retrial passed. See the
+  [exact environment and image evidence](upstream-v210-cu130-flux2-e2e.md).
+  Pumas controls were exercised through RPC, so this does not complete the
+  required Pumas desktop UI acceptance.
 
 ## Open implementation gaps
 
@@ -120,13 +128,11 @@ resolved upstream release.
    the resolved artifacts, install it, inspect results, explicitly select it,
    start it, and exercise basic use. Cover an older release and unavailable
    Python/build combinations with visible actionable alternatives.
-2. On a supported GPU host with existing Pumas model assets, use a newly
-   installed compatible runtime to load FLUX.2 Klein or Nunchaku Z-Image through
-   the Pumas gateway. From Tuldok, request a defined image resolution and
-   verify the resulting PNG is generated, displayed, saved, and decodable.
-   Record Torch/Python/build, adapter packages, model asset identity, GPU and
-   driver, Pumas/Tuldok revisions, and image evidence. An adapter failure must
-   remain scoped to that feature.
+2. Repeat the successful FLUX.2 GPU/Tuldok flow through the actual Pumas
+   desktop controls for preview, install, selection, startup trial, and model
+   load. The RPC-driven real-image path and its exact tuple are recorded in the
+   linked report. Check that a failed optional adapter remains scoped to that
+   feature in the real desktop.
 3. In the real desktop, exercise cancellation, failed trial, switching back to
    the qualified runtime, restart, and preservation of active/default/installed
    state. Recheck probe freshness across dependency, sidecar, driver, and

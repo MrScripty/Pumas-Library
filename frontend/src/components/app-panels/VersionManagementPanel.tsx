@@ -3,6 +3,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { VersionSelector } from '../VersionSelector';
 import { InstallDialog } from '../InstallDialog';
 import { TorchRuntimeProbePanel } from '../TorchRuntimeProbePanel';
+import type { createTorchTrialLifecycleStore } from '../TorchTrialLifecycleStore';
 import type { AppVersionState } from '../../utils/appVersionState';
 import { IconButton } from '../ui';
 
@@ -13,6 +14,7 @@ interface VersionManagementPanelProps {
   showManager: boolean;
   onShowManager: (show: boolean) => void;
   diskSpacePercent?: number;
+  trialStore?: ReturnType<typeof createTorchTrialLifecycleStore>;
 }
 
 export function VersionManagementPanel({
@@ -22,6 +24,7 @@ export function VersionManagementPanel({
   showManager,
   onShowManager,
   diskSpacePercent = 0,
+  trialStore,
 }: VersionManagementPanelProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [refreshOnOpenPending, setRefreshOnOpenPending] = useState(false);
@@ -166,7 +169,10 @@ export function VersionManagementPanel({
             <button type="button" className="mt-2 rounded border px-3 py-2 text-xs" onClick={() => setInspectedTorchTag(versions.activeVersion)}>
               Inspect active Torch runtime
             </button>
-            {inspectedTorchTag === versions.activeVersion && <TorchRuntimeProbePanel tag={versions.activeVersion} />}
+            {inspectedTorchTag === versions.activeVersion && <TorchRuntimeProbePanel
+              tag={versions.activeVersion}
+              trialStore={trialStore}
+            />}
           </>}
         </>
       )}

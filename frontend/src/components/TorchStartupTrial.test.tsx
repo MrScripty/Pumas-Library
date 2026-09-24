@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TorchStartupTrial } from './TorchStartupTrial';
+import { createTorchTrialLifecycleStore } from './TorchTrialLifecycleStore';
 
 const snapshot = vi.fn<() => Promise<unknown>>();
 const trial = vi.fn<(tag: string, profileId: string) => Promise<unknown>>();
@@ -18,9 +19,11 @@ vi.mock('../api/adapter', () => ({
 const managedProfile = {
   profile_id: 'torch-managed', provider: 'torch', provider_mode: 'torch_serve', management_mode: 'managed', enabled: true, name: 'Local Torch',
 };
+let store: ReturnType<typeof createTorchTrialLifecycleStore>;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  store = createTorchTrialLifecycleStore();
   snapshot.mockResolvedValue({
     success: true, snapshot: { profiles: [
       managedProfile,
@@ -38,7 +41,7 @@ describe('TorchStartupTrial', () => {
       startedByTrial: true, cleanup: 'not_needed',
     });
     conditionalStop.mockResolvedValue({ success: true, stopped: true });
-    render(<TorchStartupTrial tag="v2.10.0" />);
+    render(<TorchStartupTrial tag="v2.10.0" store={store} />);
 
     const start = screen.getByRole('button', { name: 'Trial startup' });
     expect(start).toBeDisabled();
@@ -64,7 +67,7 @@ describe('TorchStartupTrial', () => {
       healthStatus: 'failed', protocol: null, capabilities: [], generation: '43',
       startedByTrial: true, cleanup: 'stopped_owned_generation', error: 'Health check failed',
     });
-    render(<TorchStartupTrial tag="v2.10.0" />);
+    render(<TorchStartupTrial tag="v2.10.0" store={store} />);
     fireEvent.change(await screen.findByRole('combobox', { name: 'Managed Torch profile' }), { target: { value: 'torch-managed' } });
     fireEvent.click(screen.getByRole('button', { name: 'Trial startup' }));
     expect(await screen.findByText(/Startup trial failed/)).toBeInTheDocument();

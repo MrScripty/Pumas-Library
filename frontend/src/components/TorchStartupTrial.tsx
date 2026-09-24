@@ -1,28 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { api } from '../api/adapter';
 import type { RuntimeProfileConfig } from '../types/api-runtime-profiles';
-import type { TorchStartupTrialOutcome } from '../types/torch-install';
+import { torchTrialLifecycleStore, type createTorchTrialLifecycleStore } from './TorchTrialLifecycleStore';
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function TorchStartupTrial({ tag }: { tag: string }) {
+interface TorchStartupTrialProps {
+  tag: string;
+  store?: ReturnType<typeof createTorchTrialLifecycleStore>;
+}
+
+export function TorchStartupTrial({ tag, store = torchTrialLifecycleStore }: TorchStartupTrialProps) {
   const [profiles, setProfiles] = useState<RuntimeProfileConfig[]>([]);
   const [profileId, setProfileId] = useState('');
   const [profileError, setProfileError] = useState<string | null>(null);
-  const [result, setResult] = useState<TorchStartupTrialOutcome | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [stopResult, setStopResult] = useState<'stopped' | 'not-current' | null>(null);
+  const { phase, actionTag, result, pendingStop, error, stopResult } = useSyncExternalStore(store.subscribe, store.getSnapshot);
 
   useEffect(() => {
     let active = true;
     setProfiles([]);
     setProfileId('');
-    setResult(null);
-    setActionError(null);
-    setStopResult(null);
     setProfileError(null);
     void api.get_runtime_profiles_snapshot().then((response) => {
       if (!active) return;
@@ -33,48 +32,19 @@ export function TorchStartupTrial({ tag }: { tag: string }) {
       setProfiles(response.snapshot.profiles.filter((profile) =>
         profile.provider === 'torch' && profile.provider_mode === 'torch_serve'
         && profile.management_mode === 'managed' && profile.enabled));
-    }).catch((error: unknown) => {
-      if (active) setProfileError(messageOf(error));
+    }).catch((cause: unknown) => {
+      if (active) setProfileError(messageOf(cause));
     });
     return () => { active = false; };
   }, [tag]);
 
-  const needsStop = result !== null && result.startedByTrial
+  const generationMissing = result !== null && result.startedByTrial
     && (result.success || result.cleanup === 'manual_stop_required')
-    && result.cleanup !== 'stopped_owned_generation' && stopResult === null;
-
-  const trial = async () => {
-    if (!profileId || busy || needsStop) return;
-    setBusy(true);
-    setResult(null);
-    setActionError(null);
-    setStopResult(null);
-    try {
-      setResult(await api.trial_torch_runtime(tag, profileId));
-    } catch (error) {
-      setActionError(messageOf(error));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const stop = async () => {
-    if (!result || !needsStop || busy || result.generation === null) return;
-    setBusy(true);
-    setActionError(null);
-    try {
-      const response = await api.stop_runtime_profile_if_generation(result.profileId, result.generation);
-      if (!response.success) {
-        setActionError(response.error ?? 'Could not stop trial profile');
-        return;
-      }
-      setStopResult(response.stopped ? 'stopped' : 'not-current');
-    } catch (error) {
-      setActionError(messageOf(error));
-    } finally {
-      setBusy(false);
-    }
-  };
+    && result.cleanup !== 'stopped_owned_generation' && result.generation === null
+    && stopResult === null;
+  const needsStop = pendingStop !== null || generationMissing;
+  const displayedResult = result?.tag === tag ? result : null;
+  const displayedStopResult = displayedResult ? stopResult : null;
 
   return (
     <section className="mt-3 rounded border p-3 text-xs" aria-label={`Torch startup trial for ${tag}`}>
@@ -89,20 +59,20 @@ export function TorchStartupTrial({ tag }: { tag: string }) {
       {profiles.length === 0 && !profileError && <p className="mt-2">Create and enable a managed Torch profile before running a startup trial.</p>}
       {profileError && <p role="alert" className="mt-2">Profiles unavailable: {profileError}</p>}
       <div className="mt-2 flex gap-2">
-        <button type="button" onClick={() => void trial()} disabled={!profileId || busy || Boolean(needsStop)} className="rounded border px-3 py-2 disabled:opacity-50">
-          {busy && !needsStop ? 'Starting trial…' : 'Trial startup'}
+        <button type="button" onClick={() => void store.start(tag, profileId)} disabled={!profileId || phase !== 'idle' || needsStop} className="rounded border px-3 py-2 disabled:opacity-50">
+          {phase === 'starting' ? actionTag === tag ? 'Starting trial…' : `Starting trial for ${actionTag}…` : 'Trial startup'}
         </button>
-        {needsStop && <button type="button" onClick={() => void stop()} disabled={busy || result.generation === null} className="rounded border px-3 py-2 disabled:opacity-50">{busy ? 'Stopping…' : 'Stop trial profile'}</button>}
+        {needsStop && <button type="button" onClick={() => void store.stop()} disabled={phase !== 'idle' || pendingStop === null} className="rounded border px-3 py-2 disabled:opacity-50">{phase === 'stopping' && actionTag !== tag ? `Stopping trial for ${actionTag}…` : phase === 'stopping' ? 'Stopping…' : 'Stop trial profile'}</button>}
       </div>
-      {actionError && <p role="alert" className="mt-2">Trial action failed: {actionError}</p>}
-      {result && <div className="mt-2" role="status">
-        <p>{result.success ? 'Startup trial passed' : 'Startup trial failed'} · Health: {result.healthStatus} · Protocol: {result.protocol ?? 'not checked'}</p>
-        {result.error && <p>{result.error}</p>}
-        {result.capabilities.length > 0 && <p>Reported capabilities: {result.capabilities.join(', ')}</p>}
-        {needsStop && <p>The trial profile is still running. Stop it when finished.</p>}
-        {needsStop && result.generation === null && <p role="alert">This trial has no process generation, so it cannot be stopped safely from here.</p>}
-        {stopResult === 'stopped' && <p>Trial profile stopped.</p>}
-        {stopResult === 'not-current' && <p>The trial process has ended or been replaced. No current process was stopped.</p>}
+      {error && <p role="alert" className="mt-2">Trial action failed{actionTag && actionTag !== tag ? ` for ${actionTag}` : ''}: {error}</p>}
+      {pendingStop && <p className="mt-2" role="status">The trial profile for {pendingStop.tag} is still running. Stop it when finished.</p>}
+      {generationMissing && <p role="alert">The trial for {result.tag} has no process generation, so it cannot be stopped safely from here.</p>}
+      {displayedStopResult === 'stopped' && <p className="mt-2" role="status">Trial profile stopped.</p>}
+      {displayedStopResult === 'not-current' && <p className="mt-2" role="status">The trial process has ended or been replaced. No current process was stopped.</p>}
+      {displayedResult && <div className="mt-2" role="status">
+        <p>{displayedResult.success ? 'Startup trial passed' : 'Startup trial failed'} · Health: {displayedResult.healthStatus} · Protocol: {displayedResult.protocol ?? 'not checked'}</p>
+        {displayedResult.error && <p>{displayedResult.error}</p>}
+        {displayedResult.capabilities.length > 0 && <p>Reported capabilities: {displayedResult.capabilities.join(', ')}</p>}
       </div>}
     </section>
   );

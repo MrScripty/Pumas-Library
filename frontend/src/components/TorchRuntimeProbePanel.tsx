@@ -2,12 +2,18 @@ import { useEffect, useState } from 'react';
 import { api } from '../api/adapter';
 import type { TorchInstalledConfig, TorchRuntimeProbeReport } from '../types/torch-install';
 import { TorchStartupTrial } from './TorchStartupTrial';
+import type { createTorchTrialLifecycleStore } from './TorchTrialLifecycleStore';
 
 function labelForCapability(key: string): string {
   return key.replaceAll('_', ' ');
 }
 
-export function TorchRuntimeProbePanel({ tag }: { tag: string }) {
+interface TorchRuntimeProbePanelProps {
+  tag: string;
+  trialStore?: ReturnType<typeof createTorchTrialLifecycleStore>;
+}
+
+export function TorchRuntimeProbePanel({ tag, trialStore }: TorchRuntimeProbePanelProps) {
   const [report, setReport] = useState<TorchRuntimeProbeReport | null>(null);
   const [installedConfig, setInstalledConfig] = useState<TorchInstalledConfig | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +78,7 @@ export function TorchRuntimeProbePanel({ tag }: { tag: string }) {
           )}
         </>
       )}
-      <TorchStartupTrial tag={tag} />
+      <TorchStartupTrial tag={tag} store={trialStore} />
     </section>
   );
 }

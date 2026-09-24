@@ -44,3 +44,12 @@ interpreters, and show unavailable combinations with discovered alternatives.
 Real desktop tests must then cover installation, trial, basic use, adapter
 failure, cancellation, switching, and restart for a non-2.9.1 version. Deep
 probe results also need hardware-aware invalidation and an on-demand UI view.
+
+The first serving scope is the existing Nunchaku Z-Image and FLUX.2 Klein image
+models. A generic user-defined PyTorch model plugin contract is a separate
+decision. The PR acceptance gate should use the actual desktop and Tuldok
+browser to select a release, preview and install exact artifacts, explicitly
+select and start the runtime, load one of these models, and generate a PNG at a
+requested resolution. Record the exact Torch/Python/build, adapter versions,
+model assets, GPU, gateway and Tuldok revisions. Run this before requesting PR
+acceptance; a merge alone is not evidence of inference compatibility.

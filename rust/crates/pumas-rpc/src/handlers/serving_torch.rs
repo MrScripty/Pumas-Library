@@ -46,7 +46,7 @@ pub(super) async fn serve_torch_model(
             state,
             fail(
                 ModelServeErrorCode::InvalidFormat,
-                "Select a qualified Nunchaku Z-Image or Klein 9B KV FP8 library package",
+                "Select a supported Nunchaku Z-Image or Klein 9B KV FP8 library package",
             ),
         )
         .await;
@@ -134,7 +134,7 @@ pub(super) async fn serve_torch_model(
             state,
             fail(
                 ModelServeErrorCode::MissingRuntime,
-                "Install and activate a qualified Torch runtime first",
+                "Install and explicitly select a Torch runtime first",
             ),
         )
         .await;
@@ -214,12 +214,13 @@ pub(super) async fn serve_torch_model(
     }
     // The handshake (protocol plus capability) must pass before any model
     // load or publication through this runtime.
-    if client.verify_image_runtime().await.is_err() {
+    if let Err(error) = client.verify_image_runtime().await {
+        tracing::warn!(%error, "Selected Torch runtime cannot serve image models");
         return non_critical_failure_response(
             state,
             fail(
                 ModelServeErrorCode::ProviderLoadFailed,
-                "Torch runtime is incompatible; install and activate a qualified Torch runtime",
+                &format!("Selected Torch runtime cannot serve image models: {error}"),
             ),
         )
         .await;
@@ -261,7 +262,11 @@ pub(super) async fn serve_torch_model(
                 state,
                 fail(
                     ModelServeErrorCode::ProviderLoadFailed,
-                    "Torch could not load the image pipeline; inspect its runtime log",
+                    if is_flux {
+                        "FLUX.2 image adapter could not load in this Torch runtime; inspect its runtime log. Other Torch uses remain available"
+                    } else {
+                        "Nunchaku image adapter could not load in this Torch runtime; inspect its runtime log. Other Torch uses remain available"
+                    },
                 ),
             )
             .await;
@@ -301,7 +306,7 @@ pub(super) async fn serve_torch_model(
             state,
             fail(
                 ModelServeErrorCode::ProviderLoadFailed,
-                "Torch runtime is incompatible; install and activate a qualified Torch runtime",
+                &format!("Selected Torch runtime lost image compatibility: {error}"),
             ),
         )
         .await;

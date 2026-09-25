@@ -144,6 +144,27 @@ acceptance summary, and RPC log. Windows/macOS are covered by an opt-in native
 CI matrix but have not run yet. This does not establish CUDA/device execution,
 packaged desktop installation, an image adapter, or Tuldok behavior for v2.14.0.
 
+## 2026-09-25 — Native test coverage and desktop RPC diagnosis
+
+The production automatic Python preview now has a platform-neutral regression
+test for newest-first candidate selection, fallback only after definite wheel
+or dependency incompatibility, and stopping on inconclusive resolver or
+interpreter-provisioning failure. Windows and macOS provider tests cover
+cancellation, timeout, descendant draining, and closed admission. The native
+quality workflow runs those provider tests on all three OSes and has a guarded
+Windows/macOS run for the fallback test. Linux app-manager verification passes
+all 180 library tests; Windows GNU test-target checking is compile-only. The
+Windows MSVC and macOS tests still need their native runners.
+
+The reported `Unknown API method: get_torch_release_options` identifies an
+older Electron bundle: the current source and local Linux candidate register
+the method, but the toolbar-linked package has not been replaced. The managed
+runtime path already provisions private CPython automatically; users do not
+select a Python version or need Python on the host. Keep the toolbar-linked
+release update, native Windows/macOS install and lifecycle acceptance, provider
+license attribution, and packaged desktop Torch installation open. Do not
+extend the Windows/macOS runtime support claim until their native gates pass.
+
 ## Current branch behavior
 
 - Stable upstream `vMAJOR.MINOR.PATCH` releases are discovered independently of

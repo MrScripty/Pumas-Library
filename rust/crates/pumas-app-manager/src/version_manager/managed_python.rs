@@ -1160,13 +1160,20 @@ mod tests {
 
     #[test]
     fn managed_identity_retains_selected_release_and_exact_provider_pin() {
+        let root = tempfile::tempdir().unwrap();
         let source_url = "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython.tar.gz";
         let installed = ManagedPythonInterpreter {
             minor: "3.14".into(),
             version: "3.14.2".into(),
             catalog_key: "cpython-3.14.2-linux-x86_64-gnu".into(),
             source_url: source_url.into(),
-            executable: PathBuf::from("/private/python/3.14/bin/python3.14"),
+            executable: root
+                .path()
+                .join("private")
+                .join("python")
+                .join("3.14")
+                .join("bin")
+                .join("python3.14"),
         };
         let identity = ManagedPythonIdentity::from_install(installed, NativeTarget::LinuxX8664);
         assert_eq!(identity.python, "python3.14");
@@ -1341,6 +1348,139 @@ mod tests {
         let failure = provider
             .run_bounded(
                 sleeping_tree_command(&rejected_marker),
+                Duration::from_secs(1),
+                4096,
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            failure.message,
+            "Managed provider process admission is closed"
+        );
+        assert!(!rejected_marker.exists());
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    async fn wait_for_descendant_marker(path: &Path) -> u32 {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Ok(marker) = std::fs::read_to_string(path) {
+                    if let Ok(pid) = marker.trim().parse::<u32>() {
+                        return pid;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("provider descendant never started")
+    }
+
+    #[cfg(target_os = "windows")]
+    fn native_sleeping_tree_command(marker: &Path) -> Command {
+        let mut command = Command::new("powershell.exe");
+        command
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$child = Start-Process powershell.exe -ArgumentList '-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 30' -PassThru; Set-Content -LiteralPath $env:PUMAS_TEST_MARKER -Value $child.Id; Start-Sleep -Seconds 30",
+            ])
+            .env("PUMAS_TEST_MARKER", marker);
+        command
+    }
+
+    #[cfg(target_os = "macos")]
+    fn native_sleeping_tree_command(marker: &Path) -> Command {
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", "sleep 30 & echo $! > \"$1\"; wait", "sh"])
+            .arg(marker);
+        command
+    }
+
+    #[cfg(target_os = "windows")]
+    fn assert_descendant_drained(pid: u32) {
+        assert!(!pumas_library::platform::process::is_process_alive(pid));
+    }
+
+    #[cfg(target_os = "macos")]
+    fn assert_descendant_drained(pid: u32) {
+        let output = std::process::Command::new("/bin/ps")
+            .args(["-p", &pid.to_string(), "-o", "stat="])
+            .output()
+            .unwrap();
+        assert!(
+            !output.status.success()
+                || String::from_utf8_lossy(&output.stdout)
+                    .trim()
+                    .starts_with('Z'),
+            "provider descendant is still running"
+        );
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[tokio::test]
+    async fn cancelled_native_provider_command_drains_descendant() {
+        let root = tempfile::tempdir().unwrap();
+        let cleanup = Arc::new(TorchCleanupTasks::default());
+        let provider = Arc::new(ManagedPythonProvider::new(root.path(), cleanup.clone()).unwrap());
+        let marker = root.path().join("cancelled-descendant.pid");
+        let command = native_sleeping_tree_command(&marker);
+        let running = tokio::spawn(async move {
+            provider
+                .run_bounded(command, Duration::from_secs(30), 4096)
+                .await
+        });
+        let descendant = wait_for_descendant_marker(&marker).await;
+        assert!(pumas_library::platform::process::is_process_alive(
+            descendant
+        ));
+        running.abort();
+        assert!(running.await.unwrap_err().is_cancelled());
+        cleanup.close();
+        tokio::time::timeout(Duration::from_secs(15), async {
+            cleanup.drain().await.unwrap();
+            cleanup.drain_child_slots().await.unwrap();
+        })
+        .await
+        .expect("provider cancellation cleanup exceeded its bound");
+        assert_descendant_drained(descendant);
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    #[tokio::test]
+    async fn timed_out_native_provider_command_drains_descendant_and_closes_admission() {
+        let root = tempfile::tempdir().unwrap();
+        let cleanup = Arc::new(TorchCleanupTasks::default());
+        let provider = ManagedPythonProvider::new(root.path(), cleanup.clone()).unwrap();
+        let marker = root.path().join("timed-out-descendant.pid");
+        let failure = tokio::time::timeout(
+            Duration::from_secs(20),
+            provider.run_bounded(
+                native_sleeping_tree_command(&marker),
+                Duration::from_secs(5),
+                4096,
+            ),
+        )
+        .await
+        .expect("provider timeout cleanup exceeded its bound")
+        .unwrap_err();
+        assert_eq!(failure.message, "Managed provider process timed out");
+        let descendant = wait_for_descendant_marker(&marker).await;
+        cleanup.close();
+        tokio::time::timeout(Duration::from_secs(15), async {
+            cleanup.drain().await.unwrap();
+            cleanup.drain_child_slots().await.unwrap();
+        })
+        .await
+        .expect("provider timeout shutdown exceeded its bound");
+        assert_descendant_drained(descendant);
+
+        let rejected_marker = root.path().join("rejected-descendant.pid");
+        let failure = provider
+            .run_bounded(
+                native_sleeping_tree_command(&rejected_marker),
                 Duration::from_secs(1),
                 4096,
             )

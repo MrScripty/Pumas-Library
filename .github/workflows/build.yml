@@ -195,6 +195,23 @@ jobs:
         run: python scripts/release/torch-managed-python-acceptance.py --self-test
       - name: Test native Torch wheel filtering
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager torch_alternatives
+      - name: Test native managed Python candidate selection
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager version_manager::managed_python::tests
+      - name: Test native Torch preview provider paths
+        if: runner.os == 'Linux'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager version_manager::torch_preview::tests
+      - name: Test native Torch preview Python fallback selection
+        if: runner.os == 'Windows' || runner.os == 'macOS'
+        shell: pwsh
+        run: |
+          $testName = 'auto_python_fallback_requires_a_definite_unsupported_attempt'
+          $testList = @(cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager $testName -- --list)
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (@($testList | Where-Object { $_ -match '::auto_python_fallback_requires_a_definite_unsupported_attempt: test$' }).Count -eq 0) {
+            throw "No tests matched $testName"
+          }
+          cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager $testName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Test Windows locked-stage cleanup ownership
         if: runner.os == 'Windows'
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager locked_stage_stays_owned

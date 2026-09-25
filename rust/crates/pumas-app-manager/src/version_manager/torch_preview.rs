@@ -143,6 +143,60 @@ fn auto_wheel_candidates(
     )
 }
 
+struct TorchPythonPreviewSearch {
+    candidates: std::vec::IntoIter<String>,
+    allow_fallback: bool,
+    last_unsupported: Option<TorchPreviewOutcome>,
+    finished: bool,
+}
+
+impl TorchPythonPreviewSearch {
+    fn new(candidates: Vec<String>, allow_fallback: bool) -> Self {
+        Self {
+            candidates: candidates.into_iter(),
+            allow_fallback,
+            last_unsupported: None,
+            finished: false,
+        }
+    }
+
+    fn next_candidate(&mut self) -> Option<String> {
+        if self.finished {
+            None
+        } else {
+            self.candidates.next()
+        }
+    }
+
+    /// None means the current rejection proves this candidate unsupported and
+    /// the next compatible Python may be tried.
+    fn record_attempt(&mut self, outcome: TorchPreviewOutcome) -> Option<TorchPreviewOutcome> {
+        if self.allow_fallback
+            && matches!(
+                outcome,
+                TorchPreviewOutcome::Rejected {
+                    reason: TorchPreviewRejectionReason::Unsupported,
+                    ..
+                }
+            )
+        {
+            self.last_unsupported = Some(outcome);
+            None
+        } else {
+            self.finished = true;
+            Some(outcome)
+        }
+    }
+
+    fn exhausted(self) -> TorchPreviewOutcome {
+        self.last_unsupported
+            .unwrap_or(TorchPreviewOutcome::Rejected {
+                reason: TorchPreviewRejectionReason::Inconclusive,
+                message: TorchPreviewRejectionReason::Inconclusive.message(),
+            })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TorchArtifact {
@@ -559,6 +613,123 @@ mod tests {
         long_task.abort();
         assert!(long_task.await.unwrap_err().is_cancelled());
         cleanup.drain().await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod platform_neutral_tests {
+    use super::*;
+
+    #[test]
+    fn auto_python_fallback_requires_a_definite_unsupported_attempt() {
+        let catalog = vec!["3.15".into(), "3.14".into(), "3.13".into(), "3.12".into()];
+        let discovery = TorchReleaseOptionsDiscovery {
+            tag: "v2.14.0".into(),
+            status: TorchReleaseOptionsStatus::Matches,
+            complete_scan: true,
+            checked_channels: vec!["cu136".into()],
+            combinations: ["3.12", "3.14", "3.13"]
+                .into_iter()
+                .map(|minor| TorchReleaseCombination {
+                    build: "cu136".into(),
+                    python: format!("python{minor}"),
+                    wheel_url: String::new(),
+                    sha256: None,
+                })
+                .collect(),
+            issues: Vec::new(),
+            detected_gpu_vendors: Vec::new(),
+            driver_status: TorchReleaseDriverStatus {
+                nvidia: TorchReleaseDriverAvailability::NotPresent,
+                amd: TorchReleaseDriverAvailability::NotPresent,
+            },
+            recommended: None,
+            recommendation_note: String::new(),
+        };
+        let candidates = auto_wheel_candidates(&catalog, "cu136", &discovery).unwrap();
+        assert_eq!(candidates, ["3.14", "3.13", "3.12"]);
+
+        let rejected = |reason| TorchPreviewOutcome::Rejected {
+            reason,
+            message: reason.message(),
+        };
+        let mut search = TorchPythonPreviewSearch::new(candidates.clone(), true);
+        assert_eq!(search.next_candidate().as_deref(), Some("3.14"));
+        let resolved = TorchPreviewOutcome::Resolved {
+            preview: TorchPreview {
+                preview_id: "newest-python".into(),
+                tag: "v2.14.0".into(),
+                build: "cu136".into(),
+                python: "python3.14".into(),
+                adapter: "none".into(),
+                artifacts: Vec::new(),
+                qualification: "unverified".into(),
+                expires_in_seconds: PREVIEW_TTL.as_secs(),
+            },
+        };
+        let outcome = search.record_attempt(resolved).unwrap();
+        assert!(matches!(
+            outcome,
+            TorchPreviewOutcome::Resolved { preview } if preview.preview_id == "newest-python"
+        ));
+        assert_eq!(search.next_candidate(), None);
+
+        let mut search = TorchPythonPreviewSearch::new(candidates.clone(), true);
+        assert_eq!(search.next_candidate().as_deref(), Some("3.14"));
+        assert!(search
+            .record_attempt(rejected(TorchPreviewRejectionReason::Unsupported))
+            .is_none());
+        assert_eq!(search.next_candidate().as_deref(), Some("3.13"));
+        let outcome = search
+            .record_attempt(rejected(TorchPreviewRejectionReason::Inconclusive))
+            .unwrap();
+        assert!(matches!(
+            outcome,
+            TorchPreviewOutcome::Rejected {
+                reason: TorchPreviewRejectionReason::Inconclusive,
+                ..
+            }
+        ));
+        assert_eq!(search.next_candidate(), None);
+
+        let mut search = TorchPythonPreviewSearch::new(candidates.clone(), false);
+        assert_eq!(search.next_candidate().as_deref(), Some("3.14"));
+        assert!(matches!(
+            search.record_attempt(rejected(TorchPreviewRejectionReason::Unsupported)),
+            Some(TorchPreviewOutcome::Rejected {
+                reason: TorchPreviewRejectionReason::Unsupported,
+                ..
+            })
+        ));
+        assert_eq!(search.next_candidate(), None);
+
+        // Interpreter provisioning has the same inconclusive outcome as a
+        // resolver failure, so it must also leave lower candidates untouched.
+        let mut search = TorchPythonPreviewSearch::new(candidates.clone(), true);
+        assert_eq!(search.next_candidate().as_deref(), Some("3.14"));
+        assert!(search
+            .record_attempt(TorchPreviewOutcome::Rejected {
+                reason: TorchPreviewRejectionReason::Inconclusive,
+                message: "The managed Python interpreter could not be provisioned.",
+            })
+            .is_some());
+        assert_eq!(search.next_candidate(), None);
+
+        let mut search = TorchPythonPreviewSearch::new(candidates, true);
+        for minor in ["3.14", "3.13", "3.12"] {
+            assert_eq!(search.next_candidate().as_deref(), Some(minor));
+            assert!(search
+                .record_attempt(rejected(TorchPreviewRejectionReason::Unsupported))
+                .is_none());
+        }
+        assert_eq!(search.next_candidate(), None);
+        assert!(matches!(
+            search.exhausted(),
+            TorchPreviewOutcome::Rejected {
+                reason: TorchPreviewRejectionReason::Unsupported,
+                ..
+            }
+        ));
     }
 }
 
@@ -1075,8 +1246,11 @@ impl VersionManager {
         if !release_verified {
             self.resolve_installable_release(tag).await?;
         }
-        let mut last_unsupported = None;
-        for minor in requested_minors {
+        let mut search = TorchPythonPreviewSearch::new(
+            requested_minors,
+            python == "auto" && adapter != "bundled",
+        );
+        while let Some(minor) = search.next_candidate() {
             // A provisioning failure is inconclusive and must stop the search; it
             // cannot be used as evidence that a lower Python is a better match.
             let managed = match super::torch_alternatives::ensure_managed_torch_interpreter(
@@ -1088,29 +1262,23 @@ impl VersionManager {
             {
                 Ok(managed) => managed,
                 Err(_) => {
-                    return Ok(TorchPreviewOutcome::Rejected {
+                    let outcome = TorchPreviewOutcome::Rejected {
                         reason: TorchPreviewRejectionReason::Inconclusive,
                         message: "The managed Python interpreter could not be provisioned.",
-                    });
+                    };
+                    return Ok(search
+                        .record_attempt(outcome)
+                        .expect("provisioning must stop"));
                 }
             };
             let outcome = self
                 .preview_torch_runtime_with_interpreter(tag, build, adapter, &managed)
                 .await?;
-            match outcome {
-                outcome @ TorchPreviewOutcome::Rejected {
-                    reason: TorchPreviewRejectionReason::Unsupported,
-                    ..
-                } if python == "auto" && adapter != "bundled" => {
-                    last_unsupported = Some(outcome);
-                }
-                other => return Ok(other),
+            if let Some(outcome) = search.record_attempt(outcome) {
+                return Ok(outcome);
             }
         }
-        Ok(last_unsupported.unwrap_or(TorchPreviewOutcome::Rejected {
-            reason: TorchPreviewRejectionReason::Inconclusive,
-            message: TorchPreviewRejectionReason::Inconclusive.message(),
-        }))
+        Ok(search.exhausted())
     }
 
     async fn preview_torch_runtime_with_interpreter(

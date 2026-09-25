@@ -200,3 +200,27 @@
 - This is a local candidate only. The package smoke does not install Torch
   through the packaged UI; Windows/macOS builds and native runs, toolbar-link
   publication, and Torch device/image generation acceptance remain pending.
+
+## 2026-09-25 — Automatic Python fallback and native provider test coverage
+
+- Extracted automatic Python candidate-attempt state into a small helper used
+  by the production preview path. A platform-neutral regression test verifies
+  newest-first selection, success on the newest compatible candidate, fallback
+  only after a definite `Unsupported` result, stop-on-inconclusive/provisioning
+  failure, explicit-version behavior, and the exhausted-candidate result.
+- Added Windows and macOS native managed-provider tests for cancellation,
+  timeout, descendant cleanup, and closed admission. The native `torch-quality`
+  matrix runs the managed-provider tests on each OS. Windows/macOS also verify
+  the fallback test exists in Cargo's test list before running it; this guards
+  against a test filter silently matching zero tests.
+- Linux verification after these changes: all 180
+  `pumas-app-manager` library tests passed; Rust formatting and
+  `git diff --check` passed. Windows GNU app-manager test-target checking passed
+  as a cross-target compile check only. The Sol xhigh review found no material
+  lifecycle, path, or CI-filter issue after replacing a Unix-only absolute-path
+  fixture with a native temporary path.
+- These tests increase native CI coverage but do not count as native Windows
+  MSVC or macOS execution. Native Windows/macOS install and lifecycle
+  acceptance, provider license materials, packaged desktop Torch installation,
+  and the toolbar-linked release update remain open; X1–X7 therefore remain
+  pending.

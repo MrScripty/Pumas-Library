@@ -88,7 +88,7 @@ jobs:
         include:
           - os: ubuntu-24.04
             headless_os: linux
-          - os: macos-14
+          - os: macos-15
             headless_os: macos
           - os: windows-2025
             headless_os: windows
@@ -169,7 +169,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2025, macos-14]
+        os: [ubuntu-24.04, windows-2025, macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -191,6 +191,8 @@ jobs:
       # Fixtures validate tags and resolver behavior; the native tests below
       # validate host APIs without claiming GPU inference or model support.
       - run: python -m unittest discover -s torch-server/tests
+      - name: Self-test native Torch acceptance script
+        run: python scripts/release/torch-managed-python-acceptance.py --self-test
       - name: Test native Torch wheel filtering
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager torch_alternatives
       - name: Test Windows locked-stage cleanup ownership
@@ -205,6 +207,39 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library platform::managed_child
 
+  torch-native-e2e:
+    name: Torch native RPC E2E (${{ matrix.os }})
+    needs: lint-workflows
+    if: github.event_name == 'workflow_dispatch' || (github.ref_type == 'tag' && startsWith(github.ref_name, 'v'))
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: torch-native-e2e-${{ runner.os }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - name: Build native RPC for Torch acceptance
+        run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc
+      - name: Accept v2.14 CPU/Core via native RPC (${{ runner.os }})
+        run: python scripts/release/torch-managed-python-acceptance.py rust/target/debug --evidence-dir torch-native-evidence
+      - name: Upload native Torch acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: torch-native-${{ runner.os }}
+          path: torch-native-evidence/
+          if-no-files-found: ignore
+
   build-rust:
     name: Rust release (${{ matrix.os }})
     needs: lint-workflows
@@ -212,7 +247,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-14]
+        os: [ubuntu-24.04, macos-15]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     steps:
@@ -252,7 +287,7 @@ jobs:
         include:
           - os: ubuntu-24.04
             platform: linux
-          - os: macos-14
+          - os: macos-15
             platform: mac
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -318,7 +353,7 @@ jobs:
             platform: linux
             headless: headless-linux
             check: linux-no-inference
-          - os: macos-14
+          - os: macos-15
             platform: mac
             headless: headless-macos
             check: mac-no-inference

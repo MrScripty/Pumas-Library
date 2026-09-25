@@ -24,18 +24,20 @@ through its retained preview with managed CPython 3.14.7. The installer checked
 Torch identity and CPU operation; the installed version was explicitly
 selected. The install ran with `python`, `pip`, and `pypy` absent from the
 backend's child `PATH`, then its isolated temporary root was removed. The
-toolbar-linked package has not been replaced or published. Image evidence
-remains limited to its exact previously recorded tuples.
+managed sidecar also passed startup, health, protocol 3, and generation-owned
+stop before graceful backend shutdown. The toolbar-linked package has not been
+replaced or published. Image evidence remains limited to its exact previously
+recorded tuples. The exact managed-Python and sidecar run is retained in the
+[v2.14.0 acceptance evidence](../torch-cross-platform-runtime-management/reports/v2.14.0-linux-cpu-rpc-acceptance/acceptance.json).
 
-**Blockers:** The v2.14.0 managed sidecar start/health/owned-stop path and CUDA
-device use remain untested. Native Windows and macOS acceptance and provider
-license inventory also remain pending.
+**Blockers:** Native Windows/macOS acceptance and provider license inventory
+remain pending. CUDA/device use, packaged desktop installation, and v2.14.0
+image/Tuldok behavior also remain untested.
 
-**Next slice:** Exercise the installed `v2.14.0` runtime through managed
-sidecar start, health/protocol validation, and owned stop. Then run native
-Windows/macOS acceptance. Keep this Torch install path separate from FLUX.2,
-image generation, and Tuldok claims, which require their own exact runtime
-evidence.
+**Next slice:** Run and review the native Windows x64/macOS arm64 acceptance
+legs, then complete provider-license and packaged desktop acceptance. Keep this
+Torch install path separate from FLUX.2, image generation, and Tuldok claims,
+which require their own exact runtime evidence.
 
 ## Product contract
 
@@ -103,8 +105,8 @@ updated PRG-I17 disposition.
 | --- | --- | --- |
 | U1 | All stable upstream release tags are listed independently of Pumas recipes when the listing completes within the 20-page / 120-second budget; prereleases/nightlies are excluded; installed releases remain inspectable when upstream discovery is unavailable. Page failures and budget exhaustion are explicit errors, never silently truncated success. | Release fixtures including more than ten pages, end-of-list, page failure/no partial success, page-budget/deadline limits, cache completeness, filters, and offline installed-version query; live 63-tag discovery including v2.9.0. |
 | U2 | Every dynamic build/interpreter selection runs an exact preview. Official origins, binary wheel compatibility, complete dependencies, hashes, and retained preview identity are validated before installation. The fixed qualified preset follows its separately documented hash-lock exception. | Python resolver and Rust preview tests; typed rejection values distinguish unsupported, invalid report, network-inconclusive, and generic-inconclusive outcomes without parsing diagnostic text; generated Electron/preload/React contract checks. |
-| U3 | A non-preset release installs into staging from the retained lock, passes identity/core probes, and publishes only after validation. Failure/cancellation preserves installed, active, and default state. | Managed installation tests and an isolated real v2.9.0+cpu / CPython 3.12 installation on Linux x86_64; see the [RPC acceptance summary and artifact manifest](reports/v2.9.0-cpu-rpc-acceptance.json). |
-| U4 | The installed runtime can be inspected, explicitly selected, started by a managed Torch profile, health/protocol checked, and stopped by its owned generation through Pumas RPC or the desktop. | Composed desktop test plus a real older-release RPC lifecycle on Linux x86_64; see the [RPC acceptance summary](reports/v2.9.0-cpu-rpc-acceptance.json). |
+| U3 | A non-preset release installs into staging from the retained lock, passes identity/core probes, and publishes only after validation. Failure/cancellation preserves installed, active, and default state. | Managed installation tests plus isolated real Linux installs for v2.9.0 CPU/CPython 3.12 and v2.14.0 CPU/Core with Pumas-managed CPython 3.14.7; see the [v2.9.0 evidence](reports/v2.9.0-cpu-rpc-acceptance.json) and [v2.14.0 evidence](../torch-cross-platform-runtime-management/reports/v2.14.0-linux-cpu-rpc-acceptance/acceptance.json). |
+| U4 | The installed runtime can be inspected, explicitly selected, started by a managed Torch profile, health/protocol checked, and stopped by its owned generation through Pumas RPC or the desktop. | Composed desktop test plus real v2.9.0 and v2.14.0 RPC lifecycle acceptance on Linux x86_64; the v2.14.0 evidence records startup, health/protocol 3, generation-owned stop, and graceful backend shutdown. |
 | U5 | The current real Tuldok image result remains accurately scoped to its exact Torch 2.10 CUDA 13.0 / FLUX.2 tuple; no general model/plugin or all-release image-generation support is inferred. | Reuse [2.10 GPU and Tuldok evidence](../torch-diffusion-serving/reports/upstream-v210-cu130-flux2-e2e.md); update the runtime inventory in [the progress report](../torch-diffusion-serving/reports/upstream-version-manager-progress.md). |
 | U6 | For each selected stable release, the manager discovers that release's exact official CPU/CUDA/ROCm wheel matches for Pumas-managed CPython candidates, filters GPU families against detected display devices, and supplies a host-aware default when compatibility is established. Build and Pumas dependency profile remain optional advanced settings; Python selection is automatic. Partial discovery stays inconclusive; a wheel match still requires the full retained dependency preview. | Dynamic official-index scan fixtures and live `v2.14.0` scan; managed-provider candidate/fallback tests; NVIDIA driver-floor/unknown/partial-scan manager tests; typed RPC and generated-contract checks; desktop preview tests for automatic defaults, release-bounded overrides, null recommendations, and Pumas profile labeling. No all-release image qualification is inferred. |
 

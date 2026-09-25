@@ -9,37 +9,34 @@ runtime management on 2026-09-24, retaining the existing Linux support. On
 2026-09-25, the owner authorized Pumas-managed CPython provisioning and removed
 the requirement for a host-installed Python interpreter or a user Python choice.
 
-**Current acceptance:** `pending` — on Linux x86_64, the live provider and
-Torch 2.14.0 scan pass. A CUDA 13.2 Core preview resolved 44 artifacts. A
-separate CPU Core preview selected Pumas-managed CPython 3.14.7 and resolved 25
-artifacts; installing its retained preview succeeded with `python`, `pip`, and
-`pypy` absent from the child `PATH`. The installer verified Torch identity and
-CPU operation, reported `v2.14.0` installed, and explicit selection succeeded.
-The AppImage and deb rebuilt from `ce9170d4` pass artifact and packaged RPC
-health checks, and the packed Electron bundle contains the release-options RPC
-method. v2.14 CUDA/device execution and managed-sidecar start/stop remain
-untested. Windows and macOS still need native install, RPC lifecycle, and
-packaged desktop evidence.
+**Current acceptance:** Linux x86_64 passes the live v2.14.0 CPU/Core RPC
+install and lifecycle path. Pinned uv 0.12.18 provisioned managed CPython
+3.14.7; the exact retained preview resolved 25 artifacts and installed Torch
+2.14.0 with no Python, pip, or uv on the backend's `PATH`. Identity, CPU
+operation, sidecar dependencies, explicit selection, sidecar health/protocol 3,
+generation-owned stop, and graceful backend shutdown all passed. The independent
+CUDA 13.2 Core preview resolved 44 artifacts; CUDA/device execution remains
+untested. See the [retained v2.14.0 Linux evidence](reports/v2.14.0-linux-cpu-rpc-acceptance/acceptance.json).
+Native Windows and macOS runs, provider licensing, and packaged desktop install
+acceptance remain pending.
 
-**Current phase:** M1b managed interpreter provisioning and Linux packaging are
-implemented and reviewed. Commit `6a726eac` fixes the missing Electron allowlist
-entry for `get_torch_release_options`; subsequent source repairs pin published
-uv `0.12.18`, accept uv's official provider CDN URLs, and validate PyTorch's
-current official direct-wheel paths. Live managed-Python provisioning and the
-v2.14.0 scan/full preview now pass on Linux. The AppImage and deb were rebuilt
-from commit `ce9170d4`, and standalone plus packaged RPC health smoke passed.
-The desktop package linked from the toolbar has not been replaced or published.
+**Current phase:** The managed provider, Linux 2.14.0 install, and sidecar
+lifecycle are implemented and accepted on the native Linux host. The native QA
+workflow now runs the same isolated RPC acceptance on Linux, Windows x64, and
+macOS arm64 on manual dispatch or version tags, and retains acceptance reports
+and logs; only the Linux leg has run locally. Commit `6a726eac` fixes the Electron allowlist entry for
+`get_torch_release_options`; later source repairs pin uv `0.12.18` and accept
+the current official provider and PyTorch wheel URLs. The toolbar-linked
+desktop package still needs a separate update.
 
-**Blockers:** No design blocker remains. The Linux CPU/Core wheel install and
-identity check pass, but the v2.14.0 managed sidecar start/health/owned-stop
-path and CUDA/device use have not been exercised. Native Windows and macOS
-execution is not available here and remains a separate acceptance gate;
-provider-license inventory remains outstanding.
+**Blockers:** Native Windows x64 and macOS arm64 install/lifecycle acceptance,
+provider license inventory, and packaged desktop install acceptance remain
+open. CUDA/device use and v2.14.0 image/Tuldok behavior are also untested.
 
-**Next slice:** Exercise the installed v2.14.0 runtime through managed-sidecar
-start, health/protocol validation, and owned stop. Then complete CUDA/device
-checks and native Windows x64/macOS arm64 provider, install, RPC lifecycle, and
-packaged desktop acceptance, retaining provider license material.
+**Next slice:** Run the native Windows x64 and macOS arm64 QA legs and review
+their retained managed-Python, exact-wheel, install, probe, selection, sidecar,
+and cleanup evidence. Then close provider licensing and packaged desktop
+acceptance before broadening the runtime support claim.
 
 ## Objective and scope
 

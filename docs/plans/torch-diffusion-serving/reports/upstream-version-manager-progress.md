@@ -20,9 +20,11 @@ original Linux-only scope and is superseded for the in-progress install flow by
 the 2026-09-25 managed-CPython authorization below. The current implementation
 provisions stable native CPython 3.10+ from a pinned provider and chooses the
 newest candidate whose exact official wheel and complete dependencies resolve.
-Clean-host and native provisioning acceptance remain pending. Pumas does not
-compile Torch from source; XPU remains outside this provider contract. A release
-with no compatible wheel is discoverable but correctly rejected for that tuple.
+Linux clean-host provisioning and the Torch 2.14.0 CPU/Core RPC lifecycle now
+pass. Windows/macOS native provisioning acceptance remains pending. Pumas does
+not compile Torch from source; XPU remains outside this provider contract. A
+release with no compatible wheel is discoverable but correctly rejected for
+that tuple.
 
 The fixed qualified `v2.9.1` / CUDA 13.0 / Python 3.12 bundled preset remains a
 separate recipe. The current manager path provisions its Python 3.12 base
@@ -41,10 +43,11 @@ current candidate branch under the separate
 [cross-platform runtime plan](../../torch-cross-platform-runtime-management/plan.md).
 The supported runtime claim remains Linux x86_64 until Windows and macOS pass
 that plan's native quality, exact wheel, installed identity, process lifecycle,
-RPC, and packaged desktop gates. Linux regression suites pass, and a Windows
-GNU test-target compile passed; the native QA matrix is present but has not run
-for this candidate. No macOS compile or Windows/macOS native execution was
-available in this Linux session. The existing
+RPC, and packaged desktop gates. The native QA matrix now builds and runs the
+real RPC acceptance on Linux, Windows, and macOS; its Linux leg passes, while
+native Windows/macOS execution is pending. A Windows GNU test-target compile
+also passed, but remains compile-only evidence. No macOS compile was available
+in this Linux session. The existing
 Pumas artifact targets show these target architectures are shipped; they do not
 establish Torch runtime behavior.
 
@@ -123,6 +126,24 @@ mistaken for the new pin. The missing Electron RPC allowlist registration was
 already fixed in `6a726eac`; toolbar-linked release publication remains
 separate from these local builds.
 
+## 2026-09-25 — Managed Torch 2.14.0 CPU/Core lifecycle acceptance
+
+This run supersedes the earlier statement that v2.14.0 sidecar lifecycle was
+unverified. Through Pumas RPC in an isolated Linux x86_64 root, uv 0.12.18
+provisioned CPython 3.14.7 and the retained CPU/Core preview resolved 25 exact
+artifacts. With an empty backend child `PATH`, the installer verified Torch
+2.14.0 identity and CPU operation; the installed sidecar dependencies passed;
+the runtime was selected; a managed CPU profile passed startup, health, and
+protocol 3; and its owned generation was stopped before graceful backend
+shutdown. The acceptance verified the venv's actual base interpreter, private
+depot containment, executable hash, and provider archive digest.
+
+The retained [acceptance evidence](../../torch-cross-platform-runtime-management/reports/v2.14.0-linux-cpu-rpc-acceptance/)
+contains the exact runtime record, wheel resolution, pip report, installed probe,
+acceptance summary, and RPC log. Windows/macOS are covered by an opt-in native
+CI matrix but have not run yet. This does not establish CUDA/device execution,
+packaged desktop installation, an image adapter, or Tuldok behavior for v2.14.0.
+
 ## Current branch behavior
 
 - Stable upstream `vMAJOR.MINOR.PATCH` releases are discovered independently of
@@ -133,19 +154,21 @@ separate from these local builds.
   completeness; an old unmarked Torch cache containing exactly 100 or 1,000
   entries is refreshed because these counts match earlier one-page and
   ten-page caps. Prereleases, nightlies, and source builds remain outside this
-  scope. Linux x86_64 remains the only runtime target with completed acceptance;
-  the candidate Windows x86_64/macOS arm64 implementation and its pending native
-  gates are specified in the linked cross-platform plan. Installed local
-  releases remain visible when upstream discovery fails.
+  scope. Linux x86_64 is the only runtime target with completed managed-provider
+  install and sidecar acceptance; the candidate Windows x86_64/macOS arm64
+  implementation and its pending native gates are specified in the linked
+  cross-platform plan. Installed local releases remain visible when upstream
+  discovery fails.
 - The qualified 2.9.1 recipe remains a fixed CUDA 13.0 / CPython 3.12 bundled
   preset. The updated manager provisions its CPython 3.12 base from the pinned
   provider catalog. Other stable releases try stable native CPython candidates
   from newest to oldest (3.10 minimum, no upper minor cap) against exact official
   CPU/CUDA/ROCm wheels and complete dependencies. The UI has no Python selector
   and shows the Pumas-provisioned interpreter after preview. Provider/network failures remain
-  inconclusive and cannot trigger a downgrade. Clean-host provisioning is not
-  accepted yet. One installed build/interpreter/adapter combination is supported
-  per upstream tag; a different combination requires a fresh preview.
+  inconclusive and cannot trigger a downgrade. Linux clean-host provisioning
+  and installation pass without host Python; native Windows/macOS provisioning
+  is not accepted yet. One installed build/interpreter/adapter combination is
+  supported per upstream tag; a different combination requires a fresh preview.
 - On the accepted Linux x86_64 target, dynamic install choices come from a
   bounded scan of the official PyTorch
   wheel directory and exact per-channel indexes for the selected release and

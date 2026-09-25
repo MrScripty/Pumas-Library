@@ -156,3 +156,32 @@
 - This validates the Linux CPU/Core install path without a host Python. It does
   not establish CUDA/device execution, Torch sidecar startup/health/owned stop,
   image-adapter or Tuldok behavior, or Windows/macOS acceptance.
+
+## 2026-09-25 — Torch 2.14.0 managed CPU/Core RPC lifecycle
+
+- Repeated the native Linux x86_64 run through an isolated `pumas-rpc` process
+  and disposable launcher root. `get_torch_release_options` found the release;
+  the retained CPU/Core preview resolved 25 exact artifacts for managed
+  CPython 3.14.7. Pinned uv 0.12.18 was verified against its published Linux
+  archive SHA-256 (`89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16`).
+- The backend child had an empty `PATH` and no host Python, pip, uv, venv, or
+  conda selectors. The acceptance verified runtime.json provenance, the private
+  managed-Python depot, executable SHA-256, and the installed venv's direct
+  `sys._base_executable` and CPython version before accepting installation.
+- Installation passed exact Torch 2.14.0 identity, CPU tensor, and sidecar
+  dependency probes. The runtime was explicitly selected; a managed CPU
+  TorchServe profile passed startup, health, and protocol 3; generation `1` was
+  stopped by its owned generation; and RPC shutdown and process exit succeeded.
+- Retained `runtime.json`, exact `resolution.json`, `pip-resolution.json`,
+  `probe-results.json`, `acceptance.json`, and `rpc.log` in
+  [the v2.14.0 evidence directory](reports/v2.14.0-linux-cpu-rpc-acceptance/).
+  The temporary runtime root was deleted after those files were collected.
+- Added an opt-in `torch-native-e2e` CI matrix for Ubuntu 24.04, Windows 2025,
+  and macOS 15, gated to manual dispatch or version-tag builds. It builds native
+  RPC, runs the complete install/lifecycle acceptance, and uploads per-platform
+  reports even on failure. The always-on Torch QA job runs the script fixtures.
+  This Linux run does not substitute for the pending Windows/macOS executions.
+- The Sol xhigh read-only repair review found no remaining material findings in
+  Windows canonical containment, venv provenance, shutdown, evidence collection,
+  or native command paths. CUDA/device, provider licensing, packaged desktop,
+  and v2.14.0 Tuldok/image acceptance remain open.

@@ -1,7 +1,7 @@
 //! Bounded discovery of official Torch wheels for installed Python interpreters.
 //! A wheel match is only a lead; dependencies and adapters are not resolved.
 
-use super::torch_preview::{valid_torch_channel, BUILDS, PYTHONS};
+use super::torch_preview::{valid_torch_channel, PYTHONS};
 use super::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -12,6 +12,35 @@ const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(45);
 const PYTHON_CHECK_TIMEOUT: Duration = Duration::from_secs(3);
 // Leave room for interpreter checks, the bounded index scan, and process startup.
 const RELEASE_OPTIONS_TIMEOUT: Duration = Duration::from_secs(60);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TorchHostTarget {
+    LinuxX8664,
+    WindowsX8664,
+    MacosArm64,
+}
+
+impl TorchHostTarget {
+    fn current() -> Option<Self> {
+        if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+            Some(Self::LinuxX8664)
+        } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+            Some(Self::WindowsX8664)
+        } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            Some(Self::MacosArm64)
+        } else {
+            None
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::LinuxX8664 => "Linux x86_64",
+            Self::WindowsX8664 => "Windows x86_64",
+            Self::MacosArm64 => "macOS arm64",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -221,21 +250,79 @@ fn amd_driver_available(devices_root: &Path) -> TorchReleaseDriverAvailability {
     TorchReleaseDriverAvailability::Unavailable
 }
 
-async fn installed_python_paths() -> Vec<(String, PathBuf)> {
+fn python_probe_candidates(target: TorchHostTarget, python: &str) -> Vec<(String, Vec<String>)> {
+    match target {
+        TorchHostTarget::WindowsX8664 => vec![
+            (
+                "py".into(),
+                vec![format!("-{}", python.trim_start_matches("python"))],
+            ),
+            (python.into(), Vec::new()),
+            ("python".into(), Vec::new()),
+        ],
+        TorchHostTarget::LinuxX8664 | TorchHostTarget::MacosArm64 => {
+            vec![
+                (python.into(), Vec::new()),
+                ("python3".into(), Vec::new()),
+                ("python".into(), Vec::new()),
+            ]
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct PythonIdentityProbe {
+    path: String,
+    version: String,
+    platform: String,
+    machine: String,
+    implementation: String,
+    bits: u8,
+}
+
+fn python_probe_path(output: &[u8], target: TorchHostTarget, python: &str) -> Option<PathBuf> {
+    let identity: PythonIdentityProbe = serde_json::from_slice(output).ok()?;
+    let native = match target {
+        TorchHostTarget::LinuxX8664 => {
+            identity.platform == "linux" && identity.machine.eq_ignore_ascii_case("x86_64")
+        }
+        TorchHostTarget::WindowsX8664 => {
+            identity.platform == "win32"
+                && (identity.machine.eq_ignore_ascii_case("amd64")
+                    || identity.machine.eq_ignore_ascii_case("x86_64"))
+        }
+        TorchHostTarget::MacosArm64 => {
+            identity.platform == "darwin" && identity.machine.eq_ignore_ascii_case("arm64")
+        }
+    };
+    if !native
+        || identity.implementation != "cpython"
+        || identity.bits != 64
+        || identity.version != python.strip_prefix("python")?
+    {
+        return None;
+    }
+    let path = std::fs::canonicalize(identity.path).ok()?;
+    path.is_absolute().then_some(path)
+}
+
+async fn installed_python_paths(target: TorchHostTarget) -> Vec<(String, PathBuf)> {
+    const PROBE: &str = "import json,platform,struct,sys; print(json.dumps({'path':sys.executable,'version':f'{sys.version_info.major}.{sys.version_info.minor}','platform':sys.platform,'machine':platform.machine(),'implementation':sys.implementation.name,'bits':struct.calcsize('P')*8}))";
     let mut interpreters = Vec::new();
     for python in PYTHONS {
-        let mut command = Command::new(python);
-        command.kill_on_drop(true).args([
-            "-I", "-c",
-            "import platform,sys; print(sys.executable if sys.platform == 'linux' and platform.machine() == 'x86_64' and sys.implementation.name == 'cpython' and f'{sys.version_info.major}.{sys.version_info.minor}' == sys.argv[1] else '')",
-            python.strip_prefix("python").unwrap_or(""),
-        ]);
-        if let Ok(Ok(output)) = tokio::time::timeout(PYTHON_CHECK_TIMEOUT, command.output()).await {
-            if output.status.success() {
-                let path = String::from_utf8_lossy(&output.stdout);
-                if let Ok(path) = std::fs::canonicalize(path.trim()) {
-                    if path.is_absolute() {
+        for (launcher, prefix) in python_probe_candidates(target, python) {
+            let mut command = Command::new(launcher);
+            command
+                .kill_on_drop(true)
+                .args(prefix)
+                .args(["-I", "-c", PROBE]);
+            if let Ok(Ok(output)) =
+                tokio::time::timeout(PYTHON_CHECK_TIMEOUT, command.output()).await
+            {
+                if output.status.success() {
+                    if let Some(path) = python_probe_path(&output.stdout, target, python) {
                         interpreters.push(((*python).to_owned(), path));
+                        break;
                     }
                 }
             }
@@ -244,11 +331,79 @@ async fn installed_python_paths() -> Vec<(String, PathBuf)> {
     interpreters
 }
 
-fn valid_official_wheel(url: &str, build: &str) -> bool {
+pub(super) async fn installed_torch_interpreters() -> Vec<(String, PathBuf)> {
+    match TorchHostTarget::current() {
+        Some(target) => installed_python_paths(target).await,
+        None => Vec::new(),
+    }
+}
+
+fn valid_wheel_platform(platform: &str, target: TorchHostTarget) -> bool {
+    match target {
+        TorchHostTarget::LinuxX8664 => {
+            platform == "linux_x86_64"
+                || ((platform.starts_with("manylinux") || platform.starts_with("musllinux"))
+                    && platform.ends_with("_x86_64"))
+        }
+        TorchHostTarget::WindowsX8664 => platform == "win_amd64",
+        TorchHostTarget::MacosArm64 => {
+            let Some(numbers) = platform.strip_prefix("macosx_").and_then(|value| {
+                value
+                    .strip_suffix("_arm64")
+                    .or_else(|| value.strip_suffix("_universal2"))
+            }) else {
+                return false;
+            };
+            let Some((major, minor)) = numbers.split_once('_') else {
+                return false;
+            };
+            major.parse::<u32>().is_ok_and(|value| value >= 11) && minor.parse::<u32>().is_ok()
+        }
+    }
+}
+
+fn valid_official_wheel(
+    url: &str,
+    build: &str,
+    version: &str,
+    python: &str,
+    target: TorchHostTarget,
+) -> bool {
     let Ok(url) = reqwest::Url::parse(url) else {
         return false;
     };
-    url.scheme() == "https"
+    let Some(filename) = url.path().rsplit('/').next() else {
+        return false;
+    };
+    let Some(stem) = filename.strip_suffix(".whl") else {
+        return false;
+    };
+    let mut fields = stem.rsplitn(4, '-');
+    let (Some(platform), Some(abi), Some(python_tag), Some(distribution)) =
+        (fields.next(), fields.next(), fields.next(), fields.next())
+    else {
+        return false;
+    };
+    let Some(remainder) = distribution.strip_prefix(&format!("torch-{version}")) else {
+        return false;
+    };
+    let expected_python = python.replace("python", "cp").replace('.', "");
+    let exact_version = remainder.is_empty()
+        || remainder.eq_ignore_ascii_case(&format!("%2B{build}"))
+        || remainder.eq_ignore_ascii_case(&format!("+{build}"));
+    let target_build = match target {
+        TorchHostTarget::MacosArm64 => build == "cpu",
+        TorchHostTarget::WindowsX8664 => build == "cpu" || build.starts_with("cu"),
+        TorchHostTarget::LinuxX8664 => valid_torch_channel(build),
+    };
+    target_build
+        && exact_version
+        && python_tag.split('.').any(|tag| tag == expected_python)
+        && !abi.is_empty()
+        && platform
+            .split('.')
+            .any(|tag| valid_wheel_platform(tag, target))
+        && url.scheme() == "https"
         && matches!(
             url.host_str(),
             Some("download.pytorch.org" | "download-r2.pytorch.org")
@@ -258,12 +413,7 @@ fn valid_official_wheel(url: &str, build: &str) -> bool {
         && url.password().is_none()
         && url.query().is_none()
         && url.fragment().is_none()
-        && url.path().starts_with(&format!("/whl/{build}/"))
-        && url
-            .path()
-            .rsplit('/')
-            .next()
-            .is_some_and(|name| name.starts_with("torch-") && name.ends_with(".whl"))
+        && url.path().starts_with(&format!("/whl/{build}/torch/"))
 }
 
 fn python_rank(python: &str) -> u8 {
@@ -276,14 +426,34 @@ fn python_rank(python: &str) -> u8 {
     }
 }
 
+#[cfg(test)]
 fn visible_combinations(
     combinations: Vec<TorchReleaseCombination>,
     vendors: &[String],
 ) -> Vec<TorchReleaseCombination> {
+    visible_combinations_for_target(combinations, vendors, TorchHostTarget::LinuxX8664)
+}
+
+fn visible_combinations_for_target(
+    combinations: Vec<TorchReleaseCombination>,
+    vendors: &[String],
+    target: TorchHostTarget,
+) -> Vec<TorchReleaseCombination> {
     combinations
         .into_iter()
-        .filter(|item| visible_build(&item.build, vendors))
+        .filter(|item| visible_build_for_target(&item.build, vendors, target))
         .collect()
+}
+
+fn visible_build_for_target(build: &str, vendors: &[String], target: TorchHostTarget) -> bool {
+    match target {
+        TorchHostTarget::LinuxX8664 => visible_build(build, vendors),
+        TorchHostTarget::WindowsX8664 => {
+            build == "cpu"
+                || (build.starts_with("cu") && vendors.iter().any(|vendor| vendor == "nvidia"))
+        }
+        TorchHostTarget::MacosArm64 => build == "cpu",
+    }
 }
 
 fn visible_build(build: &str, vendors: &[String]) -> bool {
@@ -402,6 +572,51 @@ fn recommend_release_option(
     (None, note.to_owned())
 }
 
+fn recommend_release_option_for_target(
+    combinations: &[TorchReleaseCombination],
+    vendors: &[String],
+    drivers: &TorchReleaseDriverStatus,
+    nvidia_version: Option<NvidiaDriverVersion>,
+    complete_scan: bool,
+    target: TorchHostTarget,
+) -> (Option<TorchReleaseRecommendation>, String) {
+    if target == TorchHostTarget::LinuxX8664 {
+        return recommend_release_option(
+            combinations,
+            vendors,
+            drivers,
+            nvidia_version,
+            complete_scan,
+        );
+    }
+    let cpu = best_combination(combinations, "cpu").map(|item| TorchReleaseRecommendation {
+        build: item.build.clone(),
+        python: item.python.clone(),
+    });
+    let note = match target {
+        TorchHostTarget::WindowsX8664 if cpu.is_some() && !complete_scan => {
+            "The official wheel scan was incomplete; CPU is a provisional choice. Exact CUDA wheels remain advanced choices."
+        }
+        TorchHostTarget::WindowsX8664 if cpu.is_some() => {
+            "CPU is recommended because Windows CUDA driver compatibility has not been established. Exact CUDA wheels remain advanced choices."
+        }
+        TorchHostTarget::WindowsX8664 => {
+            "No exact CPU wheel matched. Windows CUDA wheels require an explicit advanced choice; driver and device compatibility are checked after installation."
+        }
+        TorchHostTarget::MacosArm64 if cpu.is_some() && !complete_scan => {
+            "The official wheel scan was incomplete; CPU is a provisional choice. Apple MPS is a runtime capability, not a wheel channel."
+        }
+        TorchHostTarget::MacosArm64 if cpu.is_some() => {
+            "The official CPU wheel is recommended. Apple MPS is a runtime capability checked after installation, not a wheel channel."
+        }
+        TorchHostTarget::MacosArm64 => {
+            "No exact macOS arm64 CPU wheel matched. Apple MPS is a runtime capability, not a wheel channel."
+        }
+        TorchHostTarget::LinuxX8664 => unreachable!(),
+    };
+    (cpu, note.to_owned())
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TorchAlternativeMatch {
@@ -431,15 +646,16 @@ pub struct TorchAlternativeDiscovery {
 fn filter_alternatives_for_host(
     mut result: TorchAlternativeDiscovery,
     detected: io::Result<Vec<String>>,
+    target: TorchHostTarget,
 ) -> TorchAlternativeDiscovery {
     let unknown_host = detected.is_err();
     let vendors = detected.unwrap_or_default();
     result
         .checked_builds
-        .retain(|build| visible_build(build, &vendors));
+        .retain(|build| visible_build_for_target(build, &vendors, target));
     result
         .matches
-        .retain(|item| visible_build(&item.build, &vendors));
+        .retain(|item| visible_build_for_target(&item.build, &vendors, target));
     if unknown_host {
         result.status = "inconclusive".into();
         result
@@ -447,6 +663,39 @@ fn filter_alternatives_for_host(
             .push("GPU devices could not be inspected; GPU wheel leads were withheld".into());
     } else if result.matches.is_empty() && result.status == "matches" {
         result.status = "none".into();
+    }
+    result
+}
+
+fn validate_legacy_wheel_leads(
+    mut result: TorchAlternativeDiscovery,
+    interpreters: &[(String, PathBuf)],
+    version: &str,
+    target: TorchHostTarget,
+) -> TorchAlternativeDiscovery {
+    let before = result.matches.len();
+    let checked_before = result.checked_builds.len();
+    result
+        .checked_builds
+        .retain(|build| valid_torch_channel(build));
+    result.matches.retain(|candidate| {
+        candidate.tag == result.selected_tag
+            && interpreters
+                .iter()
+                .any(|(python, _)| python == &candidate.python)
+            && valid_torch_channel(&candidate.build)
+            && candidate.wheel_url.as_ref().is_some_and(|url| {
+                valid_official_wheel(url, &candidate.build, version, &candidate.python, target)
+            })
+            && candidate.sha256.as_ref().is_none_or(|hash| {
+                hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+    });
+    if result.matches.len() != before || result.checked_builds.len() != checked_before {
+        result.status = "inconclusive".into();
+        result
+            .issues
+            .push("Some wheel leads could not be verified for this host and were withheld".into());
     }
     result
 }
@@ -475,26 +724,6 @@ fn unsupported_input(message: &str) -> PumasError {
     }
 }
 
-async fn installed_pythons() -> Vec<&'static str> {
-    let mut available = Vec::new();
-    for python in PYTHONS {
-        let mut command = Command::new(python);
-        command.kill_on_drop(true).args([
-            "-I",
-            "-c",
-            "import platform,sys; print(f'{sys.version_info.major}.{sys.version_info.minor}' if sys.platform == 'linux' and platform.machine() == 'x86_64' and sys.implementation.name == 'cpython' else '')",
-        ]);
-        if let Ok(Ok(output)) = tokio::time::timeout(PYTHON_CHECK_TIMEOUT, command.output()).await {
-            let expected = python.strip_prefix("python").unwrap_or("");
-            if output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == expected
-            {
-                available.push(*python);
-            }
-        }
-    }
-    available
-}
-
 impl VersionManager {
     /// Find a few official binary Torch wheel leads for the selected stable tag.
     /// This never claims a dependency-compatible install plan.
@@ -511,12 +740,17 @@ impl VersionManager {
         }
         let version = stable_version(selected_tag)
             .ok_or_else(|| unsupported_input("Select a stable upstream Torch tag"))?;
-        if !BUILDS.contains(&selected_build) || !PYTHONS.contains(&selected_python) {
+        let target = TorchHostTarget::current().ok_or_else(|| {
+            unsupported_input(
+                "Torch alternatives require Linux x86_64, Windows x86_64, or macOS arm64",
+            )
+        })?;
+        if !valid_torch_channel(selected_build) || !PYTHONS.contains(&selected_python) {
             return Err(unsupported_input(
                 "Select a supported Torch build and Python version",
             ));
         }
-        let interpreters = installed_pythons().await;
+        let interpreters = installed_torch_interpreters().await;
         if interpreters.is_empty() {
             return Ok(TorchAlternativeDiscovery {
                 selected_tag: selected_tag.into(),
@@ -527,10 +761,10 @@ impl VersionManager {
                 dependencies_not_checked: true,
                 checked_builds: Vec::new(),
                 matches: Vec::new(),
-                issues: vec![
-                    "No installed CPython interpreter on Linux x86_64 can inspect official wheels"
-                        .into(),
-                ],
+                issues: vec![format!(
+                    "No installed CPython interpreter on {} can inspect official wheels",
+                    target.label()
+                )],
             });
         }
         let workspace = tempfile::tempdir().map_err(PumasError::from)?;
@@ -540,7 +774,7 @@ impl VersionManager {
             include_str!("../../../../../torch-server/resolve_runtime.py"),
         )
         .map_err(PumasError::from)?;
-        let mut command = Command::new(interpreters[0]);
+        let mut command = Command::new(&interpreters[0].1);
         command.kill_on_drop(true).arg("-I").arg(&resolver).args([
             "--discover",
             "--version",
@@ -550,7 +784,7 @@ impl VersionManager {
             "--selected-python",
             selected_python,
         ]);
-        for interpreter in &interpreters {
+        for (_, interpreter) in &interpreters {
             command.arg("--interpreter").arg(interpreter);
         }
         let output = tokio::time::timeout(DISCOVERY_TIMEOUT, command.output())
@@ -574,22 +808,32 @@ impl VersionManager {
             || result.selected_tag != format!("v{version}")
             || result.selected_build != selected_build
             || result.selected_python != selected_python
-            || result.matches.iter().any(|candidate| {
-                candidate.tag != result.selected_tag
-                    || !BUILDS.contains(&candidate.build.as_str())
-                    || !interpreters.contains(&candidate.python.as_str())
-            })
+            || !matches!(result.status.as_str(), "matches" | "none" | "inconclusive")
+            || result.checked_builds.len() > 5
         {
             return Err(unsupported_input(
                 "Torch discovery violated its bounded wheel-only contract",
             ));
         }
-        Ok(filter_alternatives_for_host(
-            result,
-            pci_display_vendors(Path::new("/sys/bus/pci/devices"), |path| {
-                std::fs::read_to_string(path)
-            }),
-        ))
+        let result = validate_legacy_wheel_leads(result, &interpreters, version, target);
+        let detected = match target {
+            TorchHostTarget::LinuxX8664 => {
+                pci_display_vendors(Path::new("/sys/bus/pci/devices"), |path| {
+                    std::fs::read_to_string(path)
+                })
+            }
+            TorchHostTarget::WindowsX8664 => {
+                if nvidia_driver_probe().await.availability
+                    == TorchReleaseDriverAvailability::Available
+                {
+                    Ok(vec!["nvidia".into()])
+                } else {
+                    Err(io::Error::from(io::ErrorKind::NotFound))
+                }
+            }
+            TorchHostTarget::MacosArm64 => Ok(Vec::new()),
+        };
+        Ok(filter_alternatives_for_host(result, detected, target))
     }
 }
 
@@ -607,43 +851,83 @@ impl VersionManager {
         }
         let version = stable_release_version(tag)
             .ok_or_else(|| unsupported_input("Select a stable upstream Torch tag"))?;
+        let target = TorchHostTarget::current().ok_or_else(|| {
+            unsupported_input(
+                "Torch release options require Linux x86_64, Windows x86_64, or macOS arm64",
+            )
+        })?;
         self.resolve_installable_release(tag).await?;
 
-        let detected = pci_display_vendors(Path::new("/sys/bus/pci/devices"), |path| {
-            std::fs::read_to_string(path)
-        });
-        let (vendors, mut host_issues) = match detected {
-            Ok(vendors) => (vendors, Vec::new()),
-            Err(_) => (
-                Vec::new(),
-                vec!["GPU devices could not be inspected".to_owned()],
-            ),
-        };
-        let unknown_host = !host_issues.is_empty();
-        let nvidia_probe = if unknown_host {
-            NvidiaDriverProbe {
-                availability: TorchReleaseDriverAvailability::Unknown,
-                version: None,
+        let (vendors, mut host_issues, nvidia_probe, driver_status, unknown_host) = match target {
+            TorchHostTarget::LinuxX8664 => {
+                let detected = pci_display_vendors(Path::new("/sys/bus/pci/devices"), |path| {
+                    std::fs::read_to_string(path)
+                });
+                let (vendors, issues) = match detected {
+                    Ok(vendors) => (vendors, Vec::new()),
+                    Err(_) => (
+                        Vec::new(),
+                        vec!["GPU devices could not be inspected".to_owned()],
+                    ),
+                };
+                let unknown = !issues.is_empty();
+                let nvidia = if unknown {
+                    NvidiaDriverProbe {
+                        availability: TorchReleaseDriverAvailability::Unknown,
+                        version: None,
+                    }
+                } else if vendors.iter().any(|vendor| vendor == "nvidia") {
+                    nvidia_driver_probe().await
+                } else {
+                    NvidiaDriverProbe {
+                        availability: TorchReleaseDriverAvailability::NotPresent,
+                        version: None,
+                    }
+                };
+                let drivers = TorchReleaseDriverStatus {
+                    nvidia: nvidia.availability,
+                    amd: if unknown {
+                        TorchReleaseDriverAvailability::Unknown
+                    } else if vendors.iter().any(|vendor| vendor == "amd") {
+                        amd_driver_available(Path::new("/sys/bus/pci/devices"))
+                    } else {
+                        TorchReleaseDriverAvailability::NotPresent
+                    },
+                };
+                (vendors, issues, nvidia, drivers, unknown)
             }
-        } else if vendors.iter().any(|vendor| vendor == "nvidia") {
-            nvidia_driver_probe().await
-        } else {
-            NvidiaDriverProbe {
-                availability: TorchReleaseDriverAvailability::NotPresent,
-                version: None,
+            TorchHostTarget::WindowsX8664 => {
+                let nvidia = nvidia_driver_probe().await;
+                let detected = nvidia.availability == TorchReleaseDriverAvailability::Available;
+                let vendors = if detected {
+                    vec!["nvidia".into()]
+                } else {
+                    Vec::new()
+                };
+                let issues = if detected {
+                    Vec::new()
+                } else {
+                    vec!["NVIDIA GPU could not be positively detected; CUDA wheel choices were withheld".into()]
+                };
+                let drivers = TorchReleaseDriverStatus {
+                    nvidia: nvidia.availability,
+                    amd: TorchReleaseDriverAvailability::NotPresent,
+                };
+                (vendors, issues, nvidia, drivers, !detected)
+            }
+            TorchHostTarget::MacosArm64 => {
+                let nvidia = NvidiaDriverProbe {
+                    availability: TorchReleaseDriverAvailability::NotPresent,
+                    version: None,
+                };
+                let drivers = TorchReleaseDriverStatus {
+                    nvidia: TorchReleaseDriverAvailability::NotPresent,
+                    amd: TorchReleaseDriverAvailability::NotPresent,
+                };
+                (Vec::new(), Vec::new(), nvidia, drivers, false)
             }
         };
-        let driver_status = TorchReleaseDriverStatus {
-            nvidia: nvidia_probe.availability,
-            amd: if unknown_host {
-                TorchReleaseDriverAvailability::Unknown
-            } else if vendors.iter().any(|vendor| vendor == "amd") {
-                amd_driver_available(Path::new("/sys/bus/pci/devices"))
-            } else {
-                TorchReleaseDriverAvailability::NotPresent
-            },
-        };
-        let interpreters = installed_python_paths().await;
+        let interpreters = installed_python_paths(target).await;
         let empty = |issue: &str| ResolverReleaseOptions {
             tag: tag.to_owned(),
             status: TorchReleaseOptionsStatus::Inconclusive,
@@ -653,7 +937,10 @@ impl VersionManager {
             issues: vec![issue.to_owned()],
         };
         let mut result = if interpreters.is_empty() {
-            empty("No installed CPython 3.10–3.13 interpreter on Linux x86_64 could inspect official wheels")
+            empty(&format!(
+                "No installed CPython 3.10–3.13 interpreter on {} could inspect official wheels",
+                target.label()
+            ))
         } else {
             let workspace = tempfile::tempdir().map_err(PumasError::from)?;
             let resolver = workspace.path().join("resolve_runtime.py");
@@ -699,7 +986,13 @@ impl VersionManager {
             || result.combinations.iter().any(|item| {
                 !checked.contains(item.build.as_str())
                     || !available_pythons.contains(item.python.as_str())
-                    || !valid_official_wheel(&item.wheel_url, &item.build)
+                    || !valid_official_wheel(
+                        &item.wheel_url,
+                        &item.build,
+                        version,
+                        &item.python,
+                        target,
+                    )
                     || item.sha256.as_ref().is_some_and(|hash| {
                         hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())
                     })
@@ -718,7 +1011,13 @@ impl VersionManager {
                 "Torch release-options result violated its exact-wheel contract",
             ));
         }
-        result.combinations = visible_combinations(result.combinations, &vendors);
+        result.combinations =
+            visible_combinations_for_target(result.combinations, &vendors, target);
+        if target != TorchHostTarget::LinuxX8664 {
+            result
+                .checked_channels
+                .retain(|channel| visible_build_for_target(channel, &vendors, target));
+        }
         let status = if !result.complete_scan || (unknown_host && result.combinations.is_empty()) {
             TorchReleaseOptionsStatus::Inconclusive
         } else if result.combinations.is_empty() {
@@ -726,14 +1025,15 @@ impl VersionManager {
         } else {
             TorchReleaseOptionsStatus::Matches
         };
-        let (recommended, mut recommendation_note) = recommend_release_option(
+        let (recommended, mut recommendation_note) = recommend_release_option_for_target(
             &result.combinations,
             &vendors,
             &driver_status,
             nvidia_probe.version,
             result.complete_scan,
+            target,
         );
-        if unknown_host {
+        if unknown_host && target == TorchHostTarget::LinuxX8664 {
             recommendation_note = if recommended.is_some() {
                 "GPU devices could not be inspected; CPU is the only recommended choice until hardware is known."
             } else {
@@ -800,21 +1100,224 @@ mod tests {
             .contains("torch-2.14.0%2Bcu136"));
         assert!(valid_official_wheel(
             value["combinations"][0]["wheelUrl"].as_str().unwrap(),
-            "cu136"
+            "cu136",
+            "2.14.0",
+            "python3.12",
+            TorchHostTarget::LinuxX8664,
         ));
         assert!(value["combinations"][0].get("sha256").is_none());
         assert_eq!(value["driverStatus"]["nvidia"], "available");
         assert_eq!(value["driverStatus"]["amd"], "not_present");
         assert!(valid_official_wheel(
-            "https://download.pytorch.org/whl/cu136/torch-2.14.0%2Bcu136.whl",
-            "cu136"
+            "https://download.pytorch.org/whl/cu136/torch/torch-2.14.0%2Bcu136-cp312-cp312-manylinux_2_17_x86_64.whl",
+            "cu136",
+            "2.14.0",
+            "python3.12",
+            TorchHostTarget::LinuxX8664,
         ));
         assert!(!valid_official_wheel(
-            "https://example.com/whl/cu136/torch-2.14.0%2Bcu136.whl",
-            "cu136"
+            "https://example.com/whl/cu136/torch/torch-2.14.0%2Bcu136-cp312-cp312-manylinux_2_17_x86_64.whl",
+            "cu136",
+            "2.14.0",
+            "python3.12",
+            TorchHostTarget::LinuxX8664,
         ));
     }
 
+    #[test]
+    fn native_wheel_urls_are_release_and_target_bounded() {
+        let win_cpu =
+            "https://download.pytorch.org/whl/cpu/torch/torch-2.14.0-cp312-cp312-win_amd64.whl";
+        let win_cuda = "https://download.pytorch.org/whl/cu132/torch/torch-2.14.0%2Bcu132-cp312-cp312-win_amd64.whl";
+        let mac_cpu = "https://download.pytorch.org/whl/cpu/torch/torch-2.14.0-cp312-cp312-macosx_11_0_arm64.whl";
+        assert!(valid_official_wheel(
+            win_cpu,
+            "cpu",
+            "2.14.0",
+            "python3.12",
+            TorchHostTarget::WindowsX8664
+        ));
+        assert!(valid_official_wheel(
+            win_cuda,
+            "cu132",
+            "2.14.0",
+            "python3.12",
+            TorchHostTarget::WindowsX8664
+        ));
+        assert!(valid_official_wheel(
+            mac_cpu,
+            "cpu",
+            "2.14.0",
+            "python3.12",
+            TorchHostTarget::MacosArm64
+        ));
+        assert!(valid_official_wheel(
+            "https://download.pytorch.org/whl/cpu/torch/torch-2.14.0-cp312-cp312-macosx_11_0_universal2.whl",
+            "cpu",
+            "2.14.0",
+            "python3.12",
+            TorchHostTarget::MacosArm64
+        ));
+        for (url, build, target) in [
+            (win_cpu, "cpu", TorchHostTarget::LinuxX8664),
+            (win_cuda, "cu132", TorchHostTarget::MacosArm64),
+            (mac_cpu, "cpu", TorchHostTarget::WindowsX8664),
+            ("https://evil.example/whl/cpu/torch/torch-2.14.0-cp312-cp312-win_amd64.whl", "cpu", TorchHostTarget::WindowsX8664),
+            ("https://download.pytorch.org/whl/cu132/torch/torch-2.14.0%2Bcu132-cp312-cp312-win_arm64.whl", "cu132", TorchHostTarget::WindowsX8664),
+            ("https://download.pytorch.org/whl/cpu/torch/torch-2.14.0-cp312-cp312-macosx_11_0_x86_64.whl", "cpu", TorchHostTarget::MacosArm64),
+        ] {
+            assert!(!valid_official_wheel(url, build, "2.14.0", "python3.12", target), "{url}");
+        }
+        assert!(!valid_official_wheel(
+            win_cpu,
+            "cpu",
+            "2.13.0",
+            "python3.12",
+            TorchHostTarget::WindowsX8664
+        ));
+        assert!(!valid_official_wheel(
+            win_cpu,
+            "cpu",
+            "2.14.0",
+            "python3.13",
+            TorchHostTarget::WindowsX8664
+        ));
+    }
+
+    #[test]
+    fn native_choices_filter_channels_and_keep_cpu_default() {
+        let wheels = vec![
+            wheel("cpu", "python3.12"),
+            wheel("cu132", "python3.12"),
+            wheel("rocm7.2", "python3.12"),
+        ];
+        let no_gpu =
+            visible_combinations_for_target(wheels.clone(), &[], TorchHostTarget::WindowsX8664);
+        assert_eq!(
+            no_gpu
+                .iter()
+                .map(|item| item.build.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu"]
+        );
+        let nvidia = visible_combinations_for_target(
+            wheels.clone(),
+            &["nvidia".into()],
+            TorchHostTarget::WindowsX8664,
+        );
+        assert_eq!(
+            nvidia
+                .iter()
+                .map(|item| item.build.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu", "cu132"]
+        );
+        let mac = visible_combinations_for_target(
+            wheels,
+            &["nvidia".into(), "amd".into()],
+            TorchHostTarget::MacosArm64,
+        );
+        assert_eq!(
+            mac.iter()
+                .map(|item| item.build.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu"]
+        );
+        let drivers = TorchReleaseDriverStatus {
+            nvidia: TorchReleaseDriverAvailability::Available,
+            amd: TorchReleaseDriverAvailability::NotPresent,
+        };
+        let (choice, note) = recommend_release_option_for_target(
+            &nvidia,
+            &["nvidia".into()],
+            &drivers,
+            Some(NvidiaDriverVersion(700, 0, 0)),
+            true,
+            TorchHostTarget::WindowsX8664,
+        );
+        assert_eq!(choice.unwrap().build, "cpu");
+        assert!(note.contains("Windows CUDA driver compatibility"));
+        let (choice, note) = recommend_release_option_for_target(
+            &mac,
+            &[],
+            &drivers,
+            None,
+            true,
+            TorchHostTarget::MacosArm64,
+        );
+        assert_eq!(choice.unwrap().build, "cpu");
+        assert!(note.contains("MPS is a runtime capability"));
+    }
+
+    #[test]
+    fn windows_cuda_wheels_never_become_automatic_default_without_cpu() {
+        let vendors = vec!["nvidia".into()];
+        let combinations = visible_combinations_for_target(
+            vec![wheel("cu130", "python3.12"), wheel("cu132", "python3.12")],
+            &vendors,
+            TorchHostTarget::WindowsX8664,
+        );
+        assert_eq!(combinations.len(), 2);
+        let drivers = TorchReleaseDriverStatus {
+            nvidia: TorchReleaseDriverAvailability::Available,
+            amd: TorchReleaseDriverAvailability::NotPresent,
+        };
+        for complete_scan in [true, false] {
+            let (recommended, note) = recommend_release_option_for_target(
+                &combinations,
+                &vendors,
+                &drivers,
+                Some(NvidiaDriverVersion(700, 0, 0)),
+                complete_scan,
+                TorchHostTarget::WindowsX8664,
+            );
+            assert!(recommended.is_none());
+            assert!(note.contains("explicit advanced choice"));
+        }
+    }
+
+    #[test]
+    fn native_interpreter_probe_uses_windows_launcher_then_absolute_identity() {
+        let candidates = python_probe_candidates(TorchHostTarget::WindowsX8664, "python3.12");
+        assert_eq!(candidates[0], ("py".into(), vec!["-3.12".into()]));
+        assert!(candidates.iter().any(|(name, _)| name == "python"));
+        let mac = python_probe_candidates(TorchHostTarget::MacosArm64, "python3.12");
+        assert_eq!(mac[0], ("python3.12".into(), Vec::new()));
+        assert_eq!(mac[1], ("python3".into(), Vec::new()));
+        assert_eq!(mac[2], ("python".into(), Vec::new()));
+        let linux = python_probe_candidates(TorchHostTarget::LinuxX8664, "python3.12");
+        assert_eq!(linux, mac);
+    }
+
+    #[test]
+    fn generic_python_probe_rejects_wrong_minor_and_foreign_architecture() {
+        let root = tempfile::tempdir().unwrap();
+        let executable = root.path().join("python");
+        std::fs::write(&executable, b"test").unwrap();
+        let identity = serde_json::json!({
+            "path": executable,
+            "version": "3.11",
+            "platform": "linux",
+            "machine": "x86_64",
+            "implementation": "cpython",
+            "bits": 64,
+        });
+        let output = serde_json::to_vec(&identity).unwrap();
+        assert!(python_probe_path(&output, TorchHostTarget::LinuxX8664, "python3.12").is_none());
+        assert_eq!(
+            python_probe_path(&output, TorchHostTarget::LinuxX8664, "python3.11"),
+            Some(std::fs::canonicalize(&executable).unwrap())
+        );
+        assert!(python_probe_path(&output, TorchHostTarget::MacosArm64, "python3.11").is_none());
+
+        let mut translated_mac = identity;
+        translated_mac["platform"] = "darwin".into();
+        translated_mac["machine"] = "x86_64".into();
+        let output = serde_json::to_vec(&translated_mac).unwrap();
+        assert!(python_probe_path(&output, TorchHostTarget::MacosArm64, "python3.11").is_none());
+    }
+
+    #[cfg(target_os = "linux")]
     #[test]
     fn pci_reader_identifies_only_display_gpu_vendors() {
         let root = tempfile::tempdir().unwrap();
@@ -840,6 +1343,7 @@ mod tests {
         assert_eq!(vendors, ["amd", "intel", "nvidia"]);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn amd_driver_status_requires_binding_to_display_device() {
         let root = tempfile::tempdir().unwrap();
@@ -1100,7 +1604,11 @@ mod tests {
 
     #[test]
     fn legacy_alternatives_filter_cpu_only_and_nvidia_intel_hosts() {
-        let cpu = filter_alternatives_for_host(legacy_alternatives(), Ok(Vec::new()));
+        let cpu = filter_alternatives_for_host(
+            legacy_alternatives(),
+            Ok(Vec::new()),
+            TorchHostTarget::LinuxX8664,
+        );
         assert_eq!(cpu.checked_builds, ["cpu"]);
         assert_eq!(
             cpu.matches
@@ -1114,6 +1622,7 @@ mod tests {
         let nvidia = filter_alternatives_for_host(
             legacy_alternatives(),
             Ok(vec!["intel".into(), "nvidia".into()]),
+            TorchHostTarget::LinuxX8664,
         );
         assert_eq!(nvidia.checked_builds, ["cpu", "cu130"]);
         assert_eq!(
@@ -1132,6 +1641,7 @@ mod tests {
         let result = filter_alternatives_for_host(
             legacy_alternatives(),
             Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            TorchHostTarget::LinuxX8664,
         );
         assert_eq!(result.checked_builds, ["cpu"]);
         assert_eq!(
@@ -1153,8 +1663,60 @@ mod tests {
     fn legacy_alternatives_removed_gpu_only_match_does_not_claim_match() {
         let mut result = legacy_alternatives();
         result.matches.retain(|item| item.build == "cu130");
-        let result = filter_alternatives_for_host(result, Ok(Vec::new()));
+        let result =
+            filter_alternatives_for_host(result, Ok(Vec::new()), TorchHostTarget::LinuxX8664);
         assert!(result.matches.is_empty());
         assert_eq!(result.status, "none");
+    }
+
+    #[test]
+    fn legacy_native_wheel_leads_require_exact_official_target_wheels() {
+        let interpreters = vec![("python3.12".into(), PathBuf::from("/unused/python"))];
+        let mut windows = legacy_alternatives();
+        for item in &mut windows.matches {
+            item.wheel_url = Some(match item.build.as_str() {
+                "cpu" => "https://download.pytorch.org/whl/cpu/torch/torch-2.10.0-cp312-cp312-win_amd64.whl",
+                "cu130" => "https://download.pytorch.org/whl/cu130/torch/torch-2.10.0%2Bcu130-cp312-cp312-win_amd64.whl",
+                _ => "https://download.pytorch.org/whl/rocm7.2/torch/torch-2.10.0%2Brocm7.2-cp312-cp312-manylinux_2_17_x86_64.whl",
+            }.into());
+        }
+        let windows = validate_legacy_wheel_leads(
+            windows,
+            &interpreters,
+            "2.10.0",
+            TorchHostTarget::WindowsX8664,
+        );
+        assert_eq!(windows.status, "inconclusive");
+        assert_eq!(windows.matches.len(), 2);
+        let windows = filter_alternatives_for_host(
+            windows,
+            Ok(vec!["nvidia".into()]),
+            TorchHostTarget::WindowsX8664,
+        );
+        assert_eq!(
+            windows
+                .matches
+                .iter()
+                .map(|item| item.build.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu", "cu130"]
+        );
+        assert_eq!(windows.checked_builds, ["cpu", "cu130"]);
+
+        let mut mac = legacy_alternatives();
+        mac.matches[0].wheel_url = Some("https://download.pytorch.org/whl/cpu/torch/torch-2.10.0-cp312-cp312-macosx_11_0_arm64.whl".into());
+        mac.matches[1].wheel_url = Some("https://download.pytorch.org/whl/cu130/torch/torch-2.10.0%2Bcu130-cp312-cp312-win_amd64.whl".into());
+        let mac =
+            validate_legacy_wheel_leads(mac, &interpreters, "2.10.0", TorchHostTarget::MacosArm64);
+        let mac = filter_alternatives_for_host(mac, Ok(Vec::new()), TorchHostTarget::MacosArm64);
+        assert_eq!(
+            mac.matches
+                .iter()
+                .map(|item| item.build.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu"]
+        );
+        assert_eq!(mac.checked_builds, ["cpu"]);
+        assert_eq!(mac.status, "inconclusive");
     }
 }

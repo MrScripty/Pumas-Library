@@ -67,6 +67,92 @@ fn assert_no_staging(installer: &VersionInstaller) {
     }
 }
 
+#[test]
+fn pending_stage_quarantine_retries_after_obstruction_clears() {
+    let root = tempfile::tempdir().unwrap();
+    let versions = root.path();
+    let stage = versions.join(".torch-install-owned");
+    let quarantine = versions.join(".torch-quarantine-.torch-install-owned");
+    let marker = versions.join(".torch-pending-cleanup-.torch-install-owned");
+    std::fs::create_dir(&stage).unwrap();
+    std::fs::write(stage.join("payload"), "staged").unwrap();
+    std::fs::write(&marker, "v2.9.1").unwrap();
+    std::fs::write(&quarantine, "obstruction").unwrap();
+    let metadata = MetadataManager::new(versions);
+    torch::retry_pending_torch_cleanup(versions, &metadata).unwrap();
+    assert!(stage.exists() && marker.exists());
+    std::fs::remove_file(&quarantine).unwrap();
+    torch::retry_pending_torch_cleanup(versions, &metadata).unwrap();
+    assert!(!stage.exists() && !quarantine.exists() && !marker.exists());
+}
+
+#[test]
+fn unregistered_publication_retry_removes_owned_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let destination = root.path().join("v2.9.1");
+    std::fs::create_dir(&destination).unwrap();
+    std::fs::write(
+        destination.join(".pumas-publishing"),
+        torch::TORCH_PUBLISHING_MARKER,
+    )
+    .unwrap();
+    std::fs::write(destination.join("payload"), "unregistered").unwrap();
+    let marker = root.path().join(".torch-pending-publish-v2.9.1");
+    std::fs::write(&marker, torch::TORCH_PUBLISHING_MARKER).unwrap();
+    let metadata = MetadataManager::new(root.path());
+    torch::retry_pending_torch_cleanup(root.path(), &metadata).unwrap();
+    assert!(!destination.exists() && !marker.exists());
+}
+
+#[test]
+fn registered_publication_recovery_preserves_runtime() {
+    let root = tempfile::tempdir().unwrap();
+    let metadata = MetadataManager::new(root.path());
+    metadata.ensure_directories().unwrap();
+    let destination = root.path().join("v2.9.1");
+    std::fs::create_dir(&destination).unwrap();
+    std::fs::write(
+        destination.join(".pumas-publishing"),
+        torch::TORCH_PUBLISHING_MARKER,
+    )
+    .unwrap();
+    std::fs::write(destination.join("payload"), "registered").unwrap();
+    let marker = root.path().join(".torch-pending-publish-v2.9.1");
+    std::fs::write(&marker, torch::TORCH_PUBLISHING_MARKER).unwrap();
+    metadata
+        .update_installed_version(
+            "v2.9.1",
+            InstalledVersionMetadata {
+                path: "v2.9.1".into(),
+                release_tag: "v2.9.1".into(),
+                ..Default::default()
+            },
+            Some(AppId::Torch),
+        )
+        .unwrap();
+    torch::retry_pending_torch_cleanup(root.path(), &metadata).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(destination.join("payload")).unwrap(),
+        "registered"
+    );
+    assert!(!marker.exists());
+    assert!(!destination.join(".pumas-publishing").exists());
+}
+
+#[test]
+fn partial_publication_cleanup_preserves_ambiguous_directory() {
+    let root = tempfile::tempdir().unwrap();
+    let metadata = MetadataManager::new(root.path());
+    let destination = root.path().join("v2.9.1");
+    std::fs::create_dir(&destination).unwrap();
+    std::fs::write(destination.join("locked-payload"), "unfinished").unwrap();
+    let marker = root.path().join(".torch-pending-publish-v2.9.1");
+    std::fs::write(&marker, torch::TORCH_PUBLISHING_MARKER).unwrap();
+    torch::retry_pending_torch_cleanup(root.path(), &metadata).unwrap();
+    torch::retry_pending_torch_cleanup(root.path(), &metadata).unwrap();
+    assert!(destination.join("locked-payload").exists() && marker.exists());
+}
+
 #[tokio::test]
 async fn direct_install_rejects_legacy_custom_tag_without_changing_existing_runtime() {
     let (installer, _root) = fixture_installer();
@@ -327,6 +413,28 @@ async fn cancelled_cleanup_drain_waiter_can_retry_without_losing_task() {
 }
 
 #[tokio::test]
+async fn cancelled_child_drain_waiter_retains_slot_for_retry() {
+    let cleanup = Arc::new(TorchCleanupTasks::default());
+    let slot = cleanup.new_child_slot().unwrap();
+    let mut command = std::process::Command::new("sh");
+    command.args(["-c", "sleep 30"]);
+    let child =
+        pumas_library::platform::managed_child::ManagedChild::spawn(&mut command, slot.clone())
+            .unwrap();
+    let waiting_cleanup = cleanup.clone();
+    let waiter = tokio::spawn(async move { waiting_cleanup.drain_child_slots().await });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(!waiter.is_finished());
+    waiter.abort();
+    assert!(waiter.await.unwrap_err().is_cancelled());
+    assert!(slot.is_active());
+    drop(child);
+    cleanup.drain_child_slots().await.unwrap();
+    assert!(!slot.is_active());
+    assert!(!slot.has_parked_child());
+}
+
+#[tokio::test]
 async fn cancelling_a_runtime_command_reaps_its_process_group() {
     let (installer, root) = fixture_installer();
     let cancel = installer.cancel_flag.clone();
@@ -339,7 +447,13 @@ async fn cancelling_a_runtime_command_reaps_its_process_group() {
     let (tx, _rx) = mpsc::channel(16);
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        installer.run_runtime_command(command, &root.path().join("child.log"), "test child", &tx),
+        installer.run_runtime_command(
+            command,
+            &root.path().join("child.log"),
+            "test child",
+            &tx,
+            None,
+        ),
     )
     .await
     .expect("cancelled command did not terminate promptly");

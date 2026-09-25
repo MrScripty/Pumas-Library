@@ -15,10 +15,12 @@ independently of Pumas qualification when GitHub pagination completes within the
 20-page / 120-second request budget. A page failure or exhausted budget returns
 an error without a partial list presented as complete. Installation is offered for
 an exact official CPU, CUDA, or ROCm binary wheel plus fully resolved dependencies
-on Linux x86_64 with an already installed CPython 3.10–3.13. Pumas does not
-provision Python or compile Torch from source; XPU and other operating systems
-remain outside this provider contract. A release with no compatible wheel for a
-supported interpreter is discoverable but correctly rejected for that tuple.
+on Linux x86_64 with an already installed CPython 3.10–3.13. This records the
+original Linux-only scope; the later Windows/macOS authorization and its exact
+candidate contract are below. Pumas does not provision Python or compile Torch
+from source; XPU remains outside this provider contract. A release with no
+compatible wheel for a supported interpreter is discoverable but correctly
+rejected for that tuple.
 
 The fixed qualified `v2.9.1` / CUDA 13.0 / Python 3.12 bundled preset remains a
 separate recipe. Other exact combinations, including alternate `v2.9.1`
@@ -26,6 +28,34 @@ combinations, use dynamic retained previews and do not inherit the preset's
 qualification. The serialized follow-up and acceptance contract live in the
 [Torch upstream version management plan](../../torch-upstream-version-management/plan.md);
 the current-standards coordination entry is [PRG-I17](../../current-standards-remediation-2026-09-03/issues.md).
+
+## Cross-platform runtime expansion authorized 2026-09-24
+
+Windows x86_64 (`x86_64-pc-windows-msvc`) and macOS arm64
+(`aarch64-apple-darwin`) Torch release-manager paths are implemented in the
+current candidate branch under the separate
+[cross-platform runtime plan](../../torch-cross-platform-runtime-management/plan.md).
+The supported runtime claim remains Linux x86_64 until Windows and macOS pass
+that plan's native quality, exact wheel, installed identity, process lifecycle,
+RPC, and packaged desktop gates. Linux regression suites pass, and a Windows
+GNU test-target compile passed; the native QA matrix is present but has not run
+for this candidate. No macOS compile or Windows/macOS native execution was
+available in this Linux session. The existing
+Pumas artifact targets show these target architectures are shipped; they do not
+establish Torch runtime behavior.
+
+The official Torch 2.14.0 CPU index lists Windows x64 local-version wheels
+(`2.14.0+cpu`) and native macOS arm64 plain-version wheels (`2.14.0`,
+`macosx_14_0_arm64`). The manager must retain upstream distribution version
+separately from release and build identity. The official CUDA 13.2 index
+contains Windows x64 wheel candidates; that alone does not establish driver
+compatibility or CUDA image inference. macOS MPS is a runtime capability, not a
+separate wheel channel. These observations are recorded in the linked plan's
+[target research](../../torch-cross-platform-runtime-management/reports/target-wheel-research.md).
+
+No new FLUX.2, Nunchaku, or Tuldok image-generation support is implied. The
+current image result stays limited to its recorded Linux tuple until a separate
+target/model acceptance proves otherwise.
 
 ## Current branch behavior
 
@@ -36,20 +66,23 @@ the current-standards coordination entry is [PRG-I17](../../current-standards-re
   listing restores the target base's one-page / 100-item budget. A new cache records
   completeness; an old unmarked Torch cache containing exactly 100 or 1,000
   entries is refreshed because these counts match earlier one-page and
-  ten-page caps. Prereleases, nightlies, source builds, and managed installation
-  on platforms other than
-  Linux x86_64 remain outside this scope. Installed local releases remain visible
-  when upstream discovery fails.
+  ten-page caps. Prereleases, nightlies, and source builds remain outside this
+  scope. Linux x86_64 remains the only runtime target with completed acceptance;
+  the candidate Windows x86_64/macOS arm64 implementation and its pending native
+  gates are specified in the linked cross-platform plan. Installed local
+  releases remain visible when upstream discovery fails.
 - The qualified 2.9.1 recipe remains a fixed CUDA 13.0 / CPython 3.12 bundled
   preset. Other stable releases can use an installed CPython 3.10–3.13
   interpreter and an official CPU/CUDA/ROCm wheel index. Pumas does not provision
   interpreters. One installed build/interpreter/adapter combination is supported
   per upstream tag; the UI must disclose the installed combination before a
   different combination is attempted.
-- Dynamic install choices now come from a bounded scan of the official PyTorch
+- On the accepted Linux x86_64 target, dynamic install choices come from a
+  bounded scan of the official PyTorch
   wheel directory and exact per-channel indexes for the selected release and
   installed CPython tags. A release/build/Python pair is offered only when that
-  exact Torch wheel exists for Linux x86_64. Partial scans remain inconclusive;
+  exact Torch wheel exists for the target host and interpreter tags. Partial
+  scans remain inconclusive;
   they do not turn an unobserved wheel into a confirmed absence. The desktop uses
   the manager recommendation without requiring build, Python, or image-profile
   selections, and advanced settings contain only returned exact pairs. On a

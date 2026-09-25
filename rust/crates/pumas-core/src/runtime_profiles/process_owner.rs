@@ -1,6 +1,6 @@
 //! Session custody for managed binary profiles. PID files are diagnostics, never
-//! authority to adopt or signal a process. Linux leaders remain unreaped until
-//! cooperating group cleanup completes; escaped descendants are not contained.
+//! authority to adopt or signal a process. Unix leaders remain unreaped until
+//! group cleanup completes; Windows generations retain a kill-on-close Job.
 
 use super::router_model_operation::{OwnedRouterModelOperation, RouterModelState};
 use super::{RuntimeProfileLaunchSpec, RuntimeProfileOperationGuard};
@@ -8,11 +8,12 @@ use crate::models::{
     LaunchResponse, RuntimeEndpointUrl, RuntimeLifecycleState, RuntimeProfileId,
     RuntimeProfileStatus,
 };
+use crate::platform::managed_child::{ManagedChild, ManagedListenerCustody};
 use crate::process::BinaryLaunchConfig;
 use crate::{PumasError, Result};
+use futures::future::{BoxFuture, FutureExt, Shared};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -20,6 +21,14 @@ use tokio::task::JoinHandle;
 
 const OBSERVATION_INTERVAL: Duration = Duration::from_millis(20);
 const STOP_WAIT: Duration = Duration::from_secs(7);
+type ChildDrainResult = std::result::Result<(), Arc<String>>;
+#[derive(Clone)]
+struct ChildDrainCompletion(Shared<BoxFuture<'static, ChildDrainResult>>);
+impl std::fmt::Debug for ChildDrainCompletion {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ChildDrainCompletion")
+    }
+}
 
 /// In-memory identity of a process launched by this API instance.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,7 +57,6 @@ pub(crate) struct RuntimeProfileProcessOwner {
 #[derive(Debug, Default)]
 struct Registry {
     closed: bool,
-    #[cfg(target_os = "linux")]
     generation: u64,
     sessions: HashMap<RuntimeProfileId, Arc<Session>>,
     #[cfg(all(test, target_os = "linux"))]
@@ -63,6 +71,7 @@ struct Session {
     context_size: Option<u32>,
     router_models: Option<Arc<Mutex<RouterModelState>>>,
     stop: AtomicBool,
+    child_custody: Arc<crate::platform::managed_child::ManagedChildCustodySlot>,
     state: Mutex<SessionState>,
     observer_stop: tokio::sync::watch::Sender<bool>,
     observer_terminal: tokio::sync::watch::Sender<Option<bool>>,
@@ -71,7 +80,6 @@ struct Session {
 #[derive(Debug)]
 struct SessionState {
     status: RuntimeProfileStatus,
-    #[cfg(target_os = "linux")]
     launch: Option<std::result::Result<OwnedRuntimeProfileObservation, String>>,
     terminal: Option<std::result::Result<bool, String>>,
     worker: Option<JoinHandle<()>>,
@@ -80,7 +88,9 @@ struct SessionState {
     observer_error: Option<String>,
     joined: bool,
     // A failed cleanup never releases child custody or permits replacement.
-    residual_child: Option<Child>,
+    residual_child: Option<ManagedChild>,
+    custody_drain: Option<ChildDrainCompletion>,
+    listener: Option<ManagedListenerCustody>,
 }
 
 /// A dropped launch future must not leave its admitted worker running. The
@@ -163,17 +173,27 @@ impl RuntimeProfileProcessOwner {
         guard: RuntimeProfileOperationGuard,
         #[cfg(target_os = "linux")] observer: Option<super::router_observer::RouterObserverContext>,
     ) -> Result<OwnedRuntimeProfileLaunchReceipt> {
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
         {
             let _ = (config, spec, model_path, context_size, guard);
             Err(failure(
-                "Owned binary runtime profiles are currently supported only on Linux",
+                "Owned binary runtime profiles are unsupported on this platform",
             ))
         }
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
         {
+            #[cfg(target_os = "linux")]
             crate::platform::linux_group::ensure_supported().map_err(|e| failure(e.to_string()))?;
+            #[cfg(not(target_os = "linux"))]
+            if spec.provider != crate::models::RuntimeProviderId::Torch {
+                return Err(failure(
+                    "Only Torch binary profiles are supported on this platform",
+                ));
+            }
+            #[cfg(target_os = "linux")]
             let router_models = RouterModelState::for_spec(&spec);
+            #[cfg(not(target_os = "linux"))]
+            let router_models = None;
             let session = {
                 let mut registry = self
                     .registry
@@ -210,6 +230,7 @@ impl RuntimeProfileProcessOwner {
                     model_path,
                     context_size,
                     stop: AtomicBool::new(false),
+                    child_custody: crate::platform::managed_child::ManagedChildCustodySlot::new(),
                     state: Mutex::new(SessionState {
                         status: RuntimeProfileStatus {
                             profile_id: spec.profile_id.clone(),
@@ -230,6 +251,8 @@ impl RuntimeProfileProcessOwner {
                         terminal_observer: None,
                         observer_error: None,
                         residual_child: None,
+                        custody_drain: None,
+                        listener: None,
                     }),
                     spec,
                 });
@@ -243,6 +266,7 @@ impl RuntimeProfileProcessOwner {
                 armed: true,
             };
             // No await between registration, worker retention and gate release.
+            #[cfg(target_os = "linux")]
             if let Some(observer) = observer {
                 let mut state = session
                     .state
@@ -278,7 +302,7 @@ impl RuntimeProfileProcessOwner {
             start
                 .send(())
                 .map_err(|_| failure("Runtime process start gate closed"))?;
-            #[cfg(test)]
+            #[cfg(all(test, target_os = "linux"))]
             {
                 let gate = self.registry.lock().unwrap().launch_reply_gate.clone();
                 if let Some(gate) = gate {
@@ -345,6 +369,15 @@ impl RuntimeProfileProcessOwner {
                             lifecycle = RuntimeLifecycleState::Stopping;
                         }
                     }
+                }
+                #[cfg(not(target_os = "linux"))]
+                if lifecycle == RuntimeLifecycleState::Running
+                    && state
+                        .status
+                        .pid
+                        .is_some_and(|pid| !crate::platform::process::is_process_alive(pid))
+                {
+                    lifecycle = RuntimeLifecycleState::Stopping;
                 }
                 Ok(OwnedRuntimeProfileObservation {
                     generation: session.generation,
@@ -461,10 +494,19 @@ impl RuntimeProfileProcessOwner {
         }
         #[cfg(not(target_os = "linux"))]
         {
-            let _ = publish;
-            Err(failure(
-                "Owned runtime publication unsupported on this platform",
-            ))
+            let listener = state
+                .listener
+                .as_ref()
+                .ok_or_else(|| failure("Managed runtime listener custody is absent"))?;
+            if !listener
+                .owns_listener(&session.spec.endpoint_url)
+                .map_err(|error| {
+                    failure(format!("Runtime listener attribution unavailable: {error}"))
+                })?
+            {
+                return Ok(None);
+            }
+            Ok(Some(publish(session)))
         }
     }
 
@@ -692,6 +734,58 @@ async fn drain_session(session: &Session) -> Result<bool> {
             }
             state.joined = true;
         }
+        let completion = {
+            let mut state = session
+                .state
+                .lock()
+                .map_err(|_| failure("Runtime process session poisoned"))?;
+            if let Some(child) = state.residual_child.take() {
+                // Drop transfers this exact child to the session custody slot.
+                drop(child);
+            }
+            if state.joined
+                && state.observer.is_none()
+                && state.terminal_observer.is_none()
+                && session.child_custody.is_active()
+            {
+                if let Some(completion) = &state.custody_drain {
+                    Some(completion.0.clone())
+                } else {
+                    let custody = session.child_custody.clone();
+                    let worker =
+                        tokio::task::spawn_blocking(move || custody.drain(Duration::from_secs(5)));
+                    let completion = async move {
+                        worker
+                            .await
+                            .map_err(|error| Arc::new(error.to_string()))?
+                            .map_err(|error| Arc::new(error.to_string()))?;
+                        Ok(())
+                    }
+                    .boxed()
+                    .shared();
+                    state.custody_drain = Some(ChildDrainCompletion(completion.clone()));
+                    Some(completion)
+                }
+            } else {
+                None
+            }
+        };
+        if let Some(completion) = completion {
+            let result = completion.await;
+            let mut state = session
+                .state
+                .lock()
+                .map_err(|_| failure("Runtime process session poisoned"))?;
+            state.custody_drain = None;
+            if let Err(error) = result {
+                return Err(failure(format!(
+                    "Runtime descendant custody remains pending: {error}"
+                )));
+            }
+            state.listener = None;
+            state.status.pid = None;
+            session.observer_terminal.send_replace(Some(true));
+        }
         {
             let state = session
                 .state
@@ -715,14 +809,14 @@ async fn drain_session(session: &Session) -> Result<bool> {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfileOperationGuard) {
     let mut child = None;
     let mut pid_file = None;
     let execution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> Result<()> {
         use std::io::Write;
-        use std::os::unix::process::CommandExt;
         use std::process::{Command, Stdio};
+        #[cfg(target_os = "linux")]
         if let Some(models) = &session.router_models {
             RouterModelState::capture(models)?;
         }
@@ -741,10 +835,17 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
             })?;
         pid_file = Some((
             config.pid_file.clone(),
-            file.metadata()
+            file.try_clone()
                 .map_err(|e| PumasError::io_with_path(e, &config.pid_file))?,
         ));
-        let mut command = Command::new(&config.binary_path);
+        let binary = if cfg!(not(target_os = "linux"))
+            && session.spec.provider == crate::models::RuntimeProviderId::Torch
+        {
+            crate::platform::paths::venv_python(&config.version_dir)
+        } else {
+            config.binary_path.clone()
+        };
+        let mut command = Command::new(binary);
         if let Some(arg) = &config.command {
             command.arg(arg);
         }
@@ -752,8 +853,7 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
             .args(&config.extra_args)
             .envs(&config.env_vars)
             .current_dir(&config.version_dir)
-            .stdin(Stdio::null())
-            .process_group(0);
+            .stdin(Stdio::null());
         if let Some(path) = &config.log_file {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| PumasError::io_with_path(e, parent))?;
@@ -773,8 +873,7 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
             return Err(failure("Runtime launch stopped before process creation"));
         }
         child = Some(
-            command
-                .spawn()
+            ManagedChild::spawn(&mut command, session.child_custody.clone())
                 .map_err(|e| failure(format!("Runtime spawn failed: {e}")))?,
         );
         let pid = child.as_ref().expect("spawned child").id();
@@ -785,6 +884,7 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
                 .lock()
                 .map_err(|_| failure("Runtime process session poisoned"))?;
             state.status.pid = Some(pid);
+            state.listener = Some(child.as_ref().expect("owned child").listener_custody());
             state.status.state = RuntimeLifecycleState::Running;
             state.launch = Some(Ok(OwnedRuntimeProfileObservation {
                 generation: session.generation,
@@ -797,6 +897,7 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
         }
         drop(guard);
         loop {
+            #[cfg(target_os = "linux")]
             if let Some(models) = &session.router_models {
                 RouterModelState::process_pending(models, |receipt| {
                     if session.stop.load(Ordering::Acquire)
@@ -831,7 +932,10 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
             if session.stop.load(Ordering::Acquire) {
                 return Ok(());
             }
-            if let Some(status) = crate::platform::linux_group::observe_exit(pid)
+            if let Some(status) = child
+                .as_mut()
+                .expect("owned child")
+                .observe_exit()
                 .map_err(|e| failure(format!("Runtime exit observation failed: {e}")))?
             {
                 return Err(failure(format!("Managed runtime exited: {status}")));
@@ -848,12 +952,13 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
         state.status.state = RuntimeLifecycleState::Stopping;
     }
     session.observer_stop.send_replace(true);
+    #[cfg(target_os = "linux")]
     if let Some(models) = &session.router_models {
         RouterModelState::reject_pending(models);
     }
     let spawned = child.is_some();
     if let Some(process) = child.as_mut() {
-        if let Err(e) = cleanup_child(process) {
+        if let Err(e) = process.terminate_and_drain(Duration::from_secs(5)) {
             error = Some(format!(
                 "{}; cleanup failed: {e}",
                 error.unwrap_or_default()
@@ -863,13 +968,10 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
         }
     }
     if child.is_none() {
-        if let Some((path, owned_metadata)) = pid_file {
-            use std::os::unix::fs::MetadataExt;
-            let cleanup = std::fs::symlink_metadata(&path).and_then(|current| {
-                if current.dev() != owned_metadata.dev() || current.ino() != owned_metadata.ino() {
-                    return Err(std::io::Error::other(
-                        "Runtime PID metadata was replaced; preserving unowned replacement",
-                    ));
+        if let Some((path, owned_file)) = pid_file {
+            let cleanup = std::fs::File::open(&path).and_then(|current| {
+                if !crate::platform::process::same_file_identity(&owned_file, &current)? {
+                    return Err(std::io::Error::other("Runtime PID metadata was replaced"));
                 }
                 std::fs::remove_file(&path)
             });
@@ -889,7 +991,10 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
         } else {
             RuntimeLifecycleState::Stopped
         };
-        state.status.pid = child.as_ref().map(Child::id);
+        state.status.pid = child.as_ref().map(ManagedChild::id);
+        if child.is_none() {
+            state.listener = None;
+        }
         state.status.last_error = error.clone();
         state.residual_child = child;
         // This receipt reflects completed group cleanup, independently of an
@@ -901,29 +1006,6 @@ fn run_worker(session: &Session, config: BinaryLaunchConfig, guard: RuntimeProfi
             Some(error) => Err(error),
             None => Ok(spawned),
         });
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn cleanup_child(child: &mut Child) -> Result<()> {
-    use crate::platform::linux_group;
-    linux_group::signal_group(child.id())
-        .map_err(|e| failure(format!("Owned group signal failed: {e}")))?;
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    let group = i32::try_from(child.id()).map_err(|e| failure(e.to_string()))?;
-    loop {
-        if !linux_group::group_has_live_members(group)
-            .map_err(|e| failure(format!("Owned group observation failed: {e}")))?
-        {
-            child
-                .wait()
-                .map_err(|e| failure(format!("Owned leader reap failed: {e}")))?;
-            return Ok(());
-        }
-        if std::time::Instant::now() >= deadline {
-            return Err(failure("Owned group cleanup deadline elapsed"));
-        }
-        std::thread::sleep(OBSERVATION_INTERVAL);
     }
 }
 

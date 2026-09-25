@@ -6,6 +6,7 @@ mod torch;
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod torch_tests;
 pub(crate) use torch::is_torch_runtime_release;
+pub(crate) use torch::retry_pending_torch_cleanup;
 pub(crate) struct TorchInstallPlan {
     pub(crate) preview: crate::version_manager::TorchPreview,
     pub(crate) requirements: String,
@@ -50,6 +51,7 @@ async fn path_exists(path: &Path) -> Result<bool> {
 pub(crate) struct TorchInstallControl(AtomicU8);
 
 type TorchCleanupCompletion = Shared<BoxFuture<'static, std::result::Result<(), Arc<String>>>>;
+type TorchChildReceipt = tokio::sync::watch::Receiver<Option<std::result::Result<(), Arc<String>>>>;
 
 #[derive(Default)]
 pub(crate) struct TorchCleanupTasks {
@@ -62,9 +64,190 @@ struct TorchCleanupState {
     tasks: Vec<JoinHandle<()>>,
     failures: Vec<String>,
     completion: Option<TorchCleanupCompletion>,
+    child_drain_completion: Option<TorchCleanupCompletion>,
+    residual_drain_completion: Option<TorchCleanupCompletion>,
+    child_slots: Vec<Arc<pumas_library::platform::managed_child::ManagedChildCustodySlot>>,
+    child_receipts: std::collections::HashMap<usize, TorchChildReceipt>,
+}
+
+fn start_child_drain(
+    slots: Vec<Arc<pumas_library::platform::managed_child::ManagedChildCustodySlot>>,
+) -> TorchCleanupCompletion {
+    let worker = tokio::task::spawn_blocking(move || {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        for slot in slots {
+            loop {
+                let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+                if remaining.is_zero() && slot.is_active() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "Torch child cleanup deadline elapsed",
+                    ));
+                }
+                match slot.drain(remaining) {
+                    Ok(_) => break,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        Ok::<(), std::io::Error>(())
+    });
+    async move {
+        worker
+            .await
+            .map_err(|error| Arc::new(error.to_string()))?
+            .map_err(|error| Arc::new(error.to_string()))
+    }
+    .boxed()
+    .shared()
 }
 
 impl TorchCleanupTasks {
+    pub(crate) fn new_child_slot(
+        &self,
+    ) -> Result<Arc<pumas_library::platform::managed_child::ManagedChildCustodySlot>> {
+        let mut state = self.state.lock().expect("Torch cleanup lock poisoned");
+        if state.closed {
+            return Err(PumasError::InstallationFailed {
+                message: "Torch cleanup is closed".into(),
+            });
+        }
+        state
+            .child_slots
+            .retain(|slot| slot.is_active() || Arc::strong_count(slot) > 1);
+        let retained: std::collections::HashSet<usize> = state
+            .child_slots
+            .iter()
+            .map(|slot| Arc::as_ptr(slot) as usize)
+            .collect();
+        state.child_receipts.retain(|key, _| retained.contains(key));
+        let slot = pumas_library::platform::managed_child::ManagedChildCustodySlot::new();
+        let (completion_tx, completion_rx) = tokio::sync::watch::channel(None);
+        let supervised = slot.clone();
+        state.tasks.push(tokio::spawn(async move {
+            let result = if supervised.wait_for_park_or_completion().await {
+                let draining = supervised.clone();
+                let outcome = tokio::task::spawn_blocking(move || {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                    loop {
+                        let remaining =
+                            deadline.saturating_duration_since(std::time::Instant::now());
+                        if remaining.is_zero() {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::TimedOut,
+                                "Torch child cleanup deadline elapsed",
+                            ));
+                        }
+                        match draining.drain(remaining) {
+                            Ok(_) => return Ok(()),
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                                std::thread::sleep(std::time::Duration::from_millis(20));
+                            }
+                            Err(error) => return Err(error),
+                        }
+                    }
+                })
+                .await;
+                match outcome {
+                    Err(error) => Err(Arc::new(error.to_string())),
+                    Ok(Err(error)) => Err(Arc::new(error.to_string())),
+                    Ok(Ok(())) => Ok(()),
+                }
+            } else {
+                Ok(())
+            };
+            if let Err(error) = &result {
+                warn!(%error, "Torch child cleanup remains pending");
+            }
+            let _ = completion_tx.send(Some(result));
+        }));
+        state
+            .child_receipts
+            .insert(Arc::as_ptr(&slot) as usize, completion_rx);
+        state.child_slots.push(slot.clone());
+        Ok(slot)
+    }
+
+    pub(crate) async fn drain_child_slot(
+        &self,
+        slot: &Arc<pumas_library::platform::managed_child::ManagedChildCustodySlot>,
+    ) -> Result<()> {
+        let mut receipt = self
+            .state
+            .lock()
+            .expect("Torch cleanup lock poisoned")
+            .child_receipts
+            .get(&(Arc::as_ptr(slot) as usize))
+            .cloned()
+            .ok_or_else(|| PumasError::InstallationFailed {
+                message: "Torch child custody receipt absent".into(),
+            })?;
+        loop {
+            if let Some(result) = receipt.borrow().clone() {
+                return result.map_err(|_| PumasError::InstallationFailed {
+                    message: "Torch process cleanup incomplete; retry is required".into(),
+                });
+            }
+            receipt
+                .changed()
+                .await
+                .map_err(|_| PumasError::InstallationFailed {
+                    message: "Torch child cleanup supervisor stopped before receipt".into(),
+                })?;
+        }
+    }
+
+    pub(crate) async fn drain_child_slots(&self) -> Result<()> {
+        let completion = {
+            let mut state = self.state.lock().expect("Torch cleanup lock poisoned");
+            if let Some(completion) = &state.child_drain_completion {
+                completion.clone()
+            } else {
+                let completion = start_child_drain(state.child_slots.clone());
+                state.child_drain_completion = Some(completion.clone());
+                completion
+            }
+        };
+        let result = completion.await;
+        self.state
+            .lock()
+            .expect("Torch cleanup lock poisoned")
+            .child_drain_completion = None;
+        result.map_err(|_| PumasError::InstallationFailed {
+            message: "Torch process cleanup incomplete; retry is required".into(),
+        })
+    }
+
+    pub(crate) async fn drain_residual_child_slots(&self) -> Result<()> {
+        let completion = {
+            let mut state = self.state.lock().expect("Torch cleanup lock poisoned");
+            if let Some(completion) = &state.residual_drain_completion {
+                completion.clone()
+            } else {
+                let slots = state
+                    .child_slots
+                    .iter()
+                    .filter(|slot| slot.is_cleanup_pending())
+                    .cloned()
+                    .collect();
+                let completion = start_child_drain(slots);
+                state.residual_drain_completion = Some(completion.clone());
+                completion
+            }
+        };
+        let result = completion.await;
+        self.state
+            .lock()
+            .expect("Torch cleanup lock poisoned")
+            .residual_drain_completion = None;
+        result.map_err(|_| PumasError::InstallationFailed {
+            message: "Torch process cleanup incomplete; retry is required".into(),
+        })
+    }
+
     pub(crate) fn schedule(&self, work: impl FnOnce() + Send + 'static) {
         let mut state = self.state.lock().expect("Torch cleanup lock poisoned");
         if !state.closed {
@@ -100,6 +283,10 @@ impl TorchCleanupTasks {
             } else {
                 let tasks = std::mem::take(&mut state.tasks);
                 let mut failures = std::mem::take(&mut state.failures);
+                // One-shot cleanup closures cannot be replayed after a panic.
+                // Preserve that failure receipt; durable stage/publication
+                // markers are retried at startup, and child slots have their
+                // own retryable drain completion.
                 // This supervisor owns every handle even if all callers waiting
                 // on the shared receipt are cancelled.
                 let supervisor = tokio::spawn(async move {
@@ -252,7 +439,10 @@ impl VersionInstaller {
     /// before shutting down their Tokio runtime.
     pub async fn shutdown_torch_cleanup(&self) -> Result<()> {
         self.torch_cleanup.close();
-        self.torch_cleanup.drain().await
+        let tasks = self.torch_cleanup.drain().await;
+        let children = self.torch_cleanup.drain_child_slots().await;
+        tasks?;
+        children
     }
 
     pub(crate) fn with_torch_control(mut self, control: Arc<TorchInstallControl>) -> Self {
@@ -1633,7 +1823,7 @@ impl VersionInstaller {
             .await;
 
         // Get Python version
-        let venv_python = version_dir.join("venv").join("bin").join("python");
+        let venv_python = pumas_library::platform::paths::venv_python(version_dir);
         let python_version = if path_exists(&venv_python).await? {
             let output = tokio::process::Command::new(&venv_python)
                 .args(["--version"])

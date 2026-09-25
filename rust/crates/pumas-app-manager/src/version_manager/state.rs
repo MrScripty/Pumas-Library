@@ -116,6 +116,18 @@ impl VersionState {
 
     /// Initialize state from metadata and filesystem.
     async fn initialize(&mut self) -> Result<()> {
+        if self.app_id == AppId::Torch {
+            let versions_dir = self.launcher_root.join("torch-versions");
+            let metadata = self.metadata_manager.clone();
+            tokio::task::spawn_blocking(move || {
+                super::installer::retry_pending_torch_cleanup(&versions_dir, &metadata)
+            })
+            .await
+            .map_err(|error| {
+                PumasError::Other(format!("Torch cleanup recovery task failed: {error}"))
+            })?
+            .map_err(PumasError::from)?;
+        }
         self.normalize_llama_cpp_legacy_sycl_variants().await?;
 
         // Load metadata
@@ -660,7 +672,7 @@ impl VersionState {
             AppId::Torch => vec![
                 version_path.join("runtime.json"),
                 version_path.join("serve.py"),
-                version_path.join("venv/bin/python"),
+                pumas_library::platform::paths::venv_python(version_path),
                 version_path.join("requirements.txt"),
             ],
             _ => {
@@ -782,8 +794,9 @@ mod tests {
         let version_dir = temp.path().join("torch-versions/v1.0.0");
         std::fs::create_dir_all(&version_dir).unwrap();
         std::fs::write(version_dir.join("main.py"), "# main").unwrap();
-        std::fs::create_dir_all(version_dir.join("venv/bin")).unwrap();
-        std::fs::write(version_dir.join("venv/bin/python"), "#!/bin/python").unwrap();
+        let python = pumas_library::platform::paths::venv_python(&version_dir);
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(python, "#!/bin/python").unwrap();
 
         let metadata = InstalledVersionMetadata {
             path: "v1.0.0".to_string(),
@@ -806,8 +819,9 @@ mod tests {
         let version_dir = temp.path().join("torch-versions/v1.0.0");
         std::fs::create_dir_all(&version_dir).unwrap();
         std::fs::write(version_dir.join("main.py"), "# main").unwrap();
-        std::fs::create_dir_all(version_dir.join("venv/bin")).unwrap();
-        std::fs::write(version_dir.join("venv/bin/python"), "#!/bin/python").unwrap();
+        let python = pumas_library::platform::paths::venv_python(&version_dir);
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(python, "#!/bin/python").unwrap();
 
         let metadata = InstalledVersionMetadata {
             path: "v1.0.0".to_string(),
@@ -848,8 +862,9 @@ mod tests {
         let version_dir = temp.path().join("torch-versions/v1.0.0");
         std::fs::create_dir_all(&version_dir).unwrap();
         std::fs::write(version_dir.join("main.py"), "# main").unwrap();
-        std::fs::create_dir_all(version_dir.join("venv/bin")).unwrap();
-        std::fs::write(version_dir.join("venv/bin/python"), "#!/bin/python").unwrap();
+        let python = pumas_library::platform::paths::venv_python(&version_dir);
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(python, "#!/bin/python").unwrap();
 
         let metadata = InstalledVersionMetadata {
             path: "v1.0.0".to_string(),
@@ -876,8 +891,9 @@ mod tests {
         let version_dir = temp.path().join("torch-versions/v1.0.0");
         std::fs::create_dir_all(&version_dir).unwrap();
         std::fs::write(version_dir.join("main.py"), "# main").unwrap();
-        std::fs::create_dir_all(version_dir.join("venv/bin")).unwrap();
-        std::fs::write(version_dir.join("venv/bin/python"), "#!/bin/python").unwrap();
+        let python = pumas_library::platform::paths::venv_python(&version_dir);
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(python, "#!/bin/python").unwrap();
 
         let metadata = InstalledVersionMetadata {
             path: "v1.0.0".to_string(),

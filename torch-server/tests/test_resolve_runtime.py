@@ -9,6 +9,7 @@ import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+from types import SimpleNamespace
 from urllib.request import Request
 from unittest.mock import patch
 
@@ -60,6 +61,145 @@ def report(
 
 
 class ResolverTests(unittest.TestCase):
+    def test_native_interpreter_tags_include_windows_and_macos_but_reject_rosetta(self):
+        cases = (
+            ("win32", "AMD64", "cp312-cp312-win_amd64", True),
+            ("darwin", "arm64", "cp312-cp312-macosx_14_0_arm64", True),
+            ("darwin", "x86_64", "cp312-cp312-macosx_14_0_x86_64", False),
+            ("win32", "x86", "cp312-cp312-win32", False),
+            ("linux", "x86_64", "cp312-cp312-manylinux_2_28_x86_64", True),
+        )
+        for system, machine, wheel_tag, accepted in cases:
+            with self.subTest(system=system, machine=machine):
+                completed = type(
+                    "Completed",
+                    (),
+                    {
+                        "returncode": 0,
+                        "stdout": json.dumps(
+                            {
+                                "python": "3.12",
+                                "platform": system,
+                                "machine": machine,
+                                "implementation": "cpython",
+                                "tags": [wheel_tag, "py3-none-any"],
+                            }
+                        ),
+                    },
+                )()
+                with patch.object(resolver.subprocess, "run", return_value=completed):
+                    if accepted:
+                        self.assertEqual(resolver.interpreter_tags("python"), ("3.12", {wheel_tag}))
+                    else:
+                        with self.assertRaises(ValueError):
+                            resolver.interpreter_tags("python")
+
+    def test_native_wheels_match_exact_release_and_architecture(self):
+        windows = {"cp312-cp312-win_amd64"}
+        mac = {"cp312-cp312-macosx_14_0_arm64"}
+        self.assertIsNotNone(
+            resolver.wheel_match(
+                "torch-2.14.0%2Bcpu-cp312-cp312-win_amd64.whl", "2.14.0", "cpu", windows
+            )
+        )
+        self.assertIsNotNone(
+            resolver.wheel_match(
+                "torch-2.14.0%2Bcu130-cp312-cp312-win_amd64.whl", "2.14.0", "cu130", windows
+            )
+        )
+        plain = resolver.wheel_match(
+            "torch-2.14.0-cp312-cp312-macosx_14_0_arm64.whl", "2.14.0", "cpu", mac
+        )
+        self.assertEqual(plain["torch"], "2.14.0")
+        for href, build, tags in (
+            ("torch-2.14.0-cp312-cp312-win_amd64.whl", "cpu", windows),
+            ("torch-2.14.0-cp312-cp312-macosx_14_0_x86_64.whl", "cpu", mac),
+            ("torch-2.14.1-cp312-cp312-macosx_14_0_arm64.whl", "cpu", mac),
+            ("https://evil.test/torch-2.14.0-cp312-cp312-macosx_14_0_arm64.whl", "cpu", mac),
+        ):
+            with self.subTest(href=href):
+                self.assertIsNone(resolver.wheel_match(href, "2.14.0", build, tags))
+
+    def test_macos_cpu_report_records_plain_torch_distribution_version(self):
+        fixture = report(
+            version="2.14.0",
+            url="https://download.pytorch.org/whl/cpu/torch-2.14.0-cp312-cp312-macosx_14_0_arm64.whl",
+        )
+        with (
+            patch.object(resolver.sys, "platform", "darwin"),
+            patch.object(resolver.platform, "machine", return_value="arm64"),
+            patch.object(resolver.sys, "version_info", SimpleNamespace(major=3, minor=12)),
+        ):
+            _, resolution = resolver.requirements_from_report(fixture, "2.14.0", "cpu")
+        self.assertEqual(resolution["release"], "2.14.0")
+        self.assertEqual(resolution["torch"], "2.14.0")
+        self.assertEqual(resolution["build"], "cpu")
+        with (
+            patch.object(resolver.sys, "platform", "linux"),
+            patch.object(resolver.platform, "machine", return_value="x86_64"),
+        ):
+            with self.assertRaises(ValueError):
+                resolver.requirements_from_report(fixture, "2.14.0", "cpu")
+
+    def test_macos_cpu_cli_requests_plain_version_and_classifies_missing_wheel(self):
+        failed = type(
+            "Completed",
+            (),
+            {
+                "returncode": 1,
+                "stdout": "",
+                "stderr": "No matching distribution found for torch==2.14.0",
+            },
+        )()
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.14.0",
+                        "--build",
+                        "cpu",
+                        "--output",
+                        directory,
+                    ],
+                ),
+                patch.object(resolver.sys, "platform", "darwin"),
+                patch.object(resolver.platform, "machine", return_value="arm64"),
+                patch.object(resolver.sys, "version_info", SimpleNamespace(major=3, minor=12)),
+                patch.object(resolver.subprocess, "run", return_value=failed) as run,
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+        self.assertEqual(exit_result.exception.code, 4)
+        self.assertIn("torch==2.14.0", run.call_args.args[0])
+        self.assertNotIn("torch==2.14.0+cpu", run.call_args.args[0])
+
+    def test_release_options_match_native_windows_and_macos_wheels(self):
+        fixtures = (
+            ("cp312-cp312-win_amd64", "torch-2.14.0%2Bcu130-cp312-cp312-win_amd64.whl", "cu130"),
+            (
+                "cp312-cp312-macosx_14_0_arm64",
+                "torch-2.14.0-cp312-cp312-macosx_14_0_arm64.whl",
+                "cpu",
+            ),
+        )
+        for tag, wheel, build in fixtures:
+            with self.subTest(tag=tag):
+                result = resolver.discover_release_options(
+                    "2.14.0",
+                    ["python"],
+                    root_loader=lambda: [build],
+                    index_loader=lambda _: [f"https://download.pytorch.org/whl/{build}/{wheel}"],
+                    tag_loader=lambda _: ("3.12", {tag}),
+                )
+                self.assertEqual(result["status"], "matches")
+                self.assertEqual(len(result["combinations"]), 1)
+                self.assertEqual(result["combinations"][0]["build"], build)
+
     def test_release_channels_keep_only_canonical_official_cpu_cuda_and_rocm(self):
         links = [
             "cpu/",

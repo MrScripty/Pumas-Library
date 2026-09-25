@@ -21,6 +21,7 @@ pub(crate) mod capability_fs;
 pub mod filesystem;
 #[cfg(target_os = "linux")]
 pub mod linux_group;
+pub mod managed_child;
 pub mod paths;
 pub mod permissions;
 pub mod process;

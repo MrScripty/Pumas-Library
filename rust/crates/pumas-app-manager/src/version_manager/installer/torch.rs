@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::torch_client::{SUPPORTED_TORCH_PROTOCOL, TORCH_IMAGE_GENERATION_CAPABILITY};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::process::Stdio;
 use std::time::Duration;
@@ -10,6 +10,303 @@ use tokio::process::Command;
 
 const MAX_TORCH_ORPHAN_QUARANTINES: usize = 2;
 pub(super) const TORCH_PUBLISHING_MARKER: &[u8] = b"metadata pending";
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct TorchDirectoryIdentity {
+    volume: u64,
+    file: u64,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TorchPendingPublishMarker {
+    owner: String,
+    directory: TorchDirectoryIdentity,
+    source_stage: String,
+}
+
+#[allow(unsafe_code)]
+fn torch_directory_identity(path: &Path) -> std::io::Result<TorchDirectoryIdentity> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(std::io::Error::other(
+            "Torch publication directory identity unavailable",
+        ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Ok(TorchDirectoryIdentity {
+            volume: metadata.dev(),
+            file: metadata.ino(),
+        })
+    }
+    #[cfg(windows)]
+    {
+        use std::mem::zeroed;
+        use std::os::windows::fs::OpenOptionsExt;
+        use std::os::windows::io::AsRawHandle;
+        #[repr(C)]
+        #[allow(dead_code)]
+        struct FileInformation {
+            attributes: u32,
+            creation_time: [u32; 2],
+            access_time: [u32; 2],
+            write_time: [u32; 2],
+            volume: u32,
+            size_high: u32,
+            size_low: u32,
+            links: u32,
+            file_high: u32,
+            file_low: u32,
+        }
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            #[link_name = "GetFileInformationByHandle"]
+            fn get_file_information_by_handle(
+                handle: *mut std::ffi::c_void,
+                info: *mut FileInformation,
+            ) -> i32;
+        }
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        const FILE_SHARE_READ: u32 = 0x0000_0001;
+        const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+        const FILE_SHARE_DELETE: u32 = 0x0000_0004;
+        let directory = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .open(path)?;
+        let mut info: FileInformation = unsafe { zeroed() };
+        // SAFETY: the directory handle remains live and info has the Win32 layout.
+        if unsafe { get_file_information_by_handle(directory.as_raw_handle(), &mut info) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(TorchDirectoryIdentity {
+            volume: u64::from(info.volume),
+            file: (u64::from(info.file_high) << 32) | u64::from(info.file_low),
+        })
+    }
+}
+
+pub(super) fn write_pending_publish_marker(path: &Path, runtime: &Path) -> std::io::Result<()> {
+    use std::io::Write;
+    let contents = serde_json::to_vec(&TorchPendingPublishMarker {
+        owner: "metadata pending".into(),
+        directory: torch_directory_identity(runtime)?,
+        source_stage: runtime
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str())
+            .filter(|name| name.starts_with(".torch-install-"))
+            .ok_or_else(|| std::io::Error::other("Torch publication source stage absent"))?
+            .to_owned(),
+    })
+    .map_err(std::io::Error::other)?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?;
+    file.write_all(&contents)?;
+    file.sync_all()?;
+    #[cfg(unix)]
+    std::fs::File::open(
+        path.parent()
+            .ok_or_else(|| std::io::Error::other("Marker parent absent"))?,
+    )?
+    .sync_all()?;
+    Ok(())
+}
+
+/// The sibling marker is created before child admission and survives a failed
+/// TempDir removal on Windows, where an open wheel or DLL can lock a stage.
+pub(super) struct TorchPendingStage {
+    directory: tempfile::TempDir,
+    marker: PathBuf,
+}
+
+impl TorchPendingStage {
+    fn new(versions_dir: &Path, tag: &str) -> Result<Self> {
+        let directory = tempfile::Builder::new()
+            .prefix(".torch-install-")
+            .tempdir_in(versions_dir)
+            .map_err(PumasError::from)?;
+        let name = directory
+            .path()
+            .file_name()
+            .ok_or_else(|| failed("Stage name absent"))?;
+        let marker =
+            versions_dir.join(format!(".torch-pending-cleanup-{}", name.to_string_lossy()));
+        std::fs::write(&marker, tag).map_err(PumasError::from)?;
+        Ok(Self { directory, marker })
+    }
+
+    fn path(&self) -> &Path {
+        self.directory.path()
+    }
+}
+
+impl Drop for TorchPendingStage {
+    fn drop(&mut self) {
+        match std::fs::remove_dir_all(self.path()) {
+            Ok(()) => {
+                let _ = std::fs::remove_file(&self.marker);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let _ = std::fs::remove_file(&self.marker);
+            }
+            Err(error) => {
+                warn!(%error, path = %self.path().display(), "Torch stage retained for pending cleanup")
+            }
+        }
+    }
+}
+
+pub(crate) fn retry_pending_torch_cleanup(
+    versions_dir: &Path,
+    metadata_manager: &MetadataManager,
+) -> std::io::Result<()> {
+    let entries = match std::fs::read_dir(versions_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let marker = entry.path();
+        let Some(tag) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.strip_prefix(".torch-pending-publish-"))
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        if stable_torch_tag(&tag).is_none() || !entry.file_type()?.is_file() {
+            continue;
+        }
+        let marker_bytes = std::fs::read(&marker)?;
+        let durable_owner = if marker_bytes == TORCH_PUBLISHING_MARKER {
+            None // Legacy marker: retain the inner marker as ownership proof.
+        } else {
+            let Ok(record) = serde_json::from_slice::<TorchPendingPublishMarker>(&marker_bytes)
+            else {
+                continue;
+            };
+            if record.owner != "metadata pending"
+                || !record.source_stage.starts_with(".torch-install-")
+                || !record
+                    .source_stage
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'.')
+            {
+                continue;
+            }
+            Some((record.directory, record.source_stage))
+        };
+        let destination = versions_dir.join(&tag);
+        let registered = metadata_manager
+            .get_installed_version(&tag, Some(AppId::Torch))
+            .map_err(std::io::Error::other)?
+            .is_some();
+        if registered {
+            let inner = destination.join(".pumas-publishing");
+            match std::fs::remove_file(&inner) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    warn!(%error, path = %inner.display(), "Registered Torch marker cleanup remains pending");
+                    continue;
+                }
+            }
+            std::fs::remove_file(marker)?;
+            continue;
+        }
+        // The original directory still at its source means the rename never
+        // published it. Release the pending marker before stage cleanup can
+        // delete the source and allow native file IDs to be reused.
+        if let Some((expected, source_stage)) = &durable_owner {
+            let source = versions_dir.join(source_stage).join("runtime");
+            if torch_directory_identity(&source).ok() == Some(*expected) {
+                std::fs::remove_file(marker)?;
+                continue;
+            }
+        }
+        if destination.exists() {
+            if let Some((expected, _)) = &durable_owner {
+                if torch_directory_identity(&destination).ok() != Some(*expected) {
+                    warn!(path = %destination.display(), "Torch pending publication does not own destination identity");
+                    continue;
+                }
+            }
+            match std::fs::read(destination.join(".pumas-publishing")) {
+                Ok(contents) if contents == TORCH_PUBLISHING_MARKER => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    if durable_owner.is_none() {
+                        warn!(path = %destination.display(), "Torch publication ownership marker absent; pending cleanup retained");
+                        continue;
+                    }
+                }
+                Ok(_) => continue,
+                Err(error) => return Err(error),
+            }
+            if let Err(error) = std::fs::remove_dir_all(&destination) {
+                warn!(%error, path = %destination.display(), "Unregistered Torch publication remains pending cleanup");
+                continue;
+            }
+        }
+        std::fs::remove_file(marker)?;
+    }
+    let entries = match std::fs::read_dir(versions_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let marker = entry.path();
+        let Some(stage_name) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.strip_prefix(".torch-pending-cleanup-"))
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        if !stage_name.starts_with(".torch-install-")
+            || !stage_name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'.')
+            || !entry.file_type()?.is_file()
+        {
+            continue;
+        }
+        let tag = std::fs::read_to_string(&marker)?;
+        if stable_torch_tag(&tag).is_none() {
+            continue;
+        }
+        let stage = versions_dir.join(&stage_name);
+        let quarantine = versions_dir.join(format!(".torch-quarantine-{stage_name}"));
+        if stage.exists() && !quarantine.exists() {
+            if let Err(error) =
+                pumas_library::platform::filesystem::rename_directory_noreplace(&stage, &quarantine)
+            {
+                warn!(%error, path = %stage.display(), "Locked Torch stage remains pending cleanup");
+                continue;
+            }
+        }
+        if quarantine.exists() {
+            if let Err(error) = std::fs::remove_dir_all(&quarantine) {
+                warn!(%error, path = %quarantine.display(), "Torch quarantine remains pending cleanup");
+                continue;
+            }
+        }
+        if !stage.exists() && !quarantine.exists() {
+            std::fs::remove_file(marker)?;
+        }
+    }
+    Ok(())
+}
 
 struct TorchOrphanQuarantine {
     tag: String,
@@ -36,6 +333,123 @@ impl TorchPublicationPause {
 #[cfg(test)]
 #[path = "torch_upstream_contract_tests.rs"]
 mod torch_upstream_contract_tests;
+
+#[cfg(all(test, windows))]
+mod windows_cleanup_tests {
+    use super::*;
+    use std::os::windows::fs::OpenOptionsExt;
+
+    #[test]
+    fn locked_stage_stays_owned_and_retries_after_unlock() {
+        let root = tempfile::tempdir().unwrap();
+        let versions = root.path();
+        let stage = versions.join(".torch-install-owned");
+        std::fs::create_dir(&stage).unwrap();
+        let payload = stage.join("locked.bin");
+        std::fs::write(&payload, b"payload").unwrap();
+        let marker = versions.join(".torch-pending-cleanup-.torch-install-owned");
+        std::fs::write(&marker, "v2.9.1").unwrap();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&payload)
+            .unwrap();
+        let metadata = MetadataManager::new(versions);
+        retry_pending_torch_cleanup(versions, &metadata).unwrap();
+        assert!(marker.exists());
+        assert!(
+            stage.exists()
+                || versions
+                    .join(".torch-quarantine-.torch-install-owned")
+                    .exists()
+        );
+        drop(held);
+        retry_pending_torch_cleanup(versions, &metadata).unwrap();
+        assert!(!stage.exists());
+        assert!(!marker.exists());
+    }
+
+    #[test]
+    fn locked_unregistered_publication_retries_after_unlock() {
+        let root = tempfile::tempdir().unwrap();
+        let versions = root.path();
+        let stage = versions.join(".torch-install-owned");
+        let runtime = stage.join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        std::fs::write(runtime.join(".pumas-publishing"), TORCH_PUBLISHING_MARKER).unwrap();
+        let payload = runtime.join("locked.bin");
+        std::fs::write(&payload, b"payload").unwrap();
+        let marker = versions.join(".torch-pending-publish-v2.9.1");
+        write_pending_publish_marker(&marker, &runtime).unwrap();
+        let destination = versions.join("v2.9.1");
+        std::fs::rename(&runtime, &destination).unwrap();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(destination.join("locked.bin"))
+            .unwrap();
+        let metadata = MetadataManager::new(versions);
+        retry_pending_torch_cleanup(versions, &metadata).unwrap();
+        assert!(marker.exists() && destination.exists());
+        drop(held);
+        retry_pending_torch_cleanup(versions, &metadata).unwrap();
+        assert!(!marker.exists() && !destination.exists());
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod publication_identity_tests {
+    use super::*;
+
+    #[test]
+    fn durable_identity_reclaims_partial_publication_after_inner_marker_loss() {
+        let root = tempfile::tempdir().unwrap();
+        let stage = root.path().join(".torch-install-owned");
+        let runtime = stage.join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        std::fs::write(runtime.join(".pumas-publishing"), TORCH_PUBLISHING_MARKER).unwrap();
+        std::fs::write(runtime.join("payload"), b"owned").unwrap();
+        let marker = root.path().join(".torch-pending-publish-v2.9.1");
+        write_pending_publish_marker(&marker, &runtime).unwrap();
+        let destination = root.path().join("v2.9.1");
+        std::fs::rename(&runtime, &destination).unwrap();
+        std::fs::remove_file(destination.join(".pumas-publishing")).unwrap();
+        let metadata = MetadataManager::new(root.path());
+        retry_pending_torch_cleanup(root.path(), &metadata).unwrap();
+        assert!(!marker.exists() && !destination.exists());
+    }
+
+    #[test]
+    fn pre_rename_marker_cannot_delete_raced_unrelated_destination() {
+        let root = tempfile::tempdir().unwrap();
+        let stage = root.path().join(".torch-install-owned");
+        let runtime = stage.join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        std::fs::write(
+            root.path()
+                .join(".torch-pending-cleanup-.torch-install-owned"),
+            "v2.9.1",
+        )
+        .unwrap();
+        let marker = root.path().join(".torch-pending-publish-v2.9.1");
+        write_pending_publish_marker(&marker, &runtime).unwrap();
+        let unrelated = root.path().join("v2.9.1");
+        std::fs::create_dir(&unrelated).unwrap();
+        std::fs::write(unrelated.join("payload"), b"unrelated").unwrap();
+        let metadata = MetadataManager::new(root.path());
+        retry_pending_torch_cleanup(root.path(), &metadata).unwrap();
+        assert_eq!(
+            std::fs::read(unrelated.join("payload")).unwrap(),
+            b"unrelated"
+        );
+        assert!(!marker.exists());
+        assert!(!stage.exists());
+        assert!(!root
+            .path()
+            .join(".torch-pending-cleanup-.torch-install-owned")
+            .exists());
+    }
+}
 
 pub(crate) struct TorchRuntimeRecipe {
     #[cfg(test)]
@@ -304,11 +718,11 @@ impl VersionInstaller {
     async fn stage_resolved_torch_runtime(
         &self,
         plan: &TorchInstallPlan,
-        staging: &Path,
+        staging: &std::sync::Arc<TorchPendingStage>,
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<PathBuf> {
-        let runtime = staging.join("runtime");
+        let runtime = staging.path().join("runtime");
         let runtime_for_write = runtime.clone();
         tokio::task::spawn_blocking(move || write_embedded_torch_runtime(&runtime_for_write))
             .await
@@ -331,6 +745,7 @@ impl VersionInstaller {
             log_path,
             &format!("Creating Python environment with {}", interpreter.display()),
             progress_tx,
+            Some(staging.clone()),
         )
         .await?;
         fs::write(runtime.join("requirements.txt"), &plan.requirements)
@@ -358,13 +773,10 @@ impl VersionInstaller {
         )
         .await
         .map_err(PumasError::from)?;
-        let python = runtime.join("venv/bin/python");
-        let mut install = Command::new(&python);
+        let python = pumas_library::platform::paths::venv_python(&runtime);
+        let mut install = Command::new(pumas_library::platform::paths::venv_pip(&runtime));
         install
             .args([
-                "-I",
-                "-m",
-                "pip",
                 "--isolated",
                 "install",
                 "--no-deps",
@@ -381,6 +793,7 @@ impl VersionInstaller {
             log_path,
             "Installing resolved wheel artifacts",
             progress_tx,
+            Some(staging.clone()),
         )
         .await?;
         let mut probe = Command::new(&python);
@@ -390,6 +803,7 @@ impl VersionInstaller {
             log_path,
             "Checking installed Torch identity and CPU operation",
             progress_tx,
+            Some(staging.clone()),
         )
         .await?;
         Ok(runtime)
@@ -421,17 +835,26 @@ impl VersionInstaller {
         progress_tx: mpsc::Sender<ProgressUpdate>,
         plan: Option<TorchInstallPlan>,
     ) -> Result<()> {
-        if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-            return Err(failed("Managed Torch requires Linux x86_64"));
+        if !cfg!(any(
+            all(target_os = "linux", target_arch = "x86_64"),
+            all(
+                target_os = "windows",
+                target_arch = "x86_64",
+                target_env = "msvc"
+            ),
+            all(target_os = "macos", target_arch = "aarch64")
+        )) {
+            return Err(failed("Managed Torch is unsupported on this platform"));
         }
         if tag != release.tag_name || !is_torch_runtime_release(release) {
             return Err(failed(
                 "Unsupported upstream PyTorch release or mismatched tag",
             ));
         }
-        let recipe = if plan
-            .as_ref()
-            .is_none_or(|p| p.preview.qualification == "qualified")
+        let recipe = if cfg!(all(target_os = "linux", target_arch = "x86_64"))
+            && plan
+                .as_ref()
+                .is_none_or(|p| p.preview.qualification == "qualified")
         {
             torch_recipe_for_tag(tag)
         } else {
@@ -449,6 +872,9 @@ impl VersionInstaller {
         let versions_dir = self.versions_dir();
         fs::create_dir_all(&versions_dir)
             .await
+            .map_err(PumasError::from)?;
+        self.torch_cleanup.drain_residual_child_slots().await?;
+        retry_pending_torch_cleanup(&versions_dir, &self.metadata_manager)
             .map_err(PumasError::from)?;
         schedule_torch_orphan_prune(
             &self.torch_cleanup,
@@ -506,10 +932,7 @@ impl VersionInstaller {
         }
         // Staging shares the publication filesystem; failed attempts never enter
         // installed-version state. TempDir removes this attempt on every exit.
-        let staging = tempfile::Builder::new()
-            .prefix(".torch-install-")
-            .tempdir_in(&versions_dir)
-            .map_err(PumasError::from)?;
+        let staging = std::sync::Arc::new(TorchPendingStage::new(&versions_dir, tag)?);
         let logs = self.logs_dir();
         fs::create_dir_all(&logs).await.map_err(PumasError::from)?;
         let log_path = logs.join(format!(
@@ -528,7 +951,7 @@ impl VersionInstaller {
                 tag,
                 recipe,
                 plan.as_ref(),
-                staging.path(),
+                &staging,
                 &log_path,
                 &progress_tx,
             )
@@ -567,32 +990,36 @@ impl VersionInstaller {
                             .map_err(|e| failed(format!("Publication pause failed: {e}")))?
                             .forget();
                     }
+                    let pending = versions_dir.join(format!(".torch-pending-publish-{tag}"));
+                    write_pending_publish_marker(&pending, &runtime).map_err(PumasError::from)?;
                     let publish_to = destination.clone();
-                    tokio::task::spawn_blocking(move || {
+                    let published = tokio::task::spawn_blocking(move || {
                         pumas_library::platform::filesystem::rename_directory_noreplace(
                             &runtime,
                             &publish_to,
                         )
                     })
                     .await
-                    .map_err(|error| failed(format!("Runtime publication task failed: {error}")))?
-                    .map_err(PumasError::from)?;
+                    .map_err(|error| failed(format!("Runtime publication task failed: {error}")))?;
+                    if let Err(error) = published {
+                        fs::remove_file(&pending).await.map_err(PumasError::from)?;
+                        return Err(PumasError::from(error));
+                    }
                     let result = self
                         .finalize_installation(tag, release, &destination, &progress_tx)
                         .await;
                     if result.is_err() {
-                        // Only our newly published directory is compensated.
-                        fs::remove_dir_all(&destination)
-                            .await
-                            .map_err(PumasError::from)?;
+                        // The durable ownership marker survives a Windows
+                        // file lock and is retried at startup and install.
+                        match fs::remove_dir_all(&destination).await {
+                            Ok(()) => fs::remove_file(&pending).await.map_err(PumasError::from)?,
+                            Err(error) => warn!(%error, path = %destination.display(), "Unregistered Torch publication retained for cleanup"),
+                        }
                     }
                     if result.is_ok() {
-                        if let Err(error) =
-                            fs::remove_file(destination.join(".pumas-publishing")).await
-                        {
-                            warn!(
-                                "Installed Torch publication marker could not be removed: {error}"
-                            );
+                        match fs::remove_file(destination.join(".pumas-publishing")).await {
+                            Ok(()) => fs::remove_file(&pending).await.map_err(PumasError::from)?,
+                            Err(error) => warn!(%error, "Installed Torch publication marker could not be removed"),
                         }
                         schedule_torch_orphan_prune(
                             &self.torch_cleanup,
@@ -621,13 +1048,13 @@ impl VersionInstaller {
         _tag: &str,
         recipe_spec: Option<&TorchRuntimeRecipe>,
         plan: Option<&TorchInstallPlan>,
-        staging: &Path,
+        staging: &std::sync::Arc<TorchPendingStage>,
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<PathBuf> {
         #[cfg(test)]
         if let Some(stage) = &self.torch_stage_override {
-            return stage(staging);
+            return stage(staging.path());
         }
         if let Some(plan) = plan.filter(|p| p.preview.qualification != "qualified") {
             return self
@@ -635,7 +1062,7 @@ impl VersionInstaller {
                 .await;
         }
         let recipe_spec = recipe_spec.expect("checked above");
-        let runtime = staging.join("runtime");
+        let runtime = staging.path().join("runtime");
         let runtime_for_write = runtime.clone();
         tokio::task::spawn_blocking(move || write_embedded_torch_runtime(&runtime_for_write))
             .await
@@ -688,19 +1115,28 @@ impl VersionInstaller {
             "-c",
             "import sys; assert sys.version_info[:2] == (3,12)",
         ]);
-        self.run_runtime_command(python_check, log_path, "Checking Python 3.12", progress_tx)
-            .await?;
+        self.run_runtime_command(
+            python_check,
+            log_path,
+            "Checking Python 3.12",
+            progress_tx,
+            Some(staging.clone()),
+        )
+        .await?;
         let mut venv = Command::new(interpreter);
         venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
-        self.run_runtime_command(venv, log_path, "Creating managed environment", progress_tx)
-            .await?;
-        let python = runtime.join("venv/bin/python");
-        let mut install = Command::new(&python);
+        self.run_runtime_command(
+            venv,
+            log_path,
+            "Creating managed environment",
+            progress_tx,
+            Some(staging.clone()),
+        )
+        .await?;
+        let python = pumas_library::platform::paths::venv_python(&runtime);
+        let mut install = Command::new(pumas_library::platform::paths::venv_pip(&runtime));
         install
             .args([
-                "-I",
-                "-m",
-                "pip",
                 "--isolated",
                 "install",
                 "--require-hashes",
@@ -716,6 +1152,7 @@ impl VersionInstaller {
             log_path,
             "Installing locked runtime dependencies",
             progress_tx,
+            Some(staging.clone()),
         )
         .await?;
         let mut validate = Command::new(&python);
@@ -729,6 +1166,7 @@ impl VersionInstaller {
             log_path,
             "Validating GPU and sidecar protocol",
             progress_tx,
+            Some(staging.clone()),
         )
         .await?;
         let resolution = serde_json::json!({
@@ -751,6 +1189,7 @@ impl VersionInstaller {
             log_path,
             "Recording core and adapter probe evidence",
             progress_tx,
+            Some(staging.clone()),
         )
         .await?;
         Ok(runtime)
@@ -762,6 +1201,7 @@ impl VersionInstaller {
         log_path: &Path,
         stage: &str,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
+        stage_lease: Option<std::sync::Arc<TorchPendingStage>>,
     ) -> Result<()> {
         self.check_cancelled()?;
         self.progress_tracker.write().await.update_stage(
@@ -779,84 +1219,49 @@ impl VersionInstaller {
             .map_err(PumasError::from)?;
         command
             .stdout(Stdio::from(log.try_clone().map_err(PumasError::from)?))
-            .stderr(Stdio::from(log))
-            .kill_on_drop(true);
-        #[cfg(not(target_os = "linux"))]
-        return Err(failed("Managed Torch process supervision requires Linux"));
-        #[cfg(target_os = "linux")]
-        {
-            use pumas_library::platform::linux_group;
-            linux_group::ensure_supported().map_err(PumasError::from)?;
-            command.process_group(0);
-            let mut child = command
-                .spawn()
-                .map_err(|error| failed(format!("{stage}: {error}")))?;
-            let pid = child
-                .id()
-                .ok_or_else(|| failed("Installer process has no owned PID"))?;
-            let deadline = tokio::time::Instant::now() + Duration::from_secs(3600);
-            loop {
-                // Observe without reaping: the leader pins the numeric PGID until
-                // every cooperating child (including a GPU health probe) is dead.
-                let observed = linux_group::observe_exit(pid);
-                let cancelled = self.cancel_flag.load(Ordering::SeqCst);
-                let timed_out = tokio::time::Instant::now() >= deadline;
-                if cancelled || timed_out || !matches!(&observed, Ok(None)) {
-                    finish_process_group(&mut child, pid).await?;
-                    self.check_cancelled()?;
-                    if timed_out {
-                        return Err(failed(format!(
-                            "{stage} exceeded the installation deadline"
-                        )));
-                    }
-                    let status = observed
-                        .map_err(PumasError::from)?
-                        .ok_or_else(|| failed("Missing terminal installer status"))?;
-                    return if status.success() {
-                        Ok(())
-                    } else {
-                        Err(failed(format!(
-                            "{stage} failed ({status}); see installation log"
-                        )))
-                    };
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
+            .stderr(Stdio::from(log));
+        let custody = self.torch_cleanup.new_child_slot()?;
+        let mut child = pumas_library::platform::managed_child::ManagedChild::spawn(
+            command.as_std_mut(),
+            custody.clone(),
+        )
+        .map_err(|error| failed(format!("{stage}: {error}")))?;
+        if let Some(stage_lease) = stage_lease {
+            child.attach_cleanup_lease(stage_lease);
         }
-    }
-}
-
-#[cfg(target_os = "linux")]
-async fn finish_process_group(child: &mut tokio::process::Child, pid: u32) -> Result<()> {
-    use pumas_library::platform::linux_group;
-    let group = i32::try_from(pid).map_err(|_| failed("Invalid installer process ID"))?;
-    let mut first_failure = None;
-    loop {
-        let observation = match linux_group::signal_group(pid) {
-            Ok(()) => {
-                tokio::task::spawn_blocking(move || linux_group::group_has_live_members(group))
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3600);
+        loop {
+            let observed = child.observe_exit();
+            let cancelled = self.cancel_flag.load(Ordering::SeqCst);
+            let timed_out = tokio::time::Instant::now() >= deadline;
+            if cancelled || timed_out || !matches!(&observed, Ok(None)) {
+                drop(child);
+                self.torch_cleanup
+                    .drain_child_slot(&custody)
                     .await
-                    .map_err(|error| failed(format!("Process-group observation failed: {error}")))
-                    .and_then(|result| result.map_err(PumasError::from))
-            }
-            Err(error) => Err(PumasError::from(error)),
-        };
-        match observation {
-            Ok(false) => break,
-            Ok(true) => {}
-            Err(error) => {
-                if first_failure.is_none() {
-                    warn!("Holding runtime staging until process cleanup completes: {error}");
+                    .map_err(|_| {
+                        failed(
+                        "Torch installer cleanup incomplete; owned process cleanup remains pending",
+                    )
+                    })?;
+                self.check_cancelled()?;
+                if timed_out {
+                    return Err(failed(format!(
+                        "{stage} exceeded the installation deadline"
+                    )));
                 }
-                first_failure.get_or_insert(error);
+                let status = observed
+                    .map_err(PumasError::from)?
+                    .ok_or_else(|| failed("Missing terminal installer status"))?;
+                return if status.success() {
+                    Ok(())
+                } else {
+                    Err(failed(format!(
+                        "{stage} failed ({status}); see installation log"
+                    )))
+                };
             }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    // Reaping is deliberately last; no signal may use this PID afterwards.
-    child.wait().await.map_err(PumasError::from)?;
-    match first_failure {
-        Some(error) => Err(error),
-        None => Ok(()),
     }
 }

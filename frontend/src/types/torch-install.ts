@@ -14,6 +14,8 @@ export interface TorchRuntimeOptions {
   builds: string[];
   pythons: Array<{ id: string; label: string }>;
   adapters: string[];
+  bundledPresetAvailable: boolean;
+  defaultAdapter: 'none' | 'flux2';
   preset: { tag: string; build: string; python: string; adapter: string };
   installed: TorchInstalledConfig[];
 }

@@ -587,7 +587,10 @@ impl VersionManager {
         let _ = self.cancel_installation().await?;
         let _install_guard = self.install_lock.lock().await;
         self.torch_cleanup.close();
-        self.torch_cleanup.drain().await
+        let tasks = self.torch_cleanup.drain().await;
+        let children = self.torch_cleanup.drain_child_slots().await;
+        tasks?;
+        children
     }
 
     /// Install a version with progress channel.
@@ -1154,26 +1157,26 @@ mod tests {
     }
 
     async fn register_test_version(manager: &VersionManager, tag: &str) {
-        std::fs::create_dir_all(manager.version_path(tag)).unwrap();
-        std::fs::create_dir_all(manager.version_path(tag).join("venv/bin")).unwrap();
-        for required in [
-            "runtime.json",
-            "serve.py",
-            "venv/bin/python",
-            "requirements.txt",
-        ] {
-            std::fs::write(manager.version_path(tag).join(required), b"test fixture").unwrap();
+        let runtime = manager.version_path(tag);
+        std::fs::create_dir_all(&runtime).unwrap();
+        let python = pumas_library::platform::paths::venv_python(&runtime);
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        for required in ["runtime.json", "serve.py", "requirements.txt"] {
+            std::fs::write(runtime.join(required), b"test fixture").unwrap();
         }
+        std::fs::write(&python, b"test fixture").unwrap();
         if manager.app_id == AppId::Torch {
             std::fs::write(
-                manager.version_path(tag).join("resolution.json"),
+                runtime.join("resolution.json"),
                 r#"{"torch":"test-fixture"}"#,
             )
             .unwrap();
-            let python = manager.version_path(tag).join("venv/bin/python");
             std::fs::write(&python, b"#!/bin/sh\necho test-fixture\n").unwrap();
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
         }
         let metadata = pumas_library::metadata::InstalledVersionMetadata {
             path: tag.to_string(),
@@ -1218,6 +1221,7 @@ mod tests {
         assert!(error.to_string().contains("identity manifest"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn qualified_legacy_torch_activation_uses_trusted_recipe_identity() {
         let (manager, _root) = create_torch_test_manager().await;
@@ -1230,7 +1234,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(
-            runtime.join("venv/bin/python"),
+            pumas_library::platform::paths::venv_python(&runtime),
             b"#!/bin/sh\necho 2.9.1+cu130\n",
         )
         .unwrap();

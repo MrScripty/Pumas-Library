@@ -70,6 +70,19 @@ class AdapterImportProbeTests(TestCase):
         self.assertEqual(result["capabilities"]["sidecar_app"]["status"], "passed")
         self.assertRegex(result["recorded_at"], r"^\d{4}-\d{2}-\d{2}T")
         self.assertEqual(len(result["context"]["hardware_fingerprint"]), 64)
+        canonical_hardware = {
+            "cuda": None,
+            "hip": None,
+            "device_count": 0,
+            "devices": [],
+            "mps_available": False,
+        }
+        self.assertEqual(
+            result["context"]["hardware_fingerprint"],
+            hashlib.sha256(
+                json.dumps(canonical_hardware, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest(),
+        )
         self.assertEqual(len(result["context"]["interpreter_sha256"]), 64)
         self.assertEqual(len(result["context"]["distributions_sha256"]), 64)
         self.assertIn("serve.py", result["context"]["runtime_files_sha256"])
@@ -83,7 +96,11 @@ class AdapterImportProbeTests(TestCase):
             def tolist(self):
                 return [[2.0, 2.0], [2.0, 2.0]]
 
-        fake_torch = SimpleNamespace(__version__="2.10.0+cpu", ones=lambda *_: Tensor())
+        fake_torch = SimpleNamespace(
+            __version__="2.10.0+cpu",
+            ones=lambda *_: Tensor(),
+            backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: True)),
+        )
 
         async def health():
             return {"status": "ok", "protocol": 3}
@@ -119,6 +136,17 @@ class AdapterImportProbeTests(TestCase):
         self.assertEqual(result["adapter_status"], "unavailable")
         self.assertEqual(result["status"], "partial")
         self.assertEqual(result["capabilities"]["flux2_klein"]["status"], "unavailable")
+        canonical_hardware = {
+            "cuda": None,
+            "hip": None,
+            "device_count": 0,
+            "devices": [],
+            "mps_available": True,
+        }
+        expected_fingerprint = hashlib.sha256(
+            json.dumps(canonical_hardware, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        self.assertEqual(result["context"]["hardware_fingerprint"], expected_fingerprint)
 
     def test_device_failure_is_scoped(self):
         fake_torch = SimpleNamespace(
@@ -147,7 +175,14 @@ class AdapterImportProbeTests(TestCase):
             (root / "venv" / "ignored.py").write_bytes(b"ignored")
             (root / "venv" / "lib").mkdir()
             (root / "venv" / "lib" / "package.py").write_bytes(b"package")
-            (root / "linked.py").symlink_to(root / "serve.py")
+            try:
+                (root / "linked.py").symlink_to(root / "serve.py")
+            except OSError as error:
+                # Windows hosted runners may lack symlink privilege; keep the
+                # file-hash assertions useful without weakening link coverage
+                # on systems that can create the fixture.
+                if getattr(error, "winerror", None) != 1314:
+                    raise
             hashes = probe_runtime.runtime_file_hashes(root)
         self.assertEqual(
             hashes,

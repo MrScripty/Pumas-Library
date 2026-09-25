@@ -164,12 +164,22 @@ jobs:
           if-no-files-found: error
 
   torch-quality:
-    name: Torch source QA
+    name: Torch native QA (${{ matrix.os }})
     needs: lint-workflows
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
+      - name: Install repository Rust toolchain
+        run: rustup toolchain install --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+          key: torch-native-${{ runner.os }}
       - uses: actions/setup-python@v6
         with:
           python-version-file: .python-version
@@ -178,8 +188,22 @@ jobs:
       - run: python -m pip install -r torch-server/requirements-dev.txt
       - run: python -m ruff check torch-server scripts/release
       - run: python -m ruff format --check torch-server scripts/release
-      # Unit fixtures do not claim GPU inference or a shipped Torch runtime.
+      # Fixtures validate tags and resolver behavior; the native tests below
+      # validate host APIs without claiming GPU inference or model support.
       - run: python -m unittest discover -s torch-server/tests
+      - name: Test native Torch wheel filtering
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager torch_alternatives
+      - name: Test Windows locked-stage cleanup ownership
+        if: runner.os == 'Windows'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager locked_stage_stays_owned
+      - name: Test native managed Python paths
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library test_venv_python_path
+      - name: Test Unix managed process-group ownership
+        if: runner.os != 'Windows'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library platform::managed_child
+      - name: Test Windows managed Job ownership
+        if: runner.os == 'Windows'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library platform::managed_child
 
   build-rust:
     name: Rust release (${{ matrix.os }})

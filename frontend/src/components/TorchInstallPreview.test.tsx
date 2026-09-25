@@ -38,6 +38,7 @@ const preset: TorchRuntimeOptions = {
   builds: ['cpu', 'cu130', 'cu134', 'rocm'],
   pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
   adapters: ['none', 'flux2'], installed: [],
+  bundledPresetAvailable: true, defaultAdapter: 'flux2',
   preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
 };
 
@@ -62,7 +63,7 @@ describe('TorchInstallPreview', () => {
 
     expect(await screen.findByText(/Recommended setup: cu130 · python3.12 · Pumas image dependencies/)).toBeInTheDocument();
     expect(getReleaseOptions).toHaveBeenCalledWith('v2.14.0');
-    expect(getPresetOptions).not.toHaveBeenCalled();
+    expect(getPresetOptions).toHaveBeenCalledOnce();
     expect(screen.getByText('Advanced setup').closest('details')).not.toHaveAttribute('open');
     expect(screen.getByText(/selected by Pumas for its FLUX.2 path; they are not part of upstream Torch/)).toBeInTheDocument();
 
@@ -145,11 +146,11 @@ describe('TorchInstallPreview', () => {
     getReleaseOptions.mockResolvedValue({
       ...release, status: 'inconclusive', completeScan: false,
       checkedChannels: [], combinations: [], recommended: null,
-      issues: ['No installed CPython 3.10–3.13 interpreter on Linux x86_64 could inspect official wheels'],
+      issues: ['No installed host-matched CPython 3.10–3.13 interpreter could inspect official wheels'],
     });
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
 
-    expect(await screen.findByText(/No installed CPython 3.10–3.13 interpreter/)).toBeInTheDocument();
+    expect(await screen.findByText(/No installed host-matched CPython 3.10–3.13 interpreter/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Check selected combination' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Install reviewed artifacts' })).toBeDisabled();
     expect(getPreview).not.toHaveBeenCalled();
@@ -173,6 +174,30 @@ describe('TorchInstallPreview', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
     await waitFor(() => expect(getPreview).toHaveBeenLastCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'flux2' }));
     expect(await screen.findByText(/Artifact resolution is unverified/)).toBeInTheDocument();
+  });
+
+  it('skips the bundled v2.9.1 preset when the manager says it is unavailable', async () => {
+    getPresetOptions.mockResolvedValue({ ...preset, bundledPresetAvailable: false, defaultAdapter: 'none', adapters: ['none'] });
+    getReleaseOptions.mockResolvedValue({
+      ...release, tag: 'v2.9.1', checkedChannels: ['cpu'],
+      combinations: [{ build: 'cpu', python: 'python3.12', wheelUrl: 'https://download.pytorch.org/whl/cpu/torch.whl' }],
+      recommended: { build: 'cpu', python: 'python3.12' },
+    });
+    const onInstall = vi.fn();
+    render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
+
+    expect(await screen.findByText(/Recommended setup: cpu · python3.12 · Core runtime only/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Qualified fixed preset' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Other official wheels (unverified)' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/bundled image dependencies \(fixed\)/)).not.toBeInTheDocument();
+    expect(screen.getByText(/matching this host’s operating system and architecture/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Advanced setup'));
+    const profile = screen.getByRole('combobox', { name: 'Dependency profile' });
+    expect(within(profile).getAllByRole('option').map((option) => option.textContent)).toEqual(['Core runtime only']);
+    fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
+    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cpu', python: 'python3.12', adapter: 'none' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Install reviewed artifacts' }));
+    expect(onInstall).toHaveBeenCalledWith('review-1');
   });
 
   it('leaves the upstream v2.9.1 choice unset when the manager has no recommendation', async () => {

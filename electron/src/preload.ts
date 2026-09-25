@@ -376,6 +376,9 @@ function validateTorchOptions(value: unknown): unknown {
   const preset = result['preset'];
   if (!Array.isArray(result['builds']) || !result['builds'].every((item) => typeof item === 'string')
     || !Array.isArray(result['adapters']) || !result['adapters'].every((item) => typeof item === 'string')
+    || typeof result['bundledPresetAvailable'] !== 'boolean'
+    || !['none', 'flux2'].includes(String(result['defaultAdapter']))
+    || !result['adapters'].some((item) => item === result['defaultAdapter'])
     || !Array.isArray(result['pythons']) || !result['pythons'].every((item) => isRecord(item)
       && typeof item['id'] === 'string' && typeof item['label'] === 'string')
     || !Array.isArray(result['installed']) || !result['installed'].every((item) => isRecord(item)

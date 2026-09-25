@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::io::Read;
 use std::time::Instant;
 use tokio::process::Command;
 
@@ -81,6 +80,18 @@ pub(super) fn valid_torch_channel(build: &str) -> bool {
                 .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()));
     }
     false
+}
+
+fn supported_torch_build(build: &str) -> bool {
+    match std::env::consts::OS {
+        "linux" => cfg!(target_arch = "x86_64") && valid_torch_channel(build),
+        "windows" => {
+            cfg!(all(target_arch = "x86_64", target_env = "msvc"))
+                && (build == "cpu" || build.starts_with("cu") && valid_torch_channel(build))
+        }
+        "macos" => cfg!(target_arch = "aarch64") && build == "cpu",
+        _ => false,
+    }
 }
 
 fn insert_retained_torch_preview(
@@ -326,12 +337,14 @@ mod tests {
 
     #[tokio::test]
     async fn preview_resolver_deadline_kills_process_group() {
-        let workspace = tempfile::tempdir().unwrap();
+        let workspace = std::sync::Arc::new(tempfile::tempdir().unwrap());
         let mut command = Command::new("sh");
         command.args(["-c", "sleep 30"]);
-        let outcome = run_preview_resolver(command, workspace.path(), Duration::from_millis(25))
-            .await
-            .unwrap();
+        let cleanup = super::installer::TorchCleanupTasks::default();
+        let outcome =
+            run_preview_resolver(command, &workspace, Duration::from_millis(25), &cleanup)
+                .await
+                .unwrap();
         assert!(matches!(&outcome, PreviewResolverRun::TimedOut));
         let rejected = resolver_rejection(outcome).unwrap();
         let value = serde_json::to_value(rejected).unwrap();
@@ -341,10 +354,11 @@ mod tests {
 
     #[tokio::test]
     async fn preview_resolver_cleans_child_after_leader_exits() {
-        let workspace = tempfile::tempdir().unwrap();
+        let workspace = std::sync::Arc::new(tempfile::tempdir().unwrap());
         let mut command = Command::new("sh");
         command.args(["-c", "echo $$; sleep 30 &"]);
-        let outcome = run_preview_resolver(command, workspace.path(), Duration::from_secs(2))
+        let cleanup = super::installer::TorchCleanupTasks::default();
+        let outcome = run_preview_resolver(command, &workspace, Duration::from_secs(2), &cleanup)
             .await
             .unwrap();
         let PreviewResolverRun::Exited(status) = outcome else {
@@ -357,6 +371,97 @@ mod tests {
             .parse()
             .unwrap();
         assert!(!pumas_library::platform::linux_group::group_has_live_members(pid).unwrap());
+    }
+
+    #[tokio::test]
+    async fn cancelled_resolver_waiter_keeps_workspace_until_owned_drain() {
+        let workspace = std::sync::Arc::new(tempfile::tempdir().unwrap());
+        let path = workspace.path().to_path_buf();
+        let ready = path.join("ready");
+        let cleanup = std::sync::Arc::new(super::installer::TorchCleanupTasks::default());
+        let run_workspace = workspace.clone();
+        let run_cleanup = cleanup.clone();
+        let task = tokio::spawn(async move {
+            let mut command = Command::new("sh");
+            command
+                .arg("-c")
+                .arg("touch \"$1\"; sleep 30")
+                .arg("sh")
+                .arg(&ready);
+            run_preview_resolver(
+                command,
+                &run_workspace,
+                Duration::from_secs(30),
+                &run_cleanup,
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !path.join("ready").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        drop(workspace);
+        assert!(
+            path.exists(),
+            "workspace lease released before descendant drain"
+        );
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while path.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("registered cleanup supervisor did not drain cancelled resolver");
+        cleanup.drain().await.unwrap();
+        assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn healthy_long_resolver_does_not_block_another_preview_or_preflight() {
+        let cleanup = std::sync::Arc::new(super::installer::TorchCleanupTasks::default());
+        let long_workspace = std::sync::Arc::new(tempfile::tempdir().unwrap());
+        let ready = long_workspace.path().join("ready");
+        let long_cleanup = cleanup.clone();
+        let long_path = long_workspace.clone();
+        let long_task = tokio::spawn(async move {
+            let mut command = Command::new("sh");
+            command
+                .arg("-c")
+                .arg("touch \"$1\"; sleep 30")
+                .arg("sh")
+                .arg(&ready);
+            run_preview_resolver(command, &long_path, Duration::from_secs(30), &long_cleanup).await
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !long_workspace.path().join("ready").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let short_workspace = std::sync::Arc::new(tempfile::tempdir().unwrap());
+        let mut short = Command::new("sh");
+        short.args(["-c", "exit 0"]);
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            run_preview_resolver(short, &short_workspace, Duration::from_secs(2), &cleanup),
+        )
+        .await
+        .expect("healthy resolver blocked another preview")
+        .unwrap();
+        assert!(matches!(result, PreviewResolverRun::Exited(status) if status.success()));
+        tokio::time::timeout(Duration::from_secs(1), cleanup.drain_residual_child_slots())
+            .await
+            .expect("healthy resolver blocked preflight")
+            .unwrap();
+        long_task.abort();
+        assert!(long_task.await.unwrap_err().is_cancelled());
+        cleanup.drain().await.unwrap();
     }
 }
 
@@ -438,6 +543,7 @@ pub(crate) type TorchPreviews = Arc<Mutex<HashMap<String, RetainedTorchPreview>>
 
 #[derive(Deserialize)]
 struct Resolution {
+    release: String,
     torch: String,
     build: String,
     python: String,
@@ -457,10 +563,8 @@ fn failed(message: impl Into<String>) -> PumasError {
 
 fn preview_token() -> Result<String> {
     let mut bytes = [0u8; 24];
-    std::fs::File::open("/dev/urandom")
-        .map_err(PumasError::from)?
-        .read_exact(&mut bytes)
-        .map_err(PumasError::from)?;
+    getrandom::fill(&mut bytes)
+        .map_err(|error| failed(format!("Preview ID randomness unavailable: {error}")))?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
@@ -540,9 +644,6 @@ fn safe_torch_tag(tag: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || b"-._".contains(&c))
 }
 
-#[cfg(target_os = "linux")]
-struct PreviewGroupGuard(Option<u32>);
-
 #[derive(Debug)]
 enum PreviewResolverRun {
     Exited(std::process::ExitStatus),
@@ -564,78 +665,43 @@ fn resolver_rejection(run: PreviewResolverRun) -> Option<TorchPreviewOutcome> {
     Some(TorchPreviewOutcome::Rejected { reason, message })
 }
 
-#[cfg(target_os = "linux")]
-impl Drop for PreviewGroupGuard {
-    fn drop(&mut self) {
-        if let Some(pid) = self.0.take() {
-            let _ = pumas_library::platform::linux_group::signal_group(pid);
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
 async fn run_preview_resolver(
     mut command: Command,
-    workspace: &Path,
+    workspace: &std::sync::Arc<tempfile::TempDir>,
     deadline: Duration,
+    cleanup: &super::installer::TorchCleanupTasks,
 ) -> Result<PreviewResolverRun> {
-    use pumas_library::platform::linux_group;
-    linux_group::ensure_supported().map_err(PumasError::from)?;
-    let stdout =
-        std::fs::File::create(workspace.join("resolver.stdout")).map_err(PumasError::from)?;
-    let stderr =
-        std::fs::File::create(workspace.join("resolver.stderr")).map_err(PumasError::from)?;
-    command
-        .stdout(stdout)
-        .stderr(stderr)
-        .kill_on_drop(true)
-        .process_group(0);
-    let mut child = command
-        .spawn()
-        .map_err(|e| failed(format!("Torch resolver could not start: {e}")))?;
-    let pid = child
-        .id()
-        .ok_or_else(|| failed("Torch resolver process has no PID"))?;
-    let mut group = PreviewGroupGuard(Some(pid));
+    let stdout = std::fs::File::create(workspace.path().join("resolver.stdout"))
+        .map_err(PumasError::from)?;
+    let stderr = std::fs::File::create(workspace.path().join("resolver.stderr"))
+        .map_err(PumasError::from)?;
+    command.stdout(stdout).stderr(stderr);
+    let custody = cleanup.new_child_slot()?;
+    let mut child = pumas_library::platform::managed_child::ManagedChild::spawn(
+        command.as_std_mut(),
+        custody.clone(),
+    )
+    .map_err(|e| failed(format!("Torch resolver could not start: {e}")))?;
+    child.attach_cleanup_lease(workspace.clone());
     let until = tokio::time::Instant::now() + deadline;
     let (status, timed_out) = loop {
-        let observed = linux_group::observe_exit(pid).map_err(PumasError::from)?;
+        let observed = child.observe_exit().map_err(PumasError::from)?;
         let timed_out = tokio::time::Instant::now() >= until;
         if observed.is_some() || timed_out {
             break (observed, timed_out);
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
-    let group_id = i32::try_from(pid).map_err(|_| failed("Invalid Torch resolver PID"))?;
-    loop {
-        linux_group::signal_group(pid).map_err(PumasError::from)?;
-        let alive =
-            tokio::task::spawn_blocking(move || linux_group::group_has_live_members(group_id))
-                .await
-                .map_err(|e| failed(format!("Preview process observation failed: {e}")))?
-                .map_err(PumasError::from)?;
-        if !alive {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    child.wait().await.map_err(PumasError::from)?;
-    group.0 = None;
+    drop(child);
+    cleanup.drain_child_slot(&custody).await.map_err(|_| {
+        failed("Torch resolver cleanup incomplete; owned process cleanup remains pending")
+    })?;
     if timed_out {
         return Ok(PreviewResolverRun::TimedOut);
     }
     status
         .map(PreviewResolverRun::Exited)
         .ok_or_else(|| failed("Torch preview resolver exited without status"))
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn run_preview_resolver(
-    _command: Command,
-    _workspace: &Path,
-    _deadline: Duration,
-) -> Result<PreviewResolverRun> {
-    Err(failed("Managed Torch previews require Linux x86_64"))
 }
 
 impl VersionManager {
@@ -681,7 +747,7 @@ impl VersionManager {
             && fs::try_exists(runtime.join("serve.py"))
                 .await
                 .map_err(PumasError::from)?
-            && fs::try_exists(runtime.join("venv/bin/python"))
+            && fs::try_exists(pumas_library::platform::paths::venv_python(&runtime))
                 .await
                 .map_err(PumasError::from)?
         {
@@ -727,7 +793,7 @@ impl VersionManager {
     pub(crate) async fn check_torch_identity(&self, tag: &str) -> Result<()> {
         let runtime = self.versions_dir().join(tag);
         let expected = self.expected_torch_version(tag).await?;
-        let mut command = Command::new(runtime.join("venv/bin/python"));
+        let mut command = Command::new(pumas_library::platform::paths::venv_python(&runtime));
         command
             .kill_on_drop(true)
             .args(["-I", "-c", "import torch; print(torch.__version__)"]);
@@ -751,14 +817,22 @@ impl VersionManager {
         if self.app_id != AppId::Torch {
             return Err(failed("Torch manager required"));
         }
-        let mut pythons = Vec::new();
-        for name in PYTHONS {
-            if let Ok(output) = Command::new(name).args(["-I", "--version"]).output().await {
-                if output.status.success() {
-                    pythons.push(serde_json::json!({"id": name, "label": String::from_utf8_lossy(&output.stdout).trim()}));
-                }
-            }
-        }
+        let interpreters = super::torch_alternatives::installed_torch_interpreters().await;
+        let pythons: Vec<_> = interpreters
+            .iter()
+            .map(
+                |(name, path)| serde_json::json!({"id": name, "label": path.display().to_string()}),
+            )
+            .collect();
+        let linux_x64 = cfg!(all(target_os = "linux", target_arch = "x86_64"));
+        let bundled_preset_available =
+            linux_x64 && interpreters.iter().any(|(name, _)| name == "python3.12");
+        let adapters: &[&str] = if linux_x64 { ADAPTERS } else { &["none"] };
+        let builds: Vec<&str> = BUILDS
+            .iter()
+            .copied()
+            .filter(|build| supported_torch_build(build))
+            .collect();
         let mut installed = Vec::new();
         for tag in self.state.read().await.get_installed_tags() {
             let recipe_path = self.versions_dir().join(&tag).join("runtime.json");
@@ -775,7 +849,9 @@ impl VersionManager {
                 "qualification": if preset { "qualified" } else { "unverified" } }));
         }
         Ok(
-            serde_json::json!({"builds": BUILDS, "pythons": pythons, "adapters": ADAPTERS,
+            serde_json::json!({"builds": builds, "pythons": pythons, "adapters": adapters,
+            "bundledPresetAvailable": bundled_preset_available,
+            "defaultAdapter": if linux_x64 { "flux2" } else { "none" },
             "preset": {"tag":"v2.9.1", "build":"cu130", "python":"python3.12", "adapter":"bundled"},
             "installed": installed}),
         )
@@ -789,14 +865,27 @@ impl VersionManager {
         adapter: &str,
     ) -> Result<TorchPreviewOutcome> {
         if self.app_id != AppId::Torch
-            || !valid_torch_channel(build)
+            || !supported_torch_build(build)
             || !PYTHONS.contains(&python)
             || (!ADAPTERS.contains(&adapter) && adapter != "bundled")
         {
             return Err(failed("Invalid Torch preview selection"));
         }
-        if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-            return Err(failed("Managed Torch requires Linux x86_64"));
+        if !cfg!(any(
+            all(target_os = "linux", target_arch = "x86_64"),
+            all(
+                target_os = "windows",
+                target_arch = "x86_64",
+                target_env = "msvc"
+            ),
+            all(target_os = "macos", target_arch = "aarch64")
+        )) {
+            return Err(failed("Managed Torch is unsupported on this platform"));
+        }
+        if !cfg!(target_os = "linux") && adapter != "none" {
+            return Err(failed(
+                "Image dependency profiles are unavailable on this platform",
+            ));
         }
         let version = tag
             .strip_prefix('v')
@@ -814,7 +903,13 @@ impl VersionManager {
             ));
         }
         self.resolve_installable_release(tag).await?;
-        let output = Command::new(python)
+        let interpreters = super::torch_alternatives::installed_torch_interpreters().await;
+        let interpreter = interpreters
+            .iter()
+            .find(|(name, _)| name == python)
+            .map(|(_, path)| path)
+            .ok_or_else(|| failed("Selected Python interpreter is unavailable"))?;
+        let output = Command::new(interpreter)
             .args([
                 "-I",
                 "-c",
@@ -879,7 +974,7 @@ impl VersionManager {
                 qualification: "qualified".into(),
                 expires_in_seconds: PREVIEW_TTL.as_secs(),
             };
-            let path_output = Command::new(python)
+            let path_output = Command::new(interpreter)
                 .args(["-I", "-c", "import sys; print(sys.executable)"])
                 .output()
                 .await
@@ -910,7 +1005,7 @@ impl VersionManager {
         }
         // This temporary directory is only a resolver workspace. Retained preview
         // data is held in memory, so restart invalidates every outstanding ID.
-        let workspace = tempfile::tempdir().map_err(PumasError::from)?;
+        let workspace = std::sync::Arc::new(tempfile::tempdir().map_err(PumasError::from)?);
         let resolver = workspace.path().join("resolve_runtime.py");
         fs::write(
             &resolver,
@@ -918,7 +1013,7 @@ impl VersionManager {
         )
         .await
         .map_err(PumasError::from)?;
-        let mut command = Command::new(python);
+        let mut command = Command::new(interpreter);
         command
             .arg(&resolver)
             .args([
@@ -931,7 +1026,14 @@ impl VersionManager {
                 "--output",
             ])
             .arg(workspace.path());
-        let run = run_preview_resolver(command, workspace.path(), Duration::from_secs(180)).await?;
+        self.torch_cleanup.drain_residual_child_slots().await?;
+        let run = run_preview_resolver(
+            command,
+            &workspace,
+            Duration::from_secs(180),
+            &self.torch_cleanup,
+        )
+        .await?;
         if let Some(rejection) = resolver_rejection(run) {
             return Ok(rejection);
         }
@@ -946,14 +1048,22 @@ impl VersionManager {
             .map_err(PumasError::from)?;
         let parsed: Resolution = serde_json::from_str(&resolution)
             .map_err(|e| failed(format!("Invalid resolver manifest: {e}")))?;
-        if parsed.torch != format!("{version}+{build}")
+        if parsed.release != version
             || parsed.build != build
             || parsed.python != expected_python
             || parsed.adapter != adapter
             || parsed.artifacts.is_empty()
             || parsed.implementation != "cpython"
-            || parsed.machine != "x86_64"
-            || !parsed.platform.starts_with("Linux-")
+            || !match std::env::consts::OS {
+                "linux" => parsed.machine == "x86_64" && parsed.platform.starts_with("Linux-"),
+                "windows" => parsed.machine == "AMD64" && parsed.platform.starts_with("Windows-"),
+                "macos" => parsed.machine == "arm64" && parsed.platform.starts_with("macOS-"),
+                _ => false,
+            }
+            || !parsed
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.name == "torch" && artifact.version == parsed.torch)
         {
             return Err(failed(
                 "Resolver manifest does not match requested Torch selection",
@@ -975,9 +1085,11 @@ impl VersionManager {
         }
         let interpreter_path = std::fs::canonicalize(&parsed.interpreter)
             .map_err(|e| failed(format!("Cannot identify selected Python executable: {e}")))?;
-        if !interpreter_path.is_absolute() || !parsed.interpreter.starts_with('/') {
+        if !Path::new(&parsed.interpreter).is_absolute()
+            || interpreter_path != std::fs::canonicalize(interpreter).map_err(PumasError::from)?
+        {
             return Err(failed(
-                "Resolver did not identify an absolute Python executable",
+                "Resolver did not identify the selected absolute Python executable",
             ));
         }
         let interpreter_hash = format!(
@@ -1064,7 +1176,8 @@ impl VersionManager {
             .unwrap_or_default();
         let distribution_names =
             serde_json::to_string(&distribution_names).map_err(|e| failed(e.to_string()))?;
-        let mut hardware_command = Command::new(runtime.join("venv/bin/python"));
+        let mut hardware_command =
+            Command::new(pumas_library::platform::paths::venv_python(&runtime));
         hardware_command.kill_on_drop(true).arg("-I").arg("-c").arg(r#"import hashlib,importlib.metadata,json,subprocess,sys
 from pathlib import Path
 import torch
@@ -1073,6 +1186,8 @@ if torch.cuda.is_available():
     for index in range(torch.cuda.device_count()):
         devices.append({"name":torch.cuda.get_device_name(index),"capability":list(torch.cuda.get_device_capability(index))})
 identity={"cuda":torch.version.cuda,"hip":torch.version.hip,"device_count":len(devices),"devices":devices}
+mps_available=bool(getattr(getattr(torch.backends,"mps",None),"is_available",lambda:False)())
+identity["mps_available"]=mps_available
 versions={}
 for name in json.loads(sys.argv[1]):
     try: versions[name]=importlib.metadata.version(name)

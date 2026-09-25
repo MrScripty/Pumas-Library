@@ -45,8 +45,11 @@ installation.
 that every old tag has a wheel for every interpreter or build. Unsupported
 combinations and network-inconclusive checks remain distinct. Pumas does not
 provision Python or compile Torch from source in this plan. XPU and operating
-systems other than Linux x86_64 remain outside the supported provider/runtime
-contract. The fixed `v2.9.1` CUDA 13.0 / CPython 3.12 preset remains available as
+systems other than Linux x86_64 remain outside this plan's accepted
+provider/runtime contract. A separate Windows/macOS expansion is authorized but
+not yet accepted under the
+[cross-platform Torch runtime plan](../torch-cross-platform-runtime-management/plan.md).
+The fixed `v2.9.1` CUDA 13.0 / CPython 3.12 preset remains available as
 a separately qualified, previously accepted exception backed by the embedded
 hash-pinned requirements lock. Its preview exposes the three direct wheel URLs;
 transitive wheel URLs are chosen from that lock during install, so this preset
@@ -126,4 +129,7 @@ The authorized implementation uses disjoint write sets:
 
 The CPU/CUDA/ROCm channel vocabulary is shared between the Rust manager and
 Python resolver. Changes to wire fields, generated contracts, the plugin
-manifest, or other platform support require a new exact handoff.
+manifest, or other platform support require a new exact handoff. The separate
+Windows/macOS handoff is
+[Cross-Platform Torch Runtime Management](../torch-cross-platform-runtime-management/plan.md);
+its pending acceptance does not change this plan's recorded Linux evidence.

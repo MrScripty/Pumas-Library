@@ -14,24 +14,28 @@ user-Python-selection requirement.
 **Current phase:** The managed-CPython provider, automatic-choice UI, resolver
 candidate scan, retained interpreter provenance, and Core-default profile have
 passed code review and targeted Linux checks. Local Linux 0.7.0 AppImage and deb
-packages contain the commit `6a726eac` RPC registration and pass artifact and
-bundled RPC health smoke; those packages predate the latest live-preview repairs
-and are being rebuilt. In an isolated Linux RPC run, the current source used
-managed CPython 3.14.7 to scan Torch 2.14.0 and resolve a 44-artifact Core
-runtime preview (`cu132`, `python3.14`, adapter `none`). The toolbar-linked
-package has not been replaced or published. Image evidence remains limited to
-its exact previously recorded tuples.
+packages were rebuilt from `ce9170d4`; artifact validation, standalone startup,
+and packaged RPC health smoke pass, and the packed Electron bundle contains the
+`get_torch_release_options` registration. In an isolated Linux RPC run, the
+current source used managed CPython 3.14.7 to scan Torch 2.14.0 and resolve a
+44-artifact CUDA 13.2 Core runtime preview (`python3.14`, adapter `none`). A
+separate CPU Core preview resolved 25 artifacts and installed Torch 2.14.0
+through its retained preview with managed CPython 3.14.7. The installer checked
+Torch identity and CPU operation; the installed version was explicitly
+selected. The install ran with `python`, `pip`, and `pypy` absent from the
+backend's child `PATH`, then its isolated temporary root was removed. The
+toolbar-linked package has not been replaced or published. Image evidence
+remains limited to its exact previously recorded tuples.
 
-**Blockers:** The exact Torch wheel set has not yet been installed from the
-retained v2.14.0 preview; installed identity and sidecar lifecycle remain
-untested for that release. Native Windows and macOS acceptance and provider
+**Blockers:** The v2.14.0 managed sidecar start/health/owned-stop path and CUDA
+device use remain untested. Native Windows and macOS acceptance and provider
 license inventory also remain pending.
 
-**Next slice:** Install `v2.14.0` Core runtime (`none`) from its retained
-preview using the newest stable managed CPython whose official wheel and
-complete dependencies resolve. Record the installed identity and sidecar
-lifecycle. Keep this Torch install path separate from FLUX.2, image generation,
-and Tuldok claims, which require their own exact runtime evidence.
+**Next slice:** Exercise the installed `v2.14.0` runtime through managed
+sidecar start, health/protocol validation, and owned stop. Then run native
+Windows/macOS acceptance. Keep this Torch install path separate from FLUX.2,
+image generation, and Tuldok claims, which require their own exact runtime
+evidence.
 
 ## Product contract
 

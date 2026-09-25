@@ -133,7 +133,26 @@
   result contained 44 artifacts for `cu132` / `python3.14` / adapter `none`.
   No Torch wheels were installed; installed identity and sidecar lifecycle
   remain unverified for v2.14.0.
-- The earlier local AppImage/deb predate these final provider/index repairs and
-  need rebuilding. Windows/macOS native provider and runtime acceptance,
-  provider license inventory, and toolbar-linked package publication remain
-  outstanding.
+- Rebuilt the local AppImage and deb from commit `ce9170d4`. Both pass the
+  artifact checker and bundled RPC health smoke; the standalone release startup
+  smoke also passes. Inspection confirms the packed Electron bundle includes
+  `get_torch_release_options` and the bundled backend includes uv `0.12.18`.
+  These are local artifacts only; Windows/macOS native provider and runtime
+  acceptance, provider license inventory, and toolbar-linked package
+  publication remain outstanding.
+
+## 2026-09-25 — Managed-Python Torch 2.14.0 install acceptance
+
+- In a disposable Linux x86_64 launcher root, `preview_torch_runtime` resolved
+  the CPU/Core `v2.14.0` tuple as `python3.14` with 25 exact artifacts.
+- `install_version` consumed that retained preview, installed the official
+  Torch wheel and dependencies, checked the installed identity and CPU
+  operation, and completed successfully. `get_installed_versions` returned
+  `v2.14.0`, and `switch_version` explicitly selected it.
+- The same preview/install/identity/selection flow passed with Python, pip, and
+  PyPy absent from the backend's child `PATH`; ordinary OS tools remained
+  available. The temporary launcher root was deleted after the RPC process
+  stopped.
+- This validates the Linux CPU/Core install path without a host Python. It does
+  not establish CUDA/device execution, Torch sidecar startup/health/owned stop,
+  image-adapter or Tuldok behavior, or Windows/macOS acceptance.

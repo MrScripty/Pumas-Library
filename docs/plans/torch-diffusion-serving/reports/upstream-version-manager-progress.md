@@ -95,17 +95,22 @@ Current host verification: `pumas-app-manager` passed 179 tests and Clippy;
 outside the sandbox's socket restriction. Electron passed 12 test files
 including the RPC registration regression; the Torch preview passed 14 tests
 with frontend typecheck/lint; the full 98-test Python suite and Ruff passed.
-Rust formatting and `git diff --check` passed. Release build, headless startup
-smoke, artifact validation, and AppImage/deb bundled RPC health smoke passed
-for the earlier candidate; a fresh package build is required to include the
-repairs below.
+Rust formatting and `git diff --check` passed. A fresh release build from
+`ce9170d4` passed headless startup smoke and artifact validation; both the
+AppImage and deb passed bundled RPC health smoke. The packaged Electron bundle
+contains `get_torch_release_options`, and the packaged backend contains the
+uv 0.12.18 provider pin.
 
-The v2.14.0 live scan and full Core dependency preview now pass through Pumas
-RPC in an isolated Linux launcher root. Pinned uv 0.12.18 downloaded with its
-published Linux SHA-256, provisioned managed CPython 3.14.7, and resolved 44
-artifacts for the recommended `cu132` / `python3.14` / `none` tuple. This did not
-install Torch wheels or verify the installed runtime and sidecar lifecycle.
-Native Windows/macOS runtime and packaged acceptance remain pending.
+The v2.14.0 live scan and full Core dependency preview pass through Pumas RPC in
+an isolated Linux launcher root. Pinned uv 0.12.18 downloaded with its
+published Linux SHA-256 and provisioned managed CPython 3.14.7. The recommended
+`cu132` / `python3.14` / `none` preview resolved 44 artifacts. A CPU Core
+preview resolved 25 artifacts; its retained resolution installed Torch 2.14.0,
+passed installed-identity and CPU-operation checks, and was explicitly selected.
+The latter run removed Python, pip, and PyPy from the backend's child `PATH` and
+deleted its temporary launcher root afterward. CUDA/device execution and
+sidecar lifecycle remain unverified. Native Windows/macOS runtime and packaged
+acceptance remain pending.
 
 The live report exposed two stale compatibility assumptions. uv's actual
 python-build-standalone catalog URLs use

@@ -1,9 +1,11 @@
 # Managed Python Provider Admission
 
-**Status:** Linux x86_64 provider download, published-hash verification, pinned
-uv execution, and managed CPython provisioning pass in a live isolated Pumas
-RPC run. Windows/macOS provider-byte checks, license-material acceptance, and
-native packaged acceptance remain pending.
+**Status:** Linux x86_64 uv download and published-hash verification, pinned uv
+execution, and managed CPython 3.14.7 provisioning pass. The Torch 2.14.0
+CPU/Core preview, install, identity/CPU-operation check, and explicit selection
+also passed through Pumas RPC with Python, pip, and PyPy absent from the
+backend's child `PATH`. Windows/macOS provider-byte checks, license-material
+acceptance, and native packaged acceptance remain pending.
 
 **Decision:** Use the app-manager's exact-hash-pinned uv release to provision
 stable, standard CPython distributions from uv's embedded Python Build Standalone
@@ -65,14 +67,16 @@ provider update adds its artifact and native evidence.
 
 The provider implementation runs `uv python list --managed-python
 --only-downloads --show-urls --output-format json`. The pinned Linux uv 0.12.18
-asset returned structured URL-bearing records, provisioned CPython 3.14.7, and
-was used by a live `preview_torch_runtime` RPC for Torch 2.14.0. The preview
-selected `cu132` / `python3.14` / Core (`none`) and resolved 44 artifacts. This
-proves provider startup and full dependency resolution in an isolated Linux
-launcher root; it does not prove Torch wheel installation, installed identity,
-sidecar lifecycle, or operation on a clean host with Python absent from PATH.
-Provider fixtures cover native filtering, stable-version ordering, the 3.10
-floor, exact-version install selection, and malformed catalogs.
+asset returned structured URL-bearing records and provisioned CPython 3.14.7.
+The live v2.14.0 CUDA 13.2/Core preview resolved 44 artifacts. A separate CPU
+Core preview resolved 25 artifacts, and `install_version` installed its
+retained wheel resolution, checked installed identity and CPU operation,
+published `v2.14.0`, and allowed explicit selection. The install used a child
+`PATH` containing ordinary OS tools but no Python, pip, or PyPy. Its temporary
+launcher root was removed after acceptance. The CUDA wheel set was not
+installed, and this did not exercise sidecar start/stop. Provider fixtures cover
+native filtering, stable-version ordering, the 3.10 floor, exact-version install
+selection, and malformed catalogs.
 
 ## Licensing and remaining admission gates
 
@@ -84,9 +88,10 @@ Before release acceptance, retain uv notices and the applicable license files
 for the actual selected CPython archives in Pumas' attribution inventory. Do not
 infer the complete archive license set from the repository's top-level license.
 
-Admission remains pending until all target artifacts are downloaded and checked
-on native Linux x86_64, Windows x86_64 MSVC, and macOS arm64 hosts; clean-host
-provisioning succeeds without Python on `PATH`; stable catalog filtering excludes
+Admission remains pending until uv artifacts and hashes are checked on native
+Windows x86_64 MSVC and macOS arm64 in addition to the completed Linux x86_64
+run; native clean-host provisioning succeeds without Python on `PATH`; stable
+catalog filtering excludes
 pre-releases, debug, free-threaded, and foreign-target artifacts; timeout,
 cancellation, tamper, retry, and durable retention behavior pass; and license
 notices are recorded.

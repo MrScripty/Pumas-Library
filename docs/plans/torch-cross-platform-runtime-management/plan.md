@@ -9,35 +9,37 @@ runtime management on 2026-09-24, retaining the existing Linux support. On
 2026-09-25, the owner authorized Pumas-managed CPython provisioning and removed
 the requirement for a host-installed Python interpreter or a user Python choice.
 
-**Current acceptance:** `pending` — the live Linux provider, Torch 2.14.0
-release scan, and complete Core dependency preview now pass in an isolated
-Pumas RPC run using managed CPython 3.14.7. The preview resolves 44 artifacts
-and recommends CUDA 13.2 on this host. It does not install Torch wheels or
-exercise installed identity and sidecar lifecycle. The previously built local
-packages predate the latest provider/index repairs and must be rebuilt. Windows
-and macOS still need native install, RPC lifecycle, and packaged desktop
-evidence.
+**Current acceptance:** `pending` — on Linux x86_64, the live provider and
+Torch 2.14.0 scan pass. A CUDA 13.2 Core preview resolved 44 artifacts. A
+separate CPU Core preview selected Pumas-managed CPython 3.14.7 and resolved 25
+artifacts; installing its retained preview succeeded with `python`, `pip`, and
+`pypy` absent from the child `PATH`. The installer verified Torch identity and
+CPU operation, reported `v2.14.0` installed, and explicit selection succeeded.
+The AppImage and deb rebuilt from `ce9170d4` pass artifact and packaged RPC
+health checks, and the packed Electron bundle contains the release-options RPC
+method. v2.14 CUDA/device execution and managed-sidecar start/stop remain
+untested. Windows and macOS still need native install, RPC lifecycle, and
+packaged desktop evidence.
 
 **Current phase:** M1b managed interpreter provisioning and Linux packaging are
 implemented and reviewed. Commit `6a726eac` fixes the missing Electron allowlist
 entry for `get_torch_release_options`; subsequent source repairs pin published
 uv `0.12.18`, accept uv's official provider CDN URLs, and validate PyTorch's
 current official direct-wheel paths. Live managed-Python provisioning and the
-v2.14.0 scan/full preview now pass on Linux. The latest source still needs a
-fresh local package build. The desktop package linked from the toolbar has not
-been replaced or published.
+v2.14.0 scan/full preview now pass on Linux. The AppImage and deb were rebuilt
+from commit `ce9170d4`, and standalone plus packaged RPC health smoke passed.
+The desktop package linked from the toolbar has not been replaced or published.
 
-**Blockers:** No design blocker remains. A v2.14.0 Torch wheel has not yet been
-installed from its retained preview, and installed identity plus sidecar
-start/stop have not been exercised for this release. Native Windows and macOS
+**Blockers:** No design blocker remains. The Linux CPU/Core wheel install and
+identity check pass, but the v2.14.0 managed sidecar start/health/owned-stop
+path and CUDA/device use have not been exercised. Native Windows and macOS
 execution is not available here and remains a separate acceptance gate;
-provider-license inventory and native provider-byte checks remain outstanding.
+provider-license inventory remains outstanding.
 
-**Next slice:** Install Torch v2.14.0 Core runtime from its retained preview and
-record the managed CPython, resolved wheel set, installed identity, and sidecar
-lifecycle. Run provider license and exact-wheel install acceptance on native
-Linux, Windows x64, and macOS arm64 runners before changing platform
-acceptance.
+**Next slice:** Exercise the installed v2.14.0 runtime through managed-sidecar
+start, health/protocol validation, and owned stop. Then complete CUDA/device
+checks and native Windows x64/macOS arm64 provider, install, RPC lifecycle, and
+packaged desktop acceptance, retaining provider license material.
 
 ## Objective and scope
 
@@ -238,10 +240,10 @@ resolver, manager, desktop, and platform runtime owners.
 | ID | Observable criterion | Evidence required | Status |
 | --- | --- | --- | --- |
 | X1 | Linux behavior and existing accepted v2.9.0 install/v2.10 Tuldok evidence remain accurately scoped and pass relevant regression gates | Existing Linux manager/resolver/RPC/frontend suites; retained historical evidence references | pending |
-| X2 | Each shipped target provisions a private stable standard CPython 3.10 or newer without a host Python dependency or global PATH/registry changes; artifact integrity, target identity, cache separation, cancellation, and retention are verified | Clean-host native provisioning and tamper/cancel/retry tests on Linux, Windows, and macOS; downloaded uv digest and license checks | pending |
+| X2 | Each shipped target provisions a private stable standard CPython 3.10 or newer without a host Python dependency or global PATH/registry changes; artifact integrity, target identity, cache separation, cancellation, and retention are verified | Linux x86_64 managed CPython 3.14.7 and Torch install passed with Python/pip/PyPy absent from child `PATH`; native Windows/macOS provisioning, tamper/cancel/retry, downloaded uv digest, and license checks remain | pending |
 | X3 | Candidate versions come from exact official standard-CPython wheel tags and the pinned stable provider catalog; the manager tries highest to lowest, selects the newest complete compatible resolution, and never treats network/provisioning failure as a reason to downgrade | CPython 3.14 preference when fully resolved; definite 3.14 dependency incompatibility falls to 3.13; prerelease/free-threaded/wrong-target and pre-3.10 artifact rejection; incomplete scan/provider failures remain typed inconclusive | pending |
 | X4 | Windows x64 and macOS arm64 discovery returns only exact official wheels whose tags match the provisioned native CPython; CPU/MPS/CUDA choices follow this contract | Native wheel fixtures, wrong-OS/architecture/interpreter rejection, live official-index scan on both native runners | pending |
-| X5 | Preview retains the exact distribution version, release/build, official wheel URL/hash, Python provider artifact identity, interpreter fingerprint, and complete dependencies; install stages and verifies that exact identity before publication | Resolver/Rust contract fixtures plus real official CPU-wheel preview, install, identity, and cleanup on every declared target | pending |
+| X5 | Preview retains the exact distribution version, release/build, official wheel URL/hash, Python provider artifact identity, interpreter fingerprint, and complete dependencies; install stages and verifies that exact identity before publication | Linux x86_64 v2.14.0 CPU/Core preview (25 artifacts), install/identity/CPU-operation check, selection, and temporary-root cleanup passed with no host Python on child `PATH`; Windows/macOS native checks pending | pending |
 | X6 | Installed versions can be inspected, explicitly selected, started with health/protocol checks, and stopped by their owned generation; cancellation, timeout, RPC shutdown, and failed cleanup do not leak a resolver, installer, sidecar, interpreter provisioner, or unregistered runtime | Native lifecycle tests and real RPC health/generation-owned stop on Windows/macOS; Linux regression | pending |
 | X7 | The same manager choices and lifecycle are reachable through packaged desktop controls and the existing RPC API; the user never has to choose Python, and the desktop offers no unsupported adapter | Preload boundary validation, composed desktop tests, native RPC integration, packaged desktop smoke with no Python on PATH on all declared targets | pending |
 

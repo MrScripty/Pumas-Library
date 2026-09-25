@@ -38,7 +38,7 @@ const preset: TorchRuntimeOptions = {
   builds: ['cpu', 'cu130', 'cu134', 'rocm'],
   pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
   adapters: ['none', 'flux2'], installed: [],
-  bundledPresetAvailable: true, defaultAdapter: 'flux2',
+  bundledPresetAvailable: true, defaultAdapter: 'none',
   preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
 };
 
@@ -50,6 +50,7 @@ beforeEach(() => {
     status: 'resolved',
     preview: {
       ...request, previewId: 'review-1', expiresInSeconds: 300,
+      python: request.python === 'auto' ? (request.build === 'cpu' ? 'python3.11' : 'python3.12') : request.python,
       qualification: request.adapter === 'bundled' ? 'qualified' : 'unverified',
       artifacts: [{ name: 'torch', version: '2.14.0', url: 'https://download.pytorch.org/torch.whl', sha256: 'abc123' }],
     },
@@ -57,36 +58,37 @@ beforeEach(() => {
 });
 
 describe('TorchInstallPreview', () => {
-  it('uses the manager recommendation without requiring build, Python, or profile selectors', async () => {
+  it('uses the manager recommendation with core Torch and no required profile selectors', async () => {
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
 
-    expect(await screen.findByText(/Recommended setup: cu130 · python3.12 · Pumas image dependencies/)).toBeInTheDocument();
+    expect(await screen.findByText(/Recommended setup: cu130 · Python selected automatically · Core runtime only/)).toBeInTheDocument();
     expect(getReleaseOptions).toHaveBeenCalledWith('v2.14.0');
     expect(getPresetOptions).toHaveBeenCalledOnce();
     expect(screen.getByText('Advanced setup').closest('details')).not.toHaveAttribute('open');
-    expect(screen.getByText(/selected by Pumas for its FLUX.2 path; they are not part of upstream Torch/)).toBeInTheDocument();
+    expect(screen.getByText(/Pumas installs a private Python version that matches the selected Torch release and its dependencies/i)).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Installed Python' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/install Python 3\.10–3\.13/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/selected by Pumas for its FLUX.2 path/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
-    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'cu130', python: 'python3.12', adapter: 'flux2' }));
+    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'cu130', python: 'auto', adapter: 'none' }));
     expect(await screen.findByText('SHA-256: abc123')).toBeInTheDocument();
+    expect(screen.getByText('Selected Python: python3.12')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Install reviewed artifacts' }));
     expect(onInstall).toHaveBeenCalledWith('review-1');
   });
 
-  it('limits advanced build and Python overrides to this release’s returned combinations', async () => {
+  it('limits advanced build overrides to this release’s returned combinations', async () => {
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
     fireEvent.click(await screen.findByText('Advanced setup'));
     const build = screen.getByRole('combobox', { name: 'Torch build' });
     expect(within(build).getAllByRole('option').map((option) => option.textContent)).toEqual(['Choose a build', 'cpu', 'cu130']);
     expect(within(build).queryByRole('option', { name: /cu134|rocm/i })).not.toBeInTheDocument();
-    const python = screen.getByRole('combobox', { name: 'Installed Python' });
-    expect(within(python).getAllByRole('option').map((option) => option.textContent)).toEqual(['Choose installed Python', 'python3.12']);
+    expect(screen.queryByRole('combobox', { name: 'Installed Python' })).not.toBeInTheDocument();
     fireEvent.change(build, { target: { value: 'cpu' } });
-    expect(python).toHaveValue('python3.11');
-    expect(within(python).getAllByRole('option').map((option) => option.textContent)).toEqual(['Choose installed Python', 'python3.11']);
     fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
-    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'cpu', python: 'python3.11', adapter: 'flux2' }));
+    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'cpu', python: 'auto', adapter: 'none' }));
   });
 
   it('requires a deliberate advanced selection when no recommendation exists for a GPU-only release', async () => {
@@ -105,11 +107,9 @@ describe('TorchInstallPreview', () => {
     fireEvent.click(screen.getByText('Advanced setup'));
     const build = screen.getByRole('combobox', { name: 'Torch build' });
     expect(build).toHaveValue('');
-    expect(screen.getByRole('combobox', { name: 'Installed Python' })).toBeDisabled();
     fireEvent.change(build, { target: { value: 'cu132' } });
-    expect(screen.getByRole('combobox', { name: 'Installed Python' })).toHaveValue('python3.12');
     fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
-    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'cu132', python: 'python3.12', adapter: 'flux2' }));
+    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'cu132', python: 'auto', adapter: 'none' }));
   });
 
   it('shows the manager’s driver caveat alongside a CPU recommendation', async () => {
@@ -120,17 +120,18 @@ describe('TorchInstallPreview', () => {
       recommendationNote: 'NVIDIA hardware was detected, but its driver could not be verified. CPU is recommended.',
     });
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
-    expect(await screen.findByText(/Recommended setup: cpu · python3.11/)).toBeInTheDocument();
+    expect(await screen.findByText(/Recommended setup: cpu · Python selected automatically/)).toBeInTheDocument();
     expect(screen.getByText(/driver could not be verified. CPU is recommended/)).toBeInTheDocument();
   });
 
-  it('makes Core runtime only a deliberate advanced choice', async () => {
+  it('keeps Pumas FLUX.2 dependencies as an explicit advanced choice', async () => {
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
     fireEvent.click(await screen.findByText('Advanced setup'));
-    fireEvent.change(screen.getByRole('combobox', { name: 'Dependency profile' }), { target: { value: 'none' } });
-    expect(screen.getByText(/Recommended setup: cu130 · python3.12 · Core runtime only/)).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('combobox', { name: 'Dependency profile' }), { target: { value: 'flux2' } });
+    expect(screen.getByText(/Recommended setup: cu130 · Python selected automatically · Pumas image dependencies/)).toBeInTheDocument();
+    expect(screen.getByText(/selected by Pumas for its FLUX.2 path; they are not part of upstream Torch/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
-    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'cu130', python: 'python3.12', adapter: 'none' }));
+    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'cu130', python: 'auto', adapter: 'flux2' }));
   });
 
   it('does not imply an incomplete discovery found no wheels', async () => {
@@ -142,18 +143,17 @@ describe('TorchInstallPreview', () => {
     expect(screen.queryByText(/No official wheel matches were found/)).not.toBeInTheDocument();
   });
 
-  it('requires an installed compatible Python before checking release wheels', async () => {
-    getReleaseOptions.mockResolvedValue({
-      ...release, status: 'inconclusive', completeScan: false,
-      checkedChannels: [], combinations: [], recommended: null,
-      issues: ['No installed host-matched CPython 3.10–3.13 interpreter could inspect official wheels'],
-    });
+  it('does not require a host Python selection before checking wheels', async () => {
+    getPresetOptions.mockResolvedValue({ ...preset, pythons: [], bundledPresetAvailable: false });
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
 
-    expect(await screen.findByText(/No installed host-matched CPython 3.10–3.13 interpreter/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Check selected combination' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Install reviewed artifacts' })).toBeDisabled();
-    expect(getPreview).not.toHaveBeenCalled();
+    const check = await screen.findByRole('button', { name: 'Check selected combination' });
+    expect(check).toBeEnabled();
+    fireEvent.click(screen.getByText('Advanced setup'));
+    expect(screen.queryByRole('combobox', { name: 'Installed Python' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Install.*CPython 3\.10–3\.13/i)).not.toBeInTheDocument();
+    fireEvent.click(check);
+    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'cu130', python: 'auto', adapter: 'none' }));
   });
 
   it('keeps the qualified v2.9.1 bundled preset and an unverified upstream choice distinct', async () => {
@@ -161,18 +161,25 @@ describe('TorchInstallPreview', () => {
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
     const qualified = await screen.findByRole('button', { name: 'Qualified fixed preset' });
-    expect(qualified).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.queryByRole('combobox', { name: 'Torch build' })).not.toBeInTheDocument();
+    expect(qualified).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Other official wheels (unverified)' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Advanced setup').closest('details')).not.toHaveAttribute('open');
     fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
-    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' }));
+    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'auto', adapter: 'none' }));
+    expect(screen.getByRole('button', { name: 'Install reviewed artifacts' })).toBeEnabled();
+
+    fireEvent.click(qualified);
+    expect(qualified).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
+    await waitFor(() => expect(getPreview).toHaveBeenLastCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' }));
     fireEvent.click(screen.getByRole('button', { name: 'Install fixed preset' }));
     expect(onInstall).toHaveBeenCalledWith('review-1');
 
     fireEvent.click(screen.getByRole('button', { name: 'Other official wheels (unverified)' }));
     expect(screen.getByRole('button', { name: 'Install reviewed artifacts' })).toBeDisabled();
-    expect(screen.getByText(/Pumas image dependencies are selected by Pumas/)).toBeInTheDocument();
+    expect(screen.queryByText(/Pumas image dependencies are selected by Pumas/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
-    await waitFor(() => expect(getPreview).toHaveBeenLastCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'flux2' }));
+    await waitFor(() => expect(getPreview).toHaveBeenLastCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'auto', adapter: 'none' }));
     expect(await screen.findByText(/Artifact resolution is unverified/)).toBeInTheDocument();
   });
 
@@ -186,16 +193,16 @@ describe('TorchInstallPreview', () => {
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
 
-    expect(await screen.findByText(/Recommended setup: cpu · python3.12 · Core runtime only/)).toBeInTheDocument();
+    expect(await screen.findByText(/Recommended setup: cpu · Python selected automatically · Core runtime only/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Qualified fixed preset' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Other official wheels (unverified)' })).not.toBeInTheDocument();
     expect(screen.queryByText(/bundled image dependencies \(fixed\)/)).not.toBeInTheDocument();
-    expect(screen.getByText(/matching this host’s operating system and architecture/)).toBeInTheDocument();
+    expect(screen.queryByText(/install Python 3\.10–3\.13/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('Advanced setup'));
     const profile = screen.getByRole('combobox', { name: 'Dependency profile' });
     expect(within(profile).getAllByRole('option').map((option) => option.textContent)).toEqual(['Core runtime only']);
     fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
-    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cpu', python: 'python3.12', adapter: 'none' }));
+    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cpu', python: 'auto', adapter: 'none' }));
     fireEvent.click(screen.getByRole('button', { name: 'Install reviewed artifacts' }));
     expect(onInstall).toHaveBeenCalledWith('review-1');
   });
@@ -226,7 +233,7 @@ describe('TorchInstallPreview', () => {
     getPreview.mockResolvedValueOnce({ status: 'rejected', reason: 'unsupported', message: 'selected dependencies have no matching wheel' });
     getPreview.mockImplementationOnce(async (request) => ({
       status: 'resolved',
-      preview: { ...request, previewId: 'review-cpu', expiresInSeconds: 300, qualification: 'unverified', artifacts: [] },
+      preview: { ...request, python: 'python3.11', previewId: 'review-cpu', expiresInSeconds: 300, qualification: 'unverified', artifacts: [] },
     }));
     getAlternatives.mockResolvedValue({
       selectedTag: 'v2.14.0', selectedBuild: 'cu130', selectedPython: 'python3.12',
@@ -245,7 +252,7 @@ describe('TorchInstallPreview', () => {
     expect(screen.getByText(/Other dependencies have not been checked/)).toBeInTheDocument();
     expect(getAlternatives).toHaveBeenCalledWith('v2.14.0', 'cu130', 'python3.12');
     fireEvent.click(screen.getByRole('button', { name: 'Preview v2.14.0 · cpu · python3.11' }));
-    await waitFor(() => expect(getPreview).toHaveBeenLastCalledWith({ tag: 'v2.14.0', build: 'cpu', python: 'python3.11', adapter: 'flux2' }));
+    await waitFor(() => expect(getPreview).toHaveBeenLastCalledWith({ tag: 'v2.14.0', build: 'cpu', python: 'auto', adapter: 'none' }));
     expect(await screen.findByText('Exact artifacts resolved')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Install reviewed artifacts' }));
     expect(onInstall).toHaveBeenCalledWith('review-cpu');
@@ -261,7 +268,7 @@ describe('TorchInstallPreview', () => {
     getPreview.mockResolvedValueOnce({ status: 'rejected', reason: 'unsupported', message: 'dependency unavailable' });
     getPreview.mockImplementationOnce(async (request) => ({
       status: 'resolved',
-      preview: { ...request, previewId: 'eligible-cpu', expiresInSeconds: 300, qualification: 'unverified', artifacts: [] },
+      preview: { ...request, python: 'python3.11', previewId: 'eligible-cpu', expiresInSeconds: 300, qualification: 'unverified', artifacts: [] },
     }));
     getAlternatives.mockResolvedValue({
       selectedTag: 'v2.14.0', selectedBuild: 'cpu', selectedPython: 'python3.11',
@@ -284,7 +291,7 @@ describe('TorchInstallPreview', () => {
     expect(screen.queryByRole('button', { name: /Preview .*cu130|Preview .*rocm6\.4|Preview v2\.13\.0/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Preview v2.14.0 · cpu · python3.11' }));
     await waitFor(() => expect(getPreview).toHaveBeenCalledTimes(2));
-    expect(getPreview).toHaveBeenLastCalledWith({ tag: 'v2.14.0', build: 'cpu', python: 'python3.11', adapter: 'flux2' });
+    expect(getPreview).toHaveBeenLastCalledWith({ tag: 'v2.14.0', build: 'cpu', python: 'auto', adapter: 'none' });
   });
 
   it('keeps a long artifact list and its install action inside the scrollable preview region', async () => {
@@ -292,6 +299,7 @@ describe('TorchInstallPreview', () => {
       status: 'resolved',
       preview: {
         ...request, previewId: 'review-many', expiresInSeconds: 300, qualification: 'unverified',
+        python: 'python3.12',
         artifacts: Array.from({ length: 30 }, (_, index) => ({
           name: `wheel-${index}`, version: '1.0',
           url: `https://download.pytorch.org/whl/cu130/wheel-${index}.whl`,

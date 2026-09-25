@@ -714,6 +714,44 @@ fn failed(message: impl Into<String>) -> PumasError {
     }
 }
 
+fn managed_python_record(plan: &super::TorchInstallPlan) -> serde_json::Value {
+    serde_json::json!({
+        "provider": {
+            "name": "uv",
+            "version": plan.managed_python.uv_version,
+            "archiveSha256": plan.managed_python.uv_archive_sha256,
+        },
+        "distribution": {
+            "implementation": "CPython",
+            "version": plan.managed_python.version,
+            "catalogKey": plan.managed_python.catalog_key,
+            "sourceUrl": plan.managed_python.source_url,
+            "targetTriple": plan.managed_python.target_triple,
+        },
+        "executable": {
+            "path": plan.managed_python.executable,
+            "sha256": plan.interpreter_hash,
+        },
+    })
+}
+
+async fn record_managed_python(runtime: &Path, plan: &super::TorchInstallPlan) -> Result<()> {
+    let path = runtime.join("runtime.json");
+    let bytes = fs::read(&path).await.map_err(PumasError::from)?;
+    let mut recipe: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|error| failed(format!("Invalid Torch runtime recipe: {error}")))?;
+    if !recipe.is_object() {
+        return Err(failed("Torch runtime recipe is not an object"));
+    }
+    recipe["managed_python"] = managed_python_record(plan);
+    fs::write(
+        path,
+        serde_json::to_vec_pretty(&recipe).map_err(|error| failed(error.to_string()))?,
+    )
+    .await
+    .map_err(PumasError::from)
+}
+
 impl VersionInstaller {
     async fn stage_resolved_torch_runtime(
         &self,
@@ -734,7 +772,10 @@ impl VersionInstaller {
             "{:x}",
             Sha256::digest(std::fs::read(&plan.interpreter_path).map_err(PumasError::from)?)
         );
-        if observed_hash != plan.interpreter_hash {
+        if observed_hash != plan.interpreter_hash
+            || std::fs::canonicalize(&plan.interpreter_path).map_err(PumasError::from)?
+                != plan.managed_python.executable
+        {
             return Err(failed("Selected Python executable changed after preview"));
         }
         let interpreter = &plan.interpreter_path;
@@ -765,6 +806,7 @@ impl VersionInstaller {
             "build": plan.preview.build,
             "python": plan.preview.python,
             "adapter": plan.preview.adapter,
+            "managed_python": managed_python_record(plan),
             "artifacts": plan.preview.artifacts,
         });
         fs::write(
@@ -1102,13 +1144,18 @@ impl VersionInstaller {
                 "{:x}",
                 Sha256::digest(std::fs::read(&plan.interpreter_path).map_err(PumasError::from)?)
             );
-            if observed_hash != plan.interpreter_hash {
+            if observed_hash != plan.interpreter_hash
+                || std::fs::canonicalize(&plan.interpreter_path).map_err(PumasError::from)?
+                    != plan.managed_python.executable
+            {
                 return Err(failed("Selected Python executable changed after preview"));
             }
+            record_managed_python(&runtime, plan).await?;
         }
-        let interpreter = plan
-            .map(|p| p.interpreter_path.as_path())
-            .unwrap_or_else(|| Path::new("python3.12"));
+        let plan = plan.ok_or_else(|| {
+            failed("The bundled Torch runtime requires a retained managed Python preview")
+        })?;
+        let interpreter = plan.interpreter_path.as_path();
         let mut python_check = Command::new(interpreter);
         python_check.args([
             "-I",
@@ -1174,7 +1221,8 @@ impl VersionInstaller {
             "build": "cu130",
             "python": "3.12",
             "adapter": "bundled",
-            "artifacts": plan.map(|p| p.preview.artifacts.clone()).unwrap_or_default(),
+            "managed_python": managed_python_record(plan),
+            "artifacts": plan.preview.artifacts.clone(),
         });
         fs::write(
             runtime.join("resolution.json"),
@@ -1263,5 +1311,72 @@ impl VersionInstaller {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod managed_python_provenance_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn installed_runtime_recipe_retains_managed_python_provider_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = root.path().join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        std::fs::write(
+            runtime.join("runtime.json"),
+            r#"{"recipe_id":"upstream-preview-v2.14.0-cpu-python3.14-none"}"#,
+        )
+        .unwrap();
+        let plan = super::TorchInstallPlan {
+            preview: crate::version_manager::TorchPreview {
+                preview_id: "preview-id".into(),
+                tag: "v2.14.0".into(),
+                build: "cpu".into(),
+                python: "python3.14".into(),
+                adapter: "none".into(),
+                artifacts: Vec::new(),
+                qualification: "unverified".into(),
+                expires_in_seconds: 1800,
+            },
+            requirements: String::new(),
+            resolution: String::new(),
+            report: String::new(),
+            interpreter_path: root.path().join("python3.14"),
+            interpreter_hash: "b".repeat(64),
+            managed_python: crate::version_manager::managed_python::ManagedPythonIdentity {
+                python: "python3.14".into(),
+                version: "3.14.0".into(),
+                catalog_key: "cpython-3.14.0+20250901-x86_64-unknown-linux-gnu-install_only".into(),
+                source_url: "https://github.com/astral-sh/python-build-standalone/releases/download/20250901/cpython-3.14.0%2B20250901-x86_64-unknown-linux-gnu-install_only.tar.zst".into(),
+                executable: root.path().join("python3.14"),
+                target_triple: "x86_64-unknown-linux-gnu".into(),
+                uv_version: "0.12.19".into(),
+                uv_archive_sha256: "a".repeat(64),
+            },
+        };
+
+        record_managed_python(&runtime, &plan).await.unwrap();
+
+        let recipe: serde_json::Value =
+            serde_json::from_slice(&fs::read(runtime.join("runtime.json")).await.unwrap()).unwrap();
+        assert_eq!(recipe["managed_python"]["provider"]["name"], "uv");
+        assert_eq!(recipe["managed_python"]["provider"]["version"], "0.12.19");
+        assert_eq!(
+            recipe["managed_python"]["provider"]["archiveSha256"],
+            "a".repeat(64)
+        );
+        assert_eq!(
+            recipe["managed_python"]["distribution"]["version"],
+            "3.14.0"
+        );
+        assert_eq!(
+            recipe["managed_python"]["distribution"]["targetTriple"],
+            "x86_64-unknown-linux-gnu"
+        );
+        assert_eq!(
+            recipe["managed_python"]["executable"]["sha256"],
+            "b".repeat(64)
+        );
     }
 }

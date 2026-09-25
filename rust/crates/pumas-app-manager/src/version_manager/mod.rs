@@ -46,6 +46,7 @@ mod constraints;
 mod dependencies;
 mod installer;
 mod launcher;
+mod managed_python;
 pub mod ollama;
 mod progress;
 pub mod size_calculator;
@@ -630,8 +631,35 @@ impl VersionManager {
             pause.reached.notify_one();
             pause.resume.acquire().await.unwrap().forget();
         }
+        if self.app_id == AppId::Torch && self.torch_shutting_down.load(Ordering::SeqCst) {
+            return Err(PumasError::InstallationFailed {
+                message: "Torch version manager is shutting down".into(),
+            });
+        }
+        let generate_bundled_preset_preview =
+            self.app_id == AppId::Torch && preview_id.is_none() && tag == "v2.9.1";
+        #[cfg(test)]
+        let generate_bundled_preset_preview = generate_bundled_preset_preview
+            && self.torch_stage_override.is_none()
+            && self.torch_admission_pause.is_none();
+        let generated_preset_preview_id = if generate_bundled_preset_preview {
+            match self
+                .preview_torch_runtime("v2.9.1", "cu130", "auto", "bundled")
+                .await?
+            {
+                TorchPreviewOutcome::Resolved { preview } => Some(preview.preview_id),
+                TorchPreviewOutcome::Rejected { reason, message } => {
+                    return Err(PumasError::InstallationFailed {
+                        message: format!("Torch preview {reason:?}: {message}"),
+                    });
+                }
+            }
+        } else {
+            None
+        };
+        let retained_preview_id = preview_id.or(generated_preset_preview_id.as_deref());
         let torch_plan = if self.app_id == AppId::Torch {
-            match preview_id {
+            match retained_preview_id {
                 Some(id) => {
                     let mut previews = self.torch_previews.lock().await;
                     let retained =
@@ -655,9 +683,9 @@ impl VersionManager {
                         report: retained.report,
                         interpreter_path: retained.interpreter_path,
                         interpreter_hash: retained.interpreter_hash,
+                        managed_python: retained.managed_python,
                     })
                 }
-                None if tag == "v2.9.1" => None,
                 #[cfg(test)]
                 None if self.torch_stage_override.is_some() => None,
                 None => {

@@ -14,15 +14,16 @@ import {
   parseStatusTelemetryUpdateSseChunk,
 } from '../dist/python-bridge.js';
 
-test('Torch artifact preview has time to complete while other RPC calls keep the normal timeout', () => {
-  assert.equal(rpcRequestTimeoutMs('preview_torch_runtime'), 195_000);
+test('managed-Python Torch operations rely on bounded backend stages instead of old bridge timeouts', () => {
+  assert.equal(rpcRequestTimeoutMs('get_torch_release_options'), 0);
+  assert.equal(rpcRequestTimeoutMs('preview_torch_runtime'), 0);
   assert.equal(rpcRequestTimeoutMs('trial_torch_runtime'), 90_000);
-  assert.equal(rpcRequestTimeoutMs('find_torch_alternatives'), 75_000);
+  assert.equal(rpcRequestTimeoutMs('find_torch_alternatives'), 0);
   assert.equal(rpcRequestTimeoutMs('install_version'), 60_000);
-  assert.equal(rpcRequestTimeoutMs('get_torch_runtime_options'), 60_000);
+  assert.equal(rpcRequestTimeoutMs('get_torch_runtime_options'), 0);
 });
 
-test('bridge applies the longer timeout only to Torch preview HTTP requests', async () => {
+test('bridge does not apply the old 60s/195s socket cutoff to provisioned-Python requests', async () => {
   const bridgeUrl = new URL('../dist/python-bridge.js', import.meta.url);
   const requireBridge = createRequire(bridgeUrl);
   const exports = {};
@@ -57,11 +58,12 @@ test('bridge applies the longer timeout only to Torch preview HTTP requests', as
   });
   bridge.process = {};
 
+  await bridge.call('get_torch_release_options', { tag: 'v2.10.0' });
   await bridge.call('preview_torch_runtime', { tag: 'v2.10.0' });
   await bridge.call('trial_torch_runtime', { tag: 'v2.10.0', profileId: 'torch-profile' });
   await bridge.call('find_torch_alternatives', { tag: 'v2.10.0', build: 'cpu', python: 'python3.12' });
   await bridge.call('get_torch_runtime_options', {});
-  assert.deepEqual(seen.map((request) => request.timeout), [195_000, 90_000, 75_000, 60_000]);
+  assert.deepEqual(seen.map((request) => request.timeout), [0, 0, 90_000, 0, 0]);
 });
 
 class FakeTimerController {

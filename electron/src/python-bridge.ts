@@ -52,9 +52,15 @@ interface RPCResponse {
 }
 
 export function rpcRequestTimeoutMs(method: string): number {
-  if (method === 'preview_torch_runtime') return 195_000;
+  // Managed Python may need a bounded uv bootstrap, interpreter install, index
+  // scan, and several full wheel previews before the RPC returns any bytes.
+  // Let those backend stage deadlines own these requests instead of imposing
+  // an earlier HTTP socket inactivity timeout.
+  if (method === 'get_torch_runtime_options'
+    || method === 'get_torch_release_options'
+    || method === 'preview_torch_runtime'
+    || method === 'find_torch_alternatives') return 0;
   if (method === 'trial_torch_runtime') return 90_000;
-  if (method === 'find_torch_alternatives') return 75_000;
   return 60_000;
 }
 

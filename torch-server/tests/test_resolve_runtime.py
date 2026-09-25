@@ -61,6 +61,230 @@ def report(
 
 
 class ResolverTests(unittest.TestCase):
+    def test_bootstrap_platform_tags_keep_only_the_native_host(self):
+        cases = (
+            ("win32", "AMD64", ["win_amd64", "win32"], ["win_amd64"], "windows"),
+            (
+                "darwin",
+                "arm64",
+                ["macosx_15_0_arm64", "macosx_15_0_universal2", "macosx_15_0_x86_64"],
+                ["macosx_15_0_arm64", "macosx_15_0_universal2"],
+                "macos",
+            ),
+            (
+                "linux",
+                "x86_64",
+                ["manylinux_2_28_x86_64", "linux_aarch64"],
+                ["manylinux_2_28_x86_64"],
+                "linux",
+            ),
+        )
+        for system, machine, platforms, expected, target in cases:
+            with self.subTest(system=system):
+                completed = type(
+                    "Completed",
+                    (),
+                    {
+                        "returncode": 0,
+                        "stdout": json.dumps(
+                            {
+                                "python": "3.12",
+                                "platform": system,
+                                "machine": machine,
+                                "implementation": "cpython",
+                                "platforms": platforms,
+                            }
+                        ),
+                    },
+                )()
+                with patch.object(resolver.subprocess, "run", return_value=completed) as run:
+                    self.assertEqual(
+                        resolver.bootstrap_platform_tags("/bootstrap"), (target, expected)
+                    )
+                self.assertEqual(run.call_args.args[0][0], "/bootstrap")
+
+    def test_candidate_tags_match_cpython_314_on_exact_native_platform(self):
+        for target, platform_tag in (
+            ("windows", "win_amd64"),
+            ("macos", "macosx_15_0_arm64"),
+            ("linux", "manylinux_2_28_x86_64"),
+        ):
+            with self.subTest(target=target):
+                tags = resolver.candidate_cpython_tags("3.14", target, [platform_tag])
+                self.assertIn(f"cp314-cp314-{platform_tag}", tags)
+                self.assertTrue(all(tag.endswith(f"-{platform_tag}") for tag in tags))
+        with self.assertRaises(ValueError):
+            resolver.candidate_cpython_tags("3.14", "macos", ["macosx_15_0_x86_64"])
+        with self.assertRaises(ValueError):
+            resolver.candidate_cpython_tags("3.14", "windows", ["manylinux_2_28_x86_64"])
+
+    def test_release_options_candidate_mode_scans_without_candidate_interpreters(self):
+        for target, platform_tag, build, version_suffix in (
+            ("windows", "win_amd64", "cu130", "%2Bcu130"),
+            ("macos", "macosx_15_0_arm64", "cpu", ""),
+            ("linux", "manylinux_2_28_x86_64", "cpu", "%2Bcpu"),
+        ):
+            with self.subTest(target=target):
+
+                def wheel(minor):
+                    return f"torch-2.14.0{version_suffix}-cp3{minor}-cp3{minor}-{platform_tag}.whl"
+
+                links = [wheel(13), wheel(14), "torch-2.14.0%2Bcpu-cp314-cp314-win32.whl"]
+                with patch.object(
+                    resolver, "interpreter_tags", side_effect=AssertionError("candidate probed")
+                ):
+                    result = resolver.discover_release_options(
+                        "2.14.0",
+                        ["/bootstrap"],
+                        root_loader=lambda: [build],
+                        index_loader=lambda _: links,
+                        tag_loader=lambda _: (_ for _ in ()).throw(
+                            AssertionError("candidate probed")
+                        ),
+                        python_candidates=["3.14", "3.13"],
+                        platform_loader=lambda _: (target, [platform_tag]),
+                    )
+                self.assertEqual(result["status"], "matches")
+                self.assertTrue(result["completeScan"])
+                self.assertEqual(
+                    [combination["python"] for combination in result["combinations"]],
+                    ["python3.14", "python3.13"],
+                )
+                self.assertEqual(len(result["combinations"]), 2)
+
+    def test_release_options_rejects_malformed_or_prerelease_candidates(self):
+        for candidate in (
+            "3.14rc1",
+            "3.14.0",
+            "3.014",
+            "python3.14",
+            "2.7",
+            "3.-1",
+            "",
+            "3.9",
+            "3.0",
+            "3.09",
+        ):
+            with self.subTest(candidate=candidate):
+                with self.assertRaises(ValueError):
+                    resolver.discover_release_options(
+                        "2.14.0", ["/bootstrap"], python_candidates=[candidate]
+                    )
+        with self.assertRaises(ValueError):
+            resolver.discover_release_options(
+                "2.14.0", ["/bootstrap", "/other"], python_candidates=["3.14"]
+            )
+        self.assertEqual(resolver.candidate_python_version("3.10"), (3, 10))
+        self.assertEqual(resolver.candidate_python_version("3.99"), (3, 99))
+
+    def test_candidate_catalog_truncation_and_foreign_platform_are_inconclusive(self):
+        common = {
+            "root_loader": lambda: ["cpu"],
+            "index_loader": lambda _: [],
+            "platform_loader": lambda _: ("windows", ["win_amd64"]),
+        }
+        with patch.object(resolver, "MAX_RELEASE_CANDIDATES", 2):
+            truncated = resolver.discover_release_options(
+                "2.14.0", ["/bootstrap"], python_candidates=["3.12", "3.13", "3.14"], **common
+            )
+        self.assertEqual(truncated["status"], "inconclusive")
+        self.assertFalse(truncated["completeScan"])
+        self.assertTrue(any("first 2" in issue for issue in truncated["issues"]))
+        foreign = resolver.discover_release_options(
+            "2.14.0",
+            ["/bootstrap"],
+            python_candidates=["3.14"],
+            root_loader=lambda: self.fail("foreign platform must stop before index scan"),
+            platform_loader=lambda _: ("macos", ["macosx_15_0_x86_64"]),
+        )
+        self.assertEqual(foreign["status"], "inconclusive")
+        self.assertFalse(foreign["completeScan"])
+        self.assertEqual(foreign["combinations"], [])
+
+    def test_release_options_cli_passes_repeated_candidates_and_one_bootstrap(self):
+        expected = {
+            "tag": "v2.14.0",
+            "status": "none",
+            "completeScan": True,
+            "checkedChannels": ["cpu"],
+            "combinations": [],
+            "issues": [],
+        }
+        with (
+            patch.object(
+                resolver.sys,
+                "argv",
+                [
+                    "resolve_runtime.py",
+                    "--version",
+                    "2.14.0",
+                    "--release-options",
+                    "--interpreter",
+                    "/bootstrap",
+                    "--python-candidate",
+                    "3.13",
+                    "--python-candidate",
+                    "3.14",
+                ],
+            ),
+            patch.object(resolver, "discover_release_options", return_value=expected) as discover,
+            redirect_stdout(StringIO()) as output,
+        ):
+            resolver.main()
+        discover.assert_called_once_with(
+            "2.14.0", ["/bootstrap"], python_candidates=["3.13", "3.14"]
+        )
+        self.assertEqual(json.loads(output.getvalue()), expected)
+
+    def test_native_target_accepts_cpython_314_without_a_minor_allowlist(self):
+        for system, machine, expected in (
+            ("win32", "AMD64", "windows"),
+            ("darwin", "arm64", "macos"),
+            ("linux", "x86_64", "linux"),
+        ):
+            with self.subTest(system=system):
+                self.assertEqual(
+                    resolver.native_target(system, machine, "3.14", "cpython"), expected
+                )
+        for system, machine, python, implementation in (
+            ("win32", "x86", "3.14", "cpython"),
+            ("darwin", "x86_64", "3.14", "cpython"),
+            ("linux", "aarch64", "3.14", "cpython"),
+            ("win32", "AMD64", "3.14", "pypy"),
+            ("darwin", "arm64", "3.14rc1", "cpython"),
+            ("darwin", "arm64", "2.7", "cpython"),
+        ):
+            with self.subTest(
+                system=system, machine=machine, python=python, implementation=implementation
+            ):
+                with self.assertRaises(ValueError):
+                    resolver.native_target(system, machine, python, implementation)
+
+    def test_cpython_314_candidate_tags_remain_native(self):
+        for system, machine, wheel_tag in (
+            ("win32", "AMD64", "cp314-cp314-win_amd64"),
+            ("darwin", "arm64", "cp314-cp314-macosx_15_0_arm64"),
+        ):
+            with self.subTest(system=system):
+                completed = type(
+                    "Completed",
+                    (),
+                    {
+                        "returncode": 0,
+                        "stdout": json.dumps(
+                            {
+                                "python": "3.14",
+                                "platform": system,
+                                "machine": machine,
+                                "implementation": "cpython",
+                                "tags": [wheel_tag, "py3-none-any"],
+                            }
+                        ),
+                    },
+                )()
+                with patch.object(resolver.subprocess, "run", return_value=completed):
+                    self.assertEqual(resolver.interpreter_tags("python"), ("3.14", {wheel_tag}))
+
     def test_native_interpreter_tags_include_windows_and_macos_but_reject_rosetta(self):
         cases = (
             ("win32", "AMD64", "cp312-cp312-win_amd64", True),
@@ -119,6 +343,21 @@ class ResolverTests(unittest.TestCase):
         ):
             with self.subTest(href=href):
                 self.assertIsNone(resolver.wheel_match(href, "2.14.0", build, tags))
+
+    def test_legacy_discovery_accepts_cpython_314_without_claiming_dependencies(self):
+        result = resolver.discover_alternatives(
+            "v2.14.0",
+            "cu130",
+            "python3.14",
+            ["python3.14"],
+            index_loader=lambda build: (
+                ["torch-2.14.0-cp314-cp314-macosx_15_0_arm64.whl"] if build == "cpu" else []
+            ),
+            tag_loader=lambda _: ("3.14", {"cp314-cp314-macosx_15_0_arm64"}),
+        )
+        self.assertEqual(result["status"], "matches")
+        self.assertEqual(result["matches"][0]["build"], "cpu")
+        self.assertTrue(result["dependenciesNotChecked"])
 
     def test_macos_cpu_report_records_plain_torch_distribution_version(self):
         fixture = report(

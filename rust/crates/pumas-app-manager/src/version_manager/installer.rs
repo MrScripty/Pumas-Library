@@ -5,6 +5,7 @@
 mod torch;
 #[cfg(all(test, target_os = "linux", target_arch = "x86_64"))]
 mod torch_tests;
+use super::managed_python::ManagedPythonIdentity;
 pub(crate) use torch::is_torch_runtime_release;
 pub(crate) use torch::retry_pending_torch_cleanup;
 pub(crate) struct TorchInstallPlan {
@@ -14,6 +15,7 @@ pub(crate) struct TorchInstallPlan {
     pub(crate) report: String,
     pub(crate) interpreter_path: PathBuf,
     pub(crate) interpreter_hash: String,
+    pub(crate) managed_python: ManagedPythonIdentity,
 }
 #[cfg(test)]
 pub(crate) use torch::TorchPublicationPause;

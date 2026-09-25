@@ -38,7 +38,6 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
   const [runtimeOptions, setRuntimeOptions] = useState<TorchRuntimeOptions | null>(null);
   const [releaseOptions, setReleaseOptions] = useState<TorchReleaseOptionsOutcome | null>(null);
   const [build, setBuild] = useState('');
-  const [python, setPython] = useState('');
   const [adapter, setAdapter] = useState('');
   const [selectionMode, setSelectionMode] = useState<'preset' | 'upstream'>('upstream');
   const [preview, setPreview] = useState<TorchRuntimePreview | null>(null);
@@ -70,7 +69,6 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     selectionModeRef.current = 'upstream';
     setSelectionMode(selectionModeRef.current);
     setBuild('');
-    setPython('');
     setAdapter('');
     const releaseRequest = api.get_torch_release_options(tag).then((result) => {
       if (!active) return;
@@ -78,7 +76,6 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       if (selectionModeRef.current === 'preset') return;
       const choice = result.combinations.find((item) => item.build === result.recommended?.build && item.python === result.recommended.python);
       setBuild(choice?.build ?? '');
-      setPython(choice?.python ?? '');
     }).catch((cause: unknown) => {
       if (active) setError(`Release discovery inconclusive: ${errorText(cause)}`);
     }).finally(() => {
@@ -87,15 +84,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     const runtimeRequest = api.get_torch_runtime_options().then((result) => {
       if (!active) return;
       setRuntimeOptions(result);
-      if (tag === result.preset.tag && result.bundledPresetAvailable) {
-        selectionModeRef.current = 'preset';
-        setSelectionMode('preset');
-        setBuild(result.preset.build);
-        setPython(result.preset.python);
-        setAdapter(result.preset.adapter);
-      } else {
-        setAdapter(result.defaultAdapter);
-      }
+      setAdapter(result.defaultAdapter);
     }).catch((cause: unknown) => {
       if (active) setError(`Torch runtime choices unavailable: ${errorText(cause)}`);
     }).finally(() => {
@@ -120,11 +109,12 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     setAlternativesBusy(false);
   };
 
-  const probe = async (selection = { build, python, adapter }) => {
+  const selectedPython = selectionMode === 'preset' ? runtimeOptions?.preset.python ?? '' : 'auto';
+  const probe = async (selection = { build, python: selectedPython, adapter }) => {
     if (!selection.build || !selection.python || probing) return;
     const currentRequest = ++requestNumber.current;
     const key = `${selection.build}|${selection.python}|${selection.adapter}`;
-    const label = `${selection.build} · ${selection.python} · ${selection.adapter}`;
+    const label = `${selection.build} · ${selection.python === 'auto' ? 'Python selected automatically' : selection.python} · ${selection.adapter}`;
     const recordCheck = (status: CheckedCombination['status']) => {
       setChecks((previous) => [...previous.filter((item) => item.key !== key), { key, label, status }]);
     };
@@ -161,7 +151,9 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     setAlternatives(null);
     setAlternativesError(null);
     try {
-      const result = await api.find_torch_alternatives(tag, build, python);
+      const discoveryPython = releaseOptions?.combinations.find((choice) => choice.build === build)?.python;
+      if (!discoveryPython) return;
+      const result = await api.find_torch_alternatives(tag, build, discoveryPython);
       if (requestNumber.current === currentRequest) setAlternatives(result);
     } catch (cause) {
       if (requestNumber.current === currentRequest) setAlternativesError(errorText(cause));
@@ -178,30 +170,26 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     setSelectionMode(mode);
     if (mode === 'preset') {
       setBuild(runtimeOptions?.preset.build ?? '');
-      setPython(runtimeOptions?.preset.python ?? '');
       setAdapter(runtimeOptions?.preset.adapter ?? '');
     } else {
       const choice = releaseOptions?.combinations.find((item) => item.build === releaseOptions.recommended?.build && item.python === releaseOptions.recommended.python);
       setBuild(choice?.build ?? '');
-      setPython(choice?.python ?? '');
       setAdapter(runtimeOptions?.defaultAdapter ?? '');
     }
   };
   const availableBuilds = [...new Set(releaseOptions?.combinations.map((choice) => choice.build) ?? [])];
-  const availablePythons = [...new Set(releaseOptions?.combinations.filter((choice) => choice.build === build).map((choice) => choice.python) ?? [])];
   const availableAdapters = runtimeOptions?.adapters.filter((choice) => choice === 'none' || choice === 'flux2') ?? [];
   const isEligibleAlternative = (match: TorchAlternativeMatch) => match.tag === tag
     && releaseOptions?.tag === tag
     && releaseOptions.combinations.some((choice) => choice.build === match.build && choice.python === match.python);
   const eligibleAlternatives = alternatives?.matches.filter(isEligibleAlternative) ?? [];
   const eligibleCheckedBuilds = alternatives?.checkedBuilds.filter((choice) => availableBuilds.includes(choice)) ?? [];
-  const hasSelectedPython = fixedPreset
-    ? Boolean(runtimeOptions.pythons.some((choice) => choice.id === python))
-    : Boolean(releaseOptions?.combinations.some((choice) => choice.build === build && choice.python === python));
   const loadingOptions = loadingRuntimeOptions || (!fixedPreset && loadingReleaseOptions);
   const canInstall = preview !== null && Boolean(preview.previewId)
     && preview.tag === tag && preview.build === build
-    && preview.python === python && preview.adapter === adapter;
+    && Boolean(preview.python) && preview.python !== 'auto'
+    && (!fixedPreset || preview.python === runtimeOptions.preset.python)
+    && preview.adapter === adapter;
 
   return (
     <section className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-4" aria-label={`Torch installation preview for ${tag}`}>
@@ -220,10 +208,10 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
           This check resolves package files and hashes. Device use, image generation, and socket startup need later runtime checks.
         </p>
         <p className="text-xs text-[hsl(var(--text-secondary))]">
-          Managed Torch requires an already installed CPython 3.10–3.13 interpreter matching this host’s operating system and architecture; Pumas does not install Python.
+          This flow installs official binary wheels only. Source compilation is a separate unsupported path and is never used as a fallback.
         </p>
         <p className="text-xs text-[hsl(var(--text-secondary))]">
-          This flow installs official binary wheels only. Source compilation is a separate unsupported path and is never used as a fallback.
+          Pumas installs a private Python version that matches the selected Torch release and its dependencies. Python does not need to be installed on this computer.
         </p>
       </div>
       {loadingOptions ? <Loader2 aria-label="Loading Torch choices" className="animate-spin" /> : runtimeOptions && (releaseOptions || fixedPreset) && (
@@ -233,29 +221,22 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
             <button type="button" aria-pressed={!fixedPreset} onClick={() => chooseMode('upstream')} className="rounded border px-3 py-2 text-sm">Other official wheels (unverified)</button>
           </div>}
           {fixedPreset && <p className="text-sm">This release has one qualified Python 3.12 / CUDA 13.0 build.</p>}
-          {fixedPreset ? <p className="text-sm">Recommended setup: {build} · {python} · bundled image dependencies (fixed).</p> : <>
-            {build && python && <p className="text-sm">{releaseOptions?.recommended?.build === build && releaseOptions.recommended.python === python ? 'Recommended setup' : 'Selected setup'}: {build} · {python} · {adapter === 'flux2' ? 'Pumas image dependencies' : 'Core runtime only'}.</p>}
+          {fixedPreset ? <p className="text-sm">Recommended setup: {build} · {runtimeOptions.preset.python} · bundled image dependencies (fixed).</p> : <>
+            {build && <p className="text-sm">{releaseOptions?.recommended?.build === build ? 'Recommended setup' : 'Selected setup'}: {build} · Python selected automatically · {adapter === 'flux2' ? 'Pumas image dependencies' : 'Core runtime only'}.</p>}
             {!build && releaseOptions?.combinations.length ? <p role="status" className="text-sm">No setup was recommended. Open Advanced setup and choose a build to continue.</p> : null}
             {releaseOptions?.recommendationNote && <p className="text-xs text-[hsl(var(--text-secondary))]">{releaseOptions.recommendationNote}</p>}
             {adapter === 'flux2' && <p className="text-xs text-[hsl(var(--text-secondary))]">Pumas image dependencies are selected by Pumas for its FLUX.2 path; they are not part of upstream Torch.</p>}
             <details className="rounded border p-3 text-sm">
               <summary className="cursor-pointer">Advanced setup</summary>
-              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <label>Build
                   <select aria-label="Torch build" value={build} onChange={(event) => {
                     invalidatePreview();
                     const nextBuild = event.target.value;
                     setBuild(nextBuild);
-                    setPython(releaseOptions?.combinations.find((choice) => choice.build === nextBuild)?.python ?? '');
                   }} className="mt-1 block w-full rounded border bg-[hsl(var(--surface-control))] p-2">
                     <option value="">Choose a build</option>
                     {availableBuilds.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
-                  </select>
-                </label>
-                <label>Installed Python
-                  <select aria-label="Installed Python" value={python} disabled={!build} onChange={(event) => { invalidatePreview(); setPython(event.target.value); }} className="mt-1 block w-full rounded border bg-[hsl(var(--surface-control))] p-2">
-                    <option value="">Choose installed Python</option>
-                    {availablePythons.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
                   </select>
                 </label>
                 <label>Dependency profile
@@ -266,13 +247,11 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
               </div>
             </details>
           </>}
-          {fixedPreset && runtimeOptions.pythons.length === 0 && <p role="status">No compatible installed CPython interpreter was found. Install host-matched CPython 3.10–3.13, then reopen this preview.</p>}
-          {fixedPreset && runtimeOptions.pythons.length > 0 && !hasSelectedPython && <p role="status">This fixed preset requires installed CPython 3.12. Install it, then reopen this preview.</p>}
           {!fixedPreset && releaseOptions?.status === 'inconclusive' && <p role="status">Release discovery was inconclusive. Some official wheels may exist; retry later or review the available combinations.</p>}
-          {!fixedPreset && releaseOptions?.status === 'none' && <p role="status">No official wheel matches were found in this scan for an installed compatible Python.</p>}
+          {!fixedPreset && releaseOptions?.status === 'none' && <p role="status">No official wheel matches were found in this scan.</p>}
           {!fixedPreset && releaseOptions && !releaseOptions.completeScan && releaseOptions.status !== 'inconclusive' && <p role="status">This wheel scan was incomplete. Other combinations may still exist.</p>}
           {!fixedPreset && releaseOptions?.issues.map((issue, index) => <p key={`${index}-${issue}`} className="text-xs">{issue}</p>)}
-          <button type="button" disabled={!build || !hasSelectedPython || !adapter || probing} onClick={() => void probe()} className="rounded border px-3 py-2 text-sm disabled:opacity-50">
+          <button type="button" disabled={!build || !adapter || probing} onClick={() => void probe()} className="rounded border px-3 py-2 text-sm disabled:opacity-50">
             {probing ? 'Checking…' : 'Check selected combination'}
           </button>
         </>
@@ -301,8 +280,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
                 if (!isEligibleAlternative(match)) return;
                 invalidatePreview();
                 setBuild(match.build);
-                setPython(match.python);
-                void probe({ build: match.build, python: match.python, adapter });
+                void probe({ build: match.build, python: 'auto', adapter });
               }}>
                 Preview {match.tag} · {match.build} · {match.python}
               </button>
@@ -315,6 +293,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       {preview && (
         <div className="space-y-3 rounded border p-3 text-sm" role="status">
           <p className="font-medium">{fixedPreset ? 'Fixed preset highlights' : 'Exact artifacts resolved'}</p>
+          <p>Selected Python: {preview.python}</p>
           {preview.qualification === 'unverified' && <p>Artifact resolution is unverified; trial this installation before selecting it as default.</p>}
           {preview.artifacts.length > 0 && <ul className="space-y-2">{preview.artifacts.map((artifact) => (
             <li key={`${artifact.name}-${artifact.version}`} className="break-all rounded bg-[hsl(var(--surface-control))] p-2">

@@ -60,7 +60,6 @@ pub(super) const BUILDS: &[&str] = &[
     "rocm7.2",
     "rocm7.14",
 ];
-pub(super) const PYTHONS: &[&str] = &["python3.10", "python3.11", "python3.12", "python3.13"];
 const ADAPTERS: &[&str] = &["none", "flux2"];
 const PREVIEW_TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_RETAINED_TORCH_PREVIEWS: usize = 32;
@@ -118,6 +117,32 @@ fn is_bundled_preset(tag: &str, build: &str, python: &str, adapter: &str) -> boo
     tag == "v2.9.1" && build == "cu130" && python == "python3.12" && adapter == "bundled"
 }
 
+/// Preserve catalog order while retaining only Python ABIs with an exact
+/// official wheel for this release and build. An incomplete scan cannot prove
+/// absence, so callers must not provision or try a lower minor on that basis.
+fn auto_wheel_candidates(
+    catalog_minors: &[String],
+    build: &str,
+    discovery: &TorchReleaseOptionsDiscovery,
+) -> Option<Vec<String>> {
+    if !discovery.complete_scan || discovery.status == TorchReleaseOptionsStatus::Inconclusive {
+        return None;
+    }
+    Some(
+        catalog_minors
+            .iter()
+            .filter(|minor| {
+                let python = format!("python{minor}");
+                discovery
+                    .combinations
+                    .iter()
+                    .any(|wheel| wheel.build == build && wheel.python == python)
+            })
+            .cloned()
+            .collect(),
+    )
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TorchArtifact {
@@ -149,6 +174,16 @@ mod tests {
             report: String::new(),
             interpreter_path: PathBuf::from("/usr/bin/python3.12"),
             interpreter_hash: String::new(),
+            managed_python: super::managed_python::ManagedPythonIdentity {
+                python: "python3.12".into(),
+                version: "3.12.0".into(),
+                catalog_key: "cpython-3.12.0-test".into(),
+                source_url: "https://github.com/astral-sh/python-build-standalone/releases/download/test/python.tar.zst".into(),
+                target_triple: "x86_64-unknown-linux-gnu".into(),
+                uv_version: "0.12.19".into(),
+                uv_archive_sha256: "a".repeat(64),
+                executable: PathBuf::from("/usr/bin/python3.12"),
+            },
             created,
         }
     }
@@ -175,6 +210,31 @@ mod tests {
         assert!(!previews.contains_key("expired"));
         assert!(!previews.contains_key("preview-0"));
         assert!(previews.contains_key(&format!("preview-{MAX_RETAINED_TORCH_PREVIEWS}")));
+    }
+
+    #[test]
+    fn retained_managed_identity_hashes_canonical_path_without_launching_python() {
+        let root = tempfile::tempdir().unwrap();
+        let inert = root.path().join("python-that-cannot-run");
+        std::fs::write(&inert, b"provider-verified executable bytes").unwrap();
+        let mut managed = retained_preview("test", Instant::now()).managed_python;
+        managed.executable = std::fs::canonicalize(&inert).unwrap();
+        let (path, hash) = retained_managed_interpreter(&managed).unwrap();
+        assert_eq!(path, managed.executable);
+        assert_eq!(
+            hash,
+            format!(
+                "{:x}",
+                Sha256::digest(b"provider-verified executable bytes")
+            )
+        );
+        std::fs::create_dir(root.path().join("subdir")).unwrap();
+        managed.executable = root
+            .path()
+            .join("subdir")
+            .join("..")
+            .join("python-that-cannot-run");
+        assert!(retained_managed_interpreter(&managed).is_err());
     }
 
     #[test]
@@ -213,6 +273,43 @@ mod tests {
             assert!(!valid_torch_channel(build), "{build}");
         }
         assert!(!BUILDS.contains(&"cu136"));
+    }
+
+    #[test]
+    fn auto_skips_newer_python_without_exact_wheel_and_tries_newest_match_first() {
+        let catalog = vec!["3.15".into(), "3.14".into(), "3.13".into(), "3.12".into()];
+        let wheel = |build: &str, python: &str| TorchReleaseCombination {
+            build: build.into(),
+            python: python.into(),
+            wheel_url: String::new(),
+            sha256: None,
+        };
+        let mut discovery = TorchReleaseOptionsDiscovery {
+            tag: "v2.14.0".into(),
+            status: TorchReleaseOptionsStatus::Matches,
+            complete_scan: true,
+            checked_channels: vec!["cpu".into(), "cu136".into()],
+            combinations: vec![
+                wheel("cu136", "python3.14"),
+                wheel("cpu", "python3.15"),
+                wheel("cu136", "python3.12"),
+            ],
+            issues: Vec::new(),
+            detected_gpu_vendors: Vec::new(),
+            driver_status: TorchReleaseDriverStatus {
+                nvidia: TorchReleaseDriverAvailability::NotPresent,
+                amd: TorchReleaseDriverAvailability::NotPresent,
+            },
+            recommended: None,
+            recommendation_note: String::new(),
+        };
+        assert_eq!(
+            auto_wheel_candidates(&catalog, "cu136", &discovery),
+            Some(vec!["3.14".into(), "3.12".into()])
+        );
+        discovery.complete_scan = false;
+        discovery.status = TorchReleaseOptionsStatus::Inconclusive;
+        assert_eq!(auto_wheel_candidates(&catalog, "cu136", &discovery), None);
     }
 
     #[test]
@@ -536,6 +633,7 @@ pub(crate) struct RetainedTorchPreview {
     pub report: String,
     pub interpreter_path: PathBuf,
     pub interpreter_hash: String,
+    pub managed_python: super::managed_python::ManagedPythonIdentity,
     pub created: Instant,
 }
 
@@ -566,6 +664,22 @@ fn preview_token() -> Result<String> {
     getrandom::fill(&mut bytes)
         .map_err(|error| failed(format!("Preview ID randomness unavailable: {error}")))?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn retained_managed_interpreter(
+    managed: &super::managed_python::ManagedPythonIdentity,
+) -> Result<(PathBuf, String)> {
+    let path = std::fs::canonicalize(&managed.executable).map_err(PumasError::from)?;
+    if path != managed.executable || !path.is_absolute() {
+        return Err(failed(
+            "Managed Python executable is not the retained canonical path",
+        ));
+    }
+    let hash = format!(
+        "{:x}",
+        Sha256::digest(std::fs::read(&path).map_err(PumasError::from)?)
+    );
+    Ok((path, hash))
 }
 
 fn runtime_source_hashes(root: &Path) -> Result<BTreeMap<String, String>> {
@@ -645,7 +759,7 @@ fn safe_torch_tag(tag: &str) -> bool {
 }
 
 #[derive(Debug)]
-enum PreviewResolverRun {
+pub(super) enum PreviewResolverRun {
     Exited(std::process::ExitStatus),
     TimedOut,
 }
@@ -665,7 +779,7 @@ fn resolver_rejection(run: PreviewResolverRun) -> Option<TorchPreviewOutcome> {
     Some(TorchPreviewOutcome::Rejected { reason, message })
 }
 
-async fn run_preview_resolver(
+pub(super) async fn run_preview_resolver(
     mut command: Command,
     workspace: &std::sync::Arc<tempfile::TempDir>,
     deadline: Duration,
@@ -817,16 +931,22 @@ impl VersionManager {
         if self.app_id != AppId::Torch {
             return Err(failed("Torch manager required"));
         }
-        let interpreters = super::torch_alternatives::installed_torch_interpreters().await;
-        let pythons: Vec<_> = interpreters
+        let python_candidates = super::torch_alternatives::managed_torch_candidate_minors(
+            &self.launcher_root.join("launcher-data/managed-python"),
+            &self.torch_cleanup,
+        )
+        .await
+        .unwrap_or_default();
+        let pythons: Vec<_> = python_candidates
             .iter()
-            .map(
-                |(name, path)| serde_json::json!({"id": name, "label": path.display().to_string()}),
-            )
+            .map(|minor| {
+                let python = format!("python{minor}");
+                serde_json::json!({"id": python, "label": format!("Pumas-managed CPython {minor}")})
+            })
             .collect();
         let linux_x64 = cfg!(all(target_os = "linux", target_arch = "x86_64"));
         let bundled_preset_available =
-            linux_x64 && interpreters.iter().any(|(name, _)| name == "python3.12");
+            linux_x64 && python_candidates.iter().any(|minor| minor == "3.12");
         let adapters: &[&str] = if linux_x64 { ADAPTERS } else { &["none"] };
         let builds: Vec<&str> = BUILDS
             .iter()
@@ -851,7 +971,7 @@ impl VersionManager {
         Ok(
             serde_json::json!({"builds": builds, "pythons": pythons, "adapters": adapters,
             "bundledPresetAvailable": bundled_preset_available,
-            "defaultAdapter": if linux_x64 { "flux2" } else { "none" },
+            "defaultAdapter": "none",
             "preset": {"tag":"v2.9.1", "build":"cu130", "python":"python3.12", "adapter":"bundled"},
             "installed": installed}),
         )
@@ -866,7 +986,145 @@ impl VersionManager {
     ) -> Result<TorchPreviewOutcome> {
         if self.app_id != AppId::Torch
             || !supported_torch_build(build)
-            || !PYTHONS.contains(&python)
+            || (!ADAPTERS.contains(&adapter) && adapter != "bundled")
+        {
+            return Err(failed("Invalid Torch preview selection"));
+        }
+        if !cfg!(any(
+            all(target_os = "linux", target_arch = "x86_64"),
+            all(
+                target_os = "windows",
+                target_arch = "x86_64",
+                target_env = "msvc"
+            ),
+            all(target_os = "macos", target_arch = "aarch64")
+        )) {
+            return Err(failed("Managed Torch is unsupported on this platform"));
+        }
+        if !cfg!(target_os = "linux") && adapter != "none" {
+            return Err(failed(
+                "Image dependency profiles are unavailable on this platform",
+            ));
+        }
+        let python_root = self.launcher_root.join("launcher-data/managed-python");
+        let candidates = match super::torch_alternatives::managed_torch_candidate_minors(
+            &python_root,
+            &self.torch_cleanup,
+        )
+        .await
+        {
+            Ok(candidates) if candidates.len() <= 16 => candidates,
+            Ok(_) => {
+                return Ok(TorchPreviewOutcome::Rejected {
+                    reason: TorchPreviewRejectionReason::Inconclusive,
+                    message: "The managed Python catalog exceeded the bounded candidate scan.",
+                });
+            }
+            Err(_) => {
+                return Ok(TorchPreviewOutcome::Rejected {
+                    reason: TorchPreviewRejectionReason::Inconclusive,
+                    message: "The managed Python catalog could not be verified.",
+                });
+            }
+        };
+        let mut release_verified = false;
+        let requested_minors = if python == "auto" {
+            if adapter == "bundled" {
+                if !is_bundled_preset(tag, build, "python3.12", adapter) {
+                    return Err(failed(
+                        "Bundled adapters require the v2.9.1 CUDA 13.0/Python 3.12 preset",
+                    ));
+                }
+                vec!["3.12".to_owned()]
+            } else {
+                let discovery = self.discover_torch_release_options(tag).await?;
+                release_verified = true;
+                let Some(exact_minors) = auto_wheel_candidates(&candidates, build, &discovery)
+                else {
+                    return Ok(TorchPreviewOutcome::Rejected {
+                        reason: TorchPreviewRejectionReason::Inconclusive,
+                        message: "Official wheel discovery did not complete conclusively.",
+                    });
+                };
+                if exact_minors.is_empty() {
+                    return Ok(TorchPreviewOutcome::Rejected {
+                        reason: TorchPreviewRejectionReason::Unsupported,
+                        message: "No compatible official Torch wheel was found for this version, build, and the managed Python catalog.",
+                    });
+                }
+                exact_minors
+            }
+        } else {
+            let minor = python
+                .strip_prefix("python")
+                .ok_or_else(|| failed("Select automatic Python or a managed CPython choice"))?;
+            if !candidates.iter().any(|candidate| candidate == minor) {
+                return Err(failed(
+                    "Selected Python is not in the managed CPython catalog",
+                ));
+            }
+            vec![minor.to_owned()]
+        };
+        if requested_minors.is_empty() {
+            return Ok(TorchPreviewOutcome::Rejected {
+                reason: TorchPreviewRejectionReason::Inconclusive,
+                message:
+                    "No stable native CPython candidate is available from the managed provider.",
+            });
+        }
+        if !release_verified {
+            self.resolve_installable_release(tag).await?;
+        }
+        let mut last_unsupported = None;
+        for minor in requested_minors {
+            // A provisioning failure is inconclusive and must stop the search; it
+            // cannot be used as evidence that a lower Python is a better match.
+            let managed = match super::torch_alternatives::ensure_managed_torch_interpreter(
+                &python_root,
+                &self.torch_cleanup,
+                &minor,
+            )
+            .await
+            {
+                Ok(managed) => managed,
+                Err(_) => {
+                    return Ok(TorchPreviewOutcome::Rejected {
+                        reason: TorchPreviewRejectionReason::Inconclusive,
+                        message: "The managed Python interpreter could not be provisioned.",
+                    });
+                }
+            };
+            let outcome = self
+                .preview_torch_runtime_with_interpreter(tag, build, adapter, &managed)
+                .await?;
+            match outcome {
+                outcome @ TorchPreviewOutcome::Rejected {
+                    reason: TorchPreviewRejectionReason::Unsupported,
+                    ..
+                } if python == "auto" && adapter != "bundled" => {
+                    last_unsupported = Some(outcome);
+                }
+                other => return Ok(other),
+            }
+        }
+        Ok(last_unsupported.unwrap_or(TorchPreviewOutcome::Rejected {
+            reason: TorchPreviewRejectionReason::Inconclusive,
+            message: TorchPreviewRejectionReason::Inconclusive.message(),
+        }))
+    }
+
+    async fn preview_torch_runtime_with_interpreter(
+        &self,
+        tag: &str,
+        build: &str,
+        adapter: &str,
+        managed_python: &super::managed_python::ManagedPythonIdentity,
+    ) -> Result<TorchPreviewOutcome> {
+        let python = managed_python.python.as_str();
+        let interpreter = managed_python.executable.as_path();
+        if self.app_id != AppId::Torch
+            || !supported_torch_build(build)
+            || !python.starts_with("python3.")
             || (!ADAPTERS.contains(&adapter) && adapter != "bundled")
         {
             return Err(failed("Invalid Torch preview selection"));
@@ -902,28 +1160,7 @@ impl VersionManager {
                 "Bundled adapters require the v2.9.1 CUDA 13.0/Python 3.12 preset",
             ));
         }
-        self.resolve_installable_release(tag).await?;
-        let interpreters = super::torch_alternatives::installed_torch_interpreters().await;
-        let interpreter = interpreters
-            .iter()
-            .find(|(name, _)| name == python)
-            .map(|(_, path)| path)
-            .ok_or_else(|| failed("Selected Python interpreter is unavailable"))?;
-        let output = Command::new(interpreter)
-            .args([
-                "-I",
-                "-c",
-                "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
-            ])
-            .output()
-            .await
-            .map_err(|e| failed(format!("Selected Python is unavailable: {e}")))?;
         let expected_python = python.strip_prefix("python").unwrap();
-        if !output.status.success()
-            || String::from_utf8_lossy(&output.stdout).trim() != expected_python
-        {
-            return Err(failed("Selected Python interpreter has the wrong version"));
-        }
         if is_bundled_preset(tag, build, python, adapter) {
             let lock = include_str!("../../../../../torch-server/runtime/requirements.lock");
             let mut artifacts = Vec::new();
@@ -974,18 +1211,8 @@ impl VersionManager {
                 qualification: "qualified".into(),
                 expires_in_seconds: PREVIEW_TTL.as_secs(),
             };
-            let path_output = Command::new(interpreter)
-                .args(["-I", "-c", "import sys; print(sys.executable)"])
-                .output()
-                .await
-                .map_err(PumasError::from)?;
-            let interpreter_path =
-                std::fs::canonicalize(String::from_utf8_lossy(&path_output.stdout).trim())
-                    .map_err(PumasError::from)?;
-            let interpreter_hash = format!(
-                "{:x}",
-                Sha256::digest(std::fs::read(&interpreter_path).map_err(PumasError::from)?)
-            );
+            let (interpreter_path, interpreter_hash) =
+                retained_managed_interpreter(managed_python)?;
             let mut previews = self.torch_previews.lock().await;
             insert_retained_torch_preview(
                 &mut previews,
@@ -998,6 +1225,7 @@ impl VersionManager {
                         "directArtifacts":preview.artifacts, "scope":"hash-pinned lock; transitive wheel URLs are selected during install"}).to_string(),
                     interpreter_path,
                     interpreter_hash,
+                    managed_python: managed_python.clone(),
                     created: Instant::now(),
                 },
             );
@@ -1086,16 +1314,13 @@ impl VersionManager {
         let interpreter_path = std::fs::canonicalize(&parsed.interpreter)
             .map_err(|e| failed(format!("Cannot identify selected Python executable: {e}")))?;
         if !Path::new(&parsed.interpreter).is_absolute()
-            || interpreter_path != std::fs::canonicalize(interpreter).map_err(PumasError::from)?
+            || interpreter_path != managed_python.executable
         {
             return Err(failed(
                 "Resolver did not identify the selected absolute Python executable",
             ));
         }
-        let interpreter_hash = format!(
-            "{:x}",
-            Sha256::digest(std::fs::read(&interpreter_path).map_err(PumasError::from)?)
-        );
+        let (interpreter_path, interpreter_hash) = retained_managed_interpreter(managed_python)?;
         let preview_id = preview_token()?;
         let preview = TorchPreview {
             preview_id: preview_id.clone(),
@@ -1118,6 +1343,7 @@ impl VersionManager {
                 report,
                 interpreter_path,
                 interpreter_hash,
+                managed_python: managed_python.clone(),
                 created: Instant::now(),
             },
         );

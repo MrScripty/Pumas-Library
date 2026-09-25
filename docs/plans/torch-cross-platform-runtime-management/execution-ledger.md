@@ -80,3 +80,38 @@
   pending: the native QA matrix has not run, and exact CPU-wheel install/identity,
   RPC health/generation-owned stop, and packaged desktop smoke have not been
   exercised on Windows x64 or macOS arm64.
+
+## 2026-09-25 — Managed CPython and install-preview repair
+
+- Implemented the authorized Pumas-managed CPython provider for Linux x86_64,
+  Windows x86_64 MSVC, and macOS arm64. It bootstraps pinned uv without host
+  Python, provisions a private stable CPython 3.10+ runtime, and tries the
+  newest candidates first when an exact official Torch wheel and the complete
+  selected dependency profile are available. It has no user Python selector or
+  upper minor allowlist. Clean-host download, license, and native-platform
+  acceptance remain pending.
+- Traced the desktop error `Unknown API method: get_torch_release_options` to
+  Electron's method allowlist, which rejects the request before Rust dispatch.
+  Commit `6a726eac` registers the method and adds the payload regression test.
+  The toolbar-linked package still needs a published update; this work creates
+  a local candidate only.
+- Core Torch (`none`) is now the default on all targets. On Linux, FLUX.2 and
+  the qualified v2.9.1 bundled recipe require explicit user selection. The
+  preview explains that Pumas provisions its own Python runtime.
+- Linux verification: app-manager tests (178), app-manager Clippy, Electron
+  tests (12 files), Torch preview tests (14), frontend typecheck/lint, resolver
+  tests (98), Ruff, Rust formatting, and `git diff --check` pass. The exact
+  v2.14.0 remote artifact scan/install could not run because artifact hosts are
+  unreachable in this session; Windows/macOS native acceptance remains open.
+- Built local `v0.7.0` release artifacts:
+  `electron/release/Pumas.Library-0.7.0.AppImage` and
+  `electron/release/pumas-library-electron_0.7.0_amd64.deb`. The release builder
+  completed without publishing. The artifact checker verified both; the
+  headless release smoke and package smoke each reported RPC health passed for
+  the standalone backend, AppImage, and deb. Inspection confirmed the packaged
+  Electron bundle contains `get_torch_release_options` and the managed-Python
+  UI copy.
+- Next: use the candidate on a host with PyTorch/uv artifact access to run exact
+  v2.14.0 preview/install and sidecar lifecycle acceptance. Complete clean-host
+  provider/download/license and native Windows/macOS package acceptance before
+  claiming those platforms are supported.

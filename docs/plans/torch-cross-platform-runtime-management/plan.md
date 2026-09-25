@@ -5,40 +5,49 @@
 **Owner:** Pumas runtime integration
 
 **Authorization:** The repository owner authorized Windows and macOS Torch
-runtime management on 2026-09-24, retaining the existing Linux support.
+runtime management on 2026-09-24, retaining the existing Linux support. On
+2026-09-25, the owner authorized Pumas-managed CPython provisioning and removed
+the requirement for a host-installed Python interpreter or a user Python choice.
 
-**Current acceptance:** `pending` — the Windows and macOS implementation is not
-yet accepted. Native install, RPC lifecycle, and packaged desktop evidence is
-still required.
+**Current acceptance:** `pending` — a local Linux 0.7.0 AppImage and deb were
+built from the candidate source. Both packages pass artifact validation and
+their bundled RPC health smoke. The packed Electron bundle contains the
+`get_torch_release_options` registration. A live Torch 2.14.0 resolution and
+managed-CPython install still cannot run in this session because artifact hosts
+are unreachable. Windows and macOS still need native install, RPC lifecycle, and
+packaged desktop evidence.
 
-**Current phase:** M2 native acceptance. M1 implementation and repair are
-complete in the candidate branch. Linux regressions and Windows GNU test-target
-compilation pass; macOS test-target compilation and Windows/macOS native test
-execution have not run in this Linux session.
+**Current phase:** M1b managed interpreter provisioning and Linux packaging are
+implemented and reviewed. Commit `6a726eac` fixes the missing Electron allowlist
+entry for `get_torch_release_options`; the local candidate contains it. The
+desktop package linked from the toolbar has not been replaced or published.
+Clean-host Python provisioning and native Windows/macOS packaging remain
+outstanding.
 
-**Blockers:** No known code blocker remains from the architecture or independent
-reviews. Native Windows and macOS acceptance evidence is unavailable here:
-real wheel preview/install/identity, RPC health and generation-owned stop, and
-packaged desktop smoke must run on their target systems. The new native QA
-matrix is committed as a gate but has not run for this candidate.
+**Blockers:** No design blocker remains. This Linux session cannot resolve the
+uv, Python, or PyTorch artifact hosts, so provider-byte verification and a live
+no-host-Python install cannot run. Native Windows and macOS execution is not
+available here and remains a separate acceptance gate.
 
-**Next slice:** On native Windows x64 and macOS arm64 runners, run the candidate's
-Torch QA matrix, then exercise exact official CPU-wheel preview/install/identity,
-RPC start/health/owned-stop, and packaged desktop smoke. Record each runner,
-environment, result, and artifact before changing M2 acceptance.
+**Next slice:** On a host with artifact access, install Torch v2.14.0 Core
+runtime from the local candidate and record the selected managed CPython,
+resolved wheel set, installed identity, and sidecar lifecycle. Run provider
+download/integrity/license and exact-wheel install acceptance on native Linux,
+Windows x64, and macOS arm64 runners before changing platform acceptance.
 
 ## Objective and scope
 
 Extend the existing Torch release manager so users can discover a stable
-upstream Torch release, let Pumas select an exact official wheel matching the
-host and an installed supported Python, preview the complete hash-locked
-dependencies, install and inspect it, explicitly select it, and start/stop its
-managed sidecar through the existing RPC and desktop flows.
+upstream Torch release, let Pumas provision the newest stable CPython that
+matches an exact official wheel and resolves the complete selected dependency
+profile, install and inspect it, explicitly select it, and start/stop its
+managed sidecar through the existing RPC and desktop flows. The host does not
+need Python on `PATH`, and the desktop does not require a Python selection.
 
-“Any release” continues to mean an upstream stable tag for which the exact host,
-Python, official wheel, and complete dependency resolution exist. It does not
-promise a wheel for every release or every supported host. Python provisioning,
-source builds, and unqualified adapters are outside this objective.
+“Any release” continues to mean an upstream stable tag for which an exact host,
+stable standard-CPython wheel, and complete dependency resolution exist. It does
+not promise a wheel for every release or every supported host. Source builds and
+unqualified adapters remain outside this objective.
 
 The current accepted Linux contract remains the regression baseline in the
 [upstream version-management plan](../torch-upstream-version-management/plan.md)
@@ -57,15 +66,42 @@ recorded exact tuples.
 | macOS arm64 | `aarch64-apple-darwin`; arm64 DMG | Discover exact official native CPU wheels; inspect MPS after installation as an optional runtime capability, not a separate Torch build channel | The interpreter and wheel must be native arm64. Intel Mac and Rosetta/x86_64 Torch runtimes are unsupported. No CUDA/ROCm claim |
 
 The target triples and artifacts match the current release contract in
-[`artifact-plan.json`](../../../scripts/release/artifact-plan.json#L58). Use an
-already installed CPython 3.10–3.13 interpreter whose own supported wheel tags
-match the Pumas process architecture, selected official Torch wheel, and all
-resolved dependencies. Discover and rank eligible interpreters automatically;
-keep interpreter/build overrides advanced and constrained to exact matches.
-Do not provision Python or infer compatibility from a display name.
+[`artifact-plan.json`](../../../scripts/release/artifact-plan.json#L58). Pumas
+owns a private CPython installation depot. Candidate stable CPython minor
+versions come from the exact official Torch wheel tags and the pinned Python
+distribution catalog in the pinned uv release; do not maintain a Pumas upper
+version allowlist or treat prerelease/free-threaded tags as standard CPython.
+CPython 3.10 is Pumas' runtime minimum; there is no configured upper minor cap.
+Rank candidates numerically from newest to oldest, validate each installed
+interpreter's observed target and `sys_tags()`, and retain the first complete
+dependency resolution. A proven missing wheel or dependency incompatibility can
+advance to the next candidate. Network failure, timeout, provisioning failure,
+integrity failure, or incomplete scans are inconclusive and cannot justify a
+lower Python version. The user never has to install or choose Python.
+
+The app-manager downloads and bootstraps uv 0.12.19 for the shipped Linux x86_64 GNU, Windows
+x86_64 MSVC, and macOS arm64 targets from versioned official archives. It
+verifies each archive against the exact SHA-256 in the provider report before
+extracting or executing it. uv's Python distribution catalog is embedded and
+frozen per uv release; its exact binary pin therefore pins that catalog too.
+The manager enumerates that catalog on the native host, filters to stable
+standard CPython candidates, and sorts them newest-first. One managed
+interpreter acts as a bootstrap for native wheel discovery; the resolver
+synthesizes standard CPython tags for the catalog candidates, so discovery does
+not install every Python minor. Preview provisions real candidates in bounded
+newest-first order and runs complete dependency resolution under each candidate.
+An exact absent wheel or definite dependency incompatibility permits trying the
+next candidate. Network, provider, timeout, integrity, or incomplete-scan
+outcomes stop as inconclusive. uv
+provisions Python Build Standalone CPython releases; Pumas must retain the
+selected distribution URL, version, target/build, pinned uv/catalog identity,
+and a fingerprint of the installed interpreter. uv verifies the CPython archive
+using the checksum in its pinned embedded catalog. The CPython build source must
+be described accurately and not as a Python.org installer.
 
 The release manager retains the exact upstream wheel URL, hash, distribution
-version, build identity, interpreter fingerprint, and dependency lock. Validate
+version, build identity, managed interpreter distribution identity and
+fingerprint, and dependency lock. Validate
 the observed installed Torch identity against that retained resolution. The
 Torch distribution version is not always `release+build`: for example, the
 official Torch 2.14.0 CPU index publishes Windows wheels named
@@ -75,7 +111,7 @@ upstream distribution version. Do not manufacture a `+cpu` local version for
 the macOS artifact.
 
 Exact package availability is determined from official indexes and the
-installed interpreter's `packaging.tags.sys_tags()`, not a Pumas release
+provisioned interpreter's `packaging.tags.sys_tags()`, not a Pumas Torch release
 allowlist or a guessed OS floor. Full preview remains required before install;
 an exact wheel match alone never claims dependency compatibility. On macOS,
 MPS availability is probed from the installed Torch runtime and host. MPS does
@@ -87,22 +123,38 @@ Stable upstream tag discovery remains global and independent of this support
 matrix; install choices are limited to exact compatible host tuples. The
 bundled v2.9.1 Linux preset is Linux-only. The manager will expose an explicit
 `bundledPresetAvailable` host capability, true only for Linux x86_64 when its
-required CPython 3.12 interpreter is present; the desktop must use that result
-instead of the release tag alone. Windows and macOS use the retained dynamic
-preview and wheel lock.
+managed CPython 3.12 provider artifact is available; the desktop must use that
+result instead of the release tag alone. Windows and macOS use the retained
+dynamic preview and wheel lock.
 
-On Windows and macOS, Core Torch runtime (`none`) is the default dependency
-profile and the only offered adapter until a platform-specific image adapter
-has its own accepted plan. Linux retains its current default/profile behavior.
-The desktop displays this manager-provided default rather than guessing from
-the OS. This enables portable Torch install/select/start without suggesting
-FLUX.2 or Nunchaku inference has been qualified there.
+On every supported target, Core Torch runtime (`none`) is the default dependency
+profile. Linux may offer Pumas' FLUX.2 profile as an explicit advanced choice;
+Windows and macOS offer only core Torch until a platform-specific image adapter
+has its own accepted plan. The desktop displays the manager-provided default
+rather than guessing from the OS. This enables portable Torch install/select/
+start without suggesting FLUX.2 or Nunchaku inference has been qualified on
+every release or platform.
 
 ## Ownership and design
 
-- `pumas-app-manager` continues to own release choices, automatic interpreter
-  selection, retained previews, staged installation, identity, selection, and
-  cleanup admission.
+- `pumas-app-manager` owns release choices, CPython candidate ranking and
+  provisioning, retained interpreter leases/previews, staged Torch installation,
+  identity, selection, and cleanup admission. Python artifacts live in an
+  immutable Pumas-managed depot; uv's disposable download cache is separate.
+- The app-manager invokes only the exact-hash-pinned uv binary that it has
+  downloaded into its private bootstrap directory and verified. It clears
+  ambient uv configuration, forces manager-owned Python, uses private
+  install/cache directories, disables PATH shims and (on Windows) registry
+  writes, and never runs a shell installer or administrator operation.
+- A selected Python distribution's source catalog identity, exact CPython
+  version, native target/build, download URL, uv/catalog identity, executable
+  fingerprint, and observed `sys_tags()` remain attached to its retained
+  preview and installed runtime record. uv verifies the Python archive with the
+  digest from its embedded catalog.
+  Existing installations keep their original base interpreter; managed-runtime
+  cleanup may not delete an interpreter referenced by a preview, install, or
+  installed runtime. Automatic pruning is out of scope until reference-safe
+  removal is implemented.
 - `torch-server/resolve_runtime.py` continues to own pip dry-run resolution,
   wheel-tag matching, official wheel provenance, and hash reporting. Its
   protocol must carry the upstream distribution version and exact build as
@@ -113,45 +165,51 @@ FLUX.2 or Nunchaku inference has been qualified there.
   belong in the existing platform process API and, if the lifecycle interface
   needs its own depth, one `pumas-core/src/platform/managed_child.rs` module;
   installer and resolver operations remain their manager owners.
-- RPC and generated contracts remain unchanged unless a required capability
-  fact cannot be expressed by existing release-options, preview, install,
-  selection, and startup results. Any contract change is serial and owns its
-  generated artifacts.
+- RPC and generated contracts remain unchanged unless the request must allow an
+  automatic Python choice or the response must report provisioning progress and
+  selected interpreter identity. Any contract change is serial and updates its
+  generator, Rust source, generated artifacts, preload, and consumers together.
 - The desktop remains a presentation of manager-returned exact choices. It must
   not infer OS support, invent builds, select a mismatched interpreter, or
-  interpret MPS as an image adapter. It uses manager-provided
+  interpret MPS as an image adapter. It never requires a Python selector and
+  reports the manager-selected interpreter after resolution. It uses manager-provided
   `bundledPresetAvailable` and `defaultAdapter` capabilities rather than
   enabling the Linux bundled preset merely because the selected tag is v2.9.1.
 
 ### Composed-design review
 
-**Applicability:** `applicable` — the work changes target selection and
-process-lifecycle seams across resolver, manager, and platform runtime owners.
+**Applicability:** `applicable` — the work changes target selection, dependency
+provisioning, Python runtime persistence, and process-lifecycle seams across the
+resolver, manager, desktop, and platform runtime owners.
 
 1. **Independent concerns:** upstream wheel identity and interpreter tags
-   (Python resolver); host hardware facts and recommendations (manager); staged
-   version identity/publication (installer); native process supervision
-   (platform lifecycle); choice presentation (existing RPC/desktop).
+   (Python resolver); managed CPython artifacts and leases (interpreter owner);
+   host hardware facts and recommendations (manager); staged version
+   identity/publication (installer); native process supervision (platform
+   lifecycle); choice presentation (RPC/desktop).
 2. **Interleavings:** release/build/distribution version; target/architecture/
-   Python ABI and wheel tags; hardware/driver evidence; wheel URLs and hashes;
+   Python ABI and wheel tags; Python provider version/catalog/artifact and
+   retained interpreter; hardware/driver evidence; wheel URLs and hashes;
    staged directory and cleanup; process generation and cancellation. These
    remain explicit fields/outcomes at the manager boundaries.
 3. **Caller knowledge:** RPC/desktop clients consume manager choices, retained
-   preview identifiers, and lifecycle status. They do not parse platform paths,
-   wheel filenames, drivers, or process IDs to decide support.
+   preview identifiers, interpreter identity, and lifecycle status. They do not
+   parse platform paths, wheel filenames, drivers, or process IDs to decide
+   support.
 4. **Representative changes:** a new supported host must update target facts,
    exact wheel fixtures/resolution, manager host/interpreter detection, native
-   lifecycle evidence, and its native CI acceptance. A new upstream wheel tag
-   remains local to official-tag resolution and its tests. A new image adapter
-   does not change this runtime-management contract.
+   lifecycle evidence, provisioned Python target, and its native CI acceptance.
+   A new upstream wheel tag remains local to official-tag resolution and its
+   tests. A new image adapter does not change this runtime-management contract.
 5. **Stable interfaces:** exact artifact and host facts cross the resolver to
    manager; the retained resolution crosses preview to installer; process
    owners expose generation-scoped lifecycle results. OS path strings,
    display text, or ambient command lookup do not act as artifact identity.
 6. **Independent verification:** resolver tags can be fixture-tested; host
-   detection and venv paths are tested natively; process-group/job ownership,
-   cleanup, and sidecar lifecycle require native target execution. Integration
-   remains in the manager/API and desktop composition.
+   detection, Python provisioning, and venv paths require clean-host native
+   execution; process-group/job ownership, cleanup, and sidecar lifecycle also
+   require native target execution. Integration remains in the manager/API and
+   desktop composition.
 7. **Independent evolution and deletion test:** Linux/macOS process-group
    mechanics and Windows Job ownership may fail and evolve independently behind
    one generation-lifecycle contract. The Windows child must be created
@@ -162,21 +220,26 @@ process-lifecycle seams across resolver, manager, and platform runtime owners.
    Strategy/Factory or one-file-per-platform mirror. Any new process primitive
    must remove duplicate Linux-only process-tree logic from its callers and
    enforce generation ownership; otherwise delete it.
-8. **Necessary complexity:** exact wheel-tag compatibility and native
-   process-tree ownership are required complexity, contained in resolver and
-   process-lifecycle owners. No new public API or package dependency is admitted
-   unless implementation evidence shows the current owners cannot express the
-   contract.
+8. **Necessary complexity:** exact wheel-tag compatibility, private interpreter
+   provisioning, and native process-tree ownership are required complexity,
+   contained in the resolver, manager-owned interpreter lifecycle, and process
+   lifecycle. uv is selected over local archive installation because it owns
+   Python distribution selection, integrity checks, and platform installation;
+   Pumas retains policy, artifact identity, private paths, leases, and cleanup.
+   The target uv binary and its embedded interpreter catalog are pinned
+   together. Do not use ambient uv or runtime `latest` URLs.
 
 ## Acceptance claims
 
 | ID | Observable criterion | Evidence required | Status |
 | --- | --- | --- | --- |
 | X1 | Linux behavior and existing accepted v2.9.0 install/v2.10 Tuldok evidence remain accurately scoped and pass relevant regression gates | Existing Linux manager/resolver/RPC/frontend suites; retained historical evidence references | pending |
-| X2 | Windows x64 and macOS arm64 discovery returns only exact official wheels whose tags match an installed supported native CPython; CPU/MPS/CUDA choices follow this contract | Native wheel fixtures, wrong-OS/architecture/interpreter rejection, live official-index scan on both native runners | pending |
-| X3 | Preview retains the exact distribution version, release/build, official wheel URL/hash, interpreter identity, and complete dependencies; install stages and verifies that exact identity before publication | Resolver/Rust contract fixtures plus real official CPU wheel preview, install, identity and cleanup on Windows/macOS | pending |
-| X4 | Installed versions can be inspected, explicitly selected, started with health/protocol checks, and stopped by their owned generation; cancellation, timeout, RPC shutdown, and failed cleanup do not leak a resolver, installer, sidecar, or unregistered runtime | Native lifecycle tests and real RPC start/health/owned-stop integration on Windows/macOS; Linux regression | pending |
-| X5 | The same manager choices and lifecycle are reachable through packaged desktop controls and the existing RPC API; the desktop consumes manager-provided preset/default-adapter capability and offers no unsupported adapter | Preload boundary validation, composed desktop tests, native RPC integration, packaged desktop smoke on all declared targets | pending |
+| X2 | Each shipped target provisions a private stable standard CPython 3.10 or newer without a host Python dependency or global PATH/registry changes; artifact integrity, target identity, cache separation, cancellation, and retention are verified | Clean-host native provisioning and tamper/cancel/retry tests on Linux, Windows, and macOS; downloaded uv digest and license checks | pending |
+| X3 | Candidate versions come from exact official standard-CPython wheel tags and the pinned stable provider catalog; the manager tries highest to lowest, selects the newest complete compatible resolution, and never treats network/provisioning failure as a reason to downgrade | CPython 3.14 preference when fully resolved; definite 3.14 dependency incompatibility falls to 3.13; prerelease/free-threaded/wrong-target and pre-3.10 artifact rejection; incomplete scan/provider failures remain typed inconclusive | pending |
+| X4 | Windows x64 and macOS arm64 discovery returns only exact official wheels whose tags match the provisioned native CPython; CPU/MPS/CUDA choices follow this contract | Native wheel fixtures, wrong-OS/architecture/interpreter rejection, live official-index scan on both native runners | pending |
+| X5 | Preview retains the exact distribution version, release/build, official wheel URL/hash, Python provider artifact identity, interpreter fingerprint, and complete dependencies; install stages and verifies that exact identity before publication | Resolver/Rust contract fixtures plus real official CPU-wheel preview, install, identity, and cleanup on every declared target | pending |
+| X6 | Installed versions can be inspected, explicitly selected, started with health/protocol checks, and stopped by their owned generation; cancellation, timeout, RPC shutdown, and failed cleanup do not leak a resolver, installer, sidecar, interpreter provisioner, or unregistered runtime | Native lifecycle tests and real RPC health/generation-owned stop on Windows/macOS; Linux regression | pending |
+| X7 | The same manager choices and lifecycle are reachable through packaged desktop controls and the existing RPC API; the user never has to choose Python, and the desktop offers no unsupported adapter | Preload boundary validation, composed desktop tests, native RPC integration, packaged desktop smoke with no Python on PATH on all declared targets | pending |
 
 Plan acceptance is `pending` until every required row is satisfied on its
 declared native environment. Cross-compilation, Linux simulation, packaging,
@@ -233,19 +296,40 @@ and unit fixtures do not substitute for the Windows/macOS runtime claims.
 - **Verification:** Focused Python and Rust suites; Rust format/Clippy; native
   Windows/macOS cargo and Python QA; exact release preview and lifecycle smoke.
 - **Re-plan trigger:** A native target requires a contract/schema change,
-  process primitive outside the existing ownership boundary, Python version
-  expansion, or a non-CPU runtime claim unsupported by official evidence.
+  process primitive outside the existing ownership boundary, or a non-CPU
+  runtime claim unsupported by official evidence.
 - **State:** Implemented; target-native acceptance pending.
+
+### M1b — Managed stable CPython
+
+- **Goal:** Bootstrap a pinned uv helper without host Python, enumerate its
+  target-native catalog, use it to discover native candidate wheel tags without
+  provisioning every Python minor, then provision newest-first Python
+  candidates in Pumas-owned storage, retain exact provider/interpreter identity,
+  resolve dependencies against the
+  observed wheel tags, and keep the user-facing flow automatic.
+- **Write sets:** App-manager Python provider/lease and Torch manager/resolver
+  files; Torch install UI and focused tests; Electron bridge timeout policy and
+  tests; uv pin and attribution files; Linux/Windows/macOS native provisioning
+  QA. The existing RPC string request already accepts `python: "auto"`, so this
+  change does not require generated contract or preload changes. Root owns
+  plan/inventory, native workflow composition, final review, and commit.
+- **Verification:** Pinned uv artifact digest/version checks; stable catalog
+  selection; managed Python 3.14 with full resolution; definite-incompatibility
+  fallback to 3.13; inconclusive failures do not downgrade; clean host PATH,
+  concurrency/cancellation, immutable retention, tamper, and safe cleanup tests.
+- **State:** Manager/provider/resolver/UI implementation is present; target
+  native acceptance and clean-host provisioning are pending.
 
 ### M2 — Native acceptance and inventory
 
 - **Goal:** Collect target-native resolver/install/lifecycle/packaged desktop
-  evidence, update the existing Torch inventory, and report any model-support
-  limit without broadening Tuldok claims.
+  evidence for managed Python and update the existing Torch inventory without
+  broadening Tuldok claims.
 - **Write set:** New plan evidence/report; relevant sections of
   `docs/plans/torch-diffusion-serving/reports/upstream-version-manager-progress.md`;
   execution ledger. Existing historical model reports remain unchanged.
-- **Verification:** Every X1–X5 claim has an evidence environment, execution
+- **Verification:** Every X1–X7 claim has an evidence environment, execution
   mode, result, and link. Reuse read-only review for any lifecycle/security
   repair.
 - **State:** Active; native acceptance pending.
@@ -291,9 +375,10 @@ and unit fixtures do not substitute for the Windows/macOS runtime claims.
 - [Execution ledger](execution-ledger.md)
 - [Issues and dispositions](issues.md)
 - [Official target and wheel research](reports/target-wheel-research.md)
+- [Managed Python provider admission](reports/managed-python-provider.md)
 - Coding Standards MCP policies applied: `topic.cross-platform`,
   `profile.language.rust.cross-platform`, `topic.architecture`,
   `profile.language.rust.security`, `topic.security.filesystem-containment`,
   `topic.contracts`, `topic.dependencies`, `workflow.planning`, and
-  `workflow.verification.platforms` from snapshot
-  `snapshot:v1:305ccfba-eed5-46b7-bfa2-02868fe804b3`.
+  `topic.licensing`, `workflow.verification.platforms` from snapshot
+  `snapshot:v1:588a50a0-e97e-444d-9c6b-a383baa4dfcf`.

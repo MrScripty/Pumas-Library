@@ -14,6 +14,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from pip._vendor.packaging import tags as packaging_tags
 from urllib.parse import unquote, urljoin, urlparse, urlunparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -92,6 +93,7 @@ RELEASE_ROOT_URL = "https://download.pytorch.org/whl/"
 MAX_RELEASE_ROOT_BYTES = 200_000
 MAX_RELEASE_CHANNELS = 64
 MAX_RELEASE_INTERPRETERS = 4
+MAX_RELEASE_CANDIDATES = 16
 MAX_RELEASE_WORKERS = 8
 MAX_RELEASE_SCAN_SECONDS = 30
 RELEASE_CHANNEL = re.compile(r"cpu|cu\d+|rocm\d+(?:\.\d+)+")
@@ -269,23 +271,76 @@ def interpreter_tags(interpreter: str) -> tuple[str, set[str]]:
     target = native_target(
         details["platform"], details["machine"], details["python"], details["implementation"]
     )
-    suffix = {
+    suffix = native_platform_pattern(target)
+    tags = {tag for tag in details["tags"] if suffix.fullmatch(tag.rsplit("-", 1)[-1])}
+    return details["python"], tags
+
+
+def native_platform_pattern(target: str) -> re.Pattern:
+    return {
         "linux": re.compile(r"(?:manylinux[^-]*|musllinux[^-]*|linux)_x86_64"),
         "windows": re.compile(r"win_amd64"),
         "macos": re.compile(r"macosx_\d+_\d+_(?:arm64|universal2)"),
     }[target]
-    tags = {tag for tag in details["tags"] if suffix.fullmatch(tag.rsplit("-", 1)[-1])}
-    return details["python"], tags
+
+
+def bootstrap_platform_tags(interpreter: str) -> tuple[str, list[str]]:
+    """Read native host platforms from one installed bootstrap interpreter."""
+    code = (
+        "import json,platform,sys;"
+        "from pip._vendor.packaging.tags import platform_tags;"
+        "print(json.dumps({'python':f'{sys.version_info.major}.{sys.version_info.minor}',"
+        "'platform':sys.platform,'machine':platform.machine(),"
+        "'implementation':sys.implementation.name,'platforms':list(platform_tags())}))"
+    )
+    completed = subprocess.run(
+        [interpreter, "-I", "-c", code], capture_output=True, text=True, timeout=4, check=False
+    )
+    if completed.returncode:
+        raise ValueError("Bootstrap interpreter cannot report native platform tags")
+    details = json.loads(completed.stdout)
+    target = native_target(
+        details["platform"], details["machine"], details["python"], details["implementation"]
+    )
+    pattern = native_platform_pattern(target)
+    platforms = list(dict.fromkeys(tag for tag in details["platforms"] if pattern.fullmatch(tag)))
+    if not platforms:
+        raise ValueError("Bootstrap interpreter reported no native platform tags")
+    return target, platforms
+
+
+def candidate_cpython_tags(python: str, target: str, platforms: list[str]) -> set[str]:
+    """Synthesize standard CPython tags on the observed native host platforms."""
+    version = candidate_python_version(python)
+    if target not in {"linux", "windows", "macos"}:
+        raise ValueError("Python candidate target must be native Linux, Windows, or macOS")
+    if not platforms or any(not native_platform_pattern(target).fullmatch(p) for p in platforms):
+        raise ValueError("Python candidate platforms must match the native host")
+    generated = (
+        *packaging_tags.cpython_tags(python_version=version, platforms=platforms),
+        *packaging_tags.compatible_tags(
+            python_version=version, interpreter=f"cp{version[0]}{version[1]}", platforms=platforms
+        ),
+    )
+    return {str(tag) for tag in generated if tag.platform in platforms}
+
+
+def candidate_python_version(python: str) -> tuple[int, int]:
+    """Accept stable CPython 3.10+ minors without guessing an upper bound."""
+    match = re.fullmatch(r"3\.([1-9]\d*)", python)
+    if not match or int(match.group(1)) < 10:
+        raise ValueError("Python candidates must be stable CPython 3.10 or newer minors")
+    return 3, int(match.group(1))
 
 
 def native_target(system: str, machine: str, python: str, implementation: str) -> str:
     """Name a supported native target; reject translated or foreign architectures."""
     if implementation != "cpython":
         raise ValueError("A native CPython interpreter is required")
+    if not re.fullmatch(r"3\.\d+", python):
+        raise ValueError("A stable CPython 3 interpreter is required")
     if system == "linux" and machine == "x86_64":
         return "linux"
-    if not re.fullmatch(r"3\.(10|11|12|13)", python):
-        raise ValueError("Windows and macOS require CPython 3.10 through 3.13")
     if system == "win32" and machine.lower() in {"amd64", "x86_64"}:
         return "windows"
     if system == "darwin" and machine == "arm64":
@@ -360,7 +415,7 @@ def discover_alternatives(
     version = selected_tag.removeprefix("v")
     if not re.fullmatch(r"\d+\.\d+\.\d+", version) or not RELEASE_CHANNEL.fullmatch(selected_build):
         raise ValueError("Select a stable Torch tag and supported build")
-    if not re.fullmatch(r"python3\.(10|11|12|13)", selected_python):
+    if not re.fullmatch(r"python3\.\d+", selected_python):
         raise ValueError("Select a supported Python version")
     issues = []
     installed = {}
@@ -426,27 +481,47 @@ def discover_release_options(
     root_loader=torch_root_channels,
     index_loader=torch_index_links,
     tag_loader=interpreter_tags,
+    python_candidates: list[str] | None = None,
+    platform_loader=bootstrap_platform_tags,
 ) -> dict:
     """Find every exact wheel in a bounded scan of official stable channels."""
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise ValueError("Select a stable upstream Torch version")
     if not interpreters:
         raise ValueError("Release options require at least one installed interpreter")
+    if python_candidates is not None:
+        if len(interpreters) != 1 or not python_candidates:
+            raise ValueError("Python candidates require one native bootstrap interpreter")
+        for python in python_candidates:
+            candidate_python_version(python)
     deadline = time.monotonic() + MAX_RELEASE_SCAN_SECONDS
     issues = []
     installed = {}
-    if len(interpreters) > MAX_RELEASE_INTERPRETERS:
-        issues.append(f"Only the first {MAX_RELEASE_INTERPRETERS} interpreters were checked")
-    for number, interpreter in enumerate(interpreters[:MAX_RELEASE_INTERPRETERS], start=1):
+    if python_candidates is not None:
+        candidates = list(dict.fromkeys(python_candidates))
+        if len(candidates) > MAX_RELEASE_CANDIDATES:
+            issues.append(f"Only the first {MAX_RELEASE_CANDIDATES} Python candidates were checked")
         try:
-            python, tags = tag_loader(interpreter)
-            if not re.fullmatch(r"\d+\.\d+", python):
-                raise ValueError("Invalid interpreter version")
-            installed.setdefault(f"python{python}", set()).update(tags)
+            target, platforms = platform_loader(interpreters[0])
+            for python in candidates[:MAX_RELEASE_CANDIDATES]:
+                installed[f"python{python}"] = candidate_cpython_tags(python, target, platforms)
         except (OSError, ValueError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
             issues.append(
-                f"Interpreter {number} could not report compatible tags: {type(error).__name__}"
+                f"Bootstrap interpreter could not report native tags: {type(error).__name__}"
             )
+    else:
+        if len(interpreters) > MAX_RELEASE_INTERPRETERS:
+            issues.append(f"Only the first {MAX_RELEASE_INTERPRETERS} interpreters were checked")
+        for number, interpreter in enumerate(interpreters[:MAX_RELEASE_INTERPRETERS], start=1):
+            try:
+                python, tags = tag_loader(interpreter)
+                if not re.fullmatch(r"\d+\.\d+", python):
+                    raise ValueError("Invalid interpreter version")
+                installed.setdefault(f"python{python}", set()).update(tags)
+            except (OSError, ValueError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
+                issues.append(
+                    f"Interpreter {number} could not report compatible tags: {type(error).__name__}"
+                )
 
     checked_channels = []
     combinations = []
@@ -463,7 +538,7 @@ def discover_release_options(
         }
 
     if not installed:
-        issues.append("No installed interpreter could report compatible native wheel tags")
+        issues.append("No interpreter could report compatible native wheel tags")
         return result()
     try:
         raw_channels = root_loader()
@@ -535,8 +610,18 @@ def discover_release_options(
                     break
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
+    python_order = (
+        {f"python{python}": index for index, python in enumerate(candidates)}
+        if python_candidates is not None
+        else {}
+    )
     combinations.sort(
-        key=lambda item: (checked_channels.index(item["build"]), item["python"], item["wheelUrl"])
+        key=lambda item: (
+            checked_channels.index(item["build"]),
+            python_order.get(item["python"], len(python_order)),
+            item["python"],
+            item["wheelUrl"],
+        )
     )
     return result()
 
@@ -740,6 +825,7 @@ def main() -> None:
     parser.add_argument("--release-options", action="store_true")
     parser.add_argument("--selected-python")
     parser.add_argument("--interpreter", action="append", default=[])
+    parser.add_argument("--python-candidate", action="append")
     args = parser.parse_args()
     if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
         parser.error("Only stable upstream Torch versions are supported")
@@ -754,14 +840,23 @@ def main() -> None:
             parser.error("Release options accepts only --version and one or more --interpreter")
         if not args.interpreter:
             parser.error("Release options requires at least one --interpreter")
+        if args.python_candidate is not None and len(args.interpreter) != 1:
+            parser.error("Python candidates require exactly one bootstrap --interpreter")
         try:
-            result = discover_release_options(args.version, args.interpreter)
+            if args.python_candidate is None:
+                result = discover_release_options(args.version, args.interpreter)
+            else:
+                result = discover_release_options(
+                    args.version, args.interpreter, python_candidates=args.python_candidate
+                )
         except ValueError as error:
             parser.exit(2, f"{error}\n")
         print(json.dumps(result), flush=True)
         return
     if args.build is None:
         parser.error("Resolution and discovery require --build")
+    if args.python_candidate is not None:
+        parser.error("--python-candidate is only valid with --release-options")
     if not RELEASE_CHANNEL.fullmatch(args.build):
         parser.error("Select a canonical CPU, CUDA, or ROCm build channel")
     if args.discover:

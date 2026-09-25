@@ -1,7 +1,11 @@
-//! Bounded discovery of official Torch wheels for installed Python interpreters.
+//! Bounded discovery of official Torch wheels for managed Python candidates.
 //! A wheel match is only a lead; dependencies and adapters are not resolved.
 
-use super::torch_preview::{valid_torch_channel, PYTHONS};
+use super::managed_python::{
+    ensure_managed_torch_interpreter as provision_managed_torch_interpreter,
+    list_managed_torch_candidates, ManagedPythonFailure, ManagedPythonIdentity,
+};
+use super::torch_preview::valid_torch_channel;
 use super::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -30,14 +34,6 @@ impl TorchHostTarget {
             Some(Self::MacosArm64)
         } else {
             None
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::LinuxX8664 => "Linux x86_64",
-            Self::WindowsX8664 => "Windows x86_64",
-            Self::MacosArm64 => "macOS arm64",
         }
     }
 }
@@ -250,92 +246,80 @@ fn amd_driver_available(devices_root: &Path) -> TorchReleaseDriverAvailability {
     TorchReleaseDriverAvailability::Unavailable
 }
 
-fn python_probe_candidates(target: TorchHostTarget, python: &str) -> Vec<(String, Vec<String>)> {
-    match target {
-        TorchHostTarget::WindowsX8664 => vec![
-            (
-                "py".into(),
-                vec![format!("-{}", python.trim_start_matches("python"))],
-            ),
-            (python.into(), Vec::new()),
-            ("python".into(), Vec::new()),
-        ],
-        TorchHostTarget::LinuxX8664 | TorchHostTarget::MacosArm64 => {
-            vec![
-                (python.into(), Vec::new()),
-                ("python3".into(), Vec::new()),
-                ("python".into(), Vec::new()),
-            ]
-        }
-    }
+fn managed_python_error(error: ManagedPythonFailure) -> PumasError {
+    unsupported_input(error.message)
 }
 
-#[derive(Deserialize)]
-struct PythonIdentityProbe {
-    path: String,
-    version: String,
-    platform: String,
-    machine: String,
-    implementation: String,
-    bits: u8,
+fn catalog_python_minor(python: &str, candidates: &[String]) -> Option<String> {
+    let minor = python.strip_prefix("python")?;
+    candidates
+        .iter()
+        .any(|candidate| candidate == minor)
+        .then(|| minor.to_owned())
 }
 
-fn python_probe_path(output: &[u8], target: TorchHostTarget, python: &str) -> Option<PathBuf> {
-    let identity: PythonIdentityProbe = serde_json::from_slice(output).ok()?;
-    let native = match target {
-        TorchHostTarget::LinuxX8664 => {
-            identity.platform == "linux" && identity.machine.eq_ignore_ascii_case("x86_64")
-        }
-        TorchHostTarget::WindowsX8664 => {
-            identity.platform == "win32"
-                && (identity.machine.eq_ignore_ascii_case("amd64")
-                    || identity.machine.eq_ignore_ascii_case("x86_64"))
-        }
-        TorchHostTarget::MacosArm64 => {
-            identity.platform == "darwin" && identity.machine.eq_ignore_ascii_case("arm64")
-        }
-    };
-    if !native
-        || identity.implementation != "cpython"
-        || identity.bits != 64
-        || identity.version != python.strip_prefix("python")?
-    {
-        return None;
-    }
-    let path = std::fs::canonicalize(identity.path).ok()?;
-    path.is_absolute().then_some(path)
+fn sort_catalog_minors(mut candidates: Vec<String>) -> Vec<String> {
+    candidates.sort_by_key(|minor| {
+        let (major, minor) = minor.split_once('.').unwrap_or(("0", "0"));
+        (
+            major.parse::<u32>().unwrap_or(0),
+            minor.parse::<u32>().unwrap_or(0),
+        )
+    });
+    candidates.dedup();
+    candidates.reverse();
+    candidates
 }
 
-async fn installed_python_paths(target: TorchHostTarget) -> Vec<(String, PathBuf)> {
-    const PROBE: &str = "import json,platform,struct,sys; print(json.dumps({'path':sys.executable,'version':f'{sys.version_info.major}.{sys.version_info.minor}','platform':sys.platform,'machine':platform.machine(),'implementation':sys.implementation.name,'bits':struct.calcsize('P')*8}))";
-    let mut interpreters = Vec::new();
-    for python in PYTHONS {
-        for (launcher, prefix) in python_probe_candidates(target, python) {
-            let mut command = Command::new(launcher);
-            command
-                .kill_on_drop(true)
-                .args(prefix)
-                .args(["-I", "-c", PROBE]);
-            if let Ok(Ok(output)) =
-                tokio::time::timeout(PYTHON_CHECK_TIMEOUT, command.output()).await
-            {
-                if output.status.success() {
-                    if let Some(path) = python_probe_path(&output.stdout, target, python) {
-                        interpreters.push(((*python).to_owned(), path));
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    interpreters
+pub(super) async fn managed_torch_candidate_minors(
+    root: &Path,
+    cleanup: &Arc<super::installer::TorchCleanupTasks>,
+) -> Result<Vec<String>> {
+    let candidates = list_managed_torch_candidates(root, cleanup)
+        .await
+        .map_err(managed_python_error)?;
+    Ok(sort_catalog_minors(
+        candidates
+            .into_iter()
+            .map(|candidate| candidate.minor)
+            .collect(),
+    ))
 }
 
-pub(super) async fn installed_torch_interpreters() -> Vec<(String, PathBuf)> {
-    match TorchHostTarget::current() {
-        Some(target) => installed_python_paths(target).await,
-        None => Vec::new(),
+pub(super) async fn ensure_managed_torch_interpreter(
+    root: &Path,
+    cleanup: &Arc<super::installer::TorchCleanupTasks>,
+    minor: &str,
+) -> Result<ManagedPythonIdentity> {
+    let candidates = managed_torch_candidate_minors(root, cleanup).await?;
+    if !candidates.iter().any(|candidate| candidate == minor) {
+        return Err(unsupported_input(
+            "Select a Python version from the managed CPython catalog",
+        ));
     }
+    provision_managed_torch_interpreter(root, cleanup, minor)
+        .await
+        .map_err(managed_python_error)
+}
+
+fn release_options_command(
+    interpreter: &Path,
+    resolver: &Path,
+    version: &str,
+    candidates: &[String],
+) -> Command {
+    let mut command = Command::new(interpreter);
+    command.kill_on_drop(true).arg("-I").arg(resolver).args([
+        "--release-options",
+        "--version",
+        version,
+        "--interpreter",
+    ]);
+    command.arg(interpreter);
+    for candidate in candidates {
+        command.arg("--python-candidate").arg(candidate);
+    }
+    command
 }
 
 fn valid_wheel_platform(platform: &str, target: TorchHostTarget) -> bool {
@@ -416,14 +400,14 @@ fn valid_official_wheel(
         && url.path().starts_with(&format!("/whl/{build}/torch/"))
 }
 
-fn python_rank(python: &str) -> u8 {
-    match python {
-        "python3.12" => 4,
-        "python3.13" => 3,
-        "python3.11" => 2,
-        "python3.10" => 1,
-        _ => 0,
-    }
+fn python_rank(python: &str) -> (u32, u32) {
+    let Some((major, minor)) = python
+        .strip_prefix("python")
+        .and_then(|value| value.split_once('.'))
+    else {
+        return (0, 0);
+    };
+    (major.parse().unwrap_or(0), minor.parse().unwrap_or(0))
 }
 
 #[cfg(test)]
@@ -561,7 +545,7 @@ fn recommend_release_option(
         );
     }
     let note = if combinations.is_empty() {
-        "No exact official wheel was found for the detected devices and installed Python interpreters."
+        "No exact official wheel was found for the detected devices and managed Python candidates."
     } else if nvidia && best_combination(combinations, "cu").is_some() {
         "No exact CUDA wheel has a verified NVIDIA Linux minor-compatibility driver floor on this system, and no CPU wheel matched. CUDA wheels remain advanced choices."
     } else if amd {
@@ -724,6 +708,25 @@ fn unsupported_input(message: &str) -> PumasError {
     }
 }
 
+fn inconclusive_alternatives(
+    tag: &str,
+    build: &str,
+    python: &str,
+    issue: &str,
+) -> TorchAlternativeDiscovery {
+    TorchAlternativeDiscovery {
+        selected_tag: tag.into(),
+        selected_build: build.into(),
+        selected_python: python.into(),
+        status: "inconclusive".into(),
+        incomplete: true,
+        dependencies_not_checked: true,
+        checked_builds: Vec::new(),
+        matches: Vec::new(),
+        issues: vec![issue.into()],
+    }
+}
+
 impl VersionManager {
     /// Find a few official binary Torch wheel leads for the selected stable tag.
     /// This never claims a dependency-compatible install plan.
@@ -745,37 +748,55 @@ impl VersionManager {
                 "Torch alternatives require Linux x86_64, Windows x86_64, or macOS arm64",
             )
         })?;
-        if !valid_torch_channel(selected_build) || !PYTHONS.contains(&selected_python) {
+        if !valid_torch_channel(selected_build) {
             return Err(unsupported_input(
                 "Select a supported Torch build and Python version",
             ));
         }
-        let interpreters = installed_torch_interpreters().await;
-        if interpreters.is_empty() {
-            return Ok(TorchAlternativeDiscovery {
-                selected_tag: selected_tag.into(),
-                selected_build: selected_build.into(),
-                selected_python: selected_python.into(),
-                status: "inconclusive".into(),
-                incomplete: true,
-                dependencies_not_checked: true,
-                checked_builds: Vec::new(),
-                matches: Vec::new(),
-                issues: vec![format!(
-                    "No installed CPython interpreter on {} can inspect official wheels",
-                    target.label()
-                )],
-            });
-        }
-        let workspace = tempfile::tempdir().map_err(PumasError::from)?;
+        let managed_root = self.launcher_root.join("launcher-data/managed-python");
+        let candidates =
+            match managed_torch_candidate_minors(&managed_root, &self.torch_cleanup).await {
+                Ok(candidates) if !candidates.is_empty() => candidates,
+                Ok(_) | Err(_) => {
+                    return Ok(inconclusive_alternatives(
+                        selected_tag,
+                        selected_build,
+                        selected_python,
+                        "Managed CPython catalog could not be verified",
+                    ));
+                }
+            };
+        let Some(minor) = catalog_python_minor(selected_python, &candidates) else {
+            return Err(unsupported_input(
+                "Select a Python version from the managed CPython catalog",
+            ));
+        };
+        let interpreter = match ensure_managed_torch_interpreter(
+            &managed_root,
+            &self.torch_cleanup,
+            &minor,
+        )
+        .await
+        {
+            Ok(interpreter) => interpreter,
+            Err(_) => {
+                return Ok(inconclusive_alternatives(
+                    selected_tag,
+                    selected_build,
+                    selected_python,
+                    "Managed CPython interpreter could not be provisioned",
+                ));
+            }
+        };
+        let workspace = Arc::new(tempfile::tempdir().map_err(PumasError::from)?);
         let resolver = workspace.path().join("resolve_runtime.py");
         std::fs::write(
             &resolver,
             include_str!("../../../../../torch-server/resolve_runtime.py"),
         )
         .map_err(PumasError::from)?;
-        let mut command = Command::new(&interpreters[0].1);
-        command.kill_on_drop(true).arg("-I").arg(&resolver).args([
+        let mut command = Command::new(&interpreter.executable);
+        command.arg("-I").arg(&resolver).args([
             "--discover",
             "--version",
             version,
@@ -784,24 +805,51 @@ impl VersionManager {
             "--selected-python",
             selected_python,
         ]);
-        for (_, interpreter) in &interpreters {
-            command.arg("--interpreter").arg(interpreter);
-        }
-        let output = tokio::time::timeout(DISCOVERY_TIMEOUT, command.output())
-            .await
-            .map_err(|_| unsupported_input("Official Torch wheel discovery timed out"))?
-            .map_err(PumasError::from)?;
-        if !output.status.success() {
-            let detail = String::from_utf8_lossy(&output.stderr);
-            return Err(unsupported_input(&format!(
-                "Official Torch wheel discovery failed: {}",
-                detail.chars().take(500).collect::<String>()
-            )));
-        }
-        let result: TorchAlternativeDiscovery =
-            serde_json::from_slice(&output.stdout).map_err(|error| {
-                unsupported_input(&format!("Invalid Torch discovery result: {error}"))
-            })?;
+        command.arg("--interpreter").arg(&interpreter.executable);
+        let result = match super::torch_preview::run_preview_resolver(
+            command,
+            &workspace,
+            DISCOVERY_TIMEOUT,
+            &self.torch_cleanup,
+        )
+        .await
+        {
+            Ok(super::torch_preview::PreviewResolverRun::Exited(status)) if status.success() => {
+                let output_path = workspace.path().join("resolver.stdout");
+                let output = match std::fs::metadata(&output_path) {
+                    Ok(metadata) if metadata.len() <= 4 * 1024 * 1024 => {
+                        std::fs::read(output_path).map_err(PumasError::from)?
+                    }
+                    _ => {
+                        return Ok(inconclusive_alternatives(
+                            selected_tag,
+                            selected_build,
+                            selected_python,
+                            "Official Torch wheel discovery returned an invalid result",
+                        ));
+                    }
+                };
+                serde_json::from_slice::<TorchAlternativeDiscovery>(&output)
+            }
+            Ok(super::torch_preview::PreviewResolverRun::Exited(_))
+            | Ok(super::torch_preview::PreviewResolverRun::TimedOut)
+            | Err(_) => {
+                return Ok(inconclusive_alternatives(
+                    selected_tag,
+                    selected_build,
+                    selected_python,
+                    "Official Torch wheel discovery did not complete conclusively",
+                ));
+            }
+        };
+        let Ok(result) = result else {
+            return Ok(inconclusive_alternatives(
+                selected_tag,
+                selected_build,
+                selected_python,
+                "Official Torch wheel discovery returned an invalid result",
+            ));
+        };
         if result.matches.len() > 3
             || !result.incomplete
             || !result.dependencies_not_checked
@@ -815,7 +863,12 @@ impl VersionManager {
                 "Torch discovery violated its bounded wheel-only contract",
             ));
         }
-        let result = validate_legacy_wheel_leads(result, &interpreters, version, target);
+        let result = validate_legacy_wheel_leads(
+            result,
+            &[(interpreter.python, interpreter.executable)],
+            version,
+            target,
+        );
         let detected = match target {
             TorchHostTarget::LinuxX8664 => {
                 pci_display_vendors(Path::new("/sys/bus/pci/devices"), |path| {
@@ -838,7 +891,7 @@ impl VersionManager {
 }
 
 impl VersionManager {
-    /// Discover this release's exact official Torch wheels for installed Python.
+    /// Discover this release's exact official Torch wheels for managed Python candidates.
     /// A wheel match is a choice to preview, not a resolved dependency plan.
     pub async fn discover_torch_release_options(
         &self,
@@ -927,7 +980,7 @@ impl VersionManager {
                 (Vec::new(), Vec::new(), nvidia, drivers, false)
             }
         };
-        let interpreters = installed_python_paths(target).await;
+        let managed_root = self.launcher_root.join("launcher-data/managed-python");
         let empty = |issue: &str| ResolverReleaseOptions {
             tag: tag.to_owned(),
             status: TorchReleaseOptionsStatus::Inconclusive,
@@ -936,40 +989,73 @@ impl VersionManager {
             combinations: Vec::new(),
             issues: vec![issue.to_owned()],
         };
-        let mut result = if interpreters.is_empty() {
-            empty(&format!(
-                "No installed CPython 3.10–3.13 interpreter on {} could inspect official wheels",
-                target.label()
-            ))
-        } else {
-            let workspace = tempfile::tempdir().map_err(PumasError::from)?;
-            let resolver = workspace.path().join("resolve_runtime.py");
-            std::fs::write(
-                &resolver,
-                include_str!("../../../../../torch-server/resolve_runtime.py"),
-            )
-            .map_err(PumasError::from)?;
-            let mut command = Command::new(&interpreters[0].1);
-            command.kill_on_drop(true).arg("-I").arg(&resolver).args([
-                "--release-options",
-                "--version",
-                version,
-            ]);
-            for (_, path) in &interpreters {
-                command.arg("--interpreter").arg(path);
-            }
-            match tokio::time::timeout(RELEASE_OPTIONS_TIMEOUT, command.output()).await {
-                Ok(Ok(output)) if output.status.success() => {
-                    serde_json::from_slice::<ResolverReleaseOptions>(&output.stdout)
-                        .map_err(|_| unsupported_input("Invalid Torch release-options result"))?
+        let candidates = managed_torch_candidate_minors(&managed_root, &self.torch_cleanup).await;
+        let available_pythons: BTreeSet<String> = candidates
+            .as_ref()
+            .map(|minors| {
+                minors
+                    .iter()
+                    .map(|minor| format!("python{minor}"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut result = if let Ok(candidates) = candidates {
+            if candidates.is_empty() {
+                empty("Managed CPython catalog contained no stable candidates")
+            } else if let Ok(interpreter) =
+                ensure_managed_torch_interpreter(&managed_root, &self.torch_cleanup, &candidates[0])
+                    .await
+            {
+                let workspace = Arc::new(tempfile::tempdir().map_err(PumasError::from)?);
+                let resolver = workspace.path().join("resolve_runtime.py");
+                std::fs::write(
+                    &resolver,
+                    include_str!("../../../../../torch-server/resolve_runtime.py"),
+                )
+                .map_err(PumasError::from)?;
+                let command = release_options_command(
+                    &interpreter.executable,
+                    &resolver,
+                    version,
+                    &candidates,
+                );
+                match super::torch_preview::run_preview_resolver(
+                    command,
+                    &workspace,
+                    RELEASE_OPTIONS_TIMEOUT,
+                    &self.torch_cleanup,
+                )
+                .await
+                {
+                    Ok(super::torch_preview::PreviewResolverRun::Exited(status))
+                        if status.success() =>
+                    {
+                        let output_path = workspace.path().join("resolver.stdout");
+                        match std::fs::metadata(&output_path) {
+                            Ok(metadata) if metadata.len() <= 4 * 1024 * 1024 => {
+                                let output =
+                                    std::fs::read(output_path).map_err(PumasError::from)?;
+                                serde_json::from_slice::<ResolverReleaseOptions>(&output).map_err(
+                                    |_| unsupported_input("Invalid Torch release-options result"),
+                                )?
+                            }
+                            _ => empty("Official Torch wheel scan returned an invalid result"),
+                        }
+                    }
+                    Ok(super::torch_preview::PreviewResolverRun::Exited(_)) => {
+                        empty("Official Torch wheel scan did not complete conclusively")
+                    }
+                    Ok(super::torch_preview::PreviewResolverRun::TimedOut) => {
+                        empty("Official Torch wheel scan timed out")
+                    }
+                    Err(_) => empty("Official Torch wheel scan could not complete conclusively"),
                 }
-                Ok(Ok(_)) => empty("Official Torch wheel scan did not complete conclusively"),
-                Ok(Err(_)) => empty("Official Torch wheel scan could not start"),
-                Err(_) => empty("Official Torch wheel scan timed out"),
+            } else {
+                empty("Managed CPython interpreter could not be provisioned")
             }
+        } else {
+            empty("Managed CPython catalog could not be verified")
         };
-        let available_pythons: BTreeSet<_> =
-            interpreters.iter().map(|(name, _)| name.as_str()).collect();
         let checked: BTreeSet<_> = result.checked_channels.iter().map(String::as_str).collect();
         if result.tag != tag
             || result.checked_channels.len() > 64
@@ -985,7 +1071,7 @@ impl VersionManager {
                 .any(|issue| issue.len() > 300 || issue.chars().any(char::is_control))
             || result.combinations.iter().any(|item| {
                 !checked.contains(item.build.as_str())
-                    || !available_pythons.contains(item.python.as_str())
+                    || !available_pythons.contains(&item.python)
                     || !valid_official_wheel(
                         &item.wheel_url,
                         &item.build,
@@ -1277,44 +1363,54 @@ mod tests {
     }
 
     #[test]
-    fn native_interpreter_probe_uses_windows_launcher_then_absolute_identity() {
-        let candidates = python_probe_candidates(TorchHostTarget::WindowsX8664, "python3.12");
-        assert_eq!(candidates[0], ("py".into(), vec!["-3.12".into()]));
-        assert!(candidates.iter().any(|(name, _)| name == "python"));
-        let mac = python_probe_candidates(TorchHostTarget::MacosArm64, "python3.12");
-        assert_eq!(mac[0], ("python3.12".into(), Vec::new()));
-        assert_eq!(mac[1], ("python3".into(), Vec::new()));
-        assert_eq!(mac[2], ("python".into(), Vec::new()));
-        let linux = python_probe_candidates(TorchHostTarget::LinuxX8664, "python3.12");
-        assert_eq!(linux, mac);
+    fn catalog_candidates_sort_semantically_and_reject_unknown_minor() {
+        let candidates = sort_catalog_minors(vec![
+            "3.9".into(),
+            "3.14".into(),
+            "3.10".into(),
+            "3.12".into(),
+            "3.14".into(),
+        ]);
+        assert_eq!(candidates, ["3.14", "3.12", "3.10", "3.9"]);
+        assert_eq!(
+            catalog_python_minor("python3.14", &candidates),
+            Some("3.14".into())
+        );
+        assert_eq!(catalog_python_minor("python3.15", &candidates), None);
+        assert_eq!(catalog_python_minor("3.14", &candidates), None);
+        assert!(python_rank("python3.14") > python_rank("python3.9"));
     }
 
     #[test]
-    fn generic_python_probe_rejects_wrong_minor_and_foreign_architecture() {
-        let root = tempfile::tempdir().unwrap();
-        let executable = root.path().join("python");
-        std::fs::write(&executable, b"test").unwrap();
-        let identity = serde_json::json!({
-            "path": executable,
-            "version": "3.11",
-            "platform": "linux",
-            "machine": "x86_64",
-            "implementation": "cpython",
-            "bits": 64,
-        });
-        let output = serde_json::to_vec(&identity).unwrap();
-        assert!(python_probe_path(&output, TorchHostTarget::LinuxX8664, "python3.12").is_none());
+    fn release_options_uses_one_managed_interpreter_and_all_catalog_candidates() {
+        let interpreter = Path::new("/private/managed/python3.14");
+        let resolver = Path::new("/private/resolve_runtime.py");
+        let candidates = vec!["3.14".into(), "3.13".into(), "3.12".into()];
+        let command = release_options_command(interpreter, resolver, "2.14.0", &candidates);
+        let command = command.as_std();
+        assert_eq!(command.get_program(), interpreter.as_os_str());
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
         assert_eq!(
-            python_probe_path(&output, TorchHostTarget::LinuxX8664, "python3.11"),
-            Some(std::fs::canonicalize(&executable).unwrap())
+            args,
+            [
+                "-I",
+                "/private/resolve_runtime.py",
+                "--release-options",
+                "--version",
+                "2.14.0",
+                "--interpreter",
+                "/private/managed/python3.14",
+                "--python-candidate",
+                "3.14",
+                "--python-candidate",
+                "3.13",
+                "--python-candidate",
+                "3.12",
+            ]
         );
-        assert!(python_probe_path(&output, TorchHostTarget::MacosArm64, "python3.11").is_none());
-
-        let mut translated_mac = identity;
-        translated_mac["platform"] = "darwin".into();
-        translated_mac["machine"] = "x86_64".into();
-        let output = serde_json::to_vec(&translated_mac).unwrap();
-        assert!(python_probe_path(&output, TorchHostTarget::MacosArm64, "python3.11").is_none());
     }
 
     #[cfg(target_os = "linux")]

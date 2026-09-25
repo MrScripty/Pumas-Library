@@ -1,6 +1,6 @@
 # Upstream Torch version manager progress
 
-Date: 2026-09-24 (America/Vancouver). This is an implementation and evidence
+Date: 2026-09-25 (America/Vancouver). This is an implementation and evidence
 inventory, not a completed Pumas desktop acceptance. The prior
 [A1 packaged acceptance](a1-packaged-acceptance.md) applies only to its original
 `v2.9.1` / CPython 3.12 / CUDA 13.0 / Linux x86_64 combination. The Tuldok image
@@ -16,14 +16,18 @@ independently of Pumas qualification when GitHub pagination completes within the
 an error without a partial list presented as complete. Installation is offered for
 an exact official CPU, CUDA, or ROCm binary wheel plus fully resolved dependencies
 on Linux x86_64 with an already installed CPython 3.10–3.13. This records the
-original Linux-only scope; the later Windows/macOS authorization and its exact
-candidate contract are below. Pumas does not provision Python or compile Torch
-from source; XPU remains outside this provider contract. A release with no
-compatible wheel for a supported interpreter is discoverable but correctly
-rejected for that tuple.
+original Linux-only scope and is superseded for the in-progress install flow by
+the 2026-09-25 managed-CPython authorization below. The current implementation
+provisions stable native CPython 3.10+ from a pinned provider and chooses the
+newest candidate whose exact official wheel and complete dependencies resolve.
+Clean-host and native provisioning acceptance remain pending. Pumas does not
+compile Torch from source; XPU remains outside this provider contract. A release
+with no compatible wheel is discoverable but correctly rejected for that tuple.
 
 The fixed qualified `v2.9.1` / CUDA 13.0 / Python 3.12 bundled preset remains a
-separate recipe. Other exact combinations, including alternate `v2.9.1`
+separate recipe. The current manager path provisions its Python 3.12 base
+interpreter from the managed depot; the previous host-interpreter condition is
+historical. Other exact combinations, including alternate `v2.9.1`
 combinations, use dynamic retained previews and do not inherit the preset's
 qualification. The serialized follow-up and acceptance contract live in the
 [Torch upstream version management plan](../../torch-upstream-version-management/plan.md);
@@ -57,6 +61,44 @@ No new FLUX.2, Nunchaku, or Tuldok image-generation support is implied. The
 current image result stays limited to its recorded Linux tuple until a separate
 target/model acceptance proves otherwise.
 
+## 2026-09-25 — Managed Python and desktop discovery repair
+
+The install flow no longer requires host-installed Python or a Python choice.
+PyTorch wheels do not declare one Python version for an entire release: each
+official wheel declares its compatible CPython ABI and platform tags. Pumas
+uses its pinned provider catalog to provision stable native CPython candidates
+from newest to oldest, then retains the first interpreter whose exact selected
+Torch wheel and complete dependency profile resolve. CPython 3.10 is the
+minimum; no upper minor cap is configured. A newer candidate is skipped only
+after a definite wheel or dependency incompatibility. Provider, network, and
+incomplete-scan failures remain inconclusive. See the
+[managed Python provider report](../../torch-cross-platform-runtime-management/reports/managed-python-provider.md).
+
+The manager now defaults every target to Core Torch (`none`). Linux exposes
+Pumas' FLUX.2 dependencies only as an explicit advanced profile, and the
+qualified v2.9.1 bundled recipe is also opt-in. Windows and macOS expose Core
+only until a platform-specific adapter is accepted. UI copy states that Pumas
+installs a private Python runtime and does not require Python on the host.
+
+The reported `Unknown API method: get_torch_release_options` is emitted by the
+Electron `api:call` allowlist before a request reaches Rust. The registration
+fix is in commit `6a726eac`, with a regression test covering allowlist admission
+and payload validation. The local Linux 0.7.0 candidate contains the registration
+in its Electron bundle. Its AppImage and deb pass the artifact checker and
+bundled RPC health smoke. A package built before that commit still shows the
+reported error; the toolbar-linked package has not been replaced or published
+by this local build.
+
+Current host verification: `pumas-app-manager` passed 178 tests and Clippy;
+`pumas-rpc` passed 161 unit tests, 13 integration tests, and 2 intent tests;
+Electron passed 12 test files including the RPC registration regression; the
+Torch preview passed 14 tests with frontend typecheck/lint; the Torch resolver
+passed 98 tests with Ruff. Release build, headless startup smoke, artifact
+validation, and AppImage/deb bundled RPC health smoke passed. The exact live
+v2.14.0 artifact preview and clean managed-Python install remain unverified
+because this environment cannot reach the artifact hosts. Native Windows/macOS
+runtime and packaged acceptance also remain pending.
+
 ## Current branch behavior
 
 - Stable upstream `vMAJOR.MINOR.PATCH` releases are discovered independently of
@@ -72,15 +114,18 @@ target/model acceptance proves otherwise.
   gates are specified in the linked cross-platform plan. Installed local
   releases remain visible when upstream discovery fails.
 - The qualified 2.9.1 recipe remains a fixed CUDA 13.0 / CPython 3.12 bundled
-  preset. Other stable releases can use an installed CPython 3.10–3.13
-  interpreter and an official CPU/CUDA/ROCm wheel index. Pumas does not provision
-  interpreters. One installed build/interpreter/adapter combination is supported
-  per upstream tag; the UI must disclose the installed combination before a
-  different combination is attempted.
+  preset. The updated manager provisions its CPython 3.12 base from the pinned
+  provider catalog. Other stable releases try stable native CPython candidates
+  from newest to oldest (3.10 minimum, no upper minor cap) against exact official
+  CPU/CUDA/ROCm wheels and complete dependencies. The UI has no Python selector
+  and shows the Pumas-provisioned interpreter after preview. Provider/network failures remain
+  inconclusive and cannot trigger a downgrade. Clean-host provisioning is not
+  accepted yet. One installed build/interpreter/adapter combination is supported
+  per upstream tag; a different combination requires a fresh preview.
 - On the accepted Linux x86_64 target, dynamic install choices come from a
   bounded scan of the official PyTorch
   wheel directory and exact per-channel indexes for the selected release and
-  installed CPython tags. A release/build/Python pair is offered only when that
+  managed CPython candidate tags. A release/build/Python pair is offered only when that
   exact Torch wheel exists for the target host and interpreter tags. Partial
   scans remain inconclusive;
   they do not turn an unobserved wheel into a confirmed absence. The desktop uses
@@ -96,12 +141,13 @@ target/model acceptance proves otherwise.
   An incomplete scan recommends an exact CPU wheel provisionally when present.
 - The desktop asks the manager for available choices and a retained preview
   before installation. Dynamic previews show every resolved wheel URL, version,
-  and SHA-256. The default `flux2` selection means Pumas' FLUX.2 image dependency
-  profile; it is not an upstream Torch component. Core runtime only is available
-  as an explicit advanced profile. Neither profile implies qualification for
-  image generation on every release.
-  The manager retains the exact pip resolution and a fingerprint of the chosen
-  interpreter; installation consumes that retained lock without resolving again.
+  and SHA-256. Core runtime (`none`) is the default dependency profile. Linux
+  may offer Pumas' FLUX.2 image dependencies as an explicit advanced profile;
+  they are not an upstream Torch component. Neither profile implies
+  qualification for image generation on every release.
+  The manager retains the exact pip resolution, Python distribution source and
+  version, uv pin, target, and interpreter fingerprint; installation consumes
+  that retained identity without resolving again.
   Previews expire after 30 minutes and the in-memory store retains at most 32;
   expired reports are discarded when read.
   Resolver results use a typed outcome across the RPC and desktop boundary:
@@ -110,8 +156,8 @@ target/model acceptance proves otherwise.
   is validated across the generated contract. The install request contract
   accepts both `app_id`/`appId` and optional `preview_id`/`previewId` forms.
   After a definite unsupported preview, the desktop can search a bounded set of
-  official Torch indexes for
-  wheel matches for installed interpreters.
+  official Torch indexes for wheel matches across the pinned managed CPython
+  catalog. These discovery results are independent of host-installed Python.
   These leads are explicitly incomplete: dependencies and adapters are unchecked,
   and choosing one starts a fresh exact preview. Nunchaku's known wheel is
   confined to the fixed 2.9.1 preset.
@@ -162,12 +208,14 @@ communicate with the NVIDIA driver, so its automatic choice is CPU where an exac
 CPU wheel exists. This is not a claim about the driver's availability to the
 unsandboxed desktop process.
 
-The flow selects Pumas' FLUX.2 image dependency profile by default. Exact package
-resolution still determines whether that profile can be installed for a given
-Torch release, and a passing package preview does not prove device use, image
-generation, or Tuldok compatibility. The existing real Tuldok evidence remains
-limited to Torch 2.10 / CUDA 13.0 / Python 3.12 / FLUX.2; no v2.14.0 image result
-or all-release inference claim is added by this implementation.
+At that time the flow selected Pumas' FLUX.2 image dependency profile by
+default. The current flow defaults to core Torch (`none`) and makes FLUX.2 an
+explicit advanced profile on Linux. Exact package resolution still determines
+whether FLUX.2 can be installed for a given Torch release, and a passing
+package preview does not prove device use, image generation, or Tuldok
+compatibility. The existing real Tuldok evidence remains limited to Torch
+2.10 / CUDA 13.0 / Python 3.12 / FLUX.2; no v2.14.0 image result or all-release
+inference claim is added by this implementation.
 
 ## Earlier evidence retained from the previous report
 
@@ -252,8 +300,11 @@ desktop control test, matching the user's approved “desktop or API” scope. T
 actual desktop-driven FLUX.2/Tuldok repeat below remains a separate desktop
 product claim; it is not required to prove the RPC installation path.
 
-U1–U4 are accepted for the scope in the plan. On Linux x86_64, the current Pumas
-RPC flow discovered 63 stable tags, previewed `v2.9.0` / CPU / CPython 3.12 as
+U1–U4 were accepted for the earlier Linux x86_64 flow using a host-installed
+CPython interpreter. Managed-Python provisioning supersedes that setup, so this
+record is historical evidence and does not satisfy the current clean-host
+acceptance gate. On Linux x86_64, the Pumas RPC flow discovered 63 stable tags,
+previewed `v2.9.0` / CPU / CPython 3.12 as
 25 exact wheel artifacts with URLs and SHA-256 hashes, installed it from the
 retained resolution, inspected a passing core probe, and explicitly selected it.
 A managed Torch profile then passed startup, health, and protocol 3 checks as
@@ -264,12 +315,12 @@ wheel was `2.9.0+cpu` with SHA-256
 The adapter was `none`; no image generation was attempted. The probe result was
 passed, non-stale, with core status passed and adapter status not selected.
 
-The accepted RPC lifecycle summary and complete 25-artifact manifest are now
+The historical RPC lifecycle summary and complete 25-artifact manifest are
 retained in the [acceptance evidence JSON](../../torch-upstream-version-management/reports/v2.9.0-cpu-rpc-acceptance.json).
 The original isolated launcher root and temporary acceptance file were under
 `/tmp/pumas-torch-upstream-e2e-20260924-accepted`. This closes PRG-I17's runtime
-management acceptance for the authorized Linux/Python scope. It does not claim a
-real interactive Pumas desktop run.
+management acceptance for the earlier Linux/Python scope. It does not claim
+clean-host managed-Python provisioning or a real interactive Pumas desktop run.
 
 ## Historical pre-U6 branch gates
 

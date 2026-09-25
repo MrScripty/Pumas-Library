@@ -17,8 +17,8 @@ use tokio::process::Command;
 
 use super::installer::TorchCleanupTasks;
 
-const UV_VERSION: &str = "0.12.19";
-const UV_BASE_URL: &str = "https://releases.astral.sh/github/uv/releases/download/0.12.19/";
+const UV_VERSION: &str = "0.12.18";
+const UV_BASE_URL: &str = "https://releases.astral.sh/github/uv/releases/download/0.12.18/";
 const MAX_ARCHIVE_BYTES: usize = 40 * 1024 * 1024;
 const MAX_BINARY_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_CATALOG_BYTES: usize = 1024 * 1024;
@@ -94,7 +94,7 @@ impl NativeTarget {
         match self {
             Self::LinuxX8664 => UvPin {
                 archive: "uv-x86_64-unknown-linux-gnu.tar.gz",
-                sha256: "23bf5552d220e0842b65c862097b2ebaeba0064b74eda5e565e77fd25969d8c8",
+                sha256: "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16",
                 binary: "uv",
                 os: "linux",
                 arch: "x86_64",
@@ -102,7 +102,7 @@ impl NativeTarget {
             },
             Self::WindowsX8664 => UvPin {
                 archive: "uv-x86_64-pc-windows-msvc.zip",
-                sha256: "6dbb02d79e419522f1c500f0adb1cddcff0cda7d59b0d66ea7f5e3b4a1b2f5f0",
+                sha256: "cae6a3bc25239f83dffb467a4b180508d9da23986c04639ebfa44e43e6a84bff",
                 binary: "uv.exe",
                 os: "windows",
                 arch: "x86_64",
@@ -110,7 +110,7 @@ impl NativeTarget {
             },
             Self::MacosArm64 => UvPin {
                 archive: "uv-aarch64-apple-darwin.tar.gz",
-                sha256: "a9a8df1eedeb192f2e47e40e2faabfb387db4b850209118786d42f89dde3e0ba",
+                sha256: "cf40e0c6a202190ccd9e0406dcfdd5b2d6668a9a5c779b17948963df32aafe5b",
                 binary: "uv",
                 os: "macos",
                 arch: "aarch64",
@@ -453,8 +453,8 @@ impl ManagedPythonProvider {
                 "Pinned uv artifact metadata is invalid",
             ));
         }
-        let bootstrap = private_directory(&self.root, "uv-bootstrap")?;
-        let cache = private_directory(&self.root, "uv-cache")?;
+        let bootstrap = private_directory(&self.root, &uv_bootstrap_directory_name(pin))?;
+        let cache = private_directory(&self.root, &uv_cache_directory_name(pin))?;
         let archive_path = bootstrap.join(pin.archive);
         let archive = if archive_path.exists() {
             if std::fs::symlink_metadata(&archive_path)
@@ -570,6 +570,14 @@ impl ManagedPythonProvider {
         }
         Ok(StagedUv { binary, cache })
     }
+}
+
+fn uv_bootstrap_directory_name(pin: UvPin) -> String {
+    format!("uv-bootstrap-{UV_VERSION}-{}", pin.sha256)
+}
+
+fn uv_cache_directory_name(pin: UvPin) -> String {
+    format!("uv-cache-{UV_VERSION}-{}", pin.sha256)
 }
 
 fn private_directory(root: &Path, name: &str) -> ProviderResult<PathBuf> {
@@ -1081,7 +1089,7 @@ fn valid_python_source(value: &str) -> bool {
         return false;
     };
     url.scheme() == "https"
-        && url.host_str() == Some("github.com")
+        && url.host_str() == Some("releases.astral.sh")
         && url.port().is_none()
         && url.username().is_empty()
         && url.password().is_none()
@@ -1089,7 +1097,7 @@ fn valid_python_source(value: &str) -> bool {
         && url.fragment().is_none()
         && url
             .path()
-            .starts_with("/astral-sh/python-build-standalone/releases/download/")
+            .starts_with("/github/python-build-standalone/releases/download/")
 }
 
 const PYTHON_IDENTITY_PROBE: &str = "import json,platform,struct,sys; print(json.dumps({'path':sys.executable,'version':platform.python_version(),'platform':sys.platform,'machine':platform.machine(),'implementation':sys.implementation.name,'releaselevel':sys.version_info.releaselevel,'bits':struct.calcsize('P')*8}))";
@@ -1134,8 +1142,25 @@ mod tests {
     }
 
     #[test]
+    fn uv_bootstrap_and_cache_paths_are_scoped_to_exact_provider_pin() {
+        let current = NativeTarget::LinuxX8664.pin();
+        let mut changed_hash = current;
+        changed_hash.sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        assert_ne!(
+            uv_bootstrap_directory_name(current),
+            uv_bootstrap_directory_name(changed_hash)
+        );
+        assert_ne!(
+            uv_cache_directory_name(current),
+            uv_cache_directory_name(changed_hash)
+        );
+        assert!(uv_bootstrap_directory_name(current).contains(UV_VERSION));
+        assert!(uv_cache_directory_name(current).contains(UV_VERSION));
+    }
+
+    #[test]
     fn managed_identity_retains_selected_release_and_exact_provider_pin() {
-        let source_url = "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython.tar.gz";
+        let source_url = "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython.tar.gz";
         let installed = ManagedPythonInterpreter {
             minor: "3.14".into(),
             version: "3.14.2".into(),
@@ -1218,9 +1243,11 @@ mod tests {
         }
         assert_eq!(stable_version("3.14.2"), Some((3, 14, 2)));
         assert_eq!(stable_version("3.15.0a1"), None);
-        assert!(valid_python_source("https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython.tar.gz"));
-        assert!(!valid_python_source("https://evil.example/astral-sh/python-build-standalone/releases/download/20260901/cpython.tar.gz"));
-        assert!(!valid_python_source("https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython.tar.gz?mirror=1"));
+        assert!(valid_python_source("https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython.tar.gz"));
+        assert!(!valid_python_source("https://evil.example/github/python-build-standalone/releases/download/20260901/cpython.tar.gz"));
+        assert!(!valid_python_source("https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython.tar.gz"));
+        assert!(!valid_python_source("https://releases.astral.sh/github/other-project/releases/download/20260901/cpython.tar.gz"));
+        assert!(!valid_python_source("https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython.tar.gz?mirror=1"));
     }
 
     #[tokio::test]
@@ -1233,7 +1260,12 @@ mod tests {
         let provider = ManagedPythonProvider::new(root.path(), cleanup).unwrap();
         let failure = provider.ensure_minor("3.9").await.unwrap_err();
         assert_eq!(failure.kind, ManagedPythonFailureKind::InvalidMinor);
-        assert!(!root.path().join("uv-bootstrap").exists());
+        assert!(!root
+            .path()
+            .join(uv_bootstrap_directory_name(
+                NativeTarget::current().unwrap().pin()
+            ))
+            .exists());
     }
 
     #[cfg(target_os = "linux")]
@@ -1323,7 +1355,7 @@ mod tests {
 
     #[test]
     fn catalog_rejects_malformed_and_sorts_native_stable_minors() {
-        let source = "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython.tar.gz";
+        let source = "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython.tar.gz";
         let records = serde_json::json!([
             {"key":"cpython-3.9.25-linux-x86_64-gnu","version":"3.9.25","version_parts":{"major":3,"minor":9,"patch":25},"url":source,"os":"linux","variant":"default","implementation":"cpython","arch":"x86_64","libc":"gnu"},
             {"key":"cpython-3.10.19-linux-x86_64-gnu","version":"3.10.19","version_parts":{"major":3,"minor":10,"patch":19},"url":source,"os":"linux","variant":"default","implementation":"cpython","arch":"x86_64","libc":"gnu"},
@@ -1361,7 +1393,7 @@ mod tests {
 
     #[test]
     fn catalog_keeps_native_windows_and_macos_records_with_none_libc() {
-        let source = "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython.tar.gz";
+        let source = "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython.tar.gz";
         let records = serde_json::json!([
             {"key":"cpython-3.14.2-windows-x86_64-none","version":"3.14.2","version_parts":{"major":3,"minor":14,"patch":2},"url":source,"os":"windows","variant":"default","implementation":"cpython","arch":"x86_64","libc":"none"},
             {"key":"cpython-3.13.7-macos-aarch64-none","version":"3.13.7","version_parts":{"major":3,"minor":13,"patch":7},"url":source,"os":"macos","variant":"default","implementation":"cpython","arch":"aarch64","libc":"none"},
@@ -1404,8 +1436,9 @@ mod tests {
     fn private_provider_directory_rejects_symlink_escape() {
         let root = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        std::os::unix::fs::symlink(outside.path(), root.path().join("uv-cache")).unwrap();
-        let error = private_directory(root.path(), "uv-cache").unwrap_err();
+        let cache_directory = uv_cache_directory_name(NativeTarget::LinuxX8664.pin());
+        std::os::unix::fs::symlink(outside.path(), root.path().join(&cache_directory)).unwrap();
+        let error = private_directory(root.path(), &cache_directory).unwrap_err();
         assert_eq!(error.kind, ManagedPythonFailureKind::ArtifactIntegrity);
     }
 }

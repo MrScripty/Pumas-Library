@@ -9,31 +9,35 @@ runtime management on 2026-09-24, retaining the existing Linux support. On
 2026-09-25, the owner authorized Pumas-managed CPython provisioning and removed
 the requirement for a host-installed Python interpreter or a user Python choice.
 
-**Current acceptance:** `pending` — a local Linux 0.7.0 AppImage and deb were
-built from the candidate source. Both packages pass artifact validation and
-their bundled RPC health smoke. The packed Electron bundle contains the
-`get_torch_release_options` registration. A live Torch 2.14.0 resolution and
-managed-CPython install still cannot run in this session because artifact hosts
-are unreachable. Windows and macOS still need native install, RPC lifecycle, and
-packaged desktop evidence.
+**Current acceptance:** `pending` — the live Linux provider, Torch 2.14.0
+release scan, and complete Core dependency preview now pass in an isolated
+Pumas RPC run using managed CPython 3.14.7. The preview resolves 44 artifacts
+and recommends CUDA 13.2 on this host. It does not install Torch wheels or
+exercise installed identity and sidecar lifecycle. The previously built local
+packages predate the latest provider/index repairs and must be rebuilt. Windows
+and macOS still need native install, RPC lifecycle, and packaged desktop
+evidence.
 
 **Current phase:** M1b managed interpreter provisioning and Linux packaging are
 implemented and reviewed. Commit `6a726eac` fixes the missing Electron allowlist
-entry for `get_torch_release_options`; the local candidate contains it. The
-desktop package linked from the toolbar has not been replaced or published.
-Clean-host Python provisioning and native Windows/macOS packaging remain
-outstanding.
+entry for `get_torch_release_options`; subsequent source repairs pin published
+uv `0.12.18`, accept uv's official provider CDN URLs, and validate PyTorch's
+current official direct-wheel paths. Live managed-Python provisioning and the
+v2.14.0 scan/full preview now pass on Linux. The latest source still needs a
+fresh local package build. The desktop package linked from the toolbar has not
+been replaced or published.
 
-**Blockers:** No design blocker remains. This Linux session cannot resolve the
-uv, Python, or PyTorch artifact hosts, so provider-byte verification and a live
-no-host-Python install cannot run. Native Windows and macOS execution is not
-available here and remains a separate acceptance gate.
+**Blockers:** No design blocker remains. A v2.14.0 Torch wheel has not yet been
+installed from its retained preview, and installed identity plus sidecar
+start/stop have not been exercised for this release. Native Windows and macOS
+execution is not available here and remains a separate acceptance gate;
+provider-license inventory and native provider-byte checks remain outstanding.
 
-**Next slice:** On a host with artifact access, install Torch v2.14.0 Core
-runtime from the local candidate and record the selected managed CPython,
-resolved wheel set, installed identity, and sidecar lifecycle. Run provider
-download/integrity/license and exact-wheel install acceptance on native Linux,
-Windows x64, and macOS arm64 runners before changing platform acceptance.
+**Next slice:** Install Torch v2.14.0 Core runtime from its retained preview and
+record the managed CPython, resolved wheel set, installed identity, and sidecar
+lifecycle. Run provider license and exact-wheel install acceptance on native
+Linux, Windows x64, and macOS arm64 runners before changing platform
+acceptance.
 
 ## Objective and scope
 
@@ -79,7 +83,7 @@ advance to the next candidate. Network failure, timeout, provisioning failure,
 integrity failure, or incomplete scans are inconclusive and cannot justify a
 lower Python version. The user never has to install or choose Python.
 
-The app-manager downloads and bootstraps uv 0.12.19 for the shipped Linux x86_64 GNU, Windows
+The app-manager downloads and bootstraps uv 0.12.18 for the shipped Linux x86_64 GNU, Windows
 x86_64 MSVC, and macOS arm64 targets from versioned official archives. It
 verifies each archive against the exact SHA-256 in the provider report before
 extracting or executing it. uv's Python distribution catalog is embedded and

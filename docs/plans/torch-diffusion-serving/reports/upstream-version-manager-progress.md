@@ -89,15 +89,34 @@ bundled RPC health smoke. A package built before that commit still shows the
 reported error; the toolbar-linked package has not been replaced or published
 by this local build.
 
-Current host verification: `pumas-app-manager` passed 178 tests and Clippy;
-`pumas-rpc` passed 161 unit tests, 13 integration tests, and 2 intent tests;
-Electron passed 12 test files including the RPC registration regression; the
-Torch preview passed 14 tests with frontend typecheck/lint; the Torch resolver
-passed 98 tests with Ruff. Release build, headless startup smoke, artifact
-validation, and AppImage/deb bundled RPC health smoke passed. The exact live
-v2.14.0 artifact preview and clean managed-Python install remain unverified
-because this environment cannot reach the artifact hosts. Native Windows/macOS
-runtime and packaged acceptance also remain pending.
+Current host verification: `pumas-app-manager` passed 179 tests and Clippy;
+`pumas-rpc` passed 256 unit tests, 17 integration tests, and 2 intent tests
+(10 ignored). The RPC suite needs loopback permission; it passed when rerun
+outside the sandbox's socket restriction. Electron passed 12 test files
+including the RPC registration regression; the Torch preview passed 14 tests
+with frontend typecheck/lint; the full 98-test Python suite and Ruff passed.
+Rust formatting and `git diff --check` passed. Release build, headless startup
+smoke, artifact validation, and AppImage/deb bundled RPC health smoke passed
+for the earlier candidate; a fresh package build is required to include the
+repairs below.
+
+The v2.14.0 live scan and full Core dependency preview now pass through Pumas
+RPC in an isolated Linux launcher root. Pinned uv 0.12.18 downloaded with its
+published Linux SHA-256, provisioned managed CPython 3.14.7, and resolved 44
+artifacts for the recommended `cu132` / `python3.14` / `none` tuple. This did not
+install Torch wheels or verify the installed runtime and sidecar lifecycle.
+Native Windows/macOS runtime and packaged acceptance remain pending.
+
+The live report exposed two stale compatibility assumptions. uv's actual
+python-build-standalone catalog URLs use
+`releases.astral.sh/github/python-build-standalone/...`, and current official
+PyTorch indexes return wheel files directly under `/whl/{channel}/`; the Rust
+validators now accept those exact official forms while retaining host, channel,
+filename, tag, and nesting checks. The uv pin now uses published 0.12.18 and
+version/hash-scoped cache paths, preventing a previous bootstrap from being
+mistaken for the new pin. The missing Electron RPC allowlist registration was
+already fixed in `6a726eac`; toolbar-linked release publication remains
+separate from these local builds.
 
 ## Current branch behavior
 

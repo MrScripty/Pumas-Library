@@ -1,8 +1,9 @@
 # Managed Python Provider Admission
 
-**Status:** Candidate pin recorded; target-native download, byte verification,
-package execution, clean-host provisioning, and license-material acceptance are
-still pending.
+**Status:** Linux x86_64 provider download, published-hash verification, pinned
+uv execution, and managed CPython provisioning pass in a live isolated Pumas
+RPC run. Windows/macOS provider-byte checks, license-material acceptance, and
+native packaged acceptance remain pending.
 
 **Decision:** Use the app-manager's exact-hash-pinned uv release to provision
 stable, standard CPython distributions from uv's embedded Python Build Standalone
@@ -13,17 +14,18 @@ registration.
 
 ## uv target artifacts
 
-The official uv `0.12.19` release is immutable, published 2026-09-24, and points
-to commit `bea138450f0e620a4ce5765b0e38cff7b9f0799f`. The three shipped target
+The official uv `0.12.18` release is immutable and was published 2026-09-22.
+It is the latest published release selected for this pin; the unreleased
+`0.12.19` development version is not used. The three shipped target
 archives and published SHA-256 checksums are:
 
 | Pumas target | Official asset URL | Published SHA-256 |
 | --- | --- | --- |
-| Linux x86_64 GNU | [`uv-x86_64-unknown-linux-gnu.tar.gz`](https://releases.astral.sh/github/uv/releases/download/0.12.19/uv-x86_64-unknown-linux-gnu.tar.gz) | `23bf5552d220e0842b65c862097b2ebaeba0064b74eda5e565e77fd25969d8c8` |
-| Windows x86_64 MSVC | [`uv-x86_64-pc-windows-msvc.zip`](https://releases.astral.sh/github/uv/releases/download/0.12.19/uv-x86_64-pc-windows-msvc.zip) | `6dbb02d79e419522f1c500f0adb1cddcff0cda7d59b0d66ea7f5e3b4a1b2f5f0` |
-| macOS arm64 | [`uv-aarch64-apple-darwin.tar.gz`](https://releases.astral.sh/github/uv/releases/download/0.12.19/uv-aarch64-apple-darwin.tar.gz) | `a9a8df1eedeb192f2e47e40e2faabfb387db4b850209118786d42f89dde3e0ba` |
+| Linux x86_64 GNU | [`uv-x86_64-unknown-linux-gnu.tar.gz`](https://releases.astral.sh/github/uv/releases/download/0.12.18/uv-x86_64-unknown-linux-gnu.tar.gz) | `89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16` |
+| Windows x86_64 MSVC | [`uv-x86_64-pc-windows-msvc.zip`](https://releases.astral.sh/github/uv/releases/download/0.12.18/uv-x86_64-pc-windows-msvc.zip) | `cae6a3bc25239f83dffb467a4b180508d9da23986c04639ebfa44e43e6a84bff` |
+| macOS arm64 | [`uv-aarch64-apple-darwin.tar.gz`](https://releases.astral.sh/github/uv/releases/download/0.12.18/uv-aarch64-apple-darwin.tar.gz) | `cf40e0c6a202190ccd9e0406dcfdd5b2d6668a9a5c779b17948963df32aafe5b` |
 
-The digest values come from the release's official `.sha256` assets for [Linux](https://releases.astral.sh/github/uv/releases/download/0.12.19/uv-x86_64-unknown-linux-gnu.tar.gz.sha256), [Windows](https://releases.astral.sh/github/uv/releases/download/0.12.19/uv-x86_64-pc-windows-msvc.zip.sha256), and [macOS](https://releases.astral.sh/github/uv/releases/download/0.12.19/uv-aarch64-apple-darwin.tar.gz.sha256). The upstream [release page](https://github.com/astral-sh/uv/releases/tag/0.12.19) states that the release is immutable and publishes GitHub artifact attestations. These are published checksum values; Pumas has not yet downloaded the archives in this environment, so local verification of downloaded bytes and executable fingerprints remains an acceptance gate.
+The digest values come from the release's official `.sha256` assets for [Linux](https://releases.astral.sh/github/uv/releases/download/0.12.18/uv-x86_64-unknown-linux-gnu.tar.gz.sha256), [Windows](https://releases.astral.sh/github/uv/releases/download/0.12.18/uv-x86_64-pc-windows-msvc.zip.sha256), and [macOS](https://releases.astral.sh/github/uv/releases/download/0.12.18/uv-aarch64-apple-darwin.tar.gz.sha256). The upstream [release page](https://github.com/astral-sh/uv/releases/tag/0.12.18) marks the release immutable and documents GitHub artifact attestations. Linux x86_64 bytes were downloaded and matched the published SHA-256, then the pinned executable bootstrapped managed CPython 3.14.7 during live Pumas RPC preview. The selected official Python Build Standalone record came from uv's embedded catalog. Windows/macOS downloads and native executable checks remain acceptance gates.
 
 The app-manager must download the exact target URL into a private temporary file,
 enforce a finite size/time budget, verify SHA-256 before extraction, extract only
@@ -62,11 +64,15 @@ minor absent from the pinned catalog remains unavailable until a reviewed uv
 provider update adds its artifact and native evidence.
 
 The provider implementation runs `uv python list --managed-python
---only-downloads --show-urls --output-format json`. A Linux local-uv control
-returned structured URL-bearing records, and provider fixtures cover native
-filtering, stable-version ordering, the 3.10 floor, exact-version install
-selection, and malformed catalogs. Those checks do not substitute for executing
-the pinned uv 0.12.19 asset on a clean host.
+--only-downloads --show-urls --output-format json`. The pinned Linux uv 0.12.18
+asset returned structured URL-bearing records, provisioned CPython 3.14.7, and
+was used by a live `preview_torch_runtime` RPC for Torch 2.14.0. The preview
+selected `cu132` / `python3.14` / Core (`none`) and resolved 44 artifacts. This
+proves provider startup and full dependency resolution in an isolated Linux
+launcher root; it does not prove Torch wheel installation, installed identity,
+sidecar lifecycle, or operation on a clean host with Python absent from PATH.
+Provider fixtures cover native filtering, stable-version ordering, the 3.10
+floor, exact-version install selection, and malformed catalogs.
 
 ## Licensing and remaining admission gates
 

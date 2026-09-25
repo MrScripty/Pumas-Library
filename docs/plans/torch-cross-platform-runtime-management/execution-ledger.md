@@ -99,8 +99,8 @@
   the qualified v2.9.1 bundled recipe require explicit user selection. The
   preview explains that Pumas provisions its own Python runtime.
 - Linux verification: app-manager tests (178), app-manager Clippy, Electron
-  tests (12 files), Torch preview tests (14), frontend typecheck/lint, resolver
-  tests (98), Ruff, Rust formatting, and `git diff --check` pass. The exact
+  tests (12 files), Torch preview tests (14), frontend typecheck/lint, full
+  Python suite (98), Ruff, Rust formatting, and `git diff --check` pass. The exact
   v2.14.0 remote artifact scan/install could not run because artifact hosts are
   unreachable in this session; Windows/macOS native acceptance remains open.
 - Built local `v0.7.0` release artifacts:
@@ -115,3 +115,25 @@
   v2.14.0 preview/install and sidecar lifecycle acceptance. Complete clean-host
   provider/download/license and native Windows/macOS package acceptance before
   claiming those platforms are supported.
+
+## 2026-09-25 — Live Torch 2.14 provider and index repair
+
+- Corrected the uv pin to published `0.12.18` after confirming `0.12.19` was
+  not an official release. The Linux archive matched its official SHA-256, and
+  bootstrap/cache paths now include the exact provider version and hash so an
+  old binary cannot silently satisfy a new pin.
+- Corrected the provider source allowlist for uv's actual
+  `releases.astral.sh/github/python-build-standalone/...` URLs and corrected
+  exact-wheel validation to accept current official PyTorch direct-file URLs at
+  `/whl/{channel}/{filename}` while retaining strict host/channel/tag/path
+  validation. Added provider and official CPU/CUDA URL regression fixtures.
+- Live Pumas RPC acceptance in an isolated Linux launcher root passed the
+  Torch 2.14.0 release scan and full Core preview. Pinned uv provisioned
+  CPython 3.14.7; the manager recommended `cu132`, and the retained resolver
+  result contained 44 artifacts for `cu132` / `python3.14` / adapter `none`.
+  No Torch wheels were installed; installed identity and sidecar lifecycle
+  remain unverified for v2.14.0.
+- The earlier local AppImage/deb predate these final provider/index repairs and
+  need rebuilding. Windows/macOS native provider and runtime acceptance,
+  provider license inventory, and toolbar-linked package publication remain
+  outstanding.

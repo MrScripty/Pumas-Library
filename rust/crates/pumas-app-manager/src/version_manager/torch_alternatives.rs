@@ -371,6 +371,11 @@ fn valid_official_wheel(
     let Some(remainder) = distribution.strip_prefix(&format!("torch-{version}")) else {
         return false;
     };
+    let expected_prefix = format!("/whl/{build}/");
+    let artifact_path = url
+        .path()
+        .strip_prefix(&expected_prefix)
+        .is_some_and(|path| path == filename || path.strip_prefix("torch/") == Some(filename));
     let expected_python = python.replace("python", "cp").replace('.', "");
     let exact_version = remainder.is_empty()
         || remainder.eq_ignore_ascii_case(&format!("%2B{build}"))
@@ -397,7 +402,7 @@ fn valid_official_wheel(
         && url.password().is_none()
         && url.query().is_none()
         && url.fragment().is_none()
-        && url.path().starts_with(&format!("/whl/{build}/torch/"))
+        && artifact_path
 }
 
 fn python_rank(python: &str) -> (u32, u32) {
@@ -1057,42 +1062,64 @@ impl VersionManager {
             empty("Managed CPython catalog could not be verified")
         };
         let checked: BTreeSet<_> = result.checked_channels.iter().map(String::as_str).collect();
-        if result.tag != tag
-            || result.checked_channels.len() > 64
-            || result.combinations.len() > 1024
-            || checked.len() != result.checked_channels.len()
-            || result
-                .checked_channels
-                .iter()
-                .any(|channel| !valid_torch_channel(channel))
-            || result
-                .issues
-                .iter()
-                .any(|issue| issue.len() > 300 || issue.chars().any(char::is_control))
-            || result.combinations.iter().any(|item| {
-                !checked.contains(item.build.as_str())
-                    || !available_pythons.contains(&item.python)
-                    || !valid_official_wheel(
-                        &item.wheel_url,
-                        &item.build,
-                        version,
-                        &item.python,
-                        target,
-                    )
-                    || item.sha256.as_ref().is_some_and(|hash| {
-                        hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())
-                    })
-            })
-            || match result.status {
-                TorchReleaseOptionsStatus::Matches => {
-                    !result.complete_scan || result.combinations.is_empty()
-                }
-                TorchReleaseOptionsStatus::None => {
-                    !result.complete_scan || !result.combinations.is_empty()
-                }
-                TorchReleaseOptionsStatus::Inconclusive => result.complete_scan,
+        let invalid_tag = result.tag != tag;
+        let oversized_channels = result.checked_channels.len() > 64;
+        let oversized_combinations = result.combinations.len() > 1024;
+        let duplicate_channels = checked.len() != result.checked_channels.len();
+        let invalid_channel = result
+            .checked_channels
+            .iter()
+            .any(|channel| !valid_torch_channel(channel));
+        let invalid_issue = result
+            .issues
+            .iter()
+            .any(|issue| issue.len() > 300 || issue.chars().any(char::is_control));
+        let invalid_combination = result.combinations.iter().any(|item| {
+            !checked.contains(item.build.as_str())
+                || !available_pythons.contains(&item.python)
+                || !valid_official_wheel(
+                    &item.wheel_url,
+                    &item.build,
+                    version,
+                    &item.python,
+                    target,
+                )
+                || item.sha256.as_ref().is_some_and(|hash| {
+                    hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
+        });
+        let inconsistent_status = match result.status {
+            TorchReleaseOptionsStatus::Matches => {
+                !result.complete_scan || result.combinations.is_empty()
             }
+            TorchReleaseOptionsStatus::None => {
+                !result.complete_scan || !result.combinations.is_empty()
+            }
+            TorchReleaseOptionsStatus::Inconclusive => result.complete_scan,
+        };
+        if invalid_tag
+            || oversized_channels
+            || oversized_combinations
+            || duplicate_channels
+            || invalid_channel
+            || invalid_issue
+            || invalid_combination
+            || inconsistent_status
         {
+            tracing::warn!(
+                invalid_tag,
+                oversized_channels,
+                oversized_combinations,
+                duplicate_channels,
+                invalid_channel,
+                invalid_issue,
+                invalid_combination,
+                inconsistent_status,
+                complete_scan = result.complete_scan,
+                combination_count = result.combinations.len(),
+                issue_count = result.issues.len(),
+                "Torch release-options resolver result failed validation"
+            );
             return Err(unsupported_input(
                 "Torch release-options result violated its exact-wheel contract",
             ));
@@ -1206,6 +1233,27 @@ mod tests {
             "cu136",
             "2.14.0",
             "python3.12",
+            TorchHostTarget::LinuxX8664,
+        ));
+        assert!(valid_official_wheel(
+            "https://download-r2.pytorch.org/whl/cu130/torch-2.14.0%2Bcu130-cp310-cp310-manylinux_2_28_x86_64.whl",
+            "cu130",
+            "2.14.0",
+            "python3.10",
+            TorchHostTarget::LinuxX8664,
+        ));
+        assert!(valid_official_wheel(
+            "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0%2Bcpu-cp310-cp310-manylinux_2_28_x86_64.whl",
+            "cpu",
+            "2.14.0",
+            "python3.10",
+            TorchHostTarget::LinuxX8664,
+        ));
+        assert!(!valid_official_wheel(
+            "https://download-r2.pytorch.org/whl/cu130/untrusted/torch-2.14.0%2Bcu130-cp310-cp310-manylinux_2_28_x86_64.whl",
+            "cu130",
+            "2.14.0",
+            "python3.10",
             TorchHostTarget::LinuxX8664,
         ));
     }

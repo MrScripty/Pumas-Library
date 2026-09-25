@@ -185,3 +185,18 @@
   Windows canonical containment, venv provenance, shutdown, evidence collection,
   or native command paths. CUDA/device, provider licensing, packaged desktop,
   and v2.14.0 Tuldok/image acceptance remain open.
+
+## 2026-09-25 — Local Linux desktop release build
+
+- Built the frontend, optimized `pumas-rpc`, and local Electron v0.7.0 Linux
+  packages from commit `2af87420`. Outputs are
+  `electron/release/Pumas.Library-0.7.0.AppImage` (SHA-256
+  `e68be181a1d0ce5be44c3b44163300155614195040d777ef920d1a19bff1c2a4`) and
+  `electron/release/pumas-library-electron_0.7.0_amd64.deb` (SHA-256
+  `2b991659431a2da599328449cb8ca608fde379350a815257110eca61404140c2`).
+- The artifact checker accepted both installers. The package smoke extracted
+  each one, verified its RPC/frontend resources against the build inputs, and
+  passed bundled RPC `/health` startup for both AppImage and deb.
+- This is a local candidate only. The package smoke does not install Torch
+  through the packaged UI; Windows/macOS builds and native runs, toolbar-link
+  publication, and Torch device/image generation acceptance remain pending.

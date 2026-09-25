@@ -17,8 +17,11 @@ operation, sidecar dependencies, explicit selection, sidecar health/protocol 3,
 generation-owned stop, and graceful backend shutdown all passed. The independent
 CUDA 13.2 Core preview resolved 44 artifacts; CUDA/device execution remains
 untested. See the [retained v2.14.0 Linux evidence](reports/v2.14.0-linux-cpu-rpc-acceptance/acceptance.json).
-Native Windows and macOS runs, provider licensing, and packaged desktop install
-acceptance remain pending.
+Fresh local v0.7.0 AppImage and deb packages were built from commit `2af87420`;
+their extracted resources match the build inputs and each bundled RPC backend
+passed `/health`. This confirms package assembly and startup, not the packaged
+Torch installation UI path. Native Windows and macOS runs, provider licensing,
+and packaged desktop install acceptance remain pending.
 
 **Current phase:** The managed provider, Linux 2.14.0 install, and sidecar
 lifecycle are implemented and accepted on the native Linux host. The native QA
@@ -26,8 +29,9 @@ workflow now runs the same isolated RPC acceptance on Linux, Windows x64, and
 macOS arm64 on manual dispatch or version tags, and retains acceptance reports
 and logs; only the Linux leg has run locally. Commit `6a726eac` fixes the Electron allowlist entry for
 `get_torch_release_options`; later source repairs pin uv `0.12.18` and accept
-the current official provider and PyTorch wheel URLs. The toolbar-linked
-desktop package still needs a separate update.
+the current official provider and PyTorch wheel URLs. The latest Linux desktop
+candidate is local; the toolbar-linked package still needs a separate publish
+and update.
 
 **Blockers:** Native Windows x64 and macOS arm64 install/lifecycle acceptance,
 provider license inventory, and packaged desktop install acceptance remain

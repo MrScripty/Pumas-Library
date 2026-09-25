@@ -67,6 +67,8 @@ import {
   decodeSetDefaultVersionParams,
   decodeInstallVersionOutcome,
   decodeInstallVersionParams,
+  decodeGetTorchReleaseOptionsParams,
+  decodeTorchReleaseOptionsOutcome,
   decodePreviewTorchRuntimeParams,
   decodeTorchRuntimePreviewOutcome,
   decodeGetTorchRuntimeProbeParams,
@@ -644,6 +646,10 @@ const electronAPI = {
     return validatedApiCall('install_version', decodeInstallVersionOutcome, params);
   },
   get_torch_runtime_options: async () => validateTorchOptions(await apiCall('get_torch_runtime_options')),
+  get_torch_release_options: (tag: string) => {
+    const params = requireDecoded(decodeGetTorchReleaseOptionsParams({ tag }), 'get_torch_release_options request');
+    return validatedApiCall('get_torch_release_options', decodeTorchReleaseOptionsOutcome, params);
+  },
   preview_torch_runtime: async (request: { tag: string; build: string; python: string; adapter: string }) => {
     const params = requireDecoded(decodePreviewTorchRuntimeParams(request), 'preview_torch_runtime request');
     return validatedApiCall('preview_torch_runtime', decodeTorchRuntimePreviewOutcome, params);

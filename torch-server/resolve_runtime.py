@@ -5,12 +5,14 @@ hash-locked requirements are retained so installation need not resolve again.
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, wait
 from html.parser import HTMLParser
 import json
 import platform
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlparse, urlunparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -86,6 +88,13 @@ ADAPTERS = ("none", "flux2", "nunchaku")
 MAX_INDEX_REQUESTS = 5
 MAX_INDEX_BYTES = 1_000_000
 INDEX_TIMEOUT_SECONDS = 4
+RELEASE_ROOT_URL = "https://download.pytorch.org/whl/"
+MAX_RELEASE_ROOT_BYTES = 200_000
+MAX_RELEASE_CHANNELS = 64
+MAX_RELEASE_INTERPRETERS = 4
+MAX_RELEASE_WORKERS = 8
+MAX_RELEASE_SCAN_SECONDS = 30
+RELEASE_CHANNEL = re.compile(r"cpu|cu\d+|rocm\d+(?:\.\d+)+")
 NETWORK_MARKERS = (
     "name or service not known",
     "temporary failure in name resolution",
@@ -109,6 +118,17 @@ NETWORK_MARKERS = (
     "http 504",
     "too many requests",
 )
+METADATA_MARKERS = (
+    "metadata-generation-failed",
+    "invalid metadata",
+    "failed to prepare metadata",
+    "metadata preparation failed",
+    "error getting requirements to build wheel",
+)
+MISSING_REQUIREMENT = re.compile(
+    r"(?:no matching distribution found for|"
+    r"could not find a version that satisfies the requirement)\s+([a-z0-9][^\s;()]*)"
+)
 
 
 class WheelLinks(HTMLParser):
@@ -125,9 +145,91 @@ class WheelLinks(HTMLParser):
 
 class OfficialRedirects(HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, msg, headers, newurl):
-        if not official_torch_url(newurl, request.full_url.split("/whl/", 1)[1].split("/", 1)[0]):
+        build = request.full_url.split("/whl/", 1)[1].split("/", 1)[0]
+        if not official_torch_index_url(newurl, build):
             raise ValueError("Wheel index redirected to an untrusted origin")
         return super().redirect_request(request, fp, code, msg, headers, newurl)
+
+
+class OfficialDirectoryRedirects(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        if not official_directory_url(newurl):
+            raise ValueError("Wheel directory redirected to an untrusted origin")
+        return super().redirect_request(request, fp, code, msg, headers, newurl)
+
+
+def official_directory_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname in {"download.pytorch.org", "download-r2.pytorch.org"}
+        and parsed.port in (None, 443)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path == "/whl/"
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
+def official_torch_index_url(url: str, build: str) -> bool:
+    parsed = urlparse(url)
+    return (
+        official_torch_url(url, build)
+        and parsed.path == f"/whl/{build}/torch/"
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
+def parse_release_channels(hrefs: list[str]) -> list[str]:
+    """Keep exact canonical channel directories from the official wheel root."""
+    channels = set()
+    for href in hrefs:
+        try:
+            url = urljoin(RELEASE_ROOT_URL, href)
+            parsed = urlparse(url)
+            match = re.fullmatch(r"/whl/([^/]+)/", parsed.path)
+            if (
+                parsed.scheme == "https"
+                and parsed.hostname in {"download.pytorch.org", "download-r2.pytorch.org"}
+                and parsed.port in (None, 443)
+                and parsed.username is None
+                and parsed.password is None
+                and not parsed.query
+                and not parsed.fragment
+                and match
+                and RELEASE_CHANNEL.fullmatch(match.group(1))
+            ):
+                channels.add(match.group(1))
+        except ValueError:
+            continue
+
+    def order(channel: str) -> tuple:
+        if channel == "cpu":
+            return (0, ())
+        if channel.startswith("cu"):
+            return (1, (int(channel[2:]),))
+        return (2, tuple(int(part) for part in channel[4:].split(".")))
+
+    return sorted(channels, key=order)
+
+
+def torch_root_channels() -> list[str]:
+    """Read the bounded official wheel directory before selecting channels."""
+    opener = build_opener(OfficialDirectoryRedirects())
+    with opener.open(
+        Request(RELEASE_ROOT_URL, headers={"Accept": "text/html"}),
+        timeout=INDEX_TIMEOUT_SECONDS,
+    ) as response:
+        if not official_directory_url(response.geturl()):
+            raise ValueError("Wheel directory response came from an untrusted origin")
+        body = response.read(MAX_RELEASE_ROOT_BYTES + 1)
+    if len(body) > MAX_RELEASE_ROOT_BYTES:
+        raise ValueError(f"Official wheel directory exceeded {MAX_RELEASE_ROOT_BYTES} bytes")
+    parser = WheelLinks()
+    parser.feed(body.decode("utf-8", errors="replace"))
+    return parse_release_channels(parser.links)
 
 
 def discovery_builds(selected_build: str) -> list[str]:
@@ -137,6 +239,9 @@ def discovery_builds(selected_build: str) -> list[str]:
         family.sort(key=lambda build: abs(int(build[2:]) - int(selected_build[2:])))
     elif selected_build.startswith("rocm"):
         rocm_builds = [build for build in BUILDS if build.startswith("rocm")]
+        if selected_build not in rocm_builds:
+            rocm_builds.append(selected_build)
+            rocm_builds.sort(key=lambda build: tuple(int(part) for part in build[4:].split(".")))
         selected_index = rocm_builds.index(selected_build)
         family = [build for build in rocm_builds if build != selected_build]
         family.sort(key=lambda build: abs(rocm_builds.index(build) - selected_index))
@@ -173,7 +278,7 @@ def torch_index_links(build: str) -> list[str]:
     with opener.open(
         Request(index_url, headers={"Accept": "text/html"}), timeout=INDEX_TIMEOUT_SECONDS
     ) as response:
-        if not official_torch_url(response.geturl(), build):
+        if not official_torch_index_url(response.geturl(), build):
             raise ValueError("Wheel index response came from an untrusted origin")
         body = response.read(MAX_INDEX_BYTES + 1)
     if len(body) > MAX_INDEX_BYTES:
@@ -185,9 +290,12 @@ def torch_index_links(build: str) -> list[str]:
 
 def wheel_match(href: str, version: str, build: str, tags: set[str]) -> dict | None:
     """Match only the exact official Torch binary and an interpreter-compatible tag."""
-    url = urljoin(f"https://download.pytorch.org/whl/{build}/torch/", href)
-    parsed = urlparse(url)
-    if not official_torch_url(url, build) or parsed.query:
+    try:
+        url = urljoin(f"https://download.pytorch.org/whl/{build}/torch/", href)
+        parsed = urlparse(url)
+        if not official_torch_url(url, build) or parsed.query:
+            return None
+    except ValueError:
         return None
     filename = unquote(parsed.path.rsplit("/", 1)[-1])
     match = re.fullmatch(r"torch-([^-]+)-([^-]+)-([^-]+)-([^-]+)\.whl", filename)
@@ -219,7 +327,7 @@ def discover_alternatives(
 ) -> dict:
     """Find at most three Torch wheels; dependencies and adapters remain unchecked."""
     version = selected_tag.removeprefix("v")
-    if not re.fullmatch(r"\d+\.\d+\.\d+", version) or selected_build not in BUILDS:
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version) or not RELEASE_CHANNEL.fullmatch(selected_build):
         raise ValueError("Select a stable Torch tag and supported build")
     if not re.fullmatch(r"python3\.(10|11|12|13)", selected_python):
         raise ValueError("Select a supported Python version")
@@ -279,6 +387,127 @@ def discover_alternatives(
         "matches": matches,
         "issues": issues,
     }
+
+
+def discover_release_options(
+    version: str,
+    interpreters: list[str],
+    root_loader=torch_root_channels,
+    index_loader=torch_index_links,
+    tag_loader=interpreter_tags,
+) -> dict:
+    """Find every exact wheel in a bounded scan of official stable channels."""
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise ValueError("Select a stable upstream Torch version")
+    if not interpreters:
+        raise ValueError("Release options require at least one installed interpreter")
+    deadline = time.monotonic() + MAX_RELEASE_SCAN_SECONDS
+    issues = []
+    installed = {}
+    if len(interpreters) > MAX_RELEASE_INTERPRETERS:
+        issues.append(f"Only the first {MAX_RELEASE_INTERPRETERS} interpreters were checked")
+    for number, interpreter in enumerate(interpreters[:MAX_RELEASE_INTERPRETERS], start=1):
+        try:
+            python, tags = tag_loader(interpreter)
+            if not re.fullmatch(r"\d+\.\d+", python):
+                raise ValueError("Invalid interpreter version")
+            installed.setdefault(f"python{python}", set()).update(tags)
+        except (OSError, ValueError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
+            issues.append(
+                f"Interpreter {number} could not report compatible tags: {type(error).__name__}"
+            )
+
+    checked_channels = []
+    combinations = []
+
+    def result() -> dict:
+        complete = not issues
+        return {
+            "tag": f"v{version}",
+            "status": "inconclusive" if not complete else "matches" if combinations else "none",
+            "completeScan": complete,
+            "checkedChannels": checked_channels,
+            "combinations": combinations,
+            "issues": issues,
+        }
+
+    if not installed:
+        issues.append("No installed interpreter could report compatible Linux x86_64 wheel tags")
+        return result()
+    try:
+        raw_channels = root_loader()
+    except (OSError, ValueError, TimeoutError) as error:
+        issues.append(f"Official wheel directory could not be verified: {type(error).__name__}")
+        return result()
+    channels = list(dict.fromkeys(raw_channels))
+    if any(not RELEASE_CHANNEL.fullmatch(channel) for channel in channels):
+        issues.append("Official wheel directory included an invalid channel name")
+        channels = [channel for channel in channels if RELEASE_CHANNEL.fullmatch(channel)]
+    if not channels:
+        issues.append("Official wheel directory contained no canonical CPU, CUDA, or ROCm channels")
+        return result()
+    if len(channels) > MAX_RELEASE_CHANNELS:
+        issues.append(
+            f"Official wheel directory exceeded the {MAX_RELEASE_CHANNELS}-channel scan limit"
+        )
+        channels = channels[:MAX_RELEASE_CHANNELS]
+    if time.monotonic() >= deadline:
+        issues.append("Release scan deadline elapsed before channel indexes could be checked")
+        return result()
+
+    checked_channels.extend(channels)
+    executor = ThreadPoolExecutor(max_workers=MAX_RELEASE_WORKERS)
+    try:
+        futures = {channel: executor.submit(index_loader, channel) for channel in channels}
+        done, _ = wait(futures.values(), timeout=max(0, deadline - time.monotonic()))
+        seen = set()
+        for channel in channels:
+            if time.monotonic() >= deadline:
+                issues.append(
+                    f"{channel} Torch index was not fully checked before the scan deadline"
+                )
+                continue
+            future = futures[channel]
+            if future not in done:
+                issues.append(f"{channel} Torch index was not verified before the scan deadline")
+                continue
+            try:
+                links = future.result()
+            except (OSError, ValueError, TimeoutError) as error:
+                issues.append(
+                    f"{channel} Torch index could not be verified: {type(error).__name__}"
+                )
+                continue
+            for python, tags in installed.items():
+                for href in links:
+                    if time.monotonic() >= deadline:
+                        issues.append(
+                            f"{channel} Torch index was not fully checked before the scan deadline"
+                        )
+                        break
+                    wheel = wheel_match(href, version, channel, tags)
+                    if wheel is None:
+                        continue
+                    identity = (channel, python, wheel["wheelUrl"])
+                    if identity in seen:
+                        continue
+                    seen.add(identity)
+                    combination = {
+                        "build": channel,
+                        "python": python,
+                        "wheelUrl": wheel["wheelUrl"],
+                    }
+                    if wheel["sha256"] is not None:
+                        combination["sha256"] = wheel["sha256"]
+                    combinations.append(combination)
+                if time.monotonic() >= deadline:
+                    break
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+    combinations.sort(
+        key=lambda item: (checked_channels.index(item["build"]), item["python"], item["wheelUrl"])
+    )
+    return result()
 
 
 def official_torch_url(url: str, build: str) -> bool:
@@ -403,32 +632,45 @@ def requirements_from_report(
     }
 
 
-def resolution_failure(stderr: str, version: str, build: str) -> tuple[int, str]:
+def resolution_failure(
+    stderr: str, version: str, build: str, adapter: str = "none"
+) -> tuple[int, str]:
     lowered = stderr.lower()
     if any(marker in lowered for marker in NETWORK_MARKERS):
         return (
             75,
             "Wheel index access failed; availability is inconclusive. Retry with network access.",
         )
-    if (
-        f"no matching distribution found for torch=={version}+{build}" in lowered
-        or f"could not find a version that satisfies the requirement torch=={version}+{build}"
-        in lowered
-    ):
+    if any(marker in lowered for marker in METADATA_MARKERS):
         return (
-            2,
-            f"No official {build} Torch {version} wheel matches this interpreter and platform.",
+            1,
+            "Package metadata prevented a conclusive resolution. Review pip output or try another Python or build.",
         )
-    if (
-        "no matching distribution found for " in lowered
-        or "could not find a version that satisfies the requirement " in lowered
-    ):
+    missing = MISSING_REQUIREMENT.findall(lowered)
+    if f"torch=={version}+{build}" in missing:
+        return (
+            4,
+            f"No official Torch {version}+{build} wheel matches this interpreter and platform. Choose another build or installed Python.",
+        )
+    if missing:
+        requested = set(CORE)
+        if adapter != "none":
+            requested.update(requirement.partition("==")[0] for requirement in IMAGE)
+        if adapter == "nunchaku":
+            requested.add("nunchaku")
+        names = [re.match(r"[a-z0-9][a-z0-9._-]*", requirement).group() for requirement in missing]
+        named = next((name for name in names if name in requested), None)
         return (
             2,
-            "A requested package has no compatible wheel for this interpreter, platform, and build.",
+            f"No compatible binary wheel was found for requested package {named}. Choose another Python, build, or adapter."
+            if named
+            else "A required dependency has no compatible binary wheel. Choose another Python, build, or adapter.",
         )
     if "resolutionimpossible" in lowered or "conflicting dependencies" in lowered:
-        return 2, "The selected package requirements are incompatible."
+        return (
+            2,
+            "The selected package requirements conflict. Choose another Python, build, or adapter.",
+        )
     return (
         1,
         "Dependency resolution failed; wheel availability is inconclusive. Review pip output.",
@@ -438,15 +680,37 @@ def resolution_failure(stderr: str, version: str, build: str) -> tuple[int, str]
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", required=True)
-    parser.add_argument("--build", choices=BUILDS, required=True)
+    parser.add_argument("--build")
     parser.add_argument("--adapter", choices=ADAPTERS, default="none")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--discover", action="store_true")
+    parser.add_argument("--release-options", action="store_true")
     parser.add_argument("--selected-python")
     parser.add_argument("--interpreter", action="append", default=[])
     args = parser.parse_args()
     if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
         parser.error("Only stable upstream Torch versions are supported")
+    if args.release_options:
+        if (
+            args.discover
+            or args.build
+            or args.output
+            or args.selected_python
+            or args.adapter != "none"
+        ):
+            parser.error("Release options accepts only --version and one or more --interpreter")
+        if not args.interpreter:
+            parser.error("Release options requires at least one --interpreter")
+        try:
+            result = discover_release_options(args.version, args.interpreter)
+        except ValueError as error:
+            parser.exit(2, f"{error}\n")
+        print(json.dumps(result), flush=True)
+        return
+    if args.build is None:
+        parser.error("Resolution and discovery require --build")
+    if not RELEASE_CHANNEL.fullmatch(args.build):
+        parser.error("Select a canonical CPU, CUDA, or ROCm build channel")
     if args.discover:
         if not args.selected_python or not args.interpreter:
             parser.error("Discovery requires --selected-python and at least one --interpreter")
@@ -490,7 +754,7 @@ def main() -> None:
     print(completed.stdout, end="", flush=True)
     print(completed.stderr, end="", file=sys.stderr, flush=True)
     if completed.returncode:
-        code, message = resolution_failure(completed.stderr, args.version, args.build)
+        code, message = resolution_failure(completed.stderr, args.version, args.build, args.adapter)
         parser.exit(code, f"{message}\n")
     try:
         report = json.loads(report_path.read_text())

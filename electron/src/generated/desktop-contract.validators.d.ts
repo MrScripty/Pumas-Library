@@ -1,4 +1,4 @@
-// Generated from pumas-rpc contract.rs; SHA256 4f6771f852879c4de52ee8d1e66c25a3bba650bf832d9dbba022b3b8b0b4c75c. DO NOT EDIT.
+// Generated from pumas-rpc contract.rs; SHA256 67dd940c814b877de830883b563b559875d539d93a9158aba6cb812ffba3419a. DO NOT EDIT.
 export declare function validateAvailableVersionsOutcome(value: unknown): boolean;
 export declare function validateBackendStatusOutcome(value: unknown): boolean;
 export declare function validateCancelInstallationOutcome(value: unknown): boolean;
@@ -23,6 +23,7 @@ export declare function validateGetHfDownloadDetailsParams(value: unknown): bool
 export declare function validateGetReleaseDependenciesOutcome(value: unknown): boolean;
 export declare function validateGetReleaseDependenciesParams(value: unknown): boolean;
 export declare function validateGetTorchPreviewReportParams(value: unknown): boolean;
+export declare function validateGetTorchReleaseOptionsParams(value: unknown): boolean;
 export declare function validateGetTorchRuntimeProbeParams(value: unknown): boolean;
 export declare function validateGithubCacheStatusOutcome(value: unknown): boolean;
 export declare function validateHfDownloadDetailsOutcome(value: unknown): boolean;
@@ -59,6 +60,13 @@ export declare function validateSuccessOutcome(value: unknown): boolean;
 export declare function validateSupportedQuantTypesOutcome(value: unknown): boolean;
 export declare function validateSwitchVersionOutcome(value: unknown): boolean;
 export declare function validateSwitchVersionParams(value: unknown): boolean;
+export declare function validateTorchDriverAvailability(value: unknown): boolean;
+export declare function validateTorchGpuVendor(value: unknown): boolean;
+export declare function validateTorchReleaseCombination(value: unknown): boolean;
+export declare function validateTorchReleaseDriverStatus(value: unknown): boolean;
+export declare function validateTorchReleaseOptionsOutcome(value: unknown): boolean;
+export declare function validateTorchReleaseOptionsStatus(value: unknown): boolean;
+export declare function validateTorchReleaseRecommendation(value: unknown): boolean;
 export declare function validateTorchRuntimePreview(value: unknown): boolean;
 export declare function validateTorchRuntimePreviewArtifact(value: unknown): boolean;
 export declare function validateTorchRuntimePreviewOutcome(value: unknown): boolean;

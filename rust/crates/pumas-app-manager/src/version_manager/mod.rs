@@ -61,7 +61,11 @@ pub use ollama::OllamaVersionManager;
 pub use progress::{InstallationProgressTracker, PackageWeights, ProgressUpdate};
 pub use size_calculator::{ReleaseSize, SizeBreakdown, SizeCalculator};
 pub use state::VersionState;
-pub use torch_alternatives::{TorchAlternativeDiscovery, TorchAlternativeMatch};
+pub use torch_alternatives::{
+    TorchAlternativeDiscovery, TorchAlternativeMatch, TorchReleaseCombination,
+    TorchReleaseDriverAvailability, TorchReleaseDriverStatus, TorchReleaseOptionsDiscovery,
+    TorchReleaseOptionsStatus, TorchReleaseRecommendation,
+};
 pub use torch_preview::{
     TorchArtifact, TorchPreview, TorchPreviewOutcome, TorchPreviewRejectionReason,
 };

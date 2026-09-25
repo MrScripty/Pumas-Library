@@ -810,6 +810,12 @@ async fn dispatch_admitted_command(
                 .map(RpcOutcome::TorchRuntimeOptions)
         }
         #[cfg(feature = "inference-plugins")]
+        RpcCommand::GetTorchReleaseOptions { tag } => {
+            let vm = require_version_manager(state, "torch").await?;
+            let discovery = vm.discover_torch_release_options(&tag).await?;
+            Ok(RpcOutcome::TorchReleaseOptions(discovery.try_into()?))
+        }
+        #[cfg(feature = "inference-plugins")]
         RpcCommand::PreviewTorchRuntime {
             tag,
             build,

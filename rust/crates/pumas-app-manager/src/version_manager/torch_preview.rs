@@ -66,6 +66,23 @@ const ADAPTERS: &[&str] = &["none", "flux2"];
 const PREVIEW_TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_RETAINED_TORCH_PREVIEWS: usize = 32;
 
+pub(super) fn valid_torch_channel(build: &str) -> bool {
+    if build == "cpu" {
+        return true;
+    }
+    if let Some(cuda) = build.strip_prefix("cu") {
+        return !cuda.is_empty() && cuda.bytes().all(|byte| byte.is_ascii_digit());
+    }
+    if let Some(rocm) = build.strip_prefix("rocm") {
+        let parts: Vec<_> = rocm.split('.').collect();
+        return parts.len() >= 2
+            && parts
+                .iter()
+                .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()));
+    }
+    false
+}
+
 fn insert_retained_torch_preview(
     previews: &mut HashMap<String, RetainedTorchPreview>,
     preview_id: String,
@@ -102,6 +119,7 @@ pub struct TorchArtifact {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+    use std::os::unix::process::ExitStatusExt;
 
     fn retained_preview(preview_id: &str, created: Instant) -> RetainedTorchPreview {
         RetainedTorchPreview {
@@ -176,25 +194,55 @@ mod tests {
     }
 
     #[test]
+    fn preview_accepts_canonical_future_channels_without_xpu_or_paths() {
+        for build in ["cpu", "cu136", "cu999", "rocm8.0", "rocm8.0.1"] {
+            assert!(valid_torch_channel(build), "{build}");
+        }
+        for build in ["cu", "rocm8", "rocm8..1", "cu13/6", "xpu", "cu13+foo"] {
+            assert!(!valid_torch_channel(build), "{build}");
+        }
+        assert!(!BUILDS.contains(&"cu136"));
+    }
+
+    #[test]
     fn resolver_exit_codes_serialize_distinct_safe_rejections() {
-        for (code, expected) in [
-            (Some(2), "unsupported"),
-            (Some(3), "validation_failed"),
-            (Some(75), "network_inconclusive"),
-            (Some(1), "inconclusive"),
-            (None, "inconclusive"),
+        for (code, expected_reason, expected_message) in [
+            (
+                4,
+                "unsupported",
+                "No compatible official Torch wheel was found for this version, build, and Python selection.",
+            ),
+            (
+                2,
+                "unsupported",
+                "A required dependency is unavailable or incompatible for this selection.",
+            ),
+            (3, "validation_failed", "The resolved wheel report failed validation."),
+            (
+                75,
+                "network_inconclusive",
+                "Network access prevented a conclusive wheel resolution.",
+            ),
+            (1, "inconclusive", "Wheel resolution did not complete conclusively."),
         ] {
-            let reason = TorchPreviewRejectionReason::from_exit_code(code);
-            let outcome = TorchPreviewOutcome::Rejected {
-                reason,
-                message: reason.message(),
-            };
+            let outcome = resolver_rejection(PreviewResolverRun::Exited(
+                std::process::ExitStatus::from_raw(code << 8),
+            ))
+            .unwrap();
             let value = serde_json::to_value(outcome).unwrap();
             assert_eq!(value["status"], "rejected");
-            assert_eq!(value["reason"], expected);
-            assert_eq!(value["message"], reason.message());
+            assert_eq!(value["reason"], expected_reason);
+            assert_eq!(value["message"], expected_message);
             assert_eq!(value.as_object().unwrap().len(), 3);
         }
+        assert!(resolver_rejection(PreviewResolverRun::Exited(
+            std::process::ExitStatus::from_raw(0)
+        ))
+        .is_none());
+        assert_eq!(
+            TorchPreviewRejectionReason::from_exit_code(None),
+            TorchPreviewRejectionReason::Inconclusive
+        );
         let timeout =
             serde_json::to_value(resolver_rejection(PreviewResolverRun::TimedOut).unwrap())
                 .unwrap();
@@ -337,7 +385,7 @@ pub enum TorchPreviewRejectionReason {
 impl TorchPreviewRejectionReason {
     fn from_exit_code(code: Option<i32>) -> Self {
         match code {
-            Some(2) => Self::Unsupported,
+            Some(2 | 4) => Self::Unsupported,
             Some(3) => Self::ValidationFailed,
             Some(75) => Self::NetworkInconclusive,
             _ => Self::Inconclusive,
@@ -347,11 +395,19 @@ impl TorchPreviewRejectionReason {
     fn message(self) -> &'static str {
         match self {
             Self::Unsupported => {
-                "No compatible official wheel and dependencies were found for this selection."
+                "A required dependency is unavailable or incompatible for this selection."
             }
             Self::ValidationFailed => "The resolved wheel report failed validation.",
             Self::NetworkInconclusive => "Network access prevented a conclusive wheel resolution.",
             Self::Inconclusive => "Wheel resolution did not complete conclusively.",
+        }
+    }
+
+    fn message_for_exit_code(self, code: Option<i32>) -> &'static str {
+        if code == Some(4) {
+            "No compatible official Torch wheel was found for this version, build, and Python selection."
+        } else {
+            self.message()
         }
     }
 }
@@ -494,17 +550,18 @@ enum PreviewResolverRun {
 }
 
 fn resolver_rejection(run: PreviewResolverRun) -> Option<TorchPreviewOutcome> {
-    let reason = match run {
+    let (reason, message) = match run {
         PreviewResolverRun::Exited(status) if status.success() => return None,
         PreviewResolverRun::Exited(status) => {
-            TorchPreviewRejectionReason::from_exit_code(status.code())
+            let reason = TorchPreviewRejectionReason::from_exit_code(status.code());
+            (reason, reason.message_for_exit_code(status.code()))
         }
-        PreviewResolverRun::TimedOut => TorchPreviewRejectionReason::Inconclusive,
+        PreviewResolverRun::TimedOut => (
+            TorchPreviewRejectionReason::Inconclusive,
+            TorchPreviewRejectionReason::Inconclusive.message(),
+        ),
     };
-    Some(TorchPreviewOutcome::Rejected {
-        reason,
-        message: reason.message(),
-    })
+    Some(TorchPreviewOutcome::Rejected { reason, message })
 }
 
 #[cfg(target_os = "linux")]
@@ -732,7 +789,7 @@ impl VersionManager {
         adapter: &str,
     ) -> Result<TorchPreviewOutcome> {
         if self.app_id != AppId::Torch
-            || !BUILDS.contains(&build)
+            || !valid_torch_channel(build)
             || !PYTHONS.contains(&python)
             || (!ADAPTERS.contains(&adapter) && adapter != "bundled")
         {

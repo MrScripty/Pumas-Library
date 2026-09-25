@@ -5,9 +5,11 @@ import json
 import pathlib
 import re
 import tempfile
+import time
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
+from urllib.request import Request
 from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -58,6 +60,203 @@ def report(
 
 
 class ResolverTests(unittest.TestCase):
+    def test_release_channels_keep_only_canonical_official_cpu_cuda_and_rocm(self):
+        links = [
+            "cpu/",
+            "cu136/",
+            "rocm8.0.1/",
+            "https://download-r2.pytorch.org/whl/rocm7.14/",
+            "cu136/",
+            "xpu/",
+            "nightly/",
+            "cu136-full/",
+            "cu117-pypi-cudnn/",
+            "cpu-cxx11-abi/",
+            "cu137/?unexpected=1",
+            "https://download.pytorch.org:invalid/whl/cu139/",
+            "https://evil.example/whl/cu138/",
+        ]
+        self.assertEqual(
+            resolver.parse_release_channels(links),
+            ["cpu", "cu136", "rocm7.14", "rocm8.0.1"],
+        )
+
+    def test_release_options_find_all_exact_wheels_for_each_interpreter(self):
+        def links(build):
+            return [
+                f"https://download.pytorch.org/whl/{build}/torch-2.10.0%2B{build}-cp312-cp312-manylinux_2_28_x86_64.whl#sha256={'a' * 64}",
+                f"https://download.pytorch.org/whl/{build}/torch-2.10.0%2B{build}-cp313-cp313-manylinux_2_28_x86_64.whl#sha256={'b' * 64}",
+                f"https://download.pytorch.org/whl/{build}/torch-2.10.1%2B{build}-cp312-cp312-manylinux_2_28_x86_64.whl",
+                f"https://download.pytorch.org/whl/{build}/torch-2.10.0rc1%2B{build}-cp312-cp312-manylinux_2_28_x86_64.whl",
+                f"https://download.pytorch.org/whl/{build}/torch-2.10.0%2B{build}-cp312-cp312-win_amd64.whl",
+            ]
+
+        result = resolver.discover_release_options(
+            "2.10.0",
+            ["3.12", "3.13"],
+            root_loader=lambda: ["cpu", "cu136", "rocm8.0.1"],
+            index_loader=links,
+            tag_loader=lambda python: (
+                python,
+                {f"cp{python.replace('.', '')}-cp{python.replace('.', '')}-manylinux_2_28_x86_64"},
+            ),
+        )
+        self.assertEqual(result["tag"], "v2.10.0")
+        self.assertEqual(result["status"], "matches")
+        self.assertTrue(result["completeScan"])
+        self.assertEqual(result["checkedChannels"], ["cpu", "cu136", "rocm8.0.1"])
+        self.assertEqual(len(result["combinations"]), 6)
+        self.assertEqual(
+            {item["python"] for item in result["combinations"]}, {"python3.12", "python3.13"}
+        )
+        self.assertEqual(
+            {item["build"] for item in result["combinations"]}, {"cpu", "cu136", "rocm8.0.1"}
+        )
+        self.assertEqual({item["sha256"] for item in result["combinations"]}, {"a" * 64, "b" * 64})
+
+    def test_release_options_report_partial_matches_and_complete_absence_honestly(self):
+        def sometimes_unavailable(build):
+            if build == "cu136":
+                raise OSError("network unavailable")
+            return [
+                f"https://download.pytorch.org/whl/{build}/torch-2.10.0%2B{build}-cp312-cp312-manylinux_2_28_x86_64.whl"
+            ]
+
+        arguments = {
+            "root_loader": lambda: ["cpu", "cu136"],
+            "tag_loader": lambda _: ("3.12", {"cp312-cp312-manylinux_2_28_x86_64"}),
+        }
+        partial = resolver.discover_release_options(
+            "2.10.0", ["3.12"], index_loader=sometimes_unavailable, **arguments
+        )
+        self.assertEqual(partial["status"], "inconclusive")
+        self.assertFalse(partial["completeScan"])
+        self.assertEqual([item["build"] for item in partial["combinations"]], ["cpu"])
+        self.assertEqual(partial["checkedChannels"], ["cpu", "cu136"])
+        absent = resolver.discover_release_options(
+            "2.10.0", ["3.12"], index_loader=lambda _: [], **arguments
+        )
+        self.assertEqual(absent["status"], "none")
+        self.assertTrue(absent["completeScan"])
+        self.assertEqual(absent["combinations"], [])
+        root_unavailable = resolver.discover_release_options(
+            "2.10.0",
+            ["3.12"],
+            root_loader=lambda: (_ for _ in ()).throw(OSError("offline")),
+            index_loader=lambda _: [],
+            tag_loader=arguments["tag_loader"],
+        )
+        self.assertEqual(root_unavailable["status"], "inconclusive")
+        self.assertFalse(root_unavailable["completeScan"])
+        self.assertEqual(root_unavailable["checkedChannels"], [])
+
+    def test_release_options_limits_never_claim_complete_scan(self):
+        with patch.object(resolver, "MAX_RELEASE_CHANNELS", 2):
+            limited = resolver.discover_release_options(
+                "2.10.0",
+                ["3.12"],
+                root_loader=lambda: ["cpu", "cu136", "rocm8.0.1"],
+                index_loader=lambda _: [],
+                tag_loader=lambda _: ("3.12", {"cp312-cp312-manylinux_2_28_x86_64"}),
+            )
+        self.assertEqual(limited["status"], "inconclusive")
+        self.assertFalse(limited["completeScan"])
+        self.assertEqual(limited["checkedChannels"], ["cpu", "cu136"])
+        with patch.object(resolver, "MAX_RELEASE_SCAN_SECONDS", 0.001):
+            timed_out = resolver.discover_release_options(
+                "2.10.0",
+                ["3.12"],
+                root_loader=lambda: ["cpu"],
+                index_loader=lambda _: (time.sleep(0.02), [])[1],
+                tag_loader=lambda _: ("3.12", {"cp312-cp312-manylinux_2_28_x86_64"}),
+            )
+        self.assertEqual(timed_out["status"], "inconclusive")
+        self.assertFalse(timed_out["completeScan"])
+        self.assertTrue(any("deadline" in issue for issue in timed_out["issues"]))
+
+    def test_release_root_is_bounded_and_untrusted_redirect_is_rejected(self):
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+            def geturl(self):
+                return "https://download.pytorch.org/whl/"
+
+            def read(self, limit):
+                self.limit = limit
+                return b"x" * limit
+
+        response = Response()
+        request_timeouts = []
+
+        def open_response(_opener, _request, timeout):
+            request_timeouts.append(timeout)
+            return response
+
+        opener = type("Opener", (), {"open": open_response})()
+        with patch.object(resolver, "build_opener", return_value=opener):
+            with self.assertRaisesRegex(ValueError, "exceeded"):
+                resolver.torch_root_channels()
+        self.assertEqual(response.limit, resolver.MAX_RELEASE_ROOT_BYTES + 1)
+        self.assertEqual(request_timeouts, [resolver.INDEX_TIMEOUT_SECONDS])
+        response.geturl = lambda: "https://download.pytorch.org/whl/cu130/"
+        with patch.object(resolver, "build_opener", return_value=opener):
+            with self.assertRaisesRegex(ValueError, "untrusted"):
+                resolver.torch_root_channels()
+        with self.assertRaisesRegex(ValueError, "untrusted"):
+            resolver.OfficialDirectoryRedirects().redirect_request(
+                Request("https://download.pytorch.org/whl/"),
+                None,
+                302,
+                "Found",
+                {},
+                "https://evil.example/whl/",
+            )
+        with self.assertRaisesRegex(ValueError, "untrusted"):
+            resolver.OfficialRedirects().redirect_request(
+                Request("https://download.pytorch.org/whl/cpu/torch/"),
+                None,
+                302,
+                "Found",
+                {},
+                "https://download.pytorch.org/whl/cu136/torch/",
+            )
+
+    def test_release_options_cli_does_not_require_build_and_preserves_json_shape(self):
+        expected = {
+            "tag": "v2.10.0",
+            "status": "none",
+            "completeScan": True,
+            "checkedChannels": ["cpu"],
+            "combinations": [],
+            "issues": [],
+        }
+        output = StringIO()
+        with (
+            patch.object(
+                resolver.sys,
+                "argv",
+                [
+                    "resolve_runtime.py",
+                    "--version",
+                    "2.10.0",
+                    "--release-options",
+                    "--interpreter",
+                    "/python312",
+                    "--interpreter",
+                    "/python313",
+                ],
+            ),
+            patch.object(resolver, "discover_release_options", return_value=expected) as discover,
+            redirect_stdout(output),
+        ):
+            resolver.main()
+        discover.assert_called_once_with("2.10.0", ["/python312", "/python313"])
+        self.assertEqual(json.loads(output.getvalue()), expected)
+
     def test_build_vocabulary_matches_rust_manager(self):
         rust_source = (
             ROOT.parent / "rust/crates/pumas-app-manager/src/version_manager/torch_preview.rs"
@@ -133,6 +332,30 @@ class ResolverTests(unittest.TestCase):
             resolver.discovery_builds("rocm3.10")[:3],
             ["rocm3.10", "rocm3.8", "rocm4.0.1"],
         )
+        self.assertEqual(
+            resolver.discovery_builds("rocm8.0.1")[:2],
+            ["rocm8.0.1", "rocm7.14"],
+        )
+
+    def test_future_canonical_selected_build_is_valid_for_bounded_discovery(self):
+        result = resolver.discover_alternatives(
+            "v2.10.0",
+            "cu136",
+            "python3.12",
+            ["3.12"],
+            index_loader=lambda _: [],
+            tag_loader=lambda _: ("3.12", {"cp312-cp312-manylinux_2_28_x86_64"}),
+        )
+        self.assertEqual(result["checkedBuilds"][:2], ["cu136", "cu134"])
+        with self.assertRaisesRegex(ValueError, "supported build"):
+            resolver.discover_alternatives(
+                "v2.10.0",
+                "cu136-full",
+                "python3.12",
+                ["3.12"],
+                index_loader=lambda _: [],
+                tag_loader=lambda _: ("3.12", set()),
+            )
 
     def test_historical_build_without_matching_wheel_is_unsupported(self):
         result = resolver.discover_alternatives(
@@ -217,7 +440,7 @@ class ResolverTests(unittest.TestCase):
         _, resolution = resolver.requirements_from_report(fixture, "2.9.1", "cu130", "nunchaku")
         self.assertEqual(resolution["adapter"], "nunchaku")
 
-    def test_network_uncertainty_and_missing_torch_are_distinct(self):
+    def test_resolution_failures_distinguish_torch_dependencies_and_inconclusive_errors(self):
         for message in (
             "Connection timed out",
             "certificate verify failed",
@@ -230,19 +453,56 @@ class ResolverTests(unittest.TestCase):
             resolver.resolution_failure(
                 "No matching distribution found for torch==2.10.0+cpu", "2.10.0", "cpu"
             )[0],
-            2,
+            4,
         )
         self.assertEqual(
             resolver.resolution_failure(
-                "No matching distribution found for torchvision", "2.10.0", "cpu"
+                "Could not find a version that satisfies the requirement torch==2.10.0+cpu",
+                "2.10.0",
+                "cpu",
+            )[0],
+            4,
+        )
+        code, message = resolver.resolution_failure(
+            "No matching distribution found for torchvision==0.25.0", "2.10.0", "cpu", "flux2"
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("torchvision", message)
+        self.assertNotIn("0.25.0", message)
+        self.assertEqual(
+            resolver.resolution_failure(
+                "No matching distribution found for fastapi", "2.10.0", "cpu"
             )[0],
             2,
         )
+        code, message = resolver.resolution_failure(
+            "No matching distribution found for attacker-controlled-name", "2.10.0", "cpu"
+        )
+        self.assertEqual(code, 2)
+        self.assertNotIn("attacker-controlled-name", message)
         self.assertEqual(
             resolver.resolution_failure(
                 "HTTP 503; No matching distribution found for torchvision", "2.10.0", "cpu"
             )[0],
             75,
+        )
+        self.assertEqual(
+            resolver.resolution_failure(
+                "Invalid metadata; No matching distribution found for torch==2.10.0+cpu",
+                "2.10.0",
+                "cpu",
+            )[0],
+            1,
+        )
+        self.assertEqual(
+            resolver.resolution_failure("metadata-generation-failed", "2.10.0", "cpu")[0],
+            1,
+        )
+        self.assertEqual(
+            resolver.resolution_failure(
+                "ResolutionImpossible: conflicting dependencies", "2.10.0", "cpu"
+            )[0],
+            2,
         )
         self.assertEqual(
             resolver.resolution_failure("pip exited unexpectedly", "2.10.0", "cpu")[0],
@@ -320,7 +580,7 @@ class ResolverTests(unittest.TestCase):
                     resolver.main()
             self.assertFalse((pathlib.Path(directory) / "requirements.txt").exists())
             self.assertFalse((pathlib.Path(directory) / "resolution.json").exists())
-        self.assertEqual(exit_result.exception.code, 2)
+        self.assertEqual(exit_result.exception.code, 4)
 
     def test_discovery_matches_only_exact_binary_wheel_tags_and_caps_results(self):
         requested = []

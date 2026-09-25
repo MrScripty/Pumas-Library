@@ -46,9 +46,27 @@ the current-standards coordination entry is [PRG-I17](../../current-standards-re
   interpreters. One installed build/interpreter/adapter combination is supported
   per upstream tag; the UI must disclose the installed combination before a
   different combination is attempted.
+- Dynamic install choices now come from a bounded scan of the official PyTorch
+  wheel directory and exact per-channel indexes for the selected release and
+  installed CPython tags. A release/build/Python pair is offered only when that
+  exact Torch wheel exists for Linux x86_64. Partial scans remain inconclusive;
+  they do not turn an unobserved wheel into a confirmed absence. The desktop uses
+  the manager recommendation without requiring build, Python, or image-profile
+  selections, and advanced settings contain only returned exact pairs. On a
+  NVIDIA+Intel host, CUDA and CPU may be shown while ROCm is filtered out.
+  Automatic CUDA selection requires a complete scan and an installed NVIDIA
+  driver meeting the documented Linux minor-compatibility floor for the channel;
+  unknown/newer channel families remain advanced. Minor compatibility can limit
+  features and PTX, so device and model checks still run after installation.
+  ROCm remains an advanced choice because PCI detection and an `amdgpu` binding
+  alone do not establish that a particular GPU supports a particular ROCm wheel.
+  An incomplete scan recommends an exact CPU wheel provisionally when present.
 - The desktop asks the manager for available choices and a retained preview
   before installation. Dynamic previews show every resolved wheel URL, version,
-  and SHA-256, with `none` or FLUX.2 adapter dependencies selected separately.
+  and SHA-256. The default `flux2` selection means Pumas' FLUX.2 image dependency
+  profile; it is not an upstream Torch component. Core runtime only is available
+  as an explicit advanced profile. Neither profile implies qualification for
+  image generation on every release.
   The manager retains the exact pip resolution and a fingerprint of the chosen
   interpreter; installation consumes that retained lock without resolving again.
   Previews expire after 30 minutes and the in-memory store retains at most 32;
@@ -93,6 +111,30 @@ the current-standards coordination entry is [PRG-I17](../../current-standards-re
   generation or persist an acceptance result. A failed or cancelled trial
   stops only its admitted process generation. The
   desktop exposes a generation-conditional Stop action after a successful trial.
+
+## 2026-09-24 release-specific choices follow-up
+
+The reported `v2.14.0` rejection was caused by applying a global `cu134` build
+choice to every release. Official wheel discovery confirmed that `v2.14.0` has
+exact CPU and CUDA `cu126`, `cu130`, and `cu132` wheel candidates and no
+`cu134` candidate; Python changes cannot make the absent build/release pair
+exist. The manager's release-options RPC now scans official channels and
+returns exact installed-interpreter matches. It filters choices by detected PCI
+display vendor, ranks Python 3.12 then 3.13, 3.11, 3.10 when several exact
+matches are available, and uses conservative driver policy for automatic CUDA
+recommendation. NVIDIA's published minor-compatibility floors are used for
+CUDA 13.x, 12.x, and 11.x; unrecognized families and ROCm are not automatically
+recommended. The current execution sandbox detects GPU vendors but cannot
+communicate with the NVIDIA driver, so its automatic choice is CPU where an exact
+CPU wheel exists. This is not a claim about the driver's availability to the
+unsandboxed desktop process.
+
+The flow selects Pumas' FLUX.2 image dependency profile by default. Exact package
+resolution still determines whether that profile can be installed for a given
+Torch release, and a passing package preview does not prove device use, image
+generation, or Tuldok compatibility. The existing real Tuldok evidence remains
+limited to Torch 2.10 / CUDA 13.0 / Python 3.12 / FLUX.2; no v2.14.0 image result
+or all-release inference claim is added by this implementation.
 
 ## Earlier evidence retained from the previous report
 
@@ -196,7 +238,11 @@ The original isolated launcher root and temporary acceptance file were under
 management acceptance for the authorized Linux/Python scope. It does not claim a
 real interactive Pumas desktop run.
 
-## 2026-09-24 current-tree gates
+## Historical pre-U6 branch gates
+
+These counts describe the earlier PR branch before the release-specific U6
+changes below. They remain useful as the prior baseline, not as the current-tree
+verification result.
 
 - Python resolver: 18 tests passed, including Rust/Python ordered build-vocabulary
   parity; Ruff passed. The `pumas-app-manager` library suite passed 136 tests,
@@ -234,6 +280,42 @@ real interactive Pumas desktop run.
   status of those existing core tests. GitHub Build run 274 for commit `9b76db7`
   completed successfully on 2026-09-24; all five executed jobs passed, including
   the default-feature Rust quality and no-inference headless gates.
+
+## 2026-09-24 U6 release-specific gates
+
+- The live official-index command
+  `python3.12 -I torch-server/resolve_runtime.py --release-options --version 2.14.0 --interpreter python3.10 --interpreter python3.11 --interpreter python3.12`
+  completed with
+  `completeScan=true` for installed CPython 3.10, 3.11, and 3.12. Exact
+  candidates were CPU, `cu126`, `cu130`, `cu132`, `rocm7.2`, and `rocm7.14`
+  for each interpreter; there was no `cu134` candidate. The manager filters
+  those raw upstream results against detected display vendors, so an
+  NVIDIA-plus-Intel host retains CPU/CUDA and does not offer ROCm. CUDA
+  auto-recommendation also requires a complete scan and a recognized NVIDIA
+  driver floor. This sandbox cannot query the NVIDIA driver, so it does not
+  establish which CUDA channel the unsandboxed desktop will recommend.
+- Full Python suite: 84 tests passed; `ruff check torch-server` and
+  `ruff format --check torch-server` passed. `pumas-app-manager`: all 149 tests
+  passed, including the 14 release-options, driver-floor, incomplete-scan, and
+  legacy-alternatives filtering tests. `pumas-rpc`: 256 unit tests, 17
+  integration tests, and 2 intent integration tests passed; 10 integration and
+  2 live-network intent tests were ignored. Rust formatting and manager Clippy
+  with warnings denied passed.
+- Frontend: all 126 test files and 708 tests passed; typecheck and lint passed.
+  The focused preview tests cover automatic recommendation, exact-release
+  advanced choices, a null recommendation, Pumas-owned FLUX.2 labeling, and
+  rejection of CPU-host CUDA/ROCm or mismatched alternatives. Electron's
+  generated desktop contract check passed. The independent Sol xhigh review
+  found no issue in the repaired host/release filtering or retained-preview
+  boundary; the Astra high final review found no remaining implementation
+  finding and requested this historical/current inventory split.
+- The live scan confirms wheel availability only. A direct full resolver attempt
+  for `v2.14.0` / `cu132` / FLUX.2 ran for several minutes without returning a
+  result and was interrupted; this establishes neither success nor a dependency
+  incompatibility. A completed retained dependency preview, install, managed
+  startup, and Tuldok image generation have not been established here. The
+  existing actual image result remains limited to Torch 2.10 / CUDA 13.0 /
+  Python 3.12 / FLUX.2.
 
 ## Separate desktop and image-serving claim
 

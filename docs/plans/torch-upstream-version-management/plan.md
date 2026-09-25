@@ -1,6 +1,6 @@
 # Plan: Upstream Torch Version Management
 
-**Plan status:** `Completed`
+**Plan status:** `Active`
 
 **Owner:** Pumas runtime integration
 
@@ -9,18 +9,24 @@ reviewing the active Torch deployment inventory.
 
 ## Execution state
 
-**Current phase:** U1–U4 are accepted for the approved Linux x86_64 / installed
-CPython scope. Focused tests, production builds, generated-contract checks, and
-read-only cross-layer reviews passed; the real v2.9.0 CPU install and managed RPC
-lifecycle passed on 2026-09-24. U5 retains the exact Torch 2.10 CUDA 13.0 / FLUX.2
-Tuldok evidence. A real interactive Pumas desktop image run and image generation
-across other Torch tuples are not claimed by this plan.
+**Current phase:** U1–U5 remain accepted for the approved Linux x86_64 / installed
+CPython scope. U6 implementation and acceptance gates are complete: the live
+release-specific `v2.14.0` wheel scan, host filtering and driver policy,
+generated RPC contract, manager tests, and desktop tests pass. A full
+`v2.14.0` FLUX.2 dependency preview and image-generation run remain a separate
+exact-tuple validation. A real interactive Pumas desktop image run and image
+generation across other Torch tuples are not claimed by this plan.
 
-**Blocker:** None within the authorized scope.
+**Blocker:** No source implementation blocker. The current sandbox cannot
+communicate with the NVIDIA driver, and the full `v2.14.0` FLUX.2 dependency
+preview has not completed. CUDA recommendation and Tuldok image generation for
+that tuple still need host evidence.
 
-**Next slice:** No acceptance work remains in this plan. A real desktop-driven
-Tuldok repeat or broader user-defined image-model plugin contract would need a
-separately scoped follow-up.
+**Next slice:** Resolve and retain the exact `v2.14.0` / `cu132` / automatically
+selected installed Python / Pumas FLUX.2 dependency preview. If it resolves,
+install, select, start, and generate through Tuldok on the GPU host; record any
+upstream dependency incompatibility explicitly. Keep this exact-tuple result
+separate from any all-release claim.
 
 ## Product contract
 
@@ -48,6 +54,16 @@ does not claim the dynamic path's full per-wheel URL preview. Every other tuple
 for `v2.9.1` uses the normal retained preview path and does not inherit the
 preset's qualification.
 
+Normal installation does not require the user to pick a build, Python
+interpreter, or dependency profile. The manager discovers exact official wheels
+for the selected release and installed CPython 3.10–3.13 interpreters, filters
+GPU channels by detected display-device vendor, and returns a recommendation
+when its bounded scan and host checks support one. Advanced controls can select
+only a returned exact wheel/interpreter pair. Every install still requires the
+existing full dependency preview and retained hash lock. The default image
+profile is Pumas-owned FLUX.2 dependencies, not an upstream Torch feature; Core
+runtime only remains an explicit advanced choice.
+
 Installing a release does not activate it or make it the default. Selection,
 default selection, sidecar startup, and stopping remain explicit version/profile
 operations. A successful import or health check qualifies only its exact
@@ -74,6 +90,7 @@ updated PRG-I17 disposition.
 | U3 | A non-preset release installs into staging from the retained lock, passes identity/core probes, and publishes only after validation. Failure/cancellation preserves installed, active, and default state. | Managed installation tests and an isolated real v2.9.0+cpu / CPython 3.12 installation on Linux x86_64; see the [RPC acceptance summary and artifact manifest](reports/v2.9.0-cpu-rpc-acceptance.json). |
 | U4 | The installed runtime can be inspected, explicitly selected, started by a managed Torch profile, health/protocol checked, and stopped by its owned generation through Pumas RPC or the desktop. | Composed desktop test plus a real older-release RPC lifecycle on Linux x86_64; see the [RPC acceptance summary](reports/v2.9.0-cpu-rpc-acceptance.json). |
 | U5 | The current real Tuldok image result remains accurately scoped to its exact Torch 2.10 CUDA 13.0 / FLUX.2 tuple; no general model/plugin or all-release image-generation support is inferred. | Reuse [2.10 GPU and Tuldok evidence](../torch-diffusion-serving/reports/upstream-v210-cu130-flux2-e2e.md); update the runtime inventory in [the progress report](../torch-diffusion-serving/reports/upstream-version-manager-progress.md). |
+| U6 | For each selected stable release, the manager discovers that release's exact official CPU/CUDA/ROCm wheel matches for installed CPython interpreters, filters GPU families against detected display devices, and supplies a host-aware default when compatibility is established. Build, Python, and Pumas dependency profile are optional advanced settings. Partial discovery stays inconclusive; a wheel match still requires the full retained dependency preview. | Dynamic official-index scan fixtures and live `v2.14.0` scan; NVIDIA driver-floor/unknown/partial-scan manager tests; typed RPC and generated-contract checks; desktop preview tests for automatic defaults, release-bounded overrides, null recommendations, and Pumas profile labeling. No all-release image qualification is inferred. |
 
 ## Ownership and verification
 

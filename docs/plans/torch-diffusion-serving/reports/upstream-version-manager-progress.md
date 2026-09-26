@@ -7,6 +7,33 @@ inventory, not a completed Pumas desktop acceptance. The prior
 evidence below uses a separate, exact Torch 2.10 tuple and does not qualify a
 newly resolved upstream release.
 
+## 2026-09-26 — Torch download speed visibility repair
+
+The latest reported log, `install-v2.14.0-1790465718491.log`, selected
+`2.14.0+cu134` but pip could not find that package, so the attempt stopped
+before downloading wheel files. It therefore had no transfer speed to display.
+A worker test with a real delay between pip chunks confirmed that the backend
+does publish a positive rate during an active wheel transfer.
+
+The missing speed was also a UI issue. The progress dialog hid its network row
+until the first rate sample or source URL arrived, and the Torch-only header
+discarded rates when there was no concurrent model download. The dialog now
+shows “Waiting for package transfer…” while packages are being resolved and
+“Measuring speed…” while an active transfer awaits its first sample. Once a
+sample arrives, the Torch-only header displays the measured rate. Regression
+tests cover the pending, pre-sample, and measured-rate states.
+
+Verification passed: all 729 frontend tests, frontend typecheck and production
+build, 56 Torch resolver tests, Ruff, Linux artifact validation, and extracted
+AppImage/deb resource and backend `/health` smoke tests. The local Linux v0.7.0
+AppImage SHA-256 is
+`a16cd9e3a1d5cc30060c36e041fd7a4cab79f3b915ff33a449204e835369c982`; the deb
+SHA-256 is
+`cb51f204379d68405696fa9ae30356559f8f996234b7960088eabb078a5db68e`. These
+packages are unpublished and do not update the toolbar-linked release. No new
+Torch installation or Tuldok image run was performed. The cu134 resolution
+failure is separate from this display repair.
+
 ## 2026-09-26 — Torch 2.14.0 staged RECORD failure and repaired local package
 
 The reported install log shows that Torch 2.14.0+cu132 and its dependencies

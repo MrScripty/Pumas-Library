@@ -129,6 +129,50 @@ class ResolverTests(unittest.TestCase):
             self.assertEqual(progress["downloaded_bytes"], 4)
             self.assertEqual(progress["total_bytes"], 4)
 
+    def test_progress_worker_reports_speed_during_a_real_chunk_interval(self):
+        pip_download = importlib.import_module("pip._internal.network.download")
+        pip_cli = importlib.import_module("pip._internal.cli.main")
+        response = object()
+        source = "https://cdn.example.net/releases/package.whl"
+        link = SimpleNamespace(url_without_fragment=source)
+        progress_writes = []
+        write_progress = resolver._write_download_progress
+
+        def prepare_download(response, link, progress_bar):
+            del response, link, progress_bar
+            yield b"ab"
+            time.sleep(resolver.DOWNLOAD_PROGRESS_INTERVAL_SECONDS + 0.05)
+            yield b"cd"
+
+        def fake_pip_main(_arguments):
+            return list(pip_download._prepare_download(response, link, None)) and 0
+
+        def capture_progress(*values):
+            progress_writes.append(values)
+            write_progress(*values)
+
+        with tempfile.TemporaryDirectory() as directory:
+            progress_path = pathlib.Path(directory) / "download-progress.json"
+            with (
+                patch.object(pip_cli, "main", side_effect=fake_pip_main),
+                patch.object(pip_download, "_prepare_download", prepare_download),
+                patch.object(pip_download, "is_from_cache", return_value=False),
+                patch.object(pip_download, "_get_http_response_size", return_value=4),
+                patch.object(resolver, "_write_download_progress", side_effect=capture_progress),
+            ):
+                self.assertEqual(
+                    resolver.run_pip_progress_worker(progress_path, ["install", "pkg"]), 0
+                )
+
+        measured = [
+            sample
+            for sample in progress_writes
+            if sample[2] and sample[5] is not None
+        ]
+        self.assertTrue(measured)
+        self.assertEqual(measured[-1][1], source)
+        self.assertGreater(measured[-1][5], 0)
+
     def test_progress_worker_does_not_expose_secret_bearing_download_urls(self):
         pip_download = importlib.import_module("pip._internal.network.download")
         pip_cli = importlib.import_module("pip._internal.cli.main")

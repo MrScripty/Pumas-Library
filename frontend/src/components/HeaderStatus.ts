@@ -10,6 +10,7 @@ export interface InstallationProgress {
   stage_progress: number;
   overall_progress: number;
   current_item: string | null;
+  download_active?: boolean;
   download_speed: number | null;
   eta_seconds: number | null;
   total_size: number | null;
@@ -76,11 +77,17 @@ function getCombinedDownloadStatus({
     ? installationProgress.download_speed
     : 0;
   const totalSpeed = modelSpeed + runtimeSpeed;
+  const runtimeDownloadExpected = installationProgress?.download_active === true ||
+    installationProgress?.stage === 'download';
   const speedInfo = totalSpeed > 0 ? ` @ ${formatSpeed(totalSpeed)}` : '';
   const hasDownloadActivity =
     Boolean(activeModelDownload?.status === 'downloading') ||
     installationProgress?.stage === 'download' ||
+    runtimeDownloadExpected ||
     totalSpeed > 0;
+  const visibleSpeedInfo = totalSpeed > 0
+    ? speedInfo
+    : runtimeDownloadExpected ? ' · measuring speed…' : '';
   const activityVerb = hasDownloadActivity
     ? 'Downloading'
     : installationProgress?.stage === 'resolving' ? 'Preparing' : 'Installing';
@@ -88,7 +95,7 @@ function getCombinedDownloadStatus({
   return {
     icon: Download,
     spinning: installationProgress?.stage === 'resolving',
-    text: `${activityVerb} ${joinDownloadParts(parts)}${speedInfo}`,
+    text: `${activityVerb} ${joinDownloadParts(parts)}${visibleSpeedInfo}`,
   };
 }
 
@@ -195,7 +202,14 @@ export function getHeaderStatusInfo({
       text: `${modelStatus.text} · ${appId === 'torch' ? 'Torch ' : ''}runtime: ${activity.phase}`,
     };
   }
-  if (appId === 'torch' && activity.active && activeModelDownload && combinedDownloadStatus) {
+  const runtimeDownloadActive = installationProgress?.download_active === true ||
+    installationProgress?.stage === 'download' ||
+    (installationProgress?.download_speed ?? 0) > 0;
+  const modelDownloadActive = activeModelDownload?.status === 'downloading';
+  if (
+    appId === 'torch' && activity.active && installationProgress && combinedDownloadStatus &&
+    (runtimeDownloadActive || modelDownloadActive)
+  ) {
     return {
       ...combinedDownloadStatus,
       text: `${combinedDownloadStatus.text} · Torch: ${activity.phase}`,

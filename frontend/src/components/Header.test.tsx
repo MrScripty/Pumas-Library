@@ -144,6 +144,31 @@ describe('Header Component', () => {
     expect(screen.queryByText(/25% complete/)).not.toBeInTheDocument();
   });
 
+  it('shows that runtime download speed is being measured before the first sample', () => {
+    render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0" installationProgress={{
+      tag: 'v2.14.0', started_at: new Date().toISOString(), stage: 'dependencies',
+      stage_progress: 0, overall_progress: 0, current_item: 'torch', download_active: true,
+      download_speed: null, eta_seconds: null, total_size: null, downloaded_bytes: 0,
+      dependency_count: 1, completed_dependencies: 0, completed_items: [], error: null,
+    }} />);
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('Downloading 1 runtime');
+    expect(status).toHaveTextContent('measuring speed');
+  });
+
+  it('shows a measured Torch download rate without a concurrent model transfer', () => {
+    render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0" installationProgress={{
+      tag: 'v2.14.0', started_at: new Date().toISOString(), stage: 'dependencies',
+      stage_progress: 0, overall_progress: 0, current_item: 'torch', download_active: true,
+      download_speed: 12 * 1024 * 1024, eta_seconds: 30, total_size: 1024 * 1024 * 1024,
+      downloaded_bytes: 4 * 1024 * 1024, dependency_count: 1, completed_dependencies: 0,
+      completed_items: [], error: null,
+    }} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('12.0 MB/s');
+  });
+
   it('shows the pending and current Torch installation phase in the header', () => {
     const { rerender } = render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0" />);
     const pendingStatus = screen.getByRole('status');

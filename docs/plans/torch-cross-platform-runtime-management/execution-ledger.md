@@ -1,5 +1,31 @@
 # Execution Ledger: Cross-Platform Torch Runtime Management
 
+## 2026-09-26 — Show Torch transfer status and rate during installation
+
+- Diagnosed the latest `install-v2.14.0-1790465718491.log`: the selected
+  `2.14.0+cu134` package could not be resolved, so that attempt failed before
+  wheel downloads began and had no transfer speed to report. Separately, a
+  worker-level chunk-interval test confirmed that an active pip wheel transfer
+  publishes a positive measured rate.
+- Fixed two UI gaps: the progress dialog now keeps the network row visible while
+  an active transfer waits for its first sample, and the Torch-only header now
+  displays both “measuring speed” and positive measured rates. During package
+  resolution the dialog explains “Waiting for package transfer…” so it does not
+  imply that artifacts are already downloading.
+- Verification passed: 729 frontend tests, frontend typecheck and production
+  build, 56 Torch resolver tests, Ruff, Linux artifact checks, extracted
+  AppImage/deb resource checks and backend `/health` smoke tests, and
+  `git diff --check`. The package smoke required local loopback permission;
+  Electron packaging required access to its GitHub helper.
+- Rebuilt local Linux v0.7.0 packages: AppImage SHA-256
+  `a16cd9e3a1d5cc30060c36e041fd7a4cab79f3b915ff33a449204e835369c982`;
+  Debian package SHA-256
+  `cb51f204379d68405696fa9ae30356559f8f996234b7960088eabb078a5db68e`.
+  The packages are local and unpublished, so the toolbar-linked release is
+  unchanged. No fresh Torch installation or image-generation run was made;
+  the cu134 package-resolution failure is separate from this progress-display
+  repair.
+
 ## 2026-09-26 — Copy direct download sources across hosts
 
 - The earlier Torch telemetry host allowlist was too restrictive for the

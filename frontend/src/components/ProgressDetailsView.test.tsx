@@ -117,6 +117,48 @@ describe('ProgressDetailsView', () => {
     }
   });
 
+  it('keeps the network rate visible while an active transfer awaits its first sample', () => {
+    render(<ProgressDetailsView
+      appId="torch"
+      progress={{
+        ...dependencyProgress,
+        tag: 'v2.14.0',
+        stage: 'dependencies',
+        download_speed: null,
+        download_active: true,
+        download_source_url: null,
+        error: null,
+      }}
+      installingVersion="v2.14.0" showCompletedItems={false}
+      onToggleCompletedItems={vi.fn()} onBackToList={vi.fn()} onOpenLogPath={vi.fn()}
+    />);
+
+    expect(screen.getByText('Network download')).toBeInTheDocument();
+    expect(screen.getByText('Measuring speed…')).toBeInTheDocument();
+  });
+
+  it('explains that package resolution has not started an artifact transfer yet', () => {
+    render(<ProgressDetailsView
+      appId="torch"
+      progress={{
+        ...dependencyProgress,
+        tag: 'v2.14.0',
+        stage: 'resolving',
+        current_item: 'Preparing Torch packages',
+        download_speed: null,
+        download_active: false,
+        download_source_url: null,
+        completed_at: undefined,
+        error: null,
+      }}
+      installingVersion="v2.14.0" showCompletedItems={false}
+      onToggleCompletedItems={vi.fn()} onBackToList={vi.fn()} onOpenLogPath={vi.fn()}
+    />);
+
+    expect(screen.getByText('Network download')).toBeInTheDocument();
+    expect(screen.getByText('Waiting for package transfer…')).toBeInTheDocument();
+  });
+
   it('renders dependency progress details and routes detail actions', () => {
     const onBackToList = vi.fn();
     const onToggleCompletedItems = vi.fn();

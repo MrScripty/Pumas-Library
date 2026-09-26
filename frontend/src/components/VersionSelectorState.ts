@@ -1,10 +1,12 @@
 import { APIError } from '../errors';
 import type { InstallationProgress } from '../hooks/useVersions';
 import { getLogger } from '../utils/logger';
+import { getInstallActivityPresentation } from '../utils/installActivityPresentation';
 
 const logger = getLogger('VersionSelector');
 
 interface VersionSelectorStateInput {
+  appId?: string | null;
   activeVersion: string | null;
   diskSpacePercent: number;
   hasNewVersion: boolean;
@@ -66,6 +68,7 @@ function getProgressDegrees(progressPercent: number): number {
 }
 
 export function getVersionSelectorDisplayState({
+  appId,
   activeVersion,
   diskSpacePercent,
   installedVersions,
@@ -80,7 +83,10 @@ export function getVersionSelectorDisplayState({
   const hasInstallActivity = Boolean(installingVersion) && !isInstallComplete;
   const isInstallFailed = installNetworkStatus === 'failed';
   const isInstallPending =
-    hasInstallActivity && !isInstallFailed && isPendingInstallProgress(installationProgress);
+    hasInstallActivity && !isInstallFailed && (
+      getInstallActivityPresentation({ appId, installingTag: installingVersion, progress: installationProgress }).indeterminate
+      || isPendingInstallProgress(installationProgress)
+    );
   const progressPercent = installationProgress?.overall_progress ?? 0;
 
   return {

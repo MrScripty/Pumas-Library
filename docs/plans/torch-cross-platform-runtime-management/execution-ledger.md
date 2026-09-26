@@ -1,5 +1,32 @@
 # Execution Ledger: Cross-Platform Torch Runtime Management
 
+## 2026-09-26 — Packaged Linux AppImage progress UX acceptance
+
+- Rebuilt the local Linux v0.7.0 AppImage and deb after fixing the Torch
+  install-progress presentation. The artifact/resource checks passed, and both
+  extracted backend packages passed `/health`.
+- Through the rebuilt AppImage at 800×1000, removed the previous test install,
+  reviewed the v2.14.0 cu132/Core preset with automatic Python selection, and
+  installed 44 exact hashed artifacts. At the first sampled install state
+  (9 seconds elapsed), the header named the Torch install and current phase; the
+  dialog showed `Working…`, indeterminate setup bars, and accessible Cancel.
+  Neither bar exposed `aria-valuenow`, and the old false 95% was absent. The row
+  returned to Ready after completion. Focused source tests verify the pending
+  state before the first progress poll.
+- Managed CPython 3.14.7 reported Torch `2.14.0+cu132`; a CPU tensor sum
+  returned 5. The host pip cache matched its pre-test snapshot and resolver
+  scratch was cleaned. The package cache was warm, so this run does not claim
+  cold-cache transfer progress. CUDA/device and Tuldok generation remain
+  untested.
+- See
+  `reports/v2.14.0-linux-appimage-cu132-ui-acceptance/README.md`. AppImage
+  SHA-256 is
+  `a28f302822ce99a9d687797606574c93a5afb9c184f293526b16b972294a670b`; deb
+  SHA-256 is
+  `d8effc33ba37466171c5fae0178e2555064850e40544c93249966fedbf4bce88`.
+  These are local candidates and do not update the public toolbar-linked
+  package; packaged Windows/macOS acceptance remains open.
+
 ## 2026-09-26 — Current-source native Torch acceptance
 
 - Manual workflow

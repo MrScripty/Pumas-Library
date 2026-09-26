@@ -23,6 +23,7 @@ import type { InstallationProgress } from '../hooks/useVersions';
 import { formatBytes, formatSpeed } from '../utils/formatters';
 import { formatElapsedTime } from '../utils/installationFormatters';
 import { IconButton } from './ui';
+import { getInstallActivityPresentation } from '../utils/installActivityPresentation';
 
 const STAGE_LABELS = {
   download: 'Downloading',
@@ -89,6 +90,7 @@ function getInstallationOutcome(
 }
 
 interface ProgressDetailsViewProps {
+  appId?: string;
   progress: InstallationProgress;
   installingVersion: string | null;
   showCompletedItems: boolean;
@@ -98,6 +100,7 @@ interface ProgressDetailsViewProps {
 }
 
 export function ProgressDetailsView({
+  appId,
   progress,
   installingVersion,
   showCompletedItems,
@@ -108,6 +111,7 @@ export function ProgressDetailsView({
   const CurrentStageIcon = STAGE_ICONS[progress.stage];
   const overallProgress = clampProgress(progress.overall_progress);
   const stageProgress = clampProgress(progress.stage_progress);
+  const activity = getInstallActivityPresentation({ appId, installingTag: installingVersion, progress });
   const outcome = getInstallationOutcome(progress, installingVersion);
   const OutcomeIcon = outcome?.kind === 'succeeded' ? CheckCircle2 : AlertCircle;
   const outcomeContainerClass = outcome?.kind === 'succeeded'
@@ -140,22 +144,22 @@ export function ProgressDetailsView({
       <div>
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium text-[hsl(var(--text-secondary))]">Overall Progress</span>
-          <span className="text-sm font-semibold text-[hsl(var(--text-primary))]">{overallProgress}%</span>
+          <span className="text-sm font-semibold text-[hsl(var(--text-primary))]">{activity.indeterminate ? 'Working…' : `${overallProgress}%`}</span>
         </div>
         <div
           role="progressbar"
           aria-label="Overall installation progress"
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-valuenow={overallProgress}
+          aria-valuenow={activity.indeterminate ? undefined : overallProgress}
           className="w-full h-2 bg-[hsl(var(--surface-low))] rounded-full overflow-hidden"
         >
-          <motion.div
+          {activity.indeterminate ? <div className="h-full w-1/3 animate-pulse rounded-full bg-[hsl(var(--accent-success))]" /> : <motion.div
             className="h-full bg-[hsl(var(--accent-success))] rounded-full"
             initial={{ width: 0 }}
             animate={{ width: `${overallProgress}%` }}
             transition={{ duration: 0.3 }}
-          />
+          />}
         </div>
       </div>
 
@@ -171,7 +175,7 @@ export function ProgressDetailsView({
                 {STAGE_LABELS[progress.stage]}
               </h3>
               <span className="text-sm text-[hsl(var(--text-muted))]">
-                {stageProgress}%
+                {activity.indeterminate ? 'In progress' : `${stageProgress}%`}
               </span>
             </div>
             {progress.current_item && (
@@ -184,15 +188,15 @@ export function ProgressDetailsView({
               aria-label={`${STAGE_LABELS[progress.stage]} progress`}
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={stageProgress}
+              aria-valuenow={activity.indeterminate ? undefined : stageProgress}
               className="w-full h-1.5 bg-[hsl(var(--surface-lowest))] rounded-full overflow-hidden mt-2"
             >
-              <motion.div
+              {activity.indeterminate ? <div className="h-full w-1/3 animate-pulse rounded-full bg-[hsl(var(--accent-success))]/50" /> : <motion.div
                 className="h-full bg-[hsl(var(--accent-success))]/50 rounded-full"
                 initial={{ width: 0 }}
                 animate={{ width: `${stageProgress}%` }}
                 transition={{ duration: 0.3 }}
-              />
+              />}
             </div>
           </div>
         </div>

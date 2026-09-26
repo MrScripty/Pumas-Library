@@ -210,6 +210,26 @@ impl TorchPendingStage {
     fn path(&self) -> &Path {
         self.directory.path()
     }
+
+    fn scratch_path(&self) -> Result<PathBuf> {
+        let scratch = self.path().join("temp");
+        match std::fs::create_dir(&scratch) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(PumasError::from(error)),
+        }
+        let stage_root = std::fs::canonicalize(self.path()).map_err(PumasError::from)?;
+        let scratch = std::fs::canonicalize(&scratch).map_err(PumasError::from)?;
+        if !scratch.starts_with(&stage_root) || scratch == stage_root {
+            return Err(failed(
+                "Torch installer scratch directory escaped its stage",
+            ));
+        }
+        if !scratch.is_dir() {
+            return Err(failed("Torch installer scratch path is not a directory"));
+        }
+        Ok(scratch)
+    }
 }
 
 impl Drop for TorchPendingStage {
@@ -506,6 +526,115 @@ mod cross_process_recovery_tests {
         drop(stage);
         retry_pending_torch_cleanup(versions, &metadata).unwrap();
         assert!(!stage_path.exists() && !marker.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runtime_command_uses_stage_scratch_and_preserves_other_environment() {
+        let root = tempfile::tempdir().unwrap();
+        let launcher_root = root.path().join("launcher with spaces");
+        let metadata = Arc::new(MetadataManager::new(&launcher_root));
+        metadata.ensure_directories().unwrap();
+        let tracker = Arc::new(RwLock::new(InstallationProgressTracker::new(
+            launcher_root.join("launcher-data/cache"),
+        )));
+        let installer = VersionInstaller::new(
+            launcher_root,
+            AppId::Torch,
+            metadata,
+            tracker,
+            Arc::new(AtomicBool::new(false)),
+        );
+        let versions = installer.versions_dir();
+        std::fs::create_dir_all(&versions).unwrap();
+        let stage = Arc::new(
+            TorchPendingStage::new(
+                &versions,
+                "v2.9.1",
+                TorchVersionsLock::try_acquire(&versions).unwrap(),
+            )
+            .unwrap(),
+        );
+        let expected_scratch = std::fs::canonicalize(stage.path()).unwrap().join("temp");
+        let log = root.path().join("child.log");
+        let mut command = Command::new("/bin/sh");
+        command
+            .args([
+                "-c",
+                "printf '%s\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" \"$TORCH_UNRELATED_ENV\"",
+            ])
+            .env("TORCH_UNRELATED_ENV", "retained value");
+        let (progress_tx, _progress_rx) = mpsc::channel(4);
+
+        installer
+            .run_runtime_command(
+                command,
+                &log,
+                "Testing scratch",
+                &progress_tx,
+                Some(stage.clone()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&log)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            vec![
+                expected_scratch.to_str().unwrap(),
+                expected_scratch.to_str().unwrap(),
+                expected_scratch.to_str().unwrap(),
+                "retained value",
+            ]
+        );
+        assert!(expected_scratch.is_dir());
+        drop(stage);
+        assert!(!expected_scratch.exists());
+
+        let stage = Arc::new(
+            TorchPendingStage::new(
+                &versions,
+                "v2.9.1",
+                TorchVersionsLock::try_acquire(&versions).unwrap(),
+            )
+            .unwrap(),
+        );
+        std::fs::write(stage.path().join("temp"), b"not a directory").unwrap();
+        let sentinel = root.path().join("child-ran");
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "touch \"$1\"", "sh"]).arg(&sentinel);
+        assert!(installer
+            .run_runtime_command(
+                command,
+                &log,
+                "Testing invalid scratch",
+                &progress_tx,
+                Some(stage)
+            )
+            .await
+            .is_err());
+        assert!(!sentinel.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stage_scratch_rejects_a_link_outside_the_stage() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = TorchVersionsLock::try_acquire(root.path()).unwrap();
+        let stage = TorchPendingStage::new(root.path(), "v2.9.1", owner).unwrap();
+        let outside = root.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, stage.path().join("temp")).unwrap();
+
+        assert!(stage.scratch_path().is_err());
+
+        std::fs::remove_file(stage.path().join("temp")).unwrap();
+        let missing_outside = root.path().join("missing-outside");
+        std::os::unix::fs::symlink(&missing_outside, stage.path().join("temp")).unwrap();
+        assert!(stage.scratch_path().is_err());
+        assert!(!missing_outside.exists());
     }
 
     #[tokio::test]
@@ -1630,6 +1759,13 @@ impl VersionInstaller {
         stage_lease: Option<std::sync::Arc<TorchPendingStage>>,
     ) -> Result<()> {
         self.check_cancelled()?;
+        if let Some(stage_lease) = &stage_lease {
+            let scratch = stage_lease.scratch_path()?;
+            command
+                .env("TMPDIR", &scratch)
+                .env("TMP", &scratch)
+                .env("TEMP", &scratch);
+        }
         self.progress_tracker.write().await.update_stage(
             InstallationStage::Setup,
             0.0,

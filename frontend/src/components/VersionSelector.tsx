@@ -15,6 +15,7 @@ import { Popover } from './ui';
 const logger = getLogger('VersionSelector');
 
 interface VersionSelectorProps {
+  appId?: string | null;
   installedVersions: string[];
   activeVersion: string | null;
   isLoading: boolean;
@@ -32,6 +33,7 @@ interface VersionSelectorProps {
 }
 
 export function VersionSelector({
+  appId,
   installedVersions,
   activeVersion,
   isLoading,
@@ -113,6 +115,7 @@ export function VersionSelector({
     isInstallPending,
     ringDegrees,
   } = React.useMemo(() => getVersionSelectorDisplayState({
+    appId,
     activeVersion,
     diskSpacePercent,
     hasNewVersion,
@@ -123,6 +126,7 @@ export function VersionSelector({
     isLoading,
     latestVersion,
   }), [
+    appId,
     activeVersion,
     diskSpacePercent,
     hasNewVersion,

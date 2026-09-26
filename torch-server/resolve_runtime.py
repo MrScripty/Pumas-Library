@@ -911,6 +911,8 @@ def main() -> None:
         "-m",
         "pip",
         "--isolated",
+        "--cache-dir",
+        str(args.output / "pip-cache"),
         "install",
         "--dry-run",
         "--report",

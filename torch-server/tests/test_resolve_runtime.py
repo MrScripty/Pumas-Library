@@ -452,6 +452,7 @@ class ResolverTests(unittest.TestCase):
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "resolver workspace with spaces"
             with (
                 patch.object(
                     resolver.sys,
@@ -467,7 +468,7 @@ class ResolverTests(unittest.TestCase):
                         "--torch-sha256",
                         digest,
                         "--output",
-                        directory,
+                        str(output),
                     ],
                 ),
                 patch.object(resolver.sys, "platform", "darwin"),
@@ -484,11 +485,12 @@ class ResolverTests(unittest.TestCase):
                 resolver.main()
             self.assertEqual(len(commands), 1)
             command = commands[0]
+            self.assertEqual(command[command.index("--cache-dir") + 1], str(output / "pip-cache"))
             self.assertIn(f"torch @ {wheel}#sha256={digest}", command)
             self.assertNotIn("torch==2.14.0", command)
             self.assertTrue(set(resolver.CORE).issubset(command))
             self.assertEqual(
-                json.loads((pathlib.Path(directory) / "resolution.json").read_text())["torch"],
+                json.loads((output / "resolution.json").read_text())["torch"],
                 "2.14.0",
             )
 

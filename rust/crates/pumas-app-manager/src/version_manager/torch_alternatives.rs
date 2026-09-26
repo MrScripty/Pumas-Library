@@ -793,7 +793,7 @@ impl VersionManager {
                 ));
             }
         };
-        let workspace = Arc::new(tempfile::tempdir().map_err(PumasError::from)?);
+        let workspace = super::torch_workspace::create_launcher_workspace(&self.launcher_root)?;
         let resolver = workspace.path().join("resolve_runtime.py");
         std::fs::write(
             &resolver,
@@ -1011,7 +1011,8 @@ impl VersionManager {
                 ensure_managed_torch_interpreter(&managed_root, &self.torch_cleanup, &candidates[0])
                     .await
             {
-                let workspace = Arc::new(tempfile::tempdir().map_err(PumasError::from)?);
+                let workspace =
+                    super::torch_workspace::create_launcher_workspace(&self.launcher_root)?;
                 let resolver = workspace.path().join("resolve_runtime.py");
                 std::fs::write(
                     &resolver,

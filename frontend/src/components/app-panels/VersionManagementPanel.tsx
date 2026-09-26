@@ -144,6 +144,7 @@ export function VersionManagementPanel({
   return (
     <div className="w-full">
       <VersionSelector
+        appId={versions.appId}
         installedVersions={versions.installedVersions}
         activeVersion={versions.activeVersion}
         isLoading={versions.isLoading}

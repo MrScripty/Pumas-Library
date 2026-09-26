@@ -53,6 +53,7 @@ pub mod size_calculator;
 mod state;
 mod torch_alternatives;
 mod torch_preview;
+mod torch_workspace;
 
 pub use constraints::ConstraintsManager;
 pub use dependencies::DependencyManager;

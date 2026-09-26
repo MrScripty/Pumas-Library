@@ -48,7 +48,7 @@ export function HeaderStatusBadge({ status }: { status: HeaderStatusInfo }) {
     <div className="flex-1 flex items-center justify-center min-w-0">
       <div className="flex items-center gap-1.5 px-2 py-0.5 bg-[hsl(var(--accent-success)/0.15)] rounded text-[10px] text-[hsl(var(--text-secondary))]">
         <StatusIcon className={`w-3 h-3 flex-shrink-0 ${status.spinning ? 'animate-spin' : ''}`} />
-        <span className="truncate whitespace-nowrap">{status.text}</span>
+        <span className="truncate whitespace-nowrap" title={status.text}>{status.text}</span>
       </div>
     </div>
   );

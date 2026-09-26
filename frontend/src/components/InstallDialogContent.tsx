@@ -4,6 +4,7 @@ import type { InstallationProgress, VersionRelease } from '../hooks/useVersions'
 import { ProgressDetailsView } from './ProgressDetailsView';
 import { VersionListItem } from './VersionListItem';
 import type { TorchInstalledConfig } from '../types/torch-install';
+import { getInstallActivityPresentation } from '../utils/installActivityPresentation';
 
 interface InstallDialogContentProps {
   appId?: string;
@@ -70,6 +71,7 @@ export function InstallDialogContent({
   onInspectTorchProbe,
   onReportRemoveError,
 }: InstallDialogContentProps) {
+  const activity = getInstallActivityPresentation({ appId, installingTag: installingVersion, progress });
   return (
     <div className="flex-1 min-h-0 overflow-y-auto py-4 px-0">
       <AnimatePresence>
@@ -87,6 +89,13 @@ export function InstallDialogContent({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {activity.active && (appId === 'torch' || !progress) && (
+        <div className="mx-4 mb-3 flex items-center justify-between gap-3 rounded border border-[hsl(var(--border-default))] p-3 text-sm">
+          <span role="status" className="min-w-0 break-words">{activity.phase}</span>
+          <button type="button" onClick={onCancelInstallation} className="shrink-0 rounded border px-3 py-1" aria-label="Cancel current installation">Cancel</button>
+        </div>
+      )}
 
       <AnimatePresence>
         {isRateLimited && (
@@ -114,6 +123,7 @@ export function InstallDialogContent({
 
       {showProgressDetails && progress ? (
         <ProgressDetailsView
+          appId={appId}
           progress={progress}
           installingVersion={installingVersion}
           showCompletedItems={showCompletedItems}

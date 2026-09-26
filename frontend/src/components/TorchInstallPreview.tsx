@@ -43,6 +43,8 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
   const [adapter, setAdapter] = useState('');
   const [selectionMode, setSelectionMode] = useState<'preset' | 'upstream'>('upstream');
   const [preview, setPreview] = useState<TorchRuntimePreview | null>(null);
+  const [previewExpiresAt, setPreviewExpiresAt] = useState<number | null>(null);
+  const [previewExpired, setPreviewExpired] = useState(false);
   const [loadingRuntimeOptions, setLoadingRuntimeOptions] = useState(true);
   const [loadingReleaseOptions, setLoadingReleaseOptions] = useState(true);
   const [probing, setProbing] = useState(false);
@@ -63,6 +65,8 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     setReleaseOptions(null);
     setReleaseError(null);
     setPreview(null);
+    setPreviewExpiresAt(null);
+    setPreviewExpired(false);
     setError(null);
     setRejection(null);
     setChecks([]);
@@ -101,9 +105,26 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     };
   }, [tag, releaseAttempt]);
 
+  useEffect(() => {
+    if (previewExpiresAt === null) return;
+    let timeout: number;
+    const expireWhenDue = () => {
+      const remaining = previewExpiresAt - Date.now();
+      if (remaining <= 0) {
+        setPreviewExpired(true);
+      } else {
+        timeout = window.setTimeout(expireWhenDue, Math.min(remaining, 2_147_483_647));
+      }
+    };
+    expireWhenDue();
+    return () => window.clearTimeout(timeout);
+  }, [previewExpiresAt]);
+
   const invalidatePreview = () => {
     requestNumber.current += 1;
     setPreview(null);
+    setPreviewExpiresAt(null);
+    setPreviewExpired(false);
     setProbing(false);
     setError(null);
     setRejection(null);
@@ -122,6 +143,8 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       setChecks((previous) => [...previous.filter((item) => item.key !== key), { key, label, status }]);
     };
     setPreview(null);
+    setPreviewExpiresAt(null);
+    setPreviewExpired(false);
     setError(null);
     setRejection(null);
     setProbing(true);
@@ -130,6 +153,8 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       if (requestNumber.current === currentRequest) {
         if (outcome.status === 'resolved') {
           setPreview(outcome.preview);
+          setPreviewExpiresAt(Date.now() + outcome.preview.expiresInSeconds * 1000);
+          setPreviewExpired(false);
           recordCheck('resolved');
         } else {
           setRejection(outcome);
@@ -189,13 +214,15 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
   const eligibleCheckedBuilds = alternatives?.checkedBuilds.filter((choice) => availableBuilds.includes(choice)) ?? [];
   const loadingOptions = loadingRuntimeOptions || (!isPresetRelease && loadingReleaseOptions);
   const canInstall = preview !== null && Boolean(preview.previewId)
+    && previewExpiresAt !== null && !previewExpired && Date.now() < previewExpiresAt
     && preview.tag === tag && preview.build === build
     && Boolean(preview.python) && preview.python !== 'auto'
     && (!fixedPreset || preview.python === runtimeOptions.preset.python)
     && preview.adapter === adapter;
 
   return (
-    <section className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-4" aria-label={`Torch installation preview for ${tag}`}>
+    <section className="flex flex-1 min-h-0 max-h-[calc(80vh-5rem)] flex-col overflow-hidden" aria-label={`Torch installation preview for ${tag}`}>
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3">
       <button type="button" onClick={onBack} className="flex items-center gap-2 text-sm text-[hsl(var(--text-secondary))]">
         <ArrowLeft size={16} /> All versions
       </button>
@@ -299,22 +326,35 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
         </div>}
       </div>}
       {preview && (
-        <div className="space-y-3 rounded border p-3 text-sm" role="status">
-          <p className="font-medium">{fixedPreset ? 'Fixed preset highlights' : 'Exact artifacts resolved'}</p>
+        <div className="space-y-3 rounded border p-3 text-sm">
+          <div role="status">
+            <p className="font-medium">{fixedPreset ? 'Fixed preset highlights' : 'Exact artifacts resolved'}</p>
+            <p>{fixedPreset
+              ? `${preview.artifacts.length} fixed preset wheel highlight${preview.artifacts.length === 1 ? '' : 's'} · ${preview.build} · ${preview.python}`
+              : `${preview.artifacts.length} exact artifacts resolved · ${preview.build} · ${preview.python} · ${preview.adapter === 'none' ? 'Core runtime only' : preview.adapter}`}</p>
+          </div>
           <p>Selected Python: {preview.python}</p>
+          {fixedPreset && <p>Additional bundled dependencies and their URLs are selected during installation.</p>}
           {preview.qualification === 'unverified' && <p>Artifact resolution is unverified; trial this installation before selecting it as default.</p>}
-          {preview.artifacts.length > 0 && <ul className="space-y-2">{preview.artifacts.map((artifact) => (
-            <li key={`${artifact.name}-${artifact.version}`} className="break-all rounded bg-[hsl(var(--surface-control))] p-2">
-              <strong>{artifact.name} {artifact.version}</strong><br />
-              <span>URL: {artifact.url}</span><br />
-              <span>SHA-256: {artifact.sha256}</span>
-            </li>
-          ))}</ul>}
+          {previewExpired && <p role="alert" className="text-[hsl(var(--accent-error))]">Preview expired. Check selected combination again before installing.</p>}
+          {preview.artifacts.length > 0 && <div role="region" aria-label="Artifact URL and hash review" className="rounded border p-3">
+            <p className="font-medium">{fixedPreset ? 'Preset wheel highlight URLs and SHA-256 hashes' : 'Exact artifact URLs and SHA-256 hashes'}</p>
+            <ul aria-label={fixedPreset ? 'Preset wheel highlight URLs and SHA-256 hashes' : 'Exact artifact URLs and SHA-256 hashes'} className="mt-3 max-h-72 space-y-2 overflow-y-auto">{preview.artifacts.map((artifact) => (
+              <li key={`${artifact.name}-${artifact.version}`} className="break-all rounded bg-[hsl(var(--surface-control))] p-2">
+                <strong>{artifact.name} {artifact.version}</strong><br />
+                <span>URL: {artifact.url}</span><br />
+                <span>SHA-256: {artifact.sha256}</span>
+              </li>
+            ))}</ul>
+          </div>}
         </div>
       )}
-      <button type="button" disabled={!canInstall} onClick={() => { if (preview?.previewId) onInstall(preview.previewId); }} className="rounded bg-[hsl(var(--accent-success))] px-4 py-2 text-sm font-medium disabled:opacity-50">
-        {fixedPreset ? 'Install fixed preset' : 'Install reviewed artifacts'}
-      </button>
+      </div>
+      <div className="shrink-0 border-t border-[hsl(var(--border-default))] bg-[hsl(var(--surface-low))] px-4 py-3">
+        <button type="button" disabled={!canInstall} onClick={() => { if (canInstall && Date.now() < previewExpiresAt) onInstall(preview.previewId); }} className="rounded bg-[hsl(var(--accent-success))] px-4 py-2 text-sm font-medium disabled:opacity-50">
+          {previewExpired ? 'Preview expired — check again' : fixedPreset ? 'Install fixed preset' : 'Install reviewed artifacts'}
+        </button>
+      </div>
     </section>
   );
 }

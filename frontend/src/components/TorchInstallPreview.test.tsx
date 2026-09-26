@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TorchInstallPreview } from './TorchInstallPreview';
 import type {
@@ -172,6 +172,10 @@ describe('TorchInstallPreview', () => {
     expect(qualified).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
     await waitFor(() => expect(getPreview).toHaveBeenLastCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' }));
+    expect(screen.getByText(/1 fixed preset wheel highlight/)).toBeInTheDocument();
+    expect(screen.getByText('Additional bundled dependencies and their URLs are selected during installation.')).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Preset wheel highlight URLs and SHA-256 hashes' })).toBeInTheDocument();
+    expect(screen.queryByText(/1 exact artifacts resolved/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Install fixed preset' }));
     expect(onInstall).toHaveBeenCalledWith('review-1');
 
@@ -357,25 +361,72 @@ describe('TorchInstallPreview', () => {
     expect(getPreview).toHaveBeenLastCalledWith({ tag: 'v2.14.0', build: 'cpu', python: 'auto', adapter: 'none' });
   });
 
-  it('keeps a long artifact list and its install action inside the scrollable preview region', async () => {
+  it('keeps a 62-artifact audit available without pushing the install action below the review', async () => {
     getPreview.mockImplementation(async (request) => ({
       status: 'resolved',
       preview: {
         ...request, previewId: 'review-many', expiresInSeconds: 300, qualification: 'unverified',
         python: 'python3.12',
-        artifacts: Array.from({ length: 30 }, (_, index) => ({
+        artifacts: Array.from({ length: 62 }, (_, index) => ({
           name: `wheel-${index}`, version: '1.0',
           url: `https://download.pytorch.org/whl/cu130/wheel-${index}.whl`,
           sha256: 'a'.repeat(64),
         })),
       },
     }));
-    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
+    const onInstall = vi.fn();
+    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Check selected combination' }));
     const previewRegion = screen.getByRole('region', { name: 'Torch installation preview for v2.14.0' });
-    await waitFor(() => expect(screen.getByText('wheel-29 1.0')).toBeInTheDocument());
-    expect(previewRegion).toHaveClass('flex-1', 'min-h-0', 'overflow-y-auto');
-    expect(previewRegion).toContainElement(screen.getByRole('button', { name: 'Install reviewed artifacts' }));
+    await waitFor(() => expect(screen.getByText(/62 exact artifacts resolved/)).toBeInTheDocument());
+    expect(previewRegion).toHaveClass('max-h-[calc(80vh-5rem)]', 'overflow-hidden');
+    const audit = screen.getByRole('list', { name: 'Exact artifact URLs and SHA-256 hashes' });
+    expect(screen.getByRole('status')).toHaveTextContent('62 exact artifacts resolved');
+    expect(screen.getByRole('status')).not.toContainElement(audit);
+    expect(screen.getByRole('region', { name: 'Artifact URL and hash review' })).toContainElement(audit);
+    expect(audit).toHaveClass('max-h-72', 'overflow-y-auto');
+    expect(audit.closest('details')).toBeNull();
+    expect(within(audit).getAllByRole('listitem')).toHaveLength(62);
+    expect(audit).toContainElement(screen.getByText('wheel-61 1.0'));
+    const install = screen.getByRole('button', { name: 'Install reviewed artifacts' });
+    expect(install).toBeEnabled();
+    expect(previewRegion.firstElementChild).toHaveClass('min-h-0', 'overflow-y-auto');
+    expect(previewRegion.firstElementChild).toContainElement(audit);
+    expect(previewRegion.firstElementChild).not.toContainElement(install);
+    expect(install.parentElement).toHaveClass('shrink-0');
+    fireEvent.click(install);
+    expect(onInstall).toHaveBeenCalledWith('review-many');
+  });
+
+  it('expires a resolved preview and requires a new check before installation', async () => {
+    getPreview.mockImplementation(async (request) => ({
+      status: 'resolved',
+      preview: {
+        ...request, previewId: 'review-expiring', expiresInSeconds: 5,
+        python: 'python3.12', qualification: 'unverified', artifacts: [],
+      },
+    }));
+    const onInstall = vi.fn();
+    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
+    const check = await screen.findByRole('button', { name: 'Check selected combination' });
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    try {
+      await act(async () => { fireEvent.click(check); });
+      const install = screen.getByRole('button', { name: 'Install reviewed artifacts' });
+      expect(install).toBeEnabled();
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(screen.getByRole('alert')).toHaveTextContent('Preview expired. Check selected combination again before installing.');
+      expect(screen.getByRole('button', { name: 'Preview expired — check again' })).toBeDisabled();
+      expect(onInstall).not.toHaveBeenCalled();
+
+      await act(async () => { fireEvent.click(check); });
+      expect(screen.getByRole('button', { name: 'Install reviewed artifacts' })).toBeEnabled();
+      expect(screen.queryByText('Preview expired. Check selected combination again before installing.')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Install reviewed artifacts' }));
+      expect(onInstall).toHaveBeenCalledWith('review-expiring');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

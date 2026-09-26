@@ -185,8 +185,9 @@ export function VersionListItemButton({
   onInstall,
   onRemove,
 }: VersionListItemButtonProps) {
+  const canCancel = isInstalling && !isInstalled;
   const handleButtonClick = () => {
-    if (isInstalling) {
+    if (canCancel) {
       onCancel();
       return;
     }
@@ -199,23 +200,25 @@ export function VersionListItemButton({
 
   return (
     <motion.button
+      aria-label={canCancel ? 'Cancel current version installation' : displayState.showUninstall ? 'Uninstall version' : !isInstalled && !displayState.isComplete ? 'Install version' : undefined}
+      title={canCancel ? 'Cancel current version installation' : displayState.showUninstall ? 'Uninstall version' : !isInstalled && !displayState.isComplete ? 'Install version' : undefined}
       onClick={handleButtonClick}
-      onPointerEnter={isInstalling ? onCancelMouseEnter : undefined}
-      onPointerLeave={isInstalling ? onCancelMouseLeave : undefined}
-      whileHover={!isInstalling ? { scale: 1.05 } : {}}
-      whileTap={!isInstalling ? { scale: 0.96 } : {}}
+      onPointerEnter={canCancel ? onCancelMouseEnter : undefined}
+      onPointerLeave={canCancel ? onCancelMouseLeave : undefined}
+      whileHover={!canCancel ? { scale: 1.05 } : {}}
+      whileTap={!canCancel ? { scale: 0.96 } : {}}
       className={getInstallButtonClassName({
         displayState,
         isCancelHovered,
         isInstalled,
-        isInstalling,
+        isInstalling: canCancel,
       })}
     >
       {getButtonContent({
         displayState,
         isCancelHovered,
         isInstalled,
-        isInstalling,
+        isInstalling: canCancel,
       })}
     </motion.button>
   );

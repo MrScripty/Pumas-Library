@@ -24,9 +24,10 @@ The current-source Torch 2.14.0 CPU/Core RPC install/restart and native QA pass
 on Linux x86_64, Windows x86_64, and macOS arm64 in manual run
 [36229508586](https://github.com/MrScripty/Pumas-Library/actions/runs/36229508586)
 on runtime commit `21041697`; each target provisioned Pumas-managed CPython
-3.14.7 and installed 25 hashed official artifacts. The broader support claim
-remains bounded by Electron UI-driven and packaged Windows/macOS installation,
-provider cancellation/tamper, and non-CPU runtime gates. CPython notices are
+3.14.7 and installed 25 hashed official artifacts. The Linux v0.7.0 AppImage
+UI install-progress flow has since passed locally; the broader support claim
+remains bounded by packaged Windows/macOS installation, provider
+cancellation/tamper, and non-CPU runtime gates. CPython notices are
 generated for all three desktop targets, with fail-closed provider-pin,
 archive-mapping, and exact legal-file checks. Pumas does not compile Torch from
 source; XPU remains outside this
@@ -643,17 +644,21 @@ come from Electron's `api:call` allowlist before Rust dispatch. The public
 `v0.7.0` tag lacks that method in `electron/src/rpc-method-registry.ts`; the
 current branch contains it and the regression test passes. The toolbar-linked
 public release is still v0.7.0, so it has not received the branch's updated
-bridge. Current-branch local Linux AppImage/deb candidates include the updated
-bridge and generated CPython notices, pass extracted-resource hash checks, and
-start their packaged backends through `/health`. Their SHA-256 values are
-`1398ef0a9da1c0aab90681d3c91674ef88c6229a84984047938e7bd6eb350acd` (AppImage)
-and `468b6f7c2af00ff8785f80e5486cd5133979e875dd351b4b9f5284ddfd195043` (deb).
-The packaged Linux RPC backend then passed Torch 2.14.0 CPU/Core install and
-restart using managed CPython 3.14.7, the 25-hash official artifact resolution,
-CPU operation, probe, protocol 3 sidecar start/stop, and graceful cleanup; see
-the [packaged acceptance report](../../torch-cross-platform-runtime-management/reports/v2.14.0-linux-packaged-cpu-acceptance/README.md).
-This is backend acceptance rather than GUI-driven installation. These are local
-candidates and have not been uploaded to the toolbar-linked release. Packaged
-Electron UI interaction, Windows/macOS packaged installation, provider
-cancellation/tamper/retry, CUDA/MPS execution, and v2.14.0 Tuldok image
-generation remain open.
+bridge. The latest current-branch local Linux AppImage/deb candidates include
+the updated bridge and generated CPython notices, pass extracted-resource hash
+checks, and start their packaged backends through `/health`. Their SHA-256
+values are
+`a28f302822ce99a9d687797606574c93a5afb9c184f293526b16b972294a670b` (AppImage)
+and `d8effc33ba37466171c5fae0178e2555064850e40544c93249966fedbf4bce88` (deb).
+The packaged Linux RPC backend passed Torch 2.14.0 CPU/Core install and restart
+using managed CPython 3.14.7 and 25 hashed official artifacts; see the
+[packaged backend acceptance](../../torch-cross-platform-runtime-management/reports/v2.14.0-linux-packaged-cpu-acceptance/README.md).
+The latest AppImage also passed the real UI install flow for Torch v2.14.0
+cu132: at the first sampled install state, the header named the current phase,
+the dialog showed Cancel, setup bars were indeterminate with no `aria-valuenow`,
+and the runtime reached Ready. The exact report records the 44-artifact review,
+managed CPython 3.14.7, CPU tensor result 5, and the warm-cache limit:
+[packaged UI acceptance](../../torch-cross-platform-runtime-management/reports/v2.14.0-linux-appimage-cu132-ui-acceptance/README.md).
+These are local candidates and have not been uploaded to the toolbar-linked
+release. Packaged Windows/macOS installation, provider cancellation/tamper/retry,
+CUDA/MPS execution, and v2.14.0 Tuldok image generation remain open.

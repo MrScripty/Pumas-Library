@@ -875,7 +875,9 @@ mod tests {
 
     #[tokio::test]
     async fn cancelled_resolver_waiter_keeps_workspace_until_owned_drain() {
-        let workspace = std::sync::Arc::new(tempfile::tempdir().unwrap());
+        let launcher_root = tempfile::tempdir().unwrap();
+        let workspace =
+            super::torch_workspace::create_launcher_workspace(launcher_root.path()).unwrap();
         let path = workspace.path().to_path_buf();
         let ready = path.join("ready");
         let cleanup = std::sync::Arc::new(super::installer::TorchCleanupTasks::default());
@@ -885,7 +887,7 @@ mod tests {
             let mut command = Command::new("sh");
             command
                 .arg("-c")
-                .arg("touch \"$1\"; sleep 30")
+                .arg("printf '%s\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" > \"$1.tmp\"; mv \"$1.tmp\" \"$1\"; sleep 30")
                 .arg("sh")
                 .arg(&ready);
             run_preview_resolver(
@@ -903,6 +905,14 @@ mod tests {
         })
         .await
         .unwrap();
+        let environment = std::fs::read_to_string(path.join("ready")).unwrap();
+        let expected_tmp = path.join("tmp");
+        let canonical_launcher_root = std::fs::canonicalize(launcher_root.path()).unwrap();
+        assert!(path.starts_with(canonical_launcher_root.join("launcher-data/tmp/torch-preview")));
+        assert_eq!(
+            environment.lines().collect::<Vec<_>>(),
+            vec![expected_tmp.to_str().unwrap(); 3]
+        );
         task.abort();
         assert!(task.await.unwrap_err().is_cancelled());
         drop(workspace);
@@ -1333,6 +1343,7 @@ pub(super) async fn run_preview_resolver(
     deadline: Duration,
     cleanup: &super::installer::TorchCleanupTasks,
 ) -> Result<PreviewResolverRun> {
+    super::torch_workspace::configure_resolver_command(&mut command, workspace.path())?;
     let stdout = std::fs::File::create(workspace.path().join("resolver.stdout"))
         .map_err(PumasError::from)?;
     let stderr = std::fs::File::create(workspace.path().join("resolver.stderr"))
@@ -1806,7 +1817,7 @@ impl VersionManager {
         }
         // This temporary directory is only a resolver workspace. Retained preview
         // data is held in memory, so restart invalidates every outstanding ID.
-        let workspace = std::sync::Arc::new(tempfile::tempdir().map_err(PumasError::from)?);
+        let workspace = super::torch_workspace::create_launcher_workspace(&self.launcher_root)?;
         let resolver = workspace.path().join("resolve_runtime.py");
         fs::write(
             &resolver,

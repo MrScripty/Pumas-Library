@@ -4124,7 +4124,7 @@ impl TryFrom<pumas_app_manager::version_manager::TorchPreviewOutcome>
                     },
                 }
             }
-            TorchPreviewOutcome::Rejected { reason, .. } => {
+            TorchPreviewOutcome::Rejected { reason, message } => {
                 let reason = match reason {
                     TorchPreviewRejectionReason::Unsupported => {
                         TorchRuntimePreviewRejectionReason::Unsupported
@@ -4139,10 +4139,30 @@ impl TryFrom<pumas_app_manager::version_manager::TorchPreviewOutcome>
                         TorchRuntimePreviewRejectionReason::Inconclusive
                     }
                 };
-                Self::Rejected {
-                    reason,
-                    message: reason.message(),
-                }
+                // The manager's message is static but may still contain private text.
+                // Only these known stage messages are safe to expose verbatim.
+                let message = match reason {
+                    TorchRuntimePreviewRejectionReason::Unsupported
+                        if message
+                            == "No compatible official Torch wheel was found for this version, build, and Python selection." =>
+                    {
+                        message
+                    }
+                    TorchRuntimePreviewRejectionReason::Inconclusive
+                        if matches!(
+                            message,
+                            "The managed Python catalog exceeded the bounded candidate scan."
+                                | "The managed Python catalog could not be verified."
+                                | "Official wheel discovery did not complete conclusively."
+                                | "No stable native CPython candidate is available from the managed provider."
+                                | "The managed Python interpreter could not be provisioned."
+                        ) =>
+                    {
+                        message
+                    }
+                    _ => reason.message(),
+                };
+                Self::Rejected { reason, message }
             }
         })
     }
@@ -4198,22 +4218,88 @@ mod torch_preview_contract_tests {
 
     #[cfg(feature = "inference-plugins")]
     #[test]
-    fn manager_rejection_message_cannot_cross_rpc_boundary() {
-        let outcome = pumas_app_manager::version_manager::TorchPreviewOutcome::Rejected {
-            reason:
-                pumas_app_manager::version_manager::TorchPreviewRejectionReason::ValidationFailed,
-            message: "private resolver stderr /secret/path",
+    fn manager_rejection_message_survives_rpc_boundary() {
+        use pumas_app_manager::version_manager::{
+            TorchPreviewOutcome, TorchPreviewRejectionReason,
         };
-        let projected: TorchRuntimePreviewOutcome = outcome.try_into().unwrap();
-        let value = RpcOutcome::TorchRuntimePreview(projected)
-            .into_value()
-            .unwrap();
-        assert_eq!(value["reason"], "validation_failed");
-        assert_eq!(
-            value["message"],
-            TorchRuntimePreviewRejectionReason::ValidationFailed.message()
-        );
-        assert!(!value.to_string().contains("private resolver"));
+
+        for (reason, expected_reason, message) in [
+            (
+                TorchPreviewRejectionReason::Unsupported,
+                "unsupported",
+                "No compatible official Torch wheel was found for this version, build, and Python selection.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "The managed Python catalog exceeded the bounded candidate scan.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "The managed Python catalog could not be verified.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "Official wheel discovery did not complete conclusively.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "No stable native CPython candidate is available from the managed provider.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "The managed Python interpreter could not be provisioned.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "Wheel resolution did not complete conclusively.",
+            ),
+        ] {
+            let outcome = TorchPreviewOutcome::Rejected { reason, message };
+            let projected: TorchRuntimePreviewOutcome = outcome.try_into().unwrap();
+            let value = RpcOutcome::TorchRuntimePreview(projected)
+                .into_value()
+                .unwrap();
+            assert_eq!(value["reason"], expected_reason);
+            assert_eq!(value["message"], message);
+        }
+    }
+
+    #[cfg(feature = "inference-plugins")]
+    #[test]
+    fn manager_unknown_or_mismatched_rejection_message_is_redacted() {
+        use pumas_app_manager::version_manager::{
+            TorchPreviewOutcome, TorchPreviewRejectionReason,
+        };
+
+        for (reason, message, expected_reason, expected_message) in [
+            (
+                TorchPreviewRejectionReason::ValidationFailed,
+                "private resolver stderr /secret/path",
+                "validation_failed",
+                TorchRuntimePreviewRejectionReason::ValidationFailed.message(),
+            ),
+            (
+                TorchPreviewRejectionReason::Unsupported,
+                "The managed Python catalog could not be verified.",
+                "unsupported",
+                TorchRuntimePreviewRejectionReason::Unsupported.message(),
+            ),
+        ] {
+            let outcome = TorchPreviewOutcome::Rejected { reason, message };
+            let projected: TorchRuntimePreviewOutcome = outcome.try_into().unwrap();
+            let value = RpcOutcome::TorchRuntimePreview(projected)
+                .into_value()
+                .unwrap();
+            assert_eq!(value["reason"], expected_reason);
+            assert_eq!(value["message"], expected_message);
+            assert!(!value.to_string().contains(message));
+        }
     }
 
     #[cfg(feature = "inference-plugins")]

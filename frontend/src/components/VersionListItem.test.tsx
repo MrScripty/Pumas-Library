@@ -143,6 +143,7 @@ describe('VersionListItem', () => {
     });
 
     expect(screen.getByText('2/4')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel current version installation' })).toBeInTheDocument();
 
     const progressButton = getClosestButton('2/4');
     fireEvent.pointerEnter(progressButton);
@@ -173,5 +174,34 @@ describe('VersionListItem', () => {
     });
 
     expect(screen.getByText('50%')).toBeInTheDocument();
+  });
+
+  it('shows an indeterminate Torch setup phase and keeps the row cancel action', () => {
+    const { props, rerender } = renderVersionListItem({
+      appId: 'torch', isInstalling: true,
+      progress: { ...dependencyProgress, stage: 'setup', stage_progress: 0, overall_progress: 95, current_item: 'Creating managed Python environment', error: null },
+    });
+    const button = getClosestButton('Creating managed Python environment');
+    expect(screen.queryByText('95%')).not.toBeInTheDocument();
+    expect(button.querySelector('.download-progress-ring.is-waiting')).toBeInTheDocument();
+    fireEvent.click(button);
+    expect(props.onCancel).toHaveBeenCalledOnce();
+
+    rerender(<VersionListItem {...props} progress={{
+      ...dependencyProgress, stage: 'setup', stage_progress: 40, overall_progress: 95,
+      current_item: 'Qualifying runtime', error: null,
+    }} />);
+    expect(screen.getByText('Qualifying runtime')).toBeInTheDocument();
+    expect(button.querySelector('.download-progress-ring.is-waiting')).not.toBeInTheDocument();
+  });
+
+  it('labels a measured non-download phase instead of calling it a download', () => {
+    const { container } = renderVersionListItem({
+      isInstalling: true,
+      progress: { ...dependencyProgress, stage: 'extract', stage_progress: 40, overall_progress: 35, current_item: 'Unpacking runtime' },
+    });
+    expect(screen.getByText('Unpacking runtime')).toBeInTheDocument();
+    expect(screen.queryByText('Downloading...')).not.toBeInTheDocument();
+    expect(container.querySelector('.download-progress-ring.is-waiting')).not.toBeInTheDocument();
   });
 });

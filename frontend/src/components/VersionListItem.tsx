@@ -64,6 +64,7 @@ export function VersionListItem({
   onCancelMouseLeave,
 }: VersionListItemProps) {
   const displayState = getVersionInstallDisplayState({
+    appId,
     installNetworkStatus,
     isHovered,
     isInstalled,

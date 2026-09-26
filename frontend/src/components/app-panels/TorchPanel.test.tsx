@@ -242,7 +242,7 @@ describe('TorchPanel shared version controls', () => {
     });
     const oldRow = getVersionRow(oldTag);
     fireEvent.pointerEnter(oldRow);
-    const uninstallButton = await within(oldRow).findByRole('button', { name: 'Uninstall' });
+    const uninstallButton = await within(oldRow).findByRole('button', { name: 'Uninstall version' });
     fireEvent.click(uninstallButton);
 
     await waitFor(() => {

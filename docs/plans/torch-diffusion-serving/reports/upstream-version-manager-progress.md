@@ -22,10 +22,12 @@ provisions stable native CPython 3.10+ from a pinned provider and chooses the
 newest candidate whose exact official wheel and complete dependencies resolve.
 Linux clean-host provisioning and the Torch 2.14.0 CPU/Core RPC install/restart
 now pass on Linux x86_64, Windows x64, and macOS arm64. The broader support
-claim remains bounded by packaged-desktop, selected-provider notice, and
-non-CPU runtime gates. Pumas does not compile Torch from source; XPU remains
-outside this provider contract. A release with no compatible wheel is
-discoverable but correctly rejected for that tuple.
+claim remains bounded by packaged-desktop, provider cancellation/tamper, and
+non-CPU runtime gates. CPython notices are generated for all three desktop
+targets, with fail-closed provider-pin, archive-mapping, and exact legal-file
+checks. Pumas does not compile Torch from source; XPU remains outside this
+provider contract. A release with no compatible wheel is discoverable but
+correctly rejected for that tuple.
 
 The fixed qualified `v2.9.1` / CUDA 13.0 / Python 3.12 bundled preset remains a
 separate recipe. The current manager path provisions its Python 3.12 base
@@ -608,3 +610,36 @@ must verify the follow-up.
 The Torch QA job now disables checkout credential persistence. Security review
 confirmed the job has `contents: read` and that PR caches use the PR merge-ref
 scope; no cache-mode change was needed ([GitHub cache scope](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching)).
+
+## 2026-09-26 — CPython release attribution and desktop RPC diagnosis
+
+The release attribution generator now includes target-scoped CPython full-
+archive license supersets for Linux x86_64 GNU, Windows x86_64 MSVC, and macOS
+arm64. It derives the target set from `artifact-plan.json`, links each native
+restart runtime report to its separate Python Build Standalone full-archive
+manifest, preserves the selected install-only URL and uv identity separately,
+and records the raw 19-file license set and `PYTHON.json` for each platform.
+The generated inventory contains 371 package entries and 78 hashed inputs;
+all 57 legal files are covered by the source manifests. Windows CRLF text is
+preserved in the generated UTF-8 notice. Generation and packaging checks bind
+each target to its exact Rust uv enum arm, pinned archive hash, and reviewed
+Python Build Standalone release/flavor; they reject incomplete or duplicate
+legal-file lists and malformed archive hashes. Attribution integrity, release
+tests, Ruff, the Electron packaging hook, and the focused Electron RPC allowlist
+regression pass. The broad local Electron suite hits `EPERM` when one test
+binds its loopback HTTP server inside this sandbox; the same failure does not
+affect the focused RPC or packaging tests.
+
+The reported `Unknown API method: get_torch_release_options` is confirmed to
+come from Electron's `api:call` allowlist before Rust dispatch. The public
+`v0.7.0` tag lacks that method in `electron/src/rpc-method-registry.ts`; the
+current branch contains it and the regression test passes. The toolbar-linked
+public release is still v0.7.0, so it has not received the branch's updated
+bridge. Current-branch local Linux AppImage/deb candidates include the updated
+bridge and generated CPython notices, pass extracted-resource hash checks, and
+start their packaged backends through `/health`. Their SHA-256 values are
+`1398ef0a9da1c0aab90681d3c91674ef88c6229a84984047938e7bd6eb350acd` (AppImage)
+and `468b6f7c2af00ff8785f80e5486cd5133979e875dd351b4b9f5284ddfd195043` (deb).
+They are local candidates and have not been uploaded to the toolbar-linked
+release. Packaged Torch installation, provider cancellation/tamper/retry,
+CUDA/MPS execution, and v2.14.0 Tuldok image generation remain open.

@@ -5,6 +5,12 @@ rust/**/Cargo.toml text eol=lf
 pnpm-lock.yaml text eol=lf
 electron/package.json text eol=lf
 frontend/package.json text eol=lf
+scripts/release/artifact-plan.json text eol=lf
+scripts/release/licenses/managed-python-sources.json text eol=lf
+scripts/release/torch-managed-python-acceptance.py text eol=lf
+rust/crates/pumas-app-manager/src/version_manager/managed_python.rs text eol=lf
+docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-*-cpu-rpc-restart-acceptance/runtime.json text eol=lf
+docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/*/managed-python-licenses/full-archive-manifest.json text eol=lf
 
 # Preserve verbatim third-party legal bytes, including mixed line endings.
 scripts/release/licenses/* -text -whitespace

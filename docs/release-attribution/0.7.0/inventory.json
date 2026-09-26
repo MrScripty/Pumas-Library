@@ -6008,6 +6008,261 @@
       ]
     },
     {
+      "name": "CPython full archive",
+      "version": "3.14.7",
+      "license_declared": "Python-2.0, CNRI-Python",
+      "source": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-aarch64-apple-darwin-pgo%2Blto-full.tar.zst",
+      "scope": "Managed Python full-archive notice superset for aarch64-apple-darwin; selected install-only runtime tracked separately",
+      "texts": [
+        {
+          "path": "licenses/LICENSE.bdb.txt",
+          "sha256": "3bdff06e69991c94664f2ef5c5f8096f60b7dbec071756ea6cc26b445e06ec5b"
+        },
+        {
+          "path": "licenses/LICENSE.bzip2.txt",
+          "sha256": "1f38bbc7caacafd65169276d759c0d88c991b753b643ce35d0e45ea1971dd441"
+        },
+        {
+          "path": "licenses/LICENSE.cpython.txt",
+          "sha256": "86e61415828a8b5b06ec8d024e6f086ce155a8b85fd0c419c0ba4dc004e74fdd"
+        },
+        {
+          "path": "licenses/LICENSE.expat.txt",
+          "sha256": "122f2c27000472a201d337b9b31f7eb2b52d091b02857061a8880371612d9534"
+        },
+        {
+          "path": "licenses/LICENSE.libX11.txt",
+          "sha256": "2daec087a88e7c9b8082557cdeebad5bbb8155a4137472f0b22e269cd99d0c1e"
+        },
+        {
+          "path": "licenses/LICENSE.libXau.txt",
+          "sha256": "56abe29bb1d9806a9e04fa9f80fed2c0f18027594df3f098148d814aef6bddfa"
+        },
+        {
+          "path": "licenses/LICENSE.libedit.txt",
+          "sha256": "29cea33c32bbc9785142386377915612a2fa786482c46843383384aded2e09b1"
+        },
+        {
+          "path": "licenses/LICENSE.libffi.txt",
+          "sha256": "deaf3a42effb551a5b140fa9afefed183a27f1341c6d1bf430d106a5e6931fc0"
+        },
+        {
+          "path": "licenses/LICENSE.liblzma.txt",
+          "sha256": "9a4062de0a2c388a98cf35a35d348b62fa97c838a71c3c28ee1a2d7d0a565b02"
+        },
+        {
+          "path": "licenses/LICENSE.libuuid.txt",
+          "sha256": "122ee1f7e258f2c3c0e538a75c037684f420454bf3850ddc74ce750bbf5fe86b"
+        },
+        {
+          "path": "licenses/LICENSE.libxcb.txt",
+          "sha256": "c5ffbfeaa501071ceeb97b7de2c0d703fdaa35de01c0fb6cbac1c28453a3e9fd"
+        },
+        {
+          "path": "licenses/LICENSE.mpdecimal.txt",
+          "sha256": "669512af7219f58be03a398766d7c9da11a3b3df9d3f05cb74c5ceca25c8da3b"
+        },
+        {
+          "path": "licenses/LICENSE.ncurses.txt",
+          "sha256": "87a4c4442337b8968ef956031c406b74f9cb7149b7ba87311bdaba534816201c"
+        },
+        {
+          "path": "licenses/LICENSE.openssl-1.1.txt",
+          "sha256": "9c04cce50c4989d5601dd8b07f6ab922c40388b66ac736c9007cb1ed9d9dd560"
+        },
+        {
+          "path": "licenses/LICENSE.openssl-3.txt",
+          "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+        },
+        {
+          "path": "licenses/LICENSE.sqlite.txt",
+          "sha256": "38bef3d28b24f145ea293bd3b6eb4b20396982abc8303128fb493986ea5bc719"
+        },
+        {
+          "path": "licenses/LICENSE.tcl.txt",
+          "sha256": "c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16"
+        },
+        {
+          "path": "licenses/LICENSE.tix.txt",
+          "sha256": "3ac5cdd0bef6c43ce34c6a7ced452081d9e5a0bf94082b9f9147d23ec9e214f5"
+        },
+        {
+          "path": "licenses/LICENSE.zlib.txt",
+          "sha256": "818922b2620f12801a12bf78e399644a30990e66824abd8ca8ec24d451d6f92c"
+        }
+      ]
+    },
+    {
+      "name": "CPython full archive",
+      "version": "3.14.7",
+      "license_declared": "Python-2.0, CNRI-Python",
+      "source": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-pc-windows-msvc-pgo-full.tar.zst",
+      "scope": "Managed Python full-archive notice superset for x86_64-pc-windows-msvc; selected install-only runtime tracked separately",
+      "texts": [
+        {
+          "path": "licenses/LICENSE.bdb.txt",
+          "sha256": "8f2d533ab34899499d5b07f209854b101b17dba2c69f3251860aecf3e4005faa"
+        },
+        {
+          "path": "licenses/LICENSE.bzip2.txt",
+          "sha256": "bd5628cc76fb0ebf9c657d1dd4d1a240a1a7b216c31663e7bbf1131c0b70a910"
+        },
+        {
+          "path": "licenses/LICENSE.cpython.txt",
+          "sha256": "8fe98bf9822926d854f56ffd8d97877d8b942617aa44eb7ea77fd99e22f2537e"
+        },
+        {
+          "path": "licenses/LICENSE.expat.txt",
+          "sha256": "8a9cfe4b5924f4b25881aa0c9f5e4561c5f31065d0c4a13cdcdbcf917edf39aa"
+        },
+        {
+          "path": "licenses/LICENSE.libX11.txt",
+          "sha256": "f353accfe2976df31ea297a77d1d454bd51ef6be8c3df39bd6aca95901579357"
+        },
+        {
+          "path": "licenses/LICENSE.libXau.txt",
+          "sha256": "cec808cd2163fccdc8de4a91d526490777afbaeea060e1168c40a804694b7444"
+        },
+        {
+          "path": "licenses/LICENSE.libedit.txt",
+          "sha256": "d9932ccdd42eccf6cdded7bcb35b088e64cfc7c24d355af2cc0d02edb6b637d3"
+        },
+        {
+          "path": "licenses/LICENSE.libffi.txt",
+          "sha256": "9afb8970cd29fc1031fa647278e4bef613399e2e3468a1e3a397f4d158c6101c"
+        },
+        {
+          "path": "licenses/LICENSE.liblzma.txt",
+          "sha256": "d87d218dd908b3243ec4cbc72af400e5b7437513ea9d9229291d0812b8464fec"
+        },
+        {
+          "path": "licenses/LICENSE.libuuid.txt",
+          "sha256": "cbccaa3efe07a9a602751375085be572d4410a250b996716fbe8c5255c7ec6f2"
+        },
+        {
+          "path": "licenses/LICENSE.libxcb.txt",
+          "sha256": "29a9539190e6de1af5fd06a9139c7103137cd1f9290b08c7b11bce89c01c14d2"
+        },
+        {
+          "path": "licenses/LICENSE.mpdecimal.txt",
+          "sha256": "f094277cd46e1f6e4d87916cc4b51e22f613d45eb81f48231c3cb7caf8fc8a6a"
+        },
+        {
+          "path": "licenses/LICENSE.ncurses.txt",
+          "sha256": "4f571cad3ea6c888bf0a7092e5b215dddb3142e9e3f1857fd5fac6cf13d345d7"
+        },
+        {
+          "path": "licenses/LICENSE.openssl-1.1.txt",
+          "sha256": "ad89e3fed746413af1d34d5353978ee1520cedd361c853f8022e7bb210ac6b31"
+        },
+        {
+          "path": "licenses/LICENSE.openssl-3.txt",
+          "sha256": "ed72ce2b51ee58f117e5a021e2e04af158857f40269fbc03491f0b2a99dbcc96"
+        },
+        {
+          "path": "licenses/LICENSE.sqlite.txt",
+          "sha256": "d8eb9aba7ef6b5ed06cb3ec19a7242316af2e5933c638eb67fb781c13884e01d"
+        },
+        {
+          "path": "licenses/LICENSE.tcl.txt",
+          "sha256": "41613eabfc08921a7da9c4bfd7f3ce5d5406f55214b253d89f392ed86eebeb8f"
+        },
+        {
+          "path": "licenses/LICENSE.tix.txt",
+          "sha256": "8cdff3addb9e9eb108c78e2cf5e05f26b216c098304945733bbec382b2eaef66"
+        },
+        {
+          "path": "licenses/LICENSE.zlib.txt",
+          "sha256": "365e36720db366054863235aea5d6f440142ab968834bfaf81fa9d187c99b9b8"
+        }
+      ]
+    },
+    {
+      "name": "CPython full archive",
+      "version": "3.14.7",
+      "license_declared": "Python-2.0, CNRI-Python",
+      "source": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-unknown-linux-gnu-pgo%2Blto-full.tar.zst",
+      "scope": "Managed Python full-archive notice superset for x86_64-unknown-linux-gnu; selected install-only runtime tracked separately",
+      "texts": [
+        {
+          "path": "licenses/LICENSE.bdb.txt",
+          "sha256": "3bdff06e69991c94664f2ef5c5f8096f60b7dbec071756ea6cc26b445e06ec5b"
+        },
+        {
+          "path": "licenses/LICENSE.bzip2.txt",
+          "sha256": "1f38bbc7caacafd65169276d759c0d88c991b753b643ce35d0e45ea1971dd441"
+        },
+        {
+          "path": "licenses/LICENSE.cpython.txt",
+          "sha256": "86e61415828a8b5b06ec8d024e6f086ce155a8b85fd0c419c0ba4dc004e74fdd"
+        },
+        {
+          "path": "licenses/LICENSE.expat.txt",
+          "sha256": "122f2c27000472a201d337b9b31f7eb2b52d091b02857061a8880371612d9534"
+        },
+        {
+          "path": "licenses/LICENSE.libX11.txt",
+          "sha256": "2daec087a88e7c9b8082557cdeebad5bbb8155a4137472f0b22e269cd99d0c1e"
+        },
+        {
+          "path": "licenses/LICENSE.libXau.txt",
+          "sha256": "56abe29bb1d9806a9e04fa9f80fed2c0f18027594df3f098148d814aef6bddfa"
+        },
+        {
+          "path": "licenses/LICENSE.libedit.txt",
+          "sha256": "29cea33c32bbc9785142386377915612a2fa786482c46843383384aded2e09b1"
+        },
+        {
+          "path": "licenses/LICENSE.libffi.txt",
+          "sha256": "deaf3a42effb551a5b140fa9afefed183a27f1341c6d1bf430d106a5e6931fc0"
+        },
+        {
+          "path": "licenses/LICENSE.liblzma.txt",
+          "sha256": "9a4062de0a2c388a98cf35a35d348b62fa97c838a71c3c28ee1a2d7d0a565b02"
+        },
+        {
+          "path": "licenses/LICENSE.libuuid.txt",
+          "sha256": "122ee1f7e258f2c3c0e538a75c037684f420454bf3850ddc74ce750bbf5fe86b"
+        },
+        {
+          "path": "licenses/LICENSE.libxcb.txt",
+          "sha256": "c5ffbfeaa501071ceeb97b7de2c0d703fdaa35de01c0fb6cbac1c28453a3e9fd"
+        },
+        {
+          "path": "licenses/LICENSE.mpdecimal.txt",
+          "sha256": "669512af7219f58be03a398766d7c9da11a3b3df9d3f05cb74c5ceca25c8da3b"
+        },
+        {
+          "path": "licenses/LICENSE.ncurses.txt",
+          "sha256": "87a4c4442337b8968ef956031c406b74f9cb7149b7ba87311bdaba534816201c"
+        },
+        {
+          "path": "licenses/LICENSE.openssl-1.1.txt",
+          "sha256": "9c04cce50c4989d5601dd8b07f6ab922c40388b66ac736c9007cb1ed9d9dd560"
+        },
+        {
+          "path": "licenses/LICENSE.openssl-3.txt",
+          "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+        },
+        {
+          "path": "licenses/LICENSE.sqlite.txt",
+          "sha256": "38bef3d28b24f145ea293bd3b6eb4b20396982abc8303128fb493986ea5bc719"
+        },
+        {
+          "path": "licenses/LICENSE.tcl.txt",
+          "sha256": "c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16"
+        },
+        {
+          "path": "licenses/LICENSE.tix.txt",
+          "sha256": "3ac5cdd0bef6c43ce34c6a7ced452081d9e5a0bf94082b9f9147d23ec9e214f5"
+        },
+        {
+          "path": "licenses/LICENSE.zlib.txt",
+          "sha256": "818922b2620f12801a12bf78e399644a30990e66824abd8ca8ec24d451d6f92c"
+        }
+      ]
+    },
+    {
       "name": "uv",
       "version": "0.12.18",
       "license_declared": "MIT OR Apache-2.0",
@@ -6095,15 +6350,360 @@
       "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
     }
   ],
+  "managed_python": [
+    {
+      "target": "aarch64-apple-darwin",
+      "runtime_report": "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-macos-cpu-rpc-restart-acceptance/runtime.json",
+      "manifest": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive-manifest.json",
+      "catalog_key": "cpython-3.14.7-macos-aarch64-none",
+      "selected_install_only_url": "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "provider_name": "uv",
+      "provider_version": "0.12.18",
+      "provider_archive_sha256": "cf40e0c6a202190ccd9e0406dcfdd5b2d6668a9a5c779b17948963df32aafe5b",
+      "full_archive_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-aarch64-apple-darwin-pgo%2Blto-full.tar.zst",
+      "full_archive_sha256": "185fa676e14b648bd736ce7f20f9b11e201131b3216ec5a39d4ecd8ab8a71112",
+      "python_json": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/PYTHON.json",
+      "legal_files": [
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.bdb.txt",
+          "sha256": "3bdff06e69991c94664f2ef5c5f8096f60b7dbec071756ea6cc26b445e06ec5b"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.bzip2.txt",
+          "sha256": "1f38bbc7caacafd65169276d759c0d88c991b753b643ce35d0e45ea1971dd441"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.cpython.txt",
+          "sha256": "86e61415828a8b5b06ec8d024e6f086ce155a8b85fd0c419c0ba4dc004e74fdd"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.expat.txt",
+          "sha256": "122f2c27000472a201d337b9b31f7eb2b52d091b02857061a8880371612d9534"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libX11.txt",
+          "sha256": "2daec087a88e7c9b8082557cdeebad5bbb8155a4137472f0b22e269cd99d0c1e"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libXau.txt",
+          "sha256": "56abe29bb1d9806a9e04fa9f80fed2c0f18027594df3f098148d814aef6bddfa"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libedit.txt",
+          "sha256": "29cea33c32bbc9785142386377915612a2fa786482c46843383384aded2e09b1"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libffi.txt",
+          "sha256": "deaf3a42effb551a5b140fa9afefed183a27f1341c6d1bf430d106a5e6931fc0"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.liblzma.txt",
+          "sha256": "9a4062de0a2c388a98cf35a35d348b62fa97c838a71c3c28ee1a2d7d0a565b02"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libuuid.txt",
+          "sha256": "122ee1f7e258f2c3c0e538a75c037684f420454bf3850ddc74ce750bbf5fe86b"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libxcb.txt",
+          "sha256": "c5ffbfeaa501071ceeb97b7de2c0d703fdaa35de01c0fb6cbac1c28453a3e9fd"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.mpdecimal.txt",
+          "sha256": "669512af7219f58be03a398766d7c9da11a3b3df9d3f05cb74c5ceca25c8da3b"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.ncurses.txt",
+          "sha256": "87a4c4442337b8968ef956031c406b74f9cb7149b7ba87311bdaba534816201c"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.openssl-1.1.txt",
+          "sha256": "9c04cce50c4989d5601dd8b07f6ab922c40388b66ac736c9007cb1ed9d9dd560"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.openssl-3.txt",
+          "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.sqlite.txt",
+          "sha256": "38bef3d28b24f145ea293bd3b6eb4b20396982abc8303128fb493986ea5bc719"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.tcl.txt",
+          "sha256": "c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.tix.txt",
+          "sha256": "3ac5cdd0bef6c43ce34c6a7ced452081d9e5a0bf94082b9f9147d23ec9e214f5"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.zlib.txt",
+          "sha256": "818922b2620f12801a12bf78e399644a30990e66824abd8ca8ec24d451d6f92c"
+        }
+      ]
+    },
+    {
+      "target": "x86_64-pc-windows-msvc",
+      "runtime_report": "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-windows-cpu-rpc-restart-acceptance/runtime.json",
+      "manifest": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive-manifest.json",
+      "catalog_key": "cpython-3.14.7-windows-x86_64-none",
+      "selected_install_only_url": "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "provider_name": "uv",
+      "provider_version": "0.12.18",
+      "provider_archive_sha256": "cae6a3bc25239f83dffb467a4b180508d9da23986c04639ebfa44e43e6a84bff",
+      "full_archive_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-pc-windows-msvc-pgo-full.tar.zst",
+      "full_archive_sha256": "5363ec4aab59c24417f9877217aae95ca17f9ae6eb99c3bbfb25e4a76dcadafe",
+      "python_json": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/PYTHON.json",
+      "legal_files": [
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.bdb.txt",
+          "sha256": "8f2d533ab34899499d5b07f209854b101b17dba2c69f3251860aecf3e4005faa"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.bzip2.txt",
+          "sha256": "bd5628cc76fb0ebf9c657d1dd4d1a240a1a7b216c31663e7bbf1131c0b70a910"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.cpython.txt",
+          "sha256": "8fe98bf9822926d854f56ffd8d97877d8b942617aa44eb7ea77fd99e22f2537e"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.expat.txt",
+          "sha256": "8a9cfe4b5924f4b25881aa0c9f5e4561c5f31065d0c4a13cdcdbcf917edf39aa"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libX11.txt",
+          "sha256": "f353accfe2976df31ea297a77d1d454bd51ef6be8c3df39bd6aca95901579357"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libXau.txt",
+          "sha256": "cec808cd2163fccdc8de4a91d526490777afbaeea060e1168c40a804694b7444"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libedit.txt",
+          "sha256": "d9932ccdd42eccf6cdded7bcb35b088e64cfc7c24d355af2cc0d02edb6b637d3"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libffi.txt",
+          "sha256": "9afb8970cd29fc1031fa647278e4bef613399e2e3468a1e3a397f4d158c6101c"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.liblzma.txt",
+          "sha256": "d87d218dd908b3243ec4cbc72af400e5b7437513ea9d9229291d0812b8464fec"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libuuid.txt",
+          "sha256": "cbccaa3efe07a9a602751375085be572d4410a250b996716fbe8c5255c7ec6f2"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libxcb.txt",
+          "sha256": "29a9539190e6de1af5fd06a9139c7103137cd1f9290b08c7b11bce89c01c14d2"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.mpdecimal.txt",
+          "sha256": "f094277cd46e1f6e4d87916cc4b51e22f613d45eb81f48231c3cb7caf8fc8a6a"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.ncurses.txt",
+          "sha256": "4f571cad3ea6c888bf0a7092e5b215dddb3142e9e3f1857fd5fac6cf13d345d7"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.openssl-1.1.txt",
+          "sha256": "ad89e3fed746413af1d34d5353978ee1520cedd361c853f8022e7bb210ac6b31"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.openssl-3.txt",
+          "sha256": "ed72ce2b51ee58f117e5a021e2e04af158857f40269fbc03491f0b2a99dbcc96"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.sqlite.txt",
+          "sha256": "d8eb9aba7ef6b5ed06cb3ec19a7242316af2e5933c638eb67fb781c13884e01d"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.tcl.txt",
+          "sha256": "41613eabfc08921a7da9c4bfd7f3ce5d5406f55214b253d89f392ed86eebeb8f"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.tix.txt",
+          "sha256": "8cdff3addb9e9eb108c78e2cf5e05f26b216c098304945733bbec382b2eaef66"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.zlib.txt",
+          "sha256": "365e36720db366054863235aea5d6f440142ab968834bfaf81fa9d187c99b9b8"
+        }
+      ]
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "runtime_report": "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-linux-cpu-rpc-restart-acceptance/runtime.json",
+      "manifest": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive-manifest.json",
+      "catalog_key": "cpython-3.14.7-linux-x86_64-gnu",
+      "selected_install_only_url": "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+      "provider_name": "uv",
+      "provider_version": "0.12.18",
+      "provider_archive_sha256": "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16",
+      "full_archive_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-unknown-linux-gnu-pgo%2Blto-full.tar.zst",
+      "full_archive_sha256": "46a9e98d2c7fd2c5b9ca67510b5a0699f5ccad5fb750957961c22c52e07b6cb0",
+      "python_json": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/PYTHON.json",
+      "legal_files": [
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.bdb.txt",
+          "sha256": "3bdff06e69991c94664f2ef5c5f8096f60b7dbec071756ea6cc26b445e06ec5b"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.bzip2.txt",
+          "sha256": "1f38bbc7caacafd65169276d759c0d88c991b753b643ce35d0e45ea1971dd441"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.cpython.txt",
+          "sha256": "86e61415828a8b5b06ec8d024e6f086ce155a8b85fd0c419c0ba4dc004e74fdd"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.expat.txt",
+          "sha256": "122f2c27000472a201d337b9b31f7eb2b52d091b02857061a8880371612d9534"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libX11.txt",
+          "sha256": "2daec087a88e7c9b8082557cdeebad5bbb8155a4137472f0b22e269cd99d0c1e"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libXau.txt",
+          "sha256": "56abe29bb1d9806a9e04fa9f80fed2c0f18027594df3f098148d814aef6bddfa"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libedit.txt",
+          "sha256": "29cea33c32bbc9785142386377915612a2fa786482c46843383384aded2e09b1"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libffi.txt",
+          "sha256": "deaf3a42effb551a5b140fa9afefed183a27f1341c6d1bf430d106a5e6931fc0"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.liblzma.txt",
+          "sha256": "9a4062de0a2c388a98cf35a35d348b62fa97c838a71c3c28ee1a2d7d0a565b02"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libuuid.txt",
+          "sha256": "122ee1f7e258f2c3c0e538a75c037684f420454bf3850ddc74ce750bbf5fe86b"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libxcb.txt",
+          "sha256": "c5ffbfeaa501071ceeb97b7de2c0d703fdaa35de01c0fb6cbac1c28453a3e9fd"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.mpdecimal.txt",
+          "sha256": "669512af7219f58be03a398766d7c9da11a3b3df9d3f05cb74c5ceca25c8da3b"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.ncurses.txt",
+          "sha256": "87a4c4442337b8968ef956031c406b74f9cb7149b7ba87311bdaba534816201c"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.openssl-1.1.txt",
+          "sha256": "9c04cce50c4989d5601dd8b07f6ab922c40388b66ac736c9007cb1ed9d9dd560"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.openssl-3.txt",
+          "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.sqlite.txt",
+          "sha256": "38bef3d28b24f145ea293bd3b6eb4b20396982abc8303128fb493986ea5bc719"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.tcl.txt",
+          "sha256": "c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.tix.txt",
+          "sha256": "3ac5cdd0bef6c43ce34c6a7ced452081d9e5a0bf94082b9f9147d23ec9e214f5"
+        },
+        {
+          "path": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.zlib.txt",
+          "sha256": "818922b2620f12801a12bf78e399644a30990e66824abd8ca8ec24d451d6f92c"
+        }
+      ]
+    }
+  ],
   "input_sha256": {
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive-manifest.json": "9e22bb390cc8af89284c421a48154462c234fd879fd6a58d79cbe7b1ebd594ea",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/PYTHON.json": "0bb1b7ad30bac3dbd00ec6f8cab3b07dbd0ab727980fa6ac4f4947eb45ab831d",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.bdb.txt": "3bdff06e69991c94664f2ef5c5f8096f60b7dbec071756ea6cc26b445e06ec5b",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.bzip2.txt": "1f38bbc7caacafd65169276d759c0d88c991b753b643ce35d0e45ea1971dd441",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.cpython.txt": "86e61415828a8b5b06ec8d024e6f086ce155a8b85fd0c419c0ba4dc004e74fdd",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.expat.txt": "122f2c27000472a201d337b9b31f7eb2b52d091b02857061a8880371612d9534",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libX11.txt": "2daec087a88e7c9b8082557cdeebad5bbb8155a4137472f0b22e269cd99d0c1e",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libXau.txt": "56abe29bb1d9806a9e04fa9f80fed2c0f18027594df3f098148d814aef6bddfa",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libedit.txt": "29cea33c32bbc9785142386377915612a2fa786482c46843383384aded2e09b1",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libffi.txt": "deaf3a42effb551a5b140fa9afefed183a27f1341c6d1bf430d106a5e6931fc0",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.liblzma.txt": "9a4062de0a2c388a98cf35a35d348b62fa97c838a71c3c28ee1a2d7d0a565b02",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libuuid.txt": "122ee1f7e258f2c3c0e538a75c037684f420454bf3850ddc74ce750bbf5fe86b",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libxcb.txt": "c5ffbfeaa501071ceeb97b7de2c0d703fdaa35de01c0fb6cbac1c28453a3e9fd",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.mpdecimal.txt": "669512af7219f58be03a398766d7c9da11a3b3df9d3f05cb74c5ceca25c8da3b",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.ncurses.txt": "87a4c4442337b8968ef956031c406b74f9cb7149b7ba87311bdaba534816201c",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.openssl-1.1.txt": "9c04cce50c4989d5601dd8b07f6ab922c40388b66ac736c9007cb1ed9d9dd560",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.openssl-3.txt": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.sqlite.txt": "38bef3d28b24f145ea293bd3b6eb4b20396982abc8303128fb493986ea5bc719",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.tcl.txt": "c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.tix.txt": "3ac5cdd0bef6c43ce34c6a7ced452081d9e5a0bf94082b9f9147d23ec9e214f5",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.zlib.txt": "818922b2620f12801a12bf78e399644a30990e66824abd8ca8ec24d451d6f92c",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive-manifest.json": "7b3e139c346cde9976d06b9f366079c0e1fd40d65c59aaf1caa4e3fe9c17fdbb",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/PYTHON.json": "469cdc82612064f19338a524bc8eedbce8f6f411e0080c4dc1a5ccf30c538a71",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.bdb.txt": "3bdff06e69991c94664f2ef5c5f8096f60b7dbec071756ea6cc26b445e06ec5b",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.bzip2.txt": "1f38bbc7caacafd65169276d759c0d88c991b753b643ce35d0e45ea1971dd441",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.cpython.txt": "86e61415828a8b5b06ec8d024e6f086ce155a8b85fd0c419c0ba4dc004e74fdd",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.expat.txt": "122f2c27000472a201d337b9b31f7eb2b52d091b02857061a8880371612d9534",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libX11.txt": "2daec087a88e7c9b8082557cdeebad5bbb8155a4137472f0b22e269cd99d0c1e",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libXau.txt": "56abe29bb1d9806a9e04fa9f80fed2c0f18027594df3f098148d814aef6bddfa",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libedit.txt": "29cea33c32bbc9785142386377915612a2fa786482c46843383384aded2e09b1",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libffi.txt": "deaf3a42effb551a5b140fa9afefed183a27f1341c6d1bf430d106a5e6931fc0",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.liblzma.txt": "9a4062de0a2c388a98cf35a35d348b62fa97c838a71c3c28ee1a2d7d0a565b02",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libuuid.txt": "122ee1f7e258f2c3c0e538a75c037684f420454bf3850ddc74ce750bbf5fe86b",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libxcb.txt": "c5ffbfeaa501071ceeb97b7de2c0d703fdaa35de01c0fb6cbac1c28453a3e9fd",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.mpdecimal.txt": "669512af7219f58be03a398766d7c9da11a3b3df9d3f05cb74c5ceca25c8da3b",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.ncurses.txt": "87a4c4442337b8968ef956031c406b74f9cb7149b7ba87311bdaba534816201c",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.openssl-1.1.txt": "9c04cce50c4989d5601dd8b07f6ab922c40388b66ac736c9007cb1ed9d9dd560",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.openssl-3.txt": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.sqlite.txt": "38bef3d28b24f145ea293bd3b6eb4b20396982abc8303128fb493986ea5bc719",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.tcl.txt": "c0a69a2bfd757361ec7e6143973b103c90409316b49e9c88db26ad6388e79f16",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.tix.txt": "3ac5cdd0bef6c43ce34c6a7ced452081d9e5a0bf94082b9f9147d23ec9e214f5",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.zlib.txt": "818922b2620f12801a12bf78e399644a30990e66824abd8ca8ec24d451d6f92c",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive-manifest.json": "fbb188f4a1ec0ae015905abed25c38d1e2fa7fab52ea0733f3a67f740f092c63",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/PYTHON.json": "621218c8ca0ff0d9a92ba0533a2d460d6832cc277286852800e605e8062ec401",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.bdb.txt": "8f2d533ab34899499d5b07f209854b101b17dba2c69f3251860aecf3e4005faa",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.bzip2.txt": "bd5628cc76fb0ebf9c657d1dd4d1a240a1a7b216c31663e7bbf1131c0b70a910",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.cpython.txt": "8fe98bf9822926d854f56ffd8d97877d8b942617aa44eb7ea77fd99e22f2537e",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.expat.txt": "8a9cfe4b5924f4b25881aa0c9f5e4561c5f31065d0c4a13cdcdbcf917edf39aa",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libX11.txt": "f353accfe2976df31ea297a77d1d454bd51ef6be8c3df39bd6aca95901579357",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libXau.txt": "cec808cd2163fccdc8de4a91d526490777afbaeea060e1168c40a804694b7444",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libedit.txt": "d9932ccdd42eccf6cdded7bcb35b088e64cfc7c24d355af2cc0d02edb6b637d3",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libffi.txt": "9afb8970cd29fc1031fa647278e4bef613399e2e3468a1e3a397f4d158c6101c",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.liblzma.txt": "d87d218dd908b3243ec4cbc72af400e5b7437513ea9d9229291d0812b8464fec",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libuuid.txt": "cbccaa3efe07a9a602751375085be572d4410a250b996716fbe8c5255c7ec6f2",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.libxcb.txt": "29a9539190e6de1af5fd06a9139c7103137cd1f9290b08c7b11bce89c01c14d2",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.mpdecimal.txt": "f094277cd46e1f6e4d87916cc4b51e22f613d45eb81f48231c3cb7caf8fc8a6a",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.ncurses.txt": "4f571cad3ea6c888bf0a7092e5b215dddb3142e9e3f1857fd5fac6cf13d345d7",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.openssl-1.1.txt": "ad89e3fed746413af1d34d5353978ee1520cedd361c853f8022e7bb210ac6b31",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.openssl-3.txt": "ed72ce2b51ee58f117e5a021e2e04af158857f40269fbc03491f0b2a99dbcc96",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.sqlite.txt": "d8eb9aba7ef6b5ed06cb3ec19a7242316af2e5933c638eb67fb781c13884e01d",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.tcl.txt": "41613eabfc08921a7da9c4bfd7f3ce5d5406f55214b253d89f392ed86eebeb8f",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.tix.txt": "8cdff3addb9e9eb108c78e2cf5e05f26b216c098304945733bbec382b2eaef66",
+    "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive/licenses/LICENSE.zlib.txt": "365e36720db366054863235aea5d6f440142ab968834bfaf81fa9d187c99b9b8",
+    "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-linux-cpu-rpc-restart-acceptance/runtime.json": "d8b9826efc0aa5fedd0353f5227b1001cfe6bda96287ff3136b81b513c71e104",
+    "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-macos-cpu-rpc-restart-acceptance/runtime.json": "a280a955f040983398474af0c34f92e9172fc3c69ef22f7422ac990ed0554e26",
+    "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-windows-cpu-rpc-restart-acceptance/runtime.json": "3e2f6e67e3a4492c01232778191871e9f39543f02996349f055272f2d19fbb89",
+    "electron/package.json": "1f2b68e5819cbea84a2d8f25bbdda5d8288b3c1bf90a52162dc414c5938d72d8",
+    "frontend/package.json": "0f3d0d26b1155cdabd7a5b1f93d2b99aff64b70105760284343adeb1afb6ca2e",
+    "pnpm-lock.yaml": "8ef64f92ef3734992ce825b3253a6edef6586cf87b0a22494096bb12b9c86304",
     "rust/Cargo.lock": "ec83a541f165ac6161d4f26b220152cebe422c594405a9dc982952ddef195927",
     "rust/Cargo.toml": "c81fc6cbbe7b8a371f7492cb08b8715cf567ba9ec5321f19ffc1a1b8df50fd28",
+    "rust/crates/pumas-app-manager/Cargo.toml": "2974043227b88401adef73f0706344c804f9aa1447f49ff8c7ed19ddf66e2a8e",
+    "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "eb34506fb52ba21672e694f8aac3a4ae690b0e870e7e2eb4bea0a844db302677",
     "rust/crates/pumas-core/Cargo.toml": "920dfa71dc7160c14c753b656d16f65ad2b3fcdc7cbe1c56525e195588897022",
     "rust/crates/pumas-rpc/Cargo.toml": "b51fc102e08bf9ba72cbec544cd8b933171031078b1ba273b289a6f4c5cf981a",
-    "rust/crates/pumas-app-manager/Cargo.toml": "2974043227b88401adef73f0706344c804f9aa1447f49ff8c7ed19ddf66e2a8e",
-    "pnpm-lock.yaml": "8ef64f92ef3734992ce825b3253a6edef6586cf87b0a22494096bb12b9c86304",
-    "electron/package.json": "1f2b68e5819cbea84a2d8f25bbdda5d8288b3c1bf90a52162dc414c5938d72d8",
-    "frontend/package.json": "0f3d0d26b1155cdabd7a5b1f93d2b99aff64b70105760284343adeb1afb6ca2e"
+    "scripts/release/artifact-plan.json": "d5e4a2700728ba61cabca36d727efd477d716f3b50cc90fa9ce7f5e7959c7b0c",
+    "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",
+    "scripts/release/torch-managed-python-acceptance.py": "130b1e3d98032943bed55831228172f5c6fc29e08ea0377373dee8a1284d3166"
   },
-  "notices_sha256": "7cc20a04523faca684fd157cea3751a686600c4fdc2cf2b6713738af76bf2443"
+  "notices_sha256": "b1631dab130001c76f70f116c2099bae0b87b8ba67d2f110c2f5bae7e465ef89"
 }

@@ -3,11 +3,36 @@
 `THIRD-PARTY-NOTICES.txt` is generated from exact resolved package license and
 notice files by `python3 scripts/release/generate-notices.py`. It is embedded as
 `resources/THIRD-PARTY-NOTICES.txt` and copied to the release directory as
-`THIRD-PARTY-NOTICES-0.7.0.txt`. `inventory.json` records input and source-text
-hashes. `check-attribution.cjs` runs in CI and before Electron packaging; stale
-inputs, altered texts, and missing notices refuse packaging. Cargo manifests are
-hashed alongside lockfiles so changes to feature selection also invalidate the
-inventory. The minimized release inventory currently contains 368 package entries.
+`THIRD-PARTY-NOTICES-0.7.0.txt`. `inventory.json` records the source inputs,
+selected-provider evidence, and legal-text hashes. `check-attribution.cjs` runs
+in CI and before Electron packaging; stale inputs, altered texts, and missing
+notices refuse packaging. Cargo manifests are hashed alongside lockfiles so
+changes to feature selection also invalidate the inventory.
+
+## Managed CPython provider
+
+The selected uv provider can download private CPython runtimes after installation,
+so the release notice includes the archive license set for each shipped desktop
+target: Linux x86_64 GNU, Windows x86_64 MSVC, and macOS arm64. The checked-in
+`scripts/release/licenses/managed-python-sources.json` maps each target to its
+accepted runtime report and a separate, hash-verified Python Build Standalone
+full-archive license manifest. Generation requires a one-to-one match with
+`scripts/release/artifact-plan.json`, validates the selected CPython version,
+target, install-only source URL, provider identity, `PYTHON.json`, manifest, and
+every raw license-text hash, then emits target-specific notice records.
+It binds the current Rust uv version and target-specific enum-arm pins, as well
+as the selected install-only URL to the reviewed full-archive release, asset
+name, flavor, and `PYTHON.json` build options. The packaging checker repeats
+these checks and requires each manifest legal text exactly once, so updating
+only the generated inventory cannot hide provider or archive drift.
+
+The selected install-only runtime URL and target identity remain distinct from
+the full archive used to collect legal text. The full-archive hash is provenance
+for that license collection; its notices are a conservative superset and do not
+claim that every listed component is present in the stripped install-only
+runtime. The inventory hashes the catalog, artifact plan, accepted runtime
+reports, full-archive manifests, `PYTHON.json` files, and all captured license
+texts. Legal text bytes, including Windows line endings, are preserved verbatim.
 
 The inventory includes the normal/build Rust dependency closure for the three
 desktop targets and the JavaScript production dependency closure. It is a

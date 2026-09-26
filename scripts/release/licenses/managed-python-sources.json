@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "targets": [
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "runtime_report": "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-linux-cpu-rpc-restart-acceptance/runtime.json",
+      "manifest": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/full-archive-manifest.json"
+    },
+    {
+      "target": "x86_64-pc-windows-msvc",
+      "runtime_report": "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-windows-cpu-rpc-restart-acceptance/runtime.json",
+      "manifest": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/full-archive-manifest.json"
+    },
+    {
+      "target": "aarch64-apple-darwin",
+      "runtime_report": "docs/plans/torch-cross-platform-runtime-management/reports/v2.14.0-macos-cpu-rpc-restart-acceptance/runtime.json",
+      "manifest": "docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/full-archive-manifest.json"
+    }
+  ]
+}

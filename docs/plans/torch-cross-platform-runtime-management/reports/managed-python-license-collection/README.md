@@ -16,9 +16,14 @@ endings; all 19 match after newline normalization. The Linux and macOS sets
 currently match byte for byte. The retained full-archive manifests document
 license files for the same CPython release and target as the accepted
 installations; their archive hashes describe those separate full archives, not
-the install-only archives selected at runtime. Selected install-only archive
-identities are recorded in the platform acceptance reports. Windows and macOS
-provider notices still need integration into release attribution.
+the install-only archives selected at runtime. Selected install-only URLs,
+targets, CPython identities, and uv provider identities are recorded in the
+platform acceptance reports.
+
+Release attribution includes one CPython full-archive notice superset per
+shipped target. The generator verifies all 57 raw license files and three
+`PYTHON.json` files against these manifests and keeps full-archive hashes
+separate from the selected install-only runtime URLs and uv archive hashes.
 
 The Linux evidence README describes the accepted installation that produced
 its selected archive record. All per-file hashes can be checked directly

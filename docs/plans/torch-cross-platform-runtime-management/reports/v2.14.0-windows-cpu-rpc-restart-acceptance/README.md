@@ -26,6 +26,7 @@ The acceptance backend ran with host Python, pip, PyPy, and uv absent from its
 The [full-archive manifest and raw CPython license files](../managed-python-license-collection/windows-x86_64-cpython-3.14.7/managed-python-licenses/)
 retain hashes for the Windows CPython license set. The selected install-only
 archive identity is in `runtime.json` and `acceptance.json`; the manifest
-describes a separate full archive. Windows selected-provider notices still
-need release-attribution integration. This CPU/Core result does not establish
+describes a separate full archive. The generated release attribution now
+includes this target's full-archive notice superset while keeping the selected
+install-only identity separate. This CPU/Core result does not establish
 CUDA execution, packaged desktop installation, or Tuldok image generation.

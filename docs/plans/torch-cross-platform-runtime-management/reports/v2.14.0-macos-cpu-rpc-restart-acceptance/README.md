@@ -31,7 +31,9 @@ profile, and probes. The [CPython full-archive manifest and raw license
 files](../managed-python-license-collection/macos-arm64-cpython-3.14.7/managed-python-licenses/)
 retain license-file hashes. The selected install-only archive identity is in
 `runtime.json` and `acceptance.json`; the manifest describes a separate full
-archive. Provider notice integration remains open.
+archive. The generated release attribution now includes this target's
+full-archive notice superset while keeping the selected install-only identity
+separate.
 
 This is CPU/Core RPC acceptance. It does not establish MPS acceleration,
 packaged desktop installation, or Tuldok image generation.

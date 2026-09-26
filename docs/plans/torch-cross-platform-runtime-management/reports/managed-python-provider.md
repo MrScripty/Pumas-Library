@@ -1,15 +1,22 @@
 # Managed Python Provider Admission
 
-**Status:** Linux x86_64 uv download and published-hash verification, pinned uv
-execution, and managed CPython 3.14.7 provisioning pass. The Torch 2.14.0
-CPU/Core preview, install, identity/CPU-operation check, explicit selection,
-sidecar startup/health/protocol 3, and generation-owned stop also passed through
-Pumas RPC. The isolated backend had no Python, pip, or uv on `PATH`, and the
-installed venv reported the hashed managed CPython 3.14.7 as its base executable.
-The retained Linux evidence is
-[`v2.14.0-linux-cpu-rpc-acceptance`](v2.14.0-linux-cpu-rpc-acceptance/acceptance.json).
-Windows/macOS native runs, license-material acceptance, and packaged desktop
-installation remain pending.
+**Status:** Native Linux x86_64, Windows x86_64 MSVC, and macOS arm64 runs
+provisioned Pumas-managed CPython 3.14.7 and passed the Torch 2.14.0 CPU/Core
+preview, install, identity/CPU-operation check, explicit selection, sidecar
+startup/health/protocol 3, and generation-owned stop through Pumas RPC. Each
+retained run records the target-specific uv release identity and exact selected
+CPython install-only URL. The three target-specific CPython full-archive notice
+supersets are now included in the generated 0.7.0 attribution inventory. The
+native RPC runs do not establish packaged desktop Torch installation, CUDA/MPS
+execution, or v2.14.0 Tuldok image-generation support.
+
+The attribution gate hashes the Rust provider source and checks each
+`NativeTarget::pin()` arm against its exact target triple and uv SHA-256. It
+also checks the selected install-only URL against the reviewed full-archive
+release/flavor mapping, validates the full-archive SHA-256, and verifies an
+exact one-to-one set of legal file paths and hashes. The 0.7.0 inventory
+contains 371 package entries, 78 hashed inputs, and 57 CPython legal texts;
+Windows legal bytes retain CRLF.
 
 **Decision:** Use the app-manager's exact-hash-pinned uv release to provision
 stable, standard CPython distributions from uv's embedded Python Build Standalone
@@ -31,7 +38,7 @@ archives and published SHA-256 checksums are:
 | Windows x86_64 MSVC | [`uv-x86_64-pc-windows-msvc.zip`](https://releases.astral.sh/github/uv/releases/download/0.12.18/uv-x86_64-pc-windows-msvc.zip) | `cae6a3bc25239f83dffb467a4b180508d9da23986c04639ebfa44e43e6a84bff` |
 | macOS arm64 | [`uv-aarch64-apple-darwin.tar.gz`](https://releases.astral.sh/github/uv/releases/download/0.12.18/uv-aarch64-apple-darwin.tar.gz) | `cf40e0c6a202190ccd9e0406dcfdd5b2d6668a9a5c779b17948963df32aafe5b` |
 
-The digest values come from the release's official `.sha256` assets for [Linux](https://releases.astral.sh/github/uv/releases/download/0.12.18/uv-x86_64-unknown-linux-gnu.tar.gz.sha256), [Windows](https://releases.astral.sh/github/uv/releases/download/0.12.18/uv-x86_64-pc-windows-msvc.zip.sha256), and [macOS](https://releases.astral.sh/github/uv/releases/download/0.12.18/uv-aarch64-apple-darwin.tar.gz.sha256). The upstream [release page](https://github.com/astral-sh/uv/releases/tag/0.12.18) marks the release immutable and documents GitHub artifact attestations. Linux x86_64 bytes were downloaded and matched the published SHA-256, then the pinned executable bootstrapped managed CPython 3.14.7 during live Pumas RPC preview. The selected official Python Build Standalone record came from uv's embedded catalog. Windows/macOS downloads and native executable checks remain acceptance gates.
+The digest values come from the release's official `.sha256` assets for [Linux](https://releases.astral.sh/github/uv/releases/download/0.12.18/uv-x86_64-unknown-linux-gnu.tar.gz.sha256), [Windows](https://releases.astral.sh/github/uv/releases/download/0.12.18/uv-x86_64-pc-windows-msvc.zip.sha256), and [macOS](https://releases.astral.sh/github/uv/releases/download/0.12.18/uv-aarch64-apple-darwin.tar.gz.sha256). The upstream [release page](https://github.com/astral-sh/uv/releases/tag/0.12.18) marks the release immutable and documents GitHub artifact attestations. The selected official Python Build Standalone records came from uv's embedded catalog. Manual native RPC acceptance exercised the pinned provider on Linux, Windows, and macOS and retained each target's uv archive SHA-256 and selected CPython identity.
 
 The app-manager must download the exact target URL into a private temporary file,
 enforce a finite size/time budget, verify SHA-256 before extraction, extract only
@@ -70,8 +77,9 @@ minor absent from the pinned catalog remains unavailable until a reviewed uv
 provider update adds its artifact and native evidence.
 
 The provider implementation runs `uv python list --managed-python
---only-downloads --show-urls --output-format json`. The pinned Linux uv 0.12.18
-asset returned structured URL-bearing records and provisioned CPython 3.14.7.
+--only-downloads --show-urls --output-format json`. The pinned uv 0.12.18
+provider returned structured URL-bearing records and provisioned CPython 3.14.7
+on each shipped target.
 The live v2.14.0 CUDA 13.2/Core preview resolved 44 artifacts. A separate CPU
 Core preview resolved 25 artifacts, and `install_version` installed its
 retained wheel resolution, checked installed identity and CPU operation,
@@ -99,27 +107,20 @@ and `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4`.
 They are included in the 0.7.0 attribution inventory for the uv runtime executable
 downloaded by Pumas, which is not bundled in the application package.
 
-The CPython archive license set remains an open release-acceptance gap. The
-Python Build Standalone documentation says distribution archives include license
-texts and individual bundled dependencies carry their own terms
+The Python Build Standalone documentation says distribution archives include
+license texts and individual bundled dependencies carry their own terms
 ([distribution runtime and licensing](https://github.com/astral-sh/python-build-standalone/blob/main/docs/running.rst)).
-The Linux x86_64 CPython 3.14.7 full archive was verified against its official
-SHA-256 and corresponds to the accepted Linux installation. The matching
-Windows x86_64 and macOS arm64 CPython 3.14.7 full archives were also downloaded
-from the official release API and hash-verified using the bounded collector.
-Each target has 19 license texts, raw `PYTHON.json`, and an archive manifest in
-[target archive evidence index](managed-python-license-collection/README.md).
-The Windows texts match the Linux/macOS set after newline normalization. These
-Windows/macOS captures are candidate-version evidence only: native install
-acceptance has not yet confirmed that CPython 3.14.7 is selected on those hosts.
-Keep complete provider attribution open until native preview/install identifies
-the selected archives and the corresponding texts are integrated. Neither the
-uv license texts nor the installed interpreter tree establishes a selected
-archive's complete license set.
+The Linux x86_64, Windows x86_64, and macOS arm64 CPython 3.14.7 full archives
+were downloaded from the official release API and verified by SHA-256. Native
+RPC acceptance confirmed CPython 3.14.7 selection on all three targets. Each
+target has 19 license texts, raw `PYTHON.json`, and a separate full-archive
+manifest in the [target archive evidence index](managed-python-license-collection/README.md).
+The generated 0.7.0 notices include all three target-specific full-archive
+license supersets. The selected install-only URL and its CPython/provider
+identity remain recorded separately from each full archive's SHA-256.
 
-Admission remains pending until uv artifacts and hashes are checked on native
-Windows x86_64 MSVC and macOS arm64, and those targets pass clean-host
-provisioning without Python on `PATH`. Stable catalog filtering must exclude
-pre-releases, debug, free-threaded, and foreign-target artifacts; timeout,
-cancellation, tamper, retry, and durable retention behavior must pass; and
-the selected CPython archive license notices must be recorded.
+Further admission remains pending for packaged desktop Torch installation,
+provider cancellation/tamper/retry and durable-retention cases, and any
+device-execution or Tuldok claims. The native RPC reports establish the
+CPU/Core install and sidecar lifecycle only; they do not qualify CUDA, macOS
+MPS, or v2.14.0 image generation.

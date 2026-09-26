@@ -27,15 +27,17 @@ restart path. CUDA/device execution, packaged desktop Torch installation, and
 v2.14.0 image generation through Tuldok remain unverified. Existing Tuldok image
 evidence remains scoped to its recorded Torch 2.10 tuple.
 
-Local Linux v0.7.0 AppImage and deb candidates were rebuilt after updating release
-attribution and passed extracted-resource checks plus bundled-backend `/health`
-smoke tests. AppImage SHA-256:
-`cd4cb2c0e168ce207d79693e30fd3a02f8152870c0baea2275ab0a35323b21dd`; deb
-SHA-256: `0591e1950bbb2761a086c437e51680275dc598c1fc76560091e1557dfef6e6ea`.
-This did not exercise packaged Torch installation or replace the public
-toolbar-linked v0.7.0 assets (published 2026-09-17). uv notices and all three
-platforms' full-archive CPython license manifests are retained. Windows and
-macOS selected-provider notices still need release-attribution integration.
+Current-branch Linux v0.7.0 AppImage and deb candidates were rebuilt with the
+generated CPython notices. Artifact naming and extracted resource hashes pass;
+both extracted backends start and pass `/health`. The packaged Electron archive
+contains the `get_torch_release_options` bridge method. AppImage SHA-256:
+`1398ef0a9da1c0aab90681d3c91674ef88c6229a84984047938e7bd6eb350acd`; deb
+SHA-256: `468b6f7c2af00ff8785f80e5486cd5133979e875dd351b4b9f5284ddfd195043`.
+These are local build outputs: they neither exercise packaged Torch installation
+nor replace the toolbar-linked public v0.7.0 assets (published 2026-09-17). The
+generated attribution inventory includes all three CPython full-archive notice
+supersets and verifies 371 package entries, 78 hashed inputs, and 57 retained
+legal texts against target-specific evidence.
 **Current phase:** v2.14.0 CPU/Core RPC install and two-session sidecar
 lifecycle are accepted on the current exact-wheel implementation across Linux
 x86_64, Windows x64, and macOS arm64. Each run provisioned CPython 3.14.7,
@@ -70,17 +72,16 @@ passed native v2.14.0 CPU/Core RPC install/restart on all three shipped targets,
 but predates the current lock follow-up. Windows GNU compilation remains
 compile-only evidence but is supplemented by the native Windows acceptance run.
 
-**Remaining gates:** Selected CPython provider notices from Windows and macOS
-need release-attribution integration. Packaged desktop Torch installation
-acceptance, provider cancellation/tamper/retry cases, and downloaded uv digest
-verification remain open. CUDA/device acceleration and v2.14.0 image/Tuldok
-generation are untested. The local AppImage/deb candidates do not update the
-public toolbar-linked package.
+**Remaining gates:** Packaged desktop Torch installation acceptance and the
+provider cancellation/tamper/retry cases remain open. CUDA/device acceleration
+and v2.14.0 image/Tuldok generation are untested. The local AppImage/deb
+candidates do not update the public toolbar-linked package.
 
-**Next slice:** Complete selected-provider notice integration and native
-packaged desktop installation smoke tests. Then close the remaining provider
-integrity, cancellation, and runtime gates while keeping Tuldok qualification
-limited to its recorded exact image-generation tuple.
+**Next slice:** Run the packaged Torch discovery/install acceptance on a Linux
+host without Python on `PATH`, then close provider cancellation/tamper gates.
+Keep Tuldok qualification limited to its recorded exact image-generation tuple;
+publish a new toolbar-linked release only after the PR is merged and a new
+version is tagged.
 
 ## Objective and scope
 
@@ -102,7 +103,7 @@ and its [runtime inventory](../torch-diffusion-serving/reports/upstream-version-
 Native RPC acceptance now proves the v2.14.0 CPU/Core managed install and
 restart path on Windows x64 and macOS arm64 as well as Linux x86_64. Broader
 platform acceptance remains gated on the incomplete X2–X7 checks below,
-especially provider notices and packaged desktop installation.
+especially packaged desktop installation.
 This plan does not claim image generation or Tuldok support for every Torch
 release or operating system; existing image evidence remains limited to its
 recorded exact tuples.
@@ -284,7 +285,7 @@ resolver, manager, desktop, and platform runtime owners.
 | ID | Observable criterion | Evidence required | Status |
 | --- | --- | --- | --- |
 | X1 | Linux behavior and existing accepted v2.9.0 install/v2.10 Tuldok evidence remain accurately scoped and pass relevant regression gates | Existing Linux manager/resolver/RPC/frontend suites; retained historical evidence references | pending |
-| X2 | Each shipped target provisions a private stable standard CPython 3.10 or newer without a host Python dependency or global PATH/registry changes; artifact integrity, target identity, cache separation, cancellation, and retention are verified | Linux, Windows, and macOS v2.14.0 RPC installs provisioned CPython 3.14.7 and matched persisted interpreter identity across sessions ([Linux](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/README.md), [Windows](reports/v2.14.0-windows-cpu-rpc-restart-acceptance/README.md), [macOS](reports/v2.14.0-macos-cpu-rpc-restart-acceptance/README.md)). Artifact/source hashes are retained; cancellation, cache separation, and selected-provider notice integration remain | partial |
+| X2 | Each shipped target provisions a private stable standard CPython 3.10 or newer without a host Python dependency or global PATH/registry changes; artifact integrity, target identity, cache separation, cancellation, and retention are verified | Linux, Windows, and macOS v2.14.0 RPC installs provisioned CPython 3.14.7 and matched persisted interpreter identity across sessions ([Linux](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/README.md), [Windows](reports/v2.14.0-windows-cpu-rpc-restart-acceptance/README.md), [macOS](reports/v2.14.0-macos-cpu-rpc-restart-acceptance/README.md)). Artifact/source hashes are retained and all three full-archive license supersets are included in generated attribution; cancellation and cache separation remain | partial |
 | X3 | Candidate versions come from exact official standard-CPython wheel tags and the pinned stable provider catalog; the manager tries highest to lowest, selects the newest complete compatible resolution, and never treats network/provisioning failure as a reason to downgrade | CPython 3.14 preference when fully resolved; definite 3.14 dependency incompatibility falls to 3.13; prerelease/free-threaded/wrong-target and pre-3.10 artifact rejection; incomplete scan/provider failures remain typed inconclusive | pending |
 | X4 | Windows x64 and macOS arm64 discovery returns only exact official wheels whose tags match the provisioned native CPython; CPU/MPS/CUDA choices follow this contract | Native wheel fixtures and wrong-target rejection passed; manual native RPC run `36223106097` resolved exact official CPU wheel tags on Linux, Windows, and macOS arm64. CUDA hardware execution and macOS MPS acceleration remain untested | partial |
 | X5 | Preview retains the exact distribution version, release/build, official wheel URL/hash, Python provider artifact identity, interpreter fingerprint, and complete dependencies; install stages and verifies that exact identity before publication | Run `36223106097` resolved 25 hashed CPU/Core artifacts and passed v2.14.0 install on all three shipped targets; each report retains the exact Torch wheel URL/hash, dependency set, and managed interpreter identity (see X2 reports) | partial |
@@ -372,8 +373,10 @@ and unit fixtures do not substitute for the Windows/macOS runtime claims.
   concurrency/cancellation, immutable retention, tamper, and safe cleanup tests.
 - **State:** Manager/provider/resolver/UI implementation is present; native
   clean-host v2.14.0 CPU/Core provisioning and restart passed on all three
-  shipped targets. Cancellation/cache/tamper cases and selected-provider notice
-  integration remain open.
+  shipped targets. All three target-specific CPython notice supersets are
+  included and their provider pins, enum-arm target mapping, selected/full
+  archive identity, exact legal-file lists, and full-archive hashes pass
+  generation and packaging checks. Cancellation/cache/tamper cases remain open.
 
 ### M2 — Native acceptance and inventory
 
@@ -387,8 +390,9 @@ and unit fixtures do not substitute for the Windows/macOS runtime claims.
   mode, result, and link. Reuse read-only review for any lifecycle/security
   repair.
 - **State:** Active; native RPC CPU/Core acceptance is retained for all three
-  targets. Provider-license integration and packaged desktop install acceptance
-  remain pending.
+  targets and provider-license integration is complete. Current-branch Linux
+  packages were rebuilt and passed resource/hash and backend-health checks;
+  packaged desktop Torch installation acceptance remains pending.
 
 ## Constraints and re-plan triggers
 

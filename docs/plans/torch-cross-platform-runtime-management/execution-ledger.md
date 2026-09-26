@@ -1,5 +1,30 @@
 # Execution Ledger: Cross-Platform Torch Runtime Management
 
+## 2026-09-26 — Attribution repair and current Linux package candidate
+
+- Generated CPython full-archive notice supersets for Linux x86_64 GNU,
+  Windows x86_64 MSVC, and macOS arm64. The 0.7.0 inventory contains 371
+  package entries, 78 hashed inputs, and all 57 captured CPython legal texts;
+  Windows CRLF bytes are preserved.
+- Generation and packaging checks now bind the Rust uv version and each
+  `NativeTarget::pin()` enum arm to its target triple and SHA-256. They also
+  require the reviewed PBS release, selected/full archive URL, filename and
+  flavor to match `PYTHON.json`, and require each legal text exactly once.
+  Missing or malformed full-archive digests fail closed. Tests cover a
+  rehashed swapped uv pin and missing, uppercase, short, and non-hex archive
+  hashes. The Electron Builder hook is also tested with its context argument.
+- Attribution checker and all release-script tests pass; Ruff passes. The
+  focused Electron packaging-hook and RPC allowlist tests pass.
+- Built current-branch Linux v0.7.0 AppImage and deb locally with the updated
+  notices and bridge. Artifact checks, extracted resource hashes, and packaged
+  backend `/health` smoke pass. AppImage SHA-256 is
+  `1398ef0a9da1c0aab90681d3c91674ef88c6229a84984047938e7bd6eb350acd`; deb
+  SHA-256 is
+  `468b6f7c2af00ff8785f80e5486cd5133979e875dd351b4b9f5284ddfd195043`.
+- This does not verify packaged Torch installation or v2.14.0 Tuldok image
+  generation. The public toolbar-linked v0.7.0 assets remain unchanged; these
+  files are local candidates only.
+
 ## 2026-09-25 — Exact-wheel and native preflight follow-up
 
 - At `032045ad`, the manual native RPC run

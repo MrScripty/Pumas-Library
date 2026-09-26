@@ -1,4 +1,5 @@
 # Attribution hashes must match native checkouts even with core.autocrlf=true.
+*.py text eol=lf
 rust/Cargo.lock text eol=lf
 rust/**/Cargo.toml text eol=lf
 pnpm-lock.yaml text eol=lf

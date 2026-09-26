@@ -21,7 +21,10 @@ CUDA execution, or Tuldok image generation.
 
 The acceptance client allows 900 seconds for release-option discovery because
 the first call provisions managed CPython before the resolver's own bounded
-official-wheel scan begins. The fresh-root run passed with that budget.
+official-wheel scan begins. In this latest fresh-root run, the
+`get_available_versions` preflight found the exact `v2.14.0` release-list
+`tagName` on its first attempt, before installation. The full two-session
+Linux acceptance then passed with that budget.
 
 ## Retained evidence
 

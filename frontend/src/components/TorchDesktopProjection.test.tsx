@@ -150,7 +150,8 @@ describe('Torch desktop projection', () => {
     expect(await screen.findByText('Pumas image dependencies are selected by Pumas for its FLUX.2 path; they are not part of upstream Torch.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
     await waitFor(() => expect(screen.getByText('SHA-256: abc123')).toBeInTheDocument());
-    expect(preview).toHaveBeenCalledWith({ tag: releaseTag, build: 'cpu', python: 'python3.12', adapter: 'flux2' });
+    expect(preview).toHaveBeenCalledWith({ tag: releaseTag, build: 'cpu', python: 'auto', adapter: 'flux2' });
+    expect(screen.getByText('Selected Python: python3.12')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Install reviewed artifacts' }));
     await waitFor(() => expect(installVersion).toHaveBeenCalledWith(releaseTag, previewId));
     expect(switchVersion).not.toHaveBeenCalled();

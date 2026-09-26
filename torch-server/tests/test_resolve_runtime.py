@@ -927,6 +927,64 @@ class ResolverTests(unittest.TestCase):
                 self.assertFalse((pathlib.Path(directory) / "requirements.txt").exists())
                 self.assertFalse((pathlib.Path(directory) / "resolution.json").exists())
 
+    def test_cli_reads_utf8_pip_report_and_publishes_exact_artifacts(self):
+        fixture = report()
+        fixture["install"][1]["metadata"]["summary"] = "Ready” 🚀"
+        expected_requirements, expected_resolution = resolver.requirements_from_report(
+            fixture, "2.10.0", "cpu"
+        )
+        original_read_text = pathlib.Path.read_text
+        original_write_text = pathlib.Path.write_text
+        written_text_options = {}
+
+        def read_with_windows_default(path, *args, **kwargs):
+            if path.name == "pip-resolution.json" and kwargs.get("encoding") is None:
+                return path.read_bytes().decode("cp1252")
+            return original_read_text(path, *args, **kwargs)
+
+        def record_write_encoding(path, data, *args, **kwargs):
+            written_text_options[path.name] = (kwargs.get("encoding"), kwargs.get("newline"))
+            return original_write_text(path, data, *args, **kwargs)
+
+        def fake_run(command, **_kwargs):
+            report_path = pathlib.Path(command[command.index("--report") + 1])
+            report_path.write_bytes(json.dumps(fixture, ensure_ascii=False).encode("utf-8"))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory)
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--output",
+                        directory,
+                    ],
+                ),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+                patch.object(pathlib.Path, "read_text", read_with_windows_default),
+                patch.object(pathlib.Path, "write_text", record_write_encoding),
+            ):
+                resolver.main()
+            self.assertEqual(
+                (output / "requirements.txt").read_bytes(),
+                ("\n".join(expected_requirements) + "\n").encode("utf-8"),
+            )
+            self.assertEqual(
+                (output / "resolution.json").read_bytes(),
+                (json.dumps(expected_resolution, indent=2) + "\n").encode("utf-8"),
+            )
+        self.assertEqual(
+            written_text_options,
+            {"requirements.txt": ("utf-8", "\n"), "resolution.json": ("utf-8", "\n")},
+        )
+
     def test_missing_historical_wheel_does_not_publish_install_lock(self):
         failed = type(
             "Completed",

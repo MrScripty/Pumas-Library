@@ -918,14 +918,18 @@ def main() -> None:
         )
         parser.exit(code, f"{message}\n")
     try:
-        report = json.loads(report_path.read_text())
+        report = json.loads(report_path.read_text(encoding="utf-8"))
         requirements, resolution = requirements_from_report(
             report, args.version, args.build, args.adapter
         )
     except (KeyError, TypeError, ValueError, OSError) as error:
         parser.exit(3, f"Invalid wheel resolution: {error}\n")
-    (args.output / "requirements.txt").write_text("\n".join(requirements) + "\n")
-    (args.output / "resolution.json").write_text(json.dumps(resolution, indent=2) + "\n")
+    (args.output / "requirements.txt").write_text(
+        "\n".join(requirements) + "\n", encoding="utf-8", newline="\n"
+    )
+    (args.output / "resolution.json").write_text(
+        json.dumps(resolution, indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
 
 
 if __name__ == "__main__":

@@ -329,3 +329,16 @@
   acceptance request budget is now 900 seconds to cover the bounded cold-start
   stages; backend timeouts and product behavior are unchanged. The full
   fresh-root run then passed and replaced the retained report files above.
+
+## 2026-09-25 — Cross-platform acceptance follow-up
+
+- Fixed Windows report handling to decode captured output as UTF-8 and write
+  reports with LF line endings. Added the macOS cleanup regression for a
+  zombie-only `EPERM` result, where the extinct group may drain and release.
+  When `EPERM` is followed by live descendants, process custody and the
+  cleanup lease remain in place.
+- Targeted tests and reviews passed. The latest local Linux x86_64 two-session
+  Torch 2.14.0 CPU acceptance remains passing, including an exact `v2.14.0`
+  release-list `tagName` preflight in `get_available_versions`; its refreshed
+  [evidence](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/README.md) is
+  retained. Native Windows and macOS full acceptance remains pending.

@@ -1275,6 +1275,23 @@ mod tests {
             .exists());
     }
 
+    #[cfg(target_os = "macos")]
+    #[tokio::test]
+    async fn completed_native_provider_command_returns_stdout_after_custody_drain() {
+        let root = tempfile::tempdir().unwrap();
+        let cleanup = Arc::new(TorchCleanupTasks::default());
+        let provider = ManagedPythonProvider::new(root.path(), cleanup.clone()).unwrap();
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "printf 'cpython-3.14.2\\n'"]);
+        let output = provider
+            .run_bounded(command, Duration::from_secs(5), 4096)
+            .await
+            .unwrap();
+        assert_eq!(output, b"cpython-3.14.2\n");
+        cleanup.close();
+        cleanup.drain_child_slots().await.unwrap();
+    }
+
     #[cfg(target_os = "linux")]
     async fn wait_for_process_group_marker(path: &Path) -> i32 {
         tokio::time::timeout(Duration::from_secs(3), async {

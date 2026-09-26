@@ -1,27 +1,27 @@
-2026-09-26T02:21:42.684164Z  INFO Starting Pumas RPC Server
-2026-09-26T02:21:42.684203Z  INFO Launcher root configured
-2026-09-26T02:21:43.162394Z  INFO Created FTS5 table: model_search
-2026-09-26T02:21:43.192584Z  INFO Populated FTS5 table from models
-2026-09-26T02:21:43.192768Z  INFO Rebuilding model index
-2026-09-26T02:21:43.192838Z  INFO Rebuilt index with 0 models
-2026-09-26T02:21:43.713149Z  INFO IPC server listening on 127.0.0.1:38445
-2026-09-26T02:21:43.713300Z  INFO IPC server started on port 38445
-2026-09-26T02:21:43.713660Z  INFO Started watching model library at "/tmp/pumas-torch-native-cpu-fc2q9jr8/shared-resources/models"
-2026-09-26T02:21:43.737680Z  INFO Validation complete: 0 valid, 0 removed, 0 orphaned
-2026-09-26T02:21:43.737695Z  INFO ollama version manager initialized successfully
-2026-09-26T02:21:43.761395Z  INFO Validation complete: 0 valid, 0 removed, 0 orphaned
-2026-09-26T02:21:43.761406Z  INFO torch version manager initialized successfully
-2026-09-26T02:21:43.784919Z  INFO Validation complete: 0 valid, 0 removed, 0 orphaned
-2026-09-26T02:21:43.784935Z  INFO llama-cpp version manager initialized successfully
-2026-09-26T02:21:43.784938Z  INFO Initialized 3 version manager(s)
-2026-09-26T02:21:43.784968Z  INFO Size calculator initialized
-2026-09-26T02:21:43.785024Z  INFO Plugin loader initialized (0 plugins)
-2026-09-26T02:21:43.887063Z  INFO Server listening on 127.0.0.1:38643 with max 64 in-flight requests and 33554432 byte request bodies
-RPC_PORT=38643
-2026-09-26T02:21:43.887084Z  INFO RPC server running on 127.0.0.1:38643
-2026-09-26T02:21:45.884058Z  INFO Fetched 69 releases from GitHub for pytorch/pytorch
-2026-09-26T02:23:47.740227Z  INFO Finalizing installation for v2.14.0
-2026-09-26T02:23:47.747690Z  INFO Installation of v2.14.0 finalized
-2026-09-26T02:23:50.410695Z  INFO Set active version: v2.14.0
-2026-09-26T02:23:51.802273Z  INFO Shutdown signal received, exiting
-2026-09-26T02:23:51.805630Z  WARN File watcher channel disconnected
+2026-09-26T03:00:21.531261Z  INFO Starting Pumas RPC Server
+2026-09-26T03:00:21.531337Z  INFO Launcher root configured
+2026-09-26T03:00:21.799977Z  INFO Created FTS5 table: model_search
+2026-09-26T03:00:21.816251Z  INFO Populated FTS5 table from models
+2026-09-26T03:00:21.816742Z  INFO Rebuilding model index
+2026-09-26T03:00:21.816871Z  INFO Rebuilt index with 0 models
+2026-09-26T03:00:22.120971Z  INFO IPC server listening on 127.0.0.1:44501
+2026-09-26T03:00:22.121235Z  INFO IPC server started on port 44501
+2026-09-26T03:00:22.121608Z  INFO Started watching model library at "/tmp/pumas-torch-native-cpu-isd3cpxw/shared-resources/models"
+2026-09-26T03:00:22.145865Z  INFO Validation complete: 0 valid, 0 removed, 0 orphaned
+2026-09-26T03:00:22.145910Z  INFO ollama version manager initialized successfully
+2026-09-26T03:00:22.170025Z  INFO Validation complete: 0 valid, 0 removed, 0 orphaned
+2026-09-26T03:00:22.170060Z  INFO torch version manager initialized successfully
+2026-09-26T03:00:22.194035Z  INFO Validation complete: 0 valid, 0 removed, 0 orphaned
+2026-09-26T03:00:22.194073Z  INFO llama-cpp version manager initialized successfully
+2026-09-26T03:00:22.194085Z  INFO Initialized 3 version manager(s)
+2026-09-26T03:00:22.194421Z  INFO Size calculator initialized
+2026-09-26T03:00:22.194834Z  INFO Plugin loader initialized (0 plugins)
+2026-09-26T03:00:22.291156Z  INFO Server listening on 127.0.0.1:34183 with max 64 in-flight requests and 33554432 byte request bodies
+RPC_PORT=34183
+2026-09-26T03:00:22.291219Z  INFO RPC server running on 127.0.0.1:34183
+2026-09-26T03:00:24.242416Z  INFO Fetched 69 releases from GitHub for pytorch/pytorch
+2026-09-26T03:02:49.369211Z  INFO Finalizing installation for v2.14.0
+2026-09-26T03:02:49.378467Z  INFO Installation of v2.14.0 finalized
+2026-09-26T03:02:50.841994Z  INFO Set active version: v2.14.0
+2026-09-26T03:02:52.274485Z  INFO Shutdown signal received, exiting
+2026-09-26T03:02:52.275828Z  WARN File watcher channel disconnected

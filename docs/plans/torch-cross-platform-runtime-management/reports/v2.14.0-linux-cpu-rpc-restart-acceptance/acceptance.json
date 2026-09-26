@@ -7,7 +7,7 @@
   "distribution_catalog_key": "cpython-3.14.7-linux-x86_64-gnu",
   "distribution_implementation": "CPython",
   "distribution_source_url": "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
-  "executable_path": "/tmp/pumas-torch-native-cpu-fc2q9jr8/launcher-data/managed-python/python/0800c1ab76812b8a0a424e27c9a0c6ff818175e26b32d40b165081b5e041a8c5/cpython-3.14.7-linux-x86_64-gnu/bin/python3.14",
+  "executable_path": "/tmp/pumas-torch-native-cpu-isd3cpxw/launcher-data/managed-python/python/0800c1ab76812b8a0a424e27c9a0c6ff818175e26b32d40b165081b5e041a8c5/cpython-3.14.7-linux-x86_64-gnu/bin/python3.14",
   "executable_sha256": "241bf774a81580bb760adf960b48df7e6b23b1de026c9c912d4ca6be1a08241e",
   "platform": "linux",
   "probe": "passed",
@@ -29,7 +29,7 @@
       "distribution_catalog_key": "cpython-3.14.7-linux-x86_64-gnu",
       "distribution_implementation": "CPython",
       "distribution_source_url": "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
-      "executable_path": "/tmp/pumas-torch-native-cpu-fc2q9jr8/launcher-data/managed-python/python/0800c1ab76812b8a0a424e27c9a0c6ff818175e26b32d40b165081b5e041a8c5/cpython-3.14.7-linux-x86_64-gnu/bin/python3.14",
+      "executable_path": "/tmp/pumas-torch-native-cpu-isd3cpxw/launcher-data/managed-python/python/0800c1ab76812b8a0a424e27c9a0c6ff818175e26b32d40b165081b5e041a8c5/cpython-3.14.7-linux-x86_64-gnu/bin/python3.14",
       "executable_sha256": "241bf774a81580bb760adf960b48df7e6b23b1de026c9c912d4ca6be1a08241e",
       "provider": "uv",
       "provider_archive_sha256": "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16",
@@ -51,5 +51,15 @@
   "stopped": true,
   "success": true,
   "target": "x86_64-unknown-linux-gnu",
-  "trial": "passed"
+  "trial": "passed",
+  "version_preflight": {
+    "attempts": [
+      {
+        "number": 1,
+        "status": "requested_tag_found"
+      }
+    ],
+    "elapsed_seconds": 2.023,
+    "status": "passed"
+  }
 }

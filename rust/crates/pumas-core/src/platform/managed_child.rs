@@ -18,6 +18,8 @@ pub struct ManagedChild {
     custody: Option<Arc<ManagedChildCustodySlot>>,
     #[cfg(test)]
     force_observation_failure: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(all(test, target_os = "macos"))]
+    force_group_signal_permission_denied: Arc<std::sync::atomic::AtomicBool>,
     #[cfg(windows)]
     job: std::sync::Arc<std::os::windows::io::OwnedHandle>,
 }
@@ -175,6 +177,10 @@ impl ManagedChild {
                 custody: Some(custody),
                 #[cfg(test)]
                 force_observation_failure: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                #[cfg(all(test, target_os = "macos"))]
+                force_group_signal_permission_denied: Arc::new(std::sync::atomic::AtomicBool::new(
+                    false,
+                )),
             })
         }
         #[cfg(windows)]
@@ -285,16 +291,22 @@ impl ManagedChild {
             {
                 let pid =
                     i32::try_from(self.id()).map_err(|_| io::Error::other("Invalid group ID"))?;
-                // SAFETY: the unreaped direct child pins its group ID; the
-                // group was created by this owner at spawn.
-                #[allow(unsafe_code)]
-                if unsafe { libc::killpg(pid, libc::SIGKILL) } != 0 {
-                    let error = io::Error::last_os_error();
-                    if error.raw_os_error() != Some(libc::ESRCH) {
-                        return Err(error);
+                if !macos_drain_group_once(pid, macos_group_has_live_members, |group| {
+                    #[cfg(test)]
+                    if self
+                        .force_group_signal_permission_denied
+                        .load(std::sync::atomic::Ordering::Acquire)
+                    {
+                        return Err(io::Error::from_raw_os_error(libc::EPERM));
                     }
-                }
-                if !macos_group_has_live_members(pid)? {
+                    // SAFETY: the unreaped direct child pins its group ID; the
+                    // group was created by this owner at spawn.
+                    #[allow(unsafe_code)]
+                    if unsafe { libc::killpg(group, libc::SIGKILL) } != 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    Ok(())
+                })? {
                     break;
                 }
             }
@@ -346,6 +358,9 @@ impl Drop for ManagedChild {
             let job = self.job.clone();
             #[cfg(test)]
             let force_observation_failure = self.force_observation_failure.clone();
+            #[cfg(all(test, target_os = "macos"))]
+            let force_group_signal_permission_denied =
+                self.force_group_signal_permission_denied.clone();
             let parked = ManagedChild {
                 child: Some(child),
                 drained: false,
@@ -355,6 +370,8 @@ impl Drop for ManagedChild {
                 job,
                 #[cfg(test)]
                 force_observation_failure,
+                #[cfg(all(test, target_os = "macos"))]
+                force_group_signal_permission_denied,
             };
             let mut slot = custody
                 .parked
@@ -368,6 +385,29 @@ impl Drop for ManagedChild {
             custody.changed.notify_waiters();
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_drain_group_once<O, S>(group: i32, mut observe: O, mut signal: S) -> io::Result<bool>
+where
+    O: FnMut(i32) -> io::Result<bool>,
+    S: FnMut(i32) -> io::Result<()>,
+{
+    if !observe(group)? {
+        return Ok(false);
+    }
+    match signal(group) {
+        Ok(()) => {}
+        Err(error) if error.raw_os_error() == Some(libc::ESRCH) => {}
+        Err(error) if error.raw_os_error() == Some(libc::EPERM) => {
+            if !observe(group)? {
+                return Ok(false);
+            }
+            return Err(error);
+        }
+        Err(error) => return Err(error),
+    }
+    observe(group)
 }
 
 #[cfg(target_os = "macos")]
@@ -755,6 +795,108 @@ mod unix_tests {
             );
             std::thread::sleep(POLL_INTERVAL);
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn observed_exited_child_drains_without_signaling_zombie_group() {
+        let custody = ManagedChildCustodySlot::new();
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "exit 0"]);
+        let mut child = ManagedChild::spawn(&mut command, custody.clone()).unwrap();
+        let until = Instant::now() + Duration::from_secs(5);
+        let observed = loop {
+            if let Some(status) = child.observe_exit().unwrap() {
+                break status;
+            }
+            assert!(Instant::now() < until, "child did not exit");
+            std::thread::sleep(POLL_INTERVAL);
+        };
+        assert!(observed.success());
+        assert!(!macos_group_has_live_members(child.id() as i32).unwrap());
+        assert!(child
+            .terminate_and_drain(Duration::from_secs(5))
+            .unwrap()
+            .success());
+        assert!(!custody.is_active());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn permission_denied_with_live_descendant_retains_custody_and_lease_for_retry() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        struct Lease(Arc<AtomicBool>);
+        impl Drop for Lease {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("descendant.pid");
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", "sleep 30 & echo $! > \"$1\"; wait", "sh"])
+            .arg(&marker);
+        let custody = ManagedChildCustodySlot::new();
+        let mut child = ManagedChild::spawn(&mut command, custody.clone()).unwrap();
+        let group = child.id() as i32;
+        let descendant = wait_for(&marker);
+        assert!(macos_group_has_live_members(group).unwrap());
+        assert!(super::super::process::is_process_alive(descendant));
+
+        let released = Arc::new(AtomicBool::new(false));
+        child.attach_cleanup_lease(Arc::new(Lease(released.clone())));
+        let force_eperm = child.force_group_signal_permission_denied.clone();
+        force_eperm.store(true, Ordering::Release);
+        let error = child
+            .terminate_and_drain(Duration::from_secs(5))
+            .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(libc::EPERM));
+        assert!(macos_group_has_live_members(group).unwrap());
+        assert!(custody.is_active());
+        assert!(!released.load(Ordering::Acquire));
+
+        drop(child);
+        assert!(custody.has_parked_child());
+        assert_eq!(
+            custody
+                .drain(Duration::from_secs(5))
+                .unwrap_err()
+                .raw_os_error(),
+            Some(libc::EPERM)
+        );
+        assert!(custody.has_parked_child());
+        assert!(!released.load(Ordering::Acquire));
+
+        force_eperm.store(false, Ordering::Release);
+        assert!(custody.drain(Duration::from_secs(5)).unwrap());
+        assert!(!macos_group_has_live_members(group).unwrap());
+        assert!(!custody.has_parked_child());
+        assert!(!custody.is_active());
+        assert!(released.load(Ordering::Acquire));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn permission_denied_after_group_exits_is_accepted() {
+        let mut observations = 0;
+        let mut signals = 0;
+        let live = macos_drain_group_once(
+            42,
+            |_| {
+                observations += 1;
+                Ok(observations == 1)
+            },
+            |_| {
+                signals += 1;
+                Err(io::Error::from_raw_os_error(libc::EPERM))
+            },
+        )
+        .unwrap();
+        assert!(!live);
+        assert_eq!(observations, 2);
+        assert_eq!(signals, 1);
     }
 
     #[test]

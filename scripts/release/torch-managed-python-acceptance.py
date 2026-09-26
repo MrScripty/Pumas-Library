@@ -50,6 +50,9 @@ MAX_ARCHIVE_MEMBERS = 200_000
 MAX_UNCOMPRESSED_TAR_STREAM_BYTES = 2 * 1024 * 1024 * 1024
 DOWNLOAD_DEADLINE_SECONDS = 300
 RELEASE_OPTIONS_RPC_TIMEOUT_SECONDS = 900
+VERSION_PREFLIGHT_MAX_ATTEMPTS = 3
+VERSION_PREFLIGHT_BUDGET_SECONDS = 1800
+VERSION_PREFLIGHT_MAX_DELAY_SECONDS = 900
 
 
 class HTTPSOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -98,7 +101,7 @@ def wait_for_backend(process: subprocess.Popen[bytes], log_path: Path) -> str:
     )
 
 
-def rpc(base: str, method: str, params: dict | None = None, timeout: int = 120):
+def rpc(base: str, method: str, params: dict | None = None, timeout: float = 120):
     request = urllib.request.Request(
         base + "/rpc",
         data=json.dumps(
@@ -116,6 +119,94 @@ def rpc(base: str, method: str, params: dict | None = None, timeout: int = 120):
 def require(condition: bool, step: str, result) -> None:
     if not condition:
         raise RuntimeError(f"{step} failed: {json.dumps(result, default=str)[:1200]}")
+
+
+def preflight_torch_release(
+    base: str,
+    evidence: dict,
+    *,
+    rpc_call=None,
+    clock=time.monotonic,
+    sleep=time.sleep,
+) -> None:
+    """Wait only for an explicit release-list rate limit before scanning assets."""
+    if rpc_call is None:
+        rpc_call = rpc
+    started = clock()
+    attempts = []
+    evidence["version_preflight"] = {"attempts": attempts, "elapsed_seconds": 0}
+
+    def finish(status: str) -> None:
+        evidence["version_preflight"]["elapsed_seconds"] = round(clock() - started, 3)
+        evidence["version_preflight"]["status"] = status
+
+    def fail(reason: str) -> None:
+        finish(reason)
+        raise RuntimeError(
+            "Torch version preflight failed: "
+            + json.dumps(evidence["version_preflight"], sort_keys=True)
+        )
+
+    for number in range(1, VERSION_PREFLIGHT_MAX_ATTEMPTS + 1):
+        elapsed = clock() - started
+        if elapsed >= VERSION_PREFLIGHT_BUDGET_SECONDS:
+            fail("time_budget_exhausted")
+        # The per-call timeout cannot exceed the remaining preflight budget.
+        timeout = min(120, VERSION_PREFLIGHT_BUDGET_SECONDS - elapsed)
+        attempt = {"number": number}
+        attempts.append(attempt)
+        try:
+            result = rpc_call(
+                base,
+                "get_available_versions",
+                {"app_id": "torch", "force_refresh": False},
+                timeout=timeout,
+            )
+        except Exception:
+            attempt["status"] = "rpc_failure"
+            fail("rpc_failure")
+        if clock() - started > VERSION_PREFLIGHT_BUDGET_SECONDS:
+            attempt["status"] = "time_budget_exhausted"
+            fail("time_budget_exhausted")
+        if (
+            isinstance(result, dict)
+            and result.get("success") is True
+            and "rate_limited" not in result
+            and "retry_after_secs" not in result
+        ):
+            versions = result.get("versions")
+            if not isinstance(versions, list) or not all(
+                isinstance(item, dict) and isinstance(item.get("tagName"), str) for item in versions
+            ):
+                attempt["status"] = "malformed_listing"
+                fail("malformed_listing")
+            if not any(item["tagName"] == TAG for item in versions):
+                attempt["status"] = "requested_tag_missing"
+                fail("requested_tag_missing")
+            attempt["status"] = "requested_tag_found"
+            finish("passed")
+            return
+        if not (
+            isinstance(result, dict)
+            and result.get("success") is False
+            and result.get("rate_limited") is True
+        ):
+            attempt["status"] = "unexpected_outcome"
+            fail("unexpected_outcome")
+        delay = result.get("retry_after_secs")
+        if type(delay) is not int or delay < 0 or delay > VERSION_PREFLIGHT_MAX_DELAY_SECONDS:
+            attempt["status"] = "invalid_retry_delay"
+            fail("invalid_retry_delay")
+        attempt.update(status="rate_limited", retry_after_secs=delay)
+        if number == VERSION_PREFLIGHT_MAX_ATTEMPTS:
+            fail("attempts_exhausted")
+        if clock() - started + delay >= VERSION_PREFLIGHT_BUDGET_SECONDS:
+            fail("time_budget_exhausted")
+        try:
+            sleep(delay)
+        except Exception:
+            attempt["status"] = "sleep_failure"
+            fail("sleep_failure")
 
 
 def canonical_path_key(path: str, *, windows: bool) -> str:
@@ -156,6 +247,155 @@ class WindowsCanonicalPathFixture(unittest.TestCase):
         self.assertTrue(path_is_within(child, depot, windows=True))
         self.assertFalse(path_is_within(sibling, depot, windows=True))
         self.assertFalse(path_is_within(r"\\?\D:\managed\python\python.exe", depot, windows=True))
+
+
+class VersionPreflightFixture(unittest.TestCase):
+    @staticmethod
+    def listing(tag: str = TAG) -> dict:
+        return {"success": True, "versions": [{"tagName": tag}]}
+
+    @staticmethod
+    def limited(delay) -> dict:
+        return {
+            "success": False,
+            "rate_limited": True,
+            "retry_after_secs": delay,
+            "error": "untrusted detail must not appear in diagnostics",
+        }
+
+    def run_preflight(self, responses: list) -> tuple[dict, list, list]:
+        now = [0]
+        sleeps = []
+        calls = []
+        state = {}
+        responses = iter(responses)
+
+        def fake_rpc(base, method, params, timeout):
+            calls.append((base, method, params, timeout))
+            return next(responses)
+
+        def fake_sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds
+
+        preflight_torch_release(
+            "http://127.0.0.1:1",
+            state,
+            rpc_call=fake_rpc,
+            clock=lambda: now[0],
+            sleep=fake_sleep,
+        )
+        return state["version_preflight"], sleeps, calls
+
+    def test_success_first_attempt(self) -> None:
+        evidence, sleeps, calls = self.run_preflight([self.listing()])
+        self.assertEqual(evidence["status"], "passed")
+        self.assertEqual(evidence["elapsed_seconds"], 0)
+        self.assertEqual(evidence["attempts"], [{"number": 1, "status": "requested_tag_found"}])
+        self.assertEqual(sleeps, [])
+        self.assertEqual(
+            [(method, params) for _, method, params, _ in calls],
+            [("get_available_versions", {"app_id": "torch", "force_refresh": False})],
+        )
+
+    def test_advertised_687_second_delay_is_used_in_full(self) -> None:
+        evidence, sleeps, calls = self.run_preflight([self.limited(687), self.listing()])
+        self.assertEqual(sleeps, [687])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(evidence["elapsed_seconds"], 687)
+        self.assertEqual(evidence["status"], "passed")
+        self.assertEqual(evidence["attempts"][0]["retry_after_secs"], 687)
+        self.assertNotIn("untrusted detail", str(evidence))
+
+    def test_invalid_delays_fail_without_sleep(self) -> None:
+        for delay in (None, "687", True, -1, 901):
+            with self.subTest(delay=delay):
+                with self.assertRaisesRegex(RuntimeError, "invalid_retry_delay"):
+                    self.run_preflight([self.limited(delay)])
+
+    def test_delay_cannot_consume_remaining_budget(self) -> None:
+        state = {}
+        calls = []
+
+        def fake_rpc(_base, method, _params, timeout):
+            calls.append(method)
+            return self.limited(900)
+
+        with self.assertRaisesRegex(RuntimeError, "time_budget_exhausted"):
+            preflight_torch_release(
+                "base",
+                state,
+                rpc_call=fake_rpc,
+                clock=lambda: 1000 if calls else 0,
+                sleep=lambda _seconds: self.fail("must not sleep past budget"),
+            )
+        self.assertEqual(calls, ["get_available_versions"])
+        self.assertEqual(state["version_preflight"]["elapsed_seconds"], 1000)
+
+    def test_rpc_timeout_does_not_exceed_subsecond_remaining_budget(self) -> None:
+        clock_calls = [0]
+        timeouts = []
+
+        def fake_clock():
+            return clock_calls.pop(0) if clock_calls else 1799.75
+
+        def fake_rpc(_base, _method, _params, timeout):
+            timeouts.append(timeout)
+            return self.listing()
+
+        evidence = {}
+        preflight_torch_release("base", evidence, rpc_call=fake_rpc, clock=fake_clock)
+        self.assertEqual(timeouts, [0.25])
+        self.assertEqual(evidence["version_preflight"]["status"], "passed")
+
+    def test_malformed_listing_and_conflicting_success_fail(self) -> None:
+        for response, expected in (
+            ({"success": True, "versions": "not a list"}, "malformed_listing"),
+            ({"success": True, "versions": [{"tag_name": TAG}]}, "malformed_listing"),
+            ({"success": True, "versions": [], "rate_limited": True}, "unexpected_outcome"),
+        ):
+            with self.subTest(expected=expected):
+                with self.assertRaisesRegex(RuntimeError, expected):
+                    self.run_preflight([response])
+
+    def test_attempts_exhausted_without_final_sleep(self) -> None:
+        now = [0]
+        sleeps = []
+        state = {}
+
+        def fake_rpc(_base, _method, _params, timeout):
+            return self.limited(1)
+
+        def fake_sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds
+
+        with self.assertRaisesRegex(RuntimeError, "attempts_exhausted"):
+            preflight_torch_release(
+                "base", state, rpc_call=fake_rpc, clock=lambda: now[0], sleep=fake_sleep
+            )
+        self.assertEqual(sleeps, [1, 1])
+        self.assertEqual(state["version_preflight"]["elapsed_seconds"], 2)
+        self.assertEqual(len(state["version_preflight"]["attempts"]), 3)
+
+    def test_generic_failure_and_missing_tag_stop_before_options_or_install(self) -> None:
+        for response, expected in (
+            ({"success": False, "error": "private failure"}, "unexpected_outcome"),
+            (self.listing("v2.14.0-rc1"), "requested_tag_missing"),
+            (self.limited(None), "invalid_retry_delay"),
+        ):
+            with self.subTest(expected=expected):
+                calls = []
+
+                def fake_rpc(_base, method, _params=None, timeout=120):
+                    calls.append(method)
+                    return response
+
+                with patch.object(sys.modules[__name__], "rpc", side_effect=fake_rpc):
+                    with self.assertRaisesRegex(RuntimeError, expected) as failure:
+                        exercise("base", Path("unused"), {"install_succeeded": False})
+                self.assertEqual(calls, ["get_available_versions"])
+                self.assertNotIn("private failure", str(failure.exception))
 
 
 class EvidenceCollectionFixture(unittest.TestCase):
@@ -2290,6 +2530,7 @@ def run_restart_cpu_operation(root: Path) -> dict:
 
 
 def exercise(base: str, root: Path, state: dict) -> dict:
+    preflight_torch_release(base, state)
     options = rpc(
         base,
         "get_torch_release_options",
@@ -2391,6 +2632,7 @@ def exercise(base: str, root: Path, state: dict) -> dict:
         stopped,
     )
     return {
+        "version_preflight": state["version_preflight"],
         "release": TAG,
         "build": "cpu",
         "python": preview["python"],
@@ -2582,6 +2824,7 @@ def main() -> None:
             unittest.defaultTestLoader.loadTestsFromTestCase(fixture)
             for fixture in (
                 WindowsCanonicalPathFixture,
+                VersionPreflightFixture,
                 EvidenceCollectionFixture,
                 LauncherRootFinalizationFixture,
                 RestartAcceptanceFixture,
@@ -2633,6 +2876,8 @@ def main() -> None:
                 "cleanup_safe": False,
                 "retained_root": str(root),
             }
+            if "version_preflight" in state:
+                acceptance["version_preflight"] = state["version_preflight"]
         try:
             if evidence_dir is not None:
                 collect_evidence(
@@ -2649,7 +2894,16 @@ def main() -> None:
                 try:
                     (evidence_dir / "acceptance.json").write_text(
                         json.dumps(
-                            {"success": False, "cleanup_safe": False, "retained_root": str(root)},
+                            {
+                                "success": False,
+                                "cleanup_safe": False,
+                                "retained_root": str(root),
+                                **(
+                                    {"version_preflight": state["version_preflight"]}
+                                    if "version_preflight" in state
+                                    else {}
+                                ),
+                            },
                             indent=2,
                             sort_keys=True,
                         )
@@ -2661,6 +2915,13 @@ def main() -> None:
             raise
         finally:
             if not success_ready:
+                if "version_preflight" in state:
+                    print(
+                        "Torch version preflight: "
+                        + json.dumps(state["version_preflight"], sort_keys=True),
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 print(f"Retained launcher root: {root}", file=sys.stderr, flush=True)
             finalize_launcher_root(root, cleanup_safe=success_ready)
 

@@ -165,7 +165,7 @@
       "version": "3.14.7"
     },
     "executable": {
-      "path": "/tmp/pumas-torch-native-cpu-fc2q9jr8/launcher-data/managed-python/python/0800c1ab76812b8a0a424e27c9a0c6ff818175e26b32d40b165081b5e041a8c5/cpython-3.14.7-linux-x86_64-gnu/bin/python3.14",
+      "path": "/tmp/pumas-torch-native-cpu-isd3cpxw/launcher-data/managed-python/python/0800c1ab76812b8a0a424e27c9a0c6ff818175e26b32d40b165081b5e041a8c5/cpython-3.14.7-linux-x86_64-gnu/bin/python3.14",
       "sha256": "241bf774a81580bb760adf960b48df7e6b23b1de026c9c912d4ca6be1a08241e"
     },
     "provider": {

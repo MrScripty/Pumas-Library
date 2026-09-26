@@ -4,7 +4,7 @@
   "build": "cpu",
   "adapter": "none",
   "python": "3.14",
-  "interpreter": "/tmp/pumas-torch-native-cpu-fc2q9jr8/launcher-data/managed-python/python/0800c1ab76812b8a0a424e27c9a0c6ff818175e26b32d40b165081b5e041a8c5/cpython-3.14.7-linux-x86_64-gnu/bin/python3.14",
+  "interpreter": "/tmp/pumas-torch-native-cpu-isd3cpxw/launcher-data/managed-python/python/0800c1ab76812b8a0a424e27c9a0c6ff818175e26b32d40b165081b5e041a8c5/cpython-3.14.7-linux-x86_64-gnu/bin/python3.14",
   "implementation": "cpython",
   "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.39",
   "machine": "x86_64",

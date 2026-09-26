@@ -1,5 +1,34 @@
 # Execution Ledger: Cross-Platform Torch Runtime Management
 
+## 2026-09-25 — Exact-wheel and native preflight follow-up
+
+- At `032045ad`, the manual native RPC run
+  [36222136437](https://github.com/MrScripty/Pumas-Library/actions/runs/36222136437)
+  passed the Linux v2.14.0 CPU/Core install and second-session restart with
+  managed CPython 3.14.7. The resolver used the discovered official Torch wheel
+  identity and completed the CPU operation, retained probe, sidecar trial/stop,
+  and graceful shutdown.
+- Windows and macOS E2E stopped at version preflight before release discovery.
+  Their backend logs show GitHub 403 rate limits with `Retry-After` values of
+  1411 seconds (Windows) and 1448 seconds (macOS); the acceptance harness
+  rejected both under its separate 900-second cap. These results do not test
+  Windows/macOS wheel resolution or installation. This Linux pass supersedes
+  the earlier incomplete Linux release-options scan.
+- Removed the separate retry-delay cap. The harness accepts only exact
+  nonnegative integer delays that fit the 1800-second total budget, keeps the
+  three-attempt bound, and fails before sleeping if the delay would consume the
+  budget. The 1411-second sleep/success case, malformed values, over-budget
+  values, and final-attempt budget classification are covered.
+- All 53 acceptance-script fixtures, Ruff lint/format, and `git diff --check`
+  pass locally. Astra high reviewed the budget semantics; Sol xhigh independently
+  reviewed retry edge cases and verified no sleep occurs for over-budget values.
+- PR run
+  [36222118583](https://github.com/MrScripty/Pumas-Library/actions/runs/36222118583)
+  passed workflow/release, frontend/desktop, Linux/Windows/macOS native QA, Rust
+  quality, and headless checks. Native RPC E2E is skipped on pull requests, so
+  that run is not platform install evidence. The bounded-retry change and a new
+  manual native RPC run remain pending.
+
 ## 2026-09-24 — Support contract and design
 
 - Rechecked branch `work/torch-version-management` at `9fb367b2`; preserved the

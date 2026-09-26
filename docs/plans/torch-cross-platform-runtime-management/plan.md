@@ -36,6 +36,16 @@ release-list preflight (after a first `rate_limited` response reporting a
 691-second retry) and release options, then `preview_torch_runtime` failed with
 `validation_failed: The resolved wheel report failed validation.` No macOS
 preview or install completed. macOS native QA passed, but macOS E2E did not.
+The later [manual run 36222136437](https://github.com/MrScripty/Pumas-Library/actions/runs/36222136437)
+at `032045ad` passed the complete Linux CPU/Core RPC install and restart on
+managed CPython 3.14.7. Windows and macOS stopped before release discovery:
+GitHub returned `Retry-After` values of 1411 and 1448 seconds, which the
+acceptance harness incorrectly rejected above its separate 900-second cap.
+The harness now honors valid nonnegative integer delays only while they fit its
+existing 1800-second total budget; all 53 local acceptance fixtures, Ruff, and
+format checks pass. A native Windows/macOS rerun on this repair is pending, so
+the latest code's install path remains unverified on those targets. This Linux
+pass supersedes the earlier incomplete Linux release-options scan.
 Fresh local v0.7.0 AppImage and deb packages were rebuilt after updating release
 attribution. Their extracted resources match the build inputs, and both bundled
 RPC backends passed `/health`. AppImage SHA-256:
@@ -56,7 +66,9 @@ E2E leg did not reach installation. macOS selected-provider licensing and
 packaged desktop install acceptance remain pending.
 
 **Current phase:** Linux v2.14.0 CPU/Core install and two-session sidecar
-lifecycle are accepted; Windows x64 CPU/Core install and restart are accepted.
+lifecycle are accepted on the current exact-wheel implementation; Windows x64
+CPU/Core install and restart are accepted by historical native evidence, while
+this revision's Windows and macOS install paths still await a native rerun.
 The PR repair closes the reviewed cross-process metadata races by guarding every
 Torch metadata read/modify/write with `.torch-versions.lock`, refreshing state
 under that lease, and retaining cloned leases through detached writes. Startup
@@ -66,27 +78,34 @@ cached generation. The repair also addresses failed child-custody drain,
 best-effort cleanup recovery, bounded Electron Torch RPC requests, and fixed
 preset access while upstream release discovery is pending.
 
-Local final verification passes: 199 `pumas-app-manager` tests, the Rust
+Local final verification passes: 200 `pumas-app-manager` tests, the Rust
 default-member suite, all-target/all-feature Clippy with warnings denied, Rust
 formatting, Windows GNU app-manager test compilation, 713 frontend tests, 48
-desktop-contract tests, 179 Electron tests (one platform-dependent skip), 50
+desktop-contract tests, 179 Electron tests (one platform-dependent skip), 53
 managed-Python acceptance fixtures, Ruff, release-attribution validation, and
 `git diff --check`. Astra high and Sol xhigh completed read-only reviews with no
-remaining blockers. The repaired PR checks still need to run on GitHub. The
-Windows GNU result is compile-only and does not replace native Windows/MSVC
-acceptance; macOS native QA and E2E also need a fresh run.
+remaining code blockers. PR run
+[36222118583](https://github.com/MrScripty/Pumas-Library/actions/runs/36222118583)
+passed workflow/release, frontend/desktop, Linux/Windows/macOS native QA, Rust
+quality, and headless checks; RPC E2E is skipped on pull requests. Manual run
+[36222136437](https://github.com/MrScripty/Pumas-Library/actions/runs/36222136437)
+passed Linux install/restart and stopped at Windows/macOS rate-limit preflight.
+The Windows GNU result is compile-only; current-revision Windows/macOS RPC
+installation still requires a manual native rerun.
 
-**Blockers:** The Linux incomplete release-options scan and macOS preview-report
-validation failure from the earlier manual run remain unresolved at the E2E
-level. Windows notice integration, macOS selected-provider license inventory,
-and packaged desktop Torch install acceptance remain open. CUDA/device use and
-v2.14.0 image/Tuldok behavior are untested. The local AppImage/deb candidates do
-not update the public toolbar-linked package.
+**Blockers:** The macOS preview-report validation failure from the earlier
+manual run remains unverified after exact-wheel pinning; the latest macOS run
+stopped at rate-limit preflight before it could exercise that repair. The latest
+Windows run also stopped at preflight, so its historical install evidence does
+not verify this revision. Windows notice integration, macOS selected-provider
+license inventory, and packaged desktop install acceptance remain open.
+CUDA/device use and v2.14.0 image/Tuldok behavior are untested. The local
+AppImage/deb candidates do not update the public toolbar-linked package.
 
-**Next slice:** Push the reviewed repairs and inspect the new PR workflow results.
-Then rerun native RPC E2E on Linux and macOS with bounded diagnostics, complete
-Windows/macOS provider licensing and packaged desktop install acceptance, and
-keep X1–X7 pending until their evidence gates pass.
+**Next slice:** Push the bounded rate-limit repair and rerun native RPC E2E on
+Windows and macOS (Linux remains a regression leg). Inspect the resolver and
+install evidence, then complete Windows/macOS provider licensing and packaged
+desktop install acceptance. Keep X1–X7 pending until their evidence gates pass.
 
 ## Objective and scope
 

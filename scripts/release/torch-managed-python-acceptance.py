@@ -53,7 +53,6 @@ DOWNLOAD_DEADLINE_SECONDS = 300
 RELEASE_OPTIONS_RPC_TIMEOUT_SECONDS = 900
 VERSION_PREFLIGHT_MAX_ATTEMPTS = 3
 VERSION_PREFLIGHT_BUDGET_SECONDS = 1800
-VERSION_PREFLIGHT_MAX_DELAY_SECONDS = 900
 
 
 class HTTPSOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -217,14 +216,17 @@ def preflight_torch_release(
             attempt["status"] = "unexpected_outcome"
             fail("unexpected_outcome")
         delay = result.get("retry_after_secs")
-        if type(delay) is not int or delay < 0 or delay > VERSION_PREFLIGHT_MAX_DELAY_SECONDS:
+        if type(delay) is not int or delay < 0:
             attempt["status"] = "invalid_retry_delay"
             fail("invalid_retry_delay")
         attempt.update(status="rate_limited", retry_after_secs=delay)
+        if (
+            delay >= VERSION_PREFLIGHT_BUDGET_SECONDS
+            or clock() - started + delay >= VERSION_PREFLIGHT_BUDGET_SECONDS
+        ):
+            fail("time_budget_exhausted")
         if number == VERSION_PREFLIGHT_MAX_ATTEMPTS:
             fail("attempts_exhausted")
-        if clock() - started + delay >= VERSION_PREFLIGHT_BUDGET_SECONDS:
-            fail("time_budget_exhausted")
         try:
             sleep(delay)
         except Exception:
@@ -356,11 +358,33 @@ class VersionPreflightFixture(unittest.TestCase):
         self.assertEqual(evidence["attempts"][0]["retry_after_secs"], 687)
         self.assertNotIn("untrusted detail", str(evidence))
 
+    def test_advertised_1411_second_delay_is_used_in_full(self) -> None:
+        evidence, sleeps, calls = self.run_preflight([self.limited(1411), self.listing()])
+        self.assertEqual(sleeps, [1411])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(evidence["elapsed_seconds"], 1411)
+        self.assertEqual(evidence["status"], "passed")
+        self.assertEqual(evidence["attempts"][0]["retry_after_secs"], 1411)
+
     def test_invalid_delays_fail_without_sleep(self) -> None:
-        for delay in (None, "687", True, -1, 901):
+        for delay in (None, "687", True, -1):
             with self.subTest(delay=delay):
                 with self.assertRaisesRegex(RuntimeError, "invalid_retry_delay"):
                     self.run_preflight([self.limited(delay)])
+
+    def test_advertised_delay_at_or_above_total_budget_is_exhausted(self) -> None:
+        for delay in (1800, 1801, 10**1000):
+            with self.subTest(delay=delay):
+                sleeps = []
+                with self.assertRaisesRegex(RuntimeError, "time_budget_exhausted"):
+                    preflight_torch_release(
+                        "base",
+                        {},
+                        rpc_call=lambda *_args, **_kwargs: self.limited(delay),
+                        clock=lambda: 0,
+                        sleep=sleeps.append,
+                    )
+                self.assertEqual(sleeps, [])
 
     def test_delay_cannot_consume_remaining_budget(self) -> None:
         state = {}
@@ -380,6 +404,27 @@ class VersionPreflightFixture(unittest.TestCase):
             )
         self.assertEqual(calls, ["get_available_versions"])
         self.assertEqual(state["version_preflight"]["elapsed_seconds"], 1000)
+
+    def test_final_attempt_reports_exhausted_budget_before_attempt_limit(self) -> None:
+        now = [0]
+        sleeps = []
+        delays = iter((1, 1, 1798))
+        state = {}
+
+        def fake_rpc(_base, _method, _params, timeout):
+            return self.limited(next(delays))
+
+        def fake_sleep(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds
+
+        with self.assertRaisesRegex(RuntimeError, "time_budget_exhausted"):
+            preflight_torch_release(
+                "base", state, rpc_call=fake_rpc, clock=lambda: now[0], sleep=fake_sleep
+            )
+        self.assertEqual(sleeps, [1, 1])
+        self.assertEqual(state["version_preflight"]["elapsed_seconds"], 2)
+        self.assertEqual(len(state["version_preflight"]["attempts"]), 3)
 
     def test_rpc_timeout_does_not_exceed_subsecond_remaining_budget(self) -> None:
         clock_calls = [0]

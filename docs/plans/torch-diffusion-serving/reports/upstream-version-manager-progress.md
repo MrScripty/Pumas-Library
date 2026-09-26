@@ -44,8 +44,10 @@ current candidate branch under the separate
 The supported runtime claim remains Linux x86_64 until Windows and macOS pass
 that plan's native quality, exact wheel, installed identity, process lifecycle,
 RPC, and packaged desktop gates. The native QA matrix now builds and runs the
-real RPC acceptance on Linux, Windows, and macOS; its Linux leg passes, while
-native Windows/macOS execution is pending. A Windows GNU test-target compile
+real RPC acceptance on Linux, Windows, and macOS. The Linux leg passed on commit
+`032045ad`; the latest Windows and macOS RPC legs stopped at release-list
+preflight due GitHub rate limits before exercising wheel discovery or
+installation. A Windows GNU test-target compile
 also passed, but remains compile-only evidence. No macOS compile was available
 in this Linux session. The existing
 Pumas artifact targets show these target architectures are shipped; they do not
@@ -508,13 +510,47 @@ The uv 0.12.18 MIT/Apache notices are included in release attribution. The
 Linux, Windows, and macOS CPython 3.14.7 full-archive license collections are
 retained in the
 [cross-platform runtime plan](../../torch-cross-platform-runtime-management/reports/managed-python-license-collection/README.md).
-Windows/macOS candidate collections are not native selection evidence, so
-all-target provider attribution remains open until those native installs
-identify and integrate their selected archives. Windows/macOS native acceptance
-and packaged desktop Torch installation also remain unproven. Local v0.7.0
+The Windows archive is now backed by historical native selection evidence from
+[run 36214227835](https://github.com/MrScripty/Pumas-Library/actions/runs/36214227835)
+on commit `a0658131`: that install selected CPython 3.14.7, and its full-archive
+SHA-256 matches the retained Windows candidate manifest. Windows selected-archive
+notices still need release-attribution integration. The macOS archive remains
+candidate evidence because the latest macOS run stopped before release
+discovery. Current-revision Windows/macOS install acceptance remains pending;
+macOS native installation and packaged desktop Torch installation are still
+unproven. Local v0.7.0
 Linux AppImage and deb packages were rebuilt
 with the updated uv notices and passed extracted-resource and bundled RPC
 `/health` smoke checks; this did not update the public toolbar-linked release.
+
+## 2026-09-25 — Exact Torch wheel and cross-platform preflight follow-up
+
+Manual native run
+[36222136437](https://github.com/MrScripty/Pumas-Library/actions/runs/36222136437)
+on `032045ad` passed Linux v2.14.0 CPU/Core resolution, install, fresh CPU
+operation, retained-probe revalidation, second-session identity check, and
+sidecar trial/stop. The resolver retained and validated the exact official
+Torch wheel discovered for the selected Python instead of asking pip to choose
+the Torch artifact from multiple indexes. The earlier incomplete Linux scan is
+superseded by this pass.
+
+Windows and macOS E2E stopped before release discovery. Their backend logs show
+explicit GitHub `Retry-After` values of 1411 seconds and 1448 seconds; the
+acceptance harness previously rejected values above 900 seconds, so neither
+run reached the exact-wheel resolver. The harness now honors nonnegative
+integer delays within its existing 1800-second total budget, retains the
+three-attempt cap, and rejects a delay that would exceed that budget without
+sleeping. All 53 acceptance fixtures, Ruff lint/format, and diff checks pass;
+Astra high and Sol xhigh reviewed the behavior and regression coverage.
+
+The PR run
+[36222118583](https://github.com/MrScripty/Pumas-Library/actions/runs/36222118583)
+passed workflow/release contracts, frontend/desktop, native Linux/Windows/macOS
+QA, Rust quality, and headless checks. Native RPC E2E is skipped on PR events.
+Windows/macOS Torch install acceptance on this revision remains pending until a
+manual rerun traverses release discovery, exact resolution, and installation.
+This does not change the separate v2.10 Tuldok/image qualification or close
+provider-license and packaged desktop acceptance gates.
 
 ## 2026-09-25 — Torch metadata and lifecycle review repairs
 
@@ -530,15 +566,20 @@ blocking issue in these concurrency, cache, startup, or Windows lock-error
 paths. A failed metadata write followed by a failed active-marker rollback is
 still a best-effort error case.
 
-Local verification on this branch passed 199 `pumas-app-manager` tests and the
+Local verification on this branch passed 200 `pumas-app-manager` tests and the
 Rust default-member suite, all-target/all-feature Clippy with warnings denied,
 Rust formatting, Windows GNU app-manager test compilation, 713 frontend tests,
 48 desktop-contract tests, 179 Electron tests (one platform-dependent skip),
-50 managed-Python acceptance fixtures, Ruff, Python compilation, and
-release-attribution validation. These checks do not replace the next GitHub PR
-workflow run. Windows GNU compilation is not native Windows execution; native
-Windows/macOS E2E, provider-license integration, packaged desktop Torch
-installation, CUDA/device execution, and v2.14.0 Tuldok/image generation remain
-unverified. The Linux/macOS E2E issues recorded above also remain open pending
-a manual native rerun. X1–X7 remain pending, and the local Linux packages have
-not updated the public toolbar-linked release.
+53 managed-Python acceptance fixtures, Ruff, Python compilation, and
+release-attribution validation. PR run
+[36222118583](https://github.com/MrScripty/Pumas-Library/actions/runs/36222118583)
+passed the workflow/release, frontend/desktop, native Linux/Windows/macOS QA,
+Rust quality, and headless checks; its RPC E2E jobs are skipped on PR events.
+Manual run
+[36222136437](https://github.com/MrScripty/Pumas-Library/actions/runs/36222136437)
+passed Linux v2.14.0 install/restart; Windows and macOS stopped at release-list
+preflight due long rate limits, as described above. Current-revision Windows/macOS
+RPC installation, macOS resolver validation, provider-license integration,
+packaged desktop Torch installation, CUDA/device execution, and v2.14.0
+Tuldok/image generation remain unverified. X1–X7 remain pending, and the local
+Linux packages have not updated the public toolbar-linked release.

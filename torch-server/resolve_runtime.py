@@ -1,13 +1,18 @@
-"""Resolve a selected official Torch wheel and an optional image adapter.
+"""Resolve or stage-install an official Torch wheel and optional image adapter.
 
-Run this with the interpreter that will own the environment. The pip report and
-hash-locked requirements are retained so installation need not resolve again.
+Run this with the interpreter that will own the environment. The report and
+hash-locked requirements retain provenance for review before staged code is used.
 """
 
 import argparse
+import base64
+import csv
+from email.parser import Parser
 from concurrent.futures import ThreadPoolExecutor, wait
+import hashlib
 from html.parser import HTMLParser
 import json
+import os
 import platform
 import re
 import subprocess
@@ -15,10 +20,134 @@ import sys
 import time
 from pathlib import Path
 from pip._vendor.packaging import tags as packaging_tags
+from pip._vendor.packaging.utils import canonicalize_name
+from pip._vendor.packaging.version import Version, InvalidVersion
 from urllib.parse import unquote, urljoin, urlparse, urlunparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 CORE = ("fastapi", "uvicorn", "psutil", "pillow", "safetensors")
+
+
+def staged_file_digest(path: Path) -> tuple[bytes, int]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+            size += len(chunk)
+    return digest.digest(), size
+
+
+def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -> dict:
+    """Validate pip's staged wheel files against every installed RECORD."""
+    if target.is_symlink() or not target.is_dir():
+        raise ValueError("Staged package target is missing or linked")
+    records = sorted(target.glob("*.dist-info/RECORD"))
+    if not records:
+        raise ValueError("Staged wheels have no RECORD files")
+    if artifacts is not None:
+        expected = {
+            canonicalize_name(artifact["name"]): artifact["version"] for artifact in artifacts
+        }
+        if len(expected) != len(artifacts) or len(records) != len(expected):
+            raise ValueError("Staged wheel RECORD set differs from the pip report")
+        seen_distributions = set()
+        for record in records:
+            directory = record.parent.name.removesuffix(".dist-info")
+            if "-" not in directory:
+                raise ValueError("Staged distribution identity is malformed")
+            directory_name, directory_version = directory.rsplit("-", 1)
+            name = canonicalize_name(directory_name)
+            if name not in expected or name in seen_distributions:
+                raise ValueError("Staged wheel RECORD set differs from the pip report")
+            seen_distributions.add(name)
+            metadata_path = record.parent / "METADATA"
+            if metadata_path.is_symlink() or not metadata_path.is_file():
+                raise ValueError("Staged distribution METADATA is missing or linked")
+            metadata = Parser().parsestr(metadata_path.read_text(encoding="utf-8"))
+            if len(metadata.get_all("Name", [])) != 1 or len(metadata.get_all("Version", [])) != 1:
+                raise ValueError("Staged distribution METADATA identity is malformed")
+            try:
+                expected_version = Version(expected[name])
+                matches = (
+                    Version(directory_version) == expected_version
+                    and Version(metadata["Version"]) == expected_version
+                )
+            except InvalidVersion:
+                matches = False
+            if canonicalize_name(metadata["Name"]) != name or not matches:
+                raise ValueError("Staged distribution identity differs from the pip report")
+    claimed = set()
+    for record in records:
+        if record.is_symlink() or record.parent.is_symlink():
+            raise ValueError("Staged wheel RECORD is linked")
+        with record.open(newline="", encoding="utf-8") as source:
+            for row in csv.reader(source):
+                if len(row) != 3:
+                    raise ValueError("Malformed staged wheel RECORD")
+                name, recorded_hash, recorded_size = row
+                if name.startswith("../../bin/"):
+                    script = name.removeprefix("../../bin/")
+                    if not script or "/" in script or script in (".", ".."):
+                        raise ValueError("Staged wheel RECORD escapes its target")
+                    relative = "bin/" + script
+                else:
+                    relative = name
+                path = Path(relative)
+                if (
+                    not relative
+                    or path.is_absolute()
+                    or "\\" in relative
+                    or any(part in ("", ".", "..") for part in relative.split("/"))
+                ):
+                    raise ValueError("Staged wheel RECORD escapes its target")
+                if relative in claimed:
+                    raise ValueError("Duplicate staged wheel file")
+                file = target / path
+                if relative.endswith(".pyc") and not recorded_hash and not recorded_size:
+                    # pip compiles these during installation; the wheel provides no
+                    # digest. The interpreter will regenerate them from checked source.
+                    if file.is_symlink():
+                        raise ValueError("Staged packages contain a symlink")
+                    if file.exists():
+                        if not file.is_file():
+                            raise ValueError("Staged wheel RECORD names a special file")
+                        file.unlink()
+                    continue
+                if file.is_symlink() or not file.is_file():
+                    raise ValueError("Staged wheel RECORD names a missing or linked file")
+                claimed.add(relative)
+                if len(claimed) > 200_000:
+                    raise ValueError("Staged package manifest is too large")
+                digest, size = staged_file_digest(file)
+                if file != record:
+                    expected = "sha256=" + base64.urlsafe_b64encode(digest).rstrip(b"=").decode(
+                        "ascii"
+                    )
+                    if recorded_hash != expected or recorded_size != str(size):
+                        raise ValueError("Staged wheel RECORD hash or size differs")
+                elif recorded_hash or recorded_size:
+                    raise ValueError("Staged wheel RECORD must not self-hash")
+    files = []
+    for root, dirs, names in os.walk(target, followlinks=False):
+        for name in (*dirs, *names):
+            file = Path(root) / name
+            if file.is_symlink():
+                raise ValueError("Staged packages contain a symlink")
+        for name in names:
+            file = Path(root) / name
+            relative = file.relative_to(target).as_posix()
+            if relative not in claimed:
+                raise ValueError("Staged packages contain an unreported file")
+            digest, size = staged_file_digest(file)
+            files.append({"path": relative, "sha256": digest.hex(), "size": size})
+            if len(files) > 200_000:
+                raise ValueError("Staged package manifest is too large")
+    if len(files) != len(claimed):
+        raise ValueError("Staged wheel RECORD contains files outside the target")
+    return {"files": sorted(files, key=lambda item: item["path"])}
+
+
 IMAGE = (
     "torchvision",
     "diffusers==0.37.0",
@@ -821,6 +950,8 @@ def main() -> None:
     parser.add_argument("--build")
     parser.add_argument("--adapter", choices=ADAPTERS, default="none")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--install", action="store_true")
+    parser.add_argument("--target", type=Path)
     parser.add_argument("--cache-dir", type=Path)
     parser.add_argument("--discover", action="store_true")
     parser.add_argument("--release-options", action="store_true")
@@ -842,6 +973,8 @@ def main() -> None:
             or args.adapter != "none"
             or args.torch_wheel is not None
             or args.torch_sha256 is not None
+            or args.install
+            or args.target is not None
         ):
             parser.error("Release options accepts only --version and one or more --interpreter")
         if not args.interpreter:
@@ -863,11 +996,17 @@ def main() -> None:
         parser.error("Resolution and discovery require --build")
     if args.python_candidate is not None:
         parser.error("--python-candidate is only valid with --release-options")
+    if args.install and args.target is None:
+        parser.error("--install requires an explicit staged --target")
+    if not args.install and args.target is not None:
+        parser.error("--target is only valid with --install")
     if args.torch_sha256 is not None and args.torch_wheel is None:
         parser.error("--torch-sha256 requires --torch-wheel")
     if not RELEASE_CHANNEL.fullmatch(args.build):
         parser.error("Select a canonical CPU, CUDA, or ROCm build channel")
     if args.discover:
+        if args.install:
+            parser.error("Discovery does not accept --install")
         if args.cache_dir is not None:
             parser.error("Discovery does not accept --cache-dir")
         if not args.selected_python or not args.interpreter:
@@ -882,7 +1021,7 @@ def main() -> None:
         return
     if args.output is None:
         parser.error("Resolution requires --output")
-    if args.torch_wheel is None:
+    if args.torch_wheel is None and not args.install:
         parser.error("Resolution requires --torch-wheel from official discovery")
     try:
         target = native_target(
@@ -892,10 +1031,13 @@ def main() -> None:
             sys.implementation.name,
         )
         extras = adapter_requirements(args.adapter, args.version, args.build)
-        tags = {str(tag) for tag in packaging_tags.sys_tags()}
-        selected_wheel = wheel_match(args.torch_wheel, args.version, args.build, tags)
-        if selected_wheel is None or selected_wheel["wheelUrl"] != args.torch_wheel:
-            raise ValueError("Selected Torch wheel is not an exact compatible official artifact")
+        if args.torch_wheel is not None:
+            tags = {str(tag) for tag in packaging_tags.sys_tags()}
+            selected_wheel = wheel_match(args.torch_wheel, args.version, args.build, tags)
+            if selected_wheel is None or selected_wheel["wheelUrl"] != args.torch_wheel:
+                raise ValueError(
+                    "Selected Torch wheel is not an exact compatible official artifact"
+                )
         if args.torch_sha256 is not None and not re.fullmatch(
             r"[0-9a-fA-F]{64}", args.torch_sha256
         ):
@@ -903,6 +1045,14 @@ def main() -> None:
     except ValueError as error:
         parser.exit(2, f"{error}\n")
     args.output.mkdir(parents=True, exist_ok=True)
+    if args.install:
+        if any((args.output / name).exists() for name in ("requirements.txt", "resolution.json")):
+            parser.error("Install output must not contain a previous lock or resolution")
+        if args.target.is_symlink() or (
+            args.target.exists() and (not args.target.is_dir() or any(args.target.iterdir()))
+        ):
+            parser.error("Staged --target must be an empty directory and not a symlink")
+        args.target.mkdir(parents=True, exist_ok=True)
     cache_dir = args.cache_dir or args.output / "pip-cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
     report_path = args.output / "pip-resolution.json"
@@ -917,10 +1067,10 @@ def main() -> None:
         "-m",
         "pip",
         "--isolated",
+        "install",
         "--cache-dir",
         str(cache_dir),
-        "install",
-        "--dry-run",
+        *(["--target", str(args.target)] if args.install else ["--dry-run"]),
         "--report",
         str(report_path),
         "--ignore-installed",
@@ -929,8 +1079,12 @@ def main() -> None:
         f"https://download.pytorch.org/whl/{args.build}",
         "--extra-index-url",
         "https://pypi.org/simple",
-        f"torch @ {args.torch_wheel}"
-        + (f"#sha256={args.torch_sha256}" if args.torch_sha256 is not None else ""),
+        (
+            f"torch @ {args.torch_wheel}"
+            + (f"#sha256={args.torch_sha256}" if args.torch_sha256 is not None else "")
+        )
+        if args.torch_wheel is not None
+        else f"torch=={torch_requirement}",
         *CORE,
         *extras,
     ]
@@ -948,11 +1102,14 @@ def main() -> None:
             report, args.version, args.build, args.adapter
         )
         torch_artifact = next(item for item in resolution["artifacts"] if item["name"] == "torch")
-        if torch_artifact["url"] != args.torch_wheel or (
+        if (args.torch_wheel is not None and torch_artifact["url"] != args.torch_wheel) or (
             args.torch_sha256 is not None
             and torch_artifact["sha256"].lower() != args.torch_sha256.lower()
         ):
             raise ValueError("Resolved Torch artifact differs from the selected wheel")
+        manifest = (
+            installed_file_manifest(args.target, resolution["artifacts"]) if args.install else None
+        )
     except (KeyError, TypeError, ValueError, OSError) as error:
         parser.exit(3, f"Invalid wheel resolution: {error}\n")
     (args.output / "requirements.txt").write_text(
@@ -961,6 +1118,10 @@ def main() -> None:
     (args.output / "resolution.json").write_text(
         json.dumps(resolution, indent=2) + "\n", encoding="utf-8", newline="\n"
     )
+    if manifest is not None:
+        (args.output / "installed-files.json").write_text(
+            json.dumps(manifest, separators=(",", ":")) + "\n", encoding="utf-8", newline="\n"
+        )
 
 
 if __name__ == "__main__":

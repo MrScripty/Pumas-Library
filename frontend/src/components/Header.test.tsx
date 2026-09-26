@@ -179,6 +179,24 @@ describe('Header Component', () => {
     expect(screen.getByText(/Downloading 1 model & 1 runtime/)).toHaveTextContent('Creating managed Python environment');
   });
 
+  it('keeps download status when Torch resolution overlaps a model transfer', () => {
+    render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0"
+      activeModelDownload={{
+        downloadId: 'model-1', repoId: 'org/model', status: 'downloading', progress: 42,
+        downloadedBytes: 1024, totalBytes: 4096, speed: 4 * 1024 * 1024, etaSeconds: 30,
+      }}
+      activeModelDownloadCount={1}
+      installationProgress={{
+        tag: 'v2.14.0', started_at: '2026-04-12T00:00:00Z', stage: 'resolving', stage_progress: 0,
+        overall_progress: 0, current_item: 'Preparing Torch packages', download_speed: null,
+        eta_seconds: null, total_size: null, downloaded_bytes: 0, dependency_count: null,
+        completed_dependencies: 0, completed_items: [], error: null,
+      }}
+    />);
+    expect(screen.getByText(/Downloading 1 model & 1 runtime/)).toHaveTextContent('4.0 MB/s');
+    expect(screen.getByText(/Downloading 1 model & 1 runtime/)).toHaveTextContent('Preparing Torch packages');
+  });
+
   it('keeps model download status when another runtime installation has not reported progress yet', () => {
     render(<Header {...defaultProps} appId="ollama" installingTag="v0.6.0"
       activeModelDownload={{

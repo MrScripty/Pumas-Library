@@ -25,7 +25,7 @@ export type VersionInfo = import('../generated/desktop-contract').VersionInfoOut
 export interface InstallationProgress {
   tag: string;
   started_at: string;
-  stage: 'download' | 'extract' | 'venv' | 'dependencies' | 'setup';
+  stage: 'resolving' | 'download' | 'extract' | 'venv' | 'dependencies' | 'setup';
   stage_progress: number;
   overall_progress: number;
   current_item: string | null;

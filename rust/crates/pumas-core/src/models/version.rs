@@ -67,6 +67,7 @@ pub struct DependencyStatus {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum InstallationStage {
+    Resolving,
     Download,
     Extract,
     Venv,
@@ -78,6 +79,7 @@ impl InstallationStage {
     /// Get the weight of this stage for progress calculation.
     pub fn weight(&self) -> f32 {
         match self {
+            InstallationStage::Resolving => 0.0,
             InstallationStage::Download => 0.15,
             InstallationStage::Extract => 0.05,
             InstallationStage::Venv => 0.05,
@@ -89,6 +91,7 @@ impl InstallationStage {
     /// Get the cumulative weight up to and including this stage.
     pub fn cumulative_weight(&self) -> f32 {
         match self {
+            InstallationStage::Resolving => 0.0,
             InstallationStage::Download => 0.15,
             InstallationStage::Extract => 0.20,
             InstallationStage::Venv => 0.25,
@@ -185,6 +188,7 @@ mod tests {
     #[test]
     fn test_installation_stage_weights() {
         let total: f32 = [
+            InstallationStage::Resolving,
             InstallationStage::Download,
             InstallationStage::Extract,
             InstallationStage::Venv,

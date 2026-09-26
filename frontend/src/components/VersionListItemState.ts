@@ -36,7 +36,7 @@ function getRingPercent(progress: InstallationProgress | null, indeterminate: bo
 }
 
 function getPackageLabel(progress: InstallationProgress | null, activity: InstallActivityPresentation): string {
-  if (!progress || activity.indeterminate && progress.stage === 'setup') return activity.phase;
+  if (!progress || activity.indeterminate) return activity.phase;
   if (progress.stage === 'download') {
     const downloadPercent = getDownloadPercent(progress);
     if (downloadPercent !== null && (progress.downloaded_bytes > 0 || downloadPercent > 0)) {

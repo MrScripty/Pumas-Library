@@ -7,6 +7,37 @@ inventory, not a completed Pumas desktop acceptance. The prior
 evidence below uses a separate, exact Torch 2.10 tuple and does not qualify a
 newly resolved upstream release.
 
+## 2026-09-26 — Replace the long Torch check with the real install attempt
+
+The owner rejected the previous multi-minute compatibility check. For the
+normal Core Torch desktop/API path, selection now creates a local one-use token;
+installation does not refetch GitHub release metadata, scan every build/Python
+combination, or run `pip --dry-run` before it starts. The install task becomes
+visible and cancellable, provisions Pumas-managed CPython, and runs a real
+binary-only pip install into private staging. Package resolution and large
+wheel downloads are part of that installation task, rather than a separate
+check whose results are discarded before downloading again.
+
+Linux automatic selection makes a bounded sequence of up to four
+driver-compatible CUDA install attempts, followed by CPU. Windows and macOS use
+CPU automatically. Python candidates come from the pinned uv catalog in
+newest-first order. Only conclusive missing-wheel/dependency errors permit the
+next candidate; network, integrity, timeout, and ambiguous failures stop. Each
+successful pip report is checked against official artifact sources and hashes,
+staged distribution names/versions, the interpreter/host identity, and a full
+installed-file manifest before staged Python runs or files are published. The
+generated requirements lock records the result for provenance and repeatable
+future installs; dynamic installs do not run pip with the old pre-install
+`--require-hashes` preview lock.
+
+Focused Rust/Python tests and read-only security/lifecycle reviews cover this
+source path. The existing AppImage UI install report below used the previous
+preview flow and is not acceptance for this change. A rebuilt local Linux
+AppImage/deb now passes artifact checks and extracted-backend `/health` smoke;
+manual Torch installation through that package remains pending. The fixed
+`v2.9.1` bundled adapter remains a separate pinned recipe; image/Tuldok support
+claims are unchanged.
+
 ## Scope handoff authorized 2026-09-24
 
 The repository owner selected the broad release-management scope after reviewing
@@ -17,15 +48,18 @@ an error without a partial list presented as complete. Installation is offered f
 an exact official CPU, CUDA, or ROCm binary wheel plus fully resolved dependencies
 on Linux x86_64 with an already installed CPython 3.10–3.13. This records the
 original Linux-only scope and is superseded for the in-progress install flow by
-the 2026-09-25 managed-CPython authorization below. The current implementation
-provisions stable native CPython 3.10+ from a pinned provider and chooses the
-newest candidate whose exact official wheel and complete dependencies resolve.
-The current-source Torch 2.14.0 CPU/Core RPC install/restart and native QA pass
-on Linux x86_64, Windows x86_64, and macOS arm64 in manual run
+the 2026-09-25 managed-CPython authorization below. The normal path provisions
+stable native CPython 3.10+ from a pinned provider. The previous implementation
+chose the newest candidate through an exact wheel/dependency preview; the
+direct-install path and its narrower acceptance are recorded above.
+On the previous runtime source at `21041697`, Torch 2.14.0 CPU/Core RPC
+install/restart and native QA passed on Linux x86_64, Windows x86_64, and macOS
+arm64 in manual run
 [36229508586](https://github.com/MrScripty/Pumas-Library/actions/runs/36229508586)
 on runtime commit `21041697`; each target provisioned Pumas-managed CPython
-3.14.7 and installed 25 hashed official artifacts. The Linux v0.7.0 AppImage
-UI install-progress flow has since passed locally; the broader support claim
+3.14.7 and installed 25 hashed official artifacts. The earlier Linux v0.7.0
+AppImage UI install/progress flow passed locally under the preview-based path;
+it does not validate the direct-install change. The broader support claim
 remains bounded by packaged Windows/macOS installation, provider
 cancellation/tamper, and non-CPU runtime gates. CPython notices are
 generated for all three desktop targets, with fail-closed provider-pin,
@@ -84,11 +118,13 @@ The install flow no longer requires host-installed Python or a Python choice.
 PyTorch wheels do not declare one Python version for an entire release: each
 official wheel declares its compatible CPython ABI and platform tags. Pumas
 uses its pinned provider catalog to provision stable native CPython candidates
-from newest to oldest, then retains the first interpreter whose exact selected
-Torch wheel and complete dependency profile resolve. CPython 3.10 is the
-minimum; no upper minor cap is configured. A newer candidate is skipped only
-after a definite wheel or dependency incompatibility. Provider, network, and
-incomplete-scan failures remain inconclusive. See the
+from newest to oldest. Under the previous preview-based path, the manager
+retained the first interpreter whose exact selected Torch wheel and complete
+dependency profile resolved. The normal install now learns that compatibility
+from each real staged pip install. CPython 3.10 is the minimum; no upper minor
+cap is configured. A newer candidate is skipped only after a definite wheel or
+dependency incompatibility. Provider, network, and incomplete-scan failures
+remain inconclusive. See the
 [managed Python provider report](../../torch-cross-platform-runtime-management/reports/managed-python-provider.md).
 
 The manager now defaults every target to Core Torch (`none`). Linux exposes

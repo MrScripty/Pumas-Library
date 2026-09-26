@@ -703,7 +703,7 @@ fn stable_version(tag: &str) -> Option<&str> {
     }
 }
 
-fn stable_release_version(tag: &str) -> Option<&str> {
+pub(super) fn stable_release_version(tag: &str) -> Option<&str> {
     stable_version(tag.strip_prefix('v')?)
 }
 
@@ -896,9 +896,46 @@ impl VersionManager {
 }
 
 impl VersionManager {
-    /// Discover this release's exact official Torch wheels for managed Python candidates.
-    /// A wheel match is a choice to preview, not a resolved dependency plan.
+    /// Return an immediate advisory result. This method performs no network,
+    /// Python provisioning, or subprocess work; an unknown result never blocks
+    /// the install request.
     pub async fn discover_torch_release_options(
+        &self,
+        tag: &str,
+    ) -> Result<TorchReleaseOptionsDiscovery> {
+        if self.app_id != AppId::Torch {
+            return Err(unsupported_input(
+                "Torch release options require a Torch manager",
+            ));
+        }
+        stable_release_version(tag)
+            .ok_or_else(|| unsupported_input("Select a stable upstream Torch tag"))?;
+        if TorchHostTarget::current().is_none() {
+            return Err(unsupported_input(
+                "Torch release options require Linux x86_64, Windows x86_64, or macOS arm64",
+            ));
+        }
+        Ok(TorchReleaseOptionsDiscovery {
+            tag: tag.to_owned(),
+            status: TorchReleaseOptionsStatus::Inconclusive,
+            complete_scan: false,
+            checked_channels: Vec::new(),
+            combinations: Vec::new(),
+            issues: vec![
+                "Compatibility was not checked. Start installation to resolve packages.".to_owned(),
+            ],
+            detected_gpu_vendors: Vec::new(),
+            driver_status: TorchReleaseDriverStatus {
+                nvidia: TorchReleaseDriverAvailability::Unknown,
+                amd: TorchReleaseDriverAvailability::Unknown,
+            },
+            recommended: None,
+            recommendation_note: "Availability is resolved during installation.".to_owned(),
+        })
+    }
+
+    /// Resolve official Torch wheel choices during an admitted installation.
+    pub(crate) async fn discover_torch_release_options_for_install(
         &self,
         tag: &str,
     ) -> Result<TorchReleaseOptionsDiscovery> {

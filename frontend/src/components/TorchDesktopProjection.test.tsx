@@ -73,41 +73,26 @@ function Harness({ installVersion, switchVersion, refreshAll }: {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Torch desktop projection', () => {
-  it('keeps installed versions visible through release discovery failure and runs the reviewed release through explicit selection and an owned startup trial', async () => {
+  it('keeps installed versions visible through release discovery failure and starts a quick Torch install before an owned startup trial', async () => {
     const installVersion = vi.fn().mockResolvedValue(true);
     const switchVersion = vi.fn().mockResolvedValue(true);
     const refreshAll = vi.fn().mockRejectedValue(new Error('release discovery unavailable'));
     const getOptions = vi.fn().mockResolvedValue({
-      builds: ['cpu', 'cu130'],
+      builds: ['cpu', 'cu130'], defaultBuild: 'auto',
       pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
       adapters: ['none', 'flux2'],
-      bundledPresetAvailable: true, defaultAdapter: 'flux2',
+      bundledPresetAvailable: true, defaultAdapter: 'none',
       preset: { tag: installedTag, build: 'cu130', python: 'python3.12', adapter: 'bundled' },
       installed: [
         { tag: installedTag, build: 'cu130', python: 'python3.12', adapter: 'bundled', qualification: 'qualified' },
         { tag: releaseTag, build: 'cpu', python: 'python3.12', adapter: 'flux2', qualification: 'unverified' },
       ],
     });
-    const getReleaseOptions = vi.fn().mockResolvedValue({
-      tag: releaseTag,
-      status: 'matches',
-      completeScan: true,
-      checkedChannels: ['cpu', 'cu130'],
-      combinations: [
-        { build: 'cpu', python: 'python3.12', wheelUrl: 'https://download.pytorch.org/whl/cpu/torch.whl' },
-        { build: 'cu130', python: 'python3.12', wheelUrl: 'https://download.pytorch.org/whl/cu130/torch.whl' },
-      ],
-      issues: [],
-      detectedGpuVendors: [],
-      driverStatus: { nvidia: 'not_present', amd: 'not_present' },
-      recommended: { build: 'cpu', python: 'python3.12' },
-      recommendationNote: null,
-    });
+    const getReleaseOptions = vi.fn();
     const preview = vi.fn().mockResolvedValue({
-      status: 'resolved', preview: {
-        previewId, expiresInSeconds: 300, tag: releaseTag, build: 'cpu', python: 'python3.12', adapter: 'flux2',
-        qualification: 'unverified',
-        artifacts: [{ name: 'torch', version: '2.10.0', url: 'https://download.pytorch.org/whl/cpu/torch.whl', sha256: 'abc123' }],
+      status: 'ready', preview: {
+        previewId, expiresInSeconds: 300, tag: releaseTag, build: 'auto', python: 'auto', adapter: 'none',
+        qualification: 'unverified', artifacts: [],
       },
     });
     const probe = vi.fn().mockResolvedValue({
@@ -147,12 +132,12 @@ describe('Torch desktop projection', () => {
     if (!installButton) throw new TypeError('Expected install button');
     fireEvent.click(installButton);
     expect(installVersion).not.toHaveBeenCalled();
-    expect(await screen.findByText('Pumas image dependencies are selected by Pumas for its FLUX.2 path; they are not part of upstream Torch.')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
-    await waitFor(() => expect(screen.getByText('SHA-256: abc123')).toBeInTheDocument());
-    expect(preview).toHaveBeenCalledWith({ tag: releaseTag, build: 'cpu', python: 'auto', adapter: 'flux2' });
-    expect(screen.getByText('Selected Python: python3.12')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Install reviewed artifacts' }));
+    expect(await screen.findByText(/Package and Python resolution, wheel downloads, and installation happen within the install task/)).toBeInTheDocument();
+    const confirmInstall = screen.getByRole('button', { name: 'Install Torch' });
+    await waitFor(() => expect(confirmInstall).toBeEnabled());
+    expect(getReleaseOptions).not.toHaveBeenCalled();
+    fireEvent.click(confirmInstall);
+    expect(preview).toHaveBeenCalledWith({ tag: releaseTag, build: 'auto', python: 'auto', adapter: 'none' });
     await waitFor(() => expect(installVersion).toHaveBeenCalledWith(releaseTag, previewId));
     expect(switchVersion).not.toHaveBeenCalled();
 

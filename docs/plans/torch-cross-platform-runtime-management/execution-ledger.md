@@ -1,5 +1,26 @@
 # Execution Ledger: Cross-Platform Torch Runtime Management
 
+## 2026-09-26 — Direct-install local Linux release candidate
+
+- Rebuilt the local v0.7.0 RPC backend and Electron AppImage/deb from the
+  direct-install source. `stage-rpc.py`, the packaged RPC `/health` smoke,
+  Electron build, Linux artifact checks, and extracted AppImage/deb backend
+  `/health` smokes passed. The smoke scripts needed local loopback permission;
+  both backend and extracted package checks passed when allowed.
+- Torch package resolution now runs inside the visible, cancellable install
+  task. The normal Core path does not wait for release metadata, a release-wide
+  wheel scan, or a pre-install dry run. Optional release-options requests return
+  immediately as unchecked; the install itself resolves official packages.
+- The candidate AppImage SHA-256 is
+  `2beab4b5fb0a4d3d7482f7e8040f7f3a01c934cac5e936b7b8d53ffe3f268b6d`; the deb
+  SHA-256 is
+  `57792a65941ffa2c6a7abc6e839e383c6866ee09989790ec9e432dd772c3c794`.
+  These local files replace the repository's prior local 0.7.0 candidates, but
+  do not update the public toolbar-linked release.
+- No Torch install was run through this candidate. Its artifact and backend
+  health checks are not Torch-install acceptance; manual packaged Linux install
+  and packaged Windows/macOS acceptance remain pending.
+
 ## 2026-09-26 — Packaged Linux AppImage progress UX acceptance
 
 - Rebuilt the local Linux v0.7.0 AppImage and deb after fixing the Torch

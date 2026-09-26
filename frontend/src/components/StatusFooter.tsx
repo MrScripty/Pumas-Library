@@ -8,7 +8,7 @@ const logger = getLogger('StatusFooter');
 interface InstallationProgress {
   tag: string;
   started_at: string;
-  stage: 'download' | 'extract' | 'venv' | 'dependencies' | 'setup';
+  stage: 'resolving' | 'download' | 'extract' | 'venv' | 'dependencies' | 'setup';
   stage_progress: number;
   overall_progress: number;
   current_item: string | null;
@@ -79,8 +79,19 @@ export const StatusFooter: React.FC<StatusFooterProps> = ({
         };
       }
 
+      if (installationProgress.stage === 'resolving') {
+        return {
+          icon: RefreshCw,
+          text: installationProgress.current_item || 'Preparing Torch packages',
+          color: 'text-accent-info',
+          bgColor: 'bg-[hsl(var(--accent-info)/0.1)]',
+          spinning: true
+        };
+      }
+
       // Other installation stages (extract, venv, setup)
       const stageNames = {
+        resolving: 'Preparing Torch packages',
         extract: 'Extracting',
         venv: 'Creating environment',
         setup: 'Finalizing setup'

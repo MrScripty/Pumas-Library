@@ -449,7 +449,8 @@ impl InstallationProgressTracker {
     fn calculate_overall_progress(&self, state: &InstallationProgressState) -> f32 {
         let stage_weight = state.stage.weight();
         let stage_start = match state.stage {
-            InstallationStage::Download => 0.0,
+            InstallationStage::Resolving => 0.0,
+            InstallationStage::Download => InstallationStage::Resolving.cumulative_weight(),
             InstallationStage::Extract => InstallationStage::Download.cumulative_weight(),
             InstallationStage::Venv => InstallationStage::Extract.cumulative_weight(),
             InstallationStage::Dependencies => InstallationStage::Venv.cumulative_weight(),

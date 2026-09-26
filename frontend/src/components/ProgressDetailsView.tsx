@@ -18,6 +18,7 @@ import {
   ChevronUp,
   AlertCircle,
   FileText,
+  RefreshCw,
 } from 'lucide-react';
 import type { InstallationProgress } from '../hooks/useVersions';
 import { formatBytes, formatSpeed } from '../utils/formatters';
@@ -26,6 +27,7 @@ import { IconButton } from './ui';
 import { getInstallActivityPresentation } from '../utils/installActivityPresentation';
 
 const STAGE_LABELS = {
+  resolving: 'Preparing Torch Packages',
   download: 'Downloading',
   extract: 'Extracting',
   venv: 'Creating Environment',
@@ -34,6 +36,7 @@ const STAGE_LABELS = {
 };
 
 const STAGE_ICONS = {
+  resolving: RefreshCw,
   download: Download,
   extract: FolderArchive,
   venv: Settings,

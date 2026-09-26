@@ -62,13 +62,12 @@ pub(super) const BUILDS: &[&str] = &[
     "rocm7.14",
 ];
 const ADAPTERS: &[&str] = &["none", "flux2"];
-const PREVIEW_TTL: Duration = Duration::from_secs(30 * 60);
+pub(super) const PREVIEW_TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_RETAINED_TORCH_PREVIEWS: usize = 32;
+const MAX_RETAINED_TORCH_SELECTIONS: usize = 32;
 const RESOLVER_STDERR_TAIL_BYTES: u64 = 8 * 1024;
-// Reserve two minutes for owned-child cleanup inside Electron's 15-minute RPC deadline.
-const TORCH_RESOLVER_TIMEOUT: Duration = Duration::from_secs(13 * 60);
 const TORCH_RESOLVER_TIMEOUT_MESSAGE: &str =
-    "Torch artifact checking timed out. Cached wheel downloads may be reused if you retry.";
+    "Torch package resolution reached its safety limit. Cancel the installation or retry.";
 const TORCH_RESOLVER_FAILURE_MESSAGE: &str = "Pip could not complete dependency resolution. Wheel availability is inconclusive; check network or package-index access and retry.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -368,6 +367,15 @@ fn supported_torch_build(build: &str) -> bool {
     }
 }
 
+fn is_python_selection(python: &str) -> bool {
+    let Some(version) = python.strip_prefix("python3.") else {
+        return false;
+    };
+    !version.is_empty()
+        && version.bytes().all(|byte| byte.is_ascii_digit())
+        && version.parse::<u32>().is_ok_and(|minor| minor >= 10)
+}
+
 fn insert_retained_torch_preview(
     previews: &mut HashMap<String, RetainedTorchPreview>,
     preview_id: String,
@@ -390,6 +398,16 @@ fn insert_retained_torch_preview(
 
 fn is_bundled_preset(tag: &str, build: &str, python: &str, adapter: &str) -> bool {
     tag == "v2.9.1" && build == "cu130" && python == "python3.12" && adapter == "bundled"
+}
+
+fn requires_release_metadata_for_preview(
+    tag: &str,
+    build: &str,
+    python: &str,
+    adapter: &str,
+    release_verified: bool,
+) -> bool {
+    !release_verified && !is_bundled_preset(tag, build, python, adapter)
 }
 
 /// Preserve catalog order while retaining only Python ABIs with an exact
@@ -629,6 +647,62 @@ mod tests {
     }
 
     #[test]
+    fn pinned_bundled_preview_does_not_require_github_release_metadata() {
+        assert!(!requires_release_metadata_for_preview(
+            "v2.9.1",
+            "cu130",
+            "python3.12",
+            "bundled",
+            false,
+        ));
+        assert!(requires_release_metadata_for_preview(
+            "v2.9.1", "cu130", "auto", "bundled", false,
+        ));
+        assert!(requires_release_metadata_for_preview(
+            "v2.9.0",
+            "cu130",
+            "python3.12",
+            "bundled",
+            false,
+        ));
+        assert!(requires_release_metadata_for_preview(
+            "v2.9.1",
+            "cpu",
+            "python3.12",
+            "bundled",
+            false,
+        ));
+        assert!(requires_release_metadata_for_preview(
+            "v2.9.1",
+            "cu130",
+            "python3.13",
+            "bundled",
+            false,
+        ));
+    }
+
+    #[tokio::test]
+    async fn public_bundled_selection_requires_explicit_python312_without_release_cache() {
+        let root = tempfile::tempdir().unwrap();
+        let manager = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        let ready = manager
+            .preview_torch_runtime("v2.9.1", "cu130", "python3.12", "bundled")
+            .await
+            .unwrap();
+        assert!(matches!(ready, TorchPreviewOutcome::Ready { .. }));
+        assert!(manager
+            .preview_torch_runtime("v2.9.1", "cu130", "auto", "bundled")
+            .await
+            .is_err());
+        assert!(!root
+            .path()
+            .join("launcher-data/cache/github-releases-pytorch-pytorch.json")
+            .exists());
+    }
+
+    #[test]
     fn preview_accepts_canonical_future_channels_without_xpu_or_paths() {
         for build in ["cpu", "cu136", "cu999", "rocm8.0", "rocm8.0.1"] {
             assert!(valid_torch_channel(build), "{build}");
@@ -768,10 +842,7 @@ mod tests {
                 .unwrap();
         assert_eq!(timeout["status"], "rejected");
         assert_eq!(timeout["reason"], "inconclusive");
-        assert_eq!(
-            timeout["message"],
-            "Torch artifact checking timed out. Cached wheel downloads may be reused if you retry."
-        );
+        assert_eq!(timeout["message"], TORCH_RESOLVER_TIMEOUT_MESSAGE);
     }
 
     #[test]
@@ -860,56 +931,6 @@ mod tests {
         assert_eq!(value["status"], "rejected");
         assert_eq!(value["reason"], "inconclusive");
         assert_eq!(value["message"], TORCH_RESOLVER_TIMEOUT_MESSAGE);
-    }
-
-    #[tokio::test]
-    async fn preview_deadline_cancels_and_drains_a_child_during_preparation() {
-        let workspace = std::sync::Arc::new(tempfile::tempdir().unwrap());
-        let pid_path = workspace.path().join("preparation.pid");
-        let operation_workspace = workspace.clone();
-        let cleanup = std::sync::Arc::new(super::installer::TorchCleanupTasks::default());
-        let operation_cleanup = cleanup.clone();
-        let resolver_cleanup = operation_cleanup.clone();
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(100);
-        let task = tokio::spawn(async move {
-            let mut command = Command::new("sh");
-            command
-                .arg("-c")
-                .arg("echo $$ > \"$1\"; sleep 30")
-                .arg("sh")
-                .arg(&pid_path);
-            let operation = async move {
-                let run = run_preview_resolver(
-                    command,
-                    &operation_workspace,
-                    Duration::from_secs(30),
-                    &resolver_cleanup,
-                )
-                .await?;
-                Err(failed(format!("Unexpected resolver completion: {run:?}")))
-            };
-            run_torch_preview_with_deadline(deadline, &operation_cleanup, operation).await
-        });
-
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while !workspace.path().join("preparation.pid").exists() {
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .expect("preparation child did not start");
-        let outcome = task.await.unwrap().unwrap();
-        let value = serde_json::to_value(outcome).unwrap();
-        assert_eq!(value["status"], "rejected");
-        assert_eq!(value["reason"], "inconclusive");
-        assert_eq!(value["message"], TORCH_RESOLVER_TIMEOUT_MESSAGE);
-        let pid: i32 = std::fs::read_to_string(workspace.path().join("preparation.pid"))
-            .unwrap()
-            .trim()
-            .parse()
-            .unwrap();
-        assert!(!pumas_library::platform::linux_group::group_has_live_members(pid).unwrap());
-        cleanup.drain().await.unwrap();
     }
 
     #[tokio::test]
@@ -1235,6 +1256,9 @@ impl TorchPreviewRejectionReason {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum TorchPreviewOutcome {
+    Ready {
+        preview: TorchPreview,
+    },
     Resolved {
         preview: TorchPreview,
     },
@@ -1256,6 +1280,17 @@ pub(crate) struct RetainedTorchPreview {
 }
 
 pub(crate) type TorchPreviews = Arc<Mutex<HashMap<String, RetainedTorchPreview>>>;
+
+#[derive(Clone, Debug)]
+pub(crate) struct TorchInstallSelection {
+    pub tag: String,
+    pub build: String,
+    pub python: String,
+    pub adapter: String,
+    pub created: Instant,
+}
+
+pub(crate) type TorchInstallSelections = Arc<Mutex<HashMap<String, TorchInstallSelection>>>;
 
 #[derive(Deserialize)]
 struct Resolution {
@@ -1400,24 +1435,6 @@ fn resolver_rejection(run: PreviewResolverRun) -> Option<TorchPreviewOutcome> {
         ),
     };
     Some(TorchPreviewOutcome::Rejected { reason, message })
-}
-
-async fn run_torch_preview_with_deadline<F>(
-    deadline: tokio::time::Instant,
-    cleanup: &super::installer::TorchCleanupTasks,
-    operation: F,
-) -> Result<TorchPreviewOutcome>
-where
-    F: std::future::Future<Output = Result<TorchPreviewOutcome>>,
-{
-    match tokio::time::timeout_at(deadline, operation).await {
-        Ok(outcome) => outcome,
-        Err(_) => {
-            cleanup.drain_residual_child_slots().await?;
-            Ok(resolver_rejection(PreviewResolverRun::TimedOut)
-                .expect("a timed out resolver must be rejected"))
-        }
-    }
 }
 
 pub(super) async fn run_preview_resolver(
@@ -1573,22 +1590,8 @@ impl VersionManager {
         if self.app_id != AppId::Torch {
             return Err(failed("Torch manager required"));
         }
-        let python_candidates = super::torch_alternatives::managed_torch_candidate_minors(
-            &self.launcher_root.join("launcher-data/managed-python"),
-            &self.torch_cleanup,
-        )
-        .await
-        .unwrap_or_default();
-        let pythons: Vec<_> = python_candidates
-            .iter()
-            .map(|minor| {
-                let python = format!("python{minor}");
-                serde_json::json!({"id": python, "label": format!("Pumas-managed CPython {minor}")})
-            })
-            .collect();
         let linux_x64 = cfg!(all(target_os = "linux", target_arch = "x86_64"));
-        let bundled_preset_available =
-            linux_x64 && python_candidates.iter().any(|minor| minor == "3.12");
+        let bundled_preset_available = linux_x64;
         let adapters: &[&str] = if linux_x64 { ADAPTERS } else { &["none"] };
         let builds: Vec<&str> = BUILDS
             .iter()
@@ -1611,7 +1614,7 @@ impl VersionManager {
                 "qualification": if preset { "qualified" } else { "unverified" } }));
         }
         Ok(
-            serde_json::json!({"builds": builds, "pythons": pythons, "adapters": adapters,
+            serde_json::json!({"builds": builds, "defaultBuild":"auto", "pythons": [{"id":"auto", "label":"Select automatically"}], "adapters": adapters,
             "bundledPresetAvailable": bundled_preset_available,
             "defaultAdapter": "none",
             "preset": {"tag":"v2.9.1", "build":"cu130", "python":"python3.12", "adapter":"bundled"},
@@ -1626,9 +1629,140 @@ impl VersionManager {
         python: &str,
         adapter: &str,
     ) -> Result<TorchPreviewOutcome> {
-        let deadline = tokio::time::Instant::now() + TORCH_RESOLVER_TIMEOUT;
-        let operation = self.preview_torch_runtime_until(tag, build, python, adapter, deadline);
-        run_torch_preview_with_deadline(deadline, &self.torch_cleanup, operation).await
+        if self.app_id != AppId::Torch
+            || !(build == "auto" || supported_torch_build(build))
+            || !(python == "auto" || is_python_selection(python))
+            || (!ADAPTERS.contains(&adapter) && adapter != "bundled")
+            || !safe_torch_tag(tag)
+            || super::torch_alternatives::stable_release_version(tag).is_none()
+            || !cfg!(any(
+                all(target_os = "linux", target_arch = "x86_64"),
+                all(
+                    target_os = "windows",
+                    target_arch = "x86_64",
+                    target_env = "msvc"
+                ),
+                all(target_os = "macos", target_arch = "aarch64")
+            ))
+        {
+            return Err(failed("Invalid Torch installation selection"));
+        }
+        if adapter == "bundled" && !is_bundled_preset(tag, build, python, adapter) {
+            return Err(failed(
+                "Bundled adapters require the v2.9.1 CUDA 13.0/Python 3.12 preset",
+            ));
+        }
+
+        let id = preview_token()?;
+        let selection = TorchInstallSelection {
+            tag: tag.to_owned(),
+            build: build.to_owned(),
+            python: python.to_owned(),
+            adapter: adapter.to_owned(),
+            created: Instant::now(),
+        };
+        {
+            let mut selections = self.torch_install_selections.lock().await;
+            selections.retain(|_, retained| retained.created.elapsed() < PREVIEW_TTL);
+            while selections.len() >= MAX_RETAINED_TORCH_SELECTIONS {
+                if let Some(oldest) = selections
+                    .iter()
+                    .min_by_key(|(_, retained)| retained.created)
+                    .map(|(id, _)| id.clone())
+                {
+                    selections.remove(&oldest);
+                } else {
+                    break;
+                }
+            }
+            selections.insert(id.clone(), selection);
+        }
+
+        Ok(TorchPreviewOutcome::Ready {
+            preview: TorchPreview {
+                preview_id: id,
+                tag: tag.to_owned(),
+                build: build.to_owned(),
+                python: python.to_owned(),
+                adapter: adapter.to_owned(),
+                artifacts: Vec::new(),
+                qualification: "unverified".to_owned(),
+                expires_in_seconds: PREVIEW_TTL.as_secs(),
+            },
+        })
+    }
+
+    pub(crate) async fn consume_torch_install_selection(
+        &self,
+        preview_id: &str,
+        tag: &str,
+    ) -> Result<TorchInstallSelection> {
+        let Some(selection) = self
+            .torch_install_selections
+            .lock()
+            .await
+            .remove(preview_id)
+        else {
+            return Err(failed(
+                "Torch installation selection expired or was already used",
+            ));
+        };
+        if selection.created.elapsed() >= PREVIEW_TTL || selection.tag != tag {
+            return Err(failed(
+                "Torch installation selection does not match the requested tag or has expired",
+            ));
+        }
+        Ok(selection)
+    }
+
+    pub(crate) async fn resolve_torch_install_selection(
+        &self,
+        selection: &TorchInstallSelection,
+    ) -> Result<installer::TorchInstallPlan> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2 * 60 * 60);
+        let outcome = self
+            .preview_torch_runtime_until(
+                &selection.tag,
+                &selection.build,
+                &selection.python,
+                &selection.adapter,
+                deadline,
+            )
+            .await?;
+        match outcome {
+            TorchPreviewOutcome::Resolved { preview } => {
+                self.take_retained_torch_install_plan(&preview.preview_id)
+                    .await
+            }
+            TorchPreviewOutcome::Rejected { message, .. } => Err(failed(message)),
+            TorchPreviewOutcome::Ready { .. } => Err(failed(
+                "Torch package resolution returned an invalid selection-only result",
+            )),
+        }
+    }
+
+    async fn take_retained_torch_install_plan(
+        &self,
+        preview_id: &str,
+    ) -> Result<installer::TorchInstallPlan> {
+        let retained = self
+            .torch_previews
+            .lock()
+            .await
+            .remove(preview_id)
+            .ok_or_else(|| failed("Resolved Torch install plan expired or disappeared"))?;
+        if retained.created.elapsed() >= PREVIEW_TTL {
+            return Err(failed("Resolved Torch install plan expired"));
+        }
+        Ok(installer::TorchInstallPlan {
+            preview: retained.preview,
+            requirements: retained.requirements,
+            resolution: retained.resolution,
+            report: retained.report,
+            interpreter_path: retained.interpreter_path,
+            interpreter_hash: retained.interpreter_hash,
+            managed_python: retained.managed_python,
+        })
     }
 
     async fn preview_torch_runtime_until(
@@ -1640,7 +1774,7 @@ impl VersionManager {
         resolver_deadline: tokio::time::Instant,
     ) -> Result<TorchPreviewOutcome> {
         if self.app_id != AppId::Torch
-            || !supported_torch_build(build)
+            || !(build == "auto" || supported_torch_build(build))
             || (!ADAPTERS.contains(&adapter) && adapter != "bundled")
         {
             return Err(failed("Invalid Torch preview selection"));
@@ -1662,6 +1796,7 @@ impl VersionManager {
             ));
         }
         let python_root = self.launcher_root.join("launcher-data/managed-python");
+        let mut install_build = build.to_owned();
         let candidates = match super::torch_alternatives::managed_torch_candidate_minors(
             &python_root,
             &self.torch_cleanup,
@@ -1701,9 +1836,42 @@ impl VersionManager {
             }
             vec![TorchPythonPreviewCandidate::managed_python(minor)]
         } else {
-            let discovery = self.discover_torch_release_options(tag).await?;
+            let discovery = self.discover_torch_release_options_for_install(tag).await?;
             release_verified = true;
-            let Some(mut exact_candidates) = auto_wheel_candidates(&candidates, build, &discovery)
+            if install_build == "auto" {
+                if !discovery.complete_scan {
+                    return Ok(TorchPreviewOutcome::Rejected {
+                        reason: TorchPreviewRejectionReason::Inconclusive,
+                        message: "Official wheel discovery did not complete conclusively.",
+                    });
+                }
+                let recommended_build = discovery
+                    .recommended
+                    .as_ref()
+                    .filter(|recommendation| {
+                        discovery.combinations.iter().any(|combination| {
+                            combination.build == recommendation.build
+                                && combination.python == recommendation.python
+                        })
+                    })
+                    .map(|recommendation| recommendation.build.clone())
+                    .or_else(|| {
+                        discovery
+                            .combinations
+                            .iter()
+                            .find(|combination| combination.build == "cpu")
+                            .map(|combination| combination.build.clone())
+                    });
+                let Some(recommended_build) = recommended_build else {
+                    return Ok(TorchPreviewOutcome::Rejected {
+                        reason: TorchPreviewRejectionReason::Unsupported,
+                        message: "No compatible official Torch wheel was found for this host and release.",
+                    });
+                };
+                install_build = recommended_build;
+            }
+            let Some(mut exact_candidates) =
+                auto_wheel_candidates(&candidates, &install_build, &discovery)
             else {
                 return Ok(TorchPreviewOutcome::Rejected {
                     reason: TorchPreviewRejectionReason::Inconclusive,
@@ -1736,7 +1904,13 @@ impl VersionManager {
                     "No stable native CPython candidate is available from the managed provider.",
             });
         }
-        if !release_verified {
+        if requires_release_metadata_for_preview(
+            tag,
+            &install_build,
+            python,
+            adapter,
+            release_verified,
+        ) {
             self.resolve_installable_release(tag).await?;
         }
         let mut search = TorchPythonPreviewSearch::new(
@@ -1767,7 +1941,7 @@ impl VersionManager {
             let outcome = self
                 .preview_torch_runtime_with_interpreter(
                     tag,
-                    build,
+                    &install_build,
                     adapter,
                     &managed,
                     candidate.wheel.as_ref(),

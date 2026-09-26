@@ -200,23 +200,17 @@ describe('TorchPanel shared version controls', () => {
     const [installButton] = within(candidateRow).getAllByRole('button');
     if (!installButton) throw new TypeError('Expected the candidate install button');
     expect(installButton).toHaveTextContent('Install');
+    const discoverRelease = vi.fn();
     vi.stubGlobal('electronAPI', {
-      get_torch_release_options: vi.fn().mockResolvedValue({
-        tag: candidateTag, status: 'matches', completeScan: true,
-        checkedChannels: ['cpu'],
-        combinations: [{ build: 'cpu', python: 'python3.12', wheelUrl: 'https://download.pytorch.org/whl/cpu/torch.whl' }],
-        issues: [], detectedGpuVendors: [],
-        driverStatus: { nvidia: 'not_present', amd: 'not_present' },
-        recommended: { build: 'cpu', python: 'python3.12' }, recommendationNote: null,
-      }),
+      get_torch_release_options: discoverRelease,
       get_torch_runtime_options: vi.fn().mockResolvedValue({
-        builds: ['cpu'], pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
+        builds: ['cpu'], defaultBuild: 'auto', pythons: [],
         adapters: ['none'], bundledPresetAvailable: false, defaultAdapter: 'none',
         preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
       }),
       preview_torch_runtime: vi.fn().mockResolvedValue({
-        status: 'resolved', preview: {
-          previewId: 'preview-1', expiresInSeconds: 300, tag: candidateTag, build: 'cpu', python: 'python3.12',
+        status: 'ready', preview: {
+          previewId: 'preview-1', expiresInSeconds: 300, tag: candidateTag, build: 'auto', python: 'auto',
           adapter: 'none', qualification: 'unverified', artifacts: [],
         },
       }),
@@ -228,10 +222,10 @@ describe('TorchPanel shared version controls', () => {
     fireEvent.click(installButton);
     expect(actions.installVersion).not.toHaveBeenCalled();
     expect(screen.getByRole('region', { name: `Torch installation preview for ${candidateTag}` })).toHaveClass('text-[hsl(var(--text-primary))]');
-    fireEvent.click(await screen.findByRole('button', { name: 'Check selected combination' }));
-    const reviewedInstallButton = screen.getByRole('button', { name: 'Install reviewed artifacts' });
-    await waitFor(() => expect(reviewedInstallButton).toBeEnabled());
-    fireEvent.click(reviewedInstallButton);
+    const confirmInstallButton = screen.getByRole('button', { name: 'Install Torch' });
+    await waitFor(() => expect(confirmInstallButton).toBeEnabled());
+    expect(discoverRelease).not.toHaveBeenCalled();
+    fireEvent.click(confirmInstallButton);
     await waitFor(() => {
       expect(actions.installVersion).toHaveBeenCalledWith(candidateTag, 'preview-1');
       expect(within(getVersionRow(candidateTag)).getByRole('button', { name: 'Ready' }))

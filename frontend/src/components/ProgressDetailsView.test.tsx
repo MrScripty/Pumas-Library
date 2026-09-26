@@ -29,6 +29,20 @@ const dependencyProgress: InstallationProgress = {
 };
 
 describe('ProgressDetailsView', () => {
+  it('shows Torch package resolution as indeterminate without a false completion percentage', () => {
+    render(<ProgressDetailsView
+      appId="torch"
+      progress={{ ...dependencyProgress, tag: 'v2.14.0', stage: 'resolving', stage_progress: 0, overall_progress: 0, current_item: 'Preparing managed Python and resolving Torch packages', error: null }}
+      installingVersion="v2.14.0" showCompletedItems={false}
+      onToggleCompletedItems={vi.fn()} onBackToList={vi.fn()} onOpenLogPath={vi.fn()}
+    />);
+    expect(screen.getByText('Preparing Torch Packages')).toBeInTheDocument();
+    expect(screen.getByText('Preparing managed Python and resolving Torch packages')).toBeInTheDocument();
+    expect(screen.queryByText('0%')).not.toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Overall installation progress' })).not.toHaveAttribute('aria-valuenow');
+    expect(screen.getByRole('progressbar', { name: 'Preparing Torch Packages progress' })).not.toHaveAttribute('aria-valuenow');
+  });
+
   it('treats Torch setup as indeterminate and shows the backend phase', () => {
     render(<ProgressDetailsView
       appId="torch"

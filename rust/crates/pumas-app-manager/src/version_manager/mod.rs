@@ -91,6 +91,35 @@ async fn path_exists(path: &Path) -> Result<bool> {
         .map_err(|err| PumasError::io_with_path(err, path))
 }
 
+async fn wait_for_install_cancel(cancel_flag: Arc<AtomicBool>) {
+    loop {
+        if cancel_flag.load(Ordering::SeqCst) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn run_torch_operation_with_cancel<F, T>(
+    operation: F,
+    cancel_flag: Arc<AtomicBool>,
+    cleanup: Arc<installer::TorchCleanupTasks>,
+) -> Result<T>
+where
+    F: std::future::Future<Output = Result<T>>,
+{
+    tokio::select! {
+        biased;
+        _ = wait_for_install_cancel(cancel_flag) => {
+            cleanup.drain_residual_child_slots().await?;
+            Err(PumasError::InstallationFailed {
+                message: "Installation cancelled by user".into(),
+            })
+        }
+        result = operation => result,
+    }
+}
+
 fn active_version_path(root: &Path, app_id: AppId) -> PathBuf {
     // Preserve the established native-runtime marker; Torch must not overwrite
     // llama.cpp selection when a user activates an image runtime.
@@ -136,6 +165,7 @@ pub struct VersionManager {
     #[cfg(test)]
     torch_admission_pause: Option<Arc<TorchAdmissionPause>>,
     torch_previews: torch_preview::TorchPreviews,
+    torch_install_selections: torch_preview::TorchInstallSelections,
     #[cfg(test)]
     torch_publication_pause: Option<Arc<installer::TorchPublicationPause>>,
     #[cfg(test)]
@@ -274,6 +304,7 @@ impl VersionManager {
             #[cfg(test)]
             torch_admission_pause: None,
             torch_previews: Arc::new(Mutex::new(Default::default())),
+            torch_install_selections: Arc::new(Mutex::new(Default::default())),
             #[cfg(test)]
             torch_publication_pause: None,
             #[cfg(test)]
@@ -717,6 +748,12 @@ impl VersionManager {
         tag: &str,
         preview_id: Option<&str>,
     ) -> Result<mpsc::Receiver<ProgressUpdate>> {
+        if self.app_id == AppId::Torch && torch_alternatives::stable_release_version(tag).is_none()
+        {
+            return Err(PumasError::VersionNotFound {
+                tag: tag.to_owned(),
+            });
+        }
         // Check if already installed
         {
             let state = self.state.read().await;
@@ -734,9 +771,14 @@ impl VersionManager {
                 message: "Torch version manager is shutting down".into(),
             });
         }
-        // Resolve before recording installation state: discovery failure must not
-        // leave a phantom installation that can never complete.
-        let release = self.resolve_installable_release(tag).await?;
+        // Release lookup and package resolution are part of installation work for
+        // Torch. The UI/API must be able to enter a cancellable, visible state
+        // without waiting for network discovery first.
+        let release = if self.app_id == AppId::Torch {
+            None
+        } else {
+            Some(self.resolve_installable_release(tag).await?)
+        };
         #[cfg(test)]
         if let Some(pause) = &self.torch_admission_pause {
             pause.reached.notify_one();
@@ -747,64 +789,33 @@ impl VersionManager {
                 message: "Torch version manager is shutting down".into(),
             });
         }
-        let generate_bundled_preset_preview =
-            self.app_id == AppId::Torch && preview_id.is_none() && tag == "v2.9.1";
-        #[cfg(test)]
-        let generate_bundled_preset_preview = generate_bundled_preset_preview
-            && self.torch_stage_override.is_none()
-            && self.torch_admission_pause.is_none();
-        let generated_preset_preview_id = if generate_bundled_preset_preview {
-            match self
-                .preview_torch_runtime("v2.9.1", "cu130", "auto", "bundled")
-                .await?
-            {
-                TorchPreviewOutcome::Resolved { preview } => Some(preview.preview_id),
-                TorchPreviewOutcome::Rejected { reason, message } => {
-                    return Err(PumasError::InstallationFailed {
-                        message: format!("Torch preview {reason:?}: {message}"),
-                    });
-                }
+        let torch_selection = if self.app_id == AppId::Torch {
+            #[cfg(test)]
+            if preview_id.is_none() && self.torch_stage_override.is_some() {
+                None
+            } else {
+                Some(match preview_id {
+                    Some(id) => self.consume_torch_install_selection(id, tag).await?,
+                    None => torch_preview::TorchInstallSelection {
+                        tag: tag.to_owned(),
+                        build: "auto".to_owned(),
+                        python: "auto".to_owned(),
+                        adapter: "none".to_owned(),
+                        created: std::time::Instant::now(),
+                    },
+                })
             }
-        } else {
-            None
-        };
-        let retained_preview_id = preview_id.or(generated_preset_preview_id.as_deref());
-        let torch_plan = if self.app_id == AppId::Torch {
-            match retained_preview_id {
-                Some(id) => {
-                    let mut previews = self.torch_previews.lock().await;
-                    let retained =
-                        previews
-                            .remove(id)
-                            .ok_or_else(|| PumasError::InstallationFailed {
-                                message: "Torch preview expired or unknown".into(),
-                            })?;
-                    if retained.created.elapsed() >= Duration::from_secs(30 * 60)
-                        || retained.preview.tag != tag
-                    {
-                        return Err(PumasError::InstallationFailed {
-                            message: "Torch preview does not match requested tag or has expired"
-                                .into(),
-                        });
-                    }
-                    Some(installer::TorchInstallPlan {
-                        preview: retained.preview,
-                        requirements: retained.requirements,
-                        resolution: retained.resolution,
-                        report: retained.report,
-                        interpreter_path: retained.interpreter_path,
-                        interpreter_hash: retained.interpreter_hash,
-                        managed_python: retained.managed_python,
-                    })
-                }
-                #[cfg(test)]
-                None if self.torch_stage_override.is_some() => None,
-                None => {
-                    return Err(PumasError::InstallationFailed {
-                        message: "A retained preview ID is required for this Torch runtime".into(),
-                    })
-                }
-            }
+            #[cfg(not(test))]
+            Some(match preview_id {
+                Some(id) => self.consume_torch_install_selection(id, tag).await?,
+                None => torch_preview::TorchInstallSelection {
+                    tag: tag.to_owned(),
+                    build: "auto".to_owned(),
+                    python: "auto".to_owned(),
+                    adapter: "none".to_owned(),
+                    created: std::time::Instant::now(),
+                },
+            })
         } else if preview_id.is_some() {
             return Err(PumasError::InstallationFailed {
                 message: "Preview IDs are only valid for Torch".into(),
@@ -867,12 +878,55 @@ impl VersionManager {
         let progress_tracker = self.progress_tracker.clone();
         let torch_control = self.torch_control.clone();
         let app_id = self.app_id;
+        let manager = self.clone();
 
         tokio::spawn(async move {
             let _install_guard = install_guard;
-            let result = installer
-                .install_version_with_torch_plan(&tag, &release, tx.clone(), torch_plan)
-                .await;
+            if app_id == AppId::Torch {
+                let mut tracker = progress_tracker.write().await;
+                tracker.start_installation(&tag, None, None, None);
+                tracker.update_stage(
+                    pumas_library::models::InstallationStage::Resolving,
+                    0.0,
+                    Some("Preparing managed Python and resolving Torch packages"),
+                );
+                drop(tracker);
+                let _ = tx
+                    .send(ProgressUpdate::Setup {
+                        message: "Preparing managed Python and resolving Torch packages…".into(),
+                    })
+                    .await;
+            }
+            let result = async {
+                let (release, torch_input) = if app_id == AppId::Torch {
+                    // The tag was admitted as stable semver. Wheel availability is
+                    // established by the staged pip install, not GitHub metadata.
+                    let release = Self::torch_release_for_install(&tag)?;
+                    let input = match torch_selection {
+                        Some(selection) if selection.adapter == "bundled" => {
+                            let plan = run_torch_operation_with_cancel(
+                                manager.resolve_torch_install_selection(&selection),
+                                manager.cancel_flag.clone(),
+                                manager.torch_cleanup.clone(),
+                            )
+                            .await?;
+                            Some(installer::TorchInstallInput::Resolved(plan))
+                        }
+                        Some(selection) => Some(installer::TorchInstallInput::Selection(selection)),
+                        None => None,
+                    };
+                    (release, input)
+                } else {
+                    (
+                        release.expect("non-Torch install has a resolved release"),
+                        None,
+                    )
+                };
+                installer
+                    .install_version_with_torch_input(&tag, &release, tx.clone(), torch_input)
+                    .await
+            }
+            .await;
 
             if app_id == AppId::Torch {
                 torch_control.finish();
@@ -893,6 +947,11 @@ impl VersionManager {
             }
 
             // Send final status
+            if let Err(error) = &result {
+                let mut tracker = progress_tracker.write().await;
+                tracker.set_error(&error.to_string());
+                tracker.complete_installation(false);
+            }
             let _ = tx
                 .send(match result {
                     Ok(_) => ProgressUpdate::Completed { success: true },
@@ -951,6 +1010,29 @@ impl VersionManager {
             .ok_or_else(|| PumasError::VersionNotFound {
                 tag: tag.to_string(),
             })
+    }
+
+    fn torch_release_for_install(tag: &str) -> Result<pumas_library::network::GitHubRelease> {
+        let version = torch_alternatives::stable_release_version(tag).ok_or_else(|| {
+            PumasError::VersionNotFound {
+                tag: tag.to_owned(),
+            }
+        })?;
+        Ok(pumas_library::network::GitHubRelease {
+            tag_name: tag.to_owned(),
+            name: format!("PyTorch {version}"),
+            // GitHub publication time is unknown without a metadata request.
+            published_at: String::new(),
+            body: None,
+            tarball_url: None,
+            zipball_url: None,
+            prerelease: false,
+            assets: Vec::new(),
+            html_url: format!("https://github.com/pytorch/pytorch/releases/tag/{tag}"),
+            total_size: None,
+            archive_size: None,
+            dependencies_size: None,
+        })
     }
 
     async fn ensure_torch_stopped(&self, tag: &str) -> Result<()> {
@@ -1219,6 +1301,207 @@ mod tests {
             .await
             .unwrap();
         (manager, root)
+    }
+
+    #[tokio::test]
+    async fn torch_choices_and_selection_token_are_local_fast_and_single_use() {
+        let (manager, root) = create_torch_test_manager().await;
+        let options = tokio::time::timeout(Duration::from_secs(2), manager.torch_runtime_options())
+            .await
+            .expect("local Torch options must return promptly")
+            .unwrap();
+        assert_eq!(options["defaultBuild"], "auto");
+        assert_eq!(options["pythons"][0]["id"], "auto");
+        assert!(!root.path().join("launcher-data/managed-python").exists());
+        let release_options = tokio::time::timeout(
+            Duration::from_secs(2),
+            manager.discover_torch_release_options("v2.14.0"),
+        )
+        .await
+        .expect("advisory release options must return promptly")
+        .unwrap();
+        assert_eq!(
+            release_options.status,
+            TorchReleaseOptionsStatus::Inconclusive
+        );
+        assert!(!release_options.complete_scan);
+        assert!(!root.path().join("launcher-data/managed-python").exists());
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(2),
+            manager.preview_torch_runtime("v2.14.0", "auto", "auto", "none"),
+        )
+        .await
+        .expect("selection token creation must return promptly")
+        .unwrap();
+        let TorchPreviewOutcome::Ready { preview } = outcome else {
+            panic!("a valid selection must be ready without artifact resolution");
+        };
+        assert!(preview.artifacts.is_empty());
+        assert_eq!(preview.qualification, "unverified");
+        assert!(!root.path().join("launcher-data/managed-python").exists());
+        assert!(manager
+            .consume_torch_install_selection(&preview.preview_id, "v2.14.1")
+            .await
+            .is_err());
+
+        let TorchPreviewOutcome::Ready { preview } = manager
+            .preview_torch_runtime("v2.14.0", "auto", "auto", "none")
+            .await
+            .unwrap()
+        else {
+            panic!("a valid selection must be ready");
+        };
+        assert!(manager
+            .consume_torch_install_selection(&preview.preview_id, "v2.14.0")
+            .await
+            .is_ok());
+        assert!(manager
+            .consume_torch_install_selection(&preview.preview_id, "v2.14.0")
+            .await
+            .is_err());
+
+        manager.torch_install_selections.lock().await.insert(
+            "expired-selection".into(),
+            torch_preview::TorchInstallSelection {
+                tag: "v2.14.0".into(),
+                build: "auto".into(),
+                python: "auto".into(),
+                adapter: "none".into(),
+                created: std::time::Instant::now()
+                    - torch_preview::PREVIEW_TTL
+                    - Duration::from_secs(1),
+            },
+        );
+        assert!(manager
+            .consume_torch_install_selection("expired-selection", "v2.14.0")
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn torch_admission_returns_during_tracker_contention_then_enters_visible_cancellable_state(
+    ) {
+        let (manager, _root) = create_torch_test_manager().await;
+        let tracker_lock = manager.progress_tracker.write().await;
+        let mut updates =
+            tokio::time::timeout(Duration::from_secs(2), manager.install_version("v2.14.0"))
+                .await
+                .expect("install admission must return before network resolution")
+                .unwrap();
+        assert!(manager.is_installing().await);
+        let cancel_manager = manager.clone();
+        let cancel = tokio::spawn(async move { cancel_manager.cancel_installation().await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !manager.cancel_flag.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("cancellation must be recorded while progress tracking is contended");
+        drop(tracker_lock);
+        assert!(cancel.await.unwrap().unwrap());
+        assert!(matches!(
+            updates.recv().await,
+            Some(ProgressUpdate::Setup { message }) if message.contains("resolving Torch packages")
+        ));
+        let progress = manager.get_installation_progress().await.unwrap();
+        assert!(matches!(
+            progress.stage,
+            Some(
+                pumas_library::models::InstallationStage::Resolving
+                    | pumas_library::models::InstallationStage::Download
+            )
+        ));
+        assert_eq!(progress.overall_progress, Some(0.0));
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(5), updates.recv())
+                .await
+                .unwrap(),
+            Some(ProgressUpdate::Error { message }) if message.contains("cancelled")
+        ));
+        assert!(!manager.is_installing().await);
+    }
+
+    #[tokio::test]
+    async fn torch_direct_install_enters_stage_without_release_cache_or_network_lookup() {
+        let (manager, root) = create_torch_test_manager().await;
+        let cache = root.path().join("launcher-data/cache");
+        assert!(std::fs::read_dir(&cache).unwrap().next().is_none());
+        let reached = Arc::new(AtomicBool::new(false));
+        let reached_in_stage = reached.clone();
+        let manager = manager.with_torch_stage_override(move |_| {
+            reached_in_stage.store(true, Ordering::SeqCst);
+            Err(PumasError::InstallationFailed {
+                message: "stage reached without release lookup".into(),
+            })
+        });
+        let mut updates = manager.install_version("v2.14.0").await.unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(ProgressUpdate::Error { message }) = updates.recv().await {
+                    break message;
+                }
+            }
+        })
+        .await
+        .expect("Torch install should reach staging without release lookup");
+        assert!(reached.load(Ordering::SeqCst));
+        assert!(error.contains("stage reached without release lookup"));
+        assert!(!cache.join("github-releases-pytorch-pytorch.json").exists());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn cancelling_install_resolution_drains_owned_resolver_process_group() {
+        let workspace = Arc::new(tempfile::tempdir().unwrap());
+        let pid_path = workspace.path().join("install-resolver.pid");
+        let cleanup = Arc::new(installer::TorchCleanupTasks::default());
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let mut command = tokio::process::Command::new("sh");
+        command
+            .arg("-c")
+            .arg("echo $$ > \"$1\"; sleep 30")
+            .arg("sh")
+            .arg(&pid_path);
+        let operation_workspace = workspace.clone();
+        let operation_cleanup = cleanup.clone();
+        let operation = async move {
+            let run = torch_preview::run_preview_resolver(
+                command,
+                &operation_workspace,
+                Duration::from_secs(30),
+                &operation_cleanup,
+            )
+            .await?;
+            Err::<(), _>(PumasError::Other(format!(
+                "Unexpected resolver completion: {run:?}"
+            )))
+        };
+        let cancel_for_task = cancel_flag.clone();
+        let cancel_task = tokio::spawn(async move {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !pid_path.exists() {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .unwrap();
+            cancel_for_task.store(true, Ordering::SeqCst);
+        });
+        let result = run_torch_operation_with_cancel(operation, cancel_flag, cleanup.clone()).await;
+        cancel_task.await.unwrap();
+        assert!(matches!(
+            result,
+            Err(PumasError::InstallationFailed { message }) if message.contains("cancelled")
+        ));
+        let pid: i32 = std::fs::read_to_string(workspace.path().join("install-resolver.pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(!pumas_library::platform::linux_group::group_has_live_members(pid).unwrap());
+        cleanup.drain().await.unwrap();
     }
 
     #[test]
@@ -2047,20 +2330,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn torch_release_rejection_does_not_leave_an_install_in_progress() {
+    async fn empty_cached_torch_release_list_does_not_gate_installation() {
         let root = TempDir::new().unwrap();
         let cache = root.path().join("launcher-data/cache");
         let releases = pumas_library::network::ReleasesCache::new(cache, Duration::from_secs(3600));
         releases.set_disk(AppId::Torch.github_repo(), &[]).unwrap();
+        let reached = Arc::new(AtomicBool::new(false));
+        let reached_in_stage = reached.clone();
         let manager = VersionManager::new(root.path(), AppId::Torch)
             .await
-            .unwrap();
+            .unwrap()
+            .with_torch_stage_override(move |_| {
+                reached_in_stage.store(true, Ordering::SeqCst);
+                Err(PumasError::InstallationFailed {
+                    message: "stage reached after empty release cache".into(),
+                })
+            });
+        let mut updates = manager.install_version("v2.10.0").await.unwrap();
         assert!(matches!(
-            manager.install_version("v2.10.0").await,
-            Err(PumasError::VersionNotFound { .. })
+            updates.recv().await,
+            Some(ProgressUpdate::Setup { .. })
         ));
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(5), updates.recv())
+                .await
+                .unwrap(),
+            Some(ProgressUpdate::Error { message }) if message.contains("stage reached after empty release cache")
+        ));
+        assert!(reached.load(Ordering::SeqCst));
         assert!(!manager.is_installing().await);
-        assert!(manager.get_installation_progress().await.is_none());
+        assert!(manager
+            .get_installation_progress()
+            .await
+            .is_some_and(|progress| progress.success == Some(false)));
     }
 
     #[tokio::test]

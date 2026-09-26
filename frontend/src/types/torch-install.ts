@@ -12,6 +12,7 @@ export type TorchReleaseOptionsOutcome = DesktopTorchReleaseOptionsOutcome;
 
 export interface TorchRuntimeOptions {
   builds: string[];
+  defaultBuild?: string;
   pythons: Array<{ id: string; label: string }>;
   adapters: string[];
   bundledPresetAvailable: boolean;

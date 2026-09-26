@@ -1,6 +1,8 @@
 """Deterministic resolution checks; no network or large wheels."""
 
 import importlib.util
+import base64
+import hashlib
 import json
 import pathlib
 import re
@@ -68,6 +70,267 @@ def report(
 
 
 class ResolverTests(unittest.TestCase):
+    def test_staged_manifest_requires_exact_recorded_file_set_and_hashes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory)
+            metadata = target / "torch-2.10.0.dist-info"
+            metadata.mkdir()
+            wheel = target / "torch.pth"
+            wheel.write_bytes(b"safe staged data")
+            digest = (
+                base64.urlsafe_b64encode(hashlib.sha256(wheel.read_bytes()).digest())
+                .rstrip(b"=")
+                .decode()
+            )
+            (target / "bin").mkdir()
+            script = target / "bin" / "torchcmd"
+            script.write_bytes(b"#!/bin/sh\n")
+            script_digest = (
+                base64.urlsafe_b64encode(hashlib.sha256(script.read_bytes()).digest())
+                .rstrip(b"=")
+                .decode()
+            )
+            (target / "__pycache__").mkdir()
+            bytecode = target / "__pycache__" / "torch.cpython-312.pyc"
+            bytecode.write_bytes(b"pip generated")
+            record = metadata / "RECORD"
+            record.write_text(
+                f"torch.pth,sha256={digest},{wheel.stat().st_size}\n"
+                f"../../bin/torchcmd,sha256={script_digest},{script.stat().st_size}\n"
+                "__pycache__/torch.cpython-312.pyc,,\n"
+                "torch-2.10.0.dist-info/RECORD,,\n",
+                encoding="utf-8",
+            )
+            manifest = resolver.installed_file_manifest(target)
+            self.assertEqual(
+                [item["path"] for item in manifest["files"]],
+                ["bin/torchcmd", "torch-2.10.0.dist-info/RECORD", "torch.pth"],
+            )
+            self.assertFalse(bytecode.exists())
+            (target / "unreported.pth").write_text("exec('bad')")
+            with self.assertRaisesRegex(ValueError, "unreported"):
+                resolver.installed_file_manifest(target)
+            (target / "unreported.pth").unlink()
+            wheel.write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "hash or size"):
+                resolver.installed_file_manifest(target)
+            wheel.write_bytes(b"safe staged data")
+            (target / "linked.pth").symlink_to(wheel)
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                resolver.installed_file_manifest(target)
+
+    def test_staged_distribution_identity_must_match_pip_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory)
+            dist = target / "torch-2.10.0+cpu.dist-info"
+            dist.mkdir()
+            metadata = dist / "METADATA"
+            good = "Metadata-Version: 2.1\nName: torch\nVersion: 2.10.0+cpu\n"
+            metadata.write_text(good, encoding="utf-8")
+            digest = (
+                base64.urlsafe_b64encode(hashlib.sha256(metadata.read_bytes()).digest())
+                .rstrip(b"=")
+                .decode()
+            )
+            (dist / "RECORD").write_text(
+                f"{dist.name}/METADATA,sha256={digest},{metadata.stat().st_size}\n"
+                f"{dist.name}/RECORD,,\n",
+                encoding="utf-8",
+            )
+            artifact = [{"name": "torch", "version": "2.10.0+cpu"}]
+            self.assertEqual(len(resolver.installed_file_manifest(target, artifact)["files"]), 2)
+            metadata.write_text(good.replace("2.10.0+cpu", "1.0"), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "identity differs"):
+                resolver.installed_file_manifest(target, artifact)
+            metadata.write_text(good, encoding="utf-8")
+            wrong_dist = target / "torch-1.0.dist-info"
+            dist.rename(wrong_dist)
+            with self.assertRaisesRegex(ValueError, "identity differs"):
+                resolver.installed_file_manifest(target, artifact)
+
+    def test_install_mode_stages_once_and_validates_report_before_writing_lock(self):
+        fixture = report()
+        commands = []
+
+        def fake_run(command, **_kwargs):
+            commands.append(command)
+            self.assertIn("--target", command)
+            self.assertNotIn("--dry-run", command)
+            self.assertIn("--only-binary=:all:", command)
+            self.assertIn("torch==2.10.0+cpu", command)
+            pathlib.Path(command[command.index("--report") + 1]).write_text(
+                json.dumps(fixture), encoding="utf-8"
+            )
+            target_dir = pathlib.Path(command[command.index("--target") + 1])
+            for item in fixture["install"]:
+                name = item["metadata"]["name"]
+                version = item["metadata"]["version"]
+                metadata = target_dir / f"{name}-{version}.dist-info"
+                metadata.mkdir()
+                metadata_file = metadata / "METADATA"
+                metadata_file.write_text(
+                    f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n",
+                    encoding="utf-8",
+                )
+                digest = (
+                    base64.urlsafe_b64encode(hashlib.sha256(metadata_file.read_bytes()).digest())
+                    .rstrip(b"=")
+                    .decode()
+                )
+                (metadata / "RECORD").write_text(
+                    f"{metadata.name}/METADATA,sha256={digest},{metadata_file.stat().st_size}\n"
+                    f"{metadata.name}/RECORD,,\n",
+                    encoding="utf-8",
+                )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--install",
+                        "--target",
+                        str(target),
+                        "--output",
+                        str(output),
+                    ],
+                ),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+            ):
+                resolver.main()
+            self.assertEqual(len(commands), 1)
+            self.assertEqual(commands[0][commands[0].index("--target") + 1], str(target))
+            self.assertTrue(target.is_dir())
+            self.assertEqual(
+                json.loads((output / "resolution.json").read_text())["artifacts"][0]["sha256"],
+                "a" * 64,
+            )
+            self.assertIn("--hash=sha256:" + "a" * 64, (output / "requirements.txt").read_text())
+            self.assertEqual(
+                len(json.loads((output / "installed-files.json").read_text())["files"]),
+                2 * len(fixture["install"]),
+            )
+
+    def test_install_mode_rejects_untrusted_or_hashless_report_before_lock_publication(self):
+        fixtures = {
+            "untrusted origin": report(url="https://example.com/torch.whl"),
+            "missing digest": report(),
+            "malformed report": {"install": "not a list"},
+        }
+        fixtures["missing digest"]["install"][0]["download_info"]["archive_info"] = {}
+        for name, fixture in fixtures.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                output = pathlib.Path(directory) / "manifest"
+                target = pathlib.Path(directory) / "staged packages"
+
+                def fake_run(command, **_kwargs):
+                    pathlib.Path(command[command.index("--report") + 1]).write_text(
+                        json.dumps(fixture), encoding="utf-8"
+                    )
+                    return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+                with (
+                    patch.object(
+                        resolver.sys,
+                        "argv",
+                        [
+                            "resolve_runtime.py",
+                            "--version",
+                            "2.10.0",
+                            "--build",
+                            "cpu",
+                            "--install",
+                            "--target",
+                            str(target),
+                            "--output",
+                            str(output),
+                        ],
+                    ),
+                    patch.object(resolver.subprocess, "run", side_effect=fake_run),
+                    redirect_stderr(StringIO()),
+                ):
+                    with self.assertRaises(SystemExit) as exit_result:
+                        resolver.main()
+                self.assertEqual(exit_result.exception.code, 3)
+                self.assertFalse((output / "requirements.txt").exists())
+                self.assertFalse((output / "resolution.json").exists())
+
+    def test_install_mode_requires_an_empty_explicit_staged_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            target.mkdir()
+            (target / "existing.py").write_text("leave intact", encoding="utf-8")
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--install",
+                        "--target",
+                        str(target),
+                        "--output",
+                        str(output),
+                    ],
+                ),
+                patch.object(resolver.subprocess, "run") as run,
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 2)
+            run.assert_not_called()
+            self.assertEqual((target / "existing.py").read_text(), "leave intact")
+
+    def test_install_mode_reports_pip_failure_without_publishing_a_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            failed = SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr="No matching distribution found for torch==2.10.0+cpu",
+            )
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--install",
+                        "--target",
+                        str(target),
+                        "--output",
+                        str(output),
+                    ],
+                ),
+                patch.object(resolver.subprocess, "run", return_value=failed),
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 4)
+            self.assertFalse((output / "requirements.txt").exists())
+            self.assertFalse((output / "resolution.json").exists())
+
     def test_bootstrap_platform_tags_keep_only_the_native_host(self):
         cases = (
             ("win32", "AMD64", ["win_amd64", "win32"], ["win_amd64"], "windows"),

@@ -1,6 +1,7 @@
 import type { InstallationProgress } from '../types/versions';
 
 const STAGE_LABELS: Record<InstallationProgress['stage'], string> = {
+  resolving: 'Preparing Torch packages',
   download: 'Downloading',
   extract: 'Extracting',
   venv: 'Creating Environment',
@@ -27,7 +28,7 @@ export function getInstallActivityPresentation({
   const terminal = Boolean(currentProgress?.completed_at || currentProgress?.error);
   const active = Boolean((installingTag || currentProgress?.tag) && !terminal);
   const indeterminate = active && (!currentProgress || (
-    appId === 'torch' && currentProgress.stage === 'setup' && currentProgress.stage_progress <= 0
+    appId === 'torch' && (currentProgress.stage === 'resolving' || currentProgress.stage === 'setup') && currentProgress.stage_progress <= 0
   ));
   const stageLabel = currentProgress ? STAGE_LABELS[currentProgress.stage] : null;
 

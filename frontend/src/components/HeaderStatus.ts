@@ -6,7 +6,7 @@ import { getInstallActivityPresentation } from '../utils/installActivityPresenta
 export interface InstallationProgress {
   tag: string;
   started_at: string;
-  stage: 'download' | 'extract' | 'venv' | 'dependencies' | 'setup';
+  stage: 'resolving' | 'download' | 'extract' | 'venv' | 'dependencies' | 'setup';
   stage_progress: number;
   overall_progress: number;
   current_item: string | null;
@@ -81,11 +81,14 @@ function getCombinedDownloadStatus({
     Boolean(activeModelDownload?.status === 'downloading') ||
     installationProgress?.stage === 'download' ||
     totalSpeed > 0;
+  const activityVerb = hasDownloadActivity
+    ? 'Downloading'
+    : installationProgress?.stage === 'resolving' ? 'Preparing' : 'Installing';
 
   return {
     icon: Download,
-    spinning: false,
-    text: `${hasDownloadActivity ? 'Downloading' : 'Installing'} ${joinDownloadParts(parts)}${speedInfo}`,
+    spinning: installationProgress?.stage === 'resolving',
+    text: `${activityVerb} ${joinDownloadParts(parts)}${speedInfo}`,
   };
 }
 

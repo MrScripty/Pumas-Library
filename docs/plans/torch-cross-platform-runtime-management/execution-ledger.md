@@ -1,5 +1,32 @@
 # Execution Ledger: Cross-Platform Torch Runtime Management
 
+## 2026-09-26 — Copy direct download sources across hosts
+
+- The earlier Torch telemetry host allowlist was too restrictive for the
+  requested copyable source. Copyable progress URLs now accept any HTTPS host,
+  port, and path, with no wheel-extension or official-host requirement. URLs
+  containing credentials, a query, fragment, whitespace/control character, or
+  more than 2,048 bytes are withheld while download bytes and speed remain
+  visible. The general activity registry accepts similarly safe direct HTTP(S)
+  URLs, including local-network sources.
+- This is a display-safety rule, not an upstream trust decision. Torch package
+  provenance, official artifact URLs, and hash validation are unchanged. Signed
+  or authenticated URLs with query credentials stay hidden because copying
+  their query could disclose access tokens.
+- Focused verification passed: 55 resolver tests and Ruff, 2 Torch source
+  handoff tests, 2 shared registry source tests, formatting, and
+  `git diff --check`. The full `pumas-library` crate run returned 1,373 passed,
+  66 failed, and 6 ignored; failures were outside the changed source tests in
+  API, network, and runtime areas subject to this environment's socket/temp
+  directory restrictions.
+- Rebuilt the local Linux v0.7.0 packages and passed artifact checks plus
+  extracted resource/backend `/health` smoke tests. AppImage SHA-256
+  `19de13f4e429dd931196900e43028752e3900095546fa4a6d13dde5a9c3a6f51`;
+  Debian package SHA-256
+  `4cfc5735786d4677614ae5cc1604b866902b785fc910f506b099a0a7c0b3ff77`.
+  The package is local and unpublished; broader OS-level network sampling and
+  DownloadManager/Hugging Face producer adapters remain open.
+
 ## 2026-09-26 — Torch 2.14.0 RECORD validation repair and network activity
 
 - Diagnosed `launcher-data/logs/install-v2.14.0-1790458099378.log`: Torch
@@ -17,10 +44,12 @@
 - Added the reusable platform-neutral network activity registry and connected
   Torch pip downloads plus the installer's existing download callback. It
   tracks concurrent operation/transfer identity, cumulative payload bytes,
-  expected bytes, rate, state, and measurement coverage. Allowed source URLs are
-  copyable; unapproved URLs remain hidden while their byte rate is still
-  reported. Generic DownloadManager/Hugging Face adapters and OS-level
-  supplemental providers remain open; X8 is partial.
+  expected bytes, rate, state, and measurement coverage. Copyable direct URLs
+  accept any HTTPS host/path without embedded credentials, query, or fragment;
+  potentially secret-bearing URLs still report byte rate without exposing the
+  URL. Copyable status does not certify artifact provenance; official package
+  hash validation stays separate. Generic DownloadManager/Hugging Face adapters
+  and OS-level supplemental providers remain open; X8 is partial.
 - Verification passed: 54 resolver tests, Ruff, 231 app-manager tests, 725
   frontend tests, frontend typecheck and production build, Rust formatting,
   desktop RPC `/health`, artifact checks, extracted AppImage/deb resource and

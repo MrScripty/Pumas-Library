@@ -32,33 +32,31 @@ DOWNLOAD_PROGRESS_INTERVAL_SECONDS = 0.25
 
 
 def copyable_download_source(url: str) -> str | None:
-    """Keep progress links limited to the official HTTPS wheel hosts."""
-    parsed = urlparse(url)
+    """Allow any direct HTTPS source without embedded credentials or query secrets."""
+    if len(url.encode("utf-8")) > 2048 or any(
+        character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+        for character in url
+    ):
+        return None
     try:
+        parsed = urlparse(url)
         port = parsed.port
+        hostname = parsed.hostname
     except ValueError:
         return None
     if (
         parsed.scheme != "https"
+        or not hostname
         or parsed.username is not None
         or parsed.password is not None
-        or port not in (None, 443)
+        or (port is not None and not 1 <= port <= 65535)
         or parsed.query
         or parsed.fragment
-        or not parsed.path.lower().endswith(".whl")
+        or "?" in url.split("#", 1)[0]
+        or "#" in url
     ):
         return None
-    if parsed.hostname == "files.pythonhosted.org" and parsed.path.startswith("/packages/"):
-        return url
-    if parsed.hostname in {"download.pytorch.org", "download-r2.pytorch.org"} and parsed.path.startswith(
-        "/whl/"
-    ):
-        return url
-    if parsed.hostname == "github.com" and parsed.path.startswith(
-        "/nunchux-ai/nunchaku/releases/download/"
-    ):
-        return url
-    return None
+    return url
 
 
 def _write_download_progress(

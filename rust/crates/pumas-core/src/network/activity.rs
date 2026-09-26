@@ -48,8 +48,9 @@ pub enum MeasurementCoverage {
     Unsupported,
 }
 
-/// Safe display/copy metadata. URLs retain only their origin, omitting credentials,
-/// path, query, and fragment. Labels are caller-provided and must contain no secrets.
+/// Safe display/copy metadata. Direct HTTP(S) URLs retain their path and port but
+/// are omitted if they contain credentials, a query, or a fragment. Labels are
+/// caller-provided and must contain no secrets.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CopyableSource {
     url: Option<String>,
@@ -59,11 +60,24 @@ pub struct CopyableSource {
 impl CopyableSource {
     pub fn new(url: Option<&str>, label: Option<&str>) -> Self {
         let url = url.and_then(|raw| {
-            let parsed = Url::parse(raw).ok()?;
-            if !matches!(parsed.scheme(), "http" | "https") || parsed.host().is_none() {
+            if raw.len() > 4096
+                || raw
+                    .chars()
+                    .any(|character| character.is_whitespace() || character.is_control())
+            {
                 return None;
             }
-            Some(parsed.origin().ascii_serialization())
+            let parsed = Url::parse(raw).ok()?;
+            if !matches!(parsed.scheme(), "http" | "https")
+                || parsed.host().is_none()
+                || !parsed.username().is_empty()
+                || parsed.password().is_some()
+                || parsed.query().is_some()
+                || parsed.fragment().is_some()
+            {
+                return None;
+            }
+            Some(parsed.to_string())
         });
         let label = label
             .map(|raw| {
@@ -412,12 +426,30 @@ mod tests {
     }
 
     #[test]
-    fn copyable_source_omits_sensitive_url_components() {
+    fn copyable_source_preserves_any_safe_direct_http_source() {
+        let source = CopyableSource::new(
+            Some("https://mirror.example.net:8443/releases/model.safetensors"),
+            Some("model artifact"),
+        );
+        assert_eq!(
+            source.url(),
+            Some("https://mirror.example.net:8443/releases/model.safetensors")
+        );
+
+        let local_source = CopyableSource::new(Some("http://192.168.1.4:8080/models/flux"), None);
+        assert_eq!(
+            local_source.url(),
+            Some("http://192.168.1.4:8080/models/flux")
+        );
+    }
+
+    #[test]
+    fn copyable_source_rejects_credentials_and_token_bearing_components() {
         let source = CopyableSource::new(
             Some("https://user:password@example.com/private/token?key=secret#fragment"),
             Some("  source\nlabel  "),
         );
-        assert_eq!(source.url(), Some("https://example.com"));
+        assert_eq!(source.url(), None);
         assert_eq!(source.label(), Some("sourcelabel"));
     }
 }

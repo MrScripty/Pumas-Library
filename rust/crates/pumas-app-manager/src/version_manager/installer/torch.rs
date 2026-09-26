@@ -26,31 +26,23 @@ struct TorchDownloadProgress {
     speed_bytes_per_sec: Option<f64>,
 }
 
-fn trusted_torch_download_source(source: &str) -> bool {
-    if source.len() > MAX_TORCH_DOWNLOAD_SOURCE_BYTES {
+fn safe_torch_download_source(source: &str) -> bool {
+    if source.len() > MAX_TORCH_DOWNLOAD_SOURCE_BYTES
+        || source
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+    {
         return false;
     }
     let Ok(url) = reqwest::Url::parse(source) else {
         return false;
     };
-    let official_torch = matches!(
-        url.host_str(),
-        Some("download.pytorch.org" | "download-r2.pytorch.org")
-    ) && url.path().starts_with("/whl/");
-    let official_pypi =
-        url.host_str() == Some("files.pythonhosted.org") && url.path().starts_with("/packages/");
-    let official_nunchaku = url.host_str() == Some("github.com")
-        && url
-            .path()
-            .starts_with("/nunchux-ai/nunchaku/releases/download/");
     url.scheme() == "https"
+        && url.host().is_some()
         && url.username().is_empty()
         && url.password().is_none()
-        && matches!(url.port(), None | Some(443))
         && url.query().is_none()
         && url.fragment().is_none()
-        && url.path().to_ascii_lowercase().ends_with(".whl")
-        && (official_torch || official_pypi || official_nunchaku)
 }
 
 fn read_torch_download_progress(path: &Path) -> Option<TorchDownloadProgress> {
@@ -63,7 +55,7 @@ fn read_torch_download_progress(path: &Path) -> Option<TorchDownloadProgress> {
     if progress
         .source_url
         .as_deref()
-        .is_some_and(|source| !trusted_torch_download_source(source))
+        .is_some_and(|source| !safe_torch_download_source(source))
         || progress
             .speed_bytes_per_sec
             .is_some_and(|speed| !speed.is_finite() || speed < 0.0)
@@ -2716,34 +2708,38 @@ mod download_progress_tests {
     use super::*;
 
     #[test]
-    fn progress_source_only_accepts_official_https_wheel_hosts() {
+    fn progress_source_accepts_any_safe_https_host_and_path() {
         for source in [
             "https://download.pytorch.org/whl/cu134/torch-2.14.0.whl",
             "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0.whl",
             "https://files.pythonhosted.org/packages/ab/pkg-1.0.whl",
             "https://github.com/nunchux-ai/nunchaku/releases/download/v1.2.0/nunchaku-1.2.0.whl",
+            "https://mirror.example.net:8443/releases/model.safetensors",
         ] {
-            assert!(trusted_torch_download_source(source), "{source}");
+            assert!(safe_torch_download_source(source), "{source}");
         }
         for source in [
             "http://files.pythonhosted.org/packages/pkg-1.0.whl",
             "https://user:secret@files.pythonhosted.org/packages/pkg-1.0.whl",
             "https://files.pythonhosted.org/packages/pkg-1.0.whl?token=secret",
-            "https://example.com/packages/pkg-1.0.whl",
-            "https://files.pythonhosted.org/packages/pkg-1.0.tar.gz",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl?",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl#download",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl#",
+            "https://mirror.example.net/releases/model file.bin",
+            &format!("https://mirror.example.net/{}", "a".repeat(2048)),
         ] {
-            assert!(!trusted_torch_download_source(source), "{source}");
+            assert!(!safe_torch_download_source(source), "{source}");
         }
     }
 
     #[test]
-    fn progress_file_rejects_untrusted_sources_and_bad_rates() {
+    fn progress_file_rejects_secret_sources_and_bad_rates() {
         let workspace = tempfile::tempdir().unwrap();
         let path = workspace.path().join("download-progress.json");
         std::fs::write(
             &path,
             serde_json::json!({
-                "source_url":"https://example.com/torch.whl",
+                "source_url":"https://example.com/torch.whl?token=secret",
                 "active":true,
                 "downloaded_bytes":1,
                 "total_bytes":2,
@@ -2757,7 +2753,7 @@ mod download_progress_tests {
         std::fs::write(
             &path,
             serde_json::json!({
-                "source_url":"https://files.pythonhosted.org/packages/torch.whl",
+                "source_url":"https://mirror.example.net:8443/releases/model.safetensors",
                 "active":true,
                 "downloaded_bytes":3,
                 "total_bytes":2,
@@ -2771,7 +2767,7 @@ mod download_progress_tests {
         std::fs::write(
             &path,
             serde_json::json!({
-                "source_url":"https://files.pythonhosted.org/packages/torch.whl",
+                "source_url":"https://mirror.example.net:8443/releases/model.safetensors",
                 "active":true,
                 "downloaded_bytes":1,
                 "total_bytes":2,
@@ -2783,7 +2779,9 @@ mod download_progress_tests {
         assert_eq!(
             read_torch_download_progress(&path),
             Some(TorchDownloadProgress {
-                source_url: Some("https://files.pythonhosted.org/packages/torch.whl".into()),
+                source_url: Some(
+                    "https://mirror.example.net:8443/releases/model.safetensors".into(),
+                ),
                 active: true,
                 downloaded_bytes: 1,
                 total_bytes: Some(2),

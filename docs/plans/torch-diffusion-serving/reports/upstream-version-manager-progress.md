@@ -35,11 +35,13 @@ install, and this repair provides no new CUDA, Tuldok image, Windows, or macOS
 runtime evidence.
 
 The same work adds a shared network activity registry used by Torch wheel
-downloads and installer progress. It exposes payload rates across approved and
-unapproved sources, while only approved HTTPS artifact URLs are copyable.
-Generic DownloadManager and Hugging Face producers, OS-level supplementary
-sampling, and native cross-platform permissions remain unimplemented; network
-monitoring acceptance is partial.
+downloads and installer progress. Any direct HTTPS source host and path is
+copyable unless the URL contains embedded credentials, a query, or a fragment;
+those potentially secret-bearing sources still expose payload rates without
+displaying the URL. Copyable means safe to display, not officially sourced or
+hash-validated. Generic DownloadManager and Hugging Face producers, OS-level
+supplementary sampling, and native cross-platform permissions remain
+unimplemented; network monitoring acceptance is partial.
 
 ## 2026-09-26 — Replace the long Torch check with the real install attempt
 

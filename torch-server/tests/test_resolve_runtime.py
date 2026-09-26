@@ -70,33 +70,72 @@ def report(
 
 
 class ResolverTests(unittest.TestCase):
-    def test_copyable_download_sources_are_limited_to_official_wheel_urls(self):
-        trusted = (
+    def test_copyable_download_sources_accept_any_safe_https_host_and_path(self):
+        safe = (
             "https://files.pythonhosted.org/packages/ab/pkg-1.0-py3-none-any.whl",
             "https://download.pytorch.org/whl/cu134/torch-2.14.0.whl",
             "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0.whl",
             "https://github.com/nunchux-ai/nunchaku/releases/download/v1.2.0/nunchaku-1.2.0.whl",
+            "https://mirror.example.net:8443/releases/model.safetensors",
         )
         rejected = (
             "http://files.pythonhosted.org/packages/pkg-1.0.whl",
             "https://user:secret@files.pythonhosted.org/packages/pkg-1.0.whl",
             "https://files.pythonhosted.org/packages/pkg-1.0.whl?token=secret",
-            "https://example.com/packages/pkg-1.0.whl",
-            "https://github.com/other/package/releases/download/v1/pkg-1.0.whl",
-            "https://files.pythonhosted.org/packages/pkg-1.0.tar.gz",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl?",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl#download",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl#",
+            "https://mirror.example.net/releases/model file.bin",
+            f"https://mirror.example.net/{'a' * 2048}",
+            "https://mirror.example.net:99999/releases/model.safetensors",
+            "https:///packages/pkg-1.0.whl",
         )
-        for source in trusted:
+        for source in safe:
             with self.subTest(source=source):
                 self.assertEqual(resolver.copyable_download_source(source), source)
         for source in rejected:
             with self.subTest(source=source):
                 self.assertIsNone(resolver.copyable_download_source(source))
 
-    def test_progress_worker_tracks_unlisted_downloads_without_exposing_their_urls(self):
+    def test_progress_worker_tracks_any_safe_https_download_source(self):
         pip_download = importlib.import_module("pip._internal.network.download")
         pip_cli = importlib.import_module("pip._internal.cli.main")
         response = object()
-        link = SimpleNamespace(url_without_fragment="https://example.com/private.whl")
+        source = "https://cdn.example.net/releases/package.whl"
+        link = SimpleNamespace(url_without_fragment=source)
+
+        def prepare_download(response, link, progress_bar):
+            del response, link, progress_bar
+            return iter((b"ab", b"cd"))
+
+        def fake_pip_main(_arguments):
+            return list(pip_download._prepare_download(response, link, None)) and 0
+
+        with tempfile.TemporaryDirectory() as directory:
+            progress_path = pathlib.Path(directory) / "download-progress.json"
+            with (
+                patch.object(pip_cli, "main", side_effect=fake_pip_main),
+                patch.object(pip_download, "_prepare_download", prepare_download),
+                patch.object(pip_download, "is_from_cache", return_value=False),
+                patch.object(pip_download, "_get_http_response_size", return_value=4),
+            ):
+                self.assertEqual(
+                    resolver.run_pip_progress_worker(progress_path, ["install", "pkg"]), 0
+                )
+
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+            self.assertEqual(progress["source_url"], source)
+            self.assertFalse(progress["active"])
+            self.assertEqual(progress["downloaded_bytes"], 4)
+            self.assertEqual(progress["total_bytes"], 4)
+
+    def test_progress_worker_does_not_expose_secret_bearing_download_urls(self):
+        pip_download = importlib.import_module("pip._internal.network.download")
+        pip_cli = importlib.import_module("pip._internal.cli.main")
+        response = object()
+        link = SimpleNamespace(
+            url_without_fragment="https://cdn.example.net/private.whl?token=secret"
+        )
 
         def prepare_download(response, link, progress_bar):
             del response, link, progress_bar
@@ -121,7 +160,6 @@ class ResolverTests(unittest.TestCase):
             self.assertIsNone(progress["source_url"])
             self.assertFalse(progress["active"])
             self.assertEqual(progress["downloaded_bytes"], 4)
-            self.assertEqual(progress["total_bytes"], 4)
 
     def test_download_progress_reports_measured_rate_and_final_byte_count(self):
         timestamps = iter((0.0, 0.5, 1.0))

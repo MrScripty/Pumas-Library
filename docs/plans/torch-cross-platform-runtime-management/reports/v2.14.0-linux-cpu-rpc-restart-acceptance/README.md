@@ -1,39 +1,35 @@
 # Linux Torch managed-runtime restart acceptance
 
-This Linux x86_64 run installed and selected Torch 2.14.0 CPU/Core through the
-native Pumas RPC backend, shut that backend down, then started a second backend
-against the same launcher root. The second session confirmed the persisted
-version and managed CPU profile, compared ten managed-CPython identity fields
-with the first session, then invoked the persisted Torch venv interpreter to
-run a fresh CPU tensor operation (`sum([1, 4, 9]) == 14`). The RPC probe endpoint
-revalidated the retained install-time probe report and runtime context. The
-session repeated the protocol 3 sidecar trial, stopped the sidecar by its
-generation, and shut down gracefully. The fresh operation result, Torch
-version, and device are recorded in `restart.cpu_operation` in
-[acceptance.json](acceptance.json).
+Manual native RPC run
+[36223106097](https://github.com/MrScripty/Pumas-Library/actions/runs/36223106097)
+on commit `07f7e9f6` passed v2.14.0 CPU/Core installation and restart on
+Ubuntu 24.04 x86_64. The run discovered the requested release, resolved and
+installed the exact official `torch-2.14.0+cpu` CPython 3.14 Linux wheel, and
+retained 25 hashed artifacts for the core profile. A second backend reopened
+the same launcher root, confirmed the persisted version and managed interpreter,
+and ran a fresh CPU tensor operation (`sum([1, 4, 9]) == 14`, Torch
+`2.14.0+cpu`, device `cpu`). The RPC probe passed, the protocol 3 sidecar trial
+and generation-owned stop passed, and shutdown was graceful.
 
-Both sessions used Pumas-provisioned CPython 3.14.7 and the pinned uv 0.12.18
-with host Python, pip, PyPy, and uv absent from the backend `PATH`. The selected
-Python full-archive SHA-256 matched the retained [Linux CPython license
-evidence](../managed-python-license-collection/linux-x86_64-cpython-3.14.7/README.md).
-This evidence is Linux-only and does not establish Windows or macOS acceptance,
-CUDA execution, or Tuldok image generation.
-
-The acceptance client allows 900 seconds for release-option discovery because
-the first call provisions managed CPython before the resolver's own bounded
-official-wheel scan begins. In this latest fresh-root run, the
-`get_available_versions` preflight found the exact `v2.14.0` release-list
-`tagName` on its first attempt, before installation. The full two-session
-Linux acceptance then passed with that budget.
+The managed runtime used Pumas-provisioned CPython 3.14.7 from uv 0.12.18 with
+host Python, pip, PyPy, and uv absent from the backend `PATH`. The
+[acceptance result](acceptance.json) records both sessions and the compared
+source, catalog, provider, executable path, and executable hash. The release-list
+preflight found `v2.14.0` on its first attempt. The selected CPython archive and
+license evidence are linked in the [Linux CPython license
+report](../managed-python-license-collection/linux-x86_64-cpython-3.14.7/README.md).
 
 ## Retained evidence
 
-- [Acceptance result](acceptance.json) records both sessions and the compared
-  source, catalog, provider, executable path, and executable hash.
 - [Initial backend log](initial-backend-session.txt) and [restart backend log](restart-backend-session.txt)
-  record the two process lifecycles.
+  record both process lifecycles.
 - [Installed runtime](runtime.json), [resolution](resolution.json),
   [pip resolution](pip-resolution.json), and [runtime probes](probe-results.json)
-  retain the exact installed profile, wheel/dependency artifacts, and probes.
-- The selected CPython archive metadata and license texts are retained in the
-  linked [Linux CPython license evidence](../managed-python-license-collection/linux-x86_64-cpython-3.14.7/README.md).
+  retain the exact official Torch wheel URL and SHA-256, all resolved dependency
+  artifacts, installed profile, and probes.
+- The [full-archive manifest and raw CPython license files](../managed-python-license-collection/linux-x86_64-cpython-3.14.7/managed-python-licenses/)
+  record the license texts and hashes for this target. The selected install-only
+  archive identity remains in `runtime.json` and `acceptance.json`.
+
+This is CPU/Core RPC acceptance. It does not establish CUDA execution,
+packaged desktop installation, or Tuldok image generation.

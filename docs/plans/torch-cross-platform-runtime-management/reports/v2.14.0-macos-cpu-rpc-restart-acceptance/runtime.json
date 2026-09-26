@@ -3,9 +3,9 @@
   "artifacts": [
     {
       "name": "torch",
-      "sha256": "f152f41dc5dc462afe0de780e451ebb47ea8b4451f8f919f9537aa8e2cbe1d7e",
-      "url": "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0%2Bcpu-cp314-cp314-manylinux_2_28_x86_64.whl",
-      "version": "2.14.0+cpu"
+      "sha256": "d0f78744000a7863cc3f1eafaf511d4b9944f079f08277de6fefe4b01f4d41b9",
+      "url": "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0-cp314-cp314-macosx_14_0_arm64.whl",
+      "version": "2.14.0"
     },
     {
       "name": "fastapi",
@@ -21,20 +21,20 @@
     },
     {
       "name": "psutil",
-      "sha256": "076a2d2f923fd4821644f5ba89f059523da90dc9014e85f8e45a5774ca5bc6f9",
-      "url": "https://files.pythonhosted.org/packages/b5/70/5d8df3b09e25bce090399cf48e452d25c935ab72dad19406c77f4e828045/psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "1a7b04c10f32cc88ab39cbf606e117fd74721c831c98a27dc04578deb0c16979",
+      "url": "https://files.pythonhosted.org/packages/80/c4/f5af4c1ca8c1eeb2e92ccca14ce8effdeec651d5ab6053c589b074eda6e1/psutil-7.2.2-cp36-abi3-macosx_11_0_arm64.whl",
       "version": "7.2.2"
     },
     {
       "name": "pillow",
-      "sha256": "251bf95b67017e27b13d82f5b326234ca62d70f9cf4c2b9032de2358a3b12c7b",
-      "url": "https://files.pythonhosted.org/packages/5c/44/c85361f65dbe00eea8576ee467c768d25129989efb76e94f205e9ca9bb46/pillow-12.3.0-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "e158cb00350dc278f3b91551101aa7d12415a66ebf2c91d8d5ac14e56ddd3ad0",
+      "url": "https://files.pythonhosted.org/packages/c7/da/32c752228ae345f489e3a42499d817b6c3996da7e8a3bc7a04fc806b243b/pillow-12.3.0-cp314-cp314-macosx_11_0_arm64.whl",
       "version": "12.3.0"
     },
     {
       "name": "safetensors",
-      "sha256": "fd6f3f93c9a0a7cc2788ee63fb763353d4bd2e89b0751bc78fcf7dda00bea774",
-      "url": "https://files.pythonhosted.org/packages/28/50/f203ff3a3ddfe19308efc83c5a3a29ed02bf786732ec35e68bf9162f3365/safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "sha256": "c80201d22cbf405b80647a60ada77bba06c8fba2da2743ba1e89cdcc39a81f25",
+      "url": "https://files.pythonhosted.org/packages/f5/b1/fa7c600e7dceae12e9606c7578cbc9ff1e1ed55844883ee5c92205e86226/safetensors-0.8.0-cp310-abi3-macosx_11_0_arm64.whl",
       "version": "0.8.0"
     },
     {
@@ -75,8 +75,8 @@
     },
     {
       "name": "pydantic-core",
-      "sha256": "54d510bac3ee52247af28ed4bb18a1e799f040ac60fd2bf5ccd4c92f1fbe786f",
-      "url": "https://files.pythonhosted.org/packages/2c/9b/59634b7ac631c63b2a37760eb6943af3e29573d6b59a4abc5e7f019d4cee/pydantic_core-2.46.5-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "sha256": "1a353f84de772f423b5ffb11d7ae352fbbef0f446f3c0b0af0f8236d7233606e",
+      "url": "https://files.pythonhosted.org/packages/ae/d5/d8a4eb6d6c7f66b91dd37c576d76e9e60fba900caf5372c17bcf949febc2/pydantic_core-2.46.5-cp314-cp314-macosx_11_0_arm64.whl",
       "version": "2.46.5"
     },
     {
@@ -147,8 +147,8 @@
     },
     {
       "name": "markupsafe",
-      "sha256": "457a69a9577064c05a97c41f4e65148652db078a3a509039e64d3467b9e7ef97",
-      "url": "https://files.pythonhosted.org/packages/41/3c/a36c2450754618e62008bf7435ccb0f88053e07592e6028a34776213d877/markupsafe-3.0.3-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "c47a551199eb8eb2121d4f0f15ae0f923d31350ab9280078d1e5f12b249e0026",
+      "url": "https://files.pythonhosted.org/packages/b5/64/7660f8a4a8e53c924d0fa05dc3a55c9cee10bbd82b11c5afb27d44b096ce/markupsafe-3.0.3-cp314-cp314-macosx_11_0_arm64.whl",
       "version": "3.0.3"
     }
   ],
@@ -158,18 +158,18 @@
   ],
   "managed_python": {
     "distribution": {
-      "catalogKey": "cpython-3.14.7-linux-x86_64-gnu",
+      "catalogKey": "cpython-3.14.7-macos-aarch64-none",
       "implementation": "CPython",
-      "sourceUrl": "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
-      "targetTriple": "x86_64-unknown-linux-gnu",
+      "sourceUrl": "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "targetTriple": "aarch64-apple-darwin",
       "version": "3.14.7"
     },
     "executable": {
-      "path": "/tmp/pumas-torch-native-cpu-kkrybqey/launcher-data/managed-python/python/0800c1ab76812b8a0a424e27c9a0c6ff818175e26b32d40b165081b5e041a8c5/cpython-3.14.7-linux-x86_64-gnu/bin/python3.14",
-      "sha256": "241bf774a81580bb760adf960b48df7e6b23b1de026c9c912d4ca6be1a08241e"
+      "path": "/private/var/folders/nj/vtw8zd2j31d1gdrtntc5y4600000gn/T/pumas-torch-native-cpu-5kinhxp0/launcher-data/managed-python/python/39ab90495ce6de1a1c2c546c0f0802acaadfb3727d07f042d0a2d1e90c1b66b3/cpython-3.14.7-macos-aarch64-none/bin/python3.14",
+      "sha256": "e925fab5e8f595817ff36ff28e214b91520c040d5b7d47249b0199bc5f68015e"
     },
     "provider": {
-      "archiveSha256": "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16",
+      "archiveSha256": "cf40e0c6a202190ccd9e0406dcfdd5b2d6668a9a5c779b17948963df32aafe5b",
       "name": "uv",
       "version": "0.12.18"
     }

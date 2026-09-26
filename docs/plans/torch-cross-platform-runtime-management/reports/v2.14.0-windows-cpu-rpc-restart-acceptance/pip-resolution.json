@@ -12,7 +12,7 @@
           "hash": "sha256=ca9b3c2c652587f7b26c86d30be3648f553bd07fb3cf9b3edb645e7eafe295a3"
         }
       },
-      "is_direct": false,
+      "is_direct": true,
       "is_yanked": false,
       "requested": true,
       "metadata": {

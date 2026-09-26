@@ -1,21 +1,21 @@
-2026-09-26T03:02:52.341858Z  INFO Starting Pumas RPC Server
-2026-09-26T03:02:52.341933Z  INFO Launcher root configured
-2026-09-26T03:02:52.399871Z  INFO Rebuilding model index
-2026-09-26T03:02:52.400033Z  INFO Rebuilt index with 0 models
-2026-09-26T03:02:52.470302Z  INFO IPC server listening on 127.0.0.1:44663
-2026-09-26T03:02:52.470584Z  INFO IPC server started on port 44663
-2026-09-26T03:02:52.470871Z  INFO Started watching model library at "/tmp/pumas-torch-native-cpu-isd3cpxw/shared-resources/models"
-2026-09-26T03:02:52.499149Z  INFO Validation complete: 0 valid, 0 removed, 0 orphaned
-2026-09-26T03:02:52.499219Z  INFO ollama version manager initialized successfully
-2026-09-26T03:02:52.526800Z  INFO Validation complete: 1 valid, 0 removed, 0 orphaned
-2026-09-26T03:02:52.527305Z  INFO torch version manager initialized successfully
-2026-09-26T03:02:52.550726Z  INFO Validation complete: 0 valid, 0 removed, 0 orphaned
-2026-09-26T03:02:52.550751Z  INFO llama-cpp version manager initialized successfully
-2026-09-26T03:02:52.550759Z  INFO Initialized 3 version manager(s)
-2026-09-26T03:02:52.550835Z  INFO Size calculator initialized
-2026-09-26T03:02:52.551004Z  INFO Plugin loader initialized (0 plugins)
-2026-09-26T03:02:52.644677Z  INFO Server listening on 127.0.0.1:35013 with max 64 in-flight requests and 33554432 byte request bodies
-RPC_PORT=35013
-2026-09-26T03:02:52.644726Z  INFO RPC server running on 127.0.0.1:35013
-2026-09-26T03:02:55.740047Z  INFO Shutdown signal received, exiting
-2026-09-26T03:02:55.741010Z  WARN File watcher channel disconnected
+[2m2026-09-26T06:16:30.685491Z[0m [32m INFO[0m Starting Pumas RPC Server
+[2m2026-09-26T06:16:30.685584Z[0m [32m INFO[0m Launcher root configured
+[2m2026-09-26T06:16:30.719439Z[0m [32m INFO[0m Rebuilding model index
+[2m2026-09-26T06:16:30.719598Z[0m [32m INFO[0m Rebuilt index with 0 models
+[2m2026-09-26T06:16:30.781667Z[0m [32m INFO[0m IPC server listening on 127.0.0.1:35249
+[2m2026-09-26T06:16:30.781993Z[0m [32m INFO[0m IPC server started on port 35249
+[2m2026-09-26T06:16:30.782322Z[0m [32m INFO[0m Started watching model library at "/tmp/pumas-torch-native-cpu-kkrybqey/shared-resources/models"
+[2m2026-09-26T06:16:30.806512Z[0m [32m INFO[0m Validation complete: 0 valid, 0 removed, 0 orphaned
+[2m2026-09-26T06:16:30.806598Z[0m [32m INFO[0m ollama version manager initialized successfully
+[2m2026-09-26T06:16:30.832757Z[0m [32m INFO[0m Validation complete: 1 valid, 0 removed, 0 orphaned
+[2m2026-09-26T06:16:30.833779Z[0m [32m INFO[0m torch version manager initialized successfully
+[2m2026-09-26T06:16:30.858902Z[0m [32m INFO[0m Validation complete: 0 valid, 0 removed, 0 orphaned
+[2m2026-09-26T06:16:30.858962Z[0m [32m INFO[0m llama-cpp version manager initialized successfully
+[2m2026-09-26T06:16:30.858981Z[0m [32m INFO[0m Initialized 3 version manager(s)
+[2m2026-09-26T06:16:30.859085Z[0m [32m INFO[0m Size calculator initialized
+[2m2026-09-26T06:16:30.859166Z[0m [32m INFO[0m Plugin loader initialized (0 plugins)
+[2m2026-09-26T06:16:30.974456Z[0m [32m INFO[0m Server listening on 127.0.0.1:46157 with max 64 in-flight requests and 33554432 byte request bodies
+RPC_PORT=46157
+[2m2026-09-26T06:16:30.974571Z[0m [32m INFO[0m RPC server running on 127.0.0.1:46157
+[2m2026-09-26T06:16:34.896653Z[0m [32m INFO[0m Shutdown signal received, exiting
+[2m2026-09-26T06:16:34.900646Z[0m [33m WARN[0m File watcher channel disconnected

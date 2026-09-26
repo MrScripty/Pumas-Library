@@ -1,24 +1,24 @@
 {
-  "recorded_at": "2026-09-26T06:19:56.635087+00:00",
+  "recorded_at": "2026-09-26T06:33:14.211913+00:00",
   "status": "passed",
   "core_status": "passed",
   "adapter_status": "not selected",
   "environment": {
     "release": "2.14.0",
-    "torch": "2.14.0+cpu",
+    "torch": "2.14.0",
     "build": "cpu",
     "adapter": "none",
     "python": "3.14",
-    "interpreter": "\\\\?\\C:\\Users\\runneradmin\\AppData\\Local\\Temp\\pumas-torch-native-cpu-d2m_g5ii\\launcher-data\\managed-python\\python\\5dc2484c3bc035e81d37fb9af266e3546b42d2553d222081cd129940f1bbf9b7\\cpython-3.14.7-windows-x86_64-none\\python.exe",
+    "interpreter": "/private/var/folders/nj/vtw8zd2j31d1gdrtntc5y4600000gn/T/pumas-torch-native-cpu-5kinhxp0/launcher-data/managed-python/python/39ab90495ce6de1a1c2c546c0f0802acaadfb3727d07f042d0a2d1e90c1b66b3/cpython-3.14.7-macos-aarch64-none/bin/python3.14",
     "implementation": "cpython",
-    "platform": "Windows-2025Server-10.0.26100-SP0",
-    "machine": "AMD64",
+    "platform": "macOS-15.7.9-arm64-64bit",
+    "machine": "arm64",
     "artifacts": [
       {
         "name": "torch",
-        "version": "2.14.0+cpu",
-        "url": "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0%2Bcpu-cp314-cp314-win_amd64.whl",
-        "sha256": "ca9b3c2c652587f7b26c86d30be3648f553bd07fb3cf9b3edb645e7eafe295a3"
+        "version": "2.14.0",
+        "url": "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0-cp314-cp314-macosx_14_0_arm64.whl",
+        "sha256": "d0f78744000a7863cc3f1eafaf511d4b9944f079f08277de6fefe4b01f4d41b9"
       },
       {
         "name": "fastapi",
@@ -35,20 +35,20 @@
       {
         "name": "psutil",
         "version": "7.2.2",
-        "url": "https://files.pythonhosted.org/packages/b4/90/e2159492b5426be0c1fef7acba807a03511f97c5f86b3caeda6ad92351a7/psutil-7.2.2-cp37-abi3-win_amd64.whl",
-        "sha256": "eb7e81434c8d223ec4a219b5fc1c47d0417b12be7ea866e24fb5ad6e84b3d988"
+        "url": "https://files.pythonhosted.org/packages/80/c4/f5af4c1ca8c1eeb2e92ccca14ce8effdeec651d5ab6053c589b074eda6e1/psutil-7.2.2-cp36-abi3-macosx_11_0_arm64.whl",
+        "sha256": "1a7b04c10f32cc88ab39cbf606e117fd74721c831c98a27dc04578deb0c16979"
       },
       {
         "name": "pillow",
         "version": "12.3.0",
-        "url": "https://files.pythonhosted.org/packages/f1/e0/492879f69d94f91f60fc8cd05ba03650e9520afebb2fb7aa12777d7c7f38/pillow-12.3.0-cp314-cp314-win_amd64.whl",
-        "sha256": "fdafc9cce40277e0f7a0feabce0ee50dd2fa1800f3b38015e51296b5e814048d"
+        "url": "https://files.pythonhosted.org/packages/c7/da/32c752228ae345f489e3a42499d817b6c3996da7e8a3bc7a04fc806b243b/pillow-12.3.0-cp314-cp314-macosx_11_0_arm64.whl",
+        "sha256": "e158cb00350dc278f3b91551101aa7d12415a66ebf2c91d8d5ac14e56ddd3ad0"
       },
       {
         "name": "safetensors",
         "version": "0.8.0",
-        "url": "https://files.pythonhosted.org/packages/1b/6d/3fba214c1e5e0f69991677ec3bc17023f0421776975e1de0c682dca475e2/safetensors-0.8.0-cp310-abi3-win_amd64.whl",
-        "sha256": "096ec1a98435df7beb08853bb5aa9081a84f23d0adc67ed1a0a10550f608373f"
+        "url": "https://files.pythonhosted.org/packages/f5/b1/fa7c600e7dceae12e9606c7578cbc9ff1e1ed55844883ee5c92205e86226/safetensors-0.8.0-cp310-abi3-macosx_11_0_arm64.whl",
+        "sha256": "c80201d22cbf405b80647a60ada77bba06c8fba2da2743ba1e89cdcc39a81f25"
       },
       {
         "name": "annotated-doc",
@@ -89,8 +89,8 @@
       {
         "name": "pydantic-core",
         "version": "2.46.5",
-        "url": "https://files.pythonhosted.org/packages/f7/3c/60674207246bc0a4009d2391b7c7251c7159f279c8d2ab8aae8ef46f3dee/pydantic_core-2.46.5-cp314-cp314-win_amd64.whl",
-        "sha256": "fa10ef4112775900e7a0661068635eb67b2ab824fbde764de6e0e21982a93db0"
+        "url": "https://files.pythonhosted.org/packages/ae/d5/d8a4eb6d6c7f66b91dd37c576d76e9e60fba900caf5372c17bcf949febc2/pydantic_core-2.46.5-cp314-cp314-macosx_11_0_arm64.whl",
+        "sha256": "1a353f84de772f423b5ffb11d7ae352fbbef0f446f3c0b0af0f8236d7233606e"
       },
       {
         "name": "annotated-types",
@@ -161,21 +161,21 @@
       {
         "name": "markupsafe",
         "version": "3.0.3",
-        "url": "https://files.pythonhosted.org/packages/28/52/182836104b33b444e400b14f797212f720cbc9ed6ba34c800639d154e821/markupsafe-3.0.3-cp314-cp314-win_amd64.whl",
-        "sha256": "bdc919ead48f234740ad807933cdf545180bfbe9342c2bb451556db2ed958581"
+        "url": "https://files.pythonhosted.org/packages/b5/64/7660f8a4a8e53c924d0fa05dc3a55c9cee10bbd82b11c5afb27d44b096ce/markupsafe-3.0.3-cp314-cp314-macosx_11_0_arm64.whl",
+        "sha256": "c47a551199eb8eb2121d4f0f15ae0f923d31350ab9280078d1e5f12b249e0026"
       }
     ]
   },
   "context": {
-    "python": "3.14.7 (main, Sep  1 2026, 14:17:30) [MSC v.1944 64 bit (AMD64)]",
-    "executable": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\pumas-torch-native-cpu-d2m_g5ii\\torch-versions\\.torch-install-HKXQJa\\runtime\\venv\\Scripts\\python.exe",
-    "platform": "Windows-2025Server-10.0.26100-SP0",
+    "python": "3.14.7 (main, Sep  1 2026, 14:05:28) [Clang 22.1.3 ]",
+    "executable": "/var/folders/nj/vtw8zd2j31d1gdrtntc5y4600000gn/T/pumas-torch-native-cpu-5kinhxp0/torch-versions/.torch-install-3SsQxF/runtime/venv/bin/python",
+    "platform": "macOS-15.7.9-arm64-64bit",
     "hardware": {
       "cuda": null,
       "hip": null,
       "devices": []
     },
-    "hardware_fingerprint": "494fb1d79639aecf4bb2b6043473616914037c874c14d9805f8e3f9d38b2c602",
+    "hardware_fingerprint": "b2023780c1910304bd1917fda17a812e2a82871cdcf72031b9c668e1f5879054",
     "driver_version": null,
     "runtime_files_sha256": {
       "control_api.py": "ee5160f121a749d8d11cd929abfb9d98a1a109235dac3690c9e2118f9cca54d0",
@@ -195,9 +195,9 @@
       "serve.py": "88bf72ea3eac013dc7678bebe0e3b3053c141e8ec1222a210bd18b2a47601af4",
       "validation.py": "f53cca26ddbddbc3c924ff07d32aaf9ced6061a7f1628379b4c0db2c9da7feb1"
     },
-    "interpreter_sha256": "80da2dbc9aca9420877223d6bf9ec0f5d9fd066a79ed65a3e3870037ff4e03e8",
+    "interpreter_sha256": "e925fab5e8f595817ff36ff28e214b91520c040d5b7d47249b0199bc5f68015e",
     "installed_distributions": {
-      "torch": "2.14.0+cpu",
+      "torch": "2.14.0",
       "fastapi": "0.141.1",
       "uvicorn": "0.54.0",
       "psutil": "7.2.2",
@@ -246,19 +246,19 @@
       "setuptools": "84.0.0",
       "starlette": "1.7.0",
       "sympy": "1.14.0",
-      "torch": "2.14.0+cpu",
+      "torch": "2.14.0",
       "typing-extensions": "4.16.0",
       "typing-inspection": "0.4.4",
       "uvicorn": "0.54.0"
     },
-    "distributions_sha256": "fb628c6fb5305166cad9332e5cf97765df173d14d44b7a0296950ad749e0254e",
-    "resolution_sha256": "a1b110eff3116387751ac1a601cb1b0b3c7afd10cae01753b5381473a97039fc",
+    "distributions_sha256": "c66d66521194cb6178204da57cb438b4f99243e6068ddd4ef10686ac9cc1bd1d",
+    "resolution_sha256": "c3bf32619cd50779762389c5c8bc56f4835e4fe1a96bc6ad23ed3dbd72f2a2f4",
     "sidecar_sha256": "88bf72ea3eac013dc7678bebe0e3b3053c141e8ec1222a210bd18b2a47601af4"
   },
   "capabilities": {
     "torch_import": {
       "status": "passed",
-      "version": "2.14.0+cpu"
+      "version": "2.14.0"
     },
     "cpu_tensor": {
       "status": "passed"

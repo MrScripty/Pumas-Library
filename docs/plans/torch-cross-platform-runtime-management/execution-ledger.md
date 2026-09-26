@@ -26,8 +26,27 @@
   [36222118583](https://github.com/MrScripty/Pumas-Library/actions/runs/36222118583)
   passed workflow/release, frontend/desktop, Linux/Windows/macOS native QA, Rust
   quality, and headless checks. Native RPC E2E is skipped on pull requests, so
-  that run is not platform install evidence. The bounded-retry change and a new
-  manual native RPC run remain pending.
+  that run is not platform install evidence.
+- Commit `07f7e9f6` was pushed to the existing PR branch. The updated PR run
+  [36223095054](https://github.com/MrScripty/Pumas-Library/actions/runs/36223095054)
+  passed all required checks. Manual native run
+  [36223106097](https://github.com/MrScripty/Pumas-Library/actions/runs/36223106097)
+  passed v2.14.0 CPU/Core RPC install and restart on Linux x86_64, Windows x64,
+  and macOS arm64, with CPython 3.14.7 provisioned on each target. Each run
+  retained 25 hashed profile artifacts, passed a fresh CPU tensor operation
+  (`14`), revalidated probes, passed protocol 3 sidecar trial/stop, and shut
+  down gracefully. Linux and Windows release preflight passed on the first
+  attempt. macOS honored a 913-second `Retry-After`, then found the release on
+  attempt two in 916.889 seconds total.
+- The retained platform-specific acceptance results, runtime manifests,
+  resolver reports, wheel/dependency hashes, and backend logs are linked from
+  the plan's [Linux](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/README.md),
+  [Windows](reports/v2.14.0-windows-cpu-rpc-restart-acceptance/README.md), and
+  [macOS](reports/v2.14.0-macos-cpu-rpc-restart-acceptance/README.md) reports.
+- This closes the current-revision CPU/Core RPC install/restart gate on the
+  three shipped targets. Provider notice integration, packaged desktop install,
+  broader cancellation/tamper cases, CUDA/MPS execution, and v2.14.0
+  image/Tuldok generation remain open.
 
 ## 2026-09-24 — Support contract and design
 

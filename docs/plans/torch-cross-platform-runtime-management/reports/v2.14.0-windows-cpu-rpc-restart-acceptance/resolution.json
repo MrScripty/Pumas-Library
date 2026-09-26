@@ -4,7 +4,7 @@
   "build": "cpu",
   "adapter": "none",
   "python": "3.14",
-  "interpreter": "\\\\?\\C:\\Users\\runneradmin\\AppData\\Local\\Temp\\pumas-torch-native-cpu-jcipvuxz\\launcher-data\\managed-python\\python\\5dc2484c3bc035e81d37fb9af266e3546b42d2553d222081cd129940f1bbf9b7\\cpython-3.14.7-windows-x86_64-none\\python.exe",
+  "interpreter": "\\\\?\\C:\\Users\\runneradmin\\AppData\\Local\\Temp\\pumas-torch-native-cpu-d2m_g5ii\\launcher-data\\managed-python\\python\\5dc2484c3bc035e81d37fb9af266e3546b42d2553d222081cd129940f1bbf9b7\\cpython-3.14.7-windows-x86_64-none\\python.exe",
   "implementation": "cpython",
   "platform": "Windows-2025Server-10.0.26100-SP0",
   "machine": "AMD64",

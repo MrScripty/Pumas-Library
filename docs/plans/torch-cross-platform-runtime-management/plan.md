@@ -42,10 +42,16 @@ managed CPython 3.14.7. Windows and macOS stopped before release discovery:
 GitHub returned `Retry-After` values of 1411 and 1448 seconds, which the
 acceptance harness incorrectly rejected above its separate 900-second cap.
 The harness now honors valid nonnegative integer delays only while they fit its
-existing 1800-second total budget; all 53 local acceptance fixtures, Ruff, and
-format checks pass. A native Windows/macOS rerun on this repair is pending, so
-the latest code's install path remains unverified on those targets. This Linux
-pass supersedes the earlier incomplete Linux release-options scan.
+existing 1800-second total budget. Manual run
+[36223106097](https://github.com/MrScripty/Pumas-Library/actions/runs/36223106097)
+on `07f7e9f6` then passed the v2.14.0 CPU/Core install and restart on Linux
+x86_64, Windows x64, and macOS arm64, each using Pumas-provisioned CPython
+3.14.7. macOS exercised the retry repair with a 913-second advertised delay,
+waited fully, and passed release discovery on attempt two. See the retained
+[Linux](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/README.md),
+[Windows](reports/v2.14.0-windows-cpu-rpc-restart-acceptance/README.md), and
+[macOS](reports/v2.14.0-macos-cpu-rpc-restart-acceptance/README.md) evidence.
+This Linux pass also supersedes the earlier incomplete release-options scan.
 Fresh local v0.7.0 AppImage and deb packages were rebuilt after updating release
 attribution. Their extracted resources match the build inputs, and both bundled
 RPC backends passed `/health`. AppImage SHA-256:
@@ -56,19 +62,19 @@ does not replace the toolbar-linked assets. This confirms package assembly and
 startup, not the packaged Torch installation UI path.
 The uv 0.12.18 MIT/Apache notices are now in the release attribution inventory.
 The selected Linux CPython 3.14.7 full-archive license set (19 texts plus its
-hashed `PYTHON.json` metadata) is retained as evidence. The accepted Windows
-install selected CPython 3.14.7; its full-archive SHA-256
-`5363ec4aab59c24417f9877217aae95ca17f9ae6eb99c3bbfb25e4a76dcadafe`
-matches the retained Windows candidate manifest with 19 license files.
-Windows notices still need release-attribution integration. The collected and
-hash-verified macOS arm64 archive remains candidate evidence because its native
-E2E leg did not reach installation. macOS selected-provider licensing and
-packaged desktop install acceptance remain pending.
+hashed `PYTHON.json` metadata) is retained as evidence. The current Windows and
+macOS installs selected CPython 3.14.7 and retained their install-artifact
+identities; separate full-archive manifests record the corresponding provider
+license-file hashes. Windows and macOS selected-provider notices still need
+release-attribution integration. Packaged desktop install acceptance remains
+pending.
 
-**Current phase:** Linux v2.14.0 CPU/Core install and two-session sidecar
-lifecycle are accepted on the current exact-wheel implementation; Windows x64
-CPU/Core install and restart are accepted by historical native evidence, while
-this revision's Windows and macOS install paths still await a native rerun.
+**Current phase:** v2.14.0 CPU/Core RPC install and two-session sidecar
+lifecycle are accepted on the current exact-wheel implementation across Linux
+x86_64, Windows x64, and macOS arm64. Each run provisioned CPython 3.14.7,
+resolved 25 hashed core artifacts, ran a CPU operation returning 14 after a
+second-session restart, and passed sidecar trial/stop plus graceful shutdown.
+The macOS run also verified the bounded long `Retry-After` path.
 The PR repair closes the reviewed cross-process metadata races by guarding every
 Torch metadata read/modify/write with `.torch-versions.lock`, refreshing state
 under that lease, and retaining cloned leases through detached writes. Startup
@@ -85,27 +91,25 @@ desktop-contract tests, 179 Electron tests (one platform-dependent skip), 53
 managed-Python acceptance fixtures, Ruff, release-attribution validation, and
 `git diff --check`. Astra high and Sol xhigh completed read-only reviews with no
 remaining code blockers. PR run
-[36222118583](https://github.com/MrScripty/Pumas-Library/actions/runs/36222118583)
-passed workflow/release, frontend/desktop, Linux/Windows/macOS native QA, Rust
-quality, and headless checks; RPC E2E is skipped on pull requests. Manual run
-[36222136437](https://github.com/MrScripty/Pumas-Library/actions/runs/36222136437)
-passed Linux install/restart and stopped at Windows/macOS rate-limit preflight.
-The Windows GNU result is compile-only; current-revision Windows/macOS RPC
-installation still requires a manual native rerun.
+[36223095054](https://github.com/MrScripty/Pumas-Library/actions/runs/36223095054)
+passed all required PR checks, including native Linux/Windows/macOS QA; RPC E2E
+is skipped on pull requests. Manual run
+[36223106097](https://github.com/MrScripty/Pumas-Library/actions/runs/36223106097)
+passed native v2.14.0 CPU/Core RPC install/restart on all three shipped targets.
+Windows GNU compilation remains compile-only evidence but is supplemented by
+the native Windows acceptance run.
 
-**Blockers:** The macOS preview-report validation failure from the earlier
-manual run remains unverified after exact-wheel pinning; the latest macOS run
-stopped at rate-limit preflight before it could exercise that repair. The latest
-Windows run also stopped at preflight, so its historical install evidence does
-not verify this revision. Windows notice integration, macOS selected-provider
-license inventory, and packaged desktop install acceptance remain open.
-CUDA/device use and v2.14.0 image/Tuldok behavior are untested. The local
-AppImage/deb candidates do not update the public toolbar-linked package.
+**Remaining gates:** Selected CPython provider notices from Windows and macOS
+need release-attribution integration. Packaged desktop Torch installation
+acceptance, provider cancellation/tamper/retry cases, and downloaded uv digest
+verification remain open. CUDA/device acceleration and v2.14.0 image/Tuldok
+generation are untested. The local AppImage/deb candidates do not update the
+public toolbar-linked package.
 
-**Next slice:** Push the bounded rate-limit repair and rerun native RPC E2E on
-Windows and macOS (Linux remains a regression leg). Inspect the resolver and
-install evidence, then complete Windows/macOS provider licensing and packaged
-desktop install acceptance. Keep X1–X7 pending until their evidence gates pass.
+**Next slice:** Complete selected-provider notice integration and native
+packaged desktop installation smoke tests. Then close the remaining provider
+integrity, cancellation, and runtime gates while keeping Tuldok qualification
+limited to its recorded exact image-generation tuple.
 
 ## Objective and scope
 
@@ -124,7 +128,10 @@ unqualified adapters remain outside this objective.
 The current accepted Linux contract remains the regression baseline in the
 [upstream version-management plan](../torch-upstream-version-management/plan.md)
 and its [runtime inventory](../torch-diffusion-serving/reports/upstream-version-manager-progress.md).
-Windows/macOS become supported only when this plan's native acceptance passes.
+Native RPC acceptance now proves the v2.14.0 CPU/Core managed install and
+restart path on Windows x64 and macOS arm64 as well as Linux x86_64. Broader
+platform acceptance remains gated on the incomplete X2–X7 checks below,
+especially provider notices and packaged desktop installation.
 This plan does not claim image generation or Tuldok support for every Torch
 release or operating system; existing image evidence remains limited to its
 recorded exact tuples.
@@ -306,12 +313,12 @@ resolver, manager, desktop, and platform runtime owners.
 | ID | Observable criterion | Evidence required | Status |
 | --- | --- | --- | --- |
 | X1 | Linux behavior and existing accepted v2.9.0 install/v2.10 Tuldok evidence remain accurately scoped and pass relevant regression gates | Existing Linux manager/resolver/RPC/frontend suites; retained historical evidence references | pending |
-| X2 | Each shipped target provisions a private stable standard CPython 3.10 or newer without a host Python dependency or global PATH/registry changes; artifact integrity, target identity, cache separation, cancellation, and retention are verified | Linux x86_64 install and second-session restart passed with no host Python/pip/PyPy on the backend `PATH`; exact provider identity matched across sessions ([restart report](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/acceptance.json)). Native Windows/macOS provisioning, tamper/cancel/retry, downloaded uv digest, and selected-archive license integration remain | pending |
+| X2 | Each shipped target provisions a private stable standard CPython 3.10 or newer without a host Python dependency or global PATH/registry changes; artifact integrity, target identity, cache separation, cancellation, and retention are verified | Linux, Windows, and macOS v2.14.0 RPC installs provisioned CPython 3.14.7 and matched persisted interpreter identity across sessions ([Linux](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/README.md), [Windows](reports/v2.14.0-windows-cpu-rpc-restart-acceptance/README.md), [macOS](reports/v2.14.0-macos-cpu-rpc-restart-acceptance/README.md)). Artifact/source hashes are retained; cancellation, cache separation, and selected-provider notice integration remain | partial |
 | X3 | Candidate versions come from exact official standard-CPython wheel tags and the pinned stable provider catalog; the manager tries highest to lowest, selects the newest complete compatible resolution, and never treats network/provisioning failure as a reason to downgrade | CPython 3.14 preference when fully resolved; definite 3.14 dependency incompatibility falls to 3.13; prerelease/free-threaded/wrong-target and pre-3.10 artifact rejection; incomplete scan/provider failures remain typed inconclusive | pending |
-| X4 | Windows x64 and macOS arm64 discovery returns only exact official wheels whose tags match the provisioned native CPython; CPU/MPS/CUDA choices follow this contract | Native wheel fixtures, wrong-OS/architecture/interpreter rejection, live official-index scan on both native runners | pending |
-| X5 | Preview retains the exact distribution version, release/build, official wheel URL/hash, Python provider artifact identity, interpreter fingerprint, and complete dependencies; install stages and verifies that exact identity before publication | Linux x86_64 v2.14.0 CPU/Core preview (25 artifacts), install/identity/CPU-operation check, selection, and temporary-root cleanup passed with no host Python on child `PATH`; Windows/macOS native checks pending | pending |
-| X6 | Installed versions can be inspected, explicitly selected, started with health/protocol checks, and stopped by their owned generation; cancellation, timeout, RPC shutdown, and failed cleanup do not leak a resolver, installer, sidecar, interpreter provisioner, or unregistered runtime | Linux RPC restart preserved the active v2.14.0 CPU profile and managed interpreter, executed a fresh CPU tensor operation through the persisted venv, revalidated the retained RPC probe report, then passed protocol 3 sidecar trial, generation-owned stop, and graceful shutdown ([restart report](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/acceptance.json)); Windows/macOS native lifecycle acceptance remains | pending |
-| X7 | The same manager choices and lifecycle are reachable through packaged desktop controls and the existing RPC API; the user never has to choose Python, and the desktop offers no unsupported adapter | Preload boundary validation, composed desktop tests, native RPC integration, packaged desktop smoke with no Python on PATH on all declared targets | pending |
+| X4 | Windows x64 and macOS arm64 discovery returns only exact official wheels whose tags match the provisioned native CPython; CPU/MPS/CUDA choices follow this contract | Native wheel fixtures and wrong-target rejection passed; manual native RPC run `36223106097` resolved exact official CPU wheel tags on Linux, Windows, and macOS arm64. CUDA hardware execution and macOS MPS acceleration remain untested | partial |
+| X5 | Preview retains the exact distribution version, release/build, official wheel URL/hash, Python provider artifact identity, interpreter fingerprint, and complete dependencies; install stages and verifies that exact identity before publication | Run `36223106097` resolved 25 hashed CPU/Core artifacts and passed v2.14.0 install on all three shipped targets; each report retains the exact Torch wheel URL/hash, dependency set, and managed interpreter identity (see X2 reports) | partial |
+| X6 | Installed versions can be inspected, explicitly selected, started with health/protocol checks, and stopped by their owned generation; cancellation, timeout, RPC shutdown, and failed cleanup do not leak a resolver, installer, sidecar, interpreter provisioner, or unregistered runtime | Run `36223106097` passed second-session restart, fresh CPU operation, probe revalidation, protocol 3 sidecar trial/stop, and graceful shutdown on Linux, Windows, and macOS (see X2 reports); broader cancellation/timeout/failure cleanup remains | partial |
+| X7 | The same manager choices and lifecycle are reachable through packaged desktop controls and the existing RPC API; the user never has to choose Python, and the desktop offers no unsupported adapter | Native RPC install and lifecycle pass on all three shipped targets; preload boundary, desktop projection, and composed contract tests pass. Packaged desktop install smoke with no Python on PATH on each target remains | partial |
 
 Plan acceptance is `pending` until every required row is satisfied on its
 declared native environment. Cross-compilation, Linux simulation, packaging,
@@ -370,7 +377,9 @@ and unit fixtures do not substitute for the Windows/macOS runtime claims.
 - **Re-plan trigger:** A native target requires a contract/schema change,
   process primitive outside the existing ownership boundary, or a non-CPU
   runtime claim unsupported by official evidence.
-- **State:** Implemented; target-native acceptance pending.
+- **State:** Implemented; v2.14.0 CPU/Core RPC install and restart passed on
+  Linux, Windows, and macOS. CUDA and MPS behavior remain outside this accepted
+  runtime tuple.
 
 ### M1b — Managed stable CPython
 
@@ -390,8 +399,10 @@ and unit fixtures do not substitute for the Windows/macOS runtime claims.
   selection; managed Python 3.14 with full resolution; definite-incompatibility
   fallback to 3.13; inconclusive failures do not downgrade; clean host PATH,
   concurrency/cancellation, immutable retention, tamper, and safe cleanup tests.
-- **State:** Manager/provider/resolver/UI implementation is present; target
-  native acceptance and clean-host provisioning are pending.
+- **State:** Manager/provider/resolver/UI implementation is present; native
+  clean-host v2.14.0 CPU/Core provisioning and restart passed on all three
+  shipped targets. Cancellation/cache/tamper cases and selected-provider notice
+  integration remain open.
 
 ### M2 — Native acceptance and inventory
 
@@ -404,7 +415,9 @@ and unit fixtures do not substitute for the Windows/macOS runtime claims.
 - **Verification:** Every X1–X7 claim has an evidence environment, execution
   mode, result, and link. Reuse read-only review for any lifecycle/security
   repair.
-- **State:** Active; native acceptance pending.
+- **State:** Active; native RPC CPU/Core acceptance is retained for all three
+  targets. Provider-license integration and packaged desktop install acceptance
+  remain pending.
 
 ## Constraints and re-plan triggers
 

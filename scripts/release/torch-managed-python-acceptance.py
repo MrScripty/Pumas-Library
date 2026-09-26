@@ -118,6 +118,28 @@ def rpc(base: str, method: str, params: dict | None = None, timeout: float = 120
 
 def require(condition: bool, step: str, result) -> None:
     if not condition:
+        if isinstance(result, dict):
+            priority = ("error", "reason", "code", "status", "completeScan", "tag", "issues")
+            summary = {}
+            for key in priority:
+                if key not in result:
+                    continue
+                value = result[key]
+                if key == "issues" and isinstance(value, list):
+                    value = {
+                        "sample": [
+                            issue[:300] if isinstance(issue, str) else "<non-string issue>"
+                            for issue in value[:3]
+                        ],
+                        "omitted": max(0, len(value) - 3),
+                    }
+                elif isinstance(value, str):
+                    value = value[:300]
+                summary[key] = value
+            result = {
+                **summary,
+                **{key: value for key, value in result.items() if key not in priority},
+            }
         raise RuntimeError(f"{step} failed: {json.dumps(result, default=str)[:1200]}")
 
 
@@ -247,6 +269,32 @@ class WindowsCanonicalPathFixture(unittest.TestCase):
         self.assertTrue(path_is_within(child, depot, windows=True))
         self.assertFalse(path_is_within(sibling, depot, windows=True))
         self.assertFalse(path_is_within(r"\\?\D:\managed\python\python.exe", depot, windows=True))
+
+
+class FailureSummaryFixture(unittest.TestCase):
+    def test_top_level_error_is_visible_before_bulky_release_options(self) -> None:
+        result = {
+            "checkedChannels": [{"channel": "cpu", "detail": "x" * 3000}],
+            "combinations": [{"build": "cpu", "detail": "y" * 3000}],
+            "status": "error",
+            "code": "release_discovery_failed",
+            "reason": "rate_limited",
+            "error": "GitHub release discovery rate limited",
+            "completeScan": False,
+            "tag": TAG,
+            "issues": ["GitHub release asset scan stopped before all channels were checked"],
+        }
+        with self.assertRaises(RuntimeError) as failure:
+            require(False, "release options", result)
+        message = str(failure.exception)
+        self.assertIn("GitHub release discovery rate limited", message)
+        self.assertIn("release_discovery_failed", message)
+        self.assertIn("rate_limited", message)
+        self.assertIn('"completeScan": false', message)
+        self.assertIn(TAG, message)
+        self.assertIn("GitHub release asset scan stopped", message)
+        self.assertLess(message.index('"error"'), message.index('"checkedChannels"'))
+        self.assertLessEqual(len(message), len("release options failed: ") + 1200)
 
 
 class VersionPreflightFixture(unittest.TestCase):
@@ -2824,6 +2872,7 @@ def main() -> None:
             unittest.defaultTestLoader.loadTestsFromTestCase(fixture)
             for fixture in (
                 WindowsCanonicalPathFixture,
+                FailureSummaryFixture,
                 VersionPreflightFixture,
                 EvidenceCollectionFixture,
                 LauncherRootFinalizationFixture,

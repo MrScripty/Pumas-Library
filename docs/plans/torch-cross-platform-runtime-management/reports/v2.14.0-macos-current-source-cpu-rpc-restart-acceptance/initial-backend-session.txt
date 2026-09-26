@@ -1,0 +1,27 @@
+[2m2026-09-26T08:24:29.437032Z[0m [32m INFO[0m Starting Pumas RPC Server
+[2m2026-09-26T08:24:29.438358Z[0m [32m INFO[0m Launcher root configured
+[2m2026-09-26T08:24:29.534578Z[0m [32m INFO[0m Created FTS5 table: model_search
+[2m2026-09-26T08:24:29.535950Z[0m [32m INFO[0m Populated FTS5 table from models
+[2m2026-09-26T08:24:29.538037Z[0m [32m INFO[0m Rebuilding model index
+[2m2026-09-26T08:24:29.539056Z[0m [32m INFO[0m Rebuilt index with 0 models
+[2m2026-09-26T08:24:29.706266Z[0m [32m INFO[0m IPC server listening on 127.0.0.1:49198
+[2m2026-09-26T08:24:29.706820Z[0m [32m INFO[0m IPC server started on port 49198
+[2m2026-09-26T08:24:29.711587Z[0m [32m INFO[0m Started watching model library at "/private/var/folders/nj/vtw8zd2j31d1gdrtntc5y4600000gn/T/pumas-torch-native-cpu-phrd_sah/shared-resources/models"
+[2m2026-09-26T08:24:29.723886Z[0m [32m INFO[0m Validation complete: 0 valid, 0 removed, 0 orphaned
+[2m2026-09-26T08:24:29.724379Z[0m [32m INFO[0m ollama version manager initialized successfully
+[2m2026-09-26T08:24:29.726577Z[0m [32m INFO[0m Validation complete: 0 valid, 0 removed, 0 orphaned
+[2m2026-09-26T08:24:29.726730Z[0m [32m INFO[0m torch version manager initialized successfully
+[2m2026-09-26T08:24:29.727731Z[0m [32m INFO[0m Validation complete: 0 valid, 0 removed, 0 orphaned
+[2m2026-09-26T08:24:29.727766Z[0m [32m INFO[0m llama-cpp version manager initialized successfully
+[2m2026-09-26T08:24:29.727780Z[0m [32m INFO[0m Initialized 3 version manager(s)
+[2m2026-09-26T08:24:29.727919Z[0m [32m INFO[0m Size calculator initialized
+[2m2026-09-26T08:24:29.728114Z[0m [32m INFO[0m Plugin loader initialized (0 plugins)
+[2m2026-09-26T08:24:29.732087Z[0m [32m INFO[0m Server listening on 127.0.0.1:49199 with max 64 in-flight requests and 33554432 byte request bodies
+RPC_PORT=49199
+[2m2026-09-26T08:24:29.732211Z[0m [32m INFO[0m RPC server running on 127.0.0.1:49199
+[2m2026-09-26T08:24:30.945203Z[0m [32m INFO[0m Fetched 69 releases from GitHub for pytorch/pytorch
+[2m2026-09-26T08:26:03.642260Z[0m [32m INFO[0m Finalizing installation for v2.14.0
+[2m2026-09-26T08:26:03.649844Z[0m [32m INFO[0m Installation of v2.14.0 finalized
+[2m2026-09-26T08:26:06.458985Z[0m [32m INFO[0m Set active version: v2.14.0
+[2m2026-09-26T08:26:08.342578Z[0m [32m INFO[0m Shutdown signal received, exiting
+[2m2026-09-26T08:26:08.346692Z[0m [33m WARN[0m File watcher channel disconnected

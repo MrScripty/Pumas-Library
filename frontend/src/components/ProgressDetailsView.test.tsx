@@ -29,6 +29,31 @@ const dependencyProgress: InstallationProgress = {
 };
 
 describe('ProgressDetailsView', () => {
+  it('treats Torch setup as indeterminate and shows the backend phase', () => {
+    render(<ProgressDetailsView
+      appId="torch"
+      progress={{ ...dependencyProgress, tag: 'v2.14.0', stage: 'setup', stage_progress: 0, overall_progress: 95, current_item: 'Creating managed Python environment', error: null }}
+      installingVersion="v2.14.0" showCompletedItems={false}
+      onToggleCompletedItems={vi.fn()} onBackToList={vi.fn()} onOpenLogPath={vi.fn()}
+    />);
+    expect(screen.getByText('Creating managed Python environment')).toBeInTheDocument();
+    expect(screen.queryByText('95%')).not.toBeInTheDocument();
+    expect(screen.queryByText('0%')).not.toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Overall installation progress' })).not.toHaveAttribute('aria-valuenow');
+    expect(screen.getByRole('progressbar', { name: 'Final Setup progress' })).not.toHaveAttribute('aria-valuenow');
+  });
+
+  it('shows measured Torch setup progress when the stage reports real movement', () => {
+    render(<ProgressDetailsView
+      appId="torch"
+      progress={{ ...dependencyProgress, tag: 'v2.14.0', stage: 'setup', stage_progress: 40, overall_progress: 95, current_item: 'Qualifying runtime', error: null }}
+      installingVersion="v2.14.0" showCompletedItems={false}
+      onToggleCompletedItems={vi.fn()} onBackToList={vi.fn()} onOpenLogPath={vi.fn()}
+    />);
+    expect(screen.getByRole('progressbar', { name: 'Overall installation progress' })).toHaveAttribute('aria-valuenow', '95');
+    expect(screen.getByRole('progressbar', { name: 'Final Setup progress' })).toHaveAttribute('aria-valuenow', '40');
+  });
+
   it('renders dependency progress details and routes detail actions', () => {
     const onBackToList = vi.fn();
     const onToggleCompletedItems = vi.fn();

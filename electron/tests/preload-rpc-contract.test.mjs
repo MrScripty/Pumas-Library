@@ -11,6 +11,32 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
+test('Torch runtime options require manager preset capability and an offered default adapter', async () => {
+  const harness = loadCompiledPreload();
+  const options = {
+    builds: ['cpu'], pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
+    adapters: ['none', 'flux2'], bundledPresetAvailable: true, defaultAdapter: 'flux2',
+    preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
+    installed: [],
+  };
+  for (const valid of [options, { ...options, adapters: ['none'], bundledPresetAvailable: false, defaultAdapter: 'none' }]) {
+    harness.respondWith(valid);
+    assert.deepEqual(toPlainValue(await harness.api.get_torch_runtime_options()), valid);
+  }
+  for (const invalid of [
+    { ...options, bundledPresetAvailable: undefined },
+    { ...options, bundledPresetAvailable: 'false' },
+    { ...options, defaultAdapter: undefined },
+    { ...options, defaultAdapter: 'bundled' },
+    { ...options, adapters: ['none'], defaultAdapter: 'flux2' },
+  ]) {
+    harness.respondWith(invalid);
+    await assert.rejects(harness.api.get_torch_runtime_options(), {
+      name: 'TypeError', message: 'Invalid get_torch_runtime_options response',
+    });
+  }
+});
+
 test('Torch preview decodes resolved and all typed rejection outcomes without reading message wording', async () => {
   const harness = loadCompiledPreload();
   const request = { tag: 'v2.10.0', build: 'cpu', python: 'python3.12', adapter: 'none' };

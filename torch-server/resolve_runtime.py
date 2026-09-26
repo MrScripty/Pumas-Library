@@ -5,13 +5,16 @@ hash-locked requirements are retained so installation need not resolve again.
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, wait
 from html.parser import HTMLParser
 import json
 import platform
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
+from pip._vendor.packaging import tags as packaging_tags
 from urllib.parse import unquote, urljoin, urlparse, urlunparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -86,6 +89,14 @@ ADAPTERS = ("none", "flux2", "nunchaku")
 MAX_INDEX_REQUESTS = 5
 MAX_INDEX_BYTES = 1_000_000
 INDEX_TIMEOUT_SECONDS = 4
+RELEASE_ROOT_URL = "https://download.pytorch.org/whl/"
+MAX_RELEASE_ROOT_BYTES = 200_000
+MAX_RELEASE_CHANNELS = 64
+MAX_RELEASE_INTERPRETERS = 4
+MAX_RELEASE_CANDIDATES = 16
+MAX_RELEASE_WORKERS = 8
+MAX_RELEASE_SCAN_SECONDS = 30
+RELEASE_CHANNEL = re.compile(r"cpu|cu\d+|rocm\d+(?:\.\d+)+")
 NETWORK_MARKERS = (
     "name or service not known",
     "temporary failure in name resolution",
@@ -109,6 +120,17 @@ NETWORK_MARKERS = (
     "http 504",
     "too many requests",
 )
+METADATA_MARKERS = (
+    "metadata-generation-failed",
+    "invalid metadata",
+    "failed to prepare metadata",
+    "metadata preparation failed",
+    "error getting requirements to build wheel",
+)
+MISSING_REQUIREMENT = re.compile(
+    r"(?:no matching distribution found for|"
+    r"could not find a version that satisfies the requirement)\s+([a-z0-9][^\s;()]*)"
+)
 
 
 class WheelLinks(HTMLParser):
@@ -125,9 +147,91 @@ class WheelLinks(HTMLParser):
 
 class OfficialRedirects(HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, msg, headers, newurl):
-        if not official_torch_url(newurl, request.full_url.split("/whl/", 1)[1].split("/", 1)[0]):
+        build = request.full_url.split("/whl/", 1)[1].split("/", 1)[0]
+        if not official_torch_index_url(newurl, build):
             raise ValueError("Wheel index redirected to an untrusted origin")
         return super().redirect_request(request, fp, code, msg, headers, newurl)
+
+
+class OfficialDirectoryRedirects(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        if not official_directory_url(newurl):
+            raise ValueError("Wheel directory redirected to an untrusted origin")
+        return super().redirect_request(request, fp, code, msg, headers, newurl)
+
+
+def official_directory_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname in {"download.pytorch.org", "download-r2.pytorch.org"}
+        and parsed.port in (None, 443)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path == "/whl/"
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
+def official_torch_index_url(url: str, build: str) -> bool:
+    parsed = urlparse(url)
+    return (
+        official_torch_url(url, build)
+        and parsed.path == f"/whl/{build}/torch/"
+        and not parsed.query
+        and not parsed.fragment
+    )
+
+
+def parse_release_channels(hrefs: list[str]) -> list[str]:
+    """Keep exact canonical channel directories from the official wheel root."""
+    channels = set()
+    for href in hrefs:
+        try:
+            url = urljoin(RELEASE_ROOT_URL, href)
+            parsed = urlparse(url)
+            match = re.fullmatch(r"/whl/([^/]+)/", parsed.path)
+            if (
+                parsed.scheme == "https"
+                and parsed.hostname in {"download.pytorch.org", "download-r2.pytorch.org"}
+                and parsed.port in (None, 443)
+                and parsed.username is None
+                and parsed.password is None
+                and not parsed.query
+                and not parsed.fragment
+                and match
+                and RELEASE_CHANNEL.fullmatch(match.group(1))
+            ):
+                channels.add(match.group(1))
+        except ValueError:
+            continue
+
+    def order(channel: str) -> tuple:
+        if channel == "cpu":
+            return (0, ())
+        if channel.startswith("cu"):
+            return (1, (int(channel[2:]),))
+        return (2, tuple(int(part) for part in channel[4:].split(".")))
+
+    return sorted(channels, key=order)
+
+
+def torch_root_channels() -> list[str]:
+    """Read the bounded official wheel directory before selecting channels."""
+    opener = build_opener(OfficialDirectoryRedirects())
+    with opener.open(
+        Request(RELEASE_ROOT_URL, headers={"Accept": "text/html"}),
+        timeout=INDEX_TIMEOUT_SECONDS,
+    ) as response:
+        if not official_directory_url(response.geturl()):
+            raise ValueError("Wheel directory response came from an untrusted origin")
+        body = response.read(MAX_RELEASE_ROOT_BYTES + 1)
+    if len(body) > MAX_RELEASE_ROOT_BYTES:
+        raise ValueError(f"Official wheel directory exceeded {MAX_RELEASE_ROOT_BYTES} bytes")
+    parser = WheelLinks()
+    parser.feed(body.decode("utf-8", errors="replace"))
+    return parse_release_channels(parser.links)
 
 
 def discovery_builds(selected_build: str) -> list[str]:
@@ -137,6 +241,9 @@ def discovery_builds(selected_build: str) -> list[str]:
         family.sort(key=lambda build: abs(int(build[2:]) - int(selected_build[2:])))
     elif selected_build.startswith("rocm"):
         rocm_builds = [build for build in BUILDS if build.startswith("rocm")]
+        if selected_build not in rocm_builds:
+            rocm_builds.append(selected_build)
+            rocm_builds.sort(key=lambda build: tuple(int(part) for part in build[4:].split(".")))
         selected_index = rocm_builds.index(selected_build)
         family = [build for build in rocm_builds if build != selected_build]
         family.sort(key=lambda build: abs(rocm_builds.index(build) - selected_index))
@@ -147,13 +254,13 @@ def discovery_builds(selected_build: str) -> list[str]:
 
 
 def interpreter_tags(interpreter: str) -> tuple[str, set[str]]:
-    """Ask an installed interpreter for its own Linux x86_64 wheel tags."""
+    """Ask an installed native interpreter for its own binary wheel tags."""
     code = (
         "import json,platform,sys;"
         "from pip._vendor.packaging.tags import sys_tags;"
         "print(json.dumps({'python':f'{sys.version_info.major}.{sys.version_info.minor}',"
-        "'ok':sys.platform=='linux' and platform.machine()=='x86_64' "
-        "and sys.implementation.name=='cpython','tags':[str(tag) for tag in sys_tags()]}))"
+        "'platform':sys.platform,'machine':platform.machine(),"
+        "'implementation':sys.implementation.name,'tags':[str(tag) for tag in sys_tags()]}))"
     )
     completed = subprocess.run(
         [interpreter, "-I", "-c", code], capture_output=True, text=True, timeout=4, check=False
@@ -161,9 +268,84 @@ def interpreter_tags(interpreter: str) -> tuple[str, set[str]]:
     if completed.returncode:
         raise ValueError(f"Installed interpreter {interpreter} cannot report wheel tags")
     details = json.loads(completed.stdout)
-    if not details["ok"]:
-        raise ValueError(f"Installed interpreter {interpreter} is not CPython on Linux x86_64")
-    return details["python"], set(details["tags"])
+    target = native_target(
+        details["platform"], details["machine"], details["python"], details["implementation"]
+    )
+    suffix = native_platform_pattern(target)
+    tags = {tag for tag in details["tags"] if suffix.fullmatch(tag.rsplit("-", 1)[-1])}
+    return details["python"], tags
+
+
+def native_platform_pattern(target: str) -> re.Pattern:
+    return {
+        "linux": re.compile(r"(?:manylinux[^-]*|musllinux[^-]*|linux)_x86_64"),
+        "windows": re.compile(r"win_amd64"),
+        "macos": re.compile(r"macosx_\d+_\d+_(?:arm64|universal2)"),
+    }[target]
+
+
+def bootstrap_platform_tags(interpreter: str) -> tuple[str, list[str]]:
+    """Read native host platforms from one installed bootstrap interpreter."""
+    code = (
+        "import json,platform,sys;"
+        "from pip._vendor.packaging.tags import platform_tags;"
+        "print(json.dumps({'python':f'{sys.version_info.major}.{sys.version_info.minor}',"
+        "'platform':sys.platform,'machine':platform.machine(),"
+        "'implementation':sys.implementation.name,'platforms':list(platform_tags())}))"
+    )
+    completed = subprocess.run(
+        [interpreter, "-I", "-c", code], capture_output=True, text=True, timeout=4, check=False
+    )
+    if completed.returncode:
+        raise ValueError("Bootstrap interpreter cannot report native platform tags")
+    details = json.loads(completed.stdout)
+    target = native_target(
+        details["platform"], details["machine"], details["python"], details["implementation"]
+    )
+    pattern = native_platform_pattern(target)
+    platforms = list(dict.fromkeys(tag for tag in details["platforms"] if pattern.fullmatch(tag)))
+    if not platforms:
+        raise ValueError("Bootstrap interpreter reported no native platform tags")
+    return target, platforms
+
+
+def candidate_cpython_tags(python: str, target: str, platforms: list[str]) -> set[str]:
+    """Synthesize standard CPython tags on the observed native host platforms."""
+    version = candidate_python_version(python)
+    if target not in {"linux", "windows", "macos"}:
+        raise ValueError("Python candidate target must be native Linux, Windows, or macOS")
+    if not platforms or any(not native_platform_pattern(target).fullmatch(p) for p in platforms):
+        raise ValueError("Python candidate platforms must match the native host")
+    generated = (
+        *packaging_tags.cpython_tags(python_version=version, platforms=platforms),
+        *packaging_tags.compatible_tags(
+            python_version=version, interpreter=f"cp{version[0]}{version[1]}", platforms=platforms
+        ),
+    )
+    return {str(tag) for tag in generated if tag.platform in platforms}
+
+
+def candidate_python_version(python: str) -> tuple[int, int]:
+    """Accept stable CPython 3.10+ minors without guessing an upper bound."""
+    match = re.fullmatch(r"3\.([1-9]\d*)", python)
+    if not match or int(match.group(1)) < 10:
+        raise ValueError("Python candidates must be stable CPython 3.10 or newer minors")
+    return 3, int(match.group(1))
+
+
+def native_target(system: str, machine: str, python: str, implementation: str) -> str:
+    """Name a supported native target; reject translated or foreign architectures."""
+    if implementation != "cpython":
+        raise ValueError("A native CPython interpreter is required")
+    if not re.fullmatch(r"3\.\d+", python):
+        raise ValueError("A stable CPython 3 interpreter is required")
+    if system == "linux" and machine == "x86_64":
+        return "linux"
+    if system == "win32" and machine.lower() in {"amd64", "x86_64"}:
+        return "windows"
+    if system == "darwin" and machine == "arm64":
+        return "macos"
+    raise ValueError("Unsupported or translated native Torch target")
 
 
 def torch_index_links(build: str) -> list[str]:
@@ -173,7 +355,7 @@ def torch_index_links(build: str) -> list[str]:
     with opener.open(
         Request(index_url, headers={"Accept": "text/html"}), timeout=INDEX_TIMEOUT_SECONDS
     ) as response:
-        if not official_torch_url(response.geturl(), build):
+        if not official_torch_index_url(response.geturl(), build):
             raise ValueError("Wheel index response came from an untrusted origin")
         body = response.read(MAX_INDEX_BYTES + 1)
     if len(body) > MAX_INDEX_BYTES:
@@ -185,13 +367,25 @@ def torch_index_links(build: str) -> list[str]:
 
 def wheel_match(href: str, version: str, build: str, tags: set[str]) -> dict | None:
     """Match only the exact official Torch binary and an interpreter-compatible tag."""
-    url = urljoin(f"https://download.pytorch.org/whl/{build}/torch/", href)
-    parsed = urlparse(url)
-    if not official_torch_url(url, build) or parsed.query:
+    try:
+        url = urljoin(f"https://download.pytorch.org/whl/{build}/torch/", href)
+        parsed = urlparse(url)
+        if not official_torch_url(url, build) or parsed.query:
+            return None
+    except ValueError:
         return None
     filename = unquote(parsed.path.rsplit("/", 1)[-1])
     match = re.fullmatch(r"torch-([^-]+)-([^-]+)-([^-]+)-([^-]+)\.whl", filename)
-    if not match or match.group(1) != f"{version}+{build}":
+    if not match:
+        return None
+    distribution_version = match.group(1)
+    mac_cpu = build == "cpu" and any(
+        re.fullmatch(r"macosx_\d+_\d+_(?:arm64|universal2)", platform_tag)
+        for platform_tag in match.group(4).split(".")
+    )
+    if distribution_version != f"{version}+{build}" and not (
+        mac_cpu and distribution_version == version
+    ):
         return None
     if not any(
         f"{python}-{abi}-{system}" in tags
@@ -206,7 +400,7 @@ def wheel_match(href: str, version: str, build: str, tags: set[str]) -> dict | N
     if digest is not None and not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
         return None
     clean_url = urlunparse(parsed._replace(fragment=""))
-    return {"wheelUrl": clean_url, "sha256": digest}
+    return {"wheelUrl": clean_url, "sha256": digest, "torch": distribution_version}
 
 
 def discover_alternatives(
@@ -219,9 +413,9 @@ def discover_alternatives(
 ) -> dict:
     """Find at most three Torch wheels; dependencies and adapters remain unchecked."""
     version = selected_tag.removeprefix("v")
-    if not re.fullmatch(r"\d+\.\d+\.\d+", version) or selected_build not in BUILDS:
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version) or not RELEASE_CHANNEL.fullmatch(selected_build):
         raise ValueError("Select a stable Torch tag and supported build")
-    if not re.fullmatch(r"python3\.(10|11|12|13)", selected_python):
+    if not re.fullmatch(r"python3\.\d+", selected_python):
         raise ValueError("Select a supported Python version")
     issues = []
     installed = {}
@@ -263,7 +457,7 @@ def discover_alternatives(
         if len(matches) == 3:
             break
     if not installed:
-        issues.append("No installed CPython interpreter could report Linux x86_64 wheel tags")
+        issues.append("No installed native CPython interpreter could report compatible wheel tags")
         network_inconclusive = True
     issues.append(
         "Search is bounded to at most five official indexes; dependencies and adapters were not resolved"
@@ -279,6 +473,157 @@ def discover_alternatives(
         "matches": matches,
         "issues": issues,
     }
+
+
+def discover_release_options(
+    version: str,
+    interpreters: list[str],
+    root_loader=torch_root_channels,
+    index_loader=torch_index_links,
+    tag_loader=interpreter_tags,
+    python_candidates: list[str] | None = None,
+    platform_loader=bootstrap_platform_tags,
+) -> dict:
+    """Find every exact wheel in a bounded scan of official stable channels."""
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise ValueError("Select a stable upstream Torch version")
+    if not interpreters:
+        raise ValueError("Release options require at least one installed interpreter")
+    if python_candidates is not None:
+        if len(interpreters) != 1 or not python_candidates:
+            raise ValueError("Python candidates require one native bootstrap interpreter")
+        for python in python_candidates:
+            candidate_python_version(python)
+    deadline = time.monotonic() + MAX_RELEASE_SCAN_SECONDS
+    issues = []
+    installed = {}
+    if python_candidates is not None:
+        candidates = list(dict.fromkeys(python_candidates))
+        if len(candidates) > MAX_RELEASE_CANDIDATES:
+            issues.append(f"Only the first {MAX_RELEASE_CANDIDATES} Python candidates were checked")
+        try:
+            target, platforms = platform_loader(interpreters[0])
+            for python in candidates[:MAX_RELEASE_CANDIDATES]:
+                installed[f"python{python}"] = candidate_cpython_tags(python, target, platforms)
+        except (OSError, ValueError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
+            issues.append(
+                f"Bootstrap interpreter could not report native tags: {type(error).__name__}"
+            )
+    else:
+        if len(interpreters) > MAX_RELEASE_INTERPRETERS:
+            issues.append(f"Only the first {MAX_RELEASE_INTERPRETERS} interpreters were checked")
+        for number, interpreter in enumerate(interpreters[:MAX_RELEASE_INTERPRETERS], start=1):
+            try:
+                python, tags = tag_loader(interpreter)
+                if not re.fullmatch(r"\d+\.\d+", python):
+                    raise ValueError("Invalid interpreter version")
+                installed.setdefault(f"python{python}", set()).update(tags)
+            except (OSError, ValueError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
+                issues.append(
+                    f"Interpreter {number} could not report compatible tags: {type(error).__name__}"
+                )
+
+    checked_channels = []
+    combinations = []
+
+    def result() -> dict:
+        complete = not issues
+        return {
+            "tag": f"v{version}",
+            "status": "inconclusive" if not complete else "matches" if combinations else "none",
+            "completeScan": complete,
+            "checkedChannels": checked_channels,
+            "combinations": combinations,
+            "issues": issues,
+        }
+
+    if not installed:
+        issues.append("No interpreter could report compatible native wheel tags")
+        return result()
+    try:
+        raw_channels = root_loader()
+    except (OSError, ValueError, TimeoutError) as error:
+        issues.append(f"Official wheel directory could not be verified: {type(error).__name__}")
+        return result()
+    channels = list(dict.fromkeys(raw_channels))
+    if any(not RELEASE_CHANNEL.fullmatch(channel) for channel in channels):
+        issues.append("Official wheel directory included an invalid channel name")
+        channels = [channel for channel in channels if RELEASE_CHANNEL.fullmatch(channel)]
+    if not channels:
+        issues.append("Official wheel directory contained no canonical CPU, CUDA, or ROCm channels")
+        return result()
+    if len(channels) > MAX_RELEASE_CHANNELS:
+        issues.append(
+            f"Official wheel directory exceeded the {MAX_RELEASE_CHANNELS}-channel scan limit"
+        )
+        channels = channels[:MAX_RELEASE_CHANNELS]
+    if time.monotonic() >= deadline:
+        issues.append("Release scan deadline elapsed before channel indexes could be checked")
+        return result()
+
+    checked_channels.extend(channels)
+    executor = ThreadPoolExecutor(max_workers=MAX_RELEASE_WORKERS)
+    try:
+        futures = {channel: executor.submit(index_loader, channel) for channel in channels}
+        done, _ = wait(futures.values(), timeout=max(0, deadline - time.monotonic()))
+        seen = set()
+        for channel in channels:
+            if time.monotonic() >= deadline:
+                issues.append(
+                    f"{channel} Torch index was not fully checked before the scan deadline"
+                )
+                continue
+            future = futures[channel]
+            if future not in done:
+                issues.append(f"{channel} Torch index was not verified before the scan deadline")
+                continue
+            try:
+                links = future.result()
+            except (OSError, ValueError, TimeoutError) as error:
+                issues.append(
+                    f"{channel} Torch index could not be verified: {type(error).__name__}"
+                )
+                continue
+            for python, tags in installed.items():
+                for href in links:
+                    if time.monotonic() >= deadline:
+                        issues.append(
+                            f"{channel} Torch index was not fully checked before the scan deadline"
+                        )
+                        break
+                    wheel = wheel_match(href, version, channel, tags)
+                    if wheel is None:
+                        continue
+                    identity = (channel, python, wheel["wheelUrl"])
+                    if identity in seen:
+                        continue
+                    seen.add(identity)
+                    combination = {
+                        "build": channel,
+                        "python": python,
+                        "wheelUrl": wheel["wheelUrl"],
+                    }
+                    if wheel["sha256"] is not None:
+                        combination["sha256"] = wheel["sha256"]
+                    combinations.append(combination)
+                if time.monotonic() >= deadline:
+                    break
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+    python_order = (
+        {f"python{python}": index for index, python in enumerate(candidates)}
+        if python_candidates is not None
+        else {}
+    )
+    combinations.sort(
+        key=lambda item: (
+            checked_channels.index(item["build"]),
+            python_order.get(item["python"], len(python_order)),
+            item["python"],
+            item["wheelUrl"],
+        )
+    )
+    return result()
 
 
 def official_torch_url(url: str, build: str) -> bool:
@@ -346,9 +691,18 @@ def requirements_from_report(
     torch_entries = [
         item for item in entries if item["metadata"]["name"].lower().replace("_", "-") == "torch"
     ]
-    expected = f"{version}+{build}"
-    if len(torch_entries) != 1 or torch_entries[0]["metadata"]["version"] != expected:
+    target = native_target(
+        sys.platform,
+        platform.machine(),
+        f"{sys.version_info.major}.{sys.version_info.minor}",
+        sys.implementation.name,
+    )
+    expected_versions = {f"{version}+{build}"}
+    if target == "macos" and build == "cpu":
+        expected_versions.add(version)
+    if len(torch_entries) != 1 or torch_entries[0]["metadata"]["version"] not in expected_versions:
         raise ValueError(f"Official {build} artifact for Torch {version} was not resolved")
+    resolved_torch = torch_entries[0]["metadata"]["version"]
     lines = []
     artifacts = []
     seen = set()
@@ -364,8 +718,16 @@ def requirements_from_report(
             raise ValueError(f"No SHA-256 provenance for {name}")
         if not trusted_wheel_url(url, build, name, adapter):
             raise ValueError(f"Untrusted or non-binary artifact for {name}: {url}")
-        if name == "torchvision" and not item["metadata"]["version"].endswith(f"+{build}"):
-            raise ValueError("Torchvision build differs from the selected Torch build")
+        if name == "torchvision":
+            vision_version = item["metadata"]["version"]
+            local_build = vision_version.endswith(f"+{build}")
+            plain_mac_cpu = (
+                target == "macos"
+                and build == "cpu"
+                and re.fullmatch(r"\d+\.\d+\.\d+", vision_version)
+            )
+            if not (local_build or plain_mac_cpu):
+                raise ValueError("Torchvision build differs from the selected Torch build")
         if name == "nunchaku" and (adapter != "nunchaku" or digest.lower() != NUNCHAKU_SHA256):
             raise ValueError("Nunchaku artifact differs from the qualified wheel")
         lines.append(f"{name} @ {url} --hash=sha256:{digest}")
@@ -391,7 +753,8 @@ def requirements_from_report(
     if missing:
         raise ValueError(f"Resolution omitted requested packages: {', '.join(sorted(missing))}")
     return lines, {
-        "torch": expected,
+        "release": version,
+        "torch": resolved_torch,
         "build": build,
         "adapter": adapter,
         "python": f"{sys.version_info.major}.{sys.version_info.minor}",
@@ -403,32 +766,49 @@ def requirements_from_report(
     }
 
 
-def resolution_failure(stderr: str, version: str, build: str) -> tuple[int, str]:
+def resolution_failure(
+    stderr: str,
+    version: str,
+    build: str,
+    adapter: str = "none",
+    torch_requirement: str | None = None,
+) -> tuple[int, str]:
     lowered = stderr.lower()
     if any(marker in lowered for marker in NETWORK_MARKERS):
         return (
             75,
             "Wheel index access failed; availability is inconclusive. Retry with network access.",
         )
-    if (
-        f"no matching distribution found for torch=={version}+{build}" in lowered
-        or f"could not find a version that satisfies the requirement torch=={version}+{build}"
-        in lowered
-    ):
+    if any(marker in lowered for marker in METADATA_MARKERS):
         return (
-            2,
-            f"No official {build} Torch {version} wheel matches this interpreter and platform.",
+            1,
+            "Package metadata prevented a conclusive resolution. Review pip output or try another Python or build.",
         )
-    if (
-        "no matching distribution found for " in lowered
-        or "could not find a version that satisfies the requirement " in lowered
-    ):
+    missing = MISSING_REQUIREMENT.findall(lowered)
+    if f"torch=={torch_requirement or f'{version}+{build}'}" in missing:
+        return (
+            4,
+            f"No official Torch {version}+{build} wheel matches this interpreter and platform. Choose another build or installed Python.",
+        )
+    if missing:
+        requested = set(CORE)
+        if adapter != "none":
+            requested.update(requirement.partition("==")[0] for requirement in IMAGE)
+        if adapter == "nunchaku":
+            requested.add("nunchaku")
+        names = [re.match(r"[a-z0-9][a-z0-9._-]*", requirement).group() for requirement in missing]
+        named = next((name for name in names if name in requested), None)
         return (
             2,
-            "A requested package has no compatible wheel for this interpreter, platform, and build.",
+            f"No compatible binary wheel was found for requested package {named}. Choose another Python, build, or adapter."
+            if named
+            else "A required dependency has no compatible binary wheel. Choose another Python, build, or adapter.",
         )
     if "resolutionimpossible" in lowered or "conflicting dependencies" in lowered:
-        return 2, "The selected package requirements are incompatible."
+        return (
+            2,
+            "The selected package requirements conflict. Choose another Python, build, or adapter.",
+        )
     return (
         1,
         "Dependency resolution failed; wheel availability is inconclusive. Review pip output.",
@@ -438,16 +818,58 @@ def resolution_failure(stderr: str, version: str, build: str) -> tuple[int, str]
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", required=True)
-    parser.add_argument("--build", choices=BUILDS, required=True)
+    parser.add_argument("--build")
     parser.add_argument("--adapter", choices=ADAPTERS, default="none")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--cache-dir", type=Path)
     parser.add_argument("--discover", action="store_true")
+    parser.add_argument("--release-options", action="store_true")
     parser.add_argument("--selected-python")
     parser.add_argument("--interpreter", action="append", default=[])
+    parser.add_argument("--python-candidate", action="append")
+    parser.add_argument("--torch-wheel")
+    parser.add_argument("--torch-sha256")
     args = parser.parse_args()
     if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
         parser.error("Only stable upstream Torch versions are supported")
+    if args.release_options:
+        if (
+            args.discover
+            or args.build
+            or args.output
+            or args.selected_python
+            or args.cache_dir is not None
+            or args.adapter != "none"
+            or args.torch_wheel is not None
+            or args.torch_sha256 is not None
+        ):
+            parser.error("Release options accepts only --version and one or more --interpreter")
+        if not args.interpreter:
+            parser.error("Release options requires at least one --interpreter")
+        if args.python_candidate is not None and len(args.interpreter) != 1:
+            parser.error("Python candidates require exactly one bootstrap --interpreter")
+        try:
+            if args.python_candidate is None:
+                result = discover_release_options(args.version, args.interpreter)
+            else:
+                result = discover_release_options(
+                    args.version, args.interpreter, python_candidates=args.python_candidate
+                )
+        except ValueError as error:
+            parser.exit(2, f"{error}\n")
+        print(json.dumps(result), flush=True)
+        return
+    if args.build is None:
+        parser.error("Resolution and discovery require --build")
+    if args.python_candidate is not None:
+        parser.error("--python-candidate is only valid with --release-options")
+    if args.torch_sha256 is not None and args.torch_wheel is None:
+        parser.error("--torch-sha256 requires --torch-wheel")
+    if not RELEASE_CHANNEL.fullmatch(args.build):
+        parser.error("Select a canonical CPU, CUDA, or ROCm build channel")
     if args.discover:
+        if args.cache_dir is not None:
+            parser.error("Discovery does not accept --cache-dir")
         if not args.selected_python or not args.interpreter:
             parser.error("Discovery requires --selected-python and at least one --interpreter")
         try:
@@ -460,18 +882,43 @@ def main() -> None:
         return
     if args.output is None:
         parser.error("Resolution requires --output")
+    if args.torch_wheel is None:
+        parser.error("Resolution requires --torch-wheel from official discovery")
     try:
+        target = native_target(
+            sys.platform,
+            platform.machine(),
+            f"{sys.version_info.major}.{sys.version_info.minor}",
+            sys.implementation.name,
+        )
         extras = adapter_requirements(args.adapter, args.version, args.build)
+        tags = {str(tag) for tag in packaging_tags.sys_tags()}
+        selected_wheel = wheel_match(args.torch_wheel, args.version, args.build, tags)
+        if selected_wheel is None or selected_wheel["wheelUrl"] != args.torch_wheel:
+            raise ValueError("Selected Torch wheel is not an exact compatible official artifact")
+        if args.torch_sha256 is not None and not re.fullmatch(
+            r"[0-9a-fA-F]{64}", args.torch_sha256
+        ):
+            raise ValueError("Selected Torch wheel SHA-256 is invalid")
     except ValueError as error:
         parser.exit(2, f"{error}\n")
     args.output.mkdir(parents=True, exist_ok=True)
+    cache_dir = args.cache_dir or args.output / "pip-cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
     report_path = args.output / "pip-resolution.json"
+    torch_requirement = (
+        args.version
+        if target == "macos" and args.build == "cpu"
+        else f"{args.version}+{args.build}"
+    )
     command = [
         sys.executable,
         "-I",
         "-m",
         "pip",
         "--isolated",
+        "--cache-dir",
+        str(cache_dir),
         "install",
         "--dry-run",
         "--report",
@@ -482,7 +929,8 @@ def main() -> None:
         f"https://download.pytorch.org/whl/{args.build}",
         "--extra-index-url",
         "https://pypi.org/simple",
-        f"torch=={args.version}+{args.build}",
+        f"torch @ {args.torch_wheel}"
+        + (f"#sha256={args.torch_sha256}" if args.torch_sha256 is not None else ""),
         *CORE,
         *extras,
     ]
@@ -490,17 +938,29 @@ def main() -> None:
     print(completed.stdout, end="", flush=True)
     print(completed.stderr, end="", file=sys.stderr, flush=True)
     if completed.returncode:
-        code, message = resolution_failure(completed.stderr, args.version, args.build)
+        code, message = resolution_failure(
+            completed.stderr, args.version, args.build, args.adapter, torch_requirement
+        )
         parser.exit(code, f"{message}\n")
     try:
-        report = json.loads(report_path.read_text())
+        report = json.loads(report_path.read_text(encoding="utf-8"))
         requirements, resolution = requirements_from_report(
             report, args.version, args.build, args.adapter
         )
+        torch_artifact = next(item for item in resolution["artifacts"] if item["name"] == "torch")
+        if torch_artifact["url"] != args.torch_wheel or (
+            args.torch_sha256 is not None
+            and torch_artifact["sha256"].lower() != args.torch_sha256.lower()
+        ):
+            raise ValueError("Resolved Torch artifact differs from the selected wheel")
     except (KeyError, TypeError, ValueError, OSError) as error:
         parser.exit(3, f"Invalid wheel resolution: {error}\n")
-    (args.output / "requirements.txt").write_text("\n".join(requirements) + "\n")
-    (args.output / "resolution.json").write_text(json.dumps(resolution, indent=2) + "\n")
+    (args.output / "requirements.txt").write_text(
+        "\n".join(requirements) + "\n", encoding="utf-8", newline="\n"
+    )
+    (args.output / "resolution.json").write_text(
+        json.dumps(resolution, indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
 
 
 if __name__ == "__main__":

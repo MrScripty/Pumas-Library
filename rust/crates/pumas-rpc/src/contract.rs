@@ -241,6 +241,10 @@ pub(crate) enum RpcCommand {
     #[cfg(feature = "inference-plugins")]
     GetTorchRuntimeOptions,
     #[cfg(feature = "inference-plugins")]
+    GetTorchReleaseOptions {
+        tag: String,
+    },
+    #[cfg(feature = "inference-plugins")]
     PreviewTorchRuntime {
         tag: String,
         build: String,
@@ -453,6 +457,8 @@ impl RpcCommand {
             #[cfg(feature = "inference-plugins")]
             Self::GetTorchRuntimeOptions => "get_torch_runtime_options",
             #[cfg(feature = "inference-plugins")]
+            Self::GetTorchReleaseOptions { .. } => "get_torch_release_options",
+            #[cfg(feature = "inference-plugins")]
             Self::PreviewTorchRuntime { .. } => "preview_torch_runtime",
             #[cfg(feature = "inference-plugins")]
             Self::GetTorchPreviewReport { .. } => "get_torch_preview_report",
@@ -604,6 +610,8 @@ pub(crate) enum RpcOutcome {
     #[cfg(feature = "inference-plugins")]
     TorchRuntimeOptions(Value),
     #[cfg(feature = "inference-plugins")]
+    TorchReleaseOptions(TorchReleaseOptionsOutcome),
+    #[cfg(feature = "inference-plugins")]
     TorchRuntimePreview(TorchRuntimePreviewOutcome),
     #[cfg(feature = "inference-plugins")]
     TorchPreviewReport(Value),
@@ -725,6 +733,8 @@ impl RpcOutcome {
             | Self::TorchPreviewReport(value)
             | Self::TorchRuntimeProbe(value)
             | Self::TorchAlternatives(value) => Ok(value),
+            #[cfg(feature = "inference-plugins")]
+            Self::TorchReleaseOptions(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
             Self::TorchRuntimePreview(value) => serde_json::to_value(value),
             #[cfg(feature = "inference-plugins")]
@@ -3736,6 +3746,232 @@ pub(crate) struct InstallVersionParams {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct GetTorchReleaseOptionsParams {
+    tag: String,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct TorchReleaseOptionsOutcome {
+    tag: String,
+    status: TorchReleaseOptionsStatus,
+    complete_scan: bool,
+    checked_channels: Vec<String>,
+    combinations: Vec<TorchReleaseCombination>,
+    issues: Vec<String>,
+    detected_gpu_vendors: Vec<TorchGpuVendor>,
+    driver_status: TorchReleaseDriverStatus,
+    recommended: Option<TorchReleaseRecommendation>,
+    recommendation_note: Option<String>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum TorchReleaseOptionsStatus {
+    Matches,
+    None,
+    Inconclusive,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct TorchReleaseCombination {
+    build: String,
+    python: String,
+    wheel_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sha256: Option<String>,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum TorchGpuVendor {
+    Nvidia,
+    Amd,
+    Intel,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct TorchReleaseDriverStatus {
+    nvidia: TorchDriverAvailability,
+    amd: TorchDriverAvailability,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) enum TorchDriverAvailability {
+    Available,
+    Unavailable,
+    NotPresent,
+    Unknown,
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
+pub(crate) struct TorchReleaseRecommendation {
+    build: String,
+    python: String,
+}
+
+#[cfg(feature = "inference-plugins")]
+impl TryFrom<pumas_app_manager::version_manager::TorchReleaseOptionsDiscovery>
+    for TorchReleaseOptionsOutcome
+{
+    type Error = PumasError;
+
+    fn try_from(
+        discovery: pumas_app_manager::version_manager::TorchReleaseOptionsDiscovery,
+    ) -> Result<Self, Self::Error> {
+        let mut value = serde_json::to_value(discovery)
+            .map_err(|_| invalid_domain_outcome("Torch release options"))?;
+        if value["recommendationNote"] == "" {
+            value["recommendationNote"] = Value::Null;
+        }
+        serde_json::from_value(value).map_err(|_| invalid_domain_outcome("Torch release options"))
+    }
+}
+
+#[cfg(test)]
+mod torch_release_options_contract_tests {
+    use super::*;
+
+    #[cfg(feature = "inference-plugins")]
+    #[test]
+    fn parser_requires_a_tag_and_rejects_extra_fields() {
+        let params = serde_json::json!({"tag": "v2.10.0"});
+        assert!(matches!(
+            parse_command("get_torch_release_options", Some(&params)),
+            Ok(RpcCommand::GetTorchReleaseOptions { tag }) if tag == "v2.10.0"
+        ));
+        assert!(parse_command("get_torch_release_options", None).is_err());
+        assert!(parse_command(
+            "get_torch_release_options",
+            Some(&serde_json::json!({"tag": "v2.10.0", "build": "cu130"}))
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn typed_release_options_use_the_expected_wire_shape() {
+        let outcome = TorchReleaseOptionsOutcome {
+            tag: "v2.10.0".into(),
+            status: TorchReleaseOptionsStatus::Matches,
+            complete_scan: true,
+            checked_channels: vec!["cu130".into()],
+            combinations: vec![TorchReleaseCombination {
+                build: "cu130".into(),
+                python: "python3.12".into(),
+                wheel_url: "https://download.pytorch.org/whl/cu130/torch.whl".into(),
+                sha256: None,
+            }],
+            issues: Vec::new(),
+            detected_gpu_vendors: vec![TorchGpuVendor::Nvidia],
+            driver_status: TorchReleaseDriverStatus {
+                nvidia: TorchDriverAvailability::Available,
+                amd: TorchDriverAvailability::NotPresent,
+            },
+            recommended: Some(TorchReleaseRecommendation {
+                build: "cu130".into(),
+                python: "python3.12".into(),
+            }),
+            recommendation_note: None,
+        };
+        let value = serde_json::to_value(outcome).unwrap();
+        assert_eq!(value["status"], "matches");
+        assert_eq!(value["completeScan"], true);
+        assert_eq!(value["checkedChannels"], serde_json::json!(["cu130"]));
+        assert_eq!(
+            value["combinations"][0]["wheelUrl"],
+            "https://download.pytorch.org/whl/cu130/torch.whl"
+        );
+        assert!(value["combinations"][0].get("sha256").is_none());
+        assert_eq!(value["detectedGpuVendors"], serde_json::json!(["nvidia"]));
+        assert_eq!(
+            value["driverStatus"],
+            serde_json::json!({"nvidia":"available","amd":"not_present"})
+        );
+        assert_eq!(value["recommended"]["build"], "cu130");
+        assert!(value["recommendationNote"].is_null());
+        assert!(serde_json::from_value::<TorchReleaseOptionsOutcome>(value.clone()).is_ok());
+        let mut invalid = value;
+        invalid["detectedGpuVendors"] = serde_json::json!(["unrecognized"]);
+        assert!(serde_json::from_value::<TorchReleaseOptionsOutcome>(invalid).is_err());
+    }
+
+    #[cfg(feature = "inference-plugins")]
+    #[test]
+    fn manager_discovery_projects_into_typed_release_options() {
+        use pumas_app_manager::version_manager::{
+            TorchReleaseDriverAvailability as Driver, TorchReleaseDriverStatus as Drivers,
+            TorchReleaseOptionsDiscovery as Discovery, TorchReleaseOptionsStatus as Status,
+        };
+
+        let discovery = Discovery {
+            tag: "v2.10.0".into(),
+            status: Status::None,
+            complete_scan: true,
+            checked_channels: vec!["cpu".into()],
+            combinations: Vec::new(),
+            issues: Vec::new(),
+            detected_gpu_vendors: vec!["intel".into()],
+            driver_status: Drivers {
+                nvidia: Driver::NotPresent,
+                amd: Driver::NotPresent,
+            },
+            recommended: None,
+            recommendation_note: String::new(),
+        };
+        let mut invalid = discovery.clone();
+        invalid.detected_gpu_vendors = vec!["private vendor detail".into()];
+        assert!(TorchReleaseOptionsOutcome::try_from(invalid).is_err());
+        let projected: TorchReleaseOptionsOutcome = discovery.try_into().unwrap();
+        let value = RpcOutcome::TorchReleaseOptions(projected)
+            .into_value()
+            .unwrap();
+        assert_eq!(value["status"], "none");
+        assert!(value["recommended"].is_null());
+        assert!(value["recommendationNote"].is_null());
+        assert_eq!(value["detectedGpuVendors"], serde_json::json!(["intel"]));
+    }
+
+    #[cfg(feature = "export-contract")]
+    #[test]
+    fn export_includes_release_option_schemas() {
+        let schemas = desktop_contract_schema().unwrap();
+        for name in [
+            "GetTorchReleaseOptionsParams",
+            "TorchReleaseOptionsOutcome",
+            "TorchReleaseOptionsStatus",
+            "TorchReleaseCombination",
+            "TorchGpuVendor",
+            "TorchReleaseDriverStatus",
+            "TorchDriverAvailability",
+            "TorchReleaseRecommendation",
+        ] {
+            assert!(schemas["schemas"][name].is_object(), "missing {name}");
+        }
+    }
+}
+
+#[cfg(any(feature = "inference-plugins", feature = "export-contract", test))]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) struct PreviewTorchRuntimeParams {
     tag: String,
     build: String,
@@ -3888,7 +4124,7 @@ impl TryFrom<pumas_app_manager::version_manager::TorchPreviewOutcome>
                     },
                 }
             }
-            TorchPreviewOutcome::Rejected { reason, .. } => {
+            TorchPreviewOutcome::Rejected { reason, message } => {
                 let reason = match reason {
                     TorchPreviewRejectionReason::Unsupported => {
                         TorchRuntimePreviewRejectionReason::Unsupported
@@ -3903,10 +4139,32 @@ impl TryFrom<pumas_app_manager::version_manager::TorchPreviewOutcome>
                         TorchRuntimePreviewRejectionReason::Inconclusive
                     }
                 };
-                Self::Rejected {
-                    reason,
-                    message: reason.message(),
-                }
+                // The manager's message is static but may still contain private text.
+                // Only these known stage messages are safe to expose verbatim.
+                let message = match reason {
+                    TorchRuntimePreviewRejectionReason::Unsupported
+                        if message
+                            == "No compatible official Torch wheel was found for this version, build, and Python selection." =>
+                    {
+                        message
+                    }
+                    TorchRuntimePreviewRejectionReason::Inconclusive
+                        if matches!(
+                            message,
+                            "The managed Python catalog exceeded the bounded candidate scan."
+                                | "The managed Python catalog could not be verified."
+                                | "Official wheel discovery did not complete conclusively."
+                                | "No stable native CPython candidate is available from the managed provider."
+                                | "The managed Python interpreter could not be provisioned."
+                                | "Torch artifact checking timed out. Cached wheel downloads may be reused if you retry."
+                                | "Pip could not complete dependency resolution. Wheel availability is inconclusive; check network or package-index access and retry."
+                        ) =>
+                    {
+                        message
+                    }
+                    _ => reason.message(),
+                };
+                Self::Rejected { reason, message }
             }
         })
     }
@@ -3962,22 +4220,98 @@ mod torch_preview_contract_tests {
 
     #[cfg(feature = "inference-plugins")]
     #[test]
-    fn manager_rejection_message_cannot_cross_rpc_boundary() {
-        let outcome = pumas_app_manager::version_manager::TorchPreviewOutcome::Rejected {
-            reason:
-                pumas_app_manager::version_manager::TorchPreviewRejectionReason::ValidationFailed,
-            message: "private resolver stderr /secret/path",
+    fn manager_rejection_message_survives_rpc_boundary() {
+        use pumas_app_manager::version_manager::{
+            TorchPreviewOutcome, TorchPreviewRejectionReason,
         };
-        let projected: TorchRuntimePreviewOutcome = outcome.try_into().unwrap();
-        let value = RpcOutcome::TorchRuntimePreview(projected)
-            .into_value()
-            .unwrap();
-        assert_eq!(value["reason"], "validation_failed");
-        assert_eq!(
-            value["message"],
-            TorchRuntimePreviewRejectionReason::ValidationFailed.message()
-        );
-        assert!(!value.to_string().contains("private resolver"));
+
+        for (reason, expected_reason, message) in [
+            (
+                TorchPreviewRejectionReason::Unsupported,
+                "unsupported",
+                "No compatible official Torch wheel was found for this version, build, and Python selection.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "The managed Python catalog exceeded the bounded candidate scan.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "The managed Python catalog could not be verified.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "Official wheel discovery did not complete conclusively.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "No stable native CPython candidate is available from the managed provider.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "The managed Python interpreter could not be provisioned.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "Wheel resolution did not complete conclusively.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "Torch artifact checking timed out. Cached wheel downloads may be reused if you retry.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "Pip could not complete dependency resolution. Wheel availability is inconclusive; check network or package-index access and retry.",
+            ),
+        ] {
+            let outcome = TorchPreviewOutcome::Rejected { reason, message };
+            let projected: TorchRuntimePreviewOutcome = outcome.try_into().unwrap();
+            let value = RpcOutcome::TorchRuntimePreview(projected)
+                .into_value()
+                .unwrap();
+            assert_eq!(value["reason"], expected_reason);
+            assert_eq!(value["message"], message);
+        }
+    }
+
+    #[cfg(feature = "inference-plugins")]
+    #[test]
+    fn manager_unknown_or_mismatched_rejection_message_is_redacted() {
+        use pumas_app_manager::version_manager::{
+            TorchPreviewOutcome, TorchPreviewRejectionReason,
+        };
+
+        for (reason, message, expected_reason, expected_message) in [
+            (
+                TorchPreviewRejectionReason::ValidationFailed,
+                "private resolver stderr /secret/path",
+                "validation_failed",
+                TorchRuntimePreviewRejectionReason::ValidationFailed.message(),
+            ),
+            (
+                TorchPreviewRejectionReason::Unsupported,
+                "The managed Python catalog could not be verified.",
+                "unsupported",
+                TorchRuntimePreviewRejectionReason::Unsupported.message(),
+            ),
+        ] {
+            let outcome = TorchPreviewOutcome::Rejected { reason, message };
+            let projected: TorchRuntimePreviewOutcome = outcome.try_into().unwrap();
+            let value = RpcOutcome::TorchRuntimePreview(projected)
+                .into_value()
+                .unwrap();
+            assert_eq!(value["reason"], expected_reason);
+            assert_eq!(value["message"], expected_message);
+            assert!(!value.to_string().contains(message));
+        }
     }
 
     #[cfg(feature = "inference-plugins")]
@@ -5957,6 +6291,9 @@ fn parse_command(method: &str, params: Option<&Value>) -> Result<RpcCommand, Pub
         }
         #[cfg(feature = "inference-plugins")]
         "get_torch_runtime_options" => empty().map(|()| RpcCommand::GetTorchRuntimeOptions),
+        #[cfg(feature = "inference-plugins")]
+        "get_torch_release_options" => parse_params::<GetTorchReleaseOptionsParams>(params)
+            .map(|params| RpcCommand::GetTorchReleaseOptions { tag: params.tag }),
         #[cfg(feature = "inference-plugins")]
         "preview_torch_runtime" => {
             parse_params::<PreviewTorchRuntimeParams>(params).map(|params| {

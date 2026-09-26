@@ -2301,7 +2301,9 @@ dependencies = [
  "bytes",
  "chrono",
  "flate2",
+ "fs2",
  "futures",
+ "getrandom 0.3.4",
  "nix 0.29.0",
  "pumas-library",
  "regex",
@@ -2315,6 +2317,7 @@ dependencies = [
  "tokio",
  "tracing",
  "walkdir",
+ "windows-sys 0.59.0",
  "zip",
  "zstd",
 ]

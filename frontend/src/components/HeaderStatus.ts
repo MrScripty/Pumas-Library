@@ -1,6 +1,7 @@
 import { Clock, Database, Download, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react';
 import type { ActiveModelDownload } from '../hooks/useActiveModelDownload';
 import { formatBytes, formatSpeed } from '../utils/formatters';
+import { getInstallActivityPresentation } from '../utils/installActivityPresentation';
 
 export interface InstallationProgress {
   tag: string;
@@ -49,12 +50,14 @@ function getCombinedDownloadStatus({
   activeModelDownload,
   activeModelDownloadCount,
   installationProgress,
+  runtimePending = false,
 }: {
   activeModelDownload?: ActiveModelDownload | null;
   activeModelDownloadCount: number;
   installationProgress?: InstallationProgress | null;
+  runtimePending?: boolean;
 }): HeaderStatusInfo | null {
-  const runtimeActive = Boolean(installationProgress && !installationProgress.completed_at);
+  const runtimeActive = runtimePending || Boolean(installationProgress && !installationProgress.completed_at);
   const modelCount = activeModelDownload ? Math.max(activeModelDownloadCount, 1) : 0;
   const runtimeCount = runtimeActive ? 1 : 0;
 
@@ -159,23 +162,57 @@ function getActiveDownloadStatus(
 }
 
 export function getHeaderStatusInfo({
+  appId,
   activeModelDownload,
   activeModelDownloadCount,
   installationProgress,
+  installingTag,
   modelLibraryLoaded,
   networkAvailable,
 }: {
+  appId?: string | null;
   activeModelDownload?: ActiveModelDownload | null;
   activeModelDownloadCount: number;
   installationProgress?: InstallationProgress | null;
+  installingTag?: string | null;
   modelLibraryLoaded?: boolean | null;
   networkAvailable?: boolean | null;
 }): HeaderStatusInfo {
+  const activity = getInstallActivityPresentation({ appId, installingTag, progress: installationProgress });
   const combinedDownloadStatus = getCombinedDownloadStatus({
     activeModelDownload,
     activeModelDownloadCount,
     installationProgress,
+    runtimePending: activity.active,
   });
+  if (activity.active && activeModelDownload && activeModelDownload.status !== 'downloading') {
+    const modelStatus = getActiveDownloadStatus(activeModelDownload, activeModelDownloadCount);
+    return {
+      ...modelStatus,
+      text: `${modelStatus.text} · ${appId === 'torch' ? 'Torch ' : ''}runtime: ${activity.phase}`,
+    };
+  }
+  if (appId === 'torch' && activity.active && activeModelDownload && combinedDownloadStatus) {
+    return {
+      ...combinedDownloadStatus,
+      text: `${combinedDownloadStatus.text} · Torch: ${activity.phase}`,
+    };
+  }
+  if (activity.active && !installationProgress && activeModelDownload && combinedDownloadStatus) {
+    return {
+      ...combinedDownloadStatus,
+      text: `${combinedDownloadStatus.text} · ${activity.phase}`,
+    };
+  }
+  if (activity.active && (appId === 'torch' || !installationProgress)) {
+    return {
+      icon: activity.indeterminate ? RefreshCw : Download,
+      spinning: activity.indeterminate,
+      text: appId === 'torch'
+        ? `Installing Torch ${installingTag ?? installationProgress?.tag} · ${activity.phase}`
+        : activity.phase,
+    };
+  }
   if (combinedDownloadStatus) {
     return combinedDownloadStatus;
   }

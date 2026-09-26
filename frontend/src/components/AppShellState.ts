@@ -61,9 +61,11 @@ interface BuildModelManagerPropsOptions {
 }
 
 interface BuildAppShellHeaderOptions {
+  appId?: AppHeaderProps['appId'];
   activeModelDownload: AppHeaderProps['activeModelDownload'];
   activeModelDownloadCount: number;
   installationProgress: AppHeaderProps['installationProgress'];
+  installingTag?: AppHeaderProps['installingTag'];
   isCheckingLauncherUpdates: boolean;
   launcherLatestVersion: string | null;
   launcherUpdateAvailable: boolean;
@@ -181,9 +183,11 @@ export function buildModelManagerProps({
 }
 
 export function buildAppShellHeader({
+  appId,
   activeModelDownload,
   activeModelDownloadCount,
   installationProgress,
+  installingTag,
   isCheckingLauncherUpdates,
   launcherLatestVersion,
   launcherUpdateAvailable,
@@ -197,6 +201,7 @@ export function buildAppShellHeader({
   onMinimize,
 }: BuildAppShellHeaderOptions): AppHeaderProps {
   return {
+    appId,
     systemResources,
     appResources: status?.app_resources?.ollama,
     launcherUpdateAvailable,
@@ -213,6 +218,7 @@ export function buildAppShellHeader({
     networkAvailable,
     modelLibraryLoaded,
     installationProgress,
+    installingTag,
     activeModelDownload,
     activeModelDownloadCount,
   };

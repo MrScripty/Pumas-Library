@@ -66,11 +66,26 @@ torch-server/.venv/bin/python torch-server/serve.py --host 127.0.0.1 --port 8400
 These commands are for direct development only. The managed `v2.9.1` known-good
 preset uses `runtime/requirements.lock`, including its official hash-pinned
 Torch and torchvision wheels. The shared VersionManager discovers stable
-upstream releases independently of that preset. For other releases it resolves
-an official CPU wheel by default (or an explicitly configured CUDA/ROCm index),
-selects an installed compatible Python 3.10–3.13 interpreter, and records the
-exact wheel URLs, hashes, and package versions in `resolution.json`. It does not
-provision Python or build from source. The sidecar is embedded in the Pumas app,
+upstream releases independently of that preset. A Torch release does not
+declare one Python version for every install: its official wheels declare
+compatible Python ABI and platform tags. For an upstream release, Pumas
+provisions the newest stable native CPython candidate from its pinned provider
+catalog, checks the exact official Torch wheel and complete dependency set, then
+uses an older candidate only when the newer one is proven incompatible. Pumas
+does not require Python on the host or a Python choice from the user. CPython
+3.10 is the sidecar's minimum; there is no configured upper minor-version cap.
+Provider, network, or incomplete-scan failures remain inconclusive and do not
+silently select an older interpreter. The manager records the selected
+distribution source, full version, target, provider pin, executable
+fingerprint, exact wheel URLs, hashes, and package versions with the installed
+runtime. Installation uses official binary wheels only and never falls back to
+a source build.
+
+This managed-Python path is being integrated. Clean-host downloads and native
+provisioning/package acceptance on Linux, Windows, and macOS remain pending in
+the [cross-platform runtime plan](../docs/plans/torch-cross-platform-runtime-management/plan.md).
+Windows x86_64 and macOS arm64 support should be considered available only
+after that native acceptance passes. The sidecar is embedded in the Pumas app,
 so no Pumas-hosted Torch release bundle is required. Adapter dependencies are
 outside the core automatic install; an unavailable adapter affects its feature,
 not the installation of Torch itself.

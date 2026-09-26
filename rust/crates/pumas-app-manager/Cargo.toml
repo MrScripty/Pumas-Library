@@ -26,6 +26,7 @@ tracing = { workspace = true }
 # File operations
 tempfile = { workspace = true }
 walkdir = { workspace = true }
+fs2 = { workspace = true }
 
 # Archive extraction
 zip = { workspace = true }
@@ -48,6 +49,7 @@ futures = { workspace = true }
 
 # Hashing (for Ollama blob uploads)
 sha2 = { workspace = true }
+getrandom = "=0.3.4"
 
 # Byte buffers (for streaming uploads)
 bytes = { workspace = true }
@@ -58,6 +60,9 @@ nix = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true }
 
 [lints]
 workspace = true

@@ -2,16 +2,20 @@ import type {
   TorchRuntimePreview as DesktopTorchRuntimePreview,
   TorchRuntimePreviewOutcome as DesktopTorchRuntimePreviewOutcome,
   TorchRuntimePreviewRejectionReason as DesktopTorchRuntimePreviewRejectionReason,
+  TorchReleaseOptionsOutcome as DesktopTorchReleaseOptionsOutcome,
 } from '../generated/desktop-contract';
 
 export type TorchRuntimePreviewOutcome = DesktopTorchRuntimePreviewOutcome;
 export type TorchRuntimePreviewRejectReason = DesktopTorchRuntimePreviewRejectionReason;
 export type TorchRuntimePreview = DesktopTorchRuntimePreview;
+export type TorchReleaseOptionsOutcome = DesktopTorchReleaseOptionsOutcome;
 
 export interface TorchRuntimeOptions {
   builds: string[];
   pythons: Array<{ id: string; label: string }>;
   adapters: string[];
+  bundledPresetAvailable: boolean;
+  defaultAdapter: 'none' | 'flux2';
   preset: { tag: string; build: string; python: string; adapter: string };
   installed: TorchInstalledConfig[];
 }

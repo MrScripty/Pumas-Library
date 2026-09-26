@@ -3,6 +3,7 @@
 //! Manages the state of installed, active, and default versions.
 //! Handles state persistence and validation.
 
+use super::installer::TorchVersionsLock;
 use crate::version_manager::ValidationResult;
 use pumas_library::config::AppId;
 use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
@@ -35,6 +36,19 @@ fn legacy_llama_cpp_sycl_replacements(
         .collect()
 }
 
+async fn torch_metadata_transaction<T: Send + 'static>(
+    lock: &TorchVersionsLock,
+    work: impl FnOnce() -> Result<T> + Send + 'static,
+) -> Result<T> {
+    let lease = lock.clone();
+    tokio::task::spawn_blocking(move || {
+        let _lease = lease;
+        work()
+    })
+    .await
+    .map_err(|error| PumasError::Other(format!("Torch metadata task failed: {error}")))?
+}
+
 /// Tracks the state of all versions.
 pub struct VersionState {
     /// Root directory for launcher.
@@ -45,6 +59,8 @@ pub struct VersionState {
     metadata_manager: Arc<MetadataManager>,
     /// Set of installed version tags (cached).
     installed_tags: HashSet<String>,
+    /// Metadata from the same read as the cached tags and selections.
+    installed_metadata: HashMap<String, InstalledVersionMetadata>,
     /// Currently active version (session-specific).
     active_version: Option<String>,
     /// Default version from metadata.
@@ -52,6 +68,16 @@ pub struct VersionState {
 }
 
 impl VersionState {
+    fn torch_versions_lock(&self) -> Result<Option<TorchVersionsLock>> {
+        if self.app_id != AppId::Torch {
+            return Ok(None);
+        }
+        let versions_dir = self.launcher_root.join(self.app_id.versions_dir_name());
+        std::fs::create_dir_all(&versions_dir).map_err(PumasError::from)?;
+        Ok(Some(
+            TorchVersionsLock::try_acquire(&versions_dir).map_err(PumasError::from)?,
+        ))
+    }
     async fn load_versions_metadata(&self) -> Result<pumas_library::metadata::VersionsMetadata> {
         let metadata_manager = self.metadata_manager.clone();
         let app_id = self.app_id;
@@ -106,6 +132,7 @@ impl VersionState {
             app_id,
             metadata_manager,
             installed_tags: HashSet::new(),
+            installed_metadata: HashMap::new(),
             active_version: None,
             default_version: None,
         };
@@ -116,17 +143,50 @@ impl VersionState {
 
     /// Initialize state from metadata and filesystem.
     async fn initialize(&mut self) -> Result<()> {
+        if self.app_id == AppId::Torch {
+            let versions_dir = self.launcher_root.join(self.app_id.versions_dir_name());
+            let metadata = self.metadata_manager.clone();
+            match tokio::task::spawn_blocking(move || {
+                super::installer::retry_pending_torch_cleanup(&versions_dir, &metadata)
+            })
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => warn!(%error, "Torch cleanup recovery failed"),
+                Err(error) => warn!(%error, "Torch cleanup recovery task failed"),
+            }
+        }
         self.normalize_llama_cpp_legacy_sycl_variants().await?;
+
+        // A selection writes the marker before its metadata commit. Startup
+        // must not accept that marker while another backend owns the write.
+        let snapshot_lock = if self.app_id == AppId::Torch {
+            let versions_dir = self.launcher_root.join(self.app_id.versions_dir_name());
+            std::fs::create_dir_all(&versions_dir).map_err(PumasError::from)?;
+            match TorchVersionsLock::try_acquire(&versions_dir) {
+                Ok(lock) => Some(lock),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => None,
+                Err(error) => return Err(PumasError::from(error)),
+            }
+        } else {
+            None
+        };
 
         // Load metadata
         let versions = self.load_versions_metadata().await?;
 
-        // Cache installed tags
-        self.installed_tags = versions.installed.keys().cloned().collect();
-        self.default_version = versions.default_version.clone();
-
-        // Initialize active version
-        self.active_version = self.determine_active_version(&versions).await?;
+        let installed_tags = versions.installed.keys().cloned().collect();
+        let active_version = self
+            .determine_active_version(
+                &versions,
+                &installed_tags,
+                self.app_id != AppId::Torch || snapshot_lock.is_some(),
+            )
+            .await?;
+        self.installed_metadata = versions.installed;
+        self.installed_tags = installed_tags;
+        self.default_version = versions.default_version;
+        self.active_version = active_version;
 
         debug!(
             "Initialized version state: {} installed, active={:?}, default={:?}",
@@ -148,29 +208,43 @@ impl VersionState {
     async fn determine_active_version(
         &self,
         versions: &pumas_library::metadata::VersionsMetadata,
+        installed_tags: &HashSet<String>,
+        read_active_marker: bool,
     ) -> Result<Option<String>> {
         // 1. Check .active-version file
         let active_file = super::active_version_path(&self.launcher_root, self.app_id);
-        if fs::try_exists(&active_file)
-            .await
-            .map_err(|e| PumasError::Io {
-                message: format!("Failed to check active version file: {}", e),
-                path: Some(active_file.clone()),
-                source: Some(e),
-            })?
+        if read_active_marker
+            && fs::try_exists(&active_file)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to check active version file: {}", e),
+                    path: Some(active_file.clone()),
+                    source: Some(e),
+                })?
         {
             if let Ok(tag) = fs::read_to_string(&active_file).await {
                 let tag = tag.trim().to_string();
-                if !tag.is_empty() && self.installed_tags.contains(&tag) {
+                if !tag.is_empty() && installed_tags.contains(&tag) {
                     debug!("Active version from file: {}", tag);
                     return Ok(Some(tag));
                 }
             }
         }
 
+        // During a busy Torch transaction, the marker may be transitional.
+        // The committed last selection is a closer substitute for it than the
+        // configured default, which can intentionally point elsewhere.
+        if self.app_id == AppId::Torch && !read_active_marker {
+            if let Some(last) = &versions.last_selected_version {
+                if installed_tags.contains(last) {
+                    return Ok(Some(last.clone()));
+                }
+            }
+        }
+
         // 2. Default version
         if let Some(ref default) = versions.default_version {
-            if self.installed_tags.contains(default) {
+            if installed_tags.contains(default) {
                 debug!("Active version from default: {}", default);
                 return Ok(Some(default.clone()));
             }
@@ -178,7 +252,7 @@ impl VersionState {
 
         // 3. Last selected version
         if let Some(ref last) = versions.last_selected_version {
-            if self.installed_tags.contains(last) {
+            if installed_tags.contains(last) {
                 debug!("Active version from last selected: {}", last);
                 return Ok(Some(last.clone()));
             }
@@ -190,8 +264,8 @@ impl VersionState {
         }
 
         // 4. Newest installed version (lexicographically, which works for semver with v prefix)
-        if !self.installed_tags.is_empty() {
-            let mut sorted: Vec<_> = self.installed_tags.iter().cloned().collect();
+        if !installed_tags.is_empty() {
+            let mut sorted: Vec<_> = installed_tags.iter().cloned().collect();
             sorted.sort();
             sorted.reverse(); // Newest first
             let newest = sorted.into_iter().next();
@@ -204,20 +278,41 @@ impl VersionState {
 
     /// Refresh state from disk.
     pub async fn refresh(&mut self) -> Result<()> {
+        let lock = self.torch_versions_lock()?;
+        self.refresh_inner(lock.as_ref()).await
+    }
+
+    pub(crate) async fn refresh_with_lock(&mut self, lock: &TorchVersionsLock) -> Result<()> {
+        debug_assert_eq!(self.app_id, AppId::Torch);
+        self.refresh_inner(Some(lock)).await
+    }
+
+    async fn refresh_inner(&mut self, _lock: Option<&TorchVersionsLock>) -> Result<()> {
         self.normalize_llama_cpp_legacy_sycl_variants().await?;
 
         let versions = self.load_versions_metadata().await?;
-        self.installed_tags = versions.installed.keys().cloned().collect();
-        self.default_version = versions.default_version.clone();
+        let installed_tags: HashSet<String> = versions.installed.keys().cloned().collect();
 
-        // Re-validate active version
-        if let Some(ref active) = self.active_version {
-            if !self.installed_tags.contains(active) {
-                self.active_version = self.determine_active_version(&versions).await?;
-            }
+        // Torch selection is shared between backends; a cached but still
+        // installed tag can nevertheless be stale after another selection.
+        let active_version = if self.app_id == AppId::Torch {
+            self.determine_active_version(&versions, &installed_tags, true)
+                .await?
+        } else if self
+            .active_version
+            .as_ref()
+            .is_some_and(|active| installed_tags.contains(active))
+        {
+            self.active_version.clone()
         } else {
-            self.active_version = self.determine_active_version(&versions).await?;
-        }
+            self.determine_active_version(&versions, &installed_tags, true)
+                .await?
+        };
+
+        self.installed_metadata = versions.installed;
+        self.installed_tags = installed_tags;
+        self.default_version = versions.default_version;
+        self.active_version = active_version;
 
         Ok(())
     }
@@ -363,6 +458,10 @@ impl VersionState {
         self.default_version.clone()
     }
 
+    pub(crate) fn get_installed_metadata(&self, tag: &str) -> Option<&InstalledVersionMetadata> {
+        self.installed_metadata.get(tag)
+    }
+
     /// Check if a version is installed.
     pub fn is_installed(&self, tag: &str) -> bool {
         self.installed_tags.contains(tag)
@@ -387,28 +486,67 @@ impl VersionState {
 
     /// Set the active version.
     pub async fn set_active_version(&mut self, tag: &str) -> Result<bool> {
+        let lock = self.torch_versions_lock()?;
+        if lock.is_some() {
+            self.refresh_inner(lock.as_ref()).await?;
+        }
+        self.set_active_version_inner(tag, lock.as_ref()).await
+    }
+
+    pub(crate) async fn set_active_version_with_lock(
+        &mut self,
+        tag: &str,
+        lock: &TorchVersionsLock,
+    ) -> Result<bool> {
+        self.set_active_version_inner(tag, Some(lock)).await
+    }
+
+    async fn set_active_version_inner(
+        &mut self,
+        tag: &str,
+        lock: Option<&TorchVersionsLock>,
+    ) -> Result<bool> {
         if !self.is_installed(tag) {
             return Err(PumasError::VersionNotFound {
                 tag: tag.to_string(),
             });
         }
-
-        // Update in-memory state
-        self.active_version = Some(tag.to_string());
-
-        // Write to .active-version file
         let active_file = super::active_version_path(&self.launcher_root, self.app_id);
-        fs::write(&active_file, tag)
-            .await
-            .map_err(|e| PumasError::Io {
-                message: format!("Failed to write active version file: {}", e),
-                path: Some(active_file),
-                source: Some(e),
-            })?;
-
-        // Update last_selected_version in metadata
-        self.set_last_selected_version_metadata(Some(tag.to_string()))
+        if self.app_id == AppId::Torch {
+            let metadata = self.metadata_manager.clone();
+            let selected = tag.to_owned();
+            torch_metadata_transaction(lock.expect("Torch selection lock required"), move || {
+                let previous = match std::fs::read(&active_file) {
+                    Ok(bytes) => Some(bytes),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(error) => return Err(PumasError::io_with_path(error, &active_file)),
+                };
+                std::fs::write(&active_file, &selected)
+                    .map_err(|error| PumasError::io_with_path(error, &active_file))?;
+                if let Err(error) =
+                    metadata.set_last_selected_version(Some(&selected), Some(AppId::Torch))
+                {
+                    match previous {
+                        Some(bytes) => {
+                            let _ = std::fs::write(&active_file, bytes);
+                        }
+                        None => {
+                            let _ = std::fs::remove_file(&active_file);
+                        }
+                    }
+                    return Err(error);
+                }
+                Ok(())
+            })
             .await?;
+        } else {
+            fs::write(&active_file, tag)
+                .await
+                .map_err(|error| PumasError::io_with_path(error, &active_file))?;
+            self.set_last_selected_version_metadata(Some(tag.to_string()))
+                .await?;
+        }
+        self.active_version = Some(tag.to_string());
 
         info!("Set active version: {}", tag);
         Ok(true)
@@ -416,35 +554,85 @@ impl VersionState {
 
     /// Set the default version.
     pub async fn set_default_version(&mut self, tag: Option<&str>) -> Result<bool> {
+        let lock = self.torch_versions_lock()?;
+        if lock.is_some() {
+            self.refresh_inner(lock.as_ref()).await?;
+        }
+        self.set_default_version_inner(tag, lock.as_ref()).await
+    }
+
+    pub(crate) async fn set_default_version_with_lock(
+        &mut self,
+        tag: Option<&str>,
+        lock: &TorchVersionsLock,
+    ) -> Result<bool> {
+        self.set_default_version_inner(tag, Some(lock)).await
+    }
+
+    async fn set_default_version_inner(
+        &mut self,
+        tag: Option<&str>,
+        lock: Option<&TorchVersionsLock>,
+    ) -> Result<bool> {
         if let Some(t) = tag {
             if !self.is_installed(t) {
                 return Err(PumasError::VersionNotFound { tag: t.to_string() });
             }
         }
 
-        // Update in-memory state
-        self.default_version = tag.map(String::from);
-
-        // Update metadata
-        self.set_default_version_metadata(tag.map(String::from))
+        if self.app_id == AppId::Torch {
+            let metadata = self.metadata_manager.clone();
+            let selected = tag.map(str::to_owned);
+            torch_metadata_transaction(lock.expect("Torch selection lock required"), move || {
+                metadata.set_default_version(selected.as_deref(), Some(AppId::Torch))
+            })
             .await?;
+        } else {
+            self.set_default_version_metadata(tag.map(String::from))
+                .await?;
+        }
+        self.default_version = tag.map(String::from);
 
         info!("Set default version: {:?}", tag);
         Ok(true)
     }
 
-    pub(crate) async fn reset_torch_active_selection(&mut self) -> Result<()> {
+    pub(crate) async fn reset_torch_active_selection_with_lock(
+        &mut self,
+        lock: &TorchVersionsLock,
+    ) -> Result<()> {
         debug_assert_eq!(self.app_id, AppId::Torch);
-        self.active_version = None;
         let marker = super::active_version_path(&self.launcher_root, self.app_id);
-        match fs::remove_file(&marker).await {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(PumasError::io_with_path(error, &marker)),
-        }
-        self.set_last_selected_version_metadata(None).await?;
-        let versions = self.load_versions_metadata().await?;
-        self.active_version = self.determine_active_version(&versions).await?;
+        let metadata = self.metadata_manager.clone();
+        torch_metadata_transaction(lock, move || {
+            let previous = match std::fs::read(&marker) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => return Err(PumasError::io_with_path(error, &marker)),
+            };
+            match std::fs::remove_file(&marker) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(PumasError::io_with_path(error, &marker)),
+            }
+            if let Err(error) = metadata.set_last_selected_version(None, Some(AppId::Torch)) {
+                if let Some(bytes) = previous {
+                    let _ = std::fs::write(&marker, bytes);
+                }
+                return Err(error);
+            }
+            Ok(())
+        })
+        .await?;
+        let versions = self.metadata_manager.load_versions(Some(AppId::Torch))?;
+        let installed_tags: HashSet<String> = versions.installed.keys().cloned().collect();
+        let active_version = self
+            .determine_active_version(&versions, &installed_tags, true)
+            .await?;
+        self.installed_metadata = versions.installed;
+        self.installed_tags = installed_tags;
+        self.default_version = versions.default_version;
+        self.active_version = active_version;
         Ok(())
     }
 
@@ -454,31 +642,57 @@ impl VersionState {
         tag: &str,
         metadata: InstalledVersionMetadata,
     ) -> Result<()> {
+        let _lock = self.torch_versions_lock()?;
+        if self.app_id == AppId::Torch {
+            let versions = self.metadata_manager.load_versions(Some(AppId::Torch))?;
+            self.installed_tags = versions.installed.keys().cloned().collect();
+            self.installed_metadata = versions.installed;
+            self.default_version = versions.default_version;
+        }
+        let cached_metadata = metadata.clone();
         self.metadata_manager
             .update_installed_version(tag, metadata, Some(self.app_id))?;
         self.installed_tags.insert(tag.to_string());
+        self.installed_metadata
+            .insert(tag.to_string(), cached_metadata);
         debug!("Added installed version: {}", tag);
         Ok(())
     }
 
     /// Remove an installed version.
     pub async fn remove_installed_version(&mut self, tag: &str) -> Result<()> {
+        let lock = self.torch_versions_lock()?;
+        if lock.is_some() {
+            self.refresh_inner(lock.as_ref()).await?;
+        }
+        self.remove_installed_version_inner(tag, lock.as_ref())
+            .await
+    }
+
+    async fn remove_installed_version_inner(
+        &mut self,
+        tag: &str,
+        _lock: Option<&TorchVersionsLock>,
+    ) -> Result<()> {
         self.metadata_manager
             .remove_installed_version(tag, Some(self.app_id))?;
         self.installed_tags.remove(tag);
+        self.installed_metadata.remove(tag);
 
         // Clear active if it was this version
         if self.active_version.as_deref() == Some(tag) {
             self.active_version = None;
             // Clear .active-version file
             let active_file = super::active_version_path(&self.launcher_root, self.app_id);
-            if fs::try_exists(&active_file)
+            if self.app_id == AppId::Torch {
+                match std::fs::remove_file(&active_file) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(PumasError::io_with_path(error, &active_file)),
+                }
+            } else if fs::try_exists(&active_file)
                 .await
-                .map_err(|e| PumasError::Io {
-                    message: format!("Failed to check active version file: {}", e),
-                    path: Some(active_file.clone()),
-                    source: Some(e),
-                })?
+                .map_err(|error| PumasError::io_with_path(error, &active_file))?
             {
                 let _ = fs::remove_file(&active_file).await;
             }
@@ -499,6 +713,17 @@ impl VersionState {
 
     /// Validate all installations and remove incomplete ones.
     pub async fn validate_installations(&mut self) -> Result<ValidationResult> {
+        let lock = self.torch_versions_lock()?;
+        if lock.is_some() {
+            self.refresh_inner(lock.as_ref()).await?;
+        }
+        self.validate_installations_inner(lock.as_ref()).await
+    }
+
+    async fn validate_installations_inner(
+        &mut self,
+        lock: Option<&TorchVersionsLock>,
+    ) -> Result<ValidationResult> {
         let versions_dir = self.launcher_root.join(self.app_id.versions_dir_name());
         let mut removed_tags = Vec::new();
         let mut orphaned_dirs = Vec::new();
@@ -538,7 +763,7 @@ impl VersionState {
                 "Removing stale metadata entry for incomplete installation: {}",
                 tag
             );
-            self.remove_installed_version(tag).await?;
+            self.remove_installed_version_inner(tag, lock).await?;
             // NOTE: We no longer delete files automatically to prevent data loss
             // Orphaned directories will be reported but not deleted
         }
@@ -660,7 +885,7 @@ impl VersionState {
             AppId::Torch => vec![
                 version_path.join("runtime.json"),
                 version_path.join("serve.py"),
-                version_path.join("venv/bin/python"),
+                pumas_library::platform::paths::venv_python(version_path),
                 version_path.join("requirements.txt"),
             ],
             _ => {
@@ -775,6 +1000,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn torch_initialization_loads_versions_when_cleanup_marker_is_unreadable() {
+        let root = TempDir::new().unwrap();
+        let versions_dir = root.path().join(AppId::Torch.versions_dir_name());
+        std::fs::create_dir_all(&versions_dir).unwrap();
+        let metadata_manager = Arc::new(MetadataManager::new(root.path()));
+        metadata_manager.ensure_directories().unwrap();
+        metadata_manager
+            .update_installed_version(
+                "v1.0.0",
+                InstalledVersionMetadata {
+                    path: "v1.0.0".into(),
+                    release_tag: "v1.0.0".into(),
+                    ..Default::default()
+                },
+                Some(AppId::Torch),
+            )
+            .unwrap();
+        metadata_manager
+            .set_default_version(Some("v1.0.0"), Some(AppId::Torch))
+            .unwrap();
+
+        let marker = versions_dir.join(".torch-pending-cleanup-.torch-install-corrupt");
+        std::fs::write(&marker, [0xff]).unwrap();
+        assert!(super::super::installer::retry_pending_torch_cleanup(
+            &versions_dir,
+            &metadata_manager
+        )
+        .is_err());
+
+        let state = VersionState::new(root.path(), AppId::Torch, metadata_manager)
+            .await
+            .unwrap();
+
+        assert!(state.is_installed("v1.0.0"));
+        assert_eq!(state.get_default_version(), Some("v1.0.0".to_string()));
+        assert_eq!(state.get_active_version(), Some("v1.0.0".to_string()));
+        assert!(marker.exists());
+    }
+
+    #[tokio::test]
     async fn test_add_installed_version() {
         let (mut state, temp) = create_test_state().await;
 
@@ -782,8 +1047,9 @@ mod tests {
         let version_dir = temp.path().join("torch-versions/v1.0.0");
         std::fs::create_dir_all(&version_dir).unwrap();
         std::fs::write(version_dir.join("main.py"), "# main").unwrap();
-        std::fs::create_dir_all(version_dir.join("venv/bin")).unwrap();
-        std::fs::write(version_dir.join("venv/bin/python"), "#!/bin/python").unwrap();
+        let python = pumas_library::platform::paths::venv_python(&version_dir);
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(python, "#!/bin/python").unwrap();
 
         let metadata = InstalledVersionMetadata {
             path: "v1.0.0".to_string(),
@@ -806,8 +1072,9 @@ mod tests {
         let version_dir = temp.path().join("torch-versions/v1.0.0");
         std::fs::create_dir_all(&version_dir).unwrap();
         std::fs::write(version_dir.join("main.py"), "# main").unwrap();
-        std::fs::create_dir_all(version_dir.join("venv/bin")).unwrap();
-        std::fs::write(version_dir.join("venv/bin/python"), "#!/bin/python").unwrap();
+        let python = pumas_library::platform::paths::venv_python(&version_dir);
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(python, "#!/bin/python").unwrap();
 
         let metadata = InstalledVersionMetadata {
             path: "v1.0.0".to_string(),
@@ -848,8 +1115,9 @@ mod tests {
         let version_dir = temp.path().join("torch-versions/v1.0.0");
         std::fs::create_dir_all(&version_dir).unwrap();
         std::fs::write(version_dir.join("main.py"), "# main").unwrap();
-        std::fs::create_dir_all(version_dir.join("venv/bin")).unwrap();
-        std::fs::write(version_dir.join("venv/bin/python"), "#!/bin/python").unwrap();
+        let python = pumas_library::platform::paths::venv_python(&version_dir);
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(python, "#!/bin/python").unwrap();
 
         let metadata = InstalledVersionMetadata {
             path: "v1.0.0".to_string(),
@@ -876,8 +1144,9 @@ mod tests {
         let version_dir = temp.path().join("torch-versions/v1.0.0");
         std::fs::create_dir_all(&version_dir).unwrap();
         std::fs::write(version_dir.join("main.py"), "# main").unwrap();
-        std::fs::create_dir_all(version_dir.join("venv/bin")).unwrap();
-        std::fs::write(version_dir.join("venv/bin/python"), "#!/bin/python").unwrap();
+        let python = pumas_library::platform::paths::venv_python(&version_dir);
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        std::fs::write(python, "#!/bin/python").unwrap();
 
         let metadata = InstalledVersionMetadata {
             path: "v1.0.0".to_string(),

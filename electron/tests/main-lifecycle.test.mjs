@@ -184,7 +184,11 @@ test('failed backend startup stops its pending restart before application cleanu
     }
     assert.equal(runtime.requests.length, 1, 'bootstrap must not start another backend request');
     runtime.children[0].emit('exit', 1, null);
-    assert.equal(runtime.timers.size, 1, 'crash has a pending restart before startup fails');
+    assert.deepEqual(
+      [...runtime.timers].map((timer) => timer.delayMs).sort((a, b) => a - b),
+      [1_000, 60_000],
+      'crash has a pending restart and an outstanding health RPC deadline'
+    );
     runtime.expireStartup();
     runtime.requests[0].emit('error', new Error('connection refused'));
     await setImmediate();

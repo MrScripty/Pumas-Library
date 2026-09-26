@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
 import type { InstallationProgress, InstallNetworkStatus, VersionRelease } from '../hooks/useVersions';
+import { getInstallActivityPresentation, type InstallActivityPresentation } from '../utils/installActivityPresentation';
 
 export interface VersionInstallDisplayState {
   displayTag: string;
@@ -22,7 +23,8 @@ function getDownloadPercent(progress: InstallationProgress | null): number | nul
   return null;
 }
 
-function getRingPercent(progress: InstallationProgress | null): number | null {
+function getRingPercent(progress: InstallationProgress | null, indeterminate: boolean): number | null {
+  if (indeterminate) return null;
   const overallPercent = progress ? Math.round(progress.overall_progress || 0) : null;
   const downloadPercent = getDownloadPercent(progress);
   const stagePercent = progress ? progress.stage_progress : null;
@@ -33,8 +35,9 @@ function getRingPercent(progress: InstallationProgress | null): number | null {
   return overallPercent ?? stagePercent;
 }
 
-function getPackageLabel(progress: InstallationProgress | null): string {
-  if (progress?.stage === 'download') {
+function getPackageLabel(progress: InstallationProgress | null, activity: InstallActivityPresentation): string {
+  if (!progress || activity.indeterminate && progress.stage === 'setup') return activity.phase;
+  if (progress.stage === 'download') {
     const downloadPercent = getDownloadPercent(progress);
     if (downloadPercent !== null && (progress.downloaded_bytes > 0 || downloadPercent > 0)) {
       return `${downloadPercent}%`;
@@ -43,24 +46,25 @@ function getPackageLabel(progress: InstallationProgress | null): string {
       return `${Math.round(progress.stage_progress)}%`;
     }
   }
-  if (progress && progress.dependency_count !== null) {
+  if (progress.stage === 'dependencies' && progress.dependency_count !== null) {
     return `${progress.completed_dependencies}/${progress.dependency_count}`;
   }
-  if (progress?.stage === 'dependencies') {
+  if (progress.stage === 'dependencies') {
     return 'Installing...';
   }
-  return 'Downloading...';
+  return activity.phase;
 }
 
 function isPendingDownload(
   isInstalling: boolean,
   isInstallFailed: boolean,
-  progress: InstallationProgress | null
+  progress: InstallationProgress | null,
+  indeterminate: boolean
 ): boolean {
   if (!isInstalling || isInstallFailed) {
     return false;
   }
-  if (!progress) {
+  if (!progress || indeterminate) {
     return true;
   }
   return (
@@ -103,6 +107,7 @@ function getDisplayTag(release: VersionRelease): string {
 }
 
 export function getVersionInstallDisplayState({
+  appId,
   installNetworkStatus,
   isHovered,
   isInstalled,
@@ -110,6 +115,7 @@ export function getVersionInstallDisplayState({
   progress,
   release,
 }: {
+  appId?: string;
   installNetworkStatus: InstallNetworkStatus;
   isHovered: boolean;
   isInstalled: boolean;
@@ -118,17 +124,22 @@ export function getVersionInstallDisplayState({
   release: VersionRelease;
 }): VersionInstallDisplayState {
   const isInstallFailed = installNetworkStatus === 'failed' || Boolean(progress?.error);
+  const activity = getInstallActivityPresentation({
+    appId,
+    installingTag: isInstalling ? release.tagName : null,
+    progress,
+  });
 
   return {
     displayTag: getDisplayTag(release),
     downloadIconClass: getDownloadIconClass(installNetworkStatus),
     downloadIconStyle: getDownloadIconStyle(installNetworkStatus),
     isComplete: isInstalled || (isInstalling && Boolean(progress?.success) && Boolean(progress?.completed_at)),
-    isDownloadPending: isPendingDownload(isInstalling, isInstallFailed, progress),
+    isDownloadPending: isPendingDownload(isInstalling, isInstallFailed, progress, activity.indeterminate),
     isInstallFailed,
-    packageLabel: getPackageLabel(progress),
+    packageLabel: getPackageLabel(progress, activity),
     ringColor: isInstallFailed ? 'hsl(var(--accent-error))' : 'hsl(var(--accent-success))',
-    ringPercent: getRingPercent(progress),
+    ringPercent: getRingPercent(progress, activity.indeterminate),
     showUninstall: isInstalled && !isInstalling && isHovered,
     totalBytes: (progress ? progress.total_size : null) ?? release.totalSize ?? release.archiveSize ?? null,
   };

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::time::Instant;
 use tokio::process::Command;
 
@@ -61,10 +61,312 @@ pub(super) const BUILDS: &[&str] = &[
     "rocm7.2",
     "rocm7.14",
 ];
-pub(super) const PYTHONS: &[&str] = &["python3.10", "python3.11", "python3.12", "python3.13"];
 const ADAPTERS: &[&str] = &["none", "flux2"];
 const PREVIEW_TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_RETAINED_TORCH_PREVIEWS: usize = 32;
+const RESOLVER_STDERR_TAIL_BYTES: u64 = 8 * 1024;
+// Reserve two minutes for owned-child cleanup inside Electron's 15-minute RPC deadline.
+const TORCH_RESOLVER_TIMEOUT: Duration = Duration::from_secs(13 * 60);
+const TORCH_RESOLVER_TIMEOUT_MESSAGE: &str =
+    "Torch artifact checking timed out. Cached wheel downloads may be reused if you retry.";
+const TORCH_RESOLVER_FAILURE_MESSAGE: &str = "Pip could not complete dependency resolution. Wheel availability is inconclusive; check network or package-index access and retry.";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResolverDiagnosticCode {
+    EmptyReport,
+    TorchVersionMismatch,
+    InvalidDistribution,
+    MissingSha256,
+    UntrustedArtifact,
+    TorchvisionBuildMismatch,
+    NunchakuMismatch,
+    MissingRequiredPackages,
+    Unclassified,
+    Truncated,
+    DiagnosticUnavailable,
+}
+
+impl ResolverDiagnosticCode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::EmptyReport => "empty_report",
+            Self::TorchVersionMismatch => "torch_version_mismatch",
+            Self::InvalidDistribution => "invalid_distribution",
+            Self::MissingSha256 => "missing_sha256",
+            Self::UntrustedArtifact => "untrusted_artifact",
+            Self::TorchvisionBuildMismatch => "torchvision_build_mismatch",
+            Self::NunchakuMismatch => "nunchaku_mismatch",
+            Self::MissingRequiredPackages => "missing_required_packages",
+            Self::Unclassified => "unclassified",
+            Self::Truncated => "truncated",
+            Self::DiagnosticUnavailable => "diagnostic_unavailable",
+        }
+    }
+}
+
+struct ResolverStderrTail {
+    bytes: Vec<u8>,
+    total_bytes: u64,
+    truncated: bool,
+}
+
+fn read_resolver_stderr_tail(path: &std::path::Path) -> std::io::Result<ResolverStderrTail> {
+    let mut file = std::fs::File::open(path)?;
+    let total_bytes = file.metadata()?.len();
+    let tail_bytes = total_bytes.min(RESOLVER_STDERR_TAIL_BYTES);
+    file.seek(SeekFrom::End(-(tail_bytes as i64)))?;
+    let mut bytes = Vec::with_capacity(tail_bytes as usize);
+    file.take(tail_bytes).read_to_end(&mut bytes)?;
+    Ok(ResolverStderrTail {
+        bytes,
+        total_bytes,
+        truncated: total_bytes > RESOLVER_STDERR_TAIL_BYTES,
+    })
+}
+
+fn classify_resolver_stderr(tail: &[u8], truncated: bool) -> ResolverDiagnosticCode {
+    let line = tail
+        .rsplit(|byte| *byte == b'\n')
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    let Ok(line) = std::str::from_utf8(line) else {
+        return if truncated {
+            ResolverDiagnosticCode::Truncated
+        } else {
+            ResolverDiagnosticCode::Unclassified
+        };
+    };
+    let Some(reason) = line.strip_prefix("Invalid wheel resolution: ") else {
+        return if truncated {
+            ResolverDiagnosticCode::Truncated
+        } else {
+            ResolverDiagnosticCode::Unclassified
+        };
+    };
+    if let Some(rest) = reason.strip_prefix("Official ") {
+        if let Some((build, _)) = rest.split_once(" artifact for Torch ") {
+            if valid_torch_channel(build) {
+                return ResolverDiagnosticCode::TorchVersionMismatch;
+            }
+        }
+    }
+    for (prefix, code) in [
+        (
+            "The pip report contains no resolved artifacts",
+            ResolverDiagnosticCode::EmptyReport,
+        ),
+        (
+            "Duplicate or invalid distribution name: ",
+            ResolverDiagnosticCode::InvalidDistribution,
+        ),
+        (
+            "No SHA-256 provenance for ",
+            ResolverDiagnosticCode::MissingSha256,
+        ),
+        (
+            "Untrusted or non-binary artifact for ",
+            ResolverDiagnosticCode::UntrustedArtifact,
+        ),
+        (
+            "Torchvision build differs from the selected Torch build",
+            ResolverDiagnosticCode::TorchvisionBuildMismatch,
+        ),
+        (
+            "Nunchaku artifact differs from the qualified wheel",
+            ResolverDiagnosticCode::NunchakuMismatch,
+        ),
+        (
+            "Resolution omitted requested packages: ",
+            ResolverDiagnosticCode::MissingRequiredPackages,
+        ),
+    ] {
+        if reason.starts_with(prefix) {
+            return code;
+        }
+    }
+    if truncated {
+        ResolverDiagnosticCode::Truncated
+    } else {
+        ResolverDiagnosticCode::Unclassified
+    }
+}
+
+fn native_resolver_target() -> &'static str {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "linux-x86_64",
+        ("windows", "x86_64") => "windows-x86_64",
+        ("macos", "aarch64") => "macos-arm64",
+        _ => "other",
+    }
+}
+
+fn log_resolver_rejection_diagnostic(workspace: &std::path::Path) {
+    let (code, total_bytes, truncated) =
+        match read_resolver_stderr_tail(&workspace.join("resolver.stderr")) {
+            Ok(tail) => (
+                classify_resolver_stderr(&tail.bytes, tail.truncated),
+                Some(tail.total_bytes),
+                tail.truncated,
+            ),
+            Err(_) => (ResolverDiagnosticCode::DiagnosticUnavailable, None, false),
+        };
+    tracing::warn!(
+        code = code.as_str(),
+        exit_code = 3,
+        native_target = native_resolver_target(),
+        stderr_total_bytes = ?total_bytes,
+        stderr_truncated = truncated,
+        "Torch preview resolver rejected wheel resolution"
+    );
+}
+
+#[cfg(test)]
+mod resolver_diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn classifies_only_known_resolution_reasons() {
+        let cases = [
+            ("The pip report contains no resolved artifacts", ResolverDiagnosticCode::EmptyReport),
+            ("Official cpu artifact for Torch 2.9.1 was not resolved", ResolverDiagnosticCode::TorchVersionMismatch),
+            ("Duplicate or invalid distribution name: torch", ResolverDiagnosticCode::InvalidDistribution),
+            ("No SHA-256 provenance for torch", ResolverDiagnosticCode::MissingSha256),
+            ("Untrusted or non-binary artifact for torch: https://hostile.example/private?token=secret", ResolverDiagnosticCode::UntrustedArtifact),
+            ("Torchvision build differs from the selected Torch build", ResolverDiagnosticCode::TorchvisionBuildMismatch),
+            ("Nunchaku artifact differs from the qualified wheel", ResolverDiagnosticCode::NunchakuMismatch),
+            ("Resolution omitted requested packages: torch, private-package", ResolverDiagnosticCode::MissingRequiredPackages),
+        ];
+        for (reason, expected) in cases {
+            let stderr =
+                format!("pip diagnostic with private URL\nInvalid wheel resolution: {reason}\n");
+            assert_eq!(classify_resolver_stderr(stderr.as_bytes(), false), expected);
+            assert!(!expected.as_str().contains("private"));
+            assert!(!expected.as_str().contains("https"));
+        }
+    }
+
+    #[test]
+    fn unknown_invalid_utf8_and_truncated_stderr_use_fixed_fallback_codes() {
+        assert_eq!(
+            classify_resolver_stderr(b"unknown private text", false),
+            ResolverDiagnosticCode::Unclassified
+        );
+        assert_eq!(
+            classify_resolver_stderr(b"Invalid wheel resolution: Official hostile data", false),
+            ResolverDiagnosticCode::Unclassified
+        );
+        assert_eq!(
+            classify_resolver_stderr(b"\xff\xfe", false),
+            ResolverDiagnosticCode::Unclassified
+        );
+        assert_eq!(
+            classify_resolver_stderr(b"partial private text", true),
+            ResolverDiagnosticCode::Truncated
+        );
+        assert_eq!(
+            classify_resolver_stderr(b"\xff\xfe", true),
+            ResolverDiagnosticCode::Truncated
+        );
+        assert_eq!(
+            classify_resolver_stderr(
+                b"Invalid wheel resolution: No SHA-256 provenance for torch\n",
+                true
+            ),
+            ResolverDiagnosticCode::MissingSha256
+        );
+    }
+
+    #[test]
+    fn stderr_reader_returns_only_bounded_final_bytes() {
+        let workspace = tempfile::tempdir().unwrap();
+        let path = workspace.path().join("resolver.stderr");
+        let mut contents = vec![b'x'; RESOLVER_STDERR_TAIL_BYTES as usize + 17];
+        contents.extend_from_slice(
+            b"\nInvalid wheel resolution: The pip report contains no resolved artifacts\n",
+        );
+        std::fs::write(&path, &contents).unwrap();
+        let tail = read_resolver_stderr_tail(&path).unwrap();
+        assert_eq!(tail.total_bytes, contents.len() as u64);
+        assert!(tail.truncated);
+        assert_eq!(tail.bytes.len(), RESOLVER_STDERR_TAIL_BYTES as usize);
+        assert_eq!(tail.bytes, contents[contents.len() - tail.bytes.len()..]);
+        assert_eq!(
+            classify_resolver_stderr(&tail.bytes, tail.truncated),
+            ResolverDiagnosticCode::EmptyReport
+        );
+    }
+
+    #[test]
+    fn split_utf8_character_before_final_diagnostic_does_not_hide_category() {
+        let workspace = tempfile::tempdir().unwrap();
+        let path = workspace.path().join("resolver.stderr");
+        let diagnostic = b"Invalid wheel resolution: No SHA-256 provenance for torch\n";
+        let mut contents = b"earlier valid stderr ".to_vec();
+        contents.extend_from_slice("😀".as_bytes());
+        contents.extend(std::iter::repeat_n(
+            b'x',
+            RESOLVER_STDERR_TAIL_BYTES as usize - 3 - diagnostic.len() - 1,
+        ));
+        contents.push(b'\n');
+        contents.extend_from_slice(diagnostic);
+        assert!(std::str::from_utf8(&contents).is_ok());
+        std::fs::write(&path, &contents).unwrap();
+
+        let tail = read_resolver_stderr_tail(&path).unwrap();
+        assert_eq!(tail.bytes.len(), RESOLVER_STDERR_TAIL_BYTES as usize);
+        assert!(tail.truncated);
+        assert_eq!(tail.bytes[0], "😀".as_bytes()[1]);
+        assert!(std::str::from_utf8(&tail.bytes).is_err());
+        assert_eq!(
+            classify_resolver_stderr(&tail.bytes, tail.truncated),
+            ResolverDiagnosticCode::MissingSha256
+        );
+    }
+
+    #[test]
+    fn missing_diagnostic_does_not_change_resolver_rejection() {
+        let workspace = tempfile::tempdir().unwrap();
+        log_resolver_rejection_diagnostic(workspace.path());
+        #[cfg(unix)]
+        let status = std::os::unix::process::ExitStatusExt::from_raw(3 << 8);
+        #[cfg(windows)]
+        let status = std::os::windows::process::ExitStatusExt::from_raw(3);
+        assert!(matches!(
+            resolver_rejection(PreviewResolverRun::Exited(status)),
+            Some(TorchPreviewOutcome::Rejected { .. })
+        ));
+    }
+}
+
+pub(super) fn valid_torch_channel(build: &str) -> bool {
+    if build == "cpu" {
+        return true;
+    }
+    if let Some(cuda) = build.strip_prefix("cu") {
+        return !cuda.is_empty() && cuda.bytes().all(|byte| byte.is_ascii_digit());
+    }
+    if let Some(rocm) = build.strip_prefix("rocm") {
+        let parts: Vec<_> = rocm.split('.').collect();
+        return parts.len() >= 2
+            && parts
+                .iter()
+                .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()));
+    }
+    false
+}
+
+fn supported_torch_build(build: &str) -> bool {
+    match std::env::consts::OS {
+        "linux" => cfg!(target_arch = "x86_64") && valid_torch_channel(build),
+        "windows" => {
+            cfg!(all(target_arch = "x86_64", target_env = "msvc"))
+                && (build == "cpu" || build.starts_with("cu") && valid_torch_channel(build))
+        }
+        "macos" => cfg!(target_arch = "aarch64") && build == "cpu",
+        _ => false,
+    }
+}
 
 fn insert_retained_torch_preview(
     previews: &mut HashMap<String, RetainedTorchPreview>,
@@ -90,6 +392,121 @@ fn is_bundled_preset(tag: &str, build: &str, python: &str, adapter: &str) -> boo
     tag == "v2.9.1" && build == "cu130" && python == "python3.12" && adapter == "bundled"
 }
 
+/// Preserve catalog order while retaining only Python ABIs with an exact
+/// official wheel for this release and build. An incomplete scan cannot prove
+/// absence, so callers must not provision or try a lower minor on that basis.
+fn auto_wheel_candidates(
+    catalog_minors: &[String],
+    build: &str,
+    discovery: &TorchReleaseOptionsDiscovery,
+) -> Option<Vec<TorchPythonPreviewCandidate>> {
+    if !discovery.complete_scan || discovery.status == TorchReleaseOptionsStatus::Inconclusive {
+        return None;
+    }
+    Some(
+        catalog_minors
+            .iter()
+            .filter_map(|minor| {
+                let python = format!("python{minor}");
+                discovery
+                    .combinations
+                    .iter()
+                    .find(|wheel| wheel.build == build && wheel.python == python)
+                    .cloned()
+                    .map(TorchPythonPreviewCandidate::exact_wheel)
+            })
+            .collect(),
+    )
+}
+
+#[derive(Clone, Debug)]
+struct TorchPythonPreviewCandidate {
+    minor: String,
+    wheel: Option<TorchReleaseCombination>,
+}
+
+impl TorchPythonPreviewCandidate {
+    fn exact_wheel(wheel: TorchReleaseCombination) -> Self {
+        let minor = wheel
+            .python
+            .strip_prefix("python")
+            .expect("validated release-option Python tag")
+            .to_owned();
+        Self {
+            minor,
+            wheel: Some(wheel),
+        }
+    }
+
+    fn managed_python(minor: impl Into<String>) -> Self {
+        Self {
+            minor: minor.into(),
+            wheel: None,
+        }
+    }
+}
+
+fn append_exact_wheel_args(command: &mut Command, wheel: &TorchReleaseCombination) {
+    command.arg("--torch-wheel").arg(&wheel.wheel_url);
+    if let Some(sha256) = &wheel.sha256 {
+        command.arg("--torch-sha256").arg(sha256);
+    }
+}
+
+struct TorchPythonPreviewSearch {
+    candidates: std::vec::IntoIter<TorchPythonPreviewCandidate>,
+    allow_fallback: bool,
+    last_unsupported: Option<TorchPreviewOutcome>,
+    finished: bool,
+}
+
+impl TorchPythonPreviewSearch {
+    fn new(candidates: Vec<TorchPythonPreviewCandidate>, allow_fallback: bool) -> Self {
+        Self {
+            candidates: candidates.into_iter(),
+            allow_fallback,
+            last_unsupported: None,
+            finished: false,
+        }
+    }
+
+    fn next_candidate(&mut self) -> Option<TorchPythonPreviewCandidate> {
+        if self.finished {
+            None
+        } else {
+            self.candidates.next()
+        }
+    }
+
+    /// None means the current rejection proves this candidate unsupported and
+    /// the next compatible Python may be tried.
+    fn record_attempt(&mut self, outcome: TorchPreviewOutcome) -> Option<TorchPreviewOutcome> {
+        if self.allow_fallback
+            && matches!(
+                outcome,
+                TorchPreviewOutcome::Rejected {
+                    reason: TorchPreviewRejectionReason::Unsupported,
+                    ..
+                }
+            )
+        {
+            self.last_unsupported = Some(outcome);
+            None
+        } else {
+            self.finished = true;
+            Some(outcome)
+        }
+    }
+
+    fn exhausted(self) -> TorchPreviewOutcome {
+        self.last_unsupported
+            .unwrap_or(TorchPreviewOutcome::Rejected {
+                reason: TorchPreviewRejectionReason::Inconclusive,
+                message: TorchPreviewRejectionReason::Inconclusive.message(),
+            })
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TorchArtifact {
@@ -102,6 +519,7 @@ pub struct TorchArtifact {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
+    use std::os::unix::process::ExitStatusExt;
 
     fn retained_preview(preview_id: &str, created: Instant) -> RetainedTorchPreview {
         RetainedTorchPreview {
@@ -120,6 +538,16 @@ mod tests {
             report: String::new(),
             interpreter_path: PathBuf::from("/usr/bin/python3.12"),
             interpreter_hash: String::new(),
+            managed_python: super::managed_python::ManagedPythonIdentity {
+                python: "python3.12".into(),
+                version: "3.12.0".into(),
+                catalog_key: "cpython-3.12.0-test".into(),
+                source_url: "https://github.com/astral-sh/python-build-standalone/releases/download/test/python.tar.zst".into(),
+                target_triple: "x86_64-unknown-linux-gnu".into(),
+                uv_version: "0.12.19".into(),
+                uv_archive_sha256: "a".repeat(64),
+                executable: PathBuf::from("/usr/bin/python3.12"),
+            },
             created,
         }
     }
@@ -146,6 +574,31 @@ mod tests {
         assert!(!previews.contains_key("expired"));
         assert!(!previews.contains_key("preview-0"));
         assert!(previews.contains_key(&format!("preview-{MAX_RETAINED_TORCH_PREVIEWS}")));
+    }
+
+    #[test]
+    fn retained_managed_identity_hashes_canonical_path_without_launching_python() {
+        let root = tempfile::tempdir().unwrap();
+        let inert = root.path().join("python-that-cannot-run");
+        std::fs::write(&inert, b"provider-verified executable bytes").unwrap();
+        let mut managed = retained_preview("test", Instant::now()).managed_python;
+        managed.executable = std::fs::canonicalize(&inert).unwrap();
+        let (path, hash) = retained_managed_interpreter(&managed).unwrap();
+        assert_eq!(path, managed.executable);
+        assert_eq!(
+            hash,
+            format!(
+                "{:x}",
+                Sha256::digest(b"provider-verified executable bytes")
+            )
+        );
+        std::fs::create_dir(root.path().join("subdir")).unwrap();
+        managed.executable = root
+            .path()
+            .join("subdir")
+            .join("..")
+            .join("python-that-cannot-run");
+        assert!(retained_managed_interpreter(&managed).is_err());
     }
 
     #[test]
@@ -176,25 +629,140 @@ mod tests {
     }
 
     #[test]
+    fn preview_accepts_canonical_future_channels_without_xpu_or_paths() {
+        for build in ["cpu", "cu136", "cu999", "rocm8.0", "rocm8.0.1"] {
+            assert!(valid_torch_channel(build), "{build}");
+        }
+        for build in ["cu", "rocm8", "rocm8..1", "cu13/6", "xpu", "cu13+foo"] {
+            assert!(!valid_torch_channel(build), "{build}");
+        }
+        assert!(!BUILDS.contains(&"cu136"));
+    }
+
+    #[test]
+    fn auto_skips_newer_python_without_exact_wheel_and_tries_newest_match_first() {
+        let catalog = vec!["3.15".into(), "3.14".into(), "3.13".into(), "3.12".into()];
+        let wheel = |build: &str, python: &str| {
+            TorchReleaseCombination {
+            build: build.into(),
+            python: python.into(),
+            wheel_url: format!(
+                "https://download.pytorch.org/whl/{build}/torch/torch-2.14.0%2B{build}-cp314-cp314-manylinux_2_28_x86_64.whl"
+            ),
+            sha256: Some("a".repeat(64)),
+        }
+        };
+        let mut discovery = TorchReleaseOptionsDiscovery {
+            tag: "v2.14.0".into(),
+            status: TorchReleaseOptionsStatus::Matches,
+            complete_scan: true,
+            checked_channels: vec!["cpu".into(), "cu136".into()],
+            combinations: vec![
+                wheel("cu136", "python3.14"),
+                wheel("cpu", "python3.15"),
+                wheel("cu136", "python3.12"),
+            ],
+            issues: Vec::new(),
+            detected_gpu_vendors: Vec::new(),
+            driver_status: TorchReleaseDriverStatus {
+                nvidia: TorchReleaseDriverAvailability::NotPresent,
+                amd: TorchReleaseDriverAvailability::NotPresent,
+            },
+            recommended: None,
+            recommendation_note: String::new(),
+        };
+        let selected = auto_wheel_candidates(&catalog, "cu136", &discovery).unwrap();
+        assert_eq!(
+            selected
+                .iter()
+                .map(|candidate| candidate.minor.as_str())
+                .collect::<Vec<_>>(),
+            ["3.14", "3.12"]
+        );
+        let newest_wheel = selected[0].wheel.as_ref().unwrap();
+        assert_eq!(newest_wheel.python, "python3.14");
+        assert_eq!(newest_wheel.build, "cu136");
+        assert!(newest_wheel.sha256.as_deref().is_some_and(|sha256| {
+            sha256.len() == 64 && sha256.bytes().all(|byte| byte == b'a')
+        }));
+        assert_eq!(
+            newest_wheel.wheel_url,
+            "https://download.pytorch.org/whl/cu136/torch/torch-2.14.0%2Bcu136-cp314-cp314-manylinux_2_28_x86_64.whl"
+        );
+        discovery.complete_scan = false;
+        discovery.status = TorchReleaseOptionsStatus::Inconclusive;
+        assert!(auto_wheel_candidates(&catalog, "cu136", &discovery).is_none());
+    }
+
+    #[test]
+    fn resolver_command_receives_the_exact_discovered_wheel_and_hash() {
+        let wheel = TorchReleaseCombination {
+            build: "cpu".into(),
+            python: "python3.14".into(),
+            wheel_url: "https://download.pytorch.org/whl/cpu/torch/torch-2.14.0-cp314-cp314-macosx_14_0_arm64.whl".into(),
+            sha256: Some("b".repeat(64)),
+        };
+        let mut command = Command::new("python");
+        append_exact_wheel_args(&mut command, &wheel);
+        let args = command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            args,
+            [
+                "--torch-wheel",
+                wheel.wheel_url.as_str(),
+                "--torch-sha256",
+                wheel.sha256.as_deref().unwrap(),
+            ]
+        );
+    }
+
+    #[test]
     fn resolver_exit_codes_serialize_distinct_safe_rejections() {
-        for (code, expected) in [
-            (Some(2), "unsupported"),
-            (Some(3), "validation_failed"),
-            (Some(75), "network_inconclusive"),
-            (Some(1), "inconclusive"),
-            (None, "inconclusive"),
+        for (code, expected_reason, expected_message) in [
+            (
+                4,
+                "unsupported",
+                "No compatible official Torch wheel was found for this version, build, and Python selection.",
+            ),
+            (
+                2,
+                "unsupported",
+                "A required dependency is unavailable or incompatible for this selection.",
+            ),
+            (3, "validation_failed", "The resolved wheel report failed validation."),
+            (
+                75,
+                "network_inconclusive",
+                "Network access prevented a conclusive wheel resolution.",
+            ),
+            (
+                1,
+                "inconclusive",
+                "Pip could not complete dependency resolution. Wheel availability is inconclusive; check network or package-index access and retry.",
+            ),
         ] {
-            let reason = TorchPreviewRejectionReason::from_exit_code(code);
-            let outcome = TorchPreviewOutcome::Rejected {
-                reason,
-                message: reason.message(),
-            };
+            let outcome = resolver_rejection(PreviewResolverRun::Exited(
+                std::process::ExitStatus::from_raw(code << 8),
+            ))
+            .unwrap();
             let value = serde_json::to_value(outcome).unwrap();
             assert_eq!(value["status"], "rejected");
-            assert_eq!(value["reason"], expected);
-            assert_eq!(value["message"], reason.message());
+            assert_eq!(value["reason"], expected_reason);
+            assert_eq!(value["message"], expected_message);
             assert_eq!(value.as_object().unwrap().len(), 3);
         }
+        assert!(resolver_rejection(PreviewResolverRun::Exited(
+            std::process::ExitStatus::from_raw(0)
+        ))
+        .is_none());
+        assert_eq!(
+            TorchPreviewRejectionReason::from_exit_code(None),
+            TorchPreviewRejectionReason::Inconclusive
+        );
         let timeout =
             serde_json::to_value(resolver_rejection(PreviewResolverRun::TimedOut).unwrap())
                 .unwrap();
@@ -202,7 +770,7 @@ mod tests {
         assert_eq!(timeout["reason"], "inconclusive");
         assert_eq!(
             timeout["message"],
-            TorchPreviewRejectionReason::Inconclusive.message()
+            "Torch artifact checking timed out. Cached wheel downloads may be reused if you retry."
         );
     }
 
@@ -278,25 +846,79 @@ mod tests {
 
     #[tokio::test]
     async fn preview_resolver_deadline_kills_process_group() {
-        let workspace = tempfile::tempdir().unwrap();
+        let workspace = std::sync::Arc::new(tempfile::tempdir().unwrap());
         let mut command = Command::new("sh");
         command.args(["-c", "sleep 30"]);
-        let outcome = run_preview_resolver(command, workspace.path(), Duration::from_millis(25))
-            .await
-            .unwrap();
+        let cleanup = super::installer::TorchCleanupTasks::default();
+        let outcome =
+            run_preview_resolver(command, &workspace, Duration::from_millis(25), &cleanup)
+                .await
+                .unwrap();
         assert!(matches!(&outcome, PreviewResolverRun::TimedOut));
         let rejected = resolver_rejection(outcome).unwrap();
         let value = serde_json::to_value(rejected).unwrap();
         assert_eq!(value["status"], "rejected");
         assert_eq!(value["reason"], "inconclusive");
+        assert_eq!(value["message"], TORCH_RESOLVER_TIMEOUT_MESSAGE);
+    }
+
+    #[tokio::test]
+    async fn preview_deadline_cancels_and_drains_a_child_during_preparation() {
+        let workspace = std::sync::Arc::new(tempfile::tempdir().unwrap());
+        let pid_path = workspace.path().join("preparation.pid");
+        let operation_workspace = workspace.clone();
+        let cleanup = std::sync::Arc::new(super::installer::TorchCleanupTasks::default());
+        let operation_cleanup = cleanup.clone();
+        let resolver_cleanup = operation_cleanup.clone();
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(100);
+        let task = tokio::spawn(async move {
+            let mut command = Command::new("sh");
+            command
+                .arg("-c")
+                .arg("echo $$ > \"$1\"; sleep 30")
+                .arg("sh")
+                .arg(&pid_path);
+            let operation = async move {
+                let run = run_preview_resolver(
+                    command,
+                    &operation_workspace,
+                    Duration::from_secs(30),
+                    &resolver_cleanup,
+                )
+                .await?;
+                Err(failed(format!("Unexpected resolver completion: {run:?}")))
+            };
+            run_torch_preview_with_deadline(deadline, &operation_cleanup, operation).await
+        });
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !workspace.path().join("preparation.pid").exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("preparation child did not start");
+        let outcome = task.await.unwrap().unwrap();
+        let value = serde_json::to_value(outcome).unwrap();
+        assert_eq!(value["status"], "rejected");
+        assert_eq!(value["reason"], "inconclusive");
+        assert_eq!(value["message"], TORCH_RESOLVER_TIMEOUT_MESSAGE);
+        let pid: i32 = std::fs::read_to_string(workspace.path().join("preparation.pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(!pumas_library::platform::linux_group::group_has_live_members(pid).unwrap());
+        cleanup.drain().await.unwrap();
     }
 
     #[tokio::test]
     async fn preview_resolver_cleans_child_after_leader_exits() {
-        let workspace = tempfile::tempdir().unwrap();
+        let workspace = std::sync::Arc::new(tempfile::tempdir().unwrap());
         let mut command = Command::new("sh");
         command.args(["-c", "echo $$; sleep 30 &"]);
-        let outcome = run_preview_resolver(command, workspace.path(), Duration::from_secs(2))
+        let cleanup = super::installer::TorchCleanupTasks::default();
+        let outcome = run_preview_resolver(command, &workspace, Duration::from_secs(2), &cleanup)
             .await
             .unwrap();
         let PreviewResolverRun::Exited(status) = outcome else {
@@ -309,6 +931,252 @@ mod tests {
             .parse()
             .unwrap();
         assert!(!pumas_library::platform::linux_group::group_has_live_members(pid).unwrap());
+    }
+
+    #[tokio::test]
+    async fn cancelled_resolver_waiter_keeps_workspace_until_owned_drain() {
+        let launcher_root = tempfile::tempdir().unwrap();
+        let workspace =
+            super::torch_workspace::create_launcher_workspace(launcher_root.path()).unwrap();
+        let path = workspace.path().to_path_buf();
+        let ready = path.join("ready");
+        let cleanup = std::sync::Arc::new(super::installer::TorchCleanupTasks::default());
+        let run_workspace = workspace.clone();
+        let run_cleanup = cleanup.clone();
+        let task = tokio::spawn(async move {
+            let mut command = Command::new("sh");
+            command
+                .arg("-c")
+                .arg("printf '%s\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" > \"$1.tmp\"; mv \"$1.tmp\" \"$1\"; sleep 30")
+                .arg("sh")
+                .arg(&ready);
+            run_preview_resolver(
+                command,
+                &run_workspace,
+                Duration::from_secs(30),
+                &run_cleanup,
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !path.join("ready").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let environment = std::fs::read_to_string(path.join("ready")).unwrap();
+        let expected_tmp = path.join("tmp");
+        let canonical_launcher_root = std::fs::canonicalize(launcher_root.path()).unwrap();
+        assert!(path.starts_with(canonical_launcher_root.join("launcher-data/tmp/torch-preview")));
+        assert_eq!(
+            environment.lines().collect::<Vec<_>>(),
+            vec![expected_tmp.to_str().unwrap(); 3]
+        );
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        drop(workspace);
+        assert!(
+            path.exists(),
+            "workspace lease released before descendant drain"
+        );
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while path.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("registered cleanup supervisor did not drain cancelled resolver");
+        cleanup.drain().await.unwrap();
+        assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn healthy_long_resolver_does_not_block_another_preview_or_preflight() {
+        let cleanup = std::sync::Arc::new(super::installer::TorchCleanupTasks::default());
+        let long_workspace = std::sync::Arc::new(tempfile::tempdir().unwrap());
+        let ready = long_workspace.path().join("ready");
+        let long_cleanup = cleanup.clone();
+        let long_path = long_workspace.clone();
+        let long_task = tokio::spawn(async move {
+            let mut command = Command::new("sh");
+            command
+                .arg("-c")
+                .arg("touch \"$1\"; sleep 30")
+                .arg("sh")
+                .arg(&ready);
+            run_preview_resolver(command, &long_path, Duration::from_secs(30), &long_cleanup).await
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !long_workspace.path().join("ready").exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let short_workspace = std::sync::Arc::new(tempfile::tempdir().unwrap());
+        let mut short = Command::new("sh");
+        short.args(["-c", "exit 0"]);
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            run_preview_resolver(short, &short_workspace, Duration::from_secs(2), &cleanup),
+        )
+        .await
+        .expect("healthy resolver blocked another preview")
+        .unwrap();
+        assert!(matches!(result, PreviewResolverRun::Exited(status) if status.success()));
+        tokio::time::timeout(Duration::from_secs(1), cleanup.drain_residual_child_slots())
+            .await
+            .expect("healthy resolver blocked preflight")
+            .unwrap();
+        long_task.abort();
+        assert!(long_task.await.unwrap_err().is_cancelled());
+        cleanup.drain().await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod platform_neutral_tests {
+    use super::*;
+
+    #[test]
+    fn auto_python_fallback_requires_a_definite_unsupported_attempt() {
+        let catalog = vec!["3.15".into(), "3.14".into(), "3.13".into(), "3.12".into()];
+        let discovery = TorchReleaseOptionsDiscovery {
+            tag: "v2.14.0".into(),
+            status: TorchReleaseOptionsStatus::Matches,
+            complete_scan: true,
+            checked_channels: vec!["cu136".into()],
+            combinations: ["3.12", "3.14", "3.13"]
+                .into_iter()
+                .map(|minor| TorchReleaseCombination {
+                    build: "cu136".into(),
+                    python: format!("python{minor}"),
+                    wheel_url: format!(
+                        "https://download.pytorch.org/whl/cu136/torch/torch-2.14.0%2Bcu136-cp{}-cp{}-manylinux_2_28_x86_64.whl",
+                        minor.replace('.', ""),
+                        minor.replace('.', "")
+                    ),
+                    sha256: Some("c".repeat(64)),
+                })
+                .collect(),
+            issues: Vec::new(),
+            detected_gpu_vendors: Vec::new(),
+            driver_status: TorchReleaseDriverStatus {
+                nvidia: TorchReleaseDriverAvailability::NotPresent,
+                amd: TorchReleaseDriverAvailability::NotPresent,
+            },
+            recommended: None,
+            recommendation_note: String::new(),
+        };
+        let candidates = auto_wheel_candidates(&catalog, "cu136", &discovery).unwrap();
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.minor.as_str())
+                .collect::<Vec<_>>(),
+            ["3.14", "3.13", "3.12"]
+        );
+
+        let rejected = |reason| TorchPreviewOutcome::Rejected {
+            reason,
+            message: reason.message(),
+        };
+        let mut search = TorchPythonPreviewSearch::new(candidates.clone(), true);
+        assert_eq!(
+            search.next_candidate().map(|candidate| candidate.minor),
+            Some("3.14".into())
+        );
+        let resolved = TorchPreviewOutcome::Resolved {
+            preview: TorchPreview {
+                preview_id: "newest-python".into(),
+                tag: "v2.14.0".into(),
+                build: "cu136".into(),
+                python: "python3.14".into(),
+                adapter: "none".into(),
+                artifacts: Vec::new(),
+                qualification: "unverified".into(),
+                expires_in_seconds: PREVIEW_TTL.as_secs(),
+            },
+        };
+        let outcome = search.record_attempt(resolved).unwrap();
+        assert!(matches!(
+            outcome,
+            TorchPreviewOutcome::Resolved { preview } if preview.preview_id == "newest-python"
+        ));
+        assert!(search.next_candidate().is_none());
+
+        let mut search = TorchPythonPreviewSearch::new(candidates.clone(), true);
+        assert_eq!(
+            search.next_candidate().map(|candidate| candidate.minor),
+            Some("3.14".into())
+        );
+        assert!(search
+            .record_attempt(rejected(TorchPreviewRejectionReason::Unsupported))
+            .is_none());
+        assert_eq!(
+            search.next_candidate().map(|candidate| candidate.minor),
+            Some("3.13".into())
+        );
+        let outcome = search
+            .record_attempt(rejected(TorchPreviewRejectionReason::Inconclusive))
+            .unwrap();
+        assert!(matches!(
+            outcome,
+            TorchPreviewOutcome::Rejected {
+                reason: TorchPreviewRejectionReason::Inconclusive,
+                ..
+            }
+        ));
+        assert!(search.next_candidate().is_none());
+
+        let mut search = TorchPythonPreviewSearch::new(candidates.clone(), false);
+        assert_eq!(
+            search.next_candidate().map(|candidate| candidate.minor),
+            Some("3.14".into())
+        );
+        assert!(matches!(
+            search.record_attempt(rejected(TorchPreviewRejectionReason::Unsupported)),
+            Some(TorchPreviewOutcome::Rejected {
+                reason: TorchPreviewRejectionReason::Unsupported,
+                ..
+            })
+        ));
+        assert!(search.next_candidate().is_none());
+
+        // Interpreter provisioning has the same inconclusive outcome as a
+        // resolver failure, so it must also leave lower candidates untouched.
+        let mut search = TorchPythonPreviewSearch::new(candidates.clone(), true);
+        assert_eq!(
+            search.next_candidate().map(|candidate| candidate.minor),
+            Some("3.14".into())
+        );
+        assert!(search
+            .record_attempt(TorchPreviewOutcome::Rejected {
+                reason: TorchPreviewRejectionReason::Inconclusive,
+                message: "The managed Python interpreter could not be provisioned.",
+            })
+            .is_some());
+        assert!(search.next_candidate().is_none());
+
+        let mut search = TorchPythonPreviewSearch::new(candidates, true);
+        for minor in ["3.14", "3.13", "3.12"] {
+            assert_eq!(
+                search.next_candidate().map(|candidate| candidate.minor),
+                Some(minor.into())
+            );
+            assert!(search
+                .record_attempt(rejected(TorchPreviewRejectionReason::Unsupported))
+                .is_none());
+        }
+        assert!(search.next_candidate().is_none());
+        assert!(matches!(
+            search.exhausted(),
+            TorchPreviewOutcome::Rejected {
+                reason: TorchPreviewRejectionReason::Unsupported,
+                ..
+            }
+        ));
     }
 }
 
@@ -337,7 +1205,7 @@ pub enum TorchPreviewRejectionReason {
 impl TorchPreviewRejectionReason {
     fn from_exit_code(code: Option<i32>) -> Self {
         match code {
-            Some(2) => Self::Unsupported,
+            Some(2 | 4) => Self::Unsupported,
             Some(3) => Self::ValidationFailed,
             Some(75) => Self::NetworkInconclusive,
             _ => Self::Inconclusive,
@@ -347,11 +1215,19 @@ impl TorchPreviewRejectionReason {
     fn message(self) -> &'static str {
         match self {
             Self::Unsupported => {
-                "No compatible official wheel and dependencies were found for this selection."
+                "A required dependency is unavailable or incompatible for this selection."
             }
             Self::ValidationFailed => "The resolved wheel report failed validation.",
             Self::NetworkInconclusive => "Network access prevented a conclusive wheel resolution.",
             Self::Inconclusive => "Wheel resolution did not complete conclusively.",
+        }
+    }
+
+    fn message_for_exit_code(self, code: Option<i32>) -> &'static str {
+        if code == Some(4) {
+            "No compatible official Torch wheel was found for this version, build, and Python selection."
+        } else {
+            self.message()
         }
     }
 }
@@ -375,6 +1251,7 @@ pub(crate) struct RetainedTorchPreview {
     pub report: String,
     pub interpreter_path: PathBuf,
     pub interpreter_hash: String,
+    pub managed_python: super::managed_python::ManagedPythonIdentity,
     pub created: Instant,
 }
 
@@ -382,6 +1259,7 @@ pub(crate) type TorchPreviews = Arc<Mutex<HashMap<String, RetainedTorchPreview>>
 
 #[derive(Deserialize)]
 struct Resolution {
+    release: String,
     torch: String,
     build: String,
     python: String,
@@ -401,11 +1279,25 @@ fn failed(message: impl Into<String>) -> PumasError {
 
 fn preview_token() -> Result<String> {
     let mut bytes = [0u8; 24];
-    std::fs::File::open("/dev/urandom")
-        .map_err(PumasError::from)?
-        .read_exact(&mut bytes)
-        .map_err(PumasError::from)?;
+    getrandom::fill(&mut bytes)
+        .map_err(|error| failed(format!("Preview ID randomness unavailable: {error}")))?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn retained_managed_interpreter(
+    managed: &super::managed_python::ManagedPythonIdentity,
+) -> Result<(PathBuf, String)> {
+    let path = std::fs::canonicalize(&managed.executable).map_err(PumasError::from)?;
+    if path != managed.executable || !path.is_absolute() {
+        return Err(failed(
+            "Managed Python executable is not the retained canonical path",
+        ));
+    }
+    let hash = format!(
+        "{:x}",
+        Sha256::digest(std::fs::read(&path).map_err(PumasError::from)?)
+    );
+    Ok((path, hash))
 }
 
 fn runtime_source_hashes(root: &Path) -> Result<BTreeMap<String, String>> {
@@ -484,101 +1376,88 @@ fn safe_torch_tag(tag: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || b"-._".contains(&c))
 }
 
-#[cfg(target_os = "linux")]
-struct PreviewGroupGuard(Option<u32>);
-
 #[derive(Debug)]
-enum PreviewResolverRun {
+pub(super) enum PreviewResolverRun {
     Exited(std::process::ExitStatus),
     TimedOut,
 }
 
 fn resolver_rejection(run: PreviewResolverRun) -> Option<TorchPreviewOutcome> {
-    let reason = match run {
+    let (reason, message) = match run {
         PreviewResolverRun::Exited(status) if status.success() => return None,
         PreviewResolverRun::Exited(status) => {
-            TorchPreviewRejectionReason::from_exit_code(status.code())
+            let reason = TorchPreviewRejectionReason::from_exit_code(status.code());
+            let message = if status.code() == Some(1) {
+                TORCH_RESOLVER_FAILURE_MESSAGE
+            } else {
+                reason.message_for_exit_code(status.code())
+            };
+            (reason, message)
         }
-        PreviewResolverRun::TimedOut => TorchPreviewRejectionReason::Inconclusive,
+        PreviewResolverRun::TimedOut => (
+            TorchPreviewRejectionReason::Inconclusive,
+            TORCH_RESOLVER_TIMEOUT_MESSAGE,
+        ),
     };
-    Some(TorchPreviewOutcome::Rejected {
-        reason,
-        message: reason.message(),
-    })
+    Some(TorchPreviewOutcome::Rejected { reason, message })
 }
 
-#[cfg(target_os = "linux")]
-impl Drop for PreviewGroupGuard {
-    fn drop(&mut self) {
-        if let Some(pid) = self.0.take() {
-            let _ = pumas_library::platform::linux_group::signal_group(pid);
+async fn run_torch_preview_with_deadline<F>(
+    deadline: tokio::time::Instant,
+    cleanup: &super::installer::TorchCleanupTasks,
+    operation: F,
+) -> Result<TorchPreviewOutcome>
+where
+    F: std::future::Future<Output = Result<TorchPreviewOutcome>>,
+{
+    match tokio::time::timeout_at(deadline, operation).await {
+        Ok(outcome) => outcome,
+        Err(_) => {
+            cleanup.drain_residual_child_slots().await?;
+            Ok(resolver_rejection(PreviewResolverRun::TimedOut)
+                .expect("a timed out resolver must be rejected"))
         }
     }
 }
 
-#[cfg(target_os = "linux")]
-async fn run_preview_resolver(
+pub(super) async fn run_preview_resolver(
     mut command: Command,
-    workspace: &Path,
+    workspace: &std::sync::Arc<tempfile::TempDir>,
     deadline: Duration,
+    cleanup: &super::installer::TorchCleanupTasks,
 ) -> Result<PreviewResolverRun> {
-    use pumas_library::platform::linux_group;
-    linux_group::ensure_supported().map_err(PumasError::from)?;
-    let stdout =
-        std::fs::File::create(workspace.join("resolver.stdout")).map_err(PumasError::from)?;
-    let stderr =
-        std::fs::File::create(workspace.join("resolver.stderr")).map_err(PumasError::from)?;
-    command
-        .stdout(stdout)
-        .stderr(stderr)
-        .kill_on_drop(true)
-        .process_group(0);
-    let mut child = command
-        .spawn()
-        .map_err(|e| failed(format!("Torch resolver could not start: {e}")))?;
-    let pid = child
-        .id()
-        .ok_or_else(|| failed("Torch resolver process has no PID"))?;
-    let mut group = PreviewGroupGuard(Some(pid));
+    super::torch_workspace::configure_resolver_command(&mut command, workspace.path())?;
+    let stdout = std::fs::File::create(workspace.path().join("resolver.stdout"))
+        .map_err(PumasError::from)?;
+    let stderr = std::fs::File::create(workspace.path().join("resolver.stderr"))
+        .map_err(PumasError::from)?;
+    command.stdout(stdout).stderr(stderr);
+    let custody = cleanup.new_child_slot()?;
+    let mut child = pumas_library::platform::managed_child::ManagedChild::spawn(
+        command.as_std_mut(),
+        custody.clone(),
+    )
+    .map_err(|e| failed(format!("Torch resolver could not start: {e}")))?;
+    child.attach_cleanup_lease(workspace.clone());
     let until = tokio::time::Instant::now() + deadline;
     let (status, timed_out) = loop {
-        let observed = linux_group::observe_exit(pid).map_err(PumasError::from)?;
+        let observed = child.observe_exit().map_err(PumasError::from)?;
         let timed_out = tokio::time::Instant::now() >= until;
         if observed.is_some() || timed_out {
             break (observed, timed_out);
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
-    let group_id = i32::try_from(pid).map_err(|_| failed("Invalid Torch resolver PID"))?;
-    loop {
-        linux_group::signal_group(pid).map_err(PumasError::from)?;
-        let alive =
-            tokio::task::spawn_blocking(move || linux_group::group_has_live_members(group_id))
-                .await
-                .map_err(|e| failed(format!("Preview process observation failed: {e}")))?
-                .map_err(PumasError::from)?;
-        if !alive {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    child.wait().await.map_err(PumasError::from)?;
-    group.0 = None;
+    drop(child);
+    cleanup.drain_child_slot(&custody).await.map_err(|_| {
+        failed("Torch resolver cleanup incomplete; owned process cleanup remains pending")
+    })?;
     if timed_out {
         return Ok(PreviewResolverRun::TimedOut);
     }
     status
         .map(PreviewResolverRun::Exited)
         .ok_or_else(|| failed("Torch preview resolver exited without status"))
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn run_preview_resolver(
-    _command: Command,
-    _workspace: &Path,
-    _deadline: Duration,
-) -> Result<PreviewResolverRun> {
-    Err(failed("Managed Torch previews require Linux x86_64"))
 }
 
 impl VersionManager {
@@ -624,7 +1503,7 @@ impl VersionManager {
             && fs::try_exists(runtime.join("serve.py"))
                 .await
                 .map_err(PumasError::from)?
-            && fs::try_exists(runtime.join("venv/bin/python"))
+            && fs::try_exists(pumas_library::platform::paths::venv_python(&runtime))
                 .await
                 .map_err(PumasError::from)?
         {
@@ -670,7 +1549,7 @@ impl VersionManager {
     pub(crate) async fn check_torch_identity(&self, tag: &str) -> Result<()> {
         let runtime = self.versions_dir().join(tag);
         let expected = self.expected_torch_version(tag).await?;
-        let mut command = Command::new(runtime.join("venv/bin/python"));
+        let mut command = Command::new(pumas_library::platform::paths::venv_python(&runtime));
         command
             .kill_on_drop(true)
             .args(["-I", "-c", "import torch; print(torch.__version__)"]);
@@ -694,14 +1573,28 @@ impl VersionManager {
         if self.app_id != AppId::Torch {
             return Err(failed("Torch manager required"));
         }
-        let mut pythons = Vec::new();
-        for name in PYTHONS {
-            if let Ok(output) = Command::new(name).args(["-I", "--version"]).output().await {
-                if output.status.success() {
-                    pythons.push(serde_json::json!({"id": name, "label": String::from_utf8_lossy(&output.stdout).trim()}));
-                }
-            }
-        }
+        let python_candidates = super::torch_alternatives::managed_torch_candidate_minors(
+            &self.launcher_root.join("launcher-data/managed-python"),
+            &self.torch_cleanup,
+        )
+        .await
+        .unwrap_or_default();
+        let pythons: Vec<_> = python_candidates
+            .iter()
+            .map(|minor| {
+                let python = format!("python{minor}");
+                serde_json::json!({"id": python, "label": format!("Pumas-managed CPython {minor}")})
+            })
+            .collect();
+        let linux_x64 = cfg!(all(target_os = "linux", target_arch = "x86_64"));
+        let bundled_preset_available =
+            linux_x64 && python_candidates.iter().any(|minor| minor == "3.12");
+        let adapters: &[&str] = if linux_x64 { ADAPTERS } else { &["none"] };
+        let builds: Vec<&str> = BUILDS
+            .iter()
+            .copied()
+            .filter(|build| supported_torch_build(build))
+            .collect();
         let mut installed = Vec::new();
         for tag in self.state.read().await.get_installed_tags() {
             let recipe_path = self.versions_dir().join(&tag).join("runtime.json");
@@ -718,7 +1611,9 @@ impl VersionManager {
                 "qualification": if preset { "qualified" } else { "unverified" } }));
         }
         Ok(
-            serde_json::json!({"builds": BUILDS, "pythons": pythons, "adapters": ADAPTERS,
+            serde_json::json!({"builds": builds, "pythons": pythons, "adapters": adapters,
+            "bundledPresetAvailable": bundled_preset_available,
+            "defaultAdapter": "none",
             "preset": {"tag":"v2.9.1", "build":"cu130", "python":"python3.12", "adapter":"bundled"},
             "installed": installed}),
         )
@@ -731,15 +1626,206 @@ impl VersionManager {
         python: &str,
         adapter: &str,
     ) -> Result<TorchPreviewOutcome> {
+        let deadline = tokio::time::Instant::now() + TORCH_RESOLVER_TIMEOUT;
+        let operation = self.preview_torch_runtime_until(tag, build, python, adapter, deadline);
+        run_torch_preview_with_deadline(deadline, &self.torch_cleanup, operation).await
+    }
+
+    async fn preview_torch_runtime_until(
+        &self,
+        tag: &str,
+        build: &str,
+        python: &str,
+        adapter: &str,
+        resolver_deadline: tokio::time::Instant,
+    ) -> Result<TorchPreviewOutcome> {
         if self.app_id != AppId::Torch
-            || !BUILDS.contains(&build)
-            || !PYTHONS.contains(&python)
+            || !supported_torch_build(build)
             || (!ADAPTERS.contains(&adapter) && adapter != "bundled")
         {
             return Err(failed("Invalid Torch preview selection"));
         }
-        if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-            return Err(failed("Managed Torch requires Linux x86_64"));
+        if !cfg!(any(
+            all(target_os = "linux", target_arch = "x86_64"),
+            all(
+                target_os = "windows",
+                target_arch = "x86_64",
+                target_env = "msvc"
+            ),
+            all(target_os = "macos", target_arch = "aarch64")
+        )) {
+            return Err(failed("Managed Torch is unsupported on this platform"));
+        }
+        if !cfg!(target_os = "linux") && adapter != "none" {
+            return Err(failed(
+                "Image dependency profiles are unavailable on this platform",
+            ));
+        }
+        let python_root = self.launcher_root.join("launcher-data/managed-python");
+        let candidates = match super::torch_alternatives::managed_torch_candidate_minors(
+            &python_root,
+            &self.torch_cleanup,
+        )
+        .await
+        {
+            Ok(candidates) if candidates.len() <= 16 => candidates,
+            Ok(_) => {
+                return Ok(TorchPreviewOutcome::Rejected {
+                    reason: TorchPreviewRejectionReason::Inconclusive,
+                    message: "The managed Python catalog exceeded the bounded candidate scan.",
+                });
+            }
+            Err(_) => {
+                return Ok(TorchPreviewOutcome::Rejected {
+                    reason: TorchPreviewRejectionReason::Inconclusive,
+                    message: "The managed Python catalog could not be verified.",
+                });
+            }
+        };
+        let mut release_verified = false;
+        let requested_candidates = if python == "auto" && adapter == "bundled" {
+            if !is_bundled_preset(tag, build, "python3.12", adapter) {
+                return Err(failed(
+                    "Bundled adapters require the v2.9.1 CUDA 13.0/Python 3.12 preset",
+                ));
+            }
+            vec![TorchPythonPreviewCandidate::managed_python("3.12")]
+        } else if adapter == "bundled" {
+            let minor = python
+                .strip_prefix("python")
+                .ok_or_else(|| failed("Select automatic Python or a managed CPython choice"))?;
+            if !candidates.iter().any(|candidate| candidate == minor) {
+                return Err(failed(
+                    "Selected Python is not in the managed CPython catalog",
+                ));
+            }
+            vec![TorchPythonPreviewCandidate::managed_python(minor)]
+        } else {
+            let discovery = self.discover_torch_release_options(tag).await?;
+            release_verified = true;
+            let Some(mut exact_candidates) = auto_wheel_candidates(&candidates, build, &discovery)
+            else {
+                return Ok(TorchPreviewOutcome::Rejected {
+                    reason: TorchPreviewRejectionReason::Inconclusive,
+                    message: "Official wheel discovery did not complete conclusively.",
+                });
+            };
+            if python != "auto" {
+                let minor = python
+                    .strip_prefix("python")
+                    .ok_or_else(|| failed("Select automatic Python or a managed CPython choice"))?;
+                if !candidates.iter().any(|candidate| candidate == minor) {
+                    return Err(failed(
+                        "Selected Python is not in the managed CPython catalog",
+                    ));
+                }
+                exact_candidates.retain(|candidate| candidate.minor == minor);
+            }
+            if exact_candidates.is_empty() {
+                return Ok(TorchPreviewOutcome::Rejected {
+                    reason: TorchPreviewRejectionReason::Unsupported,
+                    message: "No compatible official Torch wheel was found for this version, build, and Python selection.",
+                });
+            }
+            exact_candidates
+        };
+        if requested_candidates.is_empty() {
+            return Ok(TorchPreviewOutcome::Rejected {
+                reason: TorchPreviewRejectionReason::Inconclusive,
+                message:
+                    "No stable native CPython candidate is available from the managed provider.",
+            });
+        }
+        if !release_verified {
+            self.resolve_installable_release(tag).await?;
+        }
+        let mut search = TorchPythonPreviewSearch::new(
+            requested_candidates,
+            python == "auto" && adapter != "bundled",
+        );
+        while let Some(candidate) = search.next_candidate() {
+            // A provisioning failure is inconclusive and must stop the search; it
+            // cannot be used as evidence that a lower Python is a better match.
+            let managed = match super::torch_alternatives::ensure_managed_torch_interpreter(
+                &python_root,
+                &self.torch_cleanup,
+                &candidate.minor,
+            )
+            .await
+            {
+                Ok(managed) => managed,
+                Err(_) => {
+                    let outcome = TorchPreviewOutcome::Rejected {
+                        reason: TorchPreviewRejectionReason::Inconclusive,
+                        message: "The managed Python interpreter could not be provisioned.",
+                    };
+                    return Ok(search
+                        .record_attempt(outcome)
+                        .expect("provisioning must stop"));
+                }
+            };
+            let outcome = self
+                .preview_torch_runtime_with_interpreter(
+                    tag,
+                    build,
+                    adapter,
+                    &managed,
+                    candidate.wheel.as_ref(),
+                    resolver_deadline,
+                )
+                .await?;
+            if let Some(outcome) = search.record_attempt(outcome) {
+                return Ok(outcome);
+            }
+        }
+        Ok(search.exhausted())
+    }
+
+    async fn preview_torch_runtime_with_interpreter(
+        &self,
+        tag: &str,
+        build: &str,
+        adapter: &str,
+        managed_python: &super::managed_python::ManagedPythonIdentity,
+        selected_wheel: Option<&TorchReleaseCombination>,
+        resolver_deadline: tokio::time::Instant,
+    ) -> Result<TorchPreviewOutcome> {
+        let python = managed_python.python.as_str();
+        let interpreter = managed_python.executable.as_path();
+        if self.app_id != AppId::Torch
+            || !supported_torch_build(build)
+            || !python.starts_with("python3.")
+            || (!ADAPTERS.contains(&adapter) && adapter != "bundled")
+        {
+            return Err(failed("Invalid Torch preview selection"));
+        }
+        if !cfg!(any(
+            all(target_os = "linux", target_arch = "x86_64"),
+            all(
+                target_os = "windows",
+                target_arch = "x86_64",
+                target_env = "msvc"
+            ),
+            all(target_os = "macos", target_arch = "aarch64")
+        )) {
+            return Err(failed("Managed Torch is unsupported on this platform"));
+        }
+        if !cfg!(target_os = "linux") && adapter != "none" {
+            return Err(failed(
+                "Image dependency profiles are unavailable on this platform",
+            ));
+        }
+        if adapter != "bundled" && selected_wheel.is_none() {
+            return Err(failed(
+                "An exact official Torch wheel is required for dependency resolution",
+            ));
+        }
+        if selected_wheel.is_some_and(|wheel| {
+            wheel.build != build || wheel.python != python || wheel.wheel_url.is_empty()
+        }) {
+            return Err(failed(
+                "Discovered Torch wheel does not match the managed Python selection",
+            ));
         }
         let version = tag
             .strip_prefix('v')
@@ -756,22 +1842,7 @@ impl VersionManager {
                 "Bundled adapters require the v2.9.1 CUDA 13.0/Python 3.12 preset",
             ));
         }
-        self.resolve_installable_release(tag).await?;
-        let output = Command::new(python)
-            .args([
-                "-I",
-                "-c",
-                "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
-            ])
-            .output()
-            .await
-            .map_err(|e| failed(format!("Selected Python is unavailable: {e}")))?;
         let expected_python = python.strip_prefix("python").unwrap();
-        if !output.status.success()
-            || String::from_utf8_lossy(&output.stdout).trim() != expected_python
-        {
-            return Err(failed("Selected Python interpreter has the wrong version"));
-        }
         if is_bundled_preset(tag, build, python, adapter) {
             let lock = include_str!("../../../../../torch-server/runtime/requirements.lock");
             let mut artifacts = Vec::new();
@@ -822,18 +1893,8 @@ impl VersionManager {
                 qualification: "qualified".into(),
                 expires_in_seconds: PREVIEW_TTL.as_secs(),
             };
-            let path_output = Command::new(python)
-                .args(["-I", "-c", "import sys; print(sys.executable)"])
-                .output()
-                .await
-                .map_err(PumasError::from)?;
-            let interpreter_path =
-                std::fs::canonicalize(String::from_utf8_lossy(&path_output.stdout).trim())
-                    .map_err(PumasError::from)?;
-            let interpreter_hash = format!(
-                "{:x}",
-                Sha256::digest(std::fs::read(&interpreter_path).map_err(PumasError::from)?)
-            );
+            let (interpreter_path, interpreter_hash) =
+                retained_managed_interpreter(managed_python)?;
             let mut previews = self.torch_previews.lock().await;
             insert_retained_torch_preview(
                 &mut previews,
@@ -846,6 +1907,7 @@ impl VersionManager {
                         "directArtifacts":preview.artifacts, "scope":"hash-pinned lock; transitive wheel URLs are selected during install"}).to_string(),
                     interpreter_path,
                     interpreter_hash,
+                    managed_python: managed_python.clone(),
                     created: Instant::now(),
                 },
             );
@@ -853,7 +1915,7 @@ impl VersionManager {
         }
         // This temporary directory is only a resolver workspace. Retained preview
         // data is held in memory, so restart invalidates every outstanding ID.
-        let workspace = tempfile::tempdir().map_err(PumasError::from)?;
+        let workspace = super::torch_workspace::create_launcher_workspace(&self.launcher_root)?;
         let resolver = workspace.path().join("resolve_runtime.py");
         fs::write(
             &resolver,
@@ -861,7 +1923,8 @@ impl VersionManager {
         )
         .await
         .map_err(PumasError::from)?;
-        let mut command = Command::new(python);
+        let mut command = Command::new(interpreter);
+        let cache_dir = super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
         command
             .arg(&resolver)
             .args([
@@ -873,8 +1936,22 @@ impl VersionManager {
                 adapter,
                 "--output",
             ])
-            .arg(workspace.path());
-        let run = run_preview_resolver(command, workspace.path(), Duration::from_secs(180)).await?;
+            .arg(workspace.path())
+            .arg("--cache-dir")
+            .arg(cache_dir);
+        if let Some(wheel) = selected_wheel {
+            append_exact_wheel_args(&mut command, wheel);
+        }
+        self.torch_cleanup.drain_residual_child_slots().await?;
+        let remaining = resolver_deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Ok(resolver_rejection(PreviewResolverRun::TimedOut)
+                .expect("a timed out resolver must be rejected"));
+        }
+        let run = run_preview_resolver(command, &workspace, remaining, &self.torch_cleanup).await?;
+        if matches!(&run, PreviewResolverRun::Exited(status) if status.code() == Some(3)) {
+            log_resolver_rejection_diagnostic(workspace.path());
+        }
         if let Some(rejection) = resolver_rejection(run) {
             return Ok(rejection);
         }
@@ -889,18 +1966,43 @@ impl VersionManager {
             .map_err(PumasError::from)?;
         let parsed: Resolution = serde_json::from_str(&resolution)
             .map_err(|e| failed(format!("Invalid resolver manifest: {e}")))?;
-        if parsed.torch != format!("{version}+{build}")
+        if parsed.release != version
             || parsed.build != build
             || parsed.python != expected_python
             || parsed.adapter != adapter
             || parsed.artifacts.is_empty()
             || parsed.implementation != "cpython"
-            || parsed.machine != "x86_64"
-            || !parsed.platform.starts_with("Linux-")
+            || !match std::env::consts::OS {
+                "linux" => parsed.machine == "x86_64" && parsed.platform.starts_with("Linux-"),
+                "windows" => parsed.machine == "AMD64" && parsed.platform.starts_with("Windows-"),
+                "macos" => parsed.machine == "arm64" && parsed.platform.starts_with("macOS-"),
+                _ => false,
+            }
+            || !parsed
+                .artifacts
+                .iter()
+                .any(|artifact| artifact.name == "torch" && artifact.version == parsed.torch)
         {
             return Err(failed(
                 "Resolver manifest does not match requested Torch selection",
             ));
+        }
+        if let Some(selected_wheel) = selected_wheel {
+            let resolved_torch = parsed
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.name == "torch")
+                .ok_or_else(|| failed("Resolved manifest omitted the selected Torch wheel"))?;
+            if resolved_torch.url != selected_wheel.wheel_url
+                || selected_wheel
+                    .sha256
+                    .as_ref()
+                    .is_some_and(|sha256| !resolved_torch.sha256.eq_ignore_ascii_case(sha256))
+            {
+                return Err(failed(
+                    "Resolved Torch artifact differs from the discovered official wheel",
+                ));
+            }
         }
         for artifact in &parsed.artifacts {
             if artifact.sha256.len() != 64
@@ -918,15 +2020,14 @@ impl VersionManager {
         }
         let interpreter_path = std::fs::canonicalize(&parsed.interpreter)
             .map_err(|e| failed(format!("Cannot identify selected Python executable: {e}")))?;
-        if !interpreter_path.is_absolute() || !parsed.interpreter.starts_with('/') {
+        if !Path::new(&parsed.interpreter).is_absolute()
+            || interpreter_path != managed_python.executable
+        {
             return Err(failed(
-                "Resolver did not identify an absolute Python executable",
+                "Resolver did not identify the selected absolute Python executable",
             ));
         }
-        let interpreter_hash = format!(
-            "{:x}",
-            Sha256::digest(std::fs::read(&interpreter_path).map_err(PumasError::from)?)
-        );
+        let (interpreter_path, interpreter_hash) = retained_managed_interpreter(managed_python)?;
         let preview_id = preview_token()?;
         let preview = TorchPreview {
             preview_id: preview_id.clone(),
@@ -949,6 +2050,7 @@ impl VersionManager {
                 report,
                 interpreter_path,
                 interpreter_hash,
+                managed_python: managed_python.clone(),
                 created: Instant::now(),
             },
         );
@@ -1007,7 +2109,8 @@ impl VersionManager {
             .unwrap_or_default();
         let distribution_names =
             serde_json::to_string(&distribution_names).map_err(|e| failed(e.to_string()))?;
-        let mut hardware_command = Command::new(runtime.join("venv/bin/python"));
+        let mut hardware_command =
+            Command::new(pumas_library::platform::paths::venv_python(&runtime));
         hardware_command.kill_on_drop(true).arg("-I").arg("-c").arg(r#"import hashlib,importlib.metadata,json,subprocess,sys
 from pathlib import Path
 import torch
@@ -1016,6 +2119,8 @@ if torch.cuda.is_available():
     for index in range(torch.cuda.device_count()):
         devices.append({"name":torch.cuda.get_device_name(index),"capability":list(torch.cuda.get_device_capability(index))})
 identity={"cuda":torch.version.cuda,"hip":torch.version.hip,"device_count":len(devices),"devices":devices}
+mps_available=bool(getattr(getattr(torch.backends,"mps",None),"is_available",lambda:False)())
+identity["mps_available"]=mps_available
 versions={}
 for name in json.loads(sys.argv[1]):
     try: versions[name]=importlib.metadata.version(name)

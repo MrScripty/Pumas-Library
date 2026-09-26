@@ -46,12 +46,14 @@ mod constraints;
 mod dependencies;
 mod installer;
 mod launcher;
+mod managed_python;
 pub mod ollama;
 mod progress;
 pub mod size_calculator;
 mod state;
 mod torch_alternatives;
 mod torch_preview;
+mod torch_workspace;
 
 pub use constraints::ConstraintsManager;
 pub use dependencies::DependencyManager;
@@ -61,7 +63,11 @@ pub use ollama::OllamaVersionManager;
 pub use progress::{InstallationProgressTracker, PackageWeights, ProgressUpdate};
 pub use size_calculator::{ReleaseSize, SizeBreakdown, SizeCalculator};
 pub use state::VersionState;
-pub use torch_alternatives::{TorchAlternativeDiscovery, TorchAlternativeMatch};
+pub use torch_alternatives::{
+    TorchAlternativeDiscovery, TorchAlternativeMatch, TorchReleaseCombination,
+    TorchReleaseDriverAvailability, TorchReleaseDriverStatus, TorchReleaseOptionsDiscovery,
+    TorchReleaseOptionsStatus, TorchReleaseRecommendation,
+};
 pub use torch_preview::{
     TorchArtifact, TorchPreview, TorchPreviewOutcome, TorchPreviewRejectionReason,
 };
@@ -285,34 +291,41 @@ impl VersionManager {
             installing_tag: Arc::new(Mutex::new(None)),
         };
         if app_id == AppId::Torch {
-            if let Some(default) = manager.get_default_version().await? {
-                if let Err(error) = manager.verify_torch_manifest(&default).await {
-                    warn!("Ignoring unusable default Torch runtime {default}: {error}");
+            if let Some(lock) =
+                Self::startup_torch_versions_lock(manager.try_torch_versions_lock_io())?
+            {
+                manager.state.write().await.refresh_with_lock(&lock).await?;
+                let default = manager.state.read().await.get_default_version();
+                if let Some(default) = default {
+                    if let Err(error) = manager.verify_torch_manifest(&default).await {
+                        warn!("Ignoring unusable default Torch runtime {default}: {error}");
+                        manager
+                            .state
+                            .write()
+                            .await
+                            .set_default_version_with_lock(None, &lock)
+                            .await?;
+                    }
+                }
+                let active = manager.state.read().await.get_active_version();
+                if let Some(active) = active {
+                    if let Err(error) = manager.verify_torch_manifest(&active).await {
+                        warn!("Ignoring unusable active Torch runtime {active}: {error}");
+                        manager
+                            .state
+                            .write()
+                            .await
+                            .reset_torch_active_selection_with_lock(&lock)
+                            .await?;
+                    }
+                } else if manager.state.read().await.get_default_version().is_some() {
                     manager
                         .state
                         .write()
                         .await
-                        .set_default_version(None)
+                        .reset_torch_active_selection_with_lock(&lock)
                         .await?;
                 }
-            }
-            if let Some(active) = manager.get_active_version().await? {
-                if let Err(error) = manager.verify_torch_manifest(&active).await {
-                    warn!("Ignoring unusable active Torch runtime {active}: {error}");
-                    manager
-                        .state
-                        .write()
-                        .await
-                        .reset_torch_active_selection()
-                        .await?;
-                }
-            } else if manager.get_default_version().await?.is_some() {
-                manager
-                    .state
-                    .write()
-                    .await
-                    .reset_torch_active_selection()
-                    .await?;
             }
         }
         Ok(manager)
@@ -367,32 +380,93 @@ impl VersionManager {
 
     /// Get list of installed version tags.
     pub async fn get_installed_versions(&self) -> Result<Vec<String>> {
-        let state = self.state.read().await;
-        Ok(state.get_installed_tags())
+        self.state_snapshot(|state| state.get_installed_tags())
+            .await
     }
 
     /// Get the currently active version tag.
     pub async fn get_active_version(&self) -> Result<Option<String>> {
-        let state = self.state.read().await;
-        Ok(state.get_active_version())
+        self.state_snapshot(|state| state.get_active_version())
+            .await
     }
 
     /// Get the default version tag.
     pub async fn get_default_version(&self) -> Result<Option<String>> {
-        let state = self.state.read().await;
-        Ok(state.get_default_version())
+        self.state_snapshot(|state| state.get_default_version())
+            .await
+    }
+
+    fn try_torch_versions_lock_io(&self) -> std::io::Result<Option<installer::TorchVersionsLock>> {
+        if self.app_id != AppId::Torch {
+            return Ok(None);
+        }
+        let versions_dir = self.launcher_root.join(self.app_id.versions_dir_name());
+        std::fs::create_dir_all(&versions_dir)?;
+        Ok(Some(installer::TorchVersionsLock::try_acquire(
+            &versions_dir,
+        )?))
+    }
+
+    fn startup_torch_versions_lock(
+        result: std::io::Result<Option<installer::TorchVersionsLock>>,
+    ) -> Result<Option<installer::TorchVersionsLock>> {
+        match result {
+            Ok(lock) => Ok(lock),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                warn!(%error, "Torch startup selection normalization deferred");
+                Ok(None)
+            }
+            Err(error) => Err(PumasError::from(error)),
+        }
+    }
+
+    async fn acquire_torch_versions_lock_for_mutation(
+        &self,
+    ) -> Result<Option<installer::TorchVersionsLock>> {
+        if self.app_id != AppId::Torch {
+            return Ok(None);
+        }
+        let versions_dir = self.launcher_root.join(self.app_id.versions_dir_name());
+        std::fs::create_dir_all(&versions_dir).map_err(PumasError::from)?;
+        installer::TorchVersionsLock::acquire_for_mutation(&versions_dir)
+            .await
+            .map(Some)
+            .map_err(PumasError::from)
+    }
+
+    async fn state_snapshot<T>(&self, snapshot: impl FnOnce(&VersionState) -> T) -> Result<T> {
+        match self.try_torch_versions_lock_io() {
+            Ok(Some(lock)) => {
+                let mut state = self.state.write().await;
+                state.refresh_with_lock(&lock).await?;
+                Ok(snapshot(&state))
+            }
+            Ok(None) => {
+                let state = self.state.read().await;
+                Ok(snapshot(&state))
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                let state = self.state.read().await;
+                Ok(snapshot(&state))
+            }
+            Err(error) => Err(PumasError::from(error)),
+        }
     }
 
     /// Set the active version.
     pub async fn set_active_version(&self, tag: &str) -> Result<bool> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        let torch_versions_lock = self.acquire_torch_versions_lock_for_mutation().await?;
+        if let Some(lock) = &torch_versions_lock {
+            self.state.write().await.refresh_with_lock(lock).await?;
+        }
         #[cfg(test)]
         if let Some(proceeded) = &self.selection_proceeded {
             proceeded.store(true, Ordering::SeqCst);
         }
         if self.app_id == AppId::Torch {
             self.verify_torch_identity(tag).await?;
-            let current = self.get_active_version().await?;
+            let current = self.state.read().await.get_active_version();
             if current.as_deref() != Some(tag) {
                 if let Some(current) = current {
                     self.ensure_torch_stopped(&current).await?;
@@ -400,12 +474,20 @@ impl VersionManager {
             }
         }
         let mut state = self.state.write().await;
-        state.set_active_version(tag).await
+        if let Some(lock) = &torch_versions_lock {
+            state.set_active_version_with_lock(tag, lock).await
+        } else {
+            state.set_active_version(tag).await
+        }
     }
 
     /// Set the default version.
     pub async fn set_default_version(&self, tag: Option<&str>) -> Result<bool> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        let torch_versions_lock = self.acquire_torch_versions_lock_for_mutation().await?;
+        if let Some(lock) = &torch_versions_lock {
+            self.state.write().await.refresh_with_lock(lock).await?;
+        }
         if self.app_id == AppId::Torch {
             if let Some(tag) = tag {
                 self.verify_torch_identity(tag).await?;
@@ -416,7 +498,11 @@ impl VersionManager {
             proceeded.store(true, Ordering::SeqCst);
         }
         let mut state = self.state.write().await;
-        state.set_default_version(tag).await
+        if let Some(lock) = &torch_versions_lock {
+            state.set_default_version_with_lock(tag, lock).await
+        } else {
+            state.set_default_version(tag).await
+        }
     }
 
     /// Get detailed version info for a specific tag.
@@ -429,14 +515,44 @@ impl VersionManager {
 
     /// Get combined version status (all versions with their states).
     pub async fn get_version_status(&self) -> Result<VersionStatusReport> {
-        let (installed, active, default) = {
-            let state = self.state.read().await;
-            (
-                state.get_installed_tags(),
-                state.get_active_version(),
-                state.get_default_version(),
-            )
-        };
+        if self.app_id == AppId::Torch {
+            return self
+                .state_snapshot(|state| {
+                    let installed = state.get_installed_tags();
+                    let active = state.get_active_version();
+                    let default = state.get_default_version();
+                    let versions = installed
+                        .iter()
+                        .map(|tag| {
+                            let info = state.get_installed_metadata(tag);
+                            VersionStatusEntry {
+                                tag: tag.clone(),
+                                is_active: active.as_deref() == Some(tag),
+                                is_default: default.as_deref() == Some(tag),
+                                installed_date: info.map(|info| info.installed_date.clone()),
+                                python_version: info.and_then(|info| info.python_version.clone()),
+                                dependencies_installed: info
+                                    .and_then(|info| info.dependencies_installed),
+                            }
+                        })
+                        .collect();
+                    VersionStatusReport {
+                        versions,
+                        active_version: active,
+                        default_version: default,
+                    }
+                })
+                .await;
+        }
+        let (installed, active, default) = self
+            .state_snapshot(|state| {
+                (
+                    state.get_installed_tags(),
+                    state.get_active_version(),
+                    state.get_default_version(),
+                )
+            })
+            .await?;
 
         let mut versions = Vec::new();
         for tag in &installed {
@@ -583,7 +699,10 @@ impl VersionManager {
         let _ = self.cancel_installation().await?;
         let _install_guard = self.install_lock.lock().await;
         self.torch_cleanup.close();
-        self.torch_cleanup.drain().await
+        let tasks = self.torch_cleanup.drain().await;
+        let children = self.torch_cleanup.drain_child_slots().await;
+        tasks?;
+        children
     }
 
     /// Install a version with progress channel.
@@ -623,8 +742,35 @@ impl VersionManager {
             pause.reached.notify_one();
             pause.resume.acquire().await.unwrap().forget();
         }
+        if self.app_id == AppId::Torch && self.torch_shutting_down.load(Ordering::SeqCst) {
+            return Err(PumasError::InstallationFailed {
+                message: "Torch version manager is shutting down".into(),
+            });
+        }
+        let generate_bundled_preset_preview =
+            self.app_id == AppId::Torch && preview_id.is_none() && tag == "v2.9.1";
+        #[cfg(test)]
+        let generate_bundled_preset_preview = generate_bundled_preset_preview
+            && self.torch_stage_override.is_none()
+            && self.torch_admission_pause.is_none();
+        let generated_preset_preview_id = if generate_bundled_preset_preview {
+            match self
+                .preview_torch_runtime("v2.9.1", "cu130", "auto", "bundled")
+                .await?
+            {
+                TorchPreviewOutcome::Resolved { preview } => Some(preview.preview_id),
+                TorchPreviewOutcome::Rejected { reason, message } => {
+                    return Err(PumasError::InstallationFailed {
+                        message: format!("Torch preview {reason:?}: {message}"),
+                    });
+                }
+            }
+        } else {
+            None
+        };
+        let retained_preview_id = preview_id.or(generated_preset_preview_id.as_deref());
         let torch_plan = if self.app_id == AppId::Torch {
-            match preview_id {
+            match retained_preview_id {
                 Some(id) => {
                     let mut previews = self.torch_previews.lock().await;
                     let retained =
@@ -648,9 +794,9 @@ impl VersionManager {
                         report: retained.report,
                         interpreter_path: retained.interpreter_path,
                         interpreter_hash: retained.interpreter_hash,
+                        managed_python: retained.managed_python,
                     })
                 }
-                None if tag == "v2.9.1" => None,
                 #[cfg(test)]
                 None if self.torch_stage_override.is_some() => None,
                 None => {
@@ -855,6 +1001,11 @@ impl VersionManager {
     pub async fn remove_version(&self, tag: &str) -> Result<bool> {
         let _install_guard = self.install_lock.lock().await;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        let torch_versions_lock = self.acquire_torch_versions_lock_for_mutation().await?;
+        // Another backend may have changed metadata while this manager was open.
+        if let Some(lock) = &torch_versions_lock {
+            self.state.write().await.refresh_with_lock(lock).await?;
+        }
         self.ensure_torch_stopped(tag).await?;
         // Check if installed
         {
@@ -882,22 +1033,45 @@ impl VersionManager {
             pause.proceed.notified().await;
         }
 
-        // Remove directory
+        // Keep directory removal and metadata deletion in one leased worker, so
+        // cancelling this waiter cannot publish a half-removed Torch version.
         let version_path = self.version_path(tag);
-        if path_exists(&version_path).await? {
-            info!("Removing version directory: {}", version_path.display());
-            fs::remove_dir_all(&version_path)
-                .await
-                .map_err(|e| PumasError::Io {
-                    message: format!("Failed to remove version directory: {}", e),
-                    path: Some(version_path),
-                    source: Some(e),
-                })?;
+        if let Some(lock) = &torch_versions_lock {
+            let lease = lock.clone();
+            let metadata = self.metadata_manager.clone();
+            let removed_tag = tag.to_owned();
+            tokio::task::spawn_blocking(move || {
+                let _lease = lease;
+                info!("Removing version directory: {}", version_path.display());
+                match std::fs::remove_dir_all(&version_path) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(PumasError::Io {
+                            message: format!("Failed to remove version directory: {}", error),
+                            path: Some(version_path),
+                            source: Some(error),
+                        });
+                    }
+                }
+                metadata.remove_installed_version(&removed_tag, Some(AppId::Torch))
+            })
+            .await
+            .map_err(|error| PumasError::Other(format!("Torch removal task failed: {error}")))??;
+        } else {
+            if path_exists(&version_path).await? {
+                info!("Removing version directory: {}", version_path.display());
+                fs::remove_dir_all(&version_path)
+                    .await
+                    .map_err(|error| PumasError::Io {
+                        message: format!("Failed to remove version directory: {}", error),
+                        path: Some(version_path),
+                        source: Some(error),
+                    })?;
+            }
+            self.metadata_manager
+                .remove_installed_version(tag, Some(self.app_id))?;
         }
-
-        // Remove from metadata
-        self.metadata_manager
-            .remove_installed_version(tag, Some(self.app_id))?;
 
         #[cfg(test)]
         if let Some(pause) = &self.removal_metadata_pause {
@@ -908,7 +1082,11 @@ impl VersionManager {
         // Refresh state
         {
             let mut state = self.state.write().await;
-            state.refresh().await?;
+            if let Some(lock) = &torch_versions_lock {
+                state.refresh_with_lock(lock).await?;
+            } else {
+                state.refresh().await?;
+            }
         }
 
         info!("Removed version: {}", tag);
@@ -1043,6 +1221,22 @@ mod tests {
         (manager, root)
     }
 
+    #[test]
+    fn torch_startup_defers_only_lock_contention() {
+        let deferred =
+            VersionManager::startup_torch_versions_lock(Err(std::io::ErrorKind::WouldBlock.into()))
+                .unwrap();
+        assert!(deferred.is_none());
+
+        let error = VersionManager::startup_torch_versions_lock(Err(
+            std::io::ErrorKind::PermissionDenied.into(),
+        ))
+        .err()
+        .unwrap();
+        assert!(matches!(error, PumasError::Io { source: Some(source), .. }
+            if source.kind() == std::io::ErrorKind::PermissionDenied));
+    }
+
     #[tokio::test]
     async fn torch_shutdown_drains_cleanup_scheduled_by_active_install() {
         let (manager, _root) = create_torch_test_manager().await;
@@ -1150,26 +1344,26 @@ mod tests {
     }
 
     async fn register_test_version(manager: &VersionManager, tag: &str) {
-        std::fs::create_dir_all(manager.version_path(tag)).unwrap();
-        std::fs::create_dir_all(manager.version_path(tag).join("venv/bin")).unwrap();
-        for required in [
-            "runtime.json",
-            "serve.py",
-            "venv/bin/python",
-            "requirements.txt",
-        ] {
-            std::fs::write(manager.version_path(tag).join(required), b"test fixture").unwrap();
+        let runtime = manager.version_path(tag);
+        std::fs::create_dir_all(&runtime).unwrap();
+        let python = pumas_library::platform::paths::venv_python(&runtime);
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
+        for required in ["runtime.json", "serve.py", "requirements.txt"] {
+            std::fs::write(runtime.join(required), b"test fixture").unwrap();
         }
+        std::fs::write(&python, b"test fixture").unwrap();
         if manager.app_id == AppId::Torch {
             std::fs::write(
-                manager.version_path(tag).join("resolution.json"),
+                runtime.join("resolution.json"),
                 r#"{"torch":"test-fixture"}"#,
             )
             .unwrap();
-            let python = manager.version_path(tag).join("venv/bin/python");
             std::fs::write(&python, b"#!/bin/sh\necho test-fixture\n").unwrap();
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
         }
         let metadata = pumas_library::metadata::InstalledVersionMetadata {
             path: tag.to_string(),
@@ -1214,6 +1408,7 @@ mod tests {
         assert!(error.to_string().contains("identity manifest"));
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn qualified_legacy_torch_activation_uses_trusted_recipe_identity() {
         let (manager, _root) = create_torch_test_manager().await;
@@ -1226,7 +1421,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(
-            runtime.join("venv/bin/python"),
+            pumas_library::platform::paths::venv_python(&runtime),
             b"#!/bin/sh\necho 2.9.1+cu130\n",
         )
         .unwrap();
@@ -1400,6 +1595,322 @@ mod tests {
                 .as_deref(),
             Some("selected")
         );
+    }
+
+    #[tokio::test]
+    async fn torch_removal_preserves_version_while_independent_install_owner_holds_lock() {
+        let (manager, root) = create_torch_test_manager().await;
+        register_test_version(&manager, "keep").await;
+        register_test_version(&manager, "remove").await;
+        manager.set_active_version("keep").await.unwrap();
+        let other_manager = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        let versions_dir = root.path().join(AppId::Torch.versions_dir_name());
+        let owner = installer::TorchVersionsLock::try_acquire(&versions_dir).unwrap();
+
+        assert!(other_manager.remove_version("remove").await.is_err());
+        assert!(other_manager.version_path("remove").exists());
+        assert!(other_manager
+            .metadata_manager
+            .get_installed_version("remove", Some(AppId::Torch))
+            .unwrap()
+            .is_some());
+
+        drop(owner);
+        assert!(other_manager.remove_version("remove").await.unwrap());
+        assert!(!other_manager.version_path("remove").exists());
+        assert!(other_manager
+            .metadata_manager
+            .get_installed_version("remove", Some(AppId::Torch))
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn torch_mutations_wait_for_short_cross_process_handoffs() {
+        let (manager, root) = create_torch_test_manager().await;
+        register_test_version(&manager, "keep").await;
+        register_test_version(&manager, "remove").await;
+        let versions_dir = root.path().join(AppId::Torch.versions_dir_name());
+
+        for operation in ["active", "default", "remove"] {
+            let owner = installer::TorchVersionsLock::try_acquire(&versions_dir).unwrap();
+            let release = tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(40)).await;
+                drop(owner);
+            });
+            match operation {
+                "active" => assert!(manager.set_active_version("keep").await.unwrap()),
+                "default" => assert!(manager.set_default_version(Some("keep")).await.unwrap()),
+                "remove" => assert!(manager.remove_version("remove").await.unwrap()),
+                _ => unreachable!(),
+            }
+            release.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn torch_selection_and_validation_leave_metadata_untouched_while_owner_holds_lock() {
+        let (manager, root) = create_torch_test_manager().await;
+        register_test_version(&manager, "keep").await;
+        register_test_version(&manager, "other").await;
+        manager.set_active_version("keep").await.unwrap();
+        let observer = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        let versions_dir = root.path().join(AppId::Torch.versions_dir_name());
+        let owner = installer::TorchVersionsLock::try_acquire(&versions_dir).unwrap();
+
+        assert!(observer.set_active_version("other").await.is_err());
+        assert!(observer.set_default_version(Some("other")).await.is_err());
+        assert!(observer.validate_installations().await.is_err());
+        let versions = manager
+            .metadata_manager
+            .load_versions(Some(AppId::Torch))
+            .unwrap();
+        assert!(versions.installed.contains_key("keep"));
+        assert!(versions.installed.contains_key("other"));
+        assert_eq!(versions.last_selected_version.as_deref(), Some("keep"));
+        assert_eq!(
+            std::fs::read_to_string(manager.active_version_file()).unwrap(),
+            "keep"
+        );
+
+        drop(owner);
+        assert!(observer.set_default_version(Some("other")).await.unwrap());
+        assert!(observer.set_active_version("other").await.unwrap());
+        let versions = manager
+            .metadata_manager
+            .load_versions(Some(AppId::Torch))
+            .unwrap();
+        assert!(versions.installed.contains_key("keep"));
+        assert_eq!(versions.default_version.as_deref(), Some("other"));
+        assert_eq!(versions.last_selected_version.as_deref(), Some("other"));
+    }
+
+    #[tokio::test]
+    async fn stale_torch_manager_selection_preserves_new_and_removed_installs() {
+        let (manager, root) = create_torch_test_manager().await;
+        register_test_version(&manager, "keep").await;
+        manager.set_active_version("keep").await.unwrap();
+        let stale = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+
+        register_test_version(&manager, "new").await;
+        assert!(stale.set_default_version(Some("keep")).await.unwrap());
+        let versions = manager
+            .metadata_manager
+            .load_versions(Some(AppId::Torch))
+            .unwrap();
+        assert!(versions.installed.contains_key("new"));
+
+        manager.remove_version("new").await.unwrap();
+        assert!(stale.set_active_version("keep").await.unwrap());
+        let versions = manager
+            .metadata_manager
+            .load_versions(Some(AppId::Torch))
+            .unwrap();
+        assert!(!versions.installed.contains_key("new"));
+        assert!(versions.installed.contains_key("keep"));
+    }
+
+    #[tokio::test]
+    async fn torch_getters_refresh_selection_after_external_commit_and_remain_responsive_when_busy()
+    {
+        let (manager, root) = create_torch_test_manager().await;
+        register_test_version(&manager, "keep").await;
+        register_test_version(&manager, "other").await;
+        manager.set_active_version("keep").await.unwrap();
+        manager.set_default_version(Some("keep")).await.unwrap();
+        let observer = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        observer.set_active_version("other").await.unwrap();
+        observer.set_default_version(Some("other")).await.unwrap();
+
+        let versions_dir = root.path().join(AppId::Torch.versions_dir_name());
+        let owner = installer::TorchVersionsLock::try_acquire(&versions_dir).unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(250), manager.get_active_version())
+                .await
+                .unwrap()
+                .unwrap()
+                .as_deref(),
+            Some("keep")
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(250), manager.get_default_version())
+                .await
+                .unwrap()
+                .unwrap()
+                .as_deref(),
+            Some("keep")
+        );
+        drop(owner);
+
+        assert_eq!(
+            manager.get_active_version().await.unwrap().as_deref(),
+            Some("other")
+        );
+        assert_eq!(
+            manager.get_default_version().await.unwrap().as_deref(),
+            Some("other")
+        );
+        let status = manager.get_version_status().await.unwrap();
+        assert_eq!(status.active_version.as_deref(), Some("other"));
+        assert_eq!(status.default_version.as_deref(), Some("other"));
+    }
+
+    #[tokio::test]
+    async fn torch_status_uses_one_metadata_generation_while_versions_lock_is_busy() {
+        let (manager, root) = create_torch_test_manager().await;
+        register_test_version(&manager, "keep").await;
+        register_test_version(&manager, "other").await;
+        let before = manager.get_version_status().await.unwrap();
+        let old_date = before
+            .versions
+            .iter()
+            .find(|version| version.tag == "keep")
+            .unwrap()
+            .installed_date
+            .clone();
+        let versions_dir = root.path().join(AppId::Torch.versions_dir_name());
+        let owner = installer::TorchVersionsLock::try_acquire(&versions_dir).unwrap();
+        manager
+            .metadata_manager
+            .update_installed_version(
+                "keep",
+                pumas_library::metadata::InstalledVersionMetadata {
+                    path: "keep".into(),
+                    release_tag: "keep".into(),
+                    installed_date: "2030-01-01T00:00:00Z".into(),
+                    ..Default::default()
+                },
+                Some(AppId::Torch),
+            )
+            .unwrap();
+        manager
+            .metadata_manager
+            .remove_installed_version("other", Some(AppId::Torch))
+            .unwrap();
+
+        let busy = manager.get_version_status().await.unwrap();
+        assert_eq!(busy.versions.len(), 2);
+        assert_eq!(
+            busy.versions
+                .iter()
+                .find(|version| version.tag == "keep")
+                .unwrap()
+                .installed_date,
+            old_date
+        );
+        drop(owner);
+        let after = manager.get_version_status().await.unwrap();
+        assert_eq!(after.versions.len(), 1);
+        assert_eq!(after.versions[0].tag, "keep");
+        assert_eq!(
+            after.versions[0].installed_date.as_deref(),
+            Some("2030-01-01T00:00:00Z")
+        );
+    }
+
+    #[tokio::test]
+    async fn torch_startup_ignores_transitional_active_marker_while_owner_holds_lock() {
+        let (manager, root) = create_torch_test_manager().await;
+        register_test_version(&manager, "old").await;
+        register_test_version(&manager, "new").await;
+        manager.set_active_version("old").await.unwrap();
+        let versions_dir = root.path().join(AppId::Torch.versions_dir_name());
+        let owner = installer::TorchVersionsLock::try_acquire(&versions_dir).unwrap();
+        std::fs::write(manager.active_version_file(), "new").unwrap();
+
+        let observer = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        assert_eq!(
+            observer.get_active_version().await.unwrap().as_deref(),
+            Some("old")
+        );
+        let error = observer.state.write().await.refresh().await.unwrap_err();
+        assert!(
+            matches!(error, PumasError::Io { source: Some(source), .. } if source.kind() == std::io::ErrorKind::WouldBlock)
+        );
+        assert_eq!(
+            observer.get_active_version().await.unwrap().as_deref(),
+            Some("old")
+        );
+
+        manager
+            .metadata_manager
+            .set_last_selected_version(Some("new"), Some(AppId::Torch))
+            .unwrap();
+        drop(owner);
+        assert_eq!(
+            observer.get_active_version().await.unwrap().as_deref(),
+            Some("new")
+        );
+    }
+
+    #[tokio::test]
+    async fn torch_busy_startup_prefers_last_selected_over_default() {
+        let (manager, root) = create_torch_test_manager().await;
+        register_test_version(&manager, "old").await;
+        register_test_version(&manager, "other").await;
+        manager.set_active_version("old").await.unwrap();
+        manager.set_default_version(Some("other")).await.unwrap();
+
+        let versions_dir = root.path().join(AppId::Torch.versions_dir_name());
+        let owner = installer::TorchVersionsLock::try_acquire(&versions_dir).unwrap();
+        let observer = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        assert_eq!(
+            observer.get_active_version().await.unwrap().as_deref(),
+            Some("old")
+        );
+        drop(owner);
+        assert_eq!(
+            observer.get_active_version().await.unwrap().as_deref(),
+            Some("old")
+        );
+    }
+
+    #[tokio::test]
+    async fn torch_startup_skips_stale_validation_when_install_owner_holds_lock() {
+        let (manager, root) = create_torch_test_manager().await;
+        manager
+            .metadata_manager
+            .update_installed_version(
+                "incomplete",
+                pumas_library::metadata::InstalledVersionMetadata {
+                    path: "incomplete".into(),
+                    release_tag: "incomplete".into(),
+                    ..Default::default()
+                },
+                Some(AppId::Torch),
+            )
+            .unwrap();
+        let versions_dir = root.path().join(AppId::Torch.versions_dir_name());
+        let owner = installer::TorchVersionsLock::try_acquire(&versions_dir).unwrap();
+
+        let observer = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        assert!(manager
+            .metadata_manager
+            .get_installed_version("incomplete", Some(AppId::Torch))
+            .unwrap()
+            .is_some());
+        drop(owner);
+        let removed = observer.validate_installations().await.unwrap();
+        assert!(removed.removed_tags.contains(&"incomplete".to_string()));
+        assert!(manager
+            .metadata_manager
+            .get_installed_version("incomplete", Some(AppId::Torch))
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]

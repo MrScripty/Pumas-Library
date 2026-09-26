@@ -130,6 +130,17 @@ function expectActiveVersionNotDefault(tag: string) {
 }
 
 describe('TorchPanel shared version controls', () => {
+  it('uses readable semantic text for profile guidance', () => {
+    render(<TorchPanelHarness actions={{
+      refreshAll: vi.fn(async () => undefined),
+      installVersion: vi.fn(async () => true),
+      switchVersion: vi.fn(async () => true),
+      removeVersion: vi.fn(async () => true),
+      setDefaultVersion: vi.fn(async () => undefined),
+    }} />);
+    expect(screen.getByText(/Create a Torch runtime profile/)).toHaveClass('text-[hsl(var(--text-secondary))]');
+  });
+
   it('installs, activates, and removes versions through the shared manager flow', async () => {
     let finishRefresh!: () => void;
     const forcedRefresh = new Promise<void>((resolve) => {
@@ -188,10 +199,20 @@ describe('TorchPanel shared version controls', () => {
     const candidateRow = getVersionRow(candidateTag);
     const [installButton] = within(candidateRow).getAllByRole('button');
     if (!installButton) throw new TypeError('Expected the candidate install button');
+    expect(installButton).toHaveTextContent('Install');
     vi.stubGlobal('electronAPI', {
+      get_torch_release_options: vi.fn().mockResolvedValue({
+        tag: candidateTag, status: 'matches', completeScan: true,
+        checkedChannels: ['cpu'],
+        combinations: [{ build: 'cpu', python: 'python3.12', wheelUrl: 'https://download.pytorch.org/whl/cpu/torch.whl' }],
+        issues: [], detectedGpuVendors: [],
+        driverStatus: { nvidia: 'not_present', amd: 'not_present' },
+        recommended: { build: 'cpu', python: 'python3.12' }, recommendationNote: null,
+      }),
       get_torch_runtime_options: vi.fn().mockResolvedValue({
         builds: ['cpu'], pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
-        adapters: ['none'], preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
+        adapters: ['none'], bundledPresetAvailable: false, defaultAdapter: 'none',
+        preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
       }),
       preview_torch_runtime: vi.fn().mockResolvedValue({
         status: 'resolved', preview: {
@@ -206,6 +227,7 @@ describe('TorchPanel shared version controls', () => {
     });
     fireEvent.click(installButton);
     expect(actions.installVersion).not.toHaveBeenCalled();
+    expect(screen.getByRole('region', { name: `Torch installation preview for ${candidateTag}` })).toHaveClass('text-[hsl(var(--text-primary))]');
     fireEvent.click(await screen.findByRole('button', { name: 'Check selected combination' }));
     const reviewedInstallButton = screen.getByRole('button', { name: 'Install reviewed artifacts' });
     await waitFor(() => expect(reviewedInstallButton).toBeEnabled());
@@ -233,7 +255,7 @@ describe('TorchPanel shared version controls', () => {
     });
     const oldRow = getVersionRow(oldTag);
     fireEvent.pointerEnter(oldRow);
-    const uninstallButton = await within(oldRow).findByRole('button', { name: 'Uninstall' });
+    const uninstallButton = await within(oldRow).findByRole('button', { name: 'Uninstall version' });
     fireEvent.click(uninstallButton);
 
     await waitFor(() => {

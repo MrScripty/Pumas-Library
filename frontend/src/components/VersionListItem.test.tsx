@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { VersionListItem } from './VersionListItem';
 import type { InstallationProgress, VersionRelease } from '../hooks/useVersions';
@@ -87,6 +88,9 @@ describe('VersionListItem', () => {
     expect(screen.getByText('1.2.3')).toBeInTheDocument();
     expect(screen.getByText('Pre')).toBeInTheDocument();
     expect(screen.getByText('1.00 GB')).toBeInTheDocument();
+    const installAction = screen.getByRole('button', { name: 'Install version' });
+    expect(installAction).toHaveTextContent('Install');
+    expect(installAction).toHaveClass('hover:bg-[hsl(var(--surface-interactive-hover))]', 'active:scale-[0.97]', 'focus-visible:outline-2');
 
     fireEvent.pointerEnter(container.firstChild as Element);
     fireEvent.pointerLeave(container.firstChild as Element);
@@ -135,6 +139,24 @@ describe('VersionListItem', () => {
     expect(props.onRemove).toHaveBeenCalledTimes(1);
   });
 
+  it('announces Uninstall on keyboard focus and removes the installed version with Enter or Space', async () => {
+    const user = userEvent.setup();
+    const { props } = renderVersionListItem({ isInstalled: true });
+    expect(screen.getByRole('button', { name: 'Ready' })).toBeInTheDocument();
+    await user.tab();
+    await user.tab();
+    const uninstall = screen.getByRole('button', { name: 'Uninstall version' });
+    expect(uninstall).toHaveTextContent('Uninstall');
+    expect(uninstall).toHaveClass('border-[hsl(var(--accent-error))]');
+    await user.keyboard('{Enter}');
+    await user.keyboard(' ');
+    expect(props.onRemove).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('button', { name: 'Uninstall version' })).toBeInTheDocument();
+
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Ready' })).toBeInTheDocument();
+  });
+
   it('renders installing dependency progress and cancel affordances', () => {
     const { props, rerender } = renderVersionListItem({
       isInstalling: true,
@@ -143,6 +165,7 @@ describe('VersionListItem', () => {
     });
 
     expect(screen.getByText('2/4')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel current version installation' })).toBeInTheDocument();
 
     const progressButton = getClosestButton('2/4');
     fireEvent.pointerEnter(progressButton);
@@ -173,5 +196,34 @@ describe('VersionListItem', () => {
     });
 
     expect(screen.getByText('50%')).toBeInTheDocument();
+  });
+
+  it('shows an indeterminate Torch setup phase and keeps the row cancel action', () => {
+    const { props, rerender } = renderVersionListItem({
+      appId: 'torch', isInstalling: true,
+      progress: { ...dependencyProgress, stage: 'setup', stage_progress: 0, overall_progress: 95, current_item: 'Creating managed Python environment', error: null },
+    });
+    const button = getClosestButton('Creating managed Python environment');
+    expect(screen.queryByText('95%')).not.toBeInTheDocument();
+    expect(button.querySelector('.download-progress-ring.is-waiting')).toBeInTheDocument();
+    fireEvent.click(button);
+    expect(props.onCancel).toHaveBeenCalledOnce();
+
+    rerender(<VersionListItem {...props} progress={{
+      ...dependencyProgress, stage: 'setup', stage_progress: 40, overall_progress: 95,
+      current_item: 'Qualifying runtime', error: null,
+    }} />);
+    expect(screen.getByText('Qualifying runtime')).toBeInTheDocument();
+    expect(button.querySelector('.download-progress-ring.is-waiting')).not.toBeInTheDocument();
+  });
+
+  it('labels a measured non-download phase instead of calling it a download', () => {
+    const { container } = renderVersionListItem({
+      isInstalling: true,
+      progress: { ...dependencyProgress, stage: 'extract', stage_progress: 40, overall_progress: 35, current_item: 'Unpacking runtime' },
+    });
+    expect(screen.getByText('Unpacking runtime')).toBeInTheDocument();
+    expect(screen.queryByText('Downloading...')).not.toBeInTheDocument();
+    expect(container.querySelector('.download-progress-ring.is-waiting')).not.toBeInTheDocument();
   });
 });

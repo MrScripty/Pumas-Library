@@ -165,7 +165,8 @@ async fn manager_filters_upstream_releases_and_preserves_legacy_runtime_state() 
     let mut installed = HashMap::new();
     for tag in legacy_tags {
         let runtime = root.path().join("torch-versions").join(tag);
-        std::fs::create_dir_all(runtime.join("venv/bin")).unwrap();
+        let python = pumas_library::platform::paths::venv_python(&runtime);
+        std::fs::create_dir_all(python.parent().unwrap()).unwrap();
         let recipe = if tag == "0.1.6" {
             r#"{"recipe_id":"torch-runtime-0.1.6"}"#
         } else {
@@ -174,7 +175,7 @@ async fn manager_filters_upstream_releases_and_preserves_legacy_runtime_state() 
         std::fs::write(runtime.join("runtime.json"), recipe).unwrap();
         std::fs::write(runtime.join("serve.py"), "# legacy fixture\n").unwrap();
         std::fs::write(runtime.join("requirements.txt"), "# legacy fixture\n").unwrap();
-        std::fs::write(runtime.join("venv/bin/python"), "# fixture\n").unwrap();
+        std::fs::write(python, "# fixture\n").unwrap();
         installed.insert(
             tag.to_string(),
             InstalledVersionMetadata {
@@ -304,7 +305,8 @@ fn mock_runtime_for_publication(
     staging: &std::path::Path,
 ) -> pumas_library::Result<std::path::PathBuf> {
     let runtime = staging.join("runtime");
-    std::fs::create_dir_all(runtime.join("venv/bin")).map_err(PumasError::from)?;
+    let python = pumas_library::platform::paths::venv_python(&runtime);
+    std::fs::create_dir_all(python.parent().unwrap()).map_err(PumasError::from)?;
     std::fs::write(
         runtime.join("runtime.json"),
         r#"{"recipe_id":"torch-upstream-2.9.1-r1"}"#,
@@ -317,8 +319,7 @@ fn mock_runtime_for_publication(
         "# isolated publication fixture\n",
     )
     .map_err(PumasError::from)?;
-    std::fs::write(runtime.join("venv/bin/python"), "# fake interpreter\n")
-        .map_err(PumasError::from)?;
+    std::fs::write(python, "# fake interpreter\n").map_err(PumasError::from)?;
     Ok(runtime)
 }
 

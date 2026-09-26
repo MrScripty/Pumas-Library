@@ -4,6 +4,7 @@ import type { InstallationProgress, VersionRelease } from '../hooks/useVersions'
 import { ProgressDetailsView } from './ProgressDetailsView';
 import { VersionListItem } from './VersionListItem';
 import type { TorchInstalledConfig } from '../types/torch-install';
+import { getInstallActivityPresentation } from '../utils/installActivityPresentation';
 
 interface InstallDialogContentProps {
   appId?: string;
@@ -70,6 +71,8 @@ export function InstallDialogContent({
   onInspectTorchProbe,
   onReportRemoveError,
 }: InstallDialogContentProps) {
+  const activity = getInstallActivityPresentation({ appId, installingTag: installingVersion, progress });
+  const torchTag = installingVersion ?? progress?.tag;
   return (
     <div className="flex-1 min-h-0 overflow-y-auto py-4 px-0">
       <AnimatePresence>
@@ -87,6 +90,16 @@ export function InstallDialogContent({
           </motion.div>
         )}
       </AnimatePresence>
+
+      {activity.active && (appId === 'torch' || !progress) && (
+        <div className="mx-4 mb-3 flex items-center justify-between gap-3 rounded border border-[hsl(var(--border-default))] p-3 text-sm text-[hsl(var(--text-primary))]">
+          <span role="status" className="flex min-w-0 items-center gap-2 break-words text-[hsl(var(--text-primary))]">
+            <Loader2 aria-hidden="true" size={16} className="shrink-0 animate-spin text-[hsl(var(--accent-success))]" />
+            {appId === 'torch' ? `Installing Torch${torchTag ? ` ${torchTag}` : ''} · ${activity.phase}` : activity.phase}
+          </span>
+          <button type="button" onClick={onCancelInstallation} className="shrink-0 rounded border border-[hsl(var(--border-control))] px-3 py-1 text-[hsl(var(--text-primary))] transition-colors hover:border-[hsl(var(--accent-error))] hover:bg-[hsl(var(--surface-interactive-hover))] active:bg-[hsl(var(--surface-lowest))] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[hsl(var(--accent-success))]" aria-label="Cancel current installation">Cancel</button>
+        </div>
+      )}
 
       <AnimatePresence>
         {isRateLimited && (
@@ -114,6 +127,7 @@ export function InstallDialogContent({
 
       {showProgressDetails && progress ? (
         <ProgressDetailsView
+          appId={appId}
           progress={progress}
           installingVersion={installingVersion}
           showCompletedItems={showCompletedItems}

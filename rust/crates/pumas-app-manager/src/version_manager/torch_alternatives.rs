@@ -1,13 +1,610 @@
-//! Bounded discovery of official Torch wheels for installed Python interpreters.
+//! Bounded discovery of official Torch wheels for managed Python candidates.
 //! A wheel match is only a lead; dependencies and adapters are not resolved.
 
-use super::torch_preview::{BUILDS, PYTHONS};
+use super::managed_python::{
+    ensure_managed_torch_interpreter as provision_managed_torch_interpreter,
+    list_managed_torch_candidates, ManagedPythonFailure, ManagedPythonIdentity,
+};
+use super::torch_preview::valid_torch_channel;
 use super::*;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+use std::io;
 use tokio::process::Command;
 
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(45);
 const PYTHON_CHECK_TIMEOUT: Duration = Duration::from_secs(3);
+// Leave room for interpreter checks, the bounded index scan, and process startup.
+const RELEASE_OPTIONS_TIMEOUT: Duration = Duration::from_secs(60);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TorchHostTarget {
+    LinuxX8664,
+    WindowsX8664,
+    MacosArm64,
+}
+
+impl TorchHostTarget {
+    fn current() -> Option<Self> {
+        if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+            Some(Self::LinuxX8664)
+        } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+            Some(Self::WindowsX8664)
+        } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            Some(Self::MacosArm64)
+        } else {
+            None
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum TorchReleaseOptionsStatus {
+    Matches,
+    None,
+    Inconclusive,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum TorchReleaseDriverAvailability {
+    Available,
+    Unavailable,
+    NotPresent,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TorchReleaseDriverStatus {
+    pub nvidia: TorchReleaseDriverAvailability,
+    pub amd: TorchReleaseDriverAvailability,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TorchReleaseCombination {
+    pub build: String,
+    pub python: String,
+    pub wheel_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TorchReleaseRecommendation {
+    pub build: String,
+    pub python: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TorchReleaseOptionsDiscovery {
+    pub tag: String,
+    pub status: TorchReleaseOptionsStatus,
+    pub complete_scan: bool,
+    pub checked_channels: Vec<String>,
+    pub combinations: Vec<TorchReleaseCombination>,
+    pub issues: Vec<String>,
+    pub detected_gpu_vendors: Vec<String>,
+    pub driver_status: TorchReleaseDriverStatus,
+    pub recommended: Option<TorchReleaseRecommendation>,
+    pub recommendation_note: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResolverReleaseOptions {
+    tag: String,
+    status: TorchReleaseOptionsStatus,
+    complete_scan: bool,
+    checked_channels: Vec<String>,
+    combinations: Vec<TorchReleaseCombination>,
+    issues: Vec<String>,
+}
+
+fn pci_display_vendors(
+    devices_root: &Path,
+    read: impl Fn(&Path) -> io::Result<String>,
+) -> io::Result<Vec<String>> {
+    let mut vendors = BTreeSet::new();
+    for entry in std::fs::read_dir(devices_root)? {
+        let path = entry?.path();
+        let class = read(&path.join("class"))?;
+        let class = u32::from_str_radix(class.trim().trim_start_matches("0x"), 16)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid PCI class"))?;
+        if class >> 16 != 0x03 {
+            continue;
+        }
+        let vendor = read(&path.join("vendor"))?;
+        let vendor = u16::from_str_radix(vendor.trim().trim_start_matches("0x"), 16)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid PCI vendor"))?;
+        match vendor {
+            0x10de => {
+                vendors.insert("nvidia".to_owned());
+            }
+            0x1002 => {
+                vendors.insert("amd".to_owned());
+            }
+            0x8086 => {
+                vendors.insert("intel".to_owned());
+            }
+            _ => {}
+        }
+    }
+    Ok(vendors.into_iter().collect())
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct NvidiaDriverVersion(u32, u32, u32);
+
+#[derive(Clone, Copy, Debug)]
+struct NvidiaDriverProbe {
+    availability: TorchReleaseDriverAvailability,
+    version: Option<NvidiaDriverVersion>,
+}
+
+fn parse_nvidia_driver_version(text: &str) -> Option<NvidiaDriverVersion> {
+    let parts = text.trim().split('.').collect::<Vec<_>>();
+    if parts.is_empty() || parts.len() > 3 || parts.iter().any(|part| part.is_empty()) {
+        return None;
+    }
+    let mut numbers = [0_u32; 3];
+    for (index, part) in parts.iter().enumerate() {
+        numbers[index] = part.parse().ok()?;
+    }
+    Some(NvidiaDriverVersion(numbers[0], numbers[1], numbers[2]))
+}
+
+fn parse_nvidia_driver_output(stdout: &[u8]) -> Option<NvidiaDriverVersion> {
+    let output = std::str::from_utf8(stdout).ok()?;
+    let mut versions = output.lines().map(parse_nvidia_driver_version);
+    let mut lowest = versions.next()??;
+    for version in versions {
+        lowest = lowest.min(version?);
+    }
+    Some(lowest)
+}
+
+// Linux driver floors for CUDA minor compatibility. CUDA 13.x/12.x/11.x
+// and exact 10.x floors: https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html
+// A passing floor is only a recommendation gate; feature/PTX and device/model
+// behavior still require checks after installation.
+fn cuda_linux_driver_floor(build: &str) -> Option<NvidiaDriverVersion> {
+    let channel = build.strip_prefix("cu")?.parse::<u32>().ok()?;
+    match channel {
+        130..=139 => Some(NvidiaDriverVersion(580, 0, 0)),
+        120..=129 => Some(NvidiaDriverVersion(525, 60, 13)),
+        110..=119 => Some(NvidiaDriverVersion(450, 80, 2)),
+        102 => Some(NvidiaDriverVersion(440, 33, 0)),
+        101 => Some(NvidiaDriverVersion(418, 39, 0)),
+        100 => Some(NvidiaDriverVersion(410, 48, 0)),
+        _ => None,
+    }
+}
+
+async fn nvidia_driver_probe() -> NvidiaDriverProbe {
+    let mut command = Command::new("nvidia-smi");
+    command
+        .kill_on_drop(true)
+        .args(["--query-gpu=driver_version", "--format=csv,noheader"]);
+    match tokio::time::timeout(PYTHON_CHECK_TIMEOUT, command.output()).await {
+        Ok(Ok(output)) if output.status.success() => {
+            let version = parse_nvidia_driver_output(&output.stdout);
+            NvidiaDriverProbe {
+                availability: if version.is_some() {
+                    TorchReleaseDriverAvailability::Available
+                } else {
+                    TorchReleaseDriverAvailability::Unknown
+                },
+                version,
+            }
+        }
+        Ok(Ok(_)) => NvidiaDriverProbe {
+            availability: TorchReleaseDriverAvailability::Unavailable,
+            version: None,
+        },
+        Ok(Err(_)) | Err(_) => NvidiaDriverProbe {
+            availability: TorchReleaseDriverAvailability::Unknown,
+            version: None,
+        },
+    }
+}
+
+fn amd_driver_available(devices_root: &Path) -> TorchReleaseDriverAvailability {
+    let Ok(entries) = std::fs::read_dir(devices_root) else {
+        return TorchReleaseDriverAvailability::Unknown;
+    };
+    for entry in entries {
+        let Ok(entry) = entry else {
+            return TorchReleaseDriverAvailability::Unknown;
+        };
+        let path = entry.path();
+        let class = std::fs::read_to_string(path.join("class"))
+            .ok()
+            .and_then(|text| u32::from_str_radix(text.trim().trim_start_matches("0x"), 16).ok());
+        let vendor = std::fs::read_to_string(path.join("vendor"))
+            .ok()
+            .and_then(|text| u16::from_str_radix(text.trim().trim_start_matches("0x"), 16).ok());
+        let (Some(class), Some(vendor)) = (class, vendor) else {
+            return TorchReleaseDriverAvailability::Unknown;
+        };
+        if class >> 16 != 0x03 || vendor != 0x1002 {
+            continue;
+        }
+        match std::fs::read_link(path.join("driver")) {
+            Ok(driver) if driver.file_name().is_some_and(|name| name == "amdgpu") => {
+                return TorchReleaseDriverAvailability::Available;
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => return TorchReleaseDriverAvailability::Unknown,
+        }
+    }
+    TorchReleaseDriverAvailability::Unavailable
+}
+
+fn managed_python_error(error: ManagedPythonFailure) -> PumasError {
+    unsupported_input(error.message)
+}
+
+fn catalog_python_minor(python: &str, candidates: &[String]) -> Option<String> {
+    let minor = python.strip_prefix("python")?;
+    candidates
+        .iter()
+        .any(|candidate| candidate == minor)
+        .then(|| minor.to_owned())
+}
+
+fn sort_catalog_minors(mut candidates: Vec<String>) -> Vec<String> {
+    candidates.sort_by_key(|minor| {
+        let (major, minor) = minor.split_once('.').unwrap_or(("0", "0"));
+        (
+            major.parse::<u32>().unwrap_or(0),
+            minor.parse::<u32>().unwrap_or(0),
+        )
+    });
+    candidates.dedup();
+    candidates.reverse();
+    candidates
+}
+
+pub(super) async fn managed_torch_candidate_minors(
+    root: &Path,
+    cleanup: &Arc<super::installer::TorchCleanupTasks>,
+) -> Result<Vec<String>> {
+    let candidates = list_managed_torch_candidates(root, cleanup)
+        .await
+        .map_err(managed_python_error)?;
+    Ok(sort_catalog_minors(
+        candidates
+            .into_iter()
+            .map(|candidate| candidate.minor)
+            .collect(),
+    ))
+}
+
+pub(super) async fn ensure_managed_torch_interpreter(
+    root: &Path,
+    cleanup: &Arc<super::installer::TorchCleanupTasks>,
+    minor: &str,
+) -> Result<ManagedPythonIdentity> {
+    let candidates = managed_torch_candidate_minors(root, cleanup).await?;
+    if !candidates.iter().any(|candidate| candidate == minor) {
+        return Err(unsupported_input(
+            "Select a Python version from the managed CPython catalog",
+        ));
+    }
+    provision_managed_torch_interpreter(root, cleanup, minor)
+        .await
+        .map_err(managed_python_error)
+}
+
+fn release_options_command(
+    interpreter: &Path,
+    resolver: &Path,
+    version: &str,
+    candidates: &[String],
+) -> Command {
+    let mut command = Command::new(interpreter);
+    command.kill_on_drop(true).arg("-I").arg(resolver).args([
+        "--release-options",
+        "--version",
+        version,
+        "--interpreter",
+    ]);
+    command.arg(interpreter);
+    for candidate in candidates {
+        command.arg("--python-candidate").arg(candidate);
+    }
+    command
+}
+
+fn valid_wheel_platform(platform: &str, target: TorchHostTarget) -> bool {
+    match target {
+        TorchHostTarget::LinuxX8664 => {
+            platform == "linux_x86_64"
+                || ((platform.starts_with("manylinux") || platform.starts_with("musllinux"))
+                    && platform.ends_with("_x86_64"))
+        }
+        TorchHostTarget::WindowsX8664 => platform == "win_amd64",
+        TorchHostTarget::MacosArm64 => {
+            let Some(numbers) = platform.strip_prefix("macosx_").and_then(|value| {
+                value
+                    .strip_suffix("_arm64")
+                    .or_else(|| value.strip_suffix("_universal2"))
+            }) else {
+                return false;
+            };
+            let Some((major, minor)) = numbers.split_once('_') else {
+                return false;
+            };
+            major.parse::<u32>().is_ok_and(|value| value >= 11) && minor.parse::<u32>().is_ok()
+        }
+    }
+}
+
+fn valid_official_wheel(
+    url: &str,
+    build: &str,
+    version: &str,
+    python: &str,
+    target: TorchHostTarget,
+) -> bool {
+    let Ok(url) = reqwest::Url::parse(url) else {
+        return false;
+    };
+    let Some(filename) = url.path().rsplit('/').next() else {
+        return false;
+    };
+    let Some(stem) = filename.strip_suffix(".whl") else {
+        return false;
+    };
+    let mut fields = stem.rsplitn(4, '-');
+    let (Some(platform), Some(abi), Some(python_tag), Some(distribution)) =
+        (fields.next(), fields.next(), fields.next(), fields.next())
+    else {
+        return false;
+    };
+    let Some(remainder) = distribution.strip_prefix(&format!("torch-{version}")) else {
+        return false;
+    };
+    let expected_prefix = format!("/whl/{build}/");
+    let artifact_path = url
+        .path()
+        .strip_prefix(&expected_prefix)
+        .is_some_and(|path| path == filename || path.strip_prefix("torch/") == Some(filename));
+    let expected_python = python.replace("python", "cp").replace('.', "");
+    let exact_version = remainder.is_empty()
+        || remainder.eq_ignore_ascii_case(&format!("%2B{build}"))
+        || remainder.eq_ignore_ascii_case(&format!("+{build}"));
+    let target_build = match target {
+        TorchHostTarget::MacosArm64 => build == "cpu",
+        TorchHostTarget::WindowsX8664 => build == "cpu" || build.starts_with("cu"),
+        TorchHostTarget::LinuxX8664 => valid_torch_channel(build),
+    };
+    target_build
+        && exact_version
+        && python_tag.split('.').any(|tag| tag == expected_python)
+        && !abi.is_empty()
+        && platform
+            .split('.')
+            .any(|tag| valid_wheel_platform(tag, target))
+        && url.scheme() == "https"
+        && matches!(
+            url.host_str(),
+            Some("download.pytorch.org" | "download-r2.pytorch.org")
+        )
+        && matches!(url.port(), None | Some(443))
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && artifact_path
+}
+
+fn python_rank(python: &str) -> (u32, u32) {
+    let Some((major, minor)) = python
+        .strip_prefix("python")
+        .and_then(|value| value.split_once('.'))
+    else {
+        return (0, 0);
+    };
+    (major.parse().unwrap_or(0), minor.parse().unwrap_or(0))
+}
+
+#[cfg(test)]
+fn visible_combinations(
+    combinations: Vec<TorchReleaseCombination>,
+    vendors: &[String],
+) -> Vec<TorchReleaseCombination> {
+    visible_combinations_for_target(combinations, vendors, TorchHostTarget::LinuxX8664)
+}
+
+fn visible_combinations_for_target(
+    combinations: Vec<TorchReleaseCombination>,
+    vendors: &[String],
+    target: TorchHostTarget,
+) -> Vec<TorchReleaseCombination> {
+    combinations
+        .into_iter()
+        .filter(|item| visible_build_for_target(&item.build, vendors, target))
+        .collect()
+}
+
+fn visible_build_for_target(build: &str, vendors: &[String], target: TorchHostTarget) -> bool {
+    match target {
+        TorchHostTarget::LinuxX8664 => visible_build(build, vendors),
+        TorchHostTarget::WindowsX8664 => {
+            build == "cpu"
+                || (build.starts_with("cu") && vendors.iter().any(|vendor| vendor == "nvidia"))
+        }
+        TorchHostTarget::MacosArm64 => build == "cpu",
+    }
+}
+
+fn visible_build(build: &str, vendors: &[String]) -> bool {
+    build == "cpu"
+        || (build.starts_with("cu") && vendors.iter().any(|vendor| vendor == "nvidia"))
+        || (build.starts_with("rocm") && vendors.iter().any(|vendor| vendor == "amd"))
+}
+
+fn best_combination<'a>(
+    combinations: &'a [TorchReleaseCombination],
+    family: &str,
+) -> Option<&'a TorchReleaseCombination> {
+    combinations
+        .iter()
+        .filter(|item| match family {
+            "cpu" => item.build == "cpu",
+            "cu" => item.build.starts_with("cu"),
+            "rocm" => item.build.starts_with("rocm"),
+            _ => false,
+        })
+        .max_by_key(|item| {
+            let versions: Vec<u64> = item
+                .build
+                .strip_prefix(family)
+                .unwrap_or("")
+                .split('.')
+                .filter_map(|part| part.parse().ok())
+                .collect();
+            (versions, python_rank(&item.python))
+        })
+}
+
+fn recommend_release_option(
+    combinations: &[TorchReleaseCombination],
+    vendors: &[String],
+    drivers: &TorchReleaseDriverStatus,
+    nvidia_version: Option<NvidiaDriverVersion>,
+    complete_scan: bool,
+) -> (Option<TorchReleaseRecommendation>, String) {
+    let nvidia = vendors.iter().any(|vendor| vendor == "nvidia");
+    let amd = vendors.iter().any(|vendor| vendor == "amd");
+    if !complete_scan {
+        if let Some(cpu) = best_combination(combinations, "cpu") {
+            return (
+                Some(TorchReleaseRecommendation {
+                    build: cpu.build.clone(),
+                    python: cpu.python.clone(),
+                }),
+                "The official wheel scan was incomplete; CPU is a provisional recommendation. Exact GPU wheels remain advanced choices."
+                    .to_owned(),
+            );
+        }
+        return (
+            None,
+            "The official wheel scan was incomplete, and no exact CPU wheel was found; review GPU wheels as advanced choices."
+                .to_owned(),
+        );
+    }
+    if nvidia && drivers.nvidia == TorchReleaseDriverAvailability::Available {
+        if let Some(version) = nvidia_version {
+            let selected = combinations
+                .iter()
+                .filter(|item| {
+                    cuda_linux_driver_floor(&item.build).is_some_and(|floor| version >= floor)
+                })
+                .max_by_key(|item| {
+                    (
+                        item.build
+                            .strip_prefix("cu")
+                            .and_then(|channel| channel.parse::<u32>().ok())
+                            .unwrap_or(0),
+                        python_rank(&item.python),
+                    )
+                });
+            if let Some(selected) = selected {
+                return (
+                    Some(TorchReleaseRecommendation {
+                        build: selected.build.clone(),
+                        python: selected.python.clone(),
+                    }),
+                    "This is the highest exact CUDA wheel meeting NVIDIA's Linux minor-compatibility driver floor. Minor compatibility can limit features and PTX; device and model behavior are tested after installation."
+                        .to_owned(),
+                );
+            }
+        }
+    }
+    if let Some(cpu) = best_combination(combinations, "cpu") {
+        let note = if nvidia && drivers.nvidia != TorchReleaseDriverAvailability::Available {
+            "NVIDIA hardware was detected, but its driver could not be verified. Exact CUDA wheels remain advanced choices; CPU is recommended."
+        } else if nvidia && best_combination(combinations, "cu").is_some() {
+            "No exact CUDA wheel has a verified NVIDIA Linux minor-compatibility driver floor on this system. CUDA wheels remain advanced choices; CPU is recommended."
+        } else if amd {
+            "An AMD GPU was detected, but per-release ROCm device compatibility is not established. ROCm wheels remain advanced choices; CPU is recommended."
+        } else if nvidia || amd {
+            "No exact wheel for the available GPU driver was found for this release; CPU is recommended."
+        } else {
+            ""
+        };
+        return (
+            Some(TorchReleaseRecommendation {
+                build: cpu.build.clone(),
+                python: cpu.python.clone(),
+            }),
+            note.to_owned(),
+        );
+    }
+    let note = if combinations.is_empty() {
+        "No exact official wheel was found for the detected devices and managed Python candidates."
+    } else if nvidia && best_combination(combinations, "cu").is_some() {
+        "No exact CUDA wheel has a verified NVIDIA Linux minor-compatibility driver floor on this system, and no CPU wheel matched. CUDA wheels remain advanced choices."
+    } else if amd {
+        "Per-release ROCm device compatibility is not established, and no CPU wheel matched. ROCm wheels remain advanced choices."
+    } else {
+        "Exact GPU wheels were found, but a corresponding driver could not be verified; review them as advanced choices."
+    };
+    (None, note.to_owned())
+}
+
+fn recommend_release_option_for_target(
+    combinations: &[TorchReleaseCombination],
+    vendors: &[String],
+    drivers: &TorchReleaseDriverStatus,
+    nvidia_version: Option<NvidiaDriverVersion>,
+    complete_scan: bool,
+    target: TorchHostTarget,
+) -> (Option<TorchReleaseRecommendation>, String) {
+    if target == TorchHostTarget::LinuxX8664 {
+        return recommend_release_option(
+            combinations,
+            vendors,
+            drivers,
+            nvidia_version,
+            complete_scan,
+        );
+    }
+    let cpu = best_combination(combinations, "cpu").map(|item| TorchReleaseRecommendation {
+        build: item.build.clone(),
+        python: item.python.clone(),
+    });
+    let note = match target {
+        TorchHostTarget::WindowsX8664 if cpu.is_some() && !complete_scan => {
+            "The official wheel scan was incomplete; CPU is a provisional choice. Exact CUDA wheels remain advanced choices."
+        }
+        TorchHostTarget::WindowsX8664 if cpu.is_some() => {
+            "CPU is recommended because Windows CUDA driver compatibility has not been established. Exact CUDA wheels remain advanced choices."
+        }
+        TorchHostTarget::WindowsX8664 => {
+            "No exact CPU wheel matched. Windows CUDA wheels require an explicit advanced choice; driver and device compatibility are checked after installation."
+        }
+        TorchHostTarget::MacosArm64 if cpu.is_some() && !complete_scan => {
+            "The official wheel scan was incomplete; CPU is a provisional choice. Apple MPS is a runtime capability, not a wheel channel."
+        }
+        TorchHostTarget::MacosArm64 if cpu.is_some() => {
+            "The official CPU wheel is recommended. Apple MPS is a runtime capability checked after installation, not a wheel channel."
+        }
+        TorchHostTarget::MacosArm64 => {
+            "No exact macOS arm64 CPU wheel matched. Apple MPS is a runtime capability, not a wheel channel."
+        }
+        TorchHostTarget::LinuxX8664 => unreachable!(),
+    };
+    (cpu, note.to_owned())
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +632,63 @@ pub struct TorchAlternativeDiscovery {
     pub issues: Vec<String>,
 }
 
+fn filter_alternatives_for_host(
+    mut result: TorchAlternativeDiscovery,
+    detected: io::Result<Vec<String>>,
+    target: TorchHostTarget,
+) -> TorchAlternativeDiscovery {
+    let unknown_host = detected.is_err();
+    let vendors = detected.unwrap_or_default();
+    result
+        .checked_builds
+        .retain(|build| visible_build_for_target(build, &vendors, target));
+    result
+        .matches
+        .retain(|item| visible_build_for_target(&item.build, &vendors, target));
+    if unknown_host {
+        result.status = "inconclusive".into();
+        result
+            .issues
+            .push("GPU devices could not be inspected; GPU wheel leads were withheld".into());
+    } else if result.matches.is_empty() && result.status == "matches" {
+        result.status = "none".into();
+    }
+    result
+}
+
+fn validate_legacy_wheel_leads(
+    mut result: TorchAlternativeDiscovery,
+    interpreters: &[(String, PathBuf)],
+    version: &str,
+    target: TorchHostTarget,
+) -> TorchAlternativeDiscovery {
+    let before = result.matches.len();
+    let checked_before = result.checked_builds.len();
+    result
+        .checked_builds
+        .retain(|build| valid_torch_channel(build));
+    result.matches.retain(|candidate| {
+        candidate.tag == result.selected_tag
+            && interpreters
+                .iter()
+                .any(|(python, _)| python == &candidate.python)
+            && valid_torch_channel(&candidate.build)
+            && candidate.wheel_url.as_ref().is_some_and(|url| {
+                valid_official_wheel(url, &candidate.build, version, &candidate.python, target)
+            })
+            && candidate.sha256.as_ref().is_none_or(|hash| {
+                hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+    });
+    if result.matches.len() != before || result.checked_builds.len() != checked_before {
+        result.status = "inconclusive".into();
+        result
+            .issues
+            .push("Some wheel leads could not be verified for this host and were withheld".into());
+    }
+    result
+}
+
 fn stable_version(tag: &str) -> Option<&str> {
     let version = tag.strip_prefix('v').unwrap_or(tag);
     let parts: Vec<_> = version.split('.').collect();
@@ -49,30 +703,33 @@ fn stable_version(tag: &str) -> Option<&str> {
     }
 }
 
+fn stable_release_version(tag: &str) -> Option<&str> {
+    stable_version(tag.strip_prefix('v')?)
+}
+
 fn unsupported_input(message: &str) -> PumasError {
     PumasError::InstallationFailed {
         message: message.into(),
     }
 }
 
-async fn installed_pythons() -> Vec<&'static str> {
-    let mut available = Vec::new();
-    for python in PYTHONS {
-        let mut command = Command::new(python);
-        command.kill_on_drop(true).args([
-            "-I",
-            "-c",
-            "import platform,sys; print(f'{sys.version_info.major}.{sys.version_info.minor}' if sys.platform == 'linux' and platform.machine() == 'x86_64' and sys.implementation.name == 'cpython' else '')",
-        ]);
-        if let Ok(Ok(output)) = tokio::time::timeout(PYTHON_CHECK_TIMEOUT, command.output()).await {
-            let expected = python.strip_prefix("python").unwrap_or("");
-            if output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == expected
-            {
-                available.push(*python);
-            }
-        }
+fn inconclusive_alternatives(
+    tag: &str,
+    build: &str,
+    python: &str,
+    issue: &str,
+) -> TorchAlternativeDiscovery {
+    TorchAlternativeDiscovery {
+        selected_tag: tag.into(),
+        selected_build: build.into(),
+        selected_python: python.into(),
+        status: "inconclusive".into(),
+        incomplete: true,
+        dependencies_not_checked: true,
+        checked_builds: Vec::new(),
+        matches: Vec::new(),
+        issues: vec![issue.into()],
     }
-    available
 }
 
 impl VersionManager {
@@ -91,37 +748,60 @@ impl VersionManager {
         }
         let version = stable_version(selected_tag)
             .ok_or_else(|| unsupported_input("Select a stable upstream Torch tag"))?;
-        if !BUILDS.contains(&selected_build) || !PYTHONS.contains(&selected_python) {
+        let target = TorchHostTarget::current().ok_or_else(|| {
+            unsupported_input(
+                "Torch alternatives require Linux x86_64, Windows x86_64, or macOS arm64",
+            )
+        })?;
+        if !valid_torch_channel(selected_build) {
             return Err(unsupported_input(
                 "Select a supported Torch build and Python version",
             ));
         }
-        let interpreters = installed_pythons().await;
-        if interpreters.is_empty() {
-            return Ok(TorchAlternativeDiscovery {
-                selected_tag: selected_tag.into(),
-                selected_build: selected_build.into(),
-                selected_python: selected_python.into(),
-                status: "inconclusive".into(),
-                incomplete: true,
-                dependencies_not_checked: true,
-                checked_builds: Vec::new(),
-                matches: Vec::new(),
-                issues: vec![
-                    "No installed CPython interpreter on Linux x86_64 can inspect official wheels"
-                        .into(),
-                ],
-            });
-        }
-        let workspace = tempfile::tempdir().map_err(PumasError::from)?;
+        let managed_root = self.launcher_root.join("launcher-data/managed-python");
+        let candidates =
+            match managed_torch_candidate_minors(&managed_root, &self.torch_cleanup).await {
+                Ok(candidates) if !candidates.is_empty() => candidates,
+                Ok(_) | Err(_) => {
+                    return Ok(inconclusive_alternatives(
+                        selected_tag,
+                        selected_build,
+                        selected_python,
+                        "Managed CPython catalog could not be verified",
+                    ));
+                }
+            };
+        let Some(minor) = catalog_python_minor(selected_python, &candidates) else {
+            return Err(unsupported_input(
+                "Select a Python version from the managed CPython catalog",
+            ));
+        };
+        let interpreter = match ensure_managed_torch_interpreter(
+            &managed_root,
+            &self.torch_cleanup,
+            &minor,
+        )
+        .await
+        {
+            Ok(interpreter) => interpreter,
+            Err(_) => {
+                return Ok(inconclusive_alternatives(
+                    selected_tag,
+                    selected_build,
+                    selected_python,
+                    "Managed CPython interpreter could not be provisioned",
+                ));
+            }
+        };
+        let workspace = super::torch_workspace::create_launcher_workspace(&self.launcher_root)?;
         let resolver = workspace.path().join("resolve_runtime.py");
         std::fs::write(
             &resolver,
             include_str!("../../../../../torch-server/resolve_runtime.py"),
         )
         .map_err(PumasError::from)?;
-        let mut command = Command::new(interpreters[0]);
-        command.kill_on_drop(true).arg("-I").arg(&resolver).args([
+        let mut command = Command::new(&interpreter.executable);
+        command.arg("-I").arg(&resolver).args([
             "--discover",
             "--version",
             version,
@@ -130,41 +810,364 @@ impl VersionManager {
             "--selected-python",
             selected_python,
         ]);
-        for interpreter in &interpreters {
-            command.arg("--interpreter").arg(interpreter);
-        }
-        let output = tokio::time::timeout(DISCOVERY_TIMEOUT, command.output())
-            .await
-            .map_err(|_| unsupported_input("Official Torch wheel discovery timed out"))?
-            .map_err(PumasError::from)?;
-        if !output.status.success() {
-            let detail = String::from_utf8_lossy(&output.stderr);
-            return Err(unsupported_input(&format!(
-                "Official Torch wheel discovery failed: {}",
-                detail.chars().take(500).collect::<String>()
-            )));
-        }
-        let result: TorchAlternativeDiscovery =
-            serde_json::from_slice(&output.stdout).map_err(|error| {
-                unsupported_input(&format!("Invalid Torch discovery result: {error}"))
-            })?;
+        command.arg("--interpreter").arg(&interpreter.executable);
+        let result = match super::torch_preview::run_preview_resolver(
+            command,
+            &workspace,
+            DISCOVERY_TIMEOUT,
+            &self.torch_cleanup,
+        )
+        .await
+        {
+            Ok(super::torch_preview::PreviewResolverRun::Exited(status)) if status.success() => {
+                let output_path = workspace.path().join("resolver.stdout");
+                let output = match std::fs::metadata(&output_path) {
+                    Ok(metadata) if metadata.len() <= 4 * 1024 * 1024 => {
+                        std::fs::read(output_path).map_err(PumasError::from)?
+                    }
+                    _ => {
+                        return Ok(inconclusive_alternatives(
+                            selected_tag,
+                            selected_build,
+                            selected_python,
+                            "Official Torch wheel discovery returned an invalid result",
+                        ));
+                    }
+                };
+                serde_json::from_slice::<TorchAlternativeDiscovery>(&output)
+            }
+            Ok(super::torch_preview::PreviewResolverRun::Exited(_))
+            | Ok(super::torch_preview::PreviewResolverRun::TimedOut)
+            | Err(_) => {
+                return Ok(inconclusive_alternatives(
+                    selected_tag,
+                    selected_build,
+                    selected_python,
+                    "Official Torch wheel discovery did not complete conclusively",
+                ));
+            }
+        };
+        let Ok(result) = result else {
+            return Ok(inconclusive_alternatives(
+                selected_tag,
+                selected_build,
+                selected_python,
+                "Official Torch wheel discovery returned an invalid result",
+            ));
+        };
         if result.matches.len() > 3
             || !result.incomplete
             || !result.dependencies_not_checked
             || result.selected_tag != format!("v{version}")
             || result.selected_build != selected_build
             || result.selected_python != selected_python
-            || result.matches.iter().any(|candidate| {
-                candidate.tag != result.selected_tag
-                    || !BUILDS.contains(&candidate.build.as_str())
-                    || !interpreters.contains(&candidate.python.as_str())
-            })
+            || !matches!(result.status.as_str(), "matches" | "none" | "inconclusive")
+            || result.checked_builds.len() > 5
         {
             return Err(unsupported_input(
                 "Torch discovery violated its bounded wheel-only contract",
             ));
         }
-        Ok(result)
+        let result = validate_legacy_wheel_leads(
+            result,
+            &[(interpreter.python, interpreter.executable)],
+            version,
+            target,
+        );
+        let detected = match target {
+            TorchHostTarget::LinuxX8664 => {
+                pci_display_vendors(Path::new("/sys/bus/pci/devices"), |path| {
+                    std::fs::read_to_string(path)
+                })
+            }
+            TorchHostTarget::WindowsX8664 => {
+                if nvidia_driver_probe().await.availability
+                    == TorchReleaseDriverAvailability::Available
+                {
+                    Ok(vec!["nvidia".into()])
+                } else {
+                    Err(io::Error::from(io::ErrorKind::NotFound))
+                }
+            }
+            TorchHostTarget::MacosArm64 => Ok(Vec::new()),
+        };
+        Ok(filter_alternatives_for_host(result, detected, target))
+    }
+}
+
+impl VersionManager {
+    /// Discover this release's exact official Torch wheels for managed Python candidates.
+    /// A wheel match is a choice to preview, not a resolved dependency plan.
+    pub async fn discover_torch_release_options(
+        &self,
+        tag: &str,
+    ) -> Result<TorchReleaseOptionsDiscovery> {
+        if self.app_id != AppId::Torch {
+            return Err(unsupported_input(
+                "Torch release options require a Torch manager",
+            ));
+        }
+        let version = stable_release_version(tag)
+            .ok_or_else(|| unsupported_input("Select a stable upstream Torch tag"))?;
+        let target = TorchHostTarget::current().ok_or_else(|| {
+            unsupported_input(
+                "Torch release options require Linux x86_64, Windows x86_64, or macOS arm64",
+            )
+        })?;
+        self.resolve_installable_release(tag).await?;
+
+        let (vendors, mut host_issues, nvidia_probe, driver_status, unknown_host) = match target {
+            TorchHostTarget::LinuxX8664 => {
+                let detected = pci_display_vendors(Path::new("/sys/bus/pci/devices"), |path| {
+                    std::fs::read_to_string(path)
+                });
+                let (vendors, issues) = match detected {
+                    Ok(vendors) => (vendors, Vec::new()),
+                    Err(_) => (
+                        Vec::new(),
+                        vec!["GPU devices could not be inspected".to_owned()],
+                    ),
+                };
+                let unknown = !issues.is_empty();
+                let nvidia = if unknown {
+                    NvidiaDriverProbe {
+                        availability: TorchReleaseDriverAvailability::Unknown,
+                        version: None,
+                    }
+                } else if vendors.iter().any(|vendor| vendor == "nvidia") {
+                    nvidia_driver_probe().await
+                } else {
+                    NvidiaDriverProbe {
+                        availability: TorchReleaseDriverAvailability::NotPresent,
+                        version: None,
+                    }
+                };
+                let drivers = TorchReleaseDriverStatus {
+                    nvidia: nvidia.availability,
+                    amd: if unknown {
+                        TorchReleaseDriverAvailability::Unknown
+                    } else if vendors.iter().any(|vendor| vendor == "amd") {
+                        amd_driver_available(Path::new("/sys/bus/pci/devices"))
+                    } else {
+                        TorchReleaseDriverAvailability::NotPresent
+                    },
+                };
+                (vendors, issues, nvidia, drivers, unknown)
+            }
+            TorchHostTarget::WindowsX8664 => {
+                let nvidia = nvidia_driver_probe().await;
+                let detected = nvidia.availability == TorchReleaseDriverAvailability::Available;
+                let vendors = if detected {
+                    vec!["nvidia".into()]
+                } else {
+                    Vec::new()
+                };
+                let issues = if detected {
+                    Vec::new()
+                } else {
+                    vec!["NVIDIA GPU could not be positively detected; CUDA wheel choices were withheld".into()]
+                };
+                let drivers = TorchReleaseDriverStatus {
+                    nvidia: nvidia.availability,
+                    amd: TorchReleaseDriverAvailability::NotPresent,
+                };
+                (vendors, issues, nvidia, drivers, !detected)
+            }
+            TorchHostTarget::MacosArm64 => {
+                let nvidia = NvidiaDriverProbe {
+                    availability: TorchReleaseDriverAvailability::NotPresent,
+                    version: None,
+                };
+                let drivers = TorchReleaseDriverStatus {
+                    nvidia: TorchReleaseDriverAvailability::NotPresent,
+                    amd: TorchReleaseDriverAvailability::NotPresent,
+                };
+                (Vec::new(), Vec::new(), nvidia, drivers, false)
+            }
+        };
+        let managed_root = self.launcher_root.join("launcher-data/managed-python");
+        let empty = |issue: &str| ResolverReleaseOptions {
+            tag: tag.to_owned(),
+            status: TorchReleaseOptionsStatus::Inconclusive,
+            complete_scan: false,
+            checked_channels: Vec::new(),
+            combinations: Vec::new(),
+            issues: vec![issue.to_owned()],
+        };
+        let candidates = managed_torch_candidate_minors(&managed_root, &self.torch_cleanup).await;
+        let available_pythons: BTreeSet<String> = candidates
+            .as_ref()
+            .map(|minors| {
+                minors
+                    .iter()
+                    .map(|minor| format!("python{minor}"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut result = if let Ok(candidates) = candidates {
+            if candidates.is_empty() {
+                empty("Managed CPython catalog contained no stable candidates")
+            } else if let Ok(interpreter) =
+                ensure_managed_torch_interpreter(&managed_root, &self.torch_cleanup, &candidates[0])
+                    .await
+            {
+                let workspace =
+                    super::torch_workspace::create_launcher_workspace(&self.launcher_root)?;
+                let resolver = workspace.path().join("resolve_runtime.py");
+                std::fs::write(
+                    &resolver,
+                    include_str!("../../../../../torch-server/resolve_runtime.py"),
+                )
+                .map_err(PumasError::from)?;
+                let command = release_options_command(
+                    &interpreter.executable,
+                    &resolver,
+                    version,
+                    &candidates,
+                );
+                match super::torch_preview::run_preview_resolver(
+                    command,
+                    &workspace,
+                    RELEASE_OPTIONS_TIMEOUT,
+                    &self.torch_cleanup,
+                )
+                .await
+                {
+                    Ok(super::torch_preview::PreviewResolverRun::Exited(status))
+                        if status.success() =>
+                    {
+                        let output_path = workspace.path().join("resolver.stdout");
+                        match std::fs::metadata(&output_path) {
+                            Ok(metadata) if metadata.len() <= 4 * 1024 * 1024 => {
+                                let output =
+                                    std::fs::read(output_path).map_err(PumasError::from)?;
+                                serde_json::from_slice::<ResolverReleaseOptions>(&output).map_err(
+                                    |_| unsupported_input("Invalid Torch release-options result"),
+                                )?
+                            }
+                            _ => empty("Official Torch wheel scan returned an invalid result"),
+                        }
+                    }
+                    Ok(super::torch_preview::PreviewResolverRun::Exited(_)) => {
+                        empty("Official Torch wheel scan did not complete conclusively")
+                    }
+                    Ok(super::torch_preview::PreviewResolverRun::TimedOut) => {
+                        empty("Official Torch wheel scan timed out")
+                    }
+                    Err(_) => empty("Official Torch wheel scan could not complete conclusively"),
+                }
+            } else {
+                empty("Managed CPython interpreter could not be provisioned")
+            }
+        } else {
+            empty("Managed CPython catalog could not be verified")
+        };
+        let checked: BTreeSet<_> = result.checked_channels.iter().map(String::as_str).collect();
+        let invalid_tag = result.tag != tag;
+        let oversized_channels = result.checked_channels.len() > 64;
+        let oversized_combinations = result.combinations.len() > 1024;
+        let duplicate_channels = checked.len() != result.checked_channels.len();
+        let invalid_channel = result
+            .checked_channels
+            .iter()
+            .any(|channel| !valid_torch_channel(channel));
+        let invalid_issue = result
+            .issues
+            .iter()
+            .any(|issue| issue.len() > 300 || issue.chars().any(char::is_control));
+        let invalid_combination = result.combinations.iter().any(|item| {
+            !checked.contains(item.build.as_str())
+                || !available_pythons.contains(&item.python)
+                || !valid_official_wheel(
+                    &item.wheel_url,
+                    &item.build,
+                    version,
+                    &item.python,
+                    target,
+                )
+                || item.sha256.as_ref().is_some_and(|hash| {
+                    hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
+        });
+        let inconsistent_status = match result.status {
+            TorchReleaseOptionsStatus::Matches => {
+                !result.complete_scan || result.combinations.is_empty()
+            }
+            TorchReleaseOptionsStatus::None => {
+                !result.complete_scan || !result.combinations.is_empty()
+            }
+            TorchReleaseOptionsStatus::Inconclusive => result.complete_scan,
+        };
+        if invalid_tag
+            || oversized_channels
+            || oversized_combinations
+            || duplicate_channels
+            || invalid_channel
+            || invalid_issue
+            || invalid_combination
+            || inconsistent_status
+        {
+            tracing::warn!(
+                invalid_tag,
+                oversized_channels,
+                oversized_combinations,
+                duplicate_channels,
+                invalid_channel,
+                invalid_issue,
+                invalid_combination,
+                inconsistent_status,
+                complete_scan = result.complete_scan,
+                combination_count = result.combinations.len(),
+                issue_count = result.issues.len(),
+                "Torch release-options resolver result failed validation"
+            );
+            return Err(unsupported_input(
+                "Torch release-options result violated its exact-wheel contract",
+            ));
+        }
+        result.combinations =
+            visible_combinations_for_target(result.combinations, &vendors, target);
+        if target != TorchHostTarget::LinuxX8664 {
+            result
+                .checked_channels
+                .retain(|channel| visible_build_for_target(channel, &vendors, target));
+        }
+        let status = if !result.complete_scan || (unknown_host && result.combinations.is_empty()) {
+            TorchReleaseOptionsStatus::Inconclusive
+        } else if result.combinations.is_empty() {
+            TorchReleaseOptionsStatus::None
+        } else {
+            TorchReleaseOptionsStatus::Matches
+        };
+        let (recommended, mut recommendation_note) = recommend_release_option_for_target(
+            &result.combinations,
+            &vendors,
+            &driver_status,
+            nvidia_probe.version,
+            result.complete_scan,
+            target,
+        );
+        if unknown_host && target == TorchHostTarget::LinuxX8664 {
+            recommendation_note = if recommended.is_some() {
+                "GPU devices could not be inspected; CPU is the only recommended choice until hardware is known."
+            } else {
+                "GPU devices could not be inspected, and no CPU wheel matched; no default can be recommended."
+            }
+            .to_owned();
+        }
+        host_issues.append(&mut result.issues);
+        Ok(TorchReleaseOptionsDiscovery {
+            tag: result.tag,
+            status,
+            complete_scan: result.complete_scan,
+            checked_channels: result.checked_channels,
+            combinations: result.combinations,
+            issues: host_issues,
+            detected_gpu_vendors: vendors,
+            driver_status,
+            recommended,
+            recommendation_note,
+        })
     }
 }
 
@@ -172,10 +1175,534 @@ impl VersionManager {
 mod tests {
     use super::*;
 
+    fn wheel(build: &str, python: &str) -> TorchReleaseCombination {
+        let abi = python.strip_prefix("python").unwrap().replace('.', "");
+        TorchReleaseCombination {
+            build: build.into(),
+            python: python.into(),
+            wheel_url: format!("https://download.pytorch.org/whl/{build}/torch/torch-2.14.0%2B{build}-cp{abi}-cp{abi}-manylinux_2_17_x86_64.whl"),
+            sha256: None,
+        }
+    }
+
+    #[test]
+    fn release_options_wire_shape_and_official_wheel_validation() {
+        let discovery = TorchReleaseOptionsDiscovery {
+            tag: "v2.14.0".into(),
+            status: TorchReleaseOptionsStatus::Matches,
+            complete_scan: true,
+            checked_channels: vec!["cpu".into(), "cu136".into()],
+            combinations: vec![wheel("cu136", "python3.12")],
+            issues: Vec::new(),
+            detected_gpu_vendors: vec!["nvidia".into()],
+            driver_status: TorchReleaseDriverStatus {
+                nvidia: TorchReleaseDriverAvailability::Available,
+                amd: TorchReleaseDriverAvailability::NotPresent,
+            },
+            recommended: Some(TorchReleaseRecommendation {
+                build: "cu136".into(),
+                python: "python3.12".into(),
+            }),
+            recommendation_note: String::new(),
+        };
+        let value = serde_json::to_value(discovery).unwrap();
+        assert_eq!(value["status"], "matches");
+        assert_eq!(value["completeScan"], true);
+        assert!(value["combinations"][0]["wheelUrl"]
+            .as_str()
+            .unwrap()
+            .contains("torch-2.14.0%2Bcu136"));
+        assert!(valid_official_wheel(
+            value["combinations"][0]["wheelUrl"].as_str().unwrap(),
+            "cu136",
+            "2.14.0",
+            "python3.12",
+            TorchHostTarget::LinuxX8664,
+        ));
+        assert!(value["combinations"][0].get("sha256").is_none());
+        assert_eq!(value["driverStatus"]["nvidia"], "available");
+        assert_eq!(value["driverStatus"]["amd"], "not_present");
+        assert!(valid_official_wheel(
+            "https://download.pytorch.org/whl/cu136/torch/torch-2.14.0%2Bcu136-cp312-cp312-manylinux_2_17_x86_64.whl",
+            "cu136",
+            "2.14.0",
+            "python3.12",
+            TorchHostTarget::LinuxX8664,
+        ));
+        assert!(!valid_official_wheel(
+            "https://example.com/whl/cu136/torch/torch-2.14.0%2Bcu136-cp312-cp312-manylinux_2_17_x86_64.whl",
+            "cu136",
+            "2.14.0",
+            "python3.12",
+            TorchHostTarget::LinuxX8664,
+        ));
+        assert!(valid_official_wheel(
+            "https://download-r2.pytorch.org/whl/cu130/torch-2.14.0%2Bcu130-cp310-cp310-manylinux_2_28_x86_64.whl",
+            "cu130",
+            "2.14.0",
+            "python3.10",
+            TorchHostTarget::LinuxX8664,
+        ));
+        assert!(valid_official_wheel(
+            "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0%2Bcpu-cp310-cp310-manylinux_2_28_x86_64.whl",
+            "cpu",
+            "2.14.0",
+            "python3.10",
+            TorchHostTarget::LinuxX8664,
+        ));
+        assert!(!valid_official_wheel(
+            "https://download-r2.pytorch.org/whl/cu130/untrusted/torch-2.14.0%2Bcu130-cp310-cp310-manylinux_2_28_x86_64.whl",
+            "cu130",
+            "2.14.0",
+            "python3.10",
+            TorchHostTarget::LinuxX8664,
+        ));
+    }
+
+    #[test]
+    fn native_wheel_urls_are_release_and_target_bounded() {
+        let win_cpu =
+            "https://download.pytorch.org/whl/cpu/torch/torch-2.14.0-cp312-cp312-win_amd64.whl";
+        let win_cuda = "https://download.pytorch.org/whl/cu132/torch/torch-2.14.0%2Bcu132-cp312-cp312-win_amd64.whl";
+        let mac_cpu = "https://download.pytorch.org/whl/cpu/torch/torch-2.14.0-cp312-cp312-macosx_11_0_arm64.whl";
+        assert!(valid_official_wheel(
+            win_cpu,
+            "cpu",
+            "2.14.0",
+            "python3.12",
+            TorchHostTarget::WindowsX8664
+        ));
+        assert!(valid_official_wheel(
+            win_cuda,
+            "cu132",
+            "2.14.0",
+            "python3.12",
+            TorchHostTarget::WindowsX8664
+        ));
+        assert!(valid_official_wheel(
+            mac_cpu,
+            "cpu",
+            "2.14.0",
+            "python3.12",
+            TorchHostTarget::MacosArm64
+        ));
+        assert!(valid_official_wheel(
+            "https://download.pytorch.org/whl/cpu/torch/torch-2.14.0-cp312-cp312-macosx_11_0_universal2.whl",
+            "cpu",
+            "2.14.0",
+            "python3.12",
+            TorchHostTarget::MacosArm64
+        ));
+        for (url, build, target) in [
+            (win_cpu, "cpu", TorchHostTarget::LinuxX8664),
+            (win_cuda, "cu132", TorchHostTarget::MacosArm64),
+            (mac_cpu, "cpu", TorchHostTarget::WindowsX8664),
+            ("https://evil.example/whl/cpu/torch/torch-2.14.0-cp312-cp312-win_amd64.whl", "cpu", TorchHostTarget::WindowsX8664),
+            ("https://download.pytorch.org/whl/cu132/torch/torch-2.14.0%2Bcu132-cp312-cp312-win_arm64.whl", "cu132", TorchHostTarget::WindowsX8664),
+            ("https://download.pytorch.org/whl/cpu/torch/torch-2.14.0-cp312-cp312-macosx_11_0_x86_64.whl", "cpu", TorchHostTarget::MacosArm64),
+        ] {
+            assert!(!valid_official_wheel(url, build, "2.14.0", "python3.12", target), "{url}");
+        }
+        assert!(!valid_official_wheel(
+            win_cpu,
+            "cpu",
+            "2.13.0",
+            "python3.12",
+            TorchHostTarget::WindowsX8664
+        ));
+        assert!(!valid_official_wheel(
+            win_cpu,
+            "cpu",
+            "2.14.0",
+            "python3.13",
+            TorchHostTarget::WindowsX8664
+        ));
+    }
+
+    #[test]
+    fn native_choices_filter_channels_and_keep_cpu_default() {
+        let wheels = vec![
+            wheel("cpu", "python3.12"),
+            wheel("cu132", "python3.12"),
+            wheel("rocm7.2", "python3.12"),
+        ];
+        let no_gpu =
+            visible_combinations_for_target(wheels.clone(), &[], TorchHostTarget::WindowsX8664);
+        assert_eq!(
+            no_gpu
+                .iter()
+                .map(|item| item.build.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu"]
+        );
+        let nvidia = visible_combinations_for_target(
+            wheels.clone(),
+            &["nvidia".into()],
+            TorchHostTarget::WindowsX8664,
+        );
+        assert_eq!(
+            nvidia
+                .iter()
+                .map(|item| item.build.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu", "cu132"]
+        );
+        let mac = visible_combinations_for_target(
+            wheels,
+            &["nvidia".into(), "amd".into()],
+            TorchHostTarget::MacosArm64,
+        );
+        assert_eq!(
+            mac.iter()
+                .map(|item| item.build.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu"]
+        );
+        let drivers = TorchReleaseDriverStatus {
+            nvidia: TorchReleaseDriverAvailability::Available,
+            amd: TorchReleaseDriverAvailability::NotPresent,
+        };
+        let (choice, note) = recommend_release_option_for_target(
+            &nvidia,
+            &["nvidia".into()],
+            &drivers,
+            Some(NvidiaDriverVersion(700, 0, 0)),
+            true,
+            TorchHostTarget::WindowsX8664,
+        );
+        assert_eq!(choice.unwrap().build, "cpu");
+        assert!(note.contains("Windows CUDA driver compatibility"));
+        let (choice, note) = recommend_release_option_for_target(
+            &mac,
+            &[],
+            &drivers,
+            None,
+            true,
+            TorchHostTarget::MacosArm64,
+        );
+        assert_eq!(choice.unwrap().build, "cpu");
+        assert!(note.contains("MPS is a runtime capability"));
+    }
+
+    #[test]
+    fn windows_cuda_wheels_never_become_automatic_default_without_cpu() {
+        let vendors = vec!["nvidia".into()];
+        let combinations = visible_combinations_for_target(
+            vec![wheel("cu130", "python3.12"), wheel("cu132", "python3.12")],
+            &vendors,
+            TorchHostTarget::WindowsX8664,
+        );
+        assert_eq!(combinations.len(), 2);
+        let drivers = TorchReleaseDriverStatus {
+            nvidia: TorchReleaseDriverAvailability::Available,
+            amd: TorchReleaseDriverAvailability::NotPresent,
+        };
+        for complete_scan in [true, false] {
+            let (recommended, note) = recommend_release_option_for_target(
+                &combinations,
+                &vendors,
+                &drivers,
+                Some(NvidiaDriverVersion(700, 0, 0)),
+                complete_scan,
+                TorchHostTarget::WindowsX8664,
+            );
+            assert!(recommended.is_none());
+            assert!(note.contains("explicit advanced choice"));
+        }
+    }
+
+    #[test]
+    fn catalog_candidates_sort_semantically_and_reject_unknown_minor() {
+        let candidates = sort_catalog_minors(vec![
+            "3.9".into(),
+            "3.14".into(),
+            "3.10".into(),
+            "3.12".into(),
+            "3.14".into(),
+        ]);
+        assert_eq!(candidates, ["3.14", "3.12", "3.10", "3.9"]);
+        assert_eq!(
+            catalog_python_minor("python3.14", &candidates),
+            Some("3.14".into())
+        );
+        assert_eq!(catalog_python_minor("python3.15", &candidates), None);
+        assert_eq!(catalog_python_minor("3.14", &candidates), None);
+        assert!(python_rank("python3.14") > python_rank("python3.9"));
+    }
+
+    #[test]
+    fn release_options_uses_one_managed_interpreter_and_all_catalog_candidates() {
+        let interpreter = Path::new("/private/managed/python3.14");
+        let resolver = Path::new("/private/resolve_runtime.py");
+        let candidates = vec!["3.14".into(), "3.13".into(), "3.12".into()];
+        let command = release_options_command(interpreter, resolver, "2.14.0", &candidates);
+        let command = command.as_std();
+        assert_eq!(command.get_program(), interpreter.as_os_str());
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            args,
+            [
+                "-I",
+                "/private/resolve_runtime.py",
+                "--release-options",
+                "--version",
+                "2.14.0",
+                "--interpreter",
+                "/private/managed/python3.14",
+                "--python-candidate",
+                "3.14",
+                "--python-candidate",
+                "3.13",
+                "--python-candidate",
+                "3.12",
+            ]
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn pci_reader_identifies_only_display_gpu_vendors() {
+        let root = tempfile::tempdir().unwrap();
+        let mut files = std::collections::HashMap::new();
+        for (slot, class, vendor) in [
+            ("0000:01:00.0", "0x030000", "0x10de"),
+            ("0000:02:00.0", "0x030200", "0x1002"),
+            ("0000:00:02.0", "0x030000", "0x8086"),
+            ("0000:00:00.0", "0x060000", "0x1002"),
+        ] {
+            let path = root.path().join(slot);
+            std::fs::create_dir(&path).unwrap();
+            files.insert(path.join("class"), class.to_owned());
+            files.insert(path.join("vendor"), vendor.to_owned());
+        }
+        let vendors = pci_display_vendors(root.path(), |path| {
+            files
+                .get(path)
+                .cloned()
+                .ok_or(io::Error::from(io::ErrorKind::NotFound))
+        })
+        .unwrap();
+        assert_eq!(vendors, ["amd", "intel", "nvidia"]);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn amd_driver_status_requires_binding_to_display_device() {
+        let root = tempfile::tempdir().unwrap();
+        let device = root.path().join("0000:02:00.0");
+        std::fs::create_dir(&device).unwrap();
+        std::fs::write(device.join("class"), "0x030000").unwrap();
+        std::fs::write(device.join("vendor"), "0x1002").unwrap();
+        assert_eq!(
+            amd_driver_available(root.path()),
+            TorchReleaseDriverAvailability::Unavailable
+        );
+        std::os::unix::fs::symlink(root.path().join("amdgpu"), device.join("driver")).unwrap();
+        assert_eq!(
+            amd_driver_available(root.path()),
+            TorchReleaseDriverAvailability::Available
+        );
+    }
+
+    #[test]
+    fn nvidia_and_intel_show_cuda_cpu_and_recommend_highest_exact_cuda() {
+        let vendors = vec!["intel".into(), "nvidia".into()];
+        let combinations = visible_combinations(
+            vec![
+                wheel("cpu", "python3.12"),
+                wheel("cu130", "python3.13"),
+                wheel("cu136", "python3.12"),
+                wheel("rocm7.14", "python3.12"),
+            ],
+            &vendors,
+        );
+        assert_eq!(
+            combinations
+                .iter()
+                .map(|item| item.build.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu", "cu130", "cu136"]
+        );
+        let drivers = TorchReleaseDriverStatus {
+            nvidia: TorchReleaseDriverAvailability::Available,
+            amd: TorchReleaseDriverAvailability::NotPresent,
+        };
+        let (selected, note) = recommend_release_option(
+            &combinations,
+            &vendors,
+            &drivers,
+            Some(NvidiaDriverVersion(580, 65, 6)),
+            true,
+        );
+        let selected = selected.unwrap();
+        assert_eq!(
+            (selected.build.as_str(), selected.python.as_str()),
+            ("cu136", "python3.12")
+        );
+        assert!(note.contains("NVIDIA's Linux minor-compatibility driver floor"));
+        assert!(note.contains("device and model behavior are tested after installation"));
+    }
+
+    #[test]
+    fn missing_gpu_driver_keeps_exact_advanced_wheels_but_recommends_cpu() {
+        let vendors = vec!["nvidia".into()];
+        let combinations = visible_combinations(
+            vec![wheel("cu136", "python3.12"), wheel("cpu", "python3.13")],
+            &vendors,
+        );
+        let drivers = TorchReleaseDriverStatus {
+            nvidia: TorchReleaseDriverAvailability::Unavailable,
+            amd: TorchReleaseDriverAvailability::NotPresent,
+        };
+        let (selected, note) =
+            recommend_release_option(&combinations, &vendors, &drivers, None, true);
+        assert_eq!(combinations.len(), 2);
+        assert_eq!(selected.unwrap().build, "cpu");
+        assert!(note.contains("CUDA wheels remain advanced choices"));
+    }
+
+    #[test]
+    fn amd_driver_keeps_rocm_advanced_and_cpu_only_host_sees_cpu() {
+        let vendors = vec!["amd".into()];
+        let combinations = visible_combinations(
+            vec![
+                wheel("rocm7.2", "python3.12"),
+                wheel("rocm7.14", "python3.13"),
+                wheel("cpu", "python3.12"),
+                wheel("cu136", "python3.12"),
+            ],
+            &vendors,
+        );
+        let drivers = TorchReleaseDriverStatus {
+            nvidia: TorchReleaseDriverAvailability::NotPresent,
+            amd: TorchReleaseDriverAvailability::Available,
+        };
+        let (selected, note) =
+            recommend_release_option(&combinations, &vendors, &drivers, None, true);
+        assert_eq!(selected.unwrap().build, "cpu");
+        assert!(note.contains("ROCm wheels remain advanced choices"));
+        let cpu = visible_combinations(combinations, &[]);
+        assert_eq!(cpu.len(), 1);
+        assert_eq!(
+            recommend_release_option(&cpu, &[], &drivers, None, true)
+                .0
+                .unwrap()
+                .build,
+            "cpu"
+        );
+    }
+
+    #[test]
+    fn cuda_minor_compatibility_floors_are_numeric_and_unknown_families_stay_advanced() {
+        assert_eq!(
+            parse_nvidia_driver_output(b"590.10.00\n580.65.06\n"),
+            Some(NvidiaDriverVersion(580, 65, 6))
+        );
+        assert_eq!(parse_nvidia_driver_output(b"not a version\n"), None);
+        assert_eq!(
+            cuda_linux_driver_floor("cu132"),
+            Some(NvidiaDriverVersion(580, 0, 0))
+        );
+        assert_eq!(
+            cuda_linux_driver_floor("cu121"),
+            Some(NvidiaDriverVersion(525, 60, 13))
+        );
+        assert_eq!(
+            cuda_linux_driver_floor("cu118"),
+            Some(NvidiaDriverVersion(450, 80, 2))
+        );
+        assert_eq!(
+            cuda_linux_driver_floor("cu102"),
+            Some(NvidiaDriverVersion(440, 33, 0))
+        );
+        assert_eq!(
+            cuda_linux_driver_floor("cu101"),
+            Some(NvidiaDriverVersion(418, 39, 0))
+        );
+        assert_eq!(
+            cuda_linux_driver_floor("cu100"),
+            Some(NvidiaDriverVersion(410, 48, 0))
+        );
+        assert_eq!(cuda_linux_driver_floor("cu90"), None);
+        assert_eq!(cuda_linux_driver_floor("cu140"), None);
+        assert!(NvidiaDriverVersion(525, 60, 12) < cuda_linux_driver_floor("cu121").unwrap());
+        assert!(NvidiaDriverVersion(525, 60, 13) >= cuda_linux_driver_floor("cu121").unwrap());
+    }
+
+    #[test]
+    fn v214_cu132_requires_nvidia_580_floor_and_unknown_channel_is_not_default() {
+        let vendors = vec!["nvidia".into()];
+        let drivers = TorchReleaseDriverStatus {
+            nvidia: TorchReleaseDriverAvailability::Available,
+            amd: TorchReleaseDriverAvailability::NotPresent,
+        };
+        let combinations = vec![wheel("cpu", "python3.12"), wheel("cu132", "python3.12")];
+        let (too_old, old_note) = recommend_release_option(
+            &combinations,
+            &vendors,
+            &drivers,
+            Some(NvidiaDriverVersion(579, 99, 99)),
+            true,
+        );
+        assert_eq!(too_old.unwrap().build, "cpu");
+        assert!(old_note.contains("driver floor"));
+        let (sufficient, note) = recommend_release_option(
+            &combinations,
+            &vendors,
+            &drivers,
+            Some(NvidiaDriverVersion(580, 0, 0)),
+            true,
+        );
+        assert_eq!(sufficient.unwrap().build, "cu132");
+        assert!(note.contains("minor-compatibility"));
+        let (unknown, note) = recommend_release_option(
+            &[wheel("cpu", "python3.12"), wheel("cu140", "python3.12")],
+            &vendors,
+            &drivers,
+            Some(NvidiaDriverVersion(700, 0, 0)),
+            true,
+        );
+        assert_eq!(unknown.unwrap().build, "cpu");
+        assert!(note.contains("driver floor"));
+    }
+
+    #[test]
+    fn incomplete_scan_never_recommends_gpu() {
+        let vendors = vec!["nvidia".into()];
+        let drivers = TorchReleaseDriverStatus {
+            nvidia: TorchReleaseDriverAvailability::Available,
+            amd: TorchReleaseDriverAvailability::NotPresent,
+        };
+        let combinations = vec![wheel("cpu", "python3.12"), wheel("cu132", "python3.12")];
+        let (selected, note) = recommend_release_option(
+            &combinations,
+            &vendors,
+            &drivers,
+            Some(NvidiaDriverVersion(600, 0, 0)),
+            false,
+        );
+        assert_eq!(selected.unwrap().build, "cpu");
+        assert!(note.contains("provisional"));
+        let (selected, note) = recommend_release_option(
+            &[wheel("cu132", "python3.12")],
+            &vendors,
+            &drivers,
+            Some(NvidiaDriverVersion(600, 0, 0)),
+            false,
+        );
+        assert!(selected.is_none());
+        assert!(note.contains("incomplete"));
+    }
+
     #[test]
     fn only_stable_three_part_versions_are_accepted() {
         assert_eq!(stable_version("v2.10.0"), Some("2.10.0"));
         assert_eq!(stable_version("2.10.0"), Some("2.10.0"));
+        assert_eq!(stable_release_version("v2.10.0"), Some("2.10.0"));
+        assert_eq!(stable_release_version("2.10.0"), None);
         for value in ["2.10", "2.10.0rc1", "../2.10.0", "v2.10.0+cu130"] {
             assert_eq!(stable_version(value), None);
         }
@@ -195,5 +1722,146 @@ mod tests {
         .unwrap();
         assert_eq!(result.matches.len(), 1);
         assert!(result.incomplete && result.dependencies_not_checked);
+    }
+
+    fn legacy_alternatives() -> TorchAlternativeDiscovery {
+        TorchAlternativeDiscovery {
+            selected_tag: "v2.10.0".into(),
+            selected_build: "cu130".into(),
+            selected_python: "python3.12".into(),
+            status: "matches".into(),
+            incomplete: true,
+            dependencies_not_checked: true,
+            checked_builds: vec!["cpu".into(), "cu130".into(), "rocm7.2".into()],
+            matches: ["cpu", "cu130", "rocm7.2"]
+                .into_iter()
+                .map(|build| TorchAlternativeMatch {
+                    tag: "v2.10.0".into(),
+                    build: build.into(),
+                    python: "python3.12".into(),
+                    wheel_url: None,
+                    sha256: None,
+                })
+                .collect(),
+            issues: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn legacy_alternatives_filter_cpu_only_and_nvidia_intel_hosts() {
+        let cpu = filter_alternatives_for_host(
+            legacy_alternatives(),
+            Ok(Vec::new()),
+            TorchHostTarget::LinuxX8664,
+        );
+        assert_eq!(cpu.checked_builds, ["cpu"]);
+        assert_eq!(
+            cpu.matches
+                .iter()
+                .map(|item| item.build.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu"]
+        );
+        assert_eq!(cpu.status, "matches");
+
+        let nvidia = filter_alternatives_for_host(
+            legacy_alternatives(),
+            Ok(vec!["intel".into(), "nvidia".into()]),
+            TorchHostTarget::LinuxX8664,
+        );
+        assert_eq!(nvidia.checked_builds, ["cpu", "cu130"]);
+        assert_eq!(
+            nvidia
+                .matches
+                .iter()
+                .map(|item| item.build.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu", "cu130"]
+        );
+        assert!(nvidia.incomplete && nvidia.dependencies_not_checked);
+    }
+
+    #[test]
+    fn legacy_alternatives_unknown_host_withholds_gpu_and_is_inconclusive() {
+        let result = filter_alternatives_for_host(
+            legacy_alternatives(),
+            Err(io::Error::from(io::ErrorKind::PermissionDenied)),
+            TorchHostTarget::LinuxX8664,
+        );
+        assert_eq!(result.checked_builds, ["cpu"]);
+        assert_eq!(
+            result
+                .matches
+                .iter()
+                .map(|item| item.build.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu"]
+        );
+        assert_eq!(result.status, "inconclusive");
+        assert!(result
+            .issues
+            .iter()
+            .any(|issue| issue.contains("GPU devices could not be inspected")));
+    }
+
+    #[test]
+    fn legacy_alternatives_removed_gpu_only_match_does_not_claim_match() {
+        let mut result = legacy_alternatives();
+        result.matches.retain(|item| item.build == "cu130");
+        let result =
+            filter_alternatives_for_host(result, Ok(Vec::new()), TorchHostTarget::LinuxX8664);
+        assert!(result.matches.is_empty());
+        assert_eq!(result.status, "none");
+    }
+
+    #[test]
+    fn legacy_native_wheel_leads_require_exact_official_target_wheels() {
+        let interpreters = vec![("python3.12".into(), PathBuf::from("/unused/python"))];
+        let mut windows = legacy_alternatives();
+        for item in &mut windows.matches {
+            item.wheel_url = Some(match item.build.as_str() {
+                "cpu" => "https://download.pytorch.org/whl/cpu/torch/torch-2.10.0-cp312-cp312-win_amd64.whl",
+                "cu130" => "https://download.pytorch.org/whl/cu130/torch/torch-2.10.0%2Bcu130-cp312-cp312-win_amd64.whl",
+                _ => "https://download.pytorch.org/whl/rocm7.2/torch/torch-2.10.0%2Brocm7.2-cp312-cp312-manylinux_2_17_x86_64.whl",
+            }.into());
+        }
+        let windows = validate_legacy_wheel_leads(
+            windows,
+            &interpreters,
+            "2.10.0",
+            TorchHostTarget::WindowsX8664,
+        );
+        assert_eq!(windows.status, "inconclusive");
+        assert_eq!(windows.matches.len(), 2);
+        let windows = filter_alternatives_for_host(
+            windows,
+            Ok(vec!["nvidia".into()]),
+            TorchHostTarget::WindowsX8664,
+        );
+        assert_eq!(
+            windows
+                .matches
+                .iter()
+                .map(|item| item.build.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu", "cu130"]
+        );
+        assert_eq!(windows.checked_builds, ["cpu", "cu130"]);
+
+        let mut mac = legacy_alternatives();
+        mac.matches[0].wheel_url = Some("https://download.pytorch.org/whl/cpu/torch/torch-2.10.0-cp312-cp312-macosx_11_0_arm64.whl".into());
+        mac.matches[1].wheel_url = Some("https://download.pytorch.org/whl/cu130/torch/torch-2.10.0%2Bcu130-cp312-cp312-win_amd64.whl".into());
+        let mac =
+            validate_legacy_wheel_leads(mac, &interpreters, "2.10.0", TorchHostTarget::MacosArm64);
+        let mac = filter_alternatives_for_host(mac, Ok(Vec::new()), TorchHostTarget::MacosArm64);
+        assert_eq!(
+            mac.matches
+                .iter()
+                .map(|item| item.build.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu"]
+        );
+        assert_eq!(mac.checked_builds, ["cpu"]);
+        assert_eq!(mac.status, "inconclusive");
     }
 }

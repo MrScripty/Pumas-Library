@@ -626,3 +626,54 @@
   Both builds are local candidates and do not replace the toolbar-linked public
   release. Windows/macOS packaged install, CUDA/device execution, and Tuldok
   image generation remain unverified.
+
+## 2026-09-26 — Torch artifact probe timeout and cache reuse repair
+
+- The reported `cu132 · Python selected automatically · none: probe
+  inconclusive` result led to a source-level diagnosis. A pip resolution
+  timeout and an unclassified pip failure both mapped to the same generic
+  message. Preview cached package files in a temporary resolver directory,
+  while installation used a separate persistent pip cache.
+- The full preview now has one 13-minute deadline across discovery, managed
+  Python provisioning, and every automatic-Python candidate. This stays below
+  Electron's 15-minute preview RPC deadline. When it expires, the operation
+  cancels and drains owned child processes before returning a typed inconclusive
+  result with a timeout-specific message. Unclassified pip failure has its own
+  safe message; the RPC boundary exposes only these allowlisted diagnostics.
+- Preview and installation now use the same canonical Pumas-managed pip cache;
+  the managed-CPython depot remains separate. This permits pip to reuse eligible
+  cached wheel responses. It does not guarantee reuse because pip may revalidate
+  artifacts or fetch them again. The review UI now says that large wheels may be
+  downloaded and that completed cache entries can be reused.
+- Verification passed: 116 focused Torch/app-manager tests, 4 Torch preview RPC
+  contract tests, 44 Torch resolver tests, 20 preview UI tests, and
+  `git diff --check`. Astra high and Sol xhigh completed read-only reviews; no
+  remaining source blocker was reported.
+- The user-reported run itself was not captured, so the original result cannot
+  be distinguished between its 180-second timeout and an unclassified pip
+  error. Packaged preview-to-install cache reuse has not yet been exercised;
+  this repair is source-tested only and does not claim a new Torch install or
+  broader desktop/device/Tuldok acceptance.
+
+## 2026-09-26 — Local Linux package rebuild for Torch probe repair
+
+- Rebuilt the optimized `pumas-rpc`, frontend, and local Electron v0.7.0 Linux
+  packages from the repaired worktree. The AppImage at
+  `electron/release/Pumas.Library-0.7.0.AppImage` is 154,855,688 bytes with
+  SHA-256 `b39f869e32001e3755e57746c4a20841d0447537f57af885de80d48e3aa19075`;
+  the Debian package is 120,460,880 bytes with SHA-256
+  `f6b8525e4452f17cae2021360fa2736a2cb2a6195cdfee7236a763b254514c40`.
+- The artifact checker accepted both packages. The package smoke extracted each
+  installer, matched bundled RPC/frontend/license resources to build inputs,
+  and passed `/health` for both bundled RPC processes. The x86_64 Windows GNU
+  app-manager test target compiled successfully; this is cross-target compile
+  evidence only.
+- Local verification: 116 focused Torch/app-manager tests, 4 Torch preview RPC
+  contract tests, 44 resolver tests, 20 preview UI tests, frontend type-check,
+  release-attribution check, and Linux package smoke passed. No actual Torch
+  package resolution or install was run, so timeout handling and cache reuse
+  have not been observed against the user's cu132 selection.
+- This local build overwrites the repository's v0.7.0 Linux installer files.
+  It was not published and does not change the desktop toolbar link. Native
+  Windows/macOS packages, device use, and Tuldok image generation remain
+  unverified.

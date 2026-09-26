@@ -23,6 +23,17 @@ pub(super) fn create_launcher_workspace(launcher_root: &Path) -> Result<Arc<temp
         .map_err(|err| PumasError::io_with_path(err, &parent))
 }
 
+/// Return Pumas' persistent pip cache shared by artifact checks and installs.
+pub(super) fn managed_pip_cache_dir(launcher_root: &Path) -> Result<PathBuf> {
+    let root = fs::canonicalize(launcher_root)
+        .map_err(|err| PumasError::io_with_path(err, launcher_root))?;
+    let mut cache = root.clone();
+    for component in ["launcher-data", "cache", "pip"] {
+        cache = checked_child_directory(&cache, component, &root)?;
+    }
+    Ok(cache)
+}
+
 /// Give one resolver process its own temporary directory without changing our environment.
 pub(super) fn configure_resolver_command(command: &mut Command, workspace: &Path) -> Result<()> {
     let workspace =
@@ -79,6 +90,39 @@ mod tests {
         assert_eq!(second.path().parent(), Some(parent.as_path()));
         assert!(first.path().is_dir());
         assert!(second.path().is_dir());
+    }
+
+    #[test]
+    fn pip_cache_is_persistent_and_managed() {
+        let root = tempfile::tempdir().unwrap();
+        let expected = fs::canonicalize(root.path())
+            .unwrap()
+            .join("launcher-data/cache/pip");
+
+        let first = managed_pip_cache_dir(root.path()).unwrap();
+        let second = managed_pip_cache_dir(root.path()).unwrap();
+
+        assert_eq!(first, expected);
+        assert_eq!(second, expected);
+        assert!(first.is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn escaping_pip_cache_symlink_is_rejected_without_touching_target() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let managed_cache = root.path().join("launcher-data/cache");
+        fs::create_dir_all(&managed_cache).unwrap();
+        let sentinel = outside.path().join("keep");
+        fs::write(&sentinel, b"untouched").unwrap();
+        symlink(outside.path(), managed_cache.join("pip")).unwrap();
+
+        assert!(managed_pip_cache_dir(root.path()).is_err());
+        assert_eq!(fs::read(&sentinel).unwrap(), b"untouched");
+        assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 1);
     }
 
     #[cfg(unix)]

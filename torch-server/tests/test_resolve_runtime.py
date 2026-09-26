@@ -443,6 +443,7 @@ class ResolverTests(unittest.TestCase):
         digest = "a" * 64
         fixture = report(version="2.14.0", url=wheel)
         commands = []
+        cache_dir = pathlib.Path(tempfile.gettempdir()) / "Pumas shared pip cache"
 
         def fake_run(command, **_kwargs):
             commands.append(command)
@@ -469,6 +470,8 @@ class ResolverTests(unittest.TestCase):
                         digest,
                         "--output",
                         str(output),
+                        "--cache-dir",
+                        str(cache_dir),
                     ],
                 ),
                 patch.object(resolver.sys, "platform", "darwin"),
@@ -485,7 +488,7 @@ class ResolverTests(unittest.TestCase):
                 resolver.main()
             self.assertEqual(len(commands), 1)
             command = commands[0]
-            self.assertEqual(command[command.index("--cache-dir") + 1], str(output / "pip-cache"))
+            self.assertEqual(command[command.index("--cache-dir") + 1], str(cache_dir))
             self.assertIn(f"torch @ {wheel}#sha256={digest}", command)
             self.assertNotIn("torch==2.14.0", command)
             self.assertTrue(set(resolver.CORE).issubset(command))

@@ -1298,6 +1298,7 @@ impl VersionInstaller {
         )
         .map_err(PumasError::from)?;
         let python = pumas_library::platform::paths::venv_python(&runtime);
+        let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
         let mut install = Command::new(pumas_library::platform::paths::venv_pip(&runtime));
         install
             .args([
@@ -1311,7 +1312,7 @@ impl VersionInstaller {
             ])
             .arg(runtime.join("requirements.txt"))
             .arg("--cache-dir")
-            .arg(self.launcher_root.join("launcher-data/cache/pip"));
+            .arg(pip_cache);
         self.run_runtime_command(
             install,
             log_path,
@@ -1689,6 +1690,7 @@ impl VersionInstaller {
         )
         .await?;
         let python = pumas_library::platform::paths::venv_python(&runtime);
+        let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
         let mut install = Command::new(pumas_library::platform::paths::venv_pip(&runtime));
         install
             .args([
@@ -1701,7 +1703,7 @@ impl VersionInstaller {
             ])
             .arg(runtime.join("requirements.txt"))
             .arg("--cache-dir")
-            .arg(self.launcher_root.join("launcher-data/cache/pip"));
+            .arg(pip_cache);
         self.run_runtime_command(
             install,
             log_path,

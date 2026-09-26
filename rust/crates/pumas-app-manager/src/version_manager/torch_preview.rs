@@ -65,6 +65,11 @@ const ADAPTERS: &[&str] = &["none", "flux2"];
 const PREVIEW_TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_RETAINED_TORCH_PREVIEWS: usize = 32;
 const RESOLVER_STDERR_TAIL_BYTES: u64 = 8 * 1024;
+// Reserve two minutes for owned-child cleanup inside Electron's 15-minute RPC deadline.
+const TORCH_RESOLVER_TIMEOUT: Duration = Duration::from_secs(13 * 60);
+const TORCH_RESOLVER_TIMEOUT_MESSAGE: &str =
+    "Torch artifact checking timed out. Cached wheel downloads may be reused if you retry.";
+const TORCH_RESOLVER_FAILURE_MESSAGE: &str = "Pip could not complete dependency resolution. Wheel availability is inconclusive; check network or package-index access and retry.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResolverDiagnosticCode {
@@ -734,7 +739,11 @@ mod tests {
                 "network_inconclusive",
                 "Network access prevented a conclusive wheel resolution.",
             ),
-            (1, "inconclusive", "Wheel resolution did not complete conclusively."),
+            (
+                1,
+                "inconclusive",
+                "Pip could not complete dependency resolution. Wheel availability is inconclusive; check network or package-index access and retry.",
+            ),
         ] {
             let outcome = resolver_rejection(PreviewResolverRun::Exited(
                 std::process::ExitStatus::from_raw(code << 8),
@@ -761,7 +770,7 @@ mod tests {
         assert_eq!(timeout["reason"], "inconclusive");
         assert_eq!(
             timeout["message"],
-            TorchPreviewRejectionReason::Inconclusive.message()
+            "Torch artifact checking timed out. Cached wheel downloads may be reused if you retry."
         );
     }
 
@@ -850,6 +859,57 @@ mod tests {
         let value = serde_json::to_value(rejected).unwrap();
         assert_eq!(value["status"], "rejected");
         assert_eq!(value["reason"], "inconclusive");
+        assert_eq!(value["message"], TORCH_RESOLVER_TIMEOUT_MESSAGE);
+    }
+
+    #[tokio::test]
+    async fn preview_deadline_cancels_and_drains_a_child_during_preparation() {
+        let workspace = std::sync::Arc::new(tempfile::tempdir().unwrap());
+        let pid_path = workspace.path().join("preparation.pid");
+        let operation_workspace = workspace.clone();
+        let cleanup = std::sync::Arc::new(super::installer::TorchCleanupTasks::default());
+        let operation_cleanup = cleanup.clone();
+        let resolver_cleanup = operation_cleanup.clone();
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(100);
+        let task = tokio::spawn(async move {
+            let mut command = Command::new("sh");
+            command
+                .arg("-c")
+                .arg("echo $$ > \"$1\"; sleep 30")
+                .arg("sh")
+                .arg(&pid_path);
+            let operation = async move {
+                let run = run_preview_resolver(
+                    command,
+                    &operation_workspace,
+                    Duration::from_secs(30),
+                    &resolver_cleanup,
+                )
+                .await?;
+                Err(failed(format!("Unexpected resolver completion: {run:?}")))
+            };
+            run_torch_preview_with_deadline(deadline, &operation_cleanup, operation).await
+        });
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !workspace.path().join("preparation.pid").exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("preparation child did not start");
+        let outcome = task.await.unwrap().unwrap();
+        let value = serde_json::to_value(outcome).unwrap();
+        assert_eq!(value["status"], "rejected");
+        assert_eq!(value["reason"], "inconclusive");
+        assert_eq!(value["message"], TORCH_RESOLVER_TIMEOUT_MESSAGE);
+        let pid: i32 = std::fs::read_to_string(workspace.path().join("preparation.pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(!pumas_library::platform::linux_group::group_has_live_members(pid).unwrap());
+        cleanup.drain().await.unwrap();
     }
 
     #[tokio::test]
@@ -1327,14 +1387,37 @@ fn resolver_rejection(run: PreviewResolverRun) -> Option<TorchPreviewOutcome> {
         PreviewResolverRun::Exited(status) if status.success() => return None,
         PreviewResolverRun::Exited(status) => {
             let reason = TorchPreviewRejectionReason::from_exit_code(status.code());
-            (reason, reason.message_for_exit_code(status.code()))
+            let message = if status.code() == Some(1) {
+                TORCH_RESOLVER_FAILURE_MESSAGE
+            } else {
+                reason.message_for_exit_code(status.code())
+            };
+            (reason, message)
         }
         PreviewResolverRun::TimedOut => (
             TorchPreviewRejectionReason::Inconclusive,
-            TorchPreviewRejectionReason::Inconclusive.message(),
+            TORCH_RESOLVER_TIMEOUT_MESSAGE,
         ),
     };
     Some(TorchPreviewOutcome::Rejected { reason, message })
+}
+
+async fn run_torch_preview_with_deadline<F>(
+    deadline: tokio::time::Instant,
+    cleanup: &super::installer::TorchCleanupTasks,
+    operation: F,
+) -> Result<TorchPreviewOutcome>
+where
+    F: std::future::Future<Output = Result<TorchPreviewOutcome>>,
+{
+    match tokio::time::timeout_at(deadline, operation).await {
+        Ok(outcome) => outcome,
+        Err(_) => {
+            cleanup.drain_residual_child_slots().await?;
+            Ok(resolver_rejection(PreviewResolverRun::TimedOut)
+                .expect("a timed out resolver must be rejected"))
+        }
+    }
 }
 
 pub(super) async fn run_preview_resolver(
@@ -1543,6 +1626,19 @@ impl VersionManager {
         python: &str,
         adapter: &str,
     ) -> Result<TorchPreviewOutcome> {
+        let deadline = tokio::time::Instant::now() + TORCH_RESOLVER_TIMEOUT;
+        let operation = self.preview_torch_runtime_until(tag, build, python, adapter, deadline);
+        run_torch_preview_with_deadline(deadline, &self.torch_cleanup, operation).await
+    }
+
+    async fn preview_torch_runtime_until(
+        &self,
+        tag: &str,
+        build: &str,
+        python: &str,
+        adapter: &str,
+        resolver_deadline: tokio::time::Instant,
+    ) -> Result<TorchPreviewOutcome> {
         if self.app_id != AppId::Torch
             || !supported_torch_build(build)
             || (!ADAPTERS.contains(&adapter) && adapter != "bundled")
@@ -1675,6 +1771,7 @@ impl VersionManager {
                     adapter,
                     &managed,
                     candidate.wheel.as_ref(),
+                    resolver_deadline,
                 )
                 .await?;
             if let Some(outcome) = search.record_attempt(outcome) {
@@ -1691,6 +1788,7 @@ impl VersionManager {
         adapter: &str,
         managed_python: &super::managed_python::ManagedPythonIdentity,
         selected_wheel: Option<&TorchReleaseCombination>,
+        resolver_deadline: tokio::time::Instant,
     ) -> Result<TorchPreviewOutcome> {
         let python = managed_python.python.as_str();
         let interpreter = managed_python.executable.as_path();
@@ -1826,6 +1924,7 @@ impl VersionManager {
         .await
         .map_err(PumasError::from)?;
         let mut command = Command::new(interpreter);
+        let cache_dir = super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
         command
             .arg(&resolver)
             .args([
@@ -1837,18 +1936,19 @@ impl VersionManager {
                 adapter,
                 "--output",
             ])
-            .arg(workspace.path());
+            .arg(workspace.path())
+            .arg("--cache-dir")
+            .arg(cache_dir);
         if let Some(wheel) = selected_wheel {
             append_exact_wheel_args(&mut command, wheel);
         }
         self.torch_cleanup.drain_residual_child_slots().await?;
-        let run = run_preview_resolver(
-            command,
-            &workspace,
-            Duration::from_secs(180),
-            &self.torch_cleanup,
-        )
-        .await?;
+        let remaining = resolver_deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return Ok(resolver_rejection(PreviewResolverRun::TimedOut)
+                .expect("a timed out resolver must be rejected"));
+        }
+        let run = run_preview_resolver(command, &workspace, remaining, &self.torch_cleanup).await?;
         if matches!(&run, PreviewResolverRun::Exited(status) if status.code() == Some(3)) {
             log_resolver_rejection_diagnostic(workspace.path());
         }

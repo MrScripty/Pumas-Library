@@ -821,6 +821,7 @@ def main() -> None:
     parser.add_argument("--build")
     parser.add_argument("--adapter", choices=ADAPTERS, default="none")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--cache-dir", type=Path)
     parser.add_argument("--discover", action="store_true")
     parser.add_argument("--release-options", action="store_true")
     parser.add_argument("--selected-python")
@@ -837,6 +838,7 @@ def main() -> None:
             or args.build
             or args.output
             or args.selected_python
+            or args.cache_dir is not None
             or args.adapter != "none"
             or args.torch_wheel is not None
             or args.torch_sha256 is not None
@@ -866,6 +868,8 @@ def main() -> None:
     if not RELEASE_CHANNEL.fullmatch(args.build):
         parser.error("Select a canonical CPU, CUDA, or ROCm build channel")
     if args.discover:
+        if args.cache_dir is not None:
+            parser.error("Discovery does not accept --cache-dir")
         if not args.selected_python or not args.interpreter:
             parser.error("Discovery requires --selected-python and at least one --interpreter")
         try:
@@ -899,6 +903,8 @@ def main() -> None:
     except ValueError as error:
         parser.exit(2, f"{error}\n")
     args.output.mkdir(parents=True, exist_ok=True)
+    cache_dir = args.cache_dir or args.output / "pip-cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
     report_path = args.output / "pip-resolution.json"
     torch_requirement = (
         args.version
@@ -912,7 +918,7 @@ def main() -> None:
         "pip",
         "--isolated",
         "--cache-dir",
-        str(args.output / "pip-cache"),
+        str(cache_dir),
         "install",
         "--dry-run",
         "--report",

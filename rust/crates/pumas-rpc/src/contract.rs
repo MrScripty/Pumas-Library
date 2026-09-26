@@ -4156,6 +4156,8 @@ impl TryFrom<pumas_app_manager::version_manager::TorchPreviewOutcome>
                                 | "Official wheel discovery did not complete conclusively."
                                 | "No stable native CPython candidate is available from the managed provider."
                                 | "The managed Python interpreter could not be provisioned."
+                                | "Torch artifact checking timed out. Cached wheel downloads may be reused if you retry."
+                                | "Pip could not complete dependency resolution. Wheel availability is inconclusive; check network or package-index access and retry."
                         ) =>
                     {
                         message
@@ -4258,6 +4260,16 @@ mod torch_preview_contract_tests {
                 TorchPreviewRejectionReason::Inconclusive,
                 "inconclusive",
                 "Wheel resolution did not complete conclusively.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "Torch artifact checking timed out. Cached wheel downloads may be reused if you retry.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "Pip could not complete dependency resolution. Wheel availability is inconclusive; check network or package-index access and retry.",
             ),
         ] {
             let outcome = TorchPreviewOutcome::Rejected { reason, message };

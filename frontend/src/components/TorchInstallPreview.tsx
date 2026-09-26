@@ -298,7 +298,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
           {!fixedPreset && releaseOptions?.issues.map((issue, index) => <p key={`${index}-${issue}`} className="text-xs">{issue}</p>)}
           {probing && <p role="status" className="flex items-center gap-2 rounded border border-[hsl(var(--accent-success))]/40 bg-[hsl(var(--accent-success)/0.08)] px-3 py-2 text-sm text-[hsl(var(--text-primary))]">
             <Loader2 aria-hidden="true" size={16} className="shrink-0 animate-spin text-[hsl(var(--accent-success))]" />
-            <span>Checking official Torch artifacts… Package files may download to Pumas’ private cache.</span>
+            <span>Resolving official Torch packages… Large wheels may download to Pumas’ shared cache so installation can reuse completed downloads.</span>
           </p>}
           <button type="button" disabled={!build || !adapter || probing} onClick={() => void probe()} className="inline-flex items-center gap-2 rounded border border-[hsl(var(--border-control))] bg-[hsl(var(--surface-control))] px-3 py-2 text-sm text-[hsl(var(--text-primary))] transition-colors hover:border-[hsl(var(--accent-success))] hover:bg-[hsl(var(--accent-success)/0.12)] active:scale-[0.98] active:bg-[hsl(var(--accent-success)/0.2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[hsl(var(--accent-success))] disabled:cursor-not-allowed disabled:opacity-60">
             {probing ? <><Loader2 aria-hidden="true" size={16} className="animate-spin" />Checking…</> : 'Check selected combination'}

@@ -90,7 +90,8 @@ describe('TorchInstallPreview', () => {
     fireEvent.click(check);
 
     const status = await screen.findByRole('status');
-    expect(status).toHaveTextContent(/Checking official Torch artifacts/);
+    expect(status).toHaveTextContent(/Resolving official Torch packages/);
+    expect(status).toHaveTextContent(/shared cache so installation can reuse completed downloads/);
     expect(status.querySelector('.animate-spin')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Checking…' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Install reviewed artifacts' })).toHaveAccessibleDescription(

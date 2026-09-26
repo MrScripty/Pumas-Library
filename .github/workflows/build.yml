@@ -191,6 +191,9 @@ jobs:
       # Fixtures validate tags and resolver behavior; the native tests below
       # validate host APIs without claiming GPU inference or model support.
       - run: python -m unittest discover -s torch-server/tests
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
       - name: Self-test native Torch acceptance script
         run: python scripts/release/torch-managed-python-acceptance.py --self-test
       - name: Test native Torch wheel filtering
@@ -244,7 +247,7 @@ jobs:
           key: torch-native-e2e-${{ runner.os }}
       - uses: actions/setup-python@v6
         with:
-          python-version-file: .python-version
+          python-version: '3.14'
       - name: Build native RPC for Torch acceptance
         run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc
       - name: Accept v2.14 CPU/Core via native RPC (${{ runner.os }})

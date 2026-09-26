@@ -91,16 +91,32 @@ malformed catalogs.
 ## Licensing and remaining admission gates
 
 The uv release uses the [MIT/Apache-2.0 license policy](https://docs.astral.sh/uv/reference/policies/license/).
-The Python Build Standalone documentation says distribution archives include
-license texts and that individual bundled dependencies carry their own terms
+The exact `0.12.18` [MIT](https://raw.githubusercontent.com/astral-sh/uv/0.12.18/LICENSE-MIT)
+and [Apache-2.0](https://raw.githubusercontent.com/astral-sh/uv/0.12.18/LICENSE-APACHE)
+texts are pinned in `scripts/release/licenses/sources.json` with SHA-256 values
+`860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c`
+and `c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4`.
+They are included in the 0.7.0 attribution inventory for the uv runtime executable
+downloaded by Pumas, which is not bundled in the application package.
+
+The CPython archive license set remains an open release-acceptance gap. The
+Python Build Standalone documentation says distribution archives include license
+texts and individual bundled dependencies carry their own terms
 ([distribution runtime and licensing](https://github.com/astral-sh/python-build-standalone/blob/main/docs/running.rst)).
-Before release acceptance, retain uv notices and the applicable license files
-for the actual selected CPython archives in Pumas' attribution inventory. Do not
-infer the complete archive license set from the repository's top-level license.
+The Linux x86_64 CPython 3.14.7 full archive was verified against its official
+SHA-256 and collected with the bounded acceptance tool. Its 19 license texts,
+raw `PYTHON.json`, and archive manifest are retained in the
+[Linux archive evidence](managed-python-license-collection/linux-x86_64-cpython-3.14.7/README.md).
+That collection is evidence only; it has not been added to the release
+attribution inventory because the Windows x86_64 and macOS arm64 selected
+archives have not been collected and compared. Retain the applicable license
+files from every selected target archive in Pumas' attribution inventory before
+release acceptance. Neither the uv license texts nor the installed interpreter
+tree establishes the archive's complete license set.
 
 Admission remains pending until uv artifacts and hashes are checked on native
 Windows x86_64 MSVC and macOS arm64, and those targets pass clean-host
 provisioning without Python on `PATH`. Stable catalog filtering must exclude
 pre-releases, debug, free-threaded, and foreign-target artifacts; timeout,
 cancellation, tamper, retry, and durable retention behavior must pass; and
-license notices must be recorded.
+the selected CPython archive license notices must be recorded.

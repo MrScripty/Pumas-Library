@@ -165,6 +165,13 @@ release update, native Windows/macOS install and lifecycle acceptance, provider
 license attribution, and packaged desktop Torch installation open. Do not
 extend the Windows/macOS runtime support claim until their native gates pass.
 
+The public [`v0.7.0` prerelease](https://github.com/MrScripty/Pumas-Library/releases/tag/v0.7.0)
+was published on 2026-09-17, and its installer assets date from that build. The
+local Linux 0.7.0 candidate was rebuilt on 2026-09-25 with the RPC allowlist
+repair. The reported error is raised by Electron IPC validation before the Rust
+Torch manager runs, so no Python/build selection can correct that installed
+bundle. The public toolbar-linked release remains unchanged.
+
 ## Current branch behavior
 
 - Stable upstream `vMAJOR.MINOR.PATCH` releases are discovered independently of
@@ -484,3 +491,17 @@ verification result.
 The first serving scope is the existing Nunchaku Z-Image and FLUX.2 Klein image
 models. A general user-defined PyTorch model plugin contract is a separate
 decision. Merge or source presence alone does not establish Tuldok inference.
+
+## Managed CPython provider follow-up — 2026-09-25
+
+Torch 2.14.0 CPU/Core passed the native Linux RPC install and managed sidecar
+lifecycle using Pumas-provisioned CPython 3.14.7. This does not expand the
+existing Tuldok/image qualification beyond its recorded Torch 2.10 tuple.
+The uv 0.12.18 MIT/Apache notices are included in release attribution. The
+Linux CPython 3.14.7 full-archive license collection is retained in the
+[cross-platform runtime plan](../../torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/README.md),
+but Windows/macOS archive licenses and all-target provider attribution remain
+open. Windows/macOS native acceptance and packaged desktop Torch installation
+also remain unproven. Local v0.7.0 Linux AppImage and deb packages were rebuilt
+with the updated uv notices and passed extracted-resource and bundled RPC
+`/health` smoke checks; this did not update the public toolbar-linked release.

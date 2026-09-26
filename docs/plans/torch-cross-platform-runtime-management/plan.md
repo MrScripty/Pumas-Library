@@ -17,11 +17,20 @@ operation, sidecar dependencies, explicit selection, sidecar health/protocol 3,
 generation-owned stop, and graceful backend shutdown all passed. The independent
 CUDA 13.2 Core preview resolved 44 artifacts; CUDA/device execution remains
 untested. See the [retained v2.14.0 Linux evidence](reports/v2.14.0-linux-cpu-rpc-acceptance/acceptance.json).
-Fresh local v0.7.0 AppImage and deb packages were built from commit `2af87420`;
-their extracted resources match the build inputs and each bundled RPC backend
-passed `/health`. This confirms package assembly and startup, not the packaged
-Torch installation UI path. Native Windows and macOS runs, provider licensing,
-and packaged desktop install acceptance remain pending.
+Fresh local v0.7.0 AppImage and deb packages were rebuilt after updating release
+attribution. Their extracted resources match the build inputs, and both bundled
+RPC backends passed `/health`. AppImage SHA-256:
+`cd4cb2c0e168ce207d79693e30fd3a02f8152870c0baea2275ab0a35323b21dd`; deb
+SHA-256: `0591e1950bbb2761a086c437e51680275dc598c1fc76560091e1557dfef6e6ea`.
+The public v0.7.0 prerelease was published on 2026-09-17; this local candidate
+does not replace the toolbar-linked assets. This confirms package assembly and
+startup, not the packaged Torch installation UI path.
+The uv 0.12.18 MIT/Apache notices are now in the release attribution inventory.
+The selected Linux CPython 3.14.7 full-archive license set (19 texts plus its
+hashed `PYTHON.json` metadata) is retained as evidence; Windows and macOS
+archive notices are not yet collected or integrated into attribution. Native
+Windows and macOS runs, complete provider licensing, and packaged desktop
+install acceptance remain pending.
 
 **Current phase:** The managed provider, Linux 2.14.0 install, and sidecar
 lifecycle are implemented and accepted on the native Linux host. The native QA

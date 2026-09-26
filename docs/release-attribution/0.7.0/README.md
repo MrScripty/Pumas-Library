@@ -7,7 +7,7 @@ notice files by `python3 scripts/release/generate-notices.py`. It is embedded as
 hashes. `check-attribution.cjs` runs in CI and before Electron packaging; stale
 inputs, altered texts, and missing notices refuse packaging. Cargo manifests are
 hashed alongside lockfiles so changes to feature selection also invalidate the
-inventory. The minimized release inventory contains 367 package entries.
+inventory. The minimized release inventory currently contains 368 package entries.
 
 The inventory includes the normal/build Rust dependency closure for the three
 desktop targets and the JavaScript production dependency closure. It is a

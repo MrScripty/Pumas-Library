@@ -224,3 +224,59 @@
   acceptance, provider license materials, packaged desktop Torch installation,
   and the toolbar-linked release update remain open; X1–X7 therefore remain
   pending.
+
+## 2026-09-25 — Managed Python license collection and archive bound repair
+
+- Added pinned uv 0.12.18 MIT and Apache-2.0 texts to the generated 0.7.0
+  release-attribution inventory. The notice identifies uv as a runtime
+  executable downloaded by Pumas, not a bundled application dependency.
+- Added the archive-license acceptance collector for the full Python Build
+  Standalone asset corresponding to the selected install-only CPython record.
+  It verifies the official release asset identity, digest, and size before
+  reading `PYTHON.json`; it retains the metadata and all licenses in the
+  archive license directory plus declared file references with hashes.
+- The retained Linux x86_64 CPython 3.14.7 full archive verified at 126,709,151
+  bytes and SHA-256
+  `46a9e98d2c7fd2c5b9ca67510b5a0699f5ccad5fb750957961c22c52e07b6cb0`.
+  Collection retained 19 license texts and `PYTHON.json` under
+  `reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/`.
+  This evidence is not yet merged into release attribution: selected Windows
+  and macOS archives remain uncollected.
+- Rebuilt the retained manifest from the captured official release API record
+  rather than synthesizing its asset URL, preserving the upstream `%2B` path
+  encoding exactly. Added a fixture requiring percent-encoded build separators
+  to survive asset selection and appear unchanged in the manifest.
+- Astra high reproduced the PAX gap in the previous cap: `tarfile` consumes
+  PAX bytes without exposing them as ordinary member payloads. Added a reader
+  that bounds bytes delivered from the decompressed tar stream, including
+  headers and PAX metadata. The PAX fixture failed before the repair and now
+  passes by rejecting at a 12,000-byte limit while the plain fixture remains
+  accepted. The CPython 3.14 zstd fixture exercises the production decompressor.
+  Acceptance fixtures pass on Python 3.12 and 3.14; Ruff check/format pass.
+- Updated the QA workflow's acceptance-tool runtime to CPython 3.14 because
+  `compression.zstd` and the acceptance collector require the standard-library
+  zstd reader introduced in Python 3.14. This does not change the packaged
+  application runtime.
+- Open gates remain native Windows/macOS provisioning and lifecycle acceptance,
+  full three-target provider attribution, and packaged desktop install
+  acceptance. Local release packaging does not update the public toolbar link.
+
+## 2026-09-25 — Rebuilt local Linux release candidate
+
+- Rebuilt frontend production assets and `pumas-rpc --release`, staged the new
+  backend, and packaged v0.7.0 AppImage and deb with the updated uv third-party
+  notices. No artifacts were published.
+- `scripts/release/check-artifacts.mjs electron/release linux` verified both
+  expected installers. `scripts/release/smoke-linux-packages.py electron/release`
+  verified their packaged resources against the current frontend, backend,
+  license, and third-party notice inputs; both packaged RPC backends passed
+  `/health`.
+- AppImage SHA-256:
+  `cd4cb2c0e168ce207d79693e30fd3a02f8152870c0baea2275ab0a35323b21dd`
+  (154,752,684 bytes). Deb SHA-256:
+  `0591e1950bbb2761a086c437e51680275dc598c1fc76560091e1557dfef6e6ea`
+  (120,406,924 bytes). The public v0.7.0 release and desktop toolbar link remain
+  unchanged; packaged Torch installation through the UI is still untested.
+- Additional checks passed: 49 launcher tests, 12 Electron tests, 20 managed
+  Python acceptance fixtures under Python 3.12 and CPython 3.14, Ruff, release
+  attribution check and test, and the final file diff whitespace check.

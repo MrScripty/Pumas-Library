@@ -198,6 +198,18 @@ console.log(JSON.stringify([...seen.values()]));
         ],
         "Native runtime; upstream notice superset, downstream archive provenance tracked separately",
     )
+    add(
+        "uv",
+        "0.12.18",
+        "MIT OR Apache-2.0",
+        "https://github.com/astral-sh/uv/tree/0.12.18",
+        LICENSES,
+        [
+            LICENSES / "uv-0.12.18-LICENSE-MIT",
+            LICENSES / "uv-0.12.18-LICENSE-APACHE",
+        ],
+        "Managed Python provider runtime executable downloaded by Pumas; not bundled",
+    )
     sqlite = next(p for p in metadata["packages"] if p["name"] == "libsqlite3-sys")
     sqlite_source = Path(sqlite["manifest_path"]).parent / "sqlite3/sqlite3.c"
     blessing = sqlite_source.read_text().split("*/", 1)[0] + "*/"
@@ -225,6 +237,8 @@ Electron also supplies LICENSE.electron.txt and LICENSES.chromium.html beside th
 application executable. Those files are part of this attribution and must be retained.
 ONNX upstream notices are included in full; downstream native closure verification
 is recorded in the release attribution report, not inferred from this list.
+The uv notice covers a runtime executable downloaded by Pumas, not a bundled binary.
+Managed CPython archive licenses require separate archive-specific attribution.
 
 """
     text = header + ("\n\n" + "=" * 78 + "\n\n").join(sections) + "\n"

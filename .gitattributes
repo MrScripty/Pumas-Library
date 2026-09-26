@@ -8,3 +8,5 @@ frontend/package.json text eol=lf
 # Preserve verbatim third-party legal bytes, including mixed line endings.
 scripts/release/licenses/* -text -whitespace
 docs/release-attribution/**/THIRD-PARTY-NOTICES.txt -text -whitespace
+# Archive-captured CPython license texts are evidence and must remain verbatim.
+docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/**/licenses/** -text -whitespace

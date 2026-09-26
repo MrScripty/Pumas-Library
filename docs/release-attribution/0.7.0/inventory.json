@@ -6008,6 +6008,23 @@
       ]
     },
     {
+      "name": "uv",
+      "version": "0.12.18",
+      "license_declared": "MIT OR Apache-2.0",
+      "source": "https://github.com/astral-sh/uv/tree/0.12.18",
+      "scope": "Managed Python provider runtime executable downloaded by Pumas; not bundled",
+      "texts": [
+        {
+          "path": "uv-0.12.18-LICENSE-MIT",
+          "sha256": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c"
+        },
+        {
+          "path": "uv-0.12.18-LICENSE-APACHE",
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        }
+      ]
+    },
+    {
       "name": "Electron",
       "version": "43.7.0",
       "license_declared": "MIT",
@@ -6066,6 +6083,16 @@
       "file": "pyke-ort-artifacts-LICENSE",
       "source": "https://github.com/pykeio/ort-artifacts/blob/f267947bba782f315bd667b9b2a607ab51363445/LICENSE",
       "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "file": "uv-0.12.18-LICENSE-MIT",
+      "source": "https://raw.githubusercontent.com/astral-sh/uv/0.12.18/LICENSE-MIT",
+      "sha256": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c"
+    },
+    {
+      "file": "uv-0.12.18-LICENSE-APACHE",
+      "source": "https://raw.githubusercontent.com/astral-sh/uv/0.12.18/LICENSE-APACHE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
     }
   ],
   "input_sha256": {
@@ -6078,5 +6105,5 @@
     "electron/package.json": "1f2b68e5819cbea84a2d8f25bbdda5d8288b3c1bf90a52162dc414c5938d72d8",
     "frontend/package.json": "0f3d0d26b1155cdabd7a5b1f93d2b99aff64b70105760284343adeb1afb6ca2e"
   },
-  "notices_sha256": "e4fca768460b0db777f4a2f226f5f20a71a9d0bf349a4aab5cf89fb1581fdcd2"
+  "notices_sha256": "7cc20a04523faca684fd157cea3751a686600c4fdc2cf2b6713738af76bf2443"
 }

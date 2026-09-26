@@ -27,10 +27,12 @@ does not replace the toolbar-linked assets. This confirms package assembly and
 startup, not the packaged Torch installation UI path.
 The uv 0.12.18 MIT/Apache notices are now in the release attribution inventory.
 The selected Linux CPython 3.14.7 full-archive license set (19 texts plus its
-hashed `PYTHON.json` metadata) is retained as evidence; Windows and macOS
-archive notices are not yet collected or integrated into attribution. Native
-Windows and macOS runs, complete provider licensing, and packaged desktop
-install acceptance remain pending.
+hashed `PYTHON.json` metadata) is retained as evidence. Official Windows x64
+and macOS arm64 CPython 3.14.7 full archives have also been collected and
+hash-verified as target evidence. Their native installers have not yet proven
+that 3.14.7 is the selected interpreter, so those notices are not yet integrated
+into release attribution. Native Windows and macOS runs, confirmed selected
+provider licensing, and packaged desktop install acceptance remain pending.
 
 **Current phase:** The managed provider, Linux 2.14.0 install, and sidecar
 lifecycle are implemented and accepted on the native Linux host. The native QA

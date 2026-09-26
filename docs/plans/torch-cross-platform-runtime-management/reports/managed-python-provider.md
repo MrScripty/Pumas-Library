@@ -104,15 +104,18 @@ Python Build Standalone documentation says distribution archives include license
 texts and individual bundled dependencies carry their own terms
 ([distribution runtime and licensing](https://github.com/astral-sh/python-build-standalone/blob/main/docs/running.rst)).
 The Linux x86_64 CPython 3.14.7 full archive was verified against its official
-SHA-256 and collected with the bounded acceptance tool. Its 19 license texts,
-raw `PYTHON.json`, and archive manifest are retained in the
-[Linux archive evidence](managed-python-license-collection/linux-x86_64-cpython-3.14.7/README.md).
-That collection is evidence only; it has not been added to the release
-attribution inventory because the Windows x86_64 and macOS arm64 selected
-archives have not been collected and compared. Retain the applicable license
-files from every selected target archive in Pumas' attribution inventory before
-release acceptance. Neither the uv license texts nor the installed interpreter
-tree establishes the archive's complete license set.
+SHA-256 and corresponds to the accepted Linux installation. The matching
+Windows x86_64 and macOS arm64 CPython 3.14.7 full archives were also downloaded
+from the official release API and hash-verified using the bounded collector.
+Each target has 19 license texts, raw `PYTHON.json`, and an archive manifest in
+[target archive evidence index](managed-python-license-collection/README.md).
+The Windows texts match the Linux/macOS set after newline normalization. These
+Windows/macOS captures are candidate-version evidence only: native install
+acceptance has not yet confirmed that CPython 3.14.7 is selected on those hosts.
+Keep complete provider attribution open until native preview/install identifies
+the selected archives and the corresponding texts are integrated. Neither the
+uv license texts nor the installed interpreter tree establishes a selected
+archive's complete license set.
 
 Admission remains pending until uv artifacts and hashes are checked on native
 Windows x86_64 MSVC and macOS arm64, and those targets pass clean-host

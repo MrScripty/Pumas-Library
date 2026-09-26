@@ -280,3 +280,22 @@
 - Additional checks passed: 49 launcher tests, 12 Electron tests, 20 managed
   Python acceptance fixtures under Python 3.12 and CPython 3.14, Ruff, release
   attribution check and test, and the final file diff whitespace check.
+
+## 2026-09-25 — Windows and macOS CPython archive candidates
+
+- Used the bounded collector to query the official Python Build Standalone
+  release API and download the exact full archives for CPython 3.14.7
+  `x86_64-pc-windows-msvc` and `aarch64-apple-darwin`. Both archive sizes and
+  SHA-256 values matched the official asset records before extraction. Their
+  manifests preserve the API URLs, release/asset IDs, raw `PYTHON.json`, and
+  hashes for all 19 license files each.
+- Windows archive: 49,262,780 bytes, SHA-256
+  `5363ec4aab59c24417f9877217aae95ca17f9ae6eb99c3bbfb25e4a76dcadafe`.
+  macOS archive: 60,724,957 bytes, SHA-256
+  `185fa676e14b648bd736ce7f20f9b11e201131b3216ec5a39d4ecd8ab8a71112`.
+- The Windows license files differ from the Linux/macOS files only in line
+  endings and match after newline normalization. These are candidate-version
+  captures only; Windows/macOS native installation has not
+  confirmed CPython 3.14.7 as the selected interpreter. They are retained for
+  review but not yet added to release attribution. See the
+  [target archive evidence index](reports/managed-python-license-collection/README.md).

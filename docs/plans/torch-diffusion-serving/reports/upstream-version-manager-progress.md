@@ -498,10 +498,13 @@ Torch 2.14.0 CPU/Core passed the native Linux RPC install and managed sidecar
 lifecycle using Pumas-provisioned CPython 3.14.7. This does not expand the
 existing Tuldok/image qualification beyond its recorded Torch 2.10 tuple.
 The uv 0.12.18 MIT/Apache notices are included in release attribution. The
-Linux CPython 3.14.7 full-archive license collection is retained in the
-[cross-platform runtime plan](../../torch-cross-platform-runtime-management/reports/managed-python-license-collection/linux-x86_64-cpython-3.14.7/README.md),
-but Windows/macOS archive licenses and all-target provider attribution remain
-open. Windows/macOS native acceptance and packaged desktop Torch installation
-also remain unproven. Local v0.7.0 Linux AppImage and deb packages were rebuilt
+Linux, Windows, and macOS CPython 3.14.7 full-archive license collections are
+retained in the
+[cross-platform runtime plan](../../torch-cross-platform-runtime-management/reports/managed-python-license-collection/README.md).
+Windows/macOS candidate collections are not native selection evidence, so
+all-target provider attribution remains open until those native installs
+identify and integrate their selected archives. Windows/macOS native acceptance
+and packaged desktop Torch installation also remain unproven. Local v0.7.0
+Linux AppImage and deb packages were rebuilt
 with the updated uv notices and passed extracted-resource and bundled RPC
 `/health` smoke checks; this did not update the public toolbar-linked release.

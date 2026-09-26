@@ -640,6 +640,12 @@ bridge and generated CPython notices, pass extracted-resource hash checks, and
 start their packaged backends through `/health`. Their SHA-256 values are
 `1398ef0a9da1c0aab90681d3c91674ef88c6229a84984047938e7bd6eb350acd` (AppImage)
 and `468b6f7c2af00ff8785f80e5486cd5133979e875dd351b4b9f5284ddfd195043` (deb).
-They are local candidates and have not been uploaded to the toolbar-linked
-release. Packaged Torch installation, provider cancellation/tamper/retry,
-CUDA/MPS execution, and v2.14.0 Tuldok image generation remain open.
+The packaged Linux RPC backend then passed Torch 2.14.0 CPU/Core install and
+restart using managed CPython 3.14.7, the 25-hash official artifact resolution,
+CPU operation, probe, protocol 3 sidecar start/stop, and graceful cleanup; see
+the [packaged acceptance report](../../torch-cross-platform-runtime-management/reports/v2.14.0-linux-packaged-cpu-acceptance/README.md).
+This is backend acceptance rather than GUI-driven installation. These are local
+candidates and have not been uploaded to the toolbar-linked release. Packaged
+Electron UI interaction, Windows/macOS packaged installation, provider
+cancellation/tamper/retry, CUDA/MPS execution, and v2.14.0 Tuldok image
+generation remain open.

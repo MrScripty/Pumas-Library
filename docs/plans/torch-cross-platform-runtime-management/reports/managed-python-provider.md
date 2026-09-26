@@ -10,6 +10,13 @@ supersets are now included in the generated 0.7.0 attribution inventory. The
 native RPC runs do not establish packaged desktop Torch installation, CUDA/MPS
 execution, or v2.14.0 Tuldok image-generation support.
 
+The current-branch local Linux AppImage/deb backend separately passed the full
+Torch 2.14.0 CPU/Core install/restart acceptance with backend `PATH` cleared;
+see the [packaged Linux acceptance](v2.14.0-linux-packaged-cpu-acceptance/README.md).
+This verifies the packaged RPC backend but not user interaction through the
+Electron UI. Windows/macOS packaged installation, CUDA/MPS, and v2.14.0 Tuldok
+image-generation support remain unverified.
+
 The attribution gate hashes the Rust provider source and checks each
 `NativeTarget::pin()` arm against its exact target triple and uv SHA-256. It
 also checks the selected install-only URL against the reviewed full-archive

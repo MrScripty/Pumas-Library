@@ -1,5 +1,30 @@
 # Execution Ledger: Cross-Platform Torch Runtime Management
 
+## 2026-09-26 — Torch install through the packaged Linux backend
+
+- Built the current branch's Linux AppImage/deb with the latest generated
+  CPython notice inventory and updated Electron RPC bridge. The exact resources
+  were checked in both installers, and each bundled backend passed `/health`.
+- Ran `torch-managed-python-acceptance.py` against the packaged RPC backend
+  with its inherited `PATH` cleared. The acceptance fetched the upstream
+  `v2.14.0` release, selected the CPU profile, provisioned managed CPython
+  3.14.7 through uv 0.12.18, and installed 25 SHA-256-verified wheel/dependency
+  artifacts. A CPU tensor operation returned 14 after a fresh backend restart;
+  the retained resolver probe, protocol 3 trial/stop, graceful shutdown, and
+  disposable-root cleanup all passed.
+- The exact result is retained in
+  `reports/v2.14.0-linux-packaged-cpu-acceptance/acceptance.json`. The backend
+  SHA-256 is
+  `1b42b6cbedc0bf842990a895cf759537f60ba1564e054a8c8b5f7f022e4a2114`.
+  AppImage SHA-256 is
+  `1398ef0a9da1c0aab90681d3c91674ef88c6229a84984047938e7bd6eb350acd`; deb
+  SHA-256 is
+  `468b6f7c2af00ff8785f80e5486cd5133979e875dd351b4b9f5284ddfd195043`.
+- This verifies the packaged Linux RPC backend, not Electron UI-driven
+  installation. Packaged Windows/macOS installation, CUDA/MPS, and v2.14.0
+  Tuldok generation remain unverified; the local artifacts do not update the
+  public toolbar-linked release.
+
 ## 2026-09-26 — Attribution repair and current Linux package candidate
 
 - Generated CPython full-archive notice supersets for Linux x86_64 GNU,

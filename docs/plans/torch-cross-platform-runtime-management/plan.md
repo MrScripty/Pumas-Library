@@ -23,9 +23,9 @@ succeeded on attempt two. Retained evidence: [Linux](reports/v2.14.0-linux-cpu-r
 
 That native run predates the current bounded metadata-lock follow-up, so it does
 not verify that change. Acceptance is limited to the CPU/Core RPC install and
-restart path. CUDA/device execution, packaged desktop Torch installation, and
-v2.14.0 image generation through Tuldok remain unverified. Existing Tuldok image
-evidence remains scoped to its recorded Torch 2.10 tuple.
+restart path. CUDA/device execution, Electron UI-driven Torch installation,
+and v2.14.0 image generation through Tuldok remain unverified. Existing Tuldok
+image evidence remains scoped to its recorded Torch 2.10 tuple.
 
 Current-branch Linux v0.7.0 AppImage and deb candidates were rebuilt with the
 generated CPython notices. Artifact naming and extracted resource hashes pass;
@@ -33,11 +33,20 @@ both extracted backends start and pass `/health`. The packaged Electron archive
 contains the `get_torch_release_options` bridge method. AppImage SHA-256:
 `1398ef0a9da1c0aab90681d3c91674ef88c6229a84984047938e7bd6eb350acd`; deb
 SHA-256: `468b6f7c2af00ff8785f80e5486cd5133979e875dd351b4b9f5284ddfd195043`.
-These are local build outputs: they neither exercise packaged Torch installation
-nor replace the toolbar-linked public v0.7.0 assets (published 2026-09-17). The
+These are local build outputs: they do not exercise Electron UI-driven Torch
+installation or replace the toolbar-linked public v0.7.0 assets (published
+2026-09-17). The
 generated attribution inventory includes all three CPython full-archive notice
 supersets and verifies 371 package entries, 78 hashed inputs, and 57 retained
 legal texts against target-specific evidence.
+
+The bundled Linux backend from this candidate then passed the full Torch 2.14.0
+CPU/Core install/restart acceptance with backend `PATH` cleared. It provisioned
+managed CPython 3.14.7, installed 25 hashed official artifacts, performed a CPU
+operation returning 14 after restart, and passed probe plus protocol 3 sidecar
+start/stop. See the [packaged Linux acceptance](reports/v2.14.0-linux-packaged-cpu-acceptance/README.md).
+This exercised the packaged backend; Electron UI interaction and packaged
+Windows/macOS install acceptance remain unverified.
 **Current phase:** v2.14.0 CPU/Core RPC install and two-session sidecar
 lifecycle are accepted on the current exact-wheel implementation across Linux
 x86_64, Windows x64, and macOS arm64. Each run provisioned CPython 3.14.7,
@@ -72,16 +81,16 @@ passed native v2.14.0 CPU/Core RPC install/restart on all three shipped targets,
 but predates the current lock follow-up. Windows GNU compilation remains
 compile-only evidence but is supplemented by the native Windows acceptance run.
 
-**Remaining gates:** Packaged desktop Torch installation acceptance and the
-provider cancellation/tamper/retry cases remain open. CUDA/device acceleration
-and v2.14.0 image/Tuldok generation are untested. The local AppImage/deb
-candidates do not update the public toolbar-linked package.
+**Remaining gates:** Packaged Electron UI interaction, packaged Windows/macOS
+Torch installation, and provider cancellation/tamper/retry cases remain open.
+CUDA/device acceleration and v2.14.0 image/Tuldok generation are untested. The
+local AppImage/deb candidates do not update the public toolbar-linked package.
 
-**Next slice:** Run the packaged Torch discovery/install acceptance on a Linux
-host without Python on `PATH`, then close provider cancellation/tamper gates.
-Keep Tuldok qualification limited to its recorded exact image-generation tuple;
-publish a new toolbar-linked release only after the PR is merged and a new
-version is tagged.
+**Next slice:** Exercise the Torch discovery/install controls through the Linux
+Electron UI and run packaged install acceptance on Windows and macOS; then close
+provider cancellation/tamper gates. Keep Tuldok qualification limited to its
+recorded exact image-generation tuple; publish a new toolbar-linked release only
+after the PR is merged and a new version is tagged.
 
 ## Objective and scope
 
@@ -290,7 +299,7 @@ resolver, manager, desktop, and platform runtime owners.
 | X4 | Windows x64 and macOS arm64 discovery returns only exact official wheels whose tags match the provisioned native CPython; CPU/MPS/CUDA choices follow this contract | Native wheel fixtures and wrong-target rejection passed; manual native RPC run `36223106097` resolved exact official CPU wheel tags on Linux, Windows, and macOS arm64. CUDA hardware execution and macOS MPS acceleration remain untested | partial |
 | X5 | Preview retains the exact distribution version, release/build, official wheel URL/hash, Python provider artifact identity, interpreter fingerprint, and complete dependencies; install stages and verifies that exact identity before publication | Run `36223106097` resolved 25 hashed CPU/Core artifacts and passed v2.14.0 install on all three shipped targets; each report retains the exact Torch wheel URL/hash, dependency set, and managed interpreter identity (see X2 reports) | partial |
 | X6 | Installed versions can be inspected, explicitly selected, started with health/protocol checks, and stopped by their owned generation; cancellation, timeout, RPC shutdown, and failed cleanup do not leak a resolver, installer, sidecar, interpreter provisioner, or unregistered runtime | Run `36223106097` passed second-session restart, fresh CPU operation, probe revalidation, protocol 3 sidecar trial/stop, and graceful shutdown on Linux, Windows, and macOS (see X2 reports); broader cancellation/timeout/failure cleanup remains | partial |
-| X7 | The same manager choices and lifecycle are reachable through packaged desktop controls and the existing RPC API; the user never has to choose Python, and the desktop offers no unsupported adapter | Native RPC install and lifecycle pass on all three shipped targets; preload boundary, desktop projection, and composed contract tests pass. Packaged desktop install smoke with no Python on PATH on each target remains | partial |
+| X7 | The same manager choices and lifecycle are reachable through packaged desktop controls and the existing RPC API; the user never has to choose Python, and the desktop offers no unsupported adapter | Packaged Linux backend install/restart passes with backend `PATH` cleared; the generated `app.asar` includes `get_torch_release_options`. Electron UI interaction and packaged Windows/macOS installation remain unverified | partial |
 
 Plan acceptance is `pending` until every required row is satisfied on its
 declared native environment. Cross-compilation, Linux simulation, packaging,
@@ -391,8 +400,10 @@ and unit fixtures do not substitute for the Windows/macOS runtime claims.
   repair.
 - **State:** Active; native RPC CPU/Core acceptance is retained for all three
   targets and provider-license integration is complete. Current-branch Linux
-  packages were rebuilt and passed resource/hash and backend-health checks;
-  packaged desktop Torch installation acceptance remains pending.
+  packages were rebuilt, passed resource/hash and backend-health checks, and
+  passed Torch CPU/Core install/restart through the packaged Linux backend.
+  Electron UI interaction and packaged Windows/macOS install acceptance remain
+  pending.
 
 ## Constraints and re-plan triggers
 

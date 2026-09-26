@@ -23,6 +23,19 @@ persisted venv interpreter (sum of squares: 14), revalidated the retained RPC
 probe report, and repeated the sidecar lifecycle. See the
 [restart acceptance evidence](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/README.md)
 and [initial install evidence](reports/v2.14.0-linux-cpu-rpc-acceptance/acceptance.json).
+The native `windows-2025` x64 E2E leg in
+[manual run 36214227835](https://github.com/MrScripty/Pumas-Library/actions/runs/36214227835)
+also passed exact v2.14.0 CPU/Core installation and second-session restart
+with managed CPython 3.14.7, a fresh CPU operation returning 14, and sidecar
+trial, stop, and graceful shutdown. See the
+[Windows acceptance evidence](reports/v2.14.0-windows-cpu-rpc-restart-acceptance/README.md).
+All three native QA legs passed in that run. Its Linux E2E leg failed at
+release options with `completeScan=false` before preview or install; its
+local Linux acceptance above remains valid. The macOS E2E leg passed
+release-list preflight (after a first `rate_limited` response reporting a
+691-second retry) and release options, then `preview_torch_runtime` failed with
+`validation_failed: The resolved wheel report failed validation.` No macOS
+preview or install completed. macOS native QA passed, but macOS E2E did not.
 Fresh local v0.7.0 AppImage and deb packages were rebuilt after updating release
 attribution. Their extracted resources match the build inputs, and both bundled
 RPC backends passed `/health`. AppImage SHA-256:
@@ -33,31 +46,45 @@ does not replace the toolbar-linked assets. This confirms package assembly and
 startup, not the packaged Torch installation UI path.
 The uv 0.12.18 MIT/Apache notices are now in the release attribution inventory.
 The selected Linux CPython 3.14.7 full-archive license set (19 texts plus its
-hashed `PYTHON.json` metadata) is retained as evidence. Official Windows x64
-and macOS arm64 CPython 3.14.7 full archives have also been collected and
-hash-verified as target evidence. Their native installers have not yet proven
-that 3.14.7 is the selected interpreter, so those notices are not yet integrated
-into release attribution. Native Windows and macOS runs, confirmed selected
-provider licensing, and packaged desktop install acceptance remain pending.
+hashed `PYTHON.json` metadata) is retained as evidence. The accepted Windows
+install selected CPython 3.14.7; its full-archive SHA-256
+`5363ec4aab59c24417f9877217aae95ca17f9ae6eb99c3bbfb25e4a76dcadafe`
+matches the retained Windows candidate manifest with 19 license files.
+Windows notices still need release-attribution integration. The collected and
+hash-verified macOS arm64 archive remains candidate evidence because its native
+E2E leg did not reach installation. macOS selected-provider licensing and
+packaged desktop install acceptance remain pending.
 
 **Current phase:** The managed provider, Linux 2.14.0 install, and sidecar
-lifecycle are implemented and accepted on the native Linux host. The native QA
-workflow now runs the same isolated RPC acceptance on Linux, Windows x64, and
-macOS arm64 on manual dispatch or version tags, and retains acceptance reports
-and logs; only the Linux leg has run locally. Commit `6a726eac` fixes the Electron allowlist entry for
-`get_torch_release_options`; later source repairs pin uv `0.12.18` and accept
+lifecycle are implemented and accepted on the native Linux host; Windows x64
+has passed native CPU/Core install and restart acceptance. The native QA
+workflow runs isolated RPC acceptance on Linux, Windows x64, and macOS arm64
+on manual dispatch or version tags and retains reports and logs. The latest
+manual run passed all three QA legs, passed Windows E2E, and exposed the Linux
+release-options and macOS preview failures above. Diagnostic commit `e2d52939`
+now retains the Linux response's `completeScan` and a bounded issue sample:
+up to three issues, each capped at 300 characters, with a 1200-character
+overall cap. Bounded,
+allowlisted resolver failure diagnostics have been implemented locally and
+independently reviewed, but are not yet committed or rerun on a native runner.
+The macOS report-validation cause remains unknown until that rerun.
+Commit `6a726eac` fixes the Electron allowlist entry for
+`get_torch_release_options`; later
+source repairs pin uv `0.12.18` and accept
 the current official provider and PyTorch wheel URLs. The latest Linux desktop
 candidate is local; the toolbar-linked package still needs a separate publish
 and update.
 
-**Blockers:** Native Windows x64 and macOS arm64 install/lifecycle acceptance,
+**Blockers:** Linux CI release-options resolution, macOS arm64 native
+preview/install/lifecycle acceptance, Windows notice integration, macOS selected
 provider license inventory, and packaged desktop install acceptance remain
 open. CUDA/device use and v2.14.0 image/Tuldok behavior are also untested.
 
-**Next slice:** Run the native Windows x64 and macOS arm64 QA legs and review
-their retained managed-Python, exact-wheel, install, probe, selection, sidecar,
-and cleanup evidence. Then close provider licensing and packaged desktop
-acceptance before broadening the runtime support claim.
+**Next slice:** Commit the reviewed bounded, allowlisted resolver diagnostics,
+rerun the failed Linux and macOS native E2E legs, and inspect their exact-wheel,
+preview, install, probe, selection, sidecar, and cleanup evidence. Then close
+provider licensing and packaged desktop acceptance before broadening the
+runtime support claim.
 
 ## Objective and scope
 

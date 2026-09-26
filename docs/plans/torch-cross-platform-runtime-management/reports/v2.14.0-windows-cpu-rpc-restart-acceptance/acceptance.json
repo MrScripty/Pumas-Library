@@ -1,0 +1,65 @@
+{
+  "architecture": "AMD64",
+  "artifact_count": 25,
+  "build": "cpu",
+  "cleanup_safe": true,
+  "cpython_version": "3.14.7",
+  "distribution_catalog_key": "cpython-3.14.7-windows-x86_64-none",
+  "distribution_implementation": "CPython",
+  "distribution_source_url": "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+  "executable_path": "\\\\?\\C:\\Users\\runneradmin\\AppData\\Local\\Temp\\pumas-torch-native-cpu-jcipvuxz\\launcher-data\\managed-python\\python\\5dc2484c3bc035e81d37fb9af266e3546b42d2553d222081cd129940f1bbf9b7\\cpython-3.14.7-windows-x86_64-none\\python.exe",
+  "executable_sha256": "716fbcb56cb6753dd9ea9f7acb3f988e9c4ba65ab492cb32b9bcd0ab81938737",
+  "platform": "win32",
+  "probe": "passed",
+  "provider": "uv",
+  "provider_archive_sha256": "cae6a3bc25239f83dffb467a4b180508d9da23986c04639ebfa44e43e6a84bff",
+  "provider_version": "0.12.18",
+  "python": "python3.14",
+  "release": "v2.14.0",
+  "restart": {
+    "active_version": "v2.14.0",
+    "cpu_operation": {
+      "device": "cpu",
+      "result": 14,
+      "version": "2.14.0+cpu"
+    },
+    "interpreter": "persisted",
+    "managed_python": {
+      "cpython_version": "3.14.7",
+      "distribution_catalog_key": "cpython-3.14.7-windows-x86_64-none",
+      "distribution_implementation": "CPython",
+      "distribution_source_url": "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+      "executable_path": "\\\\?\\C:\\Users\\runneradmin\\AppData\\Local\\Temp\\pumas-torch-native-cpu-jcipvuxz\\launcher-data\\managed-python\\python\\5dc2484c3bc035e81d37fb9af266e3546b42d2553d222081cd129940f1bbf9b7\\cpython-3.14.7-windows-x86_64-none\\python.exe",
+      "executable_sha256": "716fbcb56cb6753dd9ea9f7acb3f988e9c4ba65ab492cb32b9bcd0ab81938737",
+      "provider": "uv",
+      "provider_archive_sha256": "cae6a3bc25239f83dffb467a4b180508d9da23986c04639ebfa44e43e6a84bff",
+      "provider_version": "0.12.18",
+      "target": "x86_64-pc-windows-msvc"
+    },
+    "probe": "passed",
+    "profile_id": "torch-managed-python-acceptance",
+    "same_launcher_root": true,
+    "shutdown": "graceful",
+    "sidecar_generation": "1",
+    "sidecar_protocol": 3,
+    "stop_result": true,
+    "trial": "passed"
+  },
+  "sidecar_generation": "1",
+  "sidecar_protocol": 3,
+  "stop_result": true,
+  "stopped": true,
+  "success": true,
+  "target": "x86_64-pc-windows-msvc",
+  "trial": "passed",
+  "version_preflight": {
+    "attempts": [
+      {
+        "number": 1,
+        "status": "requested_tag_found"
+      }
+    ],
+    "elapsed_seconds": 1.272,
+    "status": "passed"
+  }
+}

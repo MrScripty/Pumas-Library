@@ -1,0 +1,304 @@
+{
+  "recorded_at": "2026-09-26T03:23:51.110369+00:00",
+  "status": "passed",
+  "core_status": "passed",
+  "adapter_status": "not selected",
+  "environment": {
+    "release": "2.14.0",
+    "torch": "2.14.0+cpu",
+    "build": "cpu",
+    "adapter": "none",
+    "python": "3.14",
+    "interpreter": "\\\\?\\C:\\Users\\runneradmin\\AppData\\Local\\Temp\\pumas-torch-native-cpu-jcipvuxz\\launcher-data\\managed-python\\python\\5dc2484c3bc035e81d37fb9af266e3546b42d2553d222081cd129940f1bbf9b7\\cpython-3.14.7-windows-x86_64-none\\python.exe",
+    "implementation": "cpython",
+    "platform": "Windows-2025Server-10.0.26100-SP0",
+    "machine": "AMD64",
+    "artifacts": [
+      {
+        "name": "torch",
+        "version": "2.14.0+cpu",
+        "url": "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0%2Bcpu-cp314-cp314-win_amd64.whl",
+        "sha256": "ca9b3c2c652587f7b26c86d30be3648f553bd07fb3cf9b3edb645e7eafe295a3"
+      },
+      {
+        "name": "fastapi",
+        "version": "0.141.1",
+        "url": "https://files.pythonhosted.org/packages/cb/03/10388a42375ee7e4ac9b94eb2c5c569c8b5795e377e701c9ac3ad63de890/fastapi-0.141.1-py3-none-any.whl",
+        "sha256": "bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3"
+      },
+      {
+        "name": "uvicorn",
+        "version": "0.54.0",
+        "url": "https://files.pythonhosted.org/packages/38/0c/b54a4fdd7f90a3af8b02ebc9ce6712c2c208b7926a2f7bad95c33ebbe943/uvicorn-0.54.0-py3-none-any.whl",
+        "sha256": "505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf"
+      },
+      {
+        "name": "psutil",
+        "version": "7.2.2",
+        "url": "https://files.pythonhosted.org/packages/b4/90/e2159492b5426be0c1fef7acba807a03511f97c5f86b3caeda6ad92351a7/psutil-7.2.2-cp37-abi3-win_amd64.whl",
+        "sha256": "eb7e81434c8d223ec4a219b5fc1c47d0417b12be7ea866e24fb5ad6e84b3d988"
+      },
+      {
+        "name": "pillow",
+        "version": "12.3.0",
+        "url": "https://files.pythonhosted.org/packages/f1/e0/492879f69d94f91f60fc8cd05ba03650e9520afebb2fb7aa12777d7c7f38/pillow-12.3.0-cp314-cp314-win_amd64.whl",
+        "sha256": "fdafc9cce40277e0f7a0feabce0ee50dd2fa1800f3b38015e51296b5e814048d"
+      },
+      {
+        "name": "safetensors",
+        "version": "0.8.0",
+        "url": "https://files.pythonhosted.org/packages/1b/6d/3fba214c1e5e0f69991677ec3bc17023f0421776975e1de0c682dca475e2/safetensors-0.8.0-cp310-abi3-win_amd64.whl",
+        "sha256": "096ec1a98435df7beb08853bb5aa9081a84f23d0adc67ed1a0a10550f608373f"
+      },
+      {
+        "name": "annotated-doc",
+        "version": "0.0.5",
+        "url": "https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl",
+        "sha256": "117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101"
+      },
+      {
+        "name": "click",
+        "version": "8.5.0",
+        "url": "https://files.pythonhosted.org/packages/58/50/6c0d534c5f134586a8e1ba4e330569e32f057e33372ae556463212fb4cd3/click-8.5.0-py3-none-any.whl",
+        "sha256": "255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360"
+      },
+      {
+        "name": "fsspec",
+        "version": "2026.9.0",
+        "url": "https://files.pythonhosted.org/packages/6c/c0/a98505f18594f1bce828bb159cec0fcf9860562f1a2c85913409fc8f3d9e/fsspec-2026.9.0-py3-none-any.whl",
+        "sha256": "8dd6e646e99ea382bd85f97a45e6b526a442d79423a7dc673f1e2756d05fcb5f"
+      },
+      {
+        "name": "h11",
+        "version": "0.16.0",
+        "url": "https://files.pythonhosted.org/packages/04/4b/29cac41a4d98d144bf5f6d33995617b185d14b22401f75ca86f384e87ff1/h11-0.16.0-py3-none-any.whl",
+        "sha256": "63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86"
+      },
+      {
+        "name": "networkx",
+        "version": "3.7",
+        "url": "https://files.pythonhosted.org/packages/7e/cd/fe58041e9011f307c490e3e17dd48cc516448f7c698a3f2d9d9d65d7e6a8/networkx-3.7-py3-none-any.whl",
+        "sha256": "e3fd2c13a7814cee3746340d8d7f8598a67f16a58bf47fb7f8793fab6efca1b0"
+      },
+      {
+        "name": "pydantic",
+        "version": "2.13.5",
+        "url": "https://files.pythonhosted.org/packages/eb/47/c95ffc2009878c7aac0c5e08528022dcb885933252a88b5f170058014464/pydantic-2.13.5-py3-none-any.whl",
+        "sha256": "346a034f080da3755d8e9cb5e00e8b07de1d39e4f6e2c87d8ab7cafa0b269a73"
+      },
+      {
+        "name": "pydantic-core",
+        "version": "2.46.5",
+        "url": "https://files.pythonhosted.org/packages/f7/3c/60674207246bc0a4009d2391b7c7251c7159f279c8d2ab8aae8ef46f3dee/pydantic_core-2.46.5-cp314-cp314-win_amd64.whl",
+        "sha256": "fa10ef4112775900e7a0661068635eb67b2ab824fbde764de6e0e21982a93db0"
+      },
+      {
+        "name": "annotated-types",
+        "version": "0.8.0",
+        "url": "https://files.pythonhosted.org/packages/99/91/8acff4f5e50511b911bbccb72b8628a49c68ce14148cd9f6431094859a90/annotated_types-0.8.0-py3-none-any.whl",
+        "sha256": "f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0"
+      },
+      {
+        "name": "setuptools",
+        "version": "84.0.0",
+        "url": "https://files.pythonhosted.org/packages/95/9c/c510029fc6ef33a6275cd2c5d3cecd6613dfd6aa401d57c54f1c18852ccf/setuptools-84.0.0-py3-none-any.whl",
+        "sha256": "51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670"
+      },
+      {
+        "name": "starlette",
+        "version": "1.7.0",
+        "url": "https://files.pythonhosted.org/packages/4e/d6/1ec1b290f9e0fb067899b61e1d37a30c923068bad260b216dbe37a7d2967/starlette-1.7.0-py3-none-any.whl",
+        "sha256": "67f8e99895493dd2911a03f11314af6ceebeae4e704bb9f43dfc6a9db151c93e"
+      },
+      {
+        "name": "anyio",
+        "version": "4.15.1",
+        "url": "https://files.pythonhosted.org/packages/12/b8/4bd346e22b28902df4d651910f5242c28d84e4a5c2435ca5c3f797ed7e2e/anyio-4.15.1-py3-none-any.whl",
+        "sha256": "6152fdbbf9a77fdec97731721bebf7c4c44f7c29b424b0065826173efc7ed101"
+      },
+      {
+        "name": "idna",
+        "version": "3.20",
+        "url": "https://files.pythonhosted.org/packages/58/a2/bb081bab032533a855d44de1d56f8e8426114ff1ba5d1f07a438a0a654f8/idna-3.20-py3-none-any.whl",
+        "sha256": "ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c"
+      },
+      {
+        "name": "sympy",
+        "version": "1.14.0",
+        "url": "https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl",
+        "sha256": "e091cc3e99d2141a0ba2847328f5479b05d94a6635cb96148ccb3f34671bd8f5"
+      },
+      {
+        "name": "mpmath",
+        "version": "1.3.0",
+        "url": "https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl",
+        "sha256": "a0b2b9fe80bbcd81a6647ff13108738cfb482d481d826cc0e02f5b35e5c88d2c"
+      },
+      {
+        "name": "typing-extensions",
+        "version": "4.16.0",
+        "url": "https://files.pythonhosted.org/packages/49/d3/b8441a820a491ddfc024b0b0cf0393375b75ea13866d9c66727e54c2fc80/typing_extensions-4.16.0-py3-none-any.whl",
+        "sha256": "481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8"
+      },
+      {
+        "name": "typing-inspection",
+        "version": "0.4.4",
+        "url": "https://files.pythonhosted.org/packages/67/81/4add07e5172b7ac40d8ed5ff580409a7801a4fe26d529bdd915401dabfbe/typing_inspection-0.4.4-py3-none-any.whl",
+        "sha256": "65b8397ba37ccbce054456aaccddfc91e6e3083c92824df348d96ca832f3f147"
+      },
+      {
+        "name": "filelock",
+        "version": "4.0.3",
+        "url": "https://files.pythonhosted.org/packages/7a/6d/db8b86e168fef0cf904737e275bccb683558088ef971e92d3b41ce980699/filelock-4.0.3-py3-none-any.whl",
+        "sha256": "30cd166e2aee2c7534ce2c33c6367c4cd051b8368e20e2c4eb0c34f699bacfab"
+      },
+      {
+        "name": "jinja2",
+        "version": "3.1.6",
+        "url": "https://files.pythonhosted.org/packages/62/a1/3d680cbfd5f4b8f15abc1d571870c5fc3e594bb582bc3b64ea099db13e56/jinja2-3.1.6-py3-none-any.whl",
+        "sha256": "85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67"
+      },
+      {
+        "name": "markupsafe",
+        "version": "3.0.3",
+        "url": "https://files.pythonhosted.org/packages/28/52/182836104b33b444e400b14f797212f720cbc9ed6ba34c800639d154e821/markupsafe-3.0.3-cp314-cp314-win_amd64.whl",
+        "sha256": "bdc919ead48f234740ad807933cdf545180bfbe9342c2bb451556db2ed958581"
+      }
+    ]
+  },
+  "context": {
+    "python": "3.14.7 (main, Sep  1 2026, 14:17:30) [MSC v.1944 64 bit (AMD64)]",
+    "executable": "C:\\Users\\RUNNER~1\\AppData\\Local\\Temp\\pumas-torch-native-cpu-jcipvuxz\\torch-versions\\.torch-install-l2toZ9\\runtime\\venv\\Scripts\\python.exe",
+    "platform": "Windows-2025Server-10.0.26100-SP0",
+    "hardware": {
+      "cuda": null,
+      "hip": null,
+      "devices": []
+    },
+    "hardware_fingerprint": "494fb1d79639aecf4bb2b6043473616914037c874c14d9805f8e3f9d38b2c602",
+    "driver_version": null,
+    "runtime_files_sha256": {
+      "control_api.py": "ee5160f121a749d8d11cd929abfb9d98a1a109235dac3690c9e2118f9cca54d0",
+      "device_manager.py": "9ab6d63eb943989bc19f1fed89098aca27b168536fa2529734d1ee4f37585379",
+      "diffusion.py": "c4dadfc949c17a460f8fc8a446b03139da0c574b45b3f561403fdf83e495b6d3",
+      "flux2.py": "39f864e1e15ffb2b697bb95418d474cb98a760feca9acd48a74b5cf05642fea2",
+      "image_api.py": "bb39ac05aee7ea4d4357360accfa27ee261f58d1cd9cc35af28470012673a7ec",
+      "loaders/__init__.py": "80cec9242f95b73881b038b890a5d9465a14be86a631b2a0e1bf9efacac543fe",
+      "loaders/dllm_loader.py": "2c5656bce01a6d133925d02ca72606f8ae951d66186ac07d3fcb7fd5580b1a13",
+      "loaders/safetensors_loader.py": "661a000b791396067d253a27a26cb5905ae40ce8d50817ba54bc1afce803396f",
+      "loaders/sherry_loader.py": "360ac3f66c4438e3ffe3d9dc99ef2a27ae69efdd26f8d3564f638ae7802e5b3f",
+      "model_manager.py": "cfc049050f9003f87d622fe57da5c4ab4efb5105523fcbab926d8770d82be3f8",
+      "nunchaku_compat.py": "27b42f9cae80e474c0b2162e6bf572f822d525134bf2fc3bddd551c031bb5d70",
+      "openai_api.py": "a3c712e6307fe3b60d1b7acdcbeb9413b011eb370ad656f862ef9399f3342f8c",
+      "probe_runtime.py": "9b9e1d81087aefffdb383038724b471daeb0456814e5f2fa17e0b4da46255e25",
+      "resolve_runtime.py": "686508be42962ee8b96210cf4aab2e630da03b46a83eeda02834296502d03f73",
+      "serve.py": "88bf72ea3eac013dc7678bebe0e3b3053c141e8ec1222a210bd18b2a47601af4",
+      "validation.py": "f53cca26ddbddbc3c924ff07d32aaf9ced6061a7f1628379b4c0db2c9da7feb1"
+    },
+    "interpreter_sha256": "80da2dbc9aca9420877223d6bf9ec0f5d9fd066a79ed65a3e3870037ff4e03e8",
+    "installed_distributions": {
+      "torch": "2.14.0+cpu",
+      "fastapi": "0.141.1",
+      "uvicorn": "0.54.0",
+      "psutil": "7.2.2",
+      "pillow": "12.3.0",
+      "safetensors": "0.8.0",
+      "annotated-doc": "0.0.5",
+      "click": "8.5.0",
+      "fsspec": "2026.9.0",
+      "h11": "0.16.0",
+      "networkx": "3.7",
+      "pydantic": "2.13.5",
+      "pydantic-core": "2.46.5",
+      "annotated-types": "0.8.0",
+      "setuptools": "84.0.0",
+      "starlette": "1.7.0",
+      "anyio": "4.15.1",
+      "idna": "3.20",
+      "sympy": "1.14.0",
+      "mpmath": "1.3.0",
+      "typing-extensions": "4.16.0",
+      "typing-inspection": "0.4.4",
+      "filelock": "4.0.3",
+      "jinja2": "3.1.6",
+      "markupsafe": "3.0.3"
+    },
+    "all_installed_distributions": {
+      "annotated-doc": "0.0.5",
+      "annotated-types": "0.8.0",
+      "anyio": "4.15.1",
+      "click": "8.5.0",
+      "fastapi": "0.141.1",
+      "filelock": "4.0.3",
+      "fsspec": "2026.9.0",
+      "h11": "0.16.0",
+      "idna": "3.20",
+      "jinja2": "3.1.6",
+      "markupsafe": "3.0.3",
+      "mpmath": "1.3.0",
+      "networkx": "3.7",
+      "pillow": "12.3.0",
+      "pip": "26.2.1",
+      "psutil": "7.2.2",
+      "pydantic": "2.13.5",
+      "pydantic-core": "2.46.5",
+      "safetensors": "0.8.0",
+      "setuptools": "84.0.0",
+      "starlette": "1.7.0",
+      "sympy": "1.14.0",
+      "torch": "2.14.0+cpu",
+      "typing-extensions": "4.16.0",
+      "typing-inspection": "0.4.4",
+      "uvicorn": "0.54.0"
+    },
+    "distributions_sha256": "fb628c6fb5305166cad9332e5cf97765df173d14d44b7a0296950ad749e0254e",
+    "resolution_sha256": "d686f83509fef0186bbfa17f9d57a105681b0e3a0f53bd1b27ca6c066e04dbcb",
+    "sidecar_sha256": "88bf72ea3eac013dc7678bebe0e3b3053c141e8ec1222a210bd18b2a47601af4"
+  },
+  "capabilities": {
+    "torch_import": {
+      "status": "passed",
+      "version": "2.14.0+cpu"
+    },
+    "cpu_tensor": {
+      "status": "passed"
+    },
+    "cuda_tensor": {
+      "status": "unavailable",
+      "scope": "CUDA tensor operation",
+      "reason": "CUDA is not available"
+    },
+    "sidecar_app": {
+      "status": "passed",
+      "health": {
+        "status": "ok",
+        "protocol": 3,
+        "capabilities": [
+          "image_generation"
+        ]
+      },
+      "scope": "in-process app construction and health endpoint"
+    },
+    "flux2_klein": {
+      "status": "not selected",
+      "scope": "optional adapter"
+    },
+    "nunchaku_z_image": {
+      "status": "not selected",
+      "scope": "optional adapter"
+    },
+    "image_device": {
+      "status": "unavailable",
+      "scope": "adapter device requirement",
+      "reason": "No NVIDIA sm_120 CUDA device detected"
+    },
+    "sidecar_startup": {
+      "status": "not tested",
+      "scope": "socket startup requires an explicit trial"
+    },
+    "image_generation": {
+      "status": "not tested",
+      "scope": "no model loaded or inference performed"
+    }
+  }
+}

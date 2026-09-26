@@ -342,3 +342,32 @@
   release-list `tagName` preflight in `get_available_versions`; its refreshed
   [evidence](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/README.md) is
   retained. Native Windows and macOS full acceptance remains pending.
+
+## 2026-09-25 — Native Windows acceptance and Linux CI diagnosis
+
+- Manual workflow run `36214227835` at `a0658131` passed native
+  `windows-2025` x64 two-session RPC acceptance for Torch `v2.14.0` CPU/Core.
+  Managed CPython 3.14.7 persisted across restart; a fresh CPU operation
+  returned 14, and the sidecar trial, generation-owned stop, and graceful
+  shutdown passed. The [Windows report](reports/v2.14.0-windows-cpu-rpc-restart-acceptance/README.md)
+  retains acceptance, backend, install, probe, and selected archive manifest
+  evidence. Windows license integration remains open; the report retains only
+  the manifest, without license text collection.
+- The Linux E2E job in that run passed exact-tag preflight in 1.625 seconds,
+  then release options returned an incomplete scan before preview or install.
+  Its diagnostic issues were truncated, so the decisive cause was unavailable.
+  Diagnostic commit `e2d52939` now preserves `completeScan` and a bounded
+  sample of up to three issues, each capped at 300 characters and with a
+  1200-character overall cap, for a rerun. The separate local Linux two-session
+  acceptance remains accepted.
+  macOS E2E acceptance and remaining all-target gates are still pending.
+- In that same [manual run](https://github.com/MrScripty/Pumas-Library/actions/runs/36214227835),
+  macOS native QA passed, but macOS E2E did not. Release-list preflight found
+  `v2.14.0` after an initial `rate_limited` response reporting a 691-second
+  retry; release options returned, then `preview_torch_runtime` failed with
+  `validation_failed: The resolved wheel report failed validation.` No macOS
+  preview or install completed. The generic rejection does not identify its
+  cause.
+- Bounded, allowlisted resolver failure diagnostics have been implemented
+  locally and independently reviewed. They are not yet committed or rerun on
+  native runners; the Linux and macOS E2E failures remain open.

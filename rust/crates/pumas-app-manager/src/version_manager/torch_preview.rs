@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::io::{Read, Seek, SeekFrom};
 use std::time::Instant;
 use tokio::process::Command;
 
@@ -63,6 +64,275 @@ pub(super) const BUILDS: &[&str] = &[
 const ADAPTERS: &[&str] = &["none", "flux2"];
 const PREVIEW_TTL: Duration = Duration::from_secs(30 * 60);
 const MAX_RETAINED_TORCH_PREVIEWS: usize = 32;
+const RESOLVER_STDERR_TAIL_BYTES: u64 = 8 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResolverDiagnosticCode {
+    EmptyReport,
+    TorchVersionMismatch,
+    InvalidDistribution,
+    MissingSha256,
+    UntrustedArtifact,
+    TorchvisionBuildMismatch,
+    NunchakuMismatch,
+    MissingRequiredPackages,
+    Unclassified,
+    Truncated,
+    DiagnosticUnavailable,
+}
+
+impl ResolverDiagnosticCode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::EmptyReport => "empty_report",
+            Self::TorchVersionMismatch => "torch_version_mismatch",
+            Self::InvalidDistribution => "invalid_distribution",
+            Self::MissingSha256 => "missing_sha256",
+            Self::UntrustedArtifact => "untrusted_artifact",
+            Self::TorchvisionBuildMismatch => "torchvision_build_mismatch",
+            Self::NunchakuMismatch => "nunchaku_mismatch",
+            Self::MissingRequiredPackages => "missing_required_packages",
+            Self::Unclassified => "unclassified",
+            Self::Truncated => "truncated",
+            Self::DiagnosticUnavailable => "diagnostic_unavailable",
+        }
+    }
+}
+
+struct ResolverStderrTail {
+    bytes: Vec<u8>,
+    total_bytes: u64,
+    truncated: bool,
+}
+
+fn read_resolver_stderr_tail(path: &std::path::Path) -> std::io::Result<ResolverStderrTail> {
+    let mut file = std::fs::File::open(path)?;
+    let total_bytes = file.metadata()?.len();
+    let tail_bytes = total_bytes.min(RESOLVER_STDERR_TAIL_BYTES);
+    file.seek(SeekFrom::End(-(tail_bytes as i64)))?;
+    let mut bytes = Vec::with_capacity(tail_bytes as usize);
+    file.take(tail_bytes).read_to_end(&mut bytes)?;
+    Ok(ResolverStderrTail {
+        bytes,
+        total_bytes,
+        truncated: total_bytes > RESOLVER_STDERR_TAIL_BYTES,
+    })
+}
+
+fn classify_resolver_stderr(tail: &[u8], truncated: bool) -> ResolverDiagnosticCode {
+    let line = tail
+        .rsplit(|byte| *byte == b'\n')
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    let Ok(line) = std::str::from_utf8(line) else {
+        return if truncated {
+            ResolverDiagnosticCode::Truncated
+        } else {
+            ResolverDiagnosticCode::Unclassified
+        };
+    };
+    let Some(reason) = line.strip_prefix("Invalid wheel resolution: ") else {
+        return if truncated {
+            ResolverDiagnosticCode::Truncated
+        } else {
+            ResolverDiagnosticCode::Unclassified
+        };
+    };
+    if let Some(rest) = reason.strip_prefix("Official ") {
+        if let Some((build, _)) = rest.split_once(" artifact for Torch ") {
+            if valid_torch_channel(build) {
+                return ResolverDiagnosticCode::TorchVersionMismatch;
+            }
+        }
+    }
+    for (prefix, code) in [
+        (
+            "The pip report contains no resolved artifacts",
+            ResolverDiagnosticCode::EmptyReport,
+        ),
+        (
+            "Duplicate or invalid distribution name: ",
+            ResolverDiagnosticCode::InvalidDistribution,
+        ),
+        (
+            "No SHA-256 provenance for ",
+            ResolverDiagnosticCode::MissingSha256,
+        ),
+        (
+            "Untrusted or non-binary artifact for ",
+            ResolverDiagnosticCode::UntrustedArtifact,
+        ),
+        (
+            "Torchvision build differs from the selected Torch build",
+            ResolverDiagnosticCode::TorchvisionBuildMismatch,
+        ),
+        (
+            "Nunchaku artifact differs from the qualified wheel",
+            ResolverDiagnosticCode::NunchakuMismatch,
+        ),
+        (
+            "Resolution omitted requested packages: ",
+            ResolverDiagnosticCode::MissingRequiredPackages,
+        ),
+    ] {
+        if reason.starts_with(prefix) {
+            return code;
+        }
+    }
+    if truncated {
+        ResolverDiagnosticCode::Truncated
+    } else {
+        ResolverDiagnosticCode::Unclassified
+    }
+}
+
+fn native_resolver_target() -> &'static str {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "linux-x86_64",
+        ("windows", "x86_64") => "windows-x86_64",
+        ("macos", "aarch64") => "macos-arm64",
+        _ => "other",
+    }
+}
+
+fn log_resolver_rejection_diagnostic(workspace: &std::path::Path) {
+    let (code, total_bytes, truncated) =
+        match read_resolver_stderr_tail(&workspace.join("resolver.stderr")) {
+            Ok(tail) => (
+                classify_resolver_stderr(&tail.bytes, tail.truncated),
+                Some(tail.total_bytes),
+                tail.truncated,
+            ),
+            Err(_) => (ResolverDiagnosticCode::DiagnosticUnavailable, None, false),
+        };
+    tracing::warn!(
+        code = code.as_str(),
+        exit_code = 3,
+        native_target = native_resolver_target(),
+        stderr_total_bytes = ?total_bytes,
+        stderr_truncated = truncated,
+        "Torch preview resolver rejected wheel resolution"
+    );
+}
+
+#[cfg(test)]
+mod resolver_diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn classifies_only_known_resolution_reasons() {
+        let cases = [
+            ("The pip report contains no resolved artifacts", ResolverDiagnosticCode::EmptyReport),
+            ("Official cpu artifact for Torch 2.9.1 was not resolved", ResolverDiagnosticCode::TorchVersionMismatch),
+            ("Duplicate or invalid distribution name: torch", ResolverDiagnosticCode::InvalidDistribution),
+            ("No SHA-256 provenance for torch", ResolverDiagnosticCode::MissingSha256),
+            ("Untrusted or non-binary artifact for torch: https://hostile.example/private?token=secret", ResolverDiagnosticCode::UntrustedArtifact),
+            ("Torchvision build differs from the selected Torch build", ResolverDiagnosticCode::TorchvisionBuildMismatch),
+            ("Nunchaku artifact differs from the qualified wheel", ResolverDiagnosticCode::NunchakuMismatch),
+            ("Resolution omitted requested packages: torch, private-package", ResolverDiagnosticCode::MissingRequiredPackages),
+        ];
+        for (reason, expected) in cases {
+            let stderr =
+                format!("pip diagnostic with private URL\nInvalid wheel resolution: {reason}\n");
+            assert_eq!(classify_resolver_stderr(stderr.as_bytes(), false), expected);
+            assert!(!expected.as_str().contains("private"));
+            assert!(!expected.as_str().contains("https"));
+        }
+    }
+
+    #[test]
+    fn unknown_invalid_utf8_and_truncated_stderr_use_fixed_fallback_codes() {
+        assert_eq!(
+            classify_resolver_stderr(b"unknown private text", false),
+            ResolverDiagnosticCode::Unclassified
+        );
+        assert_eq!(
+            classify_resolver_stderr(b"Invalid wheel resolution: Official hostile data", false),
+            ResolverDiagnosticCode::Unclassified
+        );
+        assert_eq!(
+            classify_resolver_stderr(b"\xff\xfe", false),
+            ResolverDiagnosticCode::Unclassified
+        );
+        assert_eq!(
+            classify_resolver_stderr(b"partial private text", true),
+            ResolverDiagnosticCode::Truncated
+        );
+        assert_eq!(
+            classify_resolver_stderr(b"\xff\xfe", true),
+            ResolverDiagnosticCode::Truncated
+        );
+        assert_eq!(
+            classify_resolver_stderr(
+                b"Invalid wheel resolution: No SHA-256 provenance for torch\n",
+                true
+            ),
+            ResolverDiagnosticCode::MissingSha256
+        );
+    }
+
+    #[test]
+    fn stderr_reader_returns_only_bounded_final_bytes() {
+        let workspace = tempfile::tempdir().unwrap();
+        let path = workspace.path().join("resolver.stderr");
+        let mut contents = vec![b'x'; RESOLVER_STDERR_TAIL_BYTES as usize + 17];
+        contents.extend_from_slice(
+            b"\nInvalid wheel resolution: The pip report contains no resolved artifacts\n",
+        );
+        std::fs::write(&path, &contents).unwrap();
+        let tail = read_resolver_stderr_tail(&path).unwrap();
+        assert_eq!(tail.total_bytes, contents.len() as u64);
+        assert!(tail.truncated);
+        assert_eq!(tail.bytes.len(), RESOLVER_STDERR_TAIL_BYTES as usize);
+        assert_eq!(tail.bytes, contents[contents.len() - tail.bytes.len()..]);
+        assert_eq!(
+            classify_resolver_stderr(&tail.bytes, tail.truncated),
+            ResolverDiagnosticCode::EmptyReport
+        );
+    }
+
+    #[test]
+    fn split_utf8_character_before_final_diagnostic_does_not_hide_category() {
+        let workspace = tempfile::tempdir().unwrap();
+        let path = workspace.path().join("resolver.stderr");
+        let diagnostic = b"Invalid wheel resolution: No SHA-256 provenance for torch\n";
+        let mut contents = b"earlier valid stderr ".to_vec();
+        contents.extend_from_slice("😀".as_bytes());
+        contents.extend(
+            std::iter::repeat(b'x')
+                .take(RESOLVER_STDERR_TAIL_BYTES as usize - 3 - diagnostic.len() - 1),
+        );
+        contents.push(b'\n');
+        contents.extend_from_slice(diagnostic);
+        assert!(std::str::from_utf8(&contents).is_ok());
+        std::fs::write(&path, &contents).unwrap();
+
+        let tail = read_resolver_stderr_tail(&path).unwrap();
+        assert_eq!(tail.bytes.len(), RESOLVER_STDERR_TAIL_BYTES as usize);
+        assert!(tail.truncated);
+        assert_eq!(tail.bytes[0], "😀".as_bytes()[1]);
+        assert!(std::str::from_utf8(&tail.bytes).is_err());
+        assert_eq!(
+            classify_resolver_stderr(&tail.bytes, tail.truncated),
+            ResolverDiagnosticCode::MissingSha256
+        );
+    }
+
+    #[test]
+    fn missing_diagnostic_does_not_change_resolver_rejection() {
+        let workspace = tempfile::tempdir().unwrap();
+        log_resolver_rejection_diagnostic(workspace.path());
+        #[cfg(unix)]
+        let status = std::os::unix::process::ExitStatusExt::from_raw(3 << 8);
+        #[cfg(windows)]
+        let status = std::os::windows::process::ExitStatusExt::from_raw(3);
+        assert!(matches!(
+            resolver_rejection(PreviewResolverRun::Exited(status)),
+            Some(TorchPreviewOutcome::Rejected { .. })
+        ));
+    }
+}
 
 pub(super) fn valid_torch_channel(build: &str) -> bool {
     if build == "cpu" {
@@ -1430,6 +1700,9 @@ impl VersionManager {
             &self.torch_cleanup,
         )
         .await?;
+        if matches!(&run, PreviewResolverRun::Exited(status) if status.code() == Some(3)) {
+            log_resolver_rejection_diagnostic(workspace.path());
+        }
         if let Some(rejection) = resolver_rejection(run) {
             return Ok(rejection);
         }

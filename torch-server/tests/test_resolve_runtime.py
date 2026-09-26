@@ -28,11 +28,18 @@ def entry(name, version="1.0", url=None, digest="b"):
     }
 
 
+def native_wheel(version="2.10.0", build="cpu"):
+    tag = next(resolver.packaging_tags.sys_tags())
+    return f"https://download.pytorch.org/whl/{build}/torch/torch-{version}%2B{build}-{tag}.whl"
+
+
 def report(
     version="2.10.0+cpu",
-    url="https://download.pytorch.org/whl/cpu/torch-2.10.0.whl",
+    url=None,
     adapter="none",
 ):
+    if url is None:
+        url = native_wheel()
     entries = [entry("torch", version, url, "a"), *(entry(name) for name in resolver.CORE)]
     if adapter != "none":
         build = version.split("+", 1)[1]
@@ -401,6 +408,8 @@ class ResolverTests(unittest.TestCase):
                         "2.14.0",
                         "--build",
                         "cpu",
+                        "--torch-wheel",
+                        "https://download.pytorch.org/whl/cpu/torch/torch-2.14.0-cp312-cp312-macosx_14_0_arm64.whl",
                         "--output",
                         directory,
                     ],
@@ -408,14 +417,183 @@ class ResolverTests(unittest.TestCase):
                 patch.object(resolver.sys, "platform", "darwin"),
                 patch.object(resolver.platform, "machine", return_value="arm64"),
                 patch.object(resolver.sys, "version_info", SimpleNamespace(major=3, minor=12)),
+                patch.object(
+                    resolver.packaging_tags,
+                    "sys_tags",
+                    return_value=["cp312-cp312-macosx_14_0_arm64"],
+                ),
                 patch.object(resolver.subprocess, "run", return_value=failed) as run,
                 redirect_stderr(StringIO()),
             ):
                 with self.assertRaises(SystemExit) as exit_result:
                     resolver.main()
         self.assertEqual(exit_result.exception.code, 4)
-        self.assertIn("torch==2.14.0", run.call_args.args[0])
-        self.assertNotIn("torch==2.14.0+cpu", run.call_args.args[0])
+        self.assertTrue(
+            any(
+                item.startswith("torch @ https://download.pytorch.org/whl/cpu/")
+                for item in run.call_args.args[0]
+            )
+        )
+
+    def test_cli_pins_discovered_macos_wheel_and_resolves_dependencies(self):
+        wheel = (
+            "https://download.pytorch.org/whl/cpu/torch/"
+            "torch-2.14.0-cp312-cp312-macosx_14_0_arm64.whl"
+        )
+        digest = "a" * 64
+        fixture = report(version="2.14.0", url=wheel)
+        commands = []
+
+        def fake_run(command, **_kwargs):
+            commands.append(command)
+            pathlib.Path(command[command.index("--report") + 1]).write_text(
+                json.dumps(fixture), encoding="utf-8"
+            )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.14.0",
+                        "--build",
+                        "cpu",
+                        "--torch-wheel",
+                        wheel,
+                        "--torch-sha256",
+                        digest,
+                        "--output",
+                        directory,
+                    ],
+                ),
+                patch.object(resolver.sys, "platform", "darwin"),
+                patch.object(resolver.platform, "machine", return_value="arm64"),
+                patch.object(resolver.platform, "platform", return_value="macOS"),
+                patch.object(resolver.sys, "version_info", SimpleNamespace(major=3, minor=12)),
+                patch.object(
+                    resolver.packaging_tags,
+                    "sys_tags",
+                    return_value=["cp312-cp312-macosx_14_0_arm64"],
+                ),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+            ):
+                resolver.main()
+            self.assertEqual(len(commands), 1)
+            command = commands[0]
+            self.assertIn(f"torch @ {wheel}#sha256={digest}", command)
+            self.assertNotIn("torch==2.14.0", command)
+            self.assertTrue(set(resolver.CORE).issubset(command))
+            self.assertEqual(
+                json.loads((pathlib.Path(directory) / "resolution.json").read_text())["torch"],
+                "2.14.0",
+            )
+
+    def test_cli_rejects_report_that_does_not_match_pinned_wheel(self):
+        wheel = "https://download.pytorch.org/whl/cpu/torch/torch-2.10.0%2Bcpu-cp312-cp312-manylinux_2_17_x86_64.whl"
+        fixture = report(
+            url="https://download.pytorch.org/whl/cpu/torch/torch-2.10.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl"
+        )
+
+        def fake_run(command, **_kwargs):
+            pathlib.Path(command[command.index("--report") + 1]).write_text(
+                json.dumps(fixture), encoding="utf-8"
+            )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--torch-wheel",
+                        wheel,
+                        "--output",
+                        directory,
+                    ],
+                ),
+                patch.object(
+                    resolver.packaging_tags,
+                    "sys_tags",
+                    return_value=["cp312-cp312-manylinux_2_17_x86_64"],
+                ),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 3)
+            self.assertFalse((pathlib.Path(directory) / "requirements.txt").exists())
+
+    def test_cli_rejects_report_with_wrong_hash_for_pinned_wheel(self):
+        wheel = native_wheel()
+        fixture = report(url=wheel)
+
+        def fake_run(command, **_kwargs):
+            pathlib.Path(command[command.index("--report") + 1]).write_text(
+                json.dumps(fixture), encoding="utf-8"
+            )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--torch-wheel",
+                        wheel,
+                        "--torch-sha256",
+                        "b" * 64,
+                        "--output",
+                        directory,
+                    ],
+                ),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 3)
+            self.assertFalse((pathlib.Path(directory) / "requirements.txt").exists())
+
+    def test_cli_requires_discovered_wheel_for_resolution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--output",
+                        directory,
+                    ],
+                ),
+                patch.object(resolver.subprocess, "run") as run,
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 2)
+            run.assert_not_called()
 
     def test_release_options_match_native_windows_and_macos_wheels(self):
         fixtures = (
@@ -914,6 +1092,8 @@ class ResolverTests(unittest.TestCase):
                             "2.10.0",
                             "--build",
                             "cpu",
+                            "--torch-wheel",
+                            native_wheel(),
                             "--output",
                             directory,
                         ],
@@ -963,6 +1143,8 @@ class ResolverTests(unittest.TestCase):
                         "2.10.0",
                         "--build",
                         "cpu",
+                        "--torch-wheel",
+                        native_wheel(),
                         "--output",
                         directory,
                     ],
@@ -1006,6 +1188,8 @@ class ResolverTests(unittest.TestCase):
                         "1.12.1",
                         "--build",
                         "cu102",
+                        "--torch-wheel",
+                        native_wheel("1.12.1", "cu102"),
                         "--output",
                         directory,
                     ],

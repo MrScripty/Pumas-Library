@@ -1455,9 +1455,9 @@ mod tests {
     #[cfg(target_os = "windows")]
     fn assert_descendant_drained(handle: &OwnedHandle) {
         // SAFETY: the test retains ownership of this valid process handle;
-        // the immediate wait checks its identity without allowing extra drain time.
+        // the bounded wait checks that this exact descendant has exited.
         #[allow(unsafe_code)]
-        let result = unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) };
+        let result = unsafe { WaitForSingleObject(handle.as_raw_handle(), 5_000) };
         assert_eq!(result, WAIT_OBJECT_0, "provider descendant did not exit");
     }
 
@@ -1534,6 +1534,8 @@ mod tests {
             .unwrap()
             .unwrap_err();
         assert_eq!(failure.message, "Managed provider process timed out");
+        #[cfg(target_os = "windows")]
+        assert_descendant_drained(&descendant_handle);
         cleanup.close();
         tokio::time::timeout(Duration::from_secs(15), async {
             cleanup.drain().await.unwrap();
@@ -1541,8 +1543,6 @@ mod tests {
         })
         .await
         .expect("provider timeout shutdown exceeded its bound");
-        #[cfg(target_os = "windows")]
-        assert_descendant_drained(&descendant_handle);
         #[cfg(target_os = "macos")]
         assert_descendant_drained(descendant);
 

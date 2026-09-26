@@ -826,6 +826,8 @@ def main() -> None:
     parser.add_argument("--selected-python")
     parser.add_argument("--interpreter", action="append", default=[])
     parser.add_argument("--python-candidate", action="append")
+    parser.add_argument("--torch-wheel")
+    parser.add_argument("--torch-sha256")
     args = parser.parse_args()
     if not re.fullmatch(r"\d+\.\d+\.\d+", args.version):
         parser.error("Only stable upstream Torch versions are supported")
@@ -836,6 +838,8 @@ def main() -> None:
             or args.output
             or args.selected_python
             or args.adapter != "none"
+            or args.torch_wheel is not None
+            or args.torch_sha256 is not None
         ):
             parser.error("Release options accepts only --version and one or more --interpreter")
         if not args.interpreter:
@@ -857,6 +861,8 @@ def main() -> None:
         parser.error("Resolution and discovery require --build")
     if args.python_candidate is not None:
         parser.error("--python-candidate is only valid with --release-options")
+    if args.torch_sha256 is not None and args.torch_wheel is None:
+        parser.error("--torch-sha256 requires --torch-wheel")
     if not RELEASE_CHANNEL.fullmatch(args.build):
         parser.error("Select a canonical CPU, CUDA, or ROCm build channel")
     if args.discover:
@@ -872,6 +878,8 @@ def main() -> None:
         return
     if args.output is None:
         parser.error("Resolution requires --output")
+    if args.torch_wheel is None:
+        parser.error("Resolution requires --torch-wheel from official discovery")
     try:
         target = native_target(
             sys.platform,
@@ -880,6 +888,14 @@ def main() -> None:
             sys.implementation.name,
         )
         extras = adapter_requirements(args.adapter, args.version, args.build)
+        tags = {str(tag) for tag in packaging_tags.sys_tags()}
+        selected_wheel = wheel_match(args.torch_wheel, args.version, args.build, tags)
+        if selected_wheel is None or selected_wheel["wheelUrl"] != args.torch_wheel:
+            raise ValueError("Selected Torch wheel is not an exact compatible official artifact")
+        if args.torch_sha256 is not None and not re.fullmatch(
+            r"[0-9a-fA-F]{64}", args.torch_sha256
+        ):
+            raise ValueError("Selected Torch wheel SHA-256 is invalid")
     except ValueError as error:
         parser.exit(2, f"{error}\n")
     args.output.mkdir(parents=True, exist_ok=True)
@@ -905,7 +921,8 @@ def main() -> None:
         f"https://download.pytorch.org/whl/{args.build}",
         "--extra-index-url",
         "https://pypi.org/simple",
-        f"torch=={torch_requirement}",
+        f"torch @ {args.torch_wheel}"
+        + (f"#sha256={args.torch_sha256}" if args.torch_sha256 is not None else ""),
         *CORE,
         *extras,
     ]
@@ -922,6 +939,12 @@ def main() -> None:
         requirements, resolution = requirements_from_report(
             report, args.version, args.build, args.adapter
         )
+        torch_artifact = next(item for item in resolution["artifacts"] if item["name"] == "torch")
+        if torch_artifact["url"] != args.torch_wheel or (
+            args.torch_sha256 is not None
+            and torch_artifact["sha256"].lower() != args.torch_sha256.lower()
+        ):
+            raise ValueError("Resolved Torch artifact differs from the selected wheel")
     except (KeyError, TypeError, ValueError, OSError) as error:
         parser.exit(3, f"Invalid wheel resolution: {error}\n")
     (args.output / "requirements.txt").write_text(

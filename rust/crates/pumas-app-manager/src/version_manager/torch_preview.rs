@@ -394,34 +394,69 @@ fn auto_wheel_candidates(
     catalog_minors: &[String],
     build: &str,
     discovery: &TorchReleaseOptionsDiscovery,
-) -> Option<Vec<String>> {
+) -> Option<Vec<TorchPythonPreviewCandidate>> {
     if !discovery.complete_scan || discovery.status == TorchReleaseOptionsStatus::Inconclusive {
         return None;
     }
     Some(
         catalog_minors
             .iter()
-            .filter(|minor| {
+            .filter_map(|minor| {
                 let python = format!("python{minor}");
                 discovery
                     .combinations
                     .iter()
-                    .any(|wheel| wheel.build == build && wheel.python == python)
+                    .find(|wheel| wheel.build == build && wheel.python == python)
+                    .cloned()
+                    .map(TorchPythonPreviewCandidate::exact_wheel)
             })
-            .cloned()
             .collect(),
     )
 }
 
+#[derive(Clone, Debug)]
+struct TorchPythonPreviewCandidate {
+    minor: String,
+    wheel: Option<TorchReleaseCombination>,
+}
+
+impl TorchPythonPreviewCandidate {
+    fn exact_wheel(wheel: TorchReleaseCombination) -> Self {
+        let minor = wheel
+            .python
+            .strip_prefix("python")
+            .expect("validated release-option Python tag")
+            .to_owned();
+        Self {
+            minor,
+            wheel: Some(wheel),
+        }
+    }
+
+    fn managed_python(minor: impl Into<String>) -> Self {
+        Self {
+            minor: minor.into(),
+            wheel: None,
+        }
+    }
+}
+
+fn append_exact_wheel_args(command: &mut Command, wheel: &TorchReleaseCombination) {
+    command.arg("--torch-wheel").arg(&wheel.wheel_url);
+    if let Some(sha256) = &wheel.sha256 {
+        command.arg("--torch-sha256").arg(sha256);
+    }
+}
+
 struct TorchPythonPreviewSearch {
-    candidates: std::vec::IntoIter<String>,
+    candidates: std::vec::IntoIter<TorchPythonPreviewCandidate>,
     allow_fallback: bool,
     last_unsupported: Option<TorchPreviewOutcome>,
     finished: bool,
 }
 
 impl TorchPythonPreviewSearch {
-    fn new(candidates: Vec<String>, allow_fallback: bool) -> Self {
+    fn new(candidates: Vec<TorchPythonPreviewCandidate>, allow_fallback: bool) -> Self {
         Self {
             candidates: candidates.into_iter(),
             allow_fallback,
@@ -430,7 +465,7 @@ impl TorchPythonPreviewSearch {
         }
     }
 
-    fn next_candidate(&mut self) -> Option<String> {
+    fn next_candidate(&mut self) -> Option<TorchPythonPreviewCandidate> {
         if self.finished {
             None
         } else {
@@ -602,11 +637,15 @@ mod tests {
     #[test]
     fn auto_skips_newer_python_without_exact_wheel_and_tries_newest_match_first() {
         let catalog = vec!["3.15".into(), "3.14".into(), "3.13".into(), "3.12".into()];
-        let wheel = |build: &str, python: &str| TorchReleaseCombination {
+        let wheel = |build: &str, python: &str| {
+            TorchReleaseCombination {
             build: build.into(),
             python: python.into(),
-            wheel_url: String::new(),
-            sha256: None,
+            wheel_url: format!(
+                "https://download.pytorch.org/whl/{build}/torch/torch-2.14.0%2B{build}-cp314-cp314-manylinux_2_28_x86_64.whl"
+            ),
+            sha256: Some("a".repeat(64)),
+        }
         };
         let mut discovery = TorchReleaseOptionsDiscovery {
             tag: "v2.14.0".into(),
@@ -627,13 +666,53 @@ mod tests {
             recommended: None,
             recommendation_note: String::new(),
         };
+        let selected = auto_wheel_candidates(&catalog, "cu136", &discovery).unwrap();
         assert_eq!(
-            auto_wheel_candidates(&catalog, "cu136", &discovery),
-            Some(vec!["3.14".into(), "3.12".into()])
+            selected
+                .iter()
+                .map(|candidate| candidate.minor.as_str())
+                .collect::<Vec<_>>(),
+            ["3.14", "3.12"]
+        );
+        let newest_wheel = selected[0].wheel.as_ref().unwrap();
+        assert_eq!(newest_wheel.python, "python3.14");
+        assert_eq!(newest_wheel.build, "cu136");
+        assert!(newest_wheel.sha256.as_deref().is_some_and(|sha256| {
+            sha256.len() == 64 && sha256.bytes().all(|byte| byte == b'a')
+        }));
+        assert_eq!(
+            newest_wheel.wheel_url,
+            "https://download.pytorch.org/whl/cu136/torch/torch-2.14.0%2Bcu136-cp314-cp314-manylinux_2_28_x86_64.whl"
         );
         discovery.complete_scan = false;
         discovery.status = TorchReleaseOptionsStatus::Inconclusive;
-        assert_eq!(auto_wheel_candidates(&catalog, "cu136", &discovery), None);
+        assert!(auto_wheel_candidates(&catalog, "cu136", &discovery).is_none());
+    }
+
+    #[test]
+    fn resolver_command_receives_the_exact_discovered_wheel_and_hash() {
+        let wheel = TorchReleaseCombination {
+            build: "cpu".into(),
+            python: "python3.14".into(),
+            wheel_url: "https://download.pytorch.org/whl/cpu/torch/torch-2.14.0-cp314-cp314-macosx_14_0_arm64.whl".into(),
+            sha256: Some("b".repeat(64)),
+        };
+        let mut command = Command::new("python");
+        append_exact_wheel_args(&mut command, &wheel);
+        let args = command
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            args,
+            [
+                "--torch-wheel",
+                wheel.wheel_url.as_str(),
+                "--torch-sha256",
+                wheel.sha256.as_deref().unwrap(),
+            ]
+        );
     }
 
     #[test]
@@ -903,8 +982,12 @@ mod platform_neutral_tests {
                 .map(|minor| TorchReleaseCombination {
                     build: "cu136".into(),
                     python: format!("python{minor}"),
-                    wheel_url: String::new(),
-                    sha256: None,
+                    wheel_url: format!(
+                        "https://download.pytorch.org/whl/cu136/torch/torch-2.14.0%2Bcu136-cp{}-cp{}-manylinux_2_28_x86_64.whl",
+                        minor.replace('.', ""),
+                        minor.replace('.', "")
+                    ),
+                    sha256: Some("c".repeat(64)),
                 })
                 .collect(),
             issues: Vec::new(),
@@ -917,14 +1000,23 @@ mod platform_neutral_tests {
             recommendation_note: String::new(),
         };
         let candidates = auto_wheel_candidates(&catalog, "cu136", &discovery).unwrap();
-        assert_eq!(candidates, ["3.14", "3.13", "3.12"]);
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|candidate| candidate.minor.as_str())
+                .collect::<Vec<_>>(),
+            ["3.14", "3.13", "3.12"]
+        );
 
         let rejected = |reason| TorchPreviewOutcome::Rejected {
             reason,
             message: reason.message(),
         };
         let mut search = TorchPythonPreviewSearch::new(candidates.clone(), true);
-        assert_eq!(search.next_candidate().as_deref(), Some("3.14"));
+        assert_eq!(
+            search.next_candidate().map(|candidate| candidate.minor),
+            Some("3.14".into())
+        );
         let resolved = TorchPreviewOutcome::Resolved {
             preview: TorchPreview {
                 preview_id: "newest-python".into(),
@@ -942,14 +1034,20 @@ mod platform_neutral_tests {
             outcome,
             TorchPreviewOutcome::Resolved { preview } if preview.preview_id == "newest-python"
         ));
-        assert_eq!(search.next_candidate(), None);
+        assert!(search.next_candidate().is_none());
 
         let mut search = TorchPythonPreviewSearch::new(candidates.clone(), true);
-        assert_eq!(search.next_candidate().as_deref(), Some("3.14"));
+        assert_eq!(
+            search.next_candidate().map(|candidate| candidate.minor),
+            Some("3.14".into())
+        );
         assert!(search
             .record_attempt(rejected(TorchPreviewRejectionReason::Unsupported))
             .is_none());
-        assert_eq!(search.next_candidate().as_deref(), Some("3.13"));
+        assert_eq!(
+            search.next_candidate().map(|candidate| candidate.minor),
+            Some("3.13".into())
+        );
         let outcome = search
             .record_attempt(rejected(TorchPreviewRejectionReason::Inconclusive))
             .unwrap();
@@ -960,10 +1058,13 @@ mod platform_neutral_tests {
                 ..
             }
         ));
-        assert_eq!(search.next_candidate(), None);
+        assert!(search.next_candidate().is_none());
 
         let mut search = TorchPythonPreviewSearch::new(candidates.clone(), false);
-        assert_eq!(search.next_candidate().as_deref(), Some("3.14"));
+        assert_eq!(
+            search.next_candidate().map(|candidate| candidate.minor),
+            Some("3.14".into())
+        );
         assert!(matches!(
             search.record_attempt(rejected(TorchPreviewRejectionReason::Unsupported)),
             Some(TorchPreviewOutcome::Rejected {
@@ -971,28 +1072,34 @@ mod platform_neutral_tests {
                 ..
             })
         ));
-        assert_eq!(search.next_candidate(), None);
+        assert!(search.next_candidate().is_none());
 
         // Interpreter provisioning has the same inconclusive outcome as a
         // resolver failure, so it must also leave lower candidates untouched.
         let mut search = TorchPythonPreviewSearch::new(candidates.clone(), true);
-        assert_eq!(search.next_candidate().as_deref(), Some("3.14"));
+        assert_eq!(
+            search.next_candidate().map(|candidate| candidate.minor),
+            Some("3.14".into())
+        );
         assert!(search
             .record_attempt(TorchPreviewOutcome::Rejected {
                 reason: TorchPreviewRejectionReason::Inconclusive,
                 message: "The managed Python interpreter could not be provisioned.",
             })
             .is_some());
-        assert_eq!(search.next_candidate(), None);
+        assert!(search.next_candidate().is_none());
 
         let mut search = TorchPythonPreviewSearch::new(candidates, true);
         for minor in ["3.14", "3.13", "3.12"] {
-            assert_eq!(search.next_candidate().as_deref(), Some(minor));
+            assert_eq!(
+                search.next_candidate().map(|candidate| candidate.minor),
+                Some(minor.into())
+            );
             assert!(search
                 .record_attempt(rejected(TorchPreviewRejectionReason::Unsupported))
                 .is_none());
         }
-        assert_eq!(search.next_candidate(), None);
+        assert!(search.next_candidate().is_none());
         assert!(matches!(
             search.exhausted(),
             TorchPreviewOutcome::Rejected {
@@ -1469,33 +1576,14 @@ impl VersionManager {
             }
         };
         let mut release_verified = false;
-        let requested_minors = if python == "auto" {
-            if adapter == "bundled" {
-                if !is_bundled_preset(tag, build, "python3.12", adapter) {
-                    return Err(failed(
-                        "Bundled adapters require the v2.9.1 CUDA 13.0/Python 3.12 preset",
-                    ));
-                }
-                vec!["3.12".to_owned()]
-            } else {
-                let discovery = self.discover_torch_release_options(tag).await?;
-                release_verified = true;
-                let Some(exact_minors) = auto_wheel_candidates(&candidates, build, &discovery)
-                else {
-                    return Ok(TorchPreviewOutcome::Rejected {
-                        reason: TorchPreviewRejectionReason::Inconclusive,
-                        message: "Official wheel discovery did not complete conclusively.",
-                    });
-                };
-                if exact_minors.is_empty() {
-                    return Ok(TorchPreviewOutcome::Rejected {
-                        reason: TorchPreviewRejectionReason::Unsupported,
-                        message: "No compatible official Torch wheel was found for this version, build, and the managed Python catalog.",
-                    });
-                }
-                exact_minors
+        let requested_candidates = if python == "auto" && adapter == "bundled" {
+            if !is_bundled_preset(tag, build, "python3.12", adapter) {
+                return Err(failed(
+                    "Bundled adapters require the v2.9.1 CUDA 13.0/Python 3.12 preset",
+                ));
             }
-        } else {
+            vec![TorchPythonPreviewCandidate::managed_python("3.12")]
+        } else if adapter == "bundled" {
             let minor = python
                 .strip_prefix("python")
                 .ok_or_else(|| failed("Select automatic Python or a managed CPython choice"))?;
@@ -1504,9 +1592,37 @@ impl VersionManager {
                     "Selected Python is not in the managed CPython catalog",
                 ));
             }
-            vec![minor.to_owned()]
+            vec![TorchPythonPreviewCandidate::managed_python(minor)]
+        } else {
+            let discovery = self.discover_torch_release_options(tag).await?;
+            release_verified = true;
+            let Some(mut exact_candidates) = auto_wheel_candidates(&candidates, build, &discovery)
+            else {
+                return Ok(TorchPreviewOutcome::Rejected {
+                    reason: TorchPreviewRejectionReason::Inconclusive,
+                    message: "Official wheel discovery did not complete conclusively.",
+                });
+            };
+            if python != "auto" {
+                let minor = python
+                    .strip_prefix("python")
+                    .ok_or_else(|| failed("Select automatic Python or a managed CPython choice"))?;
+                if !candidates.iter().any(|candidate| candidate == minor) {
+                    return Err(failed(
+                        "Selected Python is not in the managed CPython catalog",
+                    ));
+                }
+                exact_candidates.retain(|candidate| candidate.minor == minor);
+            }
+            if exact_candidates.is_empty() {
+                return Ok(TorchPreviewOutcome::Rejected {
+                    reason: TorchPreviewRejectionReason::Unsupported,
+                    message: "No compatible official Torch wheel was found for this version, build, and Python selection.",
+                });
+            }
+            exact_candidates
         };
-        if requested_minors.is_empty() {
+        if requested_candidates.is_empty() {
             return Ok(TorchPreviewOutcome::Rejected {
                 reason: TorchPreviewRejectionReason::Inconclusive,
                 message:
@@ -1517,16 +1633,16 @@ impl VersionManager {
             self.resolve_installable_release(tag).await?;
         }
         let mut search = TorchPythonPreviewSearch::new(
-            requested_minors,
+            requested_candidates,
             python == "auto" && adapter != "bundled",
         );
-        while let Some(minor) = search.next_candidate() {
+        while let Some(candidate) = search.next_candidate() {
             // A provisioning failure is inconclusive and must stop the search; it
             // cannot be used as evidence that a lower Python is a better match.
             let managed = match super::torch_alternatives::ensure_managed_torch_interpreter(
                 &python_root,
                 &self.torch_cleanup,
-                &minor,
+                &candidate.minor,
             )
             .await
             {
@@ -1542,7 +1658,13 @@ impl VersionManager {
                 }
             };
             let outcome = self
-                .preview_torch_runtime_with_interpreter(tag, build, adapter, &managed)
+                .preview_torch_runtime_with_interpreter(
+                    tag,
+                    build,
+                    adapter,
+                    &managed,
+                    candidate.wheel.as_ref(),
+                )
                 .await?;
             if let Some(outcome) = search.record_attempt(outcome) {
                 return Ok(outcome);
@@ -1557,6 +1679,7 @@ impl VersionManager {
         build: &str,
         adapter: &str,
         managed_python: &super::managed_python::ManagedPythonIdentity,
+        selected_wheel: Option<&TorchReleaseCombination>,
     ) -> Result<TorchPreviewOutcome> {
         let python = managed_python.python.as_str();
         let interpreter = managed_python.executable.as_path();
@@ -1581,6 +1704,18 @@ impl VersionManager {
         if !cfg!(target_os = "linux") && adapter != "none" {
             return Err(failed(
                 "Image dependency profiles are unavailable on this platform",
+            ));
+        }
+        if adapter != "bundled" && selected_wheel.is_none() {
+            return Err(failed(
+                "An exact official Torch wheel is required for dependency resolution",
+            ));
+        }
+        if selected_wheel.is_some_and(|wheel| {
+            wheel.build != build || wheel.python != python || wheel.wheel_url.is_empty()
+        }) {
+            return Err(failed(
+                "Discovered Torch wheel does not match the managed Python selection",
             ));
         }
         let version = tag
@@ -1692,6 +1827,9 @@ impl VersionManager {
                 "--output",
             ])
             .arg(workspace.path());
+        if let Some(wheel) = selected_wheel {
+            append_exact_wheel_args(&mut command, wheel);
+        }
         self.torch_cleanup.drain_residual_child_slots().await?;
         let run = run_preview_resolver(
             command,
@@ -1737,6 +1875,23 @@ impl VersionManager {
             return Err(failed(
                 "Resolver manifest does not match requested Torch selection",
             ));
+        }
+        if let Some(selected_wheel) = selected_wheel {
+            let resolved_torch = parsed
+                .artifacts
+                .iter()
+                .find(|artifact| artifact.name == "torch")
+                .ok_or_else(|| failed("Resolved manifest omitted the selected Torch wheel"))?;
+            if resolved_torch.url != selected_wheel.wheel_url
+                || selected_wheel
+                    .sha256
+                    .as_ref()
+                    .is_some_and(|sha256| !resolved_torch.sha256.eq_ignore_ascii_case(sha256))
+            {
+                return Err(failed(
+                    "Resolved Torch artifact differs from the discovered official wheel",
+                ));
+            }
         }
         for artifact in &parsed.artifacts {
             if artifact.sha256.len() != 64

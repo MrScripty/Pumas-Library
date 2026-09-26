@@ -1,5 +1,27 @@
 # Execution Ledger: Cross-Platform Torch Runtime Management
 
+## 2026-09-26 — Current-source native Torch acceptance
+
+- Manual workflow
+  [36229508586](https://github.com/MrScripty/Pumas-Library/actions/runs/36229508586)
+  passed on runtime commit `21041697`: workflow/release contracts,
+  frontend/desktop contracts, headless checks, Rust quality, and all three
+  native Torch QA and RPC E2E jobs.
+- Linux x86_64, Windows x86_64 MSVC, and macOS arm64 each provisioned
+  Pumas-managed CPython 3.14.7 with pinned uv 0.12.18; discovered and installed
+  v2.14.0 CPU/Core using 25 hashed official artifacts; persisted the interpreter
+  across a second backend; returned 14 from a fresh CPU tensor operation; passed
+  the resolver probe and protocol 3 sidecar trial/stop; shut down gracefully;
+  and reported safe cleanup.
+- Full native evidence is retained in the per-target
+  `v2.14.0-*-current-source-cpu-rpc-restart-acceptance/` report directories,
+  including acceptance, runtime, wheel/dependency resolution, probe, and backend
+  session records. This verifies the current metadata-lock follow-up.
+- PR head `57e5fb7f` adds the acceptance documentation and evidence after the
+  runtime-source commit. Electron UI-driven install, packaged Windows/macOS
+  install, provider cancellation/tamper/retry, CUDA/MPS, and v2.14.0 Tuldok
+  generation remain unverified.
+
 ## 2026-09-26 — Torch install through the packaged Linux backend
 
 - Built the current branch's Linux AppImage/deb with the latest generated

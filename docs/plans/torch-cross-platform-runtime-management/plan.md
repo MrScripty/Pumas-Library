@@ -10,22 +10,24 @@ runtime management on 2026-09-24, retaining the existing Linux support. On
 the requirement for a host-installed Python interpreter or a user Python choice.
 
 **Current acceptance:** Manual native run
+[36229508586](https://github.com/MrScripty/Pumas-Library/actions/runs/36229508586)
+on runtime commit `21041697` passed the current v2.14.0 CPU/Core RPC installation
+and restart path on Linux x86_64, Windows x86_64, and macOS arm64. Each target
+provisioned Pumas-managed CPython 3.14.7 with pinned uv 0.12.18, installed 25
+hashed official artifacts, persisted the interpreter across restart, returned
+14 from a fresh CPU tensor operation, passed the resolver probe and protocol 3
+sidecar trial/stop, shut down gracefully, and cleaned its temporary root. See
+[Linux](reports/v2.14.0-linux-current-source-cpu-rpc-restart-acceptance/README.md),
+[Windows](reports/v2.14.0-windows-current-source-cpu-rpc-restart-acceptance/README.md),
+and [macOS](reports/v2.14.0-macos-current-source-cpu-rpc-restart-acceptance/README.md).
+All active jobs in that manual workflow passed. The prior run
 [36223106097](https://github.com/MrScripty/Pumas-Library/actions/runs/36223106097)
-on commit `07f7e9f6` passed v2.14.0 CPU/Core RPC installation and restart on
-Linux x86_64, Windows x64, and macOS arm64. Each target provisioned Pumas-managed
-CPython 3.14.7, resolved and installed 25 hashed official artifacts, completed a
-fresh CPU tensor operation returning 14 after a second-backend restart, rechecked
-the retained resolver probe, passed protocol 3 sidecar trial/stop, and shut down
-gracefully. macOS also honored a 913-second Retry-After before release discovery
-succeeded on attempt two. Retained evidence: [Linux](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/README.md),
-[Windows](reports/v2.14.0-windows-cpu-rpc-restart-acceptance/README.md), and
-[macOS](reports/v2.14.0-macos-cpu-rpc-restart-acceptance/README.md).
-
-That native run predates the current bounded metadata-lock follow-up, so it does
-not verify that change. Acceptance is limited to the CPU/Core RPC install and
-restart path. CUDA/device execution, Electron UI-driven Torch installation,
-and v2.14.0 image generation through Tuldok remain unverified. Existing Tuldok
-image evidence remains scoped to its recorded Torch 2.10 tuple.
+also exercised macOS's 913-second Retry-After behavior, but predates the metadata
+lock follow-up. Acceptance remains limited to CPU/Core RPC installation and
+restart. CUDA/device execution, Electron UI-driven installation, packaged
+Windows/macOS installation, and v2.14.0 Tuldok image generation remain
+unverified; existing Tuldok image evidence remains scoped to its recorded
+Torch 2.10 tuple.
 
 Current-branch Linux v0.7.0 AppImage and deb candidates were rebuilt with the
 generated CPython notices. Artifact naming and extracted resource hashes pass;
@@ -35,9 +37,8 @@ contains the `get_torch_release_options` bridge method. AppImage SHA-256:
 SHA-256: `468b6f7c2af00ff8785f80e5486cd5133979e875dd351b4b9f5284ddfd195043`.
 These are local build outputs: they do not exercise Electron UI-driven Torch
 installation or replace the toolbar-linked public v0.7.0 assets (published
-2026-09-17). The
-generated attribution inventory includes all three CPython full-archive notice
-supersets and verifies 371 package entries, 78 hashed inputs, and 57 retained
+2026-09-17). The generated attribution inventory includes all three CPython
+full-archive notice supersets and verifies 371 package entries, 78 hashed inputs, and 57 retained
 legal texts against target-specific evidence.
 
 The bundled Linux backend from this candidate then passed the full Torch 2.14.0
@@ -45,22 +46,19 @@ CPU/Core install/restart acceptance with backend `PATH` cleared. It provisioned
 managed CPython 3.14.7, installed 25 hashed official artifacts, performed a CPU
 operation returning 14 after restart, and passed probe plus protocol 3 sidecar
 start/stop. See the [packaged Linux acceptance](reports/v2.14.0-linux-packaged-cpu-acceptance/README.md).
-This exercised the packaged backend; Electron UI interaction and packaged
-Windows/macOS install acceptance remain unverified.
-**Current phase:** v2.14.0 CPU/Core RPC install and two-session sidecar
-lifecycle are accepted on the current exact-wheel implementation across Linux
-x86_64, Windows x64, and macOS arm64. Each run provisioned CPython 3.14.7,
-resolved 25 hashed core artifacts, ran a CPU operation returning 14 after a
-second-session restart, and passed sidecar trial/stop plus graceful shutdown.
-The macOS run also verified the bounded long `Retry-After` path. That native
-run predates the current local lock follow-up. The PR repair closes the reviewed
+This exercised the packaged Linux backend; Electron UI interaction and
+packaged Windows/macOS install acceptance remain unverified.
+
+**Current phase:** The three-target CPU/Core RPC install and two-session
+sidecar lifecycle pass on current runtime source `21041697`. That run verifies
+the bounded metadata-lock follow-up. The repair closes the reviewed
 cross-process metadata races by guarding Torch metadata read/modify/write with
 `.torch-versions.lock`, refreshing state under that lease, and retaining cloned
-leases through detached writes. Startup
-defers validation/normalization when the lock is busy and avoids reading a
-possibly transitional active marker. Torch status reads now use one coherent
-cached generation. The repair also addresses failed child-custody drain,
-best-effort cleanup recovery, bounded Electron Torch RPC requests, and fixed
+leases through detached writes. Startup defers validation/normalization when
+the lock is busy and avoids reading a possibly transitional active marker. Torch
+status reads now use one coherent cached generation. The repair also addresses
+failed child-custody drain, best-effort cleanup recovery, bounded Electron Torch
+RPC requests, and fixed
 preset access while upstream release discovery is pending. Selection, default
 selection, removal, and installation now retry brief `WouldBlock` contention
 for at most 500 ms; other I/O errors propagate immediately.
@@ -71,15 +69,17 @@ workspace check and Clippy gates, 44 Torch resolver tests, Ruff, and
 `pumas-library` unit tests passed when rerun with four threads (1432 passed, 6
 ignored), but the separate `intent_api_tests` hit local filesystem permission
 and temporary-storage errors. This does not identify a failure in the changed
-Torch paths. The current PR commit still needs its own CI run. Earlier PR run
-[36225003150](https://github.com/MrScripty/Pumas-Library/actions/runs/36225003150)
-on `66ccbfe7` passed required checks, including native Linux/Windows/macOS QA;
-PR-triggered RPC E2E is skipped. Astra high and Sol xhigh completed read-only
-reviews with no lock-lifecycle blockers. Manual run
+Torch paths. Manual workflow
+[36229508586](https://github.com/MrScripty/Pumas-Library/actions/runs/36229508586)
+on `21041697` passed its workflow/release contracts, frontend/desktop contracts,
+headless checks, Rust quality, all three native Torch QA jobs, and all three
+native RPC E2E jobs. PR head `57e5fb7f` adds only the acceptance evidence and
+documentation after that runtime-source run. Astra high and Sol xhigh completed
+read-only reviews with no lock-lifecycle blockers. Earlier manual run
 [36223106097](https://github.com/MrScripty/Pumas-Library/actions/runs/36223106097)
-passed native v2.14.0 CPU/Core RPC install/restart on all three shipped targets,
-but predates the current lock follow-up. Windows GNU compilation remains
-compile-only evidence but is supplemented by the native Windows acceptance run.
+also passed the three-target RPC install/restart and exercised the macOS long
+Retry-After path. Windows GNU compilation remains compile-only evidence but is
+supplemented by native Windows MSVC acceptance.
 
 **Remaining gates:** Packaged Electron UI interaction, packaged Windows/macOS
 Torch installation, and provider cancellation/tamper/retry cases remain open.

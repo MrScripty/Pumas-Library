@@ -20,12 +20,16 @@ original Linux-only scope and is superseded for the in-progress install flow by
 the 2026-09-25 managed-CPython authorization below. The current implementation
 provisions stable native CPython 3.10+ from a pinned provider and chooses the
 newest candidate whose exact official wheel and complete dependencies resolve.
-Linux clean-host provisioning and the Torch 2.14.0 CPU/Core RPC install/restart
-now pass on Linux x86_64, Windows x64, and macOS arm64. The broader support
-claim remains bounded by packaged-desktop, provider cancellation/tamper, and
-non-CPU runtime gates. CPython notices are generated for all three desktop
-targets, with fail-closed provider-pin, archive-mapping, and exact legal-file
-checks. Pumas does not compile Torch from source; XPU remains outside this
+The current-source Torch 2.14.0 CPU/Core RPC install/restart and native QA pass
+on Linux x86_64, Windows x86_64, and macOS arm64 in manual run
+[36229508586](https://github.com/MrScripty/Pumas-Library/actions/runs/36229508586)
+on runtime commit `21041697`; each target provisioned Pumas-managed CPython
+3.14.7 and installed 25 hashed official artifacts. The broader support claim
+remains bounded by Electron UI-driven and packaged Windows/macOS installation,
+provider cancellation/tamper, and non-CPU runtime gates. CPython notices are
+generated for all three desktop targets, with fail-closed provider-pin,
+archive-mapping, and exact legal-file checks. Pumas does not compile Torch from
+source; XPU remains outside this
 provider contract. A release with no compatible wheel is discoverable but
 correctly rejected for that tuple.
 
@@ -44,10 +48,14 @@ Windows x86_64 (`x86_64-pc-windows-msvc`) and macOS arm64
 (`aarch64-apple-darwin`) Torch release-manager paths are implemented in the
 current candidate branch under the separate
 [cross-platform runtime plan](../../torch-cross-platform-runtime-management/plan.md).
-The v2.14.0 CPU/Core RPC install/restart path passed native quality, exact wheel,
-managed identity, and lifecycle checks on all three targets in manual run
+The current runtime source passed v2.14.0 CPU/Core RPC install/restart, exact
+wheel, managed identity, and lifecycle checks on all three targets in manual run
+[36229508586](https://github.com/MrScripty/Pumas-Library/actions/runs/36229508586)
+at `21041697`, including the current metadata-lock follow-up. Per-target logs
+and JSON evidence are retained in the linked plan. A preceding run
 [36223106097](https://github.com/MrScripty/Pumas-Library/actions/runs/36223106097)
-at `07f7e9f6`. Broader support remains gated on packaged desktop and other
+at `07f7e9f6` also verified the 913-second macOS `Retry-After` case but predates
+the lock follow-up. Broader support remains gated on packaged desktop and other
 incomplete plan requirements. An earlier run at `032045ad` passed Linux but
 stopped at Windows/macOS release-list preflight because of a harness retry cap;
 the corrected harness completed the latest run. A Windows GNU test-target

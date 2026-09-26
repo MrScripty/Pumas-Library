@@ -1,14 +1,20 @@
 # Managed Python Provider Admission
 
-**Status:** Native Linux x86_64, Windows x86_64 MSVC, and macOS arm64 runs
-provisioned Pumas-managed CPython 3.14.7 and passed the Torch 2.14.0 CPU/Core
-preview, install, identity/CPU-operation check, explicit selection, sidecar
-startup/health/protocol 3, and generation-owned stop through Pumas RPC. Each
-retained run records the target-specific uv release identity and exact selected
-CPython install-only URL. The three target-specific CPython full-archive notice
-supersets are now included in the generated 0.7.0 attribution inventory. The
-native RPC runs do not establish packaged desktop Torch installation, CUDA/MPS
-execution, or v2.14.0 Tuldok image-generation support.
+**Status:** Current-source manual native run
+[36229508586](https://github.com/MrScripty/Pumas-Library/actions/runs/36229508586)
+on runtime commit `21041697` passed Torch 2.14.0 CPU/Core RPC installation and
+restart on Linux x86_64, Windows x86_64 MSVC, and macOS arm64. Each target
+provisioned Pumas-managed CPython 3.14.7 with uv 0.12.18, resolved and installed
+25 hashed official artifacts, persisted the interpreter across restart, passed
+the CPU-operation and resolver-probe checks, completed protocol 3 sidecar
+trial/stop, and shut down gracefully with safe cleanup. Retained reports:
+[Linux](v2.14.0-linux-current-source-cpu-rpc-restart-acceptance/README.md),
+[Windows](v2.14.0-windows-current-source-cpu-rpc-restart-acceptance/README.md),
+and [macOS](v2.14.0-macos-current-source-cpu-rpc-restart-acceptance/README.md).
+The three target-specific CPython full-archive notice supersets are included in
+the generated 0.7.0 attribution inventory. Native RPC acceptance does not
+establish Electron UI-driven installation, packaged Windows/macOS Torch
+installation, CUDA/MPS execution, or v2.14.0 Tuldok image-generation support.
 
 The current-branch local Linux AppImage/deb backend separately passed the full
 Torch 2.14.0 CPU/Core install/restart acceptance with backend `PATH` cleared;

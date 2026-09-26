@@ -495,7 +495,14 @@ decision. Merge or source presence alone does not establish Tuldok inference.
 ## Managed CPython provider follow-up — 2026-09-25
 
 Torch 2.14.0 CPU/Core passed the native Linux RPC install and managed sidecar
-lifecycle using Pumas-provisioned CPython 3.14.7. This does not expand the
+lifecycle using Pumas-provisioned CPython 3.14.7. A fresh RPC process reopened
+the same data root and reverified the exact Python identity and active profile,
+a fresh CPU tensor operation through the persisted managed venv, the retained
+RPC probe report, the sidecar trial/stop, and graceful shutdown; see the
+[restart acceptance evidence](../../torch-cross-platform-runtime-management/reports/v2.14.0-linux-cpu-rpc-restart-acceptance/README.md).
+The acceptance script's cold-start release-options wait now covers managed
+CPython provisioning as well as the subsequent wheel scan.
+This does not expand the
 existing Tuldok/image qualification beyond its recorded Torch 2.10 tuple.
 The uv 0.12.18 MIT/Apache notices are included in release attribution. The
 Linux, Windows, and macOS CPython 3.14.7 full-archive license collections are

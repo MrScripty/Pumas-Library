@@ -16,7 +16,13 @@ install and lifecycle path. Pinned uv 0.12.18 provisioned managed CPython
 operation, sidecar dependencies, explicit selection, sidecar health/protocol 3,
 generation-owned stop, and graceful backend shutdown all passed. The independent
 CUDA 13.2 Core preview resolved 44 artifacts; CUDA/device execution remains
-untested. See the [retained v2.14.0 Linux evidence](reports/v2.14.0-linux-cpu-rpc-acceptance/acceptance.json).
+untested. A second RPC session then reopened the same launcher root, confirmed
+the selected version/profile and exact managed Python source, catalog, path,
+and executable hash. It then ran a fresh CPU tensor operation through the
+persisted venv interpreter (sum of squares: 14), revalidated the retained RPC
+probe report, and repeated the sidecar lifecycle. See the
+[restart acceptance evidence](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/README.md)
+and [initial install evidence](reports/v2.14.0-linux-cpu-rpc-acceptance/acceptance.json).
 Fresh local v0.7.0 AppImage and deb packages were rebuilt after updating release
 attribution. Their extracted resources match the build inputs, and both bundled
 RPC backends passed `/health`. AppImage SHA-256:
@@ -252,11 +258,11 @@ resolver, manager, desktop, and platform runtime owners.
 | ID | Observable criterion | Evidence required | Status |
 | --- | --- | --- | --- |
 | X1 | Linux behavior and existing accepted v2.9.0 install/v2.10 Tuldok evidence remain accurately scoped and pass relevant regression gates | Existing Linux manager/resolver/RPC/frontend suites; retained historical evidence references | pending |
-| X2 | Each shipped target provisions a private stable standard CPython 3.10 or newer without a host Python dependency or global PATH/registry changes; artifact integrity, target identity, cache separation, cancellation, and retention are verified | Linux x86_64 managed CPython 3.14.7 and Torch install passed with Python/pip/PyPy absent from child `PATH`; native Windows/macOS provisioning, tamper/cancel/retry, downloaded uv digest, and license checks remain | pending |
+| X2 | Each shipped target provisions a private stable standard CPython 3.10 or newer without a host Python dependency or global PATH/registry changes; artifact integrity, target identity, cache separation, cancellation, and retention are verified | Linux x86_64 install and second-session restart passed with no host Python/pip/PyPy on the backend `PATH`; exact provider identity matched across sessions ([restart report](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/acceptance.json)). Native Windows/macOS provisioning, tamper/cancel/retry, downloaded uv digest, and selected-archive license integration remain | pending |
 | X3 | Candidate versions come from exact official standard-CPython wheel tags and the pinned stable provider catalog; the manager tries highest to lowest, selects the newest complete compatible resolution, and never treats network/provisioning failure as a reason to downgrade | CPython 3.14 preference when fully resolved; definite 3.14 dependency incompatibility falls to 3.13; prerelease/free-threaded/wrong-target and pre-3.10 artifact rejection; incomplete scan/provider failures remain typed inconclusive | pending |
 | X4 | Windows x64 and macOS arm64 discovery returns only exact official wheels whose tags match the provisioned native CPython; CPU/MPS/CUDA choices follow this contract | Native wheel fixtures, wrong-OS/architecture/interpreter rejection, live official-index scan on both native runners | pending |
 | X5 | Preview retains the exact distribution version, release/build, official wheel URL/hash, Python provider artifact identity, interpreter fingerprint, and complete dependencies; install stages and verifies that exact identity before publication | Linux x86_64 v2.14.0 CPU/Core preview (25 artifacts), install/identity/CPU-operation check, selection, and temporary-root cleanup passed with no host Python on child `PATH`; Windows/macOS native checks pending | pending |
-| X6 | Installed versions can be inspected, explicitly selected, started with health/protocol checks, and stopped by their owned generation; cancellation, timeout, RPC shutdown, and failed cleanup do not leak a resolver, installer, sidecar, interpreter provisioner, or unregistered runtime | Native lifecycle tests and real RPC health/generation-owned stop on Windows/macOS; Linux regression | pending |
+| X6 | Installed versions can be inspected, explicitly selected, started with health/protocol checks, and stopped by their owned generation; cancellation, timeout, RPC shutdown, and failed cleanup do not leak a resolver, installer, sidecar, interpreter provisioner, or unregistered runtime | Linux RPC restart preserved the active v2.14.0 CPU profile and managed interpreter, executed a fresh CPU tensor operation through the persisted venv, revalidated the retained RPC probe report, then passed protocol 3 sidecar trial, generation-owned stop, and graceful shutdown ([restart report](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/acceptance.json)); Windows/macOS native lifecycle acceptance remains | pending |
 | X7 | The same manager choices and lifecycle are reachable through packaged desktop controls and the existing RPC API; the user never has to choose Python, and the desktop offers no unsupported adapter | Preload boundary validation, composed desktop tests, native RPC integration, packaged desktop smoke with no Python on PATH on all declared targets | pending |
 
 Plan acceptance is `pending` until every required row is satisfied on its

@@ -299,3 +299,33 @@
   confirmed CPython 3.14.7 as the selected interpreter. They are retained for
   review but not yet added to release attribution. See the
   [target archive evidence index](reports/managed-python-license-collection/README.md).
+
+## 2026-09-25 — Linux managed Torch restart acceptance
+
+- Extended the native RPC acceptance to launch a fresh backend process against
+  the same launcher root after install, explicit selection, CPU probe, and
+  generation-owned sidecar stop. The second process verified the active Torch
+  version and managed CPU profile, then revalidated and compared ten CPython
+  identity fields across sessions, including provider archive digest, source
+  URL, catalog key, canonical executable path, and executable SHA-256.
+- After comparing interpreter identity, the restarted acceptance process ran
+  a new Torch 2.14.0 CPU tensor operation through the persisted venv interpreter
+  (`sum([1, 4, 9]) == 14`). The RPC probe endpoint then revalidated its retained
+  install-time CPU probe report and runtime context. The process repeated the
+  protocol 3 sidecar trial, stopped the sidecar by its generation, and shut
+  down gracefully. Both backend logs and install/resolution reports are
+  retained in
+  [Linux restart acceptance evidence](reports/v2.14.0-linux-cpu-rpc-restart-acceptance/README.md).
+  The selected CPython full-archive hash matches the already-retained Linux
+  license evidence.
+- On Linux x86_64 with managed CPython 3.14.7 and pinned uv 0.12.18, the full
+  two-session run passed; 36 acceptance fixtures, Ruff lint/format, and
+  `git diff --check` passed. This adds Linux restart evidence only. Native
+  Windows x64 and macOS arm64 installation/lifecycle acceptance remains open.
+- A fresh-root retry initially exceeded the acceptance script's 180-second
+  HTTP wait while uv was still extracting CPython 3.14.7. Release-option
+  discovery provisions Python before starting its 60-second wheel scan, while
+  the provider permits up to 300 seconds for interpreter installation. The
+  acceptance request budget is now 900 seconds to cover the bounded cold-start
+  stages; backend timeouts and product behavior are unchanged. The full
+  fresh-root run then passed and replaced the retained report files above.

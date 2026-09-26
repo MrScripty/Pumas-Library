@@ -15,12 +15,14 @@ import os
 from pathlib import Path
 import platform
 import re
+import selectors
 import shutil
 import signal
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 from urllib.parse import unquote, urlsplit
 import urllib.request
@@ -47,6 +49,7 @@ MAX_LICENSE_TOTAL_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 200_000
 MAX_UNCOMPRESSED_TAR_STREAM_BYTES = 2 * 1024 * 1024 * 1024
 DOWNLOAD_DEADLINE_SECONDS = 300
+RELEASE_OPTIONS_RPC_TIMEOUT_SECONDS = 900
 
 
 class HTTPSOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -164,6 +167,7 @@ class EvidenceCollectionFixture(unittest.TestCase):
             runtime.mkdir(parents=True)
             (runtime / "runtime.json").write_text("fixture runtime", encoding="utf-8")
             (root / "rpc.log").write_text("backend log", encoding="utf-8")
+            (root / "rpc-restart.log").write_text("restart log", encoding="utf-8")
             for name in INSTALL_REPORTS:
                 if name != "runtime.json":
                     (runtime / name).write_text(name, encoding="utf-8")
@@ -187,9 +191,17 @@ class EvidenceCollectionFixture(unittest.TestCase):
             collector.assert_called_once_with(root, output)
             self.assertEqual(
                 {item.name for item in output.iterdir()},
-                {"rpc.log", "acceptance.json", "managed-python-licenses", *INSTALL_REPORTS},
+                {
+                    "initial-backend-session.txt",
+                    "restart-backend-session.txt",
+                    "acceptance.json",
+                    "managed-python-licenses",
+                    *INSTALL_REPORTS,
+                },
             )
             self.assertEqual(json.loads((output / "acceptance.json").read_text()), result)
+            self.assertEqual((output / "initial-backend-session.txt").read_text(), "backend log")
+            self.assertEqual((output / "restart-backend-session.txt").read_text(), "restart log")
             manifest = json.loads(
                 (output / "managed-python-licenses" / "full-archive-manifest.json").read_text()
             )
@@ -202,10 +214,26 @@ class EvidenceCollectionFixture(unittest.TestCase):
             runtime = root / "torch-versions" / TAG
             runtime.mkdir(parents=True)
             (root / "rpc.log").write_text("failure log", encoding="utf-8")
+            (root / "rpc-restart.log").write_text("restart failure", encoding="utf-8")
+            (root / "restart-cpu-operation-failure.json").write_text(
+                '{"failure_type":"CalledProcessError"}', encoding="utf-8"
+            )
             (runtime / "runtime.json").write_text("partial", encoding="utf-8")
             collect_evidence(root, output, {"success": False}, install_succeeded=False)
             self.assertEqual(
-                {item.name for item in output.iterdir()}, {"rpc.log", "acceptance.json"}
+                {item.name for item in output.iterdir()},
+                {
+                    "initial-backend-session.txt",
+                    "restart-backend-session.txt",
+                    "restart-cpu-operation-failure.json",
+                    "acceptance.json",
+                },
+            )
+            self.assertEqual(
+                json.loads((output / "restart-cpu-operation-failure.json").read_text())[
+                    "failure_type"
+                ],
+                "CalledProcessError",
             )
 
     def test_existing_destination_is_not_modified(self) -> None:
@@ -231,6 +259,631 @@ class LauncherRootFinalizationFixture(unittest.TestCase):
                 (root / "rpc.log").write_text(label, encoding="utf-8")
                 finalize_launcher_root(root, cleanup_safe=cleanup_safe)
                 self.assertEqual(root.exists(), not cleanup_safe, label)
+
+
+class RestartAcceptanceFixture(unittest.TestCase):
+    def test_session_preserves_original_failure_when_stop_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            log_path = root / "rpc-restart.log"
+            with (
+                patch.object(subprocess, "Popen"),
+                patch.object(
+                    sys.modules[__name__],
+                    "wait_for_backend",
+                    side_effect=ValueError("startup failed"),
+                ),
+                patch.object(
+                    sys.modules[__name__], "stop_backend", side_effect=RuntimeError("stop failed")
+                ),
+            ):
+                with self.assertRaisesRegex(ValueError, "startup failed") as raised:
+                    run_backend_session(Path("/binary"), root, log_path, lambda _: None)
+            self.assertIn("stop failed", raised.exception.__notes__[0])
+            self.assertTrue(log_path.is_file())
+
+    def test_restart_checks_persisted_identity_and_repeats_runtime_trial(self) -> None:
+        first = {
+            "python": "python3.14",
+            "cpython_version": "3.14.7",
+            "provider": "uv",
+            "provider_version": "0.8.1",
+            "provider_archive_sha256": "a" * 64,
+            "target": "x86_64-unknown-linux-gnu",
+            "distribution_implementation": "CPython",
+            "distribution_catalog_key": "cpython-3.14.7-linux-x86_64-gnu",
+            "distribution_source_url": self.source_url(),
+            "executable_path": "/launcher/launcher-data/managed-python/python/one/python3.14",
+            "executable_sha256": "c" * 64,
+        }
+        calls = []
+
+        def fake_rpc(_base, method, params=None, timeout=120):
+            calls.append((method, params))
+            if method == "get_active_version":
+                return {"success": True, "version": TAG}
+            if method == "get_runtime_profiles_snapshot":
+                return {
+                    "success": True,
+                    "snapshot": {
+                        "profiles": [
+                            {
+                                "profile_id": PROFILE_ID,
+                                "provider": "torch",
+                                "provider_mode": "torch_serve",
+                                "management_mode": "managed",
+                                "enabled": True,
+                                "device": {"mode": "cpu"},
+                            }
+                        ]
+                    },
+                }
+            if method == "get_torch_runtime_probe":
+                return {
+                    "status": "passed",
+                    "core_status": "passed",
+                    "stale": False,
+                    "capabilities": {
+                        "torch_import": {"status": "passed", "version": "2.14.0+cpu"},
+                        "cpu_tensor": {"status": "passed"},
+                        "sidecar_app": {"status": "passed"},
+                    },
+                }
+            if method == "trial_torch_runtime":
+                return {
+                    "success": True,
+                    "startupStatus": "passed",
+                    "healthStatus": "passed",
+                    "protocol": 3,
+                    "startedByTrial": True,
+                    "generation": "2",
+                }
+            if method == "stop_runtime_profile_if_generation":
+                return {"success": True, "stopped": True}
+            self.fail(method)
+
+        with (
+            patch.object(sys.modules[__name__], "rpc", side_effect=fake_rpc),
+            patch.object(
+                sys.modules[__name__],
+                "run_restart_cpu_operation",
+                side_effect=lambda _root: (
+                    calls.append(("cpu_operation", None))
+                    or {"version": "2.14.0+cpu", "device": "cpu", "result": 14}
+                ),
+            ) as cpu_operation,
+            patch.object(
+                sys.modules[__name__],
+                "managed_python_evidence",
+                return_value={
+                    key: first[key]
+                    for key in (
+                        "cpython_version",
+                        "provider",
+                        "provider_version",
+                        "provider_archive_sha256",
+                        "target",
+                        "distribution_implementation",
+                        "distribution_catalog_key",
+                        "distribution_source_url",
+                        "executable_path",
+                        "executable_sha256",
+                    )
+                },
+            ) as evidence,
+        ):
+            restart = exercise_restart("http://second", Path("/launcher"), first)
+        evidence.assert_called_once_with(Path("/launcher"), {"python": "python3.14"})
+        cpu_operation.assert_called_once_with(Path("/launcher"))
+        self.assertEqual(restart["active_version"], TAG)
+        self.assertEqual(restart["profile_id"], PROFILE_ID)
+        self.assertEqual(restart["sidecar_generation"], "2")
+        self.assertEqual(restart["interpreter"], "persisted")
+        self.assertEqual(
+            restart["cpu_operation"], {"version": "2.14.0+cpu", "device": "cpu", "result": 14}
+        )
+        self.assertEqual(
+            [method for method, _ in calls],
+            [
+                "get_active_version",
+                "get_runtime_profiles_snapshot",
+                "cpu_operation",
+                "get_torch_runtime_probe",
+                "trial_torch_runtime",
+                "stop_runtime_profile_if_generation",
+            ],
+        )
+
+    def test_fresh_cpu_operation_uses_isolated_persisted_venv(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = (
+                root / "torch-versions" / TAG / "venv" / "Scripts" / "python.exe"
+                if os.name == "nt"
+                else root / "torch-versions" / TAG / "venv" / "bin" / "python"
+            )
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            response = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout='{"version":"2.14.0+cpu","device":"cpu","result":14}',
+                stderr="",
+            )
+            with patch.object(
+                sys.modules[__name__], "run_bounded_subprocess", return_value=response
+            ) as run:
+                proof = run_restart_cpu_operation(root)
+            self.assertEqual(proof, {"version": "2.14.0+cpu", "device": "cpu", "result": 14})
+            args, kwargs = run.call_args
+            self.assertEqual(args[0][:2], [str(executable), "-I"])
+            self.assertEqual(kwargs["cwd"], root)
+            self.assertEqual(kwargs["env"], backend_environment(root))
+            self.assertLessEqual(kwargs["timeout"], 60)
+
+    def test_fresh_cpu_operation_rejects_wrong_result(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = (
+                root / "torch-versions" / TAG / "venv" / "Scripts" / "python.exe"
+                if os.name == "nt"
+                else root / "torch-versions" / TAG / "venv" / "bin" / "python"
+            )
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            for output in (
+                {"version": "2.13.0", "device": "cpu", "result": 14},
+                {"version": "2.14.0+cpu", "device": "cuda:0", "result": 14},
+                {"version": "2.14.0+cpu", "device": "cpu", "result": 13},
+            ):
+                with (
+                    self.subTest(output=output),
+                    patch.object(
+                        sys.modules[__name__],
+                        "run_bounded_subprocess",
+                        return_value=subprocess.CompletedProcess(
+                            args=[], returncode=0, stdout=json.dumps(output), stderr=""
+                        ),
+                    ),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "fresh CPU tensor operation"):
+                        run_restart_cpu_operation(root)
+                    report = json.loads((root / "restart-cpu-operation-failure.json").read_text())
+                    self.assertEqual(report["failure_type"], "RuntimeError")
+                    self.assertEqual(json.loads(report["stdout_tail"]), output)
+
+    def test_fresh_cpu_operation_retains_bounded_subprocess_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = (
+                root / "torch-versions" / TAG / "venv" / "Scripts" / "python.exe"
+                if os.name == "nt"
+                else root / "torch-versions" / TAG / "venv" / "bin" / "python"
+            )
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            failure = subprocess.CalledProcessError(
+                1,
+                [str(executable)],
+                output=b"x" * 5000 + b"stdout-end",
+                stderr=b"y" * 5000 + b"ImportError: missing DLL",
+            )
+            with patch.object(sys.modules[__name__], "run_bounded_subprocess", side_effect=failure):
+                with self.assertRaises(subprocess.CalledProcessError) as raised:
+                    run_restart_cpu_operation(root)
+            report = json.loads((root / "restart-cpu-operation-failure.json").read_text())
+            self.assertEqual(report["failure_type"], "CalledProcessError")
+            self.assertEqual(report["returncode"], 1)
+            self.assertLessEqual(len(report["stdout_tail"]), 2048)
+            self.assertLessEqual(len(report["stderr_tail"]), 2048)
+            self.assertTrue(report["stdout_tail"].endswith("stdout-end"))
+            self.assertTrue(report["stderr_tail"].endswith("ImportError: missing DLL"))
+            self.assertIn("restart-cpu-operation-failure.json", raised.exception.__notes__[0])
+
+    def test_fresh_cpu_operation_retains_timeout_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = (
+                root / "torch-versions" / TAG / "venv" / "Scripts" / "python.exe"
+                if os.name == "nt"
+                else root / "torch-versions" / TAG / "venv" / "bin" / "python"
+            )
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            failure = subprocess.TimeoutExpired(
+                [str(executable)], 60, output=b"partial stdout", stderr=b"partial stderr"
+            )
+            with patch.object(sys.modules[__name__], "run_bounded_subprocess", side_effect=failure):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    run_restart_cpu_operation(root)
+            report = json.loads((root / "restart-cpu-operation-failure.json").read_text())
+            self.assertEqual(report["failure_type"], "TimeoutExpired")
+            self.assertEqual(report["timeout_seconds"], 60)
+            self.assertEqual(report["stdout_tail"], "partial stdout")
+            self.assertEqual(report["stderr_tail"], "partial stderr")
+
+    def test_bounded_runner_drains_large_output_and_preserves_tails(self) -> None:
+        command = [
+            sys.executable,
+            "-c",
+            "import os; os.write(1,b'a'*131072+b'STDOUT_END'); "
+            "os.write(2,b'b'*131072+b'STDERR_END')",
+        ]
+        result = run_bounded_subprocess(command, cwd=Path.cwd(), env=os.environ.copy(), timeout=5)
+        self.assertIsInstance(result, subprocess.CompletedProcess)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(result.stdout), 2048)
+        self.assertEqual(len(result.stderr), 2048)
+        self.assertTrue(result.stdout.endswith(b"STDOUT_END"))
+        self.assertTrue(result.stderr.endswith(b"STDERR_END"))
+
+        with self.assertRaises(subprocess.CalledProcessError) as raised:
+            run_bounded_subprocess(
+                [sys.executable, "-c", "import os,sys; os.write(2,b'failure'); sys.exit(7)"],
+                cwd=Path.cwd(),
+                env=os.environ.copy(),
+                timeout=5,
+            )
+        self.assertEqual(raised.exception.returncode, 7)
+        self.assertEqual(raised.exception.stderr, b"failure")
+
+    def test_bounded_runner_kills_and_reaps_on_timeout(self) -> None:
+        start = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired) as raised:
+            run_bounded_subprocess(
+                [
+                    sys.executable,
+                    "-c",
+                    "import os,time; os.write(1,b'partial stdout'); "
+                    "os.write(2,b'partial stderr'); time.sleep(10)",
+                ],
+                cwd=Path.cwd(),
+                env=os.environ.copy(),
+                timeout=0.25,
+            )
+        self.assertLess(time.monotonic() - start, 3)
+        self.assertEqual(raised.exception.stdout, b"partial stdout")
+        self.assertEqual(raised.exception.stderr, b"partial stderr")
+
+    def test_bounded_runner_owns_descendant_with_inherited_pipes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = Path(temporary) / "escaped-child.txt"
+            descendant = (
+                "import pathlib,sys,time; time.sleep(1); "
+                "pathlib.Path(sys.argv[1]).write_text('escaped')"
+            )
+            parent = (
+                "import os,subprocess,sys; "
+                "subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2]],"
+                "stdout=sys.stdout,stderr=sys.stderr); "
+                "os.write(1,b'parent-tail'); os.write(2,b'parent-error')"
+            )
+            before = {thread.ident for thread in threading.enumerate()}
+            result = run_bounded_subprocess(
+                [sys.executable, "-c", parent, descendant, str(marker)],
+                cwd=Path(temporary),
+                env=os.environ.copy(),
+                timeout=3,
+            )
+            self.assertEqual(result.stdout, b"parent-tail")
+            self.assertEqual(result.stderr, b"parent-error")
+            self.assertEqual({thread.ident for thread in threading.enumerate()} - before, set())
+            time.sleep(1.2)
+            self.assertFalse(marker.exists(), "descendant outlived bounded subprocess")
+
+    def test_bounded_runner_timeout_kills_descendant_and_retains_partial_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = Path(temporary) / "timed-out-child.txt"
+            descendant = (
+                "import pathlib,sys,time; time.sleep(1); "
+                "pathlib.Path(sys.argv[1]).write_text('escaped')"
+            )
+            parent = (
+                "import os,subprocess,sys,time; "
+                "subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[2]],"
+                "stdout=sys.stdout,stderr=sys.stderr); "
+                "os.write(1,b'partial-out'); os.write(2,b'partial-err'); time.sleep(10)"
+            )
+            before = {thread.ident for thread in threading.enumerate()}
+            with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                run_bounded_subprocess(
+                    [sys.executable, "-c", parent, descendant, str(marker)],
+                    cwd=Path(temporary),
+                    env=os.environ.copy(),
+                    timeout=0.25,
+                )
+            self.assertEqual(raised.exception.stdout, b"partial-out")
+            self.assertEqual(raised.exception.stderr, b"partial-err")
+            self.assertEqual({thread.ident for thread in threading.enumerate()} - before, set())
+            time.sleep(1.2)
+            self.assertFalse(marker.exists(), "timed-out descendant outlived bounded subprocess")
+
+    @unittest.skipIf(os.name == "nt", "POSIX detached process group fixture")
+    def test_bounded_runner_returns_promptly_when_descendant_escapes_group(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            pid_path = Path(temporary) / "detached.pid"
+            descendant = "import time; time.sleep(3)"
+            parent = (
+                "import os,pathlib,subprocess,sys,time; "
+                "child=subprocess.Popen([sys.executable,'-c',sys.argv[1]],"
+                "stdout=sys.stdout,stderr=sys.stderr,start_new_session=True); "
+                "pathlib.Path(sys.argv[2]).write_text(str(child.pid)); "
+                "os.write(1,b'parent-tail'); os.write(2,b'parent-error'); time.sleep(10)"
+            )
+            before = {thread.ident for thread in threading.enumerate()}
+            start = time.monotonic()
+            try:
+                with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                    run_bounded_subprocess(
+                        [sys.executable, "-c", parent, descendant, str(pid_path)],
+                        cwd=Path(temporary),
+                        env=os.environ.copy(),
+                        timeout=0.25,
+                    )
+                self.assertLess(time.monotonic() - start, 1.5)
+                self.assertIn(b"parent-tail", raised.exception.stdout)
+                self.assertIn(b"parent-error", raised.exception.stderr)
+                self.assertEqual({thread.ident for thread in threading.enumerate()} - before, set())
+            finally:
+                if pid_path.exists():
+                    try:
+                        os.kill(int(pid_path.read_text()), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
+    def test_bounded_runner_cleans_up_if_reader_thread_cannot_start(self) -> None:
+        spawned = []
+        real_popen = subprocess.Popen
+        real_start = threading.Thread.start
+        starts = 0
+
+        def track_process(*args, **kwargs):
+            kwargs["creationflags"] = 0
+            kwargs["start_new_session"] = os.name != "nt"
+            process = real_popen(*args, **kwargs)
+            spawned.append(process)
+            return process
+
+        def fail_second_start(reader):
+            nonlocal starts
+            starts += 1
+            if starts == 2:
+                raise RuntimeError("reader start failed")
+            return real_start(reader)
+
+        class FakeJob:
+            def admit_and_resume(self, _process):
+                pass
+
+            def close(self):
+                if spawned and spawned[0].poll() is None:
+                    spawned[0].kill()
+
+        with (
+            patch.object(sys.modules[__name__], "native_windows", return_value=True),
+            patch.object(sys.modules[__name__], "windows_kill_job", return_value=FakeJob()),
+            patch.object(subprocess, "Popen", side_effect=track_process),
+            patch.object(threading.Thread, "start", fail_second_start),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "reader start failed"):
+                run_bounded_subprocess(
+                    [sys.executable, "-c", "import time; time.sleep(10)"],
+                    cwd=Path.cwd(),
+                    env=os.environ.copy(),
+                    timeout=5,
+                )
+        self.assertEqual(len(spawned), 1)
+        self.assertIsNotNone(spawned[0].poll())
+        self.assertTrue(spawned[0].stdout.closed)
+        self.assertTrue(spawned[0].stderr.closed)
+
+    def test_windows_admission_precedes_resume_and_reader_start(self) -> None:
+        events = []
+
+        class FakeProcess:
+            pid = 123
+            returncode = 0
+
+            def __init__(self):
+                self.stdout = io.BytesIO(b"output")
+                self.stderr = io.BytesIO(b"")
+
+            def wait(self, timeout=None):
+                events.append("wait")
+                return 0
+
+            def poll(self):
+                return 0
+
+        class FakeJob:
+            def admit_and_resume(self, _process):
+                events.append("admit_resume")
+
+            def close(self):
+                events.append("job_close")
+
+        def fake_job():
+            events.append("job_create")
+            return FakeJob()
+
+        def fake_spawn(*_args, **kwargs):
+            events.append("spawn")
+            self.assertEqual(kwargs["creationflags"], 0x4)
+            self.assertFalse(kwargs["start_new_session"])
+            return FakeProcess()
+
+        with (
+            patch.object(sys.modules[__name__], "native_windows", return_value=True),
+            patch.object(sys.modules[__name__], "windows_kill_job", side_effect=fake_job),
+            patch.object(subprocess, "Popen", side_effect=fake_spawn),
+        ):
+            result = run_bounded_subprocess(["fake-python"], cwd=Path.cwd(), env={}, timeout=1)
+        self.assertEqual(result.stdout, b"output")
+        self.assertEqual(events[:4], ["job_create", "spawn", "admit_resume", "wait"])
+        self.assertIn("job_close", events[4:])
+
+    def test_windows_admission_failure_reaps_suspended_child(self) -> None:
+        events = []
+
+        class FakeProcess:
+            pid = 123
+
+            def __init__(self):
+                self.returncode = None
+                self.stdout = io.BytesIO()
+                self.stderr = io.BytesIO()
+
+            def poll(self):
+                return self.returncode
+
+            def kill(self):
+                events.append("kill")
+                self.returncode = -9
+
+            def wait(self, timeout=None):
+                events.append("reap")
+                return self.returncode
+
+        class FakeJob:
+            def admit_and_resume(self, _process):
+                events.append("admit")
+                raise RuntimeError("admission failed")
+
+            def close(self):
+                events.append("job_close")
+
+        process = FakeProcess()
+        with (
+            patch.object(sys.modules[__name__], "native_windows", return_value=True),
+            patch.object(sys.modules[__name__], "windows_kill_job", return_value=FakeJob()),
+            patch.object(subprocess, "Popen", return_value=process),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "admission failed"):
+                run_bounded_subprocess(["fake-python"], cwd=Path.cwd(), env={}, timeout=1)
+        self.assertEqual(events, ["admit", "job_close", "kill", "reap"])
+        self.assertTrue(process.stdout.closed)
+        self.assertTrue(process.stderr.closed)
+
+    def test_failed_fresh_cpu_operation_prevents_probe_and_trial(self) -> None:
+        first = {
+            "python": "python3.14",
+            "cpython_version": "3.14.7",
+            "provider": "uv",
+            "provider_version": "0.8.1",
+            "provider_archive_sha256": "a" * 64,
+            "target": "x86_64-unknown-linux-gnu",
+            "distribution_implementation": "CPython",
+            "distribution_catalog_key": "cpython-3.14.7-linux-x86_64-gnu",
+            "distribution_source_url": self.source_url(),
+            "executable_path": "/launcher/launcher-data/managed-python/python/one/python3.14",
+            "executable_sha256": "c" * 64,
+        }
+        responses = {
+            "get_active_version": {"success": True, "version": TAG},
+            "get_runtime_profiles_snapshot": {
+                "success": True,
+                "snapshot": {
+                    "profiles": [
+                        {
+                            "profile_id": PROFILE_ID,
+                            "provider": "torch",
+                            "provider_mode": "torch_serve",
+                            "management_mode": "managed",
+                            "enabled": True,
+                            "device": {"mode": "cpu"},
+                        }
+                    ]
+                },
+            },
+        }
+        with (
+            patch.object(
+                sys.modules[__name__],
+                "rpc",
+                side_effect=lambda _, method, *args, **kwargs: responses[method],
+            ) as rpc_mock,
+            patch.object(
+                sys.modules[__name__],
+                "managed_python_evidence",
+                return_value={key: value for key, value in first.items() if key != "python"},
+            ),
+            patch.object(
+                sys.modules[__name__],
+                "run_restart_cpu_operation",
+                side_effect=RuntimeError("fresh CPU tensor operation failed"),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "fresh CPU tensor operation"):
+                exercise_restart("http://second", Path("/launcher"), first)
+        self.assertEqual(rpc_mock.call_count, 2)
+
+    def test_restart_rejects_interpreter_drift_before_runtime_trial(self) -> None:
+        first = {
+            "python": "python3.14",
+            "cpython_version": "3.14.7",
+            "provider": "uv",
+            "provider_version": "0.8.1",
+            "provider_archive_sha256": "a" * 64,
+            "target": "x86_64-unknown-linux-gnu",
+            "distribution_implementation": "CPython",
+            "distribution_catalog_key": "cpython-3.14.7-linux-x86_64-gnu",
+            "distribution_source_url": self.source_url(),
+            "executable_path": "/launcher/launcher-data/managed-python/python/one/python3.14",
+            "executable_sha256": "c" * 64,
+        }
+        responses = {
+            "get_active_version": {"success": True, "version": TAG},
+            "get_runtime_profiles_snapshot": {
+                "success": True,
+                "snapshot": {
+                    "profiles": [
+                        {
+                            "profile_id": PROFILE_ID,
+                            "provider": "torch",
+                            "provider_mode": "torch_serve",
+                            "management_mode": "managed",
+                            "enabled": True,
+                            "device": {"mode": "cpu"},
+                        }
+                    ]
+                },
+            },
+        }
+        changes = {
+            "provider_archive_sha256": "b" * 64,
+            "executable_sha256": "d" * 64,
+            "executable_path": "/launcher/launcher-data/managed-python/python/two/python3.14",
+            "distribution_source_url": self.source_url().replace("20260901", "20260902"),
+            "distribution_catalog_key": "cpython-3.14.7-linux-aarch64-gnu",
+        }
+        for key, changed in changes.items():
+            with (
+                self.subTest(key=key),
+                patch.object(
+                    sys.modules[__name__],
+                    "rpc",
+                    side_effect=lambda _, method, *args, **kwargs: responses[method],
+                ) as rpc_mock,
+                patch.object(
+                    sys.modules[__name__],
+                    "managed_python_evidence",
+                    return_value={
+                        **{key: value for key, value in first.items() if key != "python"},
+                        key: changed,
+                    },
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "persisted managed Python identity"):
+                    exercise_restart("http://second", Path("/launcher"), first)
+                self.assertEqual(rpc_mock.call_count, 2)
+
+    @staticmethod
+    def source_url() -> str:
+        return (
+            "https://releases.astral.sh/github/python-build-standalone/releases/download/"
+            "20260901/cpython-3.14.7%2B20260901-x86_64-unknown-linux-gnu-"
+            "install_only_stripped.tar.gz"
+        )
 
 
 class FullArchiveLicenseFixture(unittest.TestCase):
@@ -1113,9 +1766,16 @@ def export_full_archive_licenses(root: Path, output: Path) -> None:
 
 def collect_evidence(root: Path, output: Path, result: dict, *, install_succeeded: bool) -> None:
     output.mkdir(parents=True, exist_ok=False)
-    log = root / "rpc.log"
-    if log.is_file():
-        shutil.copyfile(log, output / log.name)
+    for source_name, evidence_name in (
+        ("rpc.log", "initial-backend-session.txt"),
+        ("rpc-restart.log", "restart-backend-session.txt"),
+    ):
+        log = root / source_name
+        if log.is_file():
+            shutil.copyfile(log, output / evidence_name)
+    cpu_failure = root / "restart-cpu-operation-failure.json"
+    if cpu_failure.is_file():
+        shutil.copyfile(cpu_failure, output / cpu_failure.name)
     if install_succeeded:
         runtime = root / "torch-versions" / TAG
         for name in INSTALL_REPORTS:
@@ -1170,16 +1830,23 @@ def managed_python_evidence(root: Path, preview: dict) -> dict:
     )
     python_version = distribution.get("version")
     target = distribution.get("targetTriple")
+    source_url = distribution.get("sourceUrl")
+    catalog_key = distribution.get("catalogKey")
     require(
         distribution.get("implementation") == "CPython"
         and isinstance(python_version, str)
         and re.fullmatch(r"\d+\.\d+\.\d+", python_version) is not None
         and "python" + ".".join(python_version.split(".")[:2]) == preview["python"]
         and isinstance(target, str)
-        and bool(target),
+        and bool(target)
+        and isinstance(source_url, str)
+        and isinstance(catalog_key, str)
+        and re.fullmatch(rf"cpython-{re.escape(python_version)}-[a-z0-9_-]+", catalog_key)
+        is not None,
         "managed CPython distribution",
         distribution,
     )
+    full_archive_name(source_url, python_version, target)
     path_value = executable.get("path")
     recorded_hash = executable.get("sha256")
     require(
@@ -1247,11 +1914,388 @@ def managed_python_evidence(root: Path, preview: dict) -> dict:
         "provider_version": version,
         "provider_archive_sha256": archive_hash,
         "target": target,
+        "distribution_implementation": "CPython",
+        "distribution_catalog_key": catalog_key,
+        "distribution_source_url": source_url,
+        "executable_path": str(canonical),
+        "executable_sha256": recorded_hash,
     }
 
 
+def native_windows() -> bool:
+    return os.name == "nt"
+
+
+def windows_kill_job():
+    """Create a kill-on-close Job before starting a suspended Windows child."""
+    import ctypes
+    from ctypes import wintypes
+
+    class IoCounters(ctypes.Structure):
+        _fields_ = [
+            ("read_operations", ctypes.c_ulonglong),
+            ("write_operations", ctypes.c_ulonglong),
+            ("other_operations", ctypes.c_ulonglong),
+            ("read_bytes", ctypes.c_ulonglong),
+            ("write_bytes", ctypes.c_ulonglong),
+            ("other_bytes", ctypes.c_ulonglong),
+        ]
+
+    class BasicLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("per_process_user_time", ctypes.c_longlong),
+            ("per_job_user_time", ctypes.c_longlong),
+            ("limit_flags", wintypes.DWORD),
+            ("minimum_working_set_size", ctypes.c_size_t),
+            ("maximum_working_set_size", ctypes.c_size_t),
+            ("active_process_limit", wintypes.DWORD),
+            ("affinity", ctypes.c_size_t),
+            ("priority_class", wintypes.DWORD),
+            ("scheduling_class", wintypes.DWORD),
+        ]
+
+    class ExtendedLimitInformation(ctypes.Structure):
+        _fields_ = [
+            ("basic", BasicLimitInformation),
+            ("io", IoCounters),
+            ("process_memory_limit", ctypes.c_size_t),
+            ("job_memory_limit", ctypes.c_size_t),
+            ("peak_process_memory_used", ctypes.c_size_t),
+            ("peak_job_memory_used", ctypes.c_size_t),
+        ]
+
+    class ThreadEntry(ctypes.Structure):
+        _fields_ = [
+            ("dw_size", wintypes.DWORD),
+            ("usage", wintypes.DWORD),
+            ("thread_id", wintypes.DWORD),
+            ("owner_process_id", wintypes.DWORD),
+            ("base_priority", wintypes.LONG),
+            ("delta_priority", wintypes.LONG),
+            ("flags", wintypes.DWORD),
+        ]
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+    kernel.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+    ]
+    kernel.SetInformationJobObject.restype = wintypes.BOOL
+    kernel.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel.AssignProcessToJobObject.restype = wintypes.BOOL
+    kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+    kernel.Thread32First.argtypes = [wintypes.HANDLE, ctypes.POINTER(ThreadEntry)]
+    kernel.Thread32First.restype = wintypes.BOOL
+    kernel.Thread32Next.argtypes = [wintypes.HANDLE, ctypes.POINTER(ThreadEntry)]
+    kernel.Thread32Next.restype = wintypes.BOOL
+    kernel.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenThread.restype = wintypes.HANDLE
+    kernel.ResumeThread.argtypes = [wintypes.HANDLE]
+    kernel.ResumeThread.restype = wintypes.DWORD
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.CreateJobObjectW(None, None)
+    if not handle:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        limits = ExtendedLimitInformation()
+        limits.basic.limit_flags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel.SetInformationJobObject(
+            handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+
+    class Job:
+        def __init__(self):
+            self.closed = False
+
+        def admit_and_resume(self, process: subprocess.Popen[bytes]) -> None:
+            if not kernel.AssignProcessToJobObject(handle, wintypes.HANDLE(int(process._handle))):
+                raise ctypes.WinError(ctypes.get_last_error())
+            snapshot = kernel.CreateToolhelp32Snapshot(0x4, 0)  # TH32CS_SNAPTHREAD
+            if snapshot == ctypes.c_void_p(-1).value:
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                entry = ThreadEntry()
+                entry.dw_size = ctypes.sizeof(ThreadEntry)
+                found = []
+                has_entry = kernel.Thread32First(snapshot, ctypes.byref(entry))
+                while has_entry:
+                    if entry.owner_process_id == process.pid:
+                        found.append(entry.thread_id)
+                    has_entry = kernel.Thread32Next(snapshot, ctypes.byref(entry))
+            finally:
+                kernel.CloseHandle(snapshot)
+            if len(found) != 1:
+                raise RuntimeError("Suspended Windows child did not have one initial thread")
+            thread = kernel.OpenThread(0x2, False, found[0])  # THREAD_SUSPEND_RESUME
+            if not thread:
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                previous_count = kernel.ResumeThread(thread)
+                if previous_count != 1:
+                    raise RuntimeError("Could not resume the suspended Windows child")
+            finally:
+                kernel.CloseHandle(thread)
+
+        def close(self) -> None:
+            if not self.closed:
+                self.closed = True
+                if not kernel.CloseHandle(handle):
+                    raise ctypes.WinError(ctypes.get_last_error())
+
+    return Job()
+
+
+def run_bounded_posix_subprocess(
+    args: list[str], *, cwd: Path, env: dict[str, str], timeout: float
+) -> subprocess.CompletedProcess[bytes]:
+    """Drain POSIX pipes without reader threads or unbounded buffering."""
+    process = subprocess.Popen(
+        args,
+        cwd=cwd,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    stdout_tail = bytearray()
+    stderr_tail = bytearray()
+    streams = ((process.stdout, stdout_tail), (process.stderr, stderr_tail))
+    selector = None
+    timed_out = False
+    open_pipes = False
+
+    def drain_ready(wait_seconds: float) -> None:
+        for key, _ in selector.select(wait_seconds):
+            retained = key.data
+            try:
+                chunk = os.read(key.fd, 2048)
+            except BlockingIOError:
+                continue
+            if chunk:
+                retained[:] = (retained + chunk)[-2048:]
+            else:
+                selector.unregister(key.fileobj)
+
+    try:
+        selector = selectors.DefaultSelector()
+        for stream, retained in streams:
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, retained)
+        deadline = time.monotonic() + timeout
+        while process.poll() is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                break
+            drain_ready(min(remaining, 0.05))
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+        grace_deadline = time.monotonic() + 0.25
+        while selector.get_map() and time.monotonic() < grace_deadline:
+            drain_ready(max(0, grace_deadline - time.monotonic()))
+        open_pipes = bool(selector.get_map())
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        if selector is not None:
+            selector.close()
+        for stream, _ in streams:
+            if stream is not None:
+                stream.close()
+    stdout = bytes(stdout_tail)
+    stderr = bytes(stderr_tail)
+    if timed_out:
+        raise subprocess.TimeoutExpired(args, timeout, output=stdout, stderr=stderr)
+    if open_pipes:
+        error = RuntimeError("Owned subprocess exited but output pipes remained open")
+        error.stdout = stdout
+        error.stderr = stderr
+        raise error
+    if process.returncode != 0:
+        raise subprocess.CalledProcessError(process.returncode, args, output=stdout, stderr=stderr)
+    return subprocess.CompletedProcess(args, process.returncode, stdout=stdout, stderr=stderr)
+
+
+def run_bounded_subprocess(
+    args: list[str], *, cwd: Path, env: dict[str, str], timeout: float
+) -> subprocess.CompletedProcess[bytes]:
+    """Drain both child pipes, retaining only their last 2048 bytes."""
+    windows = native_windows()
+    if not windows:
+        return run_bounded_posix_subprocess(args, cwd=cwd, env=env, timeout=timeout)
+    job = windows_kill_job() if windows else None
+    try:
+        process = subprocess.Popen(
+            args,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=not windows,
+            creationflags=0x4 if windows else 0,  # CREATE_SUSPENDED before Job admission
+        )
+    except BaseException:
+        if job is not None:
+            job.close()
+        raise
+    stdout_tail = bytearray()
+    stderr_tail = bytearray()
+
+    def drain(stream, retained: bytearray) -> None:
+        with stream:
+            read_partial = getattr(stream, "read1", stream.read)
+            while chunk := read_partial(2048):
+                retained[:] = (retained + chunk)[-2048:]
+
+    readers = [
+        threading.Thread(target=drain, args=(process.stdout, stdout_tail), daemon=True),
+        threading.Thread(target=drain, args=(process.stderr, stderr_tail), daemon=True),
+    ]
+    started_readers = []
+    timed_out = False
+    try:
+        if job is not None:
+            job.admit_and_resume(process)
+        for reader in readers:
+            reader.start()
+            started_readers.append(reader)
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+    finally:
+        try:
+            if job is not None:
+                job.close()
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        finally:
+            try:
+                if process.poll() is None:
+                    process.kill()
+            except ProcessLookupError:
+                pass
+            process.wait()
+            for reader in started_readers:
+                reader.join(timeout=2)
+            for stream in (process.stdout, process.stderr):
+                if stream is not None and not stream.closed:
+                    stream.close()
+    stdout = bytes(stdout_tail)
+    stderr = bytes(stderr_tail)
+    if timed_out:
+        raise subprocess.TimeoutExpired(args, timeout, output=stdout, stderr=stderr)
+    if any(reader.is_alive() for reader in started_readers):
+        raise RuntimeError("Bounded subprocess output readers did not finish")
+    if process.returncode != 0:
+        raise subprocess.CalledProcessError(process.returncode, args, output=stdout, stderr=stderr)
+    return subprocess.CompletedProcess(args, process.returncode, stdout=stdout, stderr=stderr)
+
+
+def run_restart_cpu_operation(root: Path) -> dict:
+    runtime = root / "torch-versions" / TAG
+    venv_python = (
+        runtime / "venv" / "Scripts" / "python.exe"
+        if os.name == "nt"
+        else runtime / "venv" / "bin" / "python"
+    )
+    require(venv_python.is_file(), "persisted Torch venv Python", str(venv_python))
+    operation = None
+    try:
+        operation = run_bounded_subprocess(
+            [
+                str(venv_python),
+                "-I",
+                "-c",
+                "import json,torch; "
+                "tensor=torch.arange(1,4,dtype=torch.int64,device='cpu'); "
+                "print(json.dumps({'version':torch.__version__,'device':str(tensor.device),"
+                "'result':int((tensor*tensor).sum().item())}))",
+            ],
+            cwd=root,
+            env=backend_environment(root),
+            timeout=60,
+        )
+        proof = json.loads(operation.stdout)
+        require(
+            isinstance(proof, dict)
+            and isinstance(proof.get("version"), str)
+            and proof["version"].split("+")[0] == "2.14.0"
+            and proof.get("device") == "cpu"
+            and type(proof.get("result")) is int
+            and proof["result"] == 14,
+            "fresh CPU tensor operation after restart",
+            proof,
+        )
+        return {"version": proof["version"], "device": proof["device"], "result": proof["result"]}
+    except Exception as error:
+
+        def tail(value) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, bytes):
+                value = value.decode("utf-8", errors="replace")
+            return str(value)[-2048:]
+
+        stdout = getattr(error, "stdout", None)
+        stderr = getattr(error, "stderr", None)
+        if operation is not None:
+            stdout = operation.stdout
+            stderr = operation.stderr
+        report = {
+            "failure_type": type(error).__name__,
+            "message": tail(error)[-512:],
+            "returncode": getattr(error, "returncode", None),
+            "timeout_seconds": error.timeout
+            if isinstance(error, subprocess.TimeoutExpired)
+            else None,
+            "stdout_tail": tail(stdout),
+            "stderr_tail": tail(stderr),
+        }
+        report_path = root / "restart-cpu-operation-failure.json"
+        try:
+            report_path.write_text(
+                json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            error.add_note(
+                f"Fresh CPU operation diagnostics: {report_path}; "
+                f"stderr tail: {report['stderr_tail'][-512:]}"
+            )
+        except OSError as report_error:
+            error.add_note(f"Could not retain CPU operation diagnostics: {report_error}")
+        raise
+
+
 def exercise(base: str, root: Path, state: dict) -> dict:
-    options = rpc(base, "get_torch_release_options", {"tag": TAG}, timeout=180)
+    options = rpc(
+        base,
+        "get_torch_release_options",
+        {"tag": TAG},
+        timeout=RELEASE_OPTIONS_RPC_TIMEOUT_SECONDS,
+    )
     require(
         options.get("tag") == TAG and options.get("completeScan") is True,
         "release options",
@@ -1363,6 +2407,95 @@ def exercise(base: str, root: Path, state: dict) -> dict:
     }
 
 
+def exercise_restart(base: str, root: Path, first: dict) -> dict:
+    active = rpc(base, "get_active_version", {"appId": "torch"})
+    require(
+        active.get("success") is True and active.get("version") == TAG,
+        "persisted active Torch version after restart",
+        active,
+    )
+    snapshot = rpc(base, "get_runtime_profiles_snapshot")
+    profiles = snapshot.get("snapshot", {}).get("profiles", [])
+    matching = [profile for profile in profiles if profile.get("profile_id") == PROFILE_ID]
+    require(
+        snapshot.get("success") is True
+        and len(matching) == 1
+        and matching[0].get("provider") == "torch"
+        and matching[0].get("provider_mode") == "torch_serve"
+        and matching[0].get("management_mode") == "managed"
+        and matching[0].get("enabled") is True
+        and matching[0].get("device", {}).get("mode") == "cpu",
+        "persisted managed CPU profile after restart",
+        snapshot,
+    )
+    python_evidence = managed_python_evidence(root, {"python": first["python"]})
+    identity_keys = (
+        "cpython_version",
+        "provider",
+        "provider_version",
+        "provider_archive_sha256",
+        "target",
+        "distribution_implementation",
+        "distribution_catalog_key",
+        "distribution_source_url",
+        "executable_path",
+        "executable_sha256",
+    )
+    require(
+        all(python_evidence[key] == first[key] for key in identity_keys),
+        "persisted managed Python identity after restart",
+        python_evidence,
+    )
+    cpu_operation = run_restart_cpu_operation(root)
+    probe = rpc(base, "get_torch_runtime_probe", {"tag": TAG}, timeout=60)
+    capabilities = probe.get("capabilities", {})
+    require(
+        probe.get("status") == "passed"
+        and probe.get("core_status") == "passed"
+        and probe.get("stale") is False
+        and capabilities.get("torch_import", {}).get("status") == "passed"
+        and capabilities.get("torch_import", {}).get("version", "").split("+")[0] == "2.14.0"
+        and capabilities.get("cpu_tensor", {}).get("status") == "passed"
+        and capabilities.get("sidecar_app", {}).get("status") == "passed",
+        "Torch identity and CPU probe after restart",
+        probe,
+    )
+    trial = rpc(base, "trial_torch_runtime", {"tag": TAG, "profileId": PROFILE_ID}, timeout=100)
+    require(
+        trial.get("success") is True
+        and trial.get("startupStatus") == "passed"
+        and trial.get("healthStatus") == "passed"
+        and trial.get("protocol") == 3
+        and trial.get("startedByTrial") is True
+        and isinstance(trial.get("generation"), str)
+        and trial["generation"].isdigit(),
+        "Torch sidecar trial after restart",
+        trial,
+    )
+    stopped = rpc(
+        base,
+        "stop_runtime_profile_if_generation",
+        {"profileId": PROFILE_ID, "generation": trial["generation"]},
+    )
+    require(
+        stopped.get("success") is True and stopped.get("stopped") is True,
+        "generation stop after restart",
+        stopped,
+    )
+    return {
+        "active_version": active["version"],
+        "profile_id": matching[0]["profile_id"],
+        "interpreter": "persisted",
+        "managed_python": python_evidence,
+        "cpu_operation": cpu_operation,
+        "probe": "passed",
+        "trial": "passed",
+        "sidecar_protocol": trial["protocol"],
+        "sidecar_generation": trial["generation"],
+        "stop_result": stopped["stopped"],
+    }
+
+
 def stop_backend(process: subprocess.Popen[bytes]) -> None:
     if process.poll() is not None:
         require(process.returncode == 0, "backend exit", {"returncode": process.returncode})
@@ -1378,6 +2511,55 @@ def stop_backend(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=10)
         raise RuntimeError("Backend required forced shutdown") from error
     require(process.returncode == 0, "backend shutdown", {"returncode": process.returncode})
+
+
+def run_backend_session(binary: Path, root: Path, log_path: Path, action):
+    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    with log_path.open("wb") as log:
+        process = subprocess.Popen(
+            [str(binary), "--launcher-root", str(root), "--port", "0"],
+            cwd=root,
+            env=backend_environment(root),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            creationflags=creationflags,
+        )
+        base = None
+        try:
+            base = wait_for_backend(process, log_path)
+            return action(base)
+        finally:
+            primary_error = sys.exc_info()[1]
+            shutdown_error = None
+            try:
+                if base is not None:
+                    require(
+                        process.poll() is None,
+                        "backend remained live before shutdown",
+                        {"returncode": process.returncode},
+                    )
+                    shutdown = rpc(base, "shutdown", timeout=60)
+                    require(
+                        shutdown.get("status") == "shutting_down" and not shutdown.get("errors"),
+                        "managed profile shutdown",
+                        shutdown,
+                    )
+            except BaseException as error:
+                shutdown_error = error
+            try:
+                stop_backend(process)
+            except BaseException as error:
+                if primary_error is not None:
+                    primary_error.add_note(f"Backend stop also failed: {error}")
+                elif shutdown_error is not None:
+                    shutdown_error.add_note(f"Backend stop also failed: {error}")
+                else:
+                    raise
+            if shutdown_error is not None:
+                if primary_error is not None:
+                    primary_error.add_note(f"Backend shutdown also failed: {shutdown_error}")
+                else:
+                    raise shutdown_error
 
 
 def main() -> None:
@@ -1402,6 +2584,7 @@ def main() -> None:
                 WindowsCanonicalPathFixture,
                 EvidenceCollectionFixture,
                 LauncherRootFinalizationFixture,
+                RestartAcceptanceFixture,
                 FullArchiveLicenseFixture,
             )
         )
@@ -1427,39 +2610,21 @@ def main() -> None:
     success_ready = False
     try:
         (root / "tmp").mkdir()
-        log_path = root / "rpc.log"
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-        with log_path.open("wb") as log:
-            process = subprocess.Popen(
-                [str(binary), "--launcher-root", str(root), "--port", "0"],
-                cwd=root,
-                env=backend_environment(root),
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                creationflags=creationflags,
-            )
-            base = None
-            try:
-                base = wait_for_backend(process, log_path)
-                result = exercise(base, root, state)
-            finally:
-                try:
-                    if base is not None:
-                        require(
-                            process.poll() is None,
-                            "backend remained live before shutdown",
-                            {"returncode": process.returncode},
-                        )
-                        shutdown = rpc(base, "shutdown", timeout=60)
-                        require(
-                            shutdown.get("status") == "shutting_down"
-                            and not shutdown.get("errors"),
-                            "managed profile shutdown",
-                            shutdown,
-                        )
-                finally:
-                    stop_backend(process)
-        acceptance = {"success": True, "cleanup_safe": True, **result}
+        result = run_backend_session(
+            binary, root, root / "rpc.log", lambda base: exercise(base, root, state)
+        )
+        restart = run_backend_session(
+            binary,
+            root,
+            root / "rpc-restart.log",
+            lambda base: exercise_restart(base, root, result),
+        )
+        acceptance = {
+            "success": True,
+            "cleanup_safe": True,
+            **result,
+            "restart": {"same_launcher_root": True, "shutdown": "graceful", **restart},
+        }
         success_ready = True
     finally:
         if not success_ready:

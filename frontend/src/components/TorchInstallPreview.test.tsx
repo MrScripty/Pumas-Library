@@ -58,6 +58,46 @@ beforeEach(() => {
 });
 
 describe('TorchInstallPreview', () => {
+  it('announces loading and explains why installation is disabled until artifacts are checked', async () => {
+    let finishOptions!: (options: TorchRuntimeOptions) => void;
+    getPresetOptions.mockImplementationOnce(() => new Promise((resolve) => { finishOptions = resolve; }));
+    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
+
+    const region = screen.getByRole('region', { name: 'Torch installation preview for v2.14.0' });
+    expect(region).toHaveClass('text-[hsl(var(--text-primary))]');
+    expect(screen.getByText(/The first Install click opens this review.*may fetch package files into Pumas’ private cache.*Installing into the managed Torch environment starts only after you confirm Install below/)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading Torch choices…');
+    const install = screen.getByRole('button', { name: 'Install reviewed artifacts' });
+    expect(install).toBeDisabled();
+    expect(install).toHaveAccessibleDescription('Loading Torch choices before artifact review.');
+    expect(install).toHaveClass('text-[hsl(var(--text-primary))]', 'bg-[hsl(var(--accent-success)/0.14)]', 'hover:bg-[hsl(var(--accent-success)/0.22)]', 'active:bg-[hsl(var(--accent-success)/0.3)]', 'active:scale-[0.98]', 'focus-visible:outline-2');
+
+    await act(async () => { finishOptions(preset); });
+    const check = await screen.findByRole('button', { name: 'Check selected combination' });
+    expect(check).toBeEnabled();
+    expect(check).toHaveClass('hover:border-[hsl(var(--accent-success))]', 'active:scale-[0.98]', 'focus-visible:outline-2');
+    expect(install).toHaveAccessibleDescription('Check the selected combination to review its artifacts and enable installation.');
+    fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
+    await waitFor(() => expect(install).toBeEnabled());
+    expect(install).toHaveAccessibleDescription('Artifact check complete. Confirm to install this Torch version.');
+  });
+
+  it('shows an immediate visible status while checking official Torch artifacts', async () => {
+    getPreview.mockImplementationOnce(() => new Promise(() => undefined));
+    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
+
+    const check = await screen.findByRole('button', { name: 'Check selected combination' });
+    fireEvent.click(check);
+
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent(/Checking official Torch artifacts/);
+    expect(status.querySelector('.animate-spin')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Checking…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Install reviewed artifacts' })).toHaveAccessibleDescription(
+      'Checking the selected combination before installation.'
+    );
+  });
+
   it('uses the manager recommendation with core Torch and no required profile selectors', async () => {
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);

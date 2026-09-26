@@ -35,3 +35,22 @@ The exact machine-readable result is [acceptance.json](acceptance.json). This is
 a local candidate only and was not uploaded to the toolbar-linked public
 release. The successful CPU tensor operation does not qualify CUDA device use,
 Tuldok image generation, or Windows/macOS packaged installation.
+
+## 2026-09-26 interaction and readability follow-up
+
+The rebuilt local v0.7.0 AppImage (`34a5ffc88f5f42aa03bd9ed72ead37e5ca385838037247b74186a67d9d128aaf`)
+was opened at the same 800×1000 viewport. Browser-level pointer input on the
+Torch v2.14.0 Install row showed the green hover state, darker pressed state,
+and scale response. The review heading and Install text rendered white; the
+Install action explained why it remains disabled until the artifact check
+finishes. Clicking Check showed an animated status immediately:
+“Checking official Torch artifacts… Package files may download to Pumas’
+private cache.” The footer changed to the checking explanation at the same
+time. Frontend tests also verify the header and dialog announce
+“Installing Torch v2.14.0 · Starting installation…” before the first backend
+progress response, with a visible Cancel action.
+
+This follow-up verifies interaction feedback and text contrast in the rebuilt
+package. It did not complete a new artifact preview or Torch installation; the
+successful runtime installation above remains tied to the AppImage hash in
+`acceptance.json`. See the exact [follow-up evidence](ui-interaction-follow-up.json).

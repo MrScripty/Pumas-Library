@@ -146,7 +146,9 @@ describe('Header Component', () => {
 
   it('shows the pending and current Torch installation phase in the header', () => {
     const { rerender } = render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0" />);
-    expect(screen.getByText(/Starting installation…/)).toBeInTheDocument();
+    const pendingStatus = screen.getByRole('status');
+    expect(pendingStatus).toHaveTextContent('Installing Torch v2.14.0 · Starting installation…');
+    expect(pendingStatus).toHaveClass('text-xs', 'font-medium', 'text-[hsl(var(--text-primary))]');
     rerender(<Header {...defaultProps} appId="torch" installingTag="v2.14.0" installationProgress={{
       tag: 'v2.14.0', started_at: '2026-04-12T00:00:00Z', stage: 'setup', stage_progress: 0,
       overall_progress: 95, current_item: 'Creating managed Python environment',

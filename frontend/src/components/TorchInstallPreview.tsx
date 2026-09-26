@@ -219,15 +219,29 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     && Boolean(preview.python) && preview.python !== 'auto'
     && (!fixedPreset || preview.python === runtimeOptions.preset.python)
     && preview.adapter === adapter;
+  const installHint = previewExpired
+    ? 'This review expired. Check the selected combination again to install.'
+    : loadingOptions
+      ? 'Loading Torch choices before artifact review.'
+      : probing
+        ? 'Checking the selected combination before installation.'
+        : !build || !adapter
+          ? 'Choose a build and dependency profile, then check the combination.'
+          : !canInstall
+            ? 'Check the selected combination to review its artifacts and enable installation.'
+            : 'Artifact check complete. Confirm to install this Torch version.';
 
   return (
-    <section className="flex flex-1 min-h-0 max-h-[calc(80vh-5rem)] flex-col overflow-hidden" aria-label={`Torch installation preview for ${tag}`}>
+    <section className="flex flex-1 min-h-0 max-h-[calc(80vh-5rem)] flex-col overflow-hidden text-[hsl(var(--text-primary))]" aria-label={`Torch installation preview for ${tag}`}>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3">
-      <button type="button" onClick={onBack} className="flex items-center gap-2 text-sm text-[hsl(var(--text-secondary))]">
+      <button type="button" onClick={onBack} className="flex items-center gap-2 rounded text-sm text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] active:opacity-75 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[hsl(var(--accent-success))]">
         <ArrowLeft size={16} /> All versions
       </button>
       <div>
         <h3 className="text-lg font-semibold">Review Torch {tag}</h3>
+        <p className="text-sm text-[hsl(var(--text-secondary))]">
+          The first Install click opens this review. Checking may fetch package files into Pumas’ private cache. Installing into the managed Torch environment starts only after you confirm Install below.
+        </p>
         <p className="text-sm text-[hsl(var(--text-secondary))]">
           {fixedPreset
             ? 'Review fixed preset wheel highlights. The complete bundled lock is checked during installation; saved runtime checks can be inspected afterward.'
@@ -244,7 +258,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
           Pumas installs a private Python version that matches the selected Torch release and its dependencies. Python does not need to be installed on this computer.
         </p>
       </div>
-      {loadingOptions ? <Loader2 aria-label="Loading Torch choices" className="animate-spin" /> : runtimeOptions && (releaseOptions || isPresetRelease) && (
+      {loadingOptions ? <p role="status" className="flex items-center gap-2 text-sm text-[hsl(var(--text-secondary))]"><Loader2 aria-hidden="true" size={16} className="animate-spin" />Loading Torch choices…</p> : runtimeOptions && (releaseOptions || isPresetRelease) && (
         <>
           {isPresetRelease && <div className="flex flex-wrap gap-2" role="group" aria-label="Torch release choice">
             <button type="button" aria-pressed={fixedPreset} onClick={() => chooseMode('preset')} className="rounded border px-3 py-2 text-sm">Qualified fixed preset</button>
@@ -264,13 +278,13 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
                     invalidatePreview();
                     const nextBuild = event.target.value;
                     setBuild(nextBuild);
-                  }} className="mt-1 block w-full rounded border bg-[hsl(var(--surface-control))] p-2">
+                  }} className="mt-1 block w-full rounded border bg-[hsl(var(--surface-control))] p-2 text-[hsl(var(--text-primary))]">
                     <option value="">Choose a build</option>
                     {availableBuilds.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
                   </select>
                 </label>
                 <label>Dependency profile
-                  <select aria-label="Dependency profile" value={adapter} onChange={(event) => { invalidatePreview(); setAdapter(event.target.value); }} className="mt-1 block w-full rounded border bg-[hsl(var(--surface-control))] p-2">
+                  <select aria-label="Dependency profile" value={adapter} onChange={(event) => { invalidatePreview(); setAdapter(event.target.value); }} className="mt-1 block w-full rounded border bg-[hsl(var(--surface-control))] p-2 text-[hsl(var(--text-primary))]">
                     {availableAdapters.map((choice) => <option key={choice} value={choice}>{choice === 'flux2' ? 'Pumas image dependencies' : 'Core runtime only'}</option>)}
                   </select>
                 </label>
@@ -282,8 +296,12 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
           {!fixedPreset && releaseOptions?.status === 'none' && <p role="status">No official wheel matches were found in this scan.</p>}
           {!fixedPreset && releaseOptions && !releaseOptions.completeScan && releaseOptions.status !== 'inconclusive' && <p role="status">This wheel scan was incomplete. Other combinations may still exist.</p>}
           {!fixedPreset && releaseOptions?.issues.map((issue, index) => <p key={`${index}-${issue}`} className="text-xs">{issue}</p>)}
-          <button type="button" disabled={!build || !adapter || probing} onClick={() => void probe()} className="rounded border px-3 py-2 text-sm disabled:opacity-50">
-            {probing ? 'Checking…' : 'Check selected combination'}
+          {probing && <p role="status" className="flex items-center gap-2 rounded border border-[hsl(var(--accent-success))]/40 bg-[hsl(var(--accent-success)/0.08)] px-3 py-2 text-sm text-[hsl(var(--text-primary))]">
+            <Loader2 aria-hidden="true" size={16} className="shrink-0 animate-spin text-[hsl(var(--accent-success))]" />
+            <span>Checking official Torch artifacts… Package files may download to Pumas’ private cache.</span>
+          </p>}
+          <button type="button" disabled={!build || !adapter || probing} onClick={() => void probe()} className="inline-flex items-center gap-2 rounded border border-[hsl(var(--border-control))] bg-[hsl(var(--surface-control))] px-3 py-2 text-sm text-[hsl(var(--text-primary))] transition-colors hover:border-[hsl(var(--accent-success))] hover:bg-[hsl(var(--accent-success)/0.12)] active:scale-[0.98] active:bg-[hsl(var(--accent-success)/0.2)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[hsl(var(--accent-success))] disabled:cursor-not-allowed disabled:opacity-60">
+            {probing ? <><Loader2 aria-hidden="true" size={16} className="animate-spin" />Checking…</> : 'Check selected combination'}
           </button>
         </>
       )}
@@ -351,9 +369,10 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       )}
       </div>
       <div className="shrink-0 border-t border-[hsl(var(--border-default))] bg-[hsl(var(--surface-low))] px-4 py-3">
-        <button type="button" disabled={!canInstall} onClick={() => { if (canInstall && Date.now() < previewExpiresAt) onInstall(preview.previewId); }} className="rounded bg-[hsl(var(--accent-success))] px-4 py-2 text-sm font-medium disabled:opacity-50">
+        <button type="button" aria-describedby="torch-install-hint" disabled={!canInstall} onClick={() => { if (canInstall && Date.now() < previewExpiresAt) onInstall(preview.previewId); }} className="rounded border border-[hsl(var(--accent-success))] bg-[hsl(var(--accent-success)/0.14)] px-4 py-2 text-sm font-semibold text-[hsl(var(--text-primary))] transition-colors hover:bg-[hsl(var(--accent-success)/0.22)] active:scale-[0.98] active:bg-[hsl(var(--accent-success)/0.3)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[hsl(var(--accent-success))] disabled:cursor-not-allowed disabled:opacity-50">
           {previewExpired ? 'Preview expired — check again' : fixedPreset ? 'Install fixed preset' : 'Install reviewed artifacts'}
         </button>
+        <p id="torch-install-hint" className="mt-2 text-xs text-[hsl(var(--text-secondary))]">{installHint}</p>
       </div>
     </section>
   );

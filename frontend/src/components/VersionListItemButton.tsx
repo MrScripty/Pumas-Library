@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import { Check, Download, Pause, X, XCircle } from 'lucide-react';
 import { formatGB } from '../utils/installationFormatters';
@@ -24,7 +24,7 @@ function getInstallButtonClassName({
   isInstalling,
 }: Pick<VersionListItemButtonProps, 'displayState' | 'isCancelHovered' | 'isInstalled' | 'isInstalling'>): string {
   const baseClass =
-    'flex items-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors border w-[120px] min-w-[120px] overflow-hidden';
+    'flex items-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors border w-[120px] min-w-[120px] overflow-hidden focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[hsl(var(--accent-success))] active:scale-[0.97]';
 
   if (isInstalling) {
     return `${baseClass} ${
@@ -39,7 +39,7 @@ function getInstallButtonClassName({
   if (isInstalled || displayState.isComplete) {
     return `${baseClass} bg-[hsl(var(--accent-success))]/20 border-[hsl(var(--accent-success))]/60 text-[hsl(var(--text-primary))]`;
   }
-  return `${baseClass} bg-[hsl(var(--surface-control))] border-[hsl(var(--border-control))] text-[hsl(var(--text-primary))] hover:border-[hsl(var(--accent-success))] hover:text-[hsl(var(--accent-success))]`;
+  return `${baseClass} bg-[hsl(var(--surface-control))] border-[hsl(var(--border-control))] text-[hsl(var(--text-primary))] hover:bg-[hsl(var(--surface-interactive-hover))] hover:border-[hsl(var(--accent-success))] hover:text-[hsl(var(--accent-success))] active:bg-[hsl(var(--surface-lowest))]`;
 }
 
 function ReadyButtonContent() {
@@ -146,12 +146,11 @@ function InstallButtonContent({
 }) {
   return (
     <>
-      <Download size={16} />
-      {displayState.totalBytes && (
-        <span className="text-xs truncate whitespace-nowrap flex-1 min-w-0">
-          {formatGB(displayState.totalBytes)}
-        </span>
-      )}
+      <Download size={16} className="shrink-0" />
+      <span className="flex min-w-0 flex-1 flex-col items-start leading-tight">
+        <span className="text-xs font-semibold">Install</span>
+        {displayState.totalBytes && <span className="text-[10px] text-[hsl(var(--text-secondary))]">{formatGB(displayState.totalBytes)}</span>}
+      </span>
     </>
   );
 }
@@ -185,6 +184,11 @@ export function VersionListItemButton({
   onInstall,
   onRemove,
 }: VersionListItemButtonProps) {
+  const [isFocused, setIsFocused] = useState(false);
+  const showUninstall = isInstalled && (displayState.showUninstall || isFocused);
+  const buttonDisplayState = showUninstall === displayState.showUninstall
+    ? displayState
+    : { ...displayState, showUninstall };
   const canCancel = isInstalling && !isInstalled;
   const handleButtonClick = () => {
     if (canCancel) {
@@ -200,22 +204,24 @@ export function VersionListItemButton({
 
   return (
     <motion.button
-      aria-label={canCancel ? 'Cancel current version installation' : displayState.showUninstall ? 'Uninstall version' : !isInstalled && !displayState.isComplete ? 'Install version' : undefined}
-      title={canCancel ? 'Cancel current version installation' : displayState.showUninstall ? 'Uninstall version' : !isInstalled && !displayState.isComplete ? 'Install version' : undefined}
+      aria-label={canCancel ? 'Cancel current version installation' : showUninstall ? 'Uninstall version' : !isInstalled && !displayState.isComplete ? 'Install version' : undefined}
+      title={canCancel ? 'Cancel current version installation' : showUninstall ? 'Uninstall version' : !isInstalled && !displayState.isComplete ? 'Install version' : undefined}
       onClick={handleButtonClick}
+      onFocus={() => setIsFocused(true)}
+      onBlur={() => setIsFocused(false)}
       onPointerEnter={canCancel ? onCancelMouseEnter : undefined}
       onPointerLeave={canCancel ? onCancelMouseLeave : undefined}
       whileHover={!canCancel ? { scale: 1.05 } : {}}
       whileTap={!canCancel ? { scale: 0.96 } : {}}
       className={getInstallButtonClassName({
-        displayState,
+        displayState: buttonDisplayState,
         isCancelHovered,
         isInstalled,
         isInstalling: canCancel,
       })}
     >
       {getButtonContent({
-        displayState,
+        displayState: buttonDisplayState,
         isCancelHovered,
         isInstalled,
         isInstalling: canCancel,

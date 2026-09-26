@@ -592,3 +592,37 @@
   Windows/macOS E2E, provider-license integration, packaged desktop Torch
   installation, CUDA/device execution, and v2.14.0 Tuldok/image generation are
   still open; X1–X7 remain pending.
+
+## 2026-09-26 — Torch install feedback and readability follow-up
+
+- Reproduced the remaining packaged UI complaints in the exact Linux v0.7.0
+  AppImage path. The Install row opened its review but gave too little feedback;
+  the preview CTA used dark text and the artifact check only changed its label.
+- The Install row now has a visible label and clearer hover/pressed/focus
+  feedback. The review CTA uses light primary text on a dark green-accent
+  surface. Artifact checking and the pre-progress Torch install phase display
+  a spinner and explicit status; the header status is larger, brighter, and a
+  polite live region. The immediate Cancel action has readable text and
+  keyboard focus feedback.
+- Browser-level interaction against the rebuilt AppImage at 800×1000 confirmed
+  green Install-row hover, a darker pressed state, white review/CTA text, the
+  prerequisite explanation while Install is disabled, and an immediate
+  “Checking official Torch artifacts…” live status on click. The separate
+  source tests verify the header and dialog show “Installing Torch v2.14.0 ·
+  Starting installation…” before the first backend progress response.
+- Local artifacts: AppImage SHA-256
+  `34a5ffc88f5f42aa03bd9ed72ead37e5ca385838037247b74186a67d9d128aaf`; deb
+  SHA-256
+  `fea54b4694d7ddb77a797327a9e15d0f0e66e0cf4f2d38fc9169feb4a4811386`.
+  Artifact naming/resource checks and extracted AppImage/deb RPC health checks
+  passed. The initial sandboxed build could not resolve GitHub for the
+  AppImage helper; the authorized rebuild with helper download access passed.
+- Frontend acceptance: 60 focused tests, TypeScript check, scoped ESLint,
+  frontend production build, and `git diff --check` passed. Astra high and Sol
+  xhigh completed read-only repair reviews with no remaining blocker.
+- The follow-up records UI feedback only; it did not complete a new artifact
+  preview or Torch install. The prior successful cu132 install remains tied to
+  its historical AppImage hash in the [UI report](reports/v2.14.0-linux-appimage-cu132-ui-acceptance/README.md).
+  Both builds are local candidates and do not replace the toolbar-linked public
+  release. Windows/macOS packaged install, CUDA/device execution, and Tuldok
+  image generation remain unverified.

@@ -46,7 +46,7 @@ export function TorchPanel({
 
       {!isManagerOpen && (
         <>
-          <p className="text-sm text-[var(--text-secondary)]">
+          <p className="text-sm text-[hsl(var(--text-secondary))]">
             Create a Torch runtime profile, then use Serve on the image model.
             {' '}{gatewayUrl
               ? 'Copy the Pumas gateway URL above into Tuldok to generate images.'

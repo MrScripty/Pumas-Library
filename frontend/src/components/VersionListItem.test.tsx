@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { VersionListItem } from './VersionListItem';
 import type { InstallationProgress, VersionRelease } from '../hooks/useVersions';
@@ -87,6 +88,9 @@ describe('VersionListItem', () => {
     expect(screen.getByText('1.2.3')).toBeInTheDocument();
     expect(screen.getByText('Pre')).toBeInTheDocument();
     expect(screen.getByText('1.00 GB')).toBeInTheDocument();
+    const installAction = screen.getByRole('button', { name: 'Install version' });
+    expect(installAction).toHaveTextContent('Install');
+    expect(installAction).toHaveClass('hover:bg-[hsl(var(--surface-interactive-hover))]', 'active:scale-[0.97]', 'focus-visible:outline-2');
 
     fireEvent.pointerEnter(container.firstChild as Element);
     fireEvent.pointerLeave(container.firstChild as Element);
@@ -133,6 +137,24 @@ describe('VersionListItem', () => {
 
     expect(props.onOpenLogPath).toHaveBeenCalledWith('/tmp/install.log');
     expect(props.onRemove).toHaveBeenCalledTimes(1);
+  });
+
+  it('announces Uninstall on keyboard focus and removes the installed version with Enter or Space', async () => {
+    const user = userEvent.setup();
+    const { props } = renderVersionListItem({ isInstalled: true });
+    expect(screen.getByRole('button', { name: 'Ready' })).toBeInTheDocument();
+    await user.tab();
+    await user.tab();
+    const uninstall = screen.getByRole('button', { name: 'Uninstall version' });
+    expect(uninstall).toHaveTextContent('Uninstall');
+    expect(uninstall).toHaveClass('border-[hsl(var(--accent-error))]');
+    await user.keyboard('{Enter}');
+    await user.keyboard(' ');
+    expect(props.onRemove).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('button', { name: 'Uninstall version' })).toBeInTheDocument();
+
+    await user.tab();
+    expect(screen.getByRole('button', { name: 'Ready' })).toBeInTheDocument();
   });
 
   it('renders installing dependency progress and cancel affordances', () => {

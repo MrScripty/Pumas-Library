@@ -30,20 +30,21 @@ generation remain unverified; existing Tuldok image evidence remains scoped to
 its recorded Torch 2.10 tuple.
 
 Current-branch Linux v0.7.0 AppImage and deb candidates were rebuilt with the
-generated CPython notices and progress-feedback repair. Artifact naming and
-extracted resource hashes pass; both extracted backends start and pass
-`/health`. The packaged Electron archive contains the
-`get_torch_release_options` bridge method. The latest local AppImage SHA-256 is
-`a28f302822ce99a9d687797606574c93a5afb9c184f293526b16b972294a670b`; the deb
+generated CPython notices and Torch install feedback/readability repair.
+Artifact naming and extracted resource hashes pass; both extracted backends
+start and pass `/health`. The packaged Electron archive contains the
+`get_torch_release_options` bridge method. The current local AppImage SHA-256 is
+`34a5ffc88f5f42aa03bd9ed72ead37e5ca385838037247b74186a67d9d128aaf`; the deb
 SHA-256 is
-`d8effc33ba37466171c5fae0178e2555064850e40544c93249966fedbf4bce88`.
-The AppImage passed the Linux v2.14.0 cu132 UI install recorded in the
-[packaged UI acceptance report](reports/v2.14.0-linux-appimage-cu132-ui-acceptance/README.md).
-These are local build outputs; they do not replace the toolbar-linked public
-v0.7.0 assets (published 2026-09-17). The generated attribution inventory
-includes all three CPython full-archive notice supersets and verifies 371
-package entries, 78 hashed inputs, and 57 retained legal texts against
-target-specific evidence.
+`fea54b4694d7ddb77a797327a9e15d0f0e66e0cf4f2d38fc9169feb4a4811386`.
+The prior successful Linux v2.14.0 cu132 UI install remains recorded with its
+then-current AppImage hash in the [packaged UI acceptance report](reports/v2.14.0-linux-appimage-cu132-ui-acceptance/README.md).
+The report also records the interaction/readability check on the current
+candidate; that follow-up did not claim another install. These are local build
+outputs; they do not replace the toolbar-linked public v0.7.0 assets (published
+2026-09-17). The generated attribution inventory includes all three CPython
+full-archive notice supersets and verifies 371 package entries, 78 hashed
+inputs, and 57 retained legal texts against target-specific evidence.
 
 The earlier local Linux package candidate recorded in the
 [packaged Linux backend acceptance](reports/v2.14.0-linux-packaged-cpu-acceptance/README.md)
@@ -303,7 +304,7 @@ resolver, manager, desktop, and platform runtime owners.
 | X4 | Windows x64 and macOS arm64 discovery returns only exact official wheels whose tags match the provisioned native CPython; CPU/MPS/CUDA choices follow this contract | Native wheel fixtures and wrong-target rejection passed; manual native RPC run `36223106097` resolved exact official CPU wheel tags on Linux, Windows, and macOS arm64. CUDA hardware execution and macOS MPS acceleration remain untested | partial |
 | X5 | Preview retains the exact distribution version, release/build, official wheel URL/hash, Python provider artifact identity, interpreter fingerprint, and complete dependencies; install stages and verifies that exact identity before publication | Run `36223106097` resolved 25 hashed CPU/Core artifacts and passed v2.14.0 install on all three shipped targets; each report retains the exact Torch wheel URL/hash, dependency set, and managed interpreter identity (see X2 reports) | partial |
 | X6 | Installed versions can be inspected, explicitly selected, started with health/protocol checks, and stopped by their owned generation; cancellation, timeout, RPC shutdown, and failed cleanup do not leak a resolver, installer, sidecar, interpreter provisioner, or unregistered runtime | Run `36223106097` passed second-session restart, fresh CPU operation, probe revalidation, protocol 3 sidecar trial/stop, and graceful shutdown on Linux, Windows, and macOS (see X2 reports); broader cancellation/timeout/failure cleanup remains | partial |
-| X7 | The same manager choices and lifecycle are reachable through packaged desktop controls and the existing RPC API; the user never has to choose Python, and the desktop offers no unsupported adapter | Linux v0.7.0 AppImage UI installed v2.14.0 cu132 through the normal review flow at 800×1000. The first sampled install state showed the current phase in the header, a visible Cancel control, and indeterminate setup bars without a false percentage; the runtime reached Ready. See the [UI acceptance report](reports/v2.14.0-linux-appimage-cu132-ui-acceptance/README.md). Packaged Windows/macOS installation remains unverified | partial |
+| X7 | The same manager choices and lifecycle are reachable through packaged desktop controls and the existing RPC API; the user never has to choose Python, and the desktop offers no unsupported adapter | Linux v0.7.0 AppImage UI installed v2.14.0 cu132 through the normal review flow at 800×1000. The first sampled install state showed the current phase in the header, a visible Cancel control, and indeterminate setup bars without a false percentage; the runtime reached Ready. The current AppImage candidate also passes the interaction/readability follow-up at the same report, including visible row hover/press, light text, and immediate artifact-check status. The follow-up does not claim a second runtime install. Packaged Windows/macOS installation remains unverified | partial |
 
 Plan acceptance is `pending` until every required row is satisfied on its
 declared native environment. Cross-compilation, Linux simulation, packaging,

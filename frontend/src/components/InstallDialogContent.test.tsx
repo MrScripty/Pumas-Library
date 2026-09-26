@@ -94,6 +94,17 @@ function renderInstallDialogContent(overrides: Partial<React.ComponentProps<type
 }
 
 describe('InstallDialogContent', () => {
+  it('shows a visible Torch install status and spinner before backend progress arrives', () => {
+    renderInstallDialogContent({ appId: 'torch', installingVersion: 'v2.14.0' });
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('Installing Torch v2.14.0 · Starting installation…');
+    expect(status.querySelector('.animate-spin')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel current installation' })).toHaveClass(
+      'text-[hsl(var(--text-primary))]', 'hover:bg-[hsl(var(--surface-interactive-hover))]', 'focus-visible:outline-2'
+    );
+  });
+
   it('renders notices and routes install, release-link, and remove-error actions', async () => {
     const removeError = new Error('remove failed');
     const { props } = renderInstallDialogContent({

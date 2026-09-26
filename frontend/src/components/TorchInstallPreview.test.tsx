@@ -183,6 +183,69 @@ describe('TorchInstallPreview', () => {
     expect(await screen.findByText(/Artifact resolution is unverified/)).toBeInTheDocument();
   });
 
+  it('keeps the fixed preset available when upstream discovery fails', async () => {
+    getReleaseOptions.mockResolvedValue({ ...release, tag: 'v2.9.1' });
+    getReleaseOptions.mockRejectedValueOnce(new Error('index timed out'));
+    const onInstall = vi.fn();
+    render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Release discovery inconclusive: index timed out');
+    const qualified = screen.getByRole('button', { name: 'Qualified fixed preset' });
+    expect(qualified).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Other official wheels (unverified)' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Check selected combination' })).toBeDisabled();
+
+    fireEvent.click(qualified);
+    expect(screen.getByText(/Recommended setup: cu130 · python3.12 · bundled image dependencies \(fixed\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
+    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Install fixed preset' }));
+    expect(onInstall).toHaveBeenCalledWith('review-1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Other official wheels (unverified)' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Release discovery inconclusive: index timed out');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry release discovery' }));
+    expect(await screen.findByText(/Recommended setup: cu130 · Python selected automatically · Core runtime only/)).toBeInTheDocument();
+    expect(getReleaseOptions).toHaveBeenCalledTimes(2);
+  });
+
+  it('offers the fixed preset while upstream discovery is still pending', async () => {
+    getReleaseOptions.mockImplementation(() => new Promise<TorchReleaseOptionsOutcome>(() => {
+      // Keep the upstream scan pending throughout this test.
+    }));
+    render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={vi.fn()} />);
+
+    const qualified = await screen.findByRole('button', { name: 'Qualified fixed preset' });
+    expect(qualified).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByText('Discovering official wheels…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Check selected combination' })).toBeDisabled();
+
+    fireEvent.click(qualified);
+    expect(screen.queryByText('Discovering official wheels…')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
+    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' }));
+    expect(screen.getByRole('button', { name: 'Install fixed preset' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Other official wheels (unverified)' }));
+    expect(screen.getByText('Discovering official wheels…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Check selected combination' })).toBeDisabled();
+  });
+
+  it('keeps the fixed preset available after an inconclusive upstream scan', async () => {
+    getReleaseOptions.mockResolvedValue({
+      ...release, tag: 'v2.9.1', status: 'inconclusive', completeScan: false,
+      combinations: [], recommended: null, issues: ['index timed out'],
+    });
+    render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={vi.fn()} />);
+
+    expect(await screen.findByText(/Release discovery was inconclusive. Some official wheels may exist/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Check selected combination' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Qualified fixed preset' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
+    await waitFor(() => expect(getPreview).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' }));
+    expect(screen.getByRole('button', { name: 'Install fixed preset' })).toBeEnabled();
+  });
+
   it('skips the bundled v2.9.1 preset when the manager says it is unavailable', async () => {
     getPresetOptions.mockResolvedValue({ ...preset, bundledPresetAvailable: false, defaultAdapter: 'none', adapters: ['none'] });
     getReleaseOptions.mockResolvedValue({

@@ -52,14 +52,13 @@ interface RPCResponse {
 }
 
 export function rpcRequestTimeoutMs(method: string): number {
-  // Managed Python may need a bounded uv bootstrap, interpreter install, index
-  // scan, and several full wheel previews before the RPC returns any bytes.
-  // Let those backend stage deadlines own these requests instead of imposing
-  // an earlier HTTP socket inactivity timeout.
+  // Managed Python may need a uv bootstrap, interpreter install, index scan,
+  // and several wheel previews before the RPC returns any bytes. Allow these
+  // operations 15 minutes while keeping a finite HTTP socket deadline.
   if (method === 'get_torch_runtime_options'
     || method === 'get_torch_release_options'
     || method === 'preview_torch_runtime'
-    || method === 'find_torch_alternatives') return 0;
+    || method === 'find_torch_alternatives') return 900_000;
   if (method === 'trial_torch_runtime') return 90_000;
   return 60_000;
 }
@@ -312,6 +311,7 @@ export class PythonBridge {
   private isShuttingDown = false;
   private healthCheckTimer: BridgeTimer | null = null;
   private restartTimer: BridgeTimer | null = null;
+  private pendingRpcCalls = new Set<() => void>();
   private modelLibraryUpdateStream: NamedSseStreamOwner;
   private modelDownloadUpdateStream: NamedSseStreamOwner;
   private runtimeProfileUpdateStream: NamedSseStreamOwner;
@@ -578,6 +578,7 @@ export class PythonBridge {
     this.stopRuntimeProfileUpdateStream();
     this.stopServingStatusUpdateStream();
     this.stopStatusTelemetryUpdateStream();
+    for (const cancel of [...this.pendingRpcCalls]) cancel();
 
     if (!this.process) {
       return;
@@ -728,6 +729,9 @@ export class PythonBridge {
    * Make an RPC call to the backend
    */
   async call(method: string, params: Record<string, unknown>): Promise<unknown> {
+    if (this.isShuttingDown && method !== 'shutdown') {
+      throw new Error('Backend bridge stopping');
+    }
     if (!this.process) {
       throw new Error('Backend bridge not running');
     }
@@ -739,6 +743,21 @@ export class PythonBridge {
         params,
         id: Date.now(),
       });
+      const requestTimeoutMs = rpcRequestTimeoutMs(method);
+      let deadline: BridgeTimer | null = null;
+      let settled = false;
+      let cancelPending: (() => void) | null = null;
+      const finish = (error: Error | null, result?: unknown): void => {
+        if (settled) return;
+        settled = true;
+        if (cancelPending) this.pendingRpcCalls.delete(cancelPending);
+        if (deadline !== null) {
+          this.timerController.clearTimeout(deadline);
+          deadline = null;
+        }
+        if (error) reject(error);
+        else resolve(result);
+      };
 
       const options: http.RequestOptions = {
         hostname: '127.0.0.1',
@@ -749,7 +768,7 @@ export class PythonBridge {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(requestBody),
         },
-        timeout: rpcRequestTimeoutMs(method),
+        timeout: requestTimeoutMs,
       };
 
       const req = http.request(options, (res) => {
@@ -767,27 +786,51 @@ export class PythonBridge {
               const errorMessage = typeof response.error === 'string'
                 ? response.error
                 : response.error.message || JSON.stringify(response.error);
-              reject(new Error(errorMessage));
+              finish(new Error(errorMessage));
             } else {
-              resolve(response.result);
+              finish(null, response.result);
             }
           } catch {
-            reject(new Error(`Invalid JSON response: ${data}`));
+            finish(new Error(`Invalid JSON response: ${data}`));
           }
+        });
+        res.on('error', (error) => {
+          finish(new Error(`RPC response failed: ${error.message}`));
+        });
+        res.on('aborted', () => {
+          finish(new Error('RPC response aborted'));
         });
       });
 
       req.on('error', (error) => {
-        reject(new Error(`RPC request failed: ${error.message}`));
+        finish(new Error(`RPC request failed: ${error.message}`));
       });
 
       req.on('timeout', () => {
+        if (settled) return;
+        finish(new Error('RPC request timeout'));
         req.destroy();
-        reject(new Error('RPC request timeout'));
       });
 
-      req.write(requestBody);
-      req.end();
+      cancelPending = () => {
+        if (settled) return;
+        finish(new Error('Backend bridge stopped'));
+        req.destroy();
+      };
+      this.pendingRpcCalls.add(cancelPending);
+      deadline = this.timerController.setTimeout(() => {
+        if (settled) return;
+        finish(new Error('RPC request timeout'));
+        req.destroy();
+      }, requestTimeoutMs);
+
+      try {
+        req.write(requestBody);
+        req.end();
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error(String(error)));
+        req.destroy();
+      }
     });
   }
 

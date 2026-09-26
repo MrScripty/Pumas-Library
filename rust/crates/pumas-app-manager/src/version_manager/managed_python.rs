@@ -1117,6 +1117,15 @@ struct ObservedPython {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "windows")]
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    #[cfg(target_os = "windows")]
+    use windows_sys::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+    #[cfg(target_os = "windows")]
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+    };
+
     #[test]
     fn all_shipped_targets_have_distinct_official_uv_pins() {
         let pins = [
@@ -1417,8 +1426,39 @@ mod tests {
     }
 
     #[cfg(target_os = "windows")]
-    fn assert_descendant_drained(pid: u32) {
-        assert!(!pumas_library::platform::process::is_process_alive(pid));
+    async fn open_live_descendant_handle(pid: u32) -> OwnedHandle {
+        let until = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            // SAFETY: OpenProcess receives a numeric PID and returns a process
+            // handle owned by this test when non-null.
+            #[allow(unsafe_code)]
+            let raw = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+            if !raw.is_null() {
+                // SAFETY: this non-null OpenProcess result is uniquely owned;
+                // OwnedHandle closes it on every path out of this iteration.
+                #[allow(unsafe_code)]
+                let handle = unsafe { OwnedHandle::from_raw_handle(raw) };
+                // SAFETY: the retained handle is valid for this wait query.
+                #[allow(unsafe_code)]
+                if unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) } == WAIT_TIMEOUT {
+                    return handle;
+                }
+            }
+            assert!(
+                tokio::time::Instant::now() < until,
+                "provider descendant handle was not acquired while alive"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn assert_descendant_drained(handle: &OwnedHandle) {
+        // SAFETY: the test retains ownership of this valid process handle;
+        // the immediate wait checks its identity without allowing extra drain time.
+        #[allow(unsafe_code)]
+        let result = unsafe { WaitForSingleObject(handle.as_raw_handle(), 0) };
+        assert_eq!(result, WAIT_OBJECT_0, "provider descendant did not exit");
     }
 
     #[cfg(target_os = "macos")]
@@ -1450,6 +1490,9 @@ mod tests {
                 .await
         });
         let descendant = wait_for_descendant_marker(&marker).await;
+        #[cfg(target_os = "windows")]
+        let descendant_handle = open_live_descendant_handle(descendant).await;
+        #[cfg(target_os = "macos")]
         assert!(pumas_library::platform::process::is_process_alive(
             descendant
         ));
@@ -1462,6 +1505,9 @@ mod tests {
         })
         .await
         .expect("provider cancellation cleanup exceeded its bound");
+        #[cfg(target_os = "windows")]
+        assert_descendant_drained(&descendant_handle);
+        #[cfg(target_os = "macos")]
         assert_descendant_drained(descendant);
     }
 
@@ -1470,21 +1516,24 @@ mod tests {
     async fn timed_out_native_provider_command_drains_descendant_and_closes_admission() {
         let root = tempfile::tempdir().unwrap();
         let cleanup = Arc::new(TorchCleanupTasks::default());
-        let provider = ManagedPythonProvider::new(root.path(), cleanup.clone()).unwrap();
+        let provider = Arc::new(ManagedPythonProvider::new(root.path(), cleanup.clone()).unwrap());
         let marker = root.path().join("timed-out-descendant.pid");
-        let failure = tokio::time::timeout(
-            Duration::from_secs(20),
-            provider.run_bounded(
-                native_sleeping_tree_command(&marker),
-                Duration::from_secs(5),
-                4096,
-            ),
-        )
-        .await
-        .expect("provider timeout cleanup exceeded its bound")
-        .unwrap_err();
-        assert_eq!(failure.message, "Managed provider process timed out");
+        let running_provider = provider.clone();
+        let command = native_sleeping_tree_command(&marker);
+        let running = tokio::spawn(async move {
+            running_provider
+                .run_bounded(command, Duration::from_secs(5), 4096)
+                .await
+        });
         let descendant = wait_for_descendant_marker(&marker).await;
+        #[cfg(target_os = "windows")]
+        let descendant_handle = open_live_descendant_handle(descendant).await;
+        let failure = tokio::time::timeout(Duration::from_secs(20), running)
+            .await
+            .expect("provider timeout cleanup exceeded its bound")
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(failure.message, "Managed provider process timed out");
         cleanup.close();
         tokio::time::timeout(Duration::from_secs(15), async {
             cleanup.drain().await.unwrap();
@@ -1492,6 +1541,9 @@ mod tests {
         })
         .await
         .expect("provider timeout shutdown exceeded its bound");
+        #[cfg(target_os = "windows")]
+        assert_descendant_drained(&descendant_handle);
+        #[cfg(target_os = "macos")]
         assert_descendant_drained(descendant);
 
         let rejected_marker = root.path().join("rejected-descendant.pid");

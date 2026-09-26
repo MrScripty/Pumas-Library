@@ -37,6 +37,8 @@ function errorText(error: unknown): string {
 export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPreviewProps) {
   const [runtimeOptions, setRuntimeOptions] = useState<TorchRuntimeOptions | null>(null);
   const [releaseOptions, setReleaseOptions] = useState<TorchReleaseOptionsOutcome | null>(null);
+  const [releaseError, setReleaseError] = useState<string | null>(null);
+  const [releaseAttempt, setReleaseAttempt] = useState(0);
   const [build, setBuild] = useState('');
   const [adapter, setAdapter] = useState('');
   const [selectionMode, setSelectionMode] = useState<'preset' | 'upstream'>('upstream');
@@ -59,6 +61,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     setLoadingReleaseOptions(true);
     setRuntimeOptions(null);
     setReleaseOptions(null);
+    setReleaseError(null);
     setPreview(null);
     setError(null);
     setRejection(null);
@@ -77,7 +80,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       const choice = result.combinations.find((item) => item.build === result.recommended?.build && item.python === result.recommended.python);
       setBuild(choice?.build ?? '');
     }).catch((cause: unknown) => {
-      if (active) setError(`Release discovery inconclusive: ${errorText(cause)}`);
+      if (active) setReleaseError(`Release discovery inconclusive: ${errorText(cause)}`);
     }).finally(() => {
       if (active) setLoadingReleaseOptions(false);
     });
@@ -96,7 +99,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       active = false;
       requestNumber.current += 1;
     };
-  }, [tag]);
+  }, [tag, releaseAttempt]);
 
   const invalidatePreview = () => {
     requestNumber.current += 1;
@@ -184,7 +187,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     && releaseOptions.combinations.some((choice) => choice.build === match.build && choice.python === match.python);
   const eligibleAlternatives = alternatives?.matches.filter(isEligibleAlternative) ?? [];
   const eligibleCheckedBuilds = alternatives?.checkedBuilds.filter((choice) => availableBuilds.includes(choice)) ?? [];
-  const loadingOptions = loadingRuntimeOptions || (!fixedPreset && loadingReleaseOptions);
+  const loadingOptions = loadingRuntimeOptions || (!isPresetRelease && loadingReleaseOptions);
   const canInstall = preview !== null && Boolean(preview.previewId)
     && preview.tag === tag && preview.build === build
     && Boolean(preview.python) && preview.python !== 'auto'
@@ -214,7 +217,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
           Pumas installs a private Python version that matches the selected Torch release and its dependencies. Python does not need to be installed on this computer.
         </p>
       </div>
-      {loadingOptions ? <Loader2 aria-label="Loading Torch choices" className="animate-spin" /> : runtimeOptions && (releaseOptions || fixedPreset) && (
+      {loadingOptions ? <Loader2 aria-label="Loading Torch choices" className="animate-spin" /> : runtimeOptions && (releaseOptions || isPresetRelease) && (
         <>
           {isPresetRelease && <div className="flex flex-wrap gap-2" role="group" aria-label="Torch release choice">
             <button type="button" aria-pressed={fixedPreset} onClick={() => chooseMode('preset')} className="rounded border px-3 py-2 text-sm">Qualified fixed preset</button>
@@ -247,6 +250,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
               </div>
             </details>
           </>}
+          {!fixedPreset && loadingReleaseOptions && <p role="status">Discovering official wheels…</p>}
           {!fixedPreset && releaseOptions?.status === 'inconclusive' && <p role="status">Release discovery was inconclusive. Some official wheels may exist; retry later or review the available combinations.</p>}
           {!fixedPreset && releaseOptions?.status === 'none' && <p role="status">No official wheel matches were found in this scan.</p>}
           {!fixedPreset && releaseOptions && !releaseOptions.completeScan && releaseOptions.status !== 'inconclusive' && <p role="status">This wheel scan was incomplete. Other combinations may still exist.</p>}
@@ -256,6 +260,10 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
           </button>
         </>
       )}
+      {!fixedPreset && releaseError && <div className="space-y-2 text-sm">
+        <p role="alert" className="text-[hsl(var(--accent-error))]">{releaseError}</p>
+        <button type="button" onClick={() => setReleaseAttempt((attempt) => attempt + 1)} className="rounded border px-3 py-2">Retry release discovery</button>
+      </div>}
       {checks.length > 0 && <div className="text-xs">
         <strong>Checked combinations</strong>
         <ul>{checks.map((check) => <li key={check.key}>{check.label}: {checkStatusLabel(check.status)}</li>)}</ul>

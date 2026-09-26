@@ -8,6 +8,7 @@ mod torch_tests;
 use super::managed_python::ManagedPythonIdentity;
 pub(crate) use torch::is_torch_runtime_release;
 pub(crate) use torch::retry_pending_torch_cleanup;
+pub(crate) use torch::TorchVersionsLock;
 pub(crate) struct TorchInstallPlan {
     pub(crate) preview: crate::version_manager::TorchPreview,
     pub(crate) requirements: String,
@@ -250,6 +251,7 @@ impl TorchCleanupTasks {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn schedule(&self, work: impl FnOnce() + Send + 'static) {
         let mut state = self.state.lock().expect("Torch cleanup lock poisoned");
         if !state.closed {
@@ -1805,6 +1807,8 @@ impl VersionInstaller {
         release: &GitHubRelease,
         version_dir: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
+        publication_lease: Arc<torch::TorchPendingStage>,
+        python_version: Option<String>,
     ) -> Result<()> {
         info!("Finalizing installation for {}", tag);
 
@@ -1823,21 +1827,6 @@ impl VersionInstaller {
                 message: "Finalizing installation...".to_string(),
             })
             .await;
-
-        // Get Python version
-        let venv_python = pumas_library::platform::paths::venv_python(version_dir);
-        let python_version = if path_exists(&venv_python).await? {
-            let output = tokio::process::Command::new(&venv_python)
-                .args(["--version"])
-                .output()
-                .await
-                .ok()
-                .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map(|s| s.trim().to_string());
-            output
-        } else {
-            None
-        };
 
         // Create metadata entry
         let metadata = InstalledVersionMetadata {
@@ -1886,6 +1875,7 @@ impl VersionInstaller {
         let installed_tag = tag.to_string();
         let app_id = self.app_id;
         tokio::task::spawn_blocking(move || {
+            let _publication_lease = publication_lease;
             manager.update_installed_version(&installed_tag, metadata, Some(app_id))
         })
         .await

@@ -55,36 +55,38 @@ hash-verified macOS arm64 archive remains candidate evidence because its native
 E2E leg did not reach installation. macOS selected-provider licensing and
 packaged desktop install acceptance remain pending.
 
-**Current phase:** The managed provider, Linux 2.14.0 install, and sidecar
-lifecycle are implemented and accepted on the native Linux host; Windows x64
-has passed native CPU/Core install and restart acceptance. The native QA
-workflow runs isolated RPC acceptance on Linux, Windows x64, and macOS arm64
-on manual dispatch or version tags and retains reports and logs. The latest
-manual run passed all three QA legs, passed Windows E2E, and exposed the Linux
-release-options and macOS preview failures above. Diagnostic commit `e2d52939`
-now retains the Linux response's `completeScan` and a bounded issue sample:
-up to three issues, each capped at 300 characters, with a 1200-character
-overall cap. Bounded,
-allowlisted resolver failure diagnostics have been implemented locally and
-independently reviewed, but are not yet committed or rerun on a native runner.
-The macOS report-validation cause remains unknown until that rerun.
-Commit `6a726eac` fixes the Electron allowlist entry for
-`get_torch_release_options`; later
-source repairs pin uv `0.12.18` and accept
-the current official provider and PyTorch wheel URLs. The latest Linux desktop
-candidate is local; the toolbar-linked package still needs a separate publish
-and update.
+**Current phase:** Linux v2.14.0 CPU/Core install and two-session sidecar
+lifecycle are accepted; Windows x64 CPU/Core install and restart are accepted.
+The PR repair closes the reviewed cross-process metadata races by guarding every
+Torch metadata read/modify/write with `.torch-versions.lock`, refreshing state
+under that lease, and retaining cloned leases through detached writes. Startup
+defers validation/normalization when the lock is busy and avoids reading a
+possibly transitional active marker. Torch status reads now use one coherent
+cached generation. The repair also addresses failed child-custody drain,
+best-effort cleanup recovery, bounded Electron Torch RPC requests, and fixed
+preset access while upstream release discovery is pending.
 
-**Blockers:** Linux CI release-options resolution, macOS arm64 native
-preview/install/lifecycle acceptance, Windows notice integration, macOS selected
-provider license inventory, and packaged desktop install acceptance remain
-open. CUDA/device use and v2.14.0 image/Tuldok behavior are also untested.
+Local final verification passes: 199 `pumas-app-manager` tests, the Rust
+default-member suite, all-target/all-feature Clippy with warnings denied, Rust
+formatting, Windows GNU app-manager test compilation, 713 frontend tests, 48
+desktop-contract tests, 179 Electron tests (one platform-dependent skip), 50
+managed-Python acceptance fixtures, Ruff, release-attribution validation, and
+`git diff --check`. Astra high and Sol xhigh completed read-only reviews with no
+remaining blockers. The repaired PR checks still need to run on GitHub. The
+Windows GNU result is compile-only and does not replace native Windows/MSVC
+acceptance; macOS native QA and E2E also need a fresh run.
 
-**Next slice:** Commit the reviewed bounded, allowlisted resolver diagnostics,
-rerun the failed Linux and macOS native E2E legs, and inspect their exact-wheel,
-preview, install, probe, selection, sidecar, and cleanup evidence. Then close
-provider licensing and packaged desktop acceptance before broadening the
-runtime support claim.
+**Blockers:** The Linux incomplete release-options scan and macOS preview-report
+validation failure from the earlier manual run remain unresolved at the E2E
+level. Windows notice integration, macOS selected-provider license inventory,
+and packaged desktop Torch install acceptance remain open. CUDA/device use and
+v2.14.0 image/Tuldok behavior are untested. The local AppImage/deb candidates do
+not update the public toolbar-linked package.
+
+**Next slice:** Push the reviewed repairs and inspect the new PR workflow results.
+Then rerun native RPC E2E on Linux and macOS with bounded diagnostics, complete
+Windows/macOS provider licensing and packaged desktop install acceptance, and
+keep X1–X7 pending until their evidence gates pass.
 
 ## Objective and scope
 

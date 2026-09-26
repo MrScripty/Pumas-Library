@@ -368,6 +368,80 @@
   `validation_failed: The resolved wheel report failed validation.` No macOS
   preview or install completed. The generic rejection does not identify its
   cause.
-- Bounded, allowlisted resolver failure diagnostics have been implemented
-  locally and independently reviewed. They are not yet committed or rerun on
-  native runners; the Linux and macOS E2E failures remain open.
+- Bounded, allowlisted resolver failure diagnostics have been committed on the
+  branch and independently reviewed. They have not yet been exercised by a
+  manual native RPC E2E rerun; the Linux and macOS E2E failures remain open.
+
+## 2026-09-25 — PR native QA follow-up repairs
+
+- PR workflow run
+  [36215890738](https://github.com/MrScripty/Pumas-Library/actions/runs/36215890738)
+  for `298688cf` passed workflow/release contracts, frontend/desktop contracts,
+  headless checks, and Linux native QA. Rust quality failed on Clippy's
+  `manual_repeat_n` lint in the resolver-diagnostic regression, now fixed with
+  `std::iter::repeat_n`. macOS native QA failed in the acceptance-script timeout
+  cleanup with `EPERM`. Windows native QA failed in the managed-Python
+  candidate step at a PID-only descendant-exit assertion after cleanup. The
+  run did not execute the native RPC E2E legs because those jobs are skipped on
+  pull-request events.
+- Repaired the POSIX acceptance harness to keep the exited leader unreaped with
+  `waitid(..., WNOWAIT)` until live members of its owned process group drain.
+  Zombie-only groups are not signaled. Normal and emergency cleanup signal only
+  the pinned group; persistent denial fails loudly and retains the unreaped
+  `Popen` custody object. Regression fixtures cover observer failure,
+  transient and persistent `EPERM`, and detached descendants; the detached
+  fixture now exits naturally and is awaited without signaling its PID.
+- Repaired Windows lifecycle test oracles by retaining `SYNCHRONIZE` process
+  handles while descendants are alive and checking the exact handles are
+  signaled immediately after cleanup. The direct Job-membership test retains
+  the handle through `terminate_and_drain`. Added a macOS-only RAII test guard
+  that resets injected `EPERM` and drains the standalone custody slot during
+  unwinding. These are test changes; runtime lifecycle behavior is unchanged.
+- Final local verification passed: 50 acceptance-script fixtures; Ruff lint,
+  format, and Python compilation; 185 `pumas-app-manager` tests; workspace
+  all-target/all-feature Clippy with warnings denied; Rust formatting; Windows
+  GNU test compilation for `pumas-app-manager` and no-default-feature
+  `pumas-library`; and `git diff --check`. Astra high and Sol xhigh completed
+  read-only repair reviews with no blocking findings.
+- The repaired macOS/Windows native QA jobs still need a new PR run. The Linux
+  incomplete release-options scan and macOS preview-report validation failure
+  remain open pending a manual native RPC E2E rerun with the retained bounded
+  resolver diagnostics. Provider license integration, packaged desktop install,
+  CUDA/device use, and Torch image/Tuldok generation remain unverified; X1–X7
+  remain pending.
+
+## 2026-09-25 — Torch PR metadata and lifecycle review repairs
+
+- All Torch metadata mutations now share the permanent `.torch-versions.lock`,
+  including active/default selection, installed-entry add/remove, public
+  validation, startup cleanup, and startup selection normalization. Mutations
+  load current metadata after acquiring the lock; detached blocking writers keep
+  a cloned lease until they finish, including when the async waiter is canceled.
+- Active marker and selection metadata writes run in one leased worker. Public
+  state snapshots refresh while holding the lock; on contention they return one
+  coherent cached generation without blocking. Initialization ignores a
+  transitional marker while busy and prefers committed last-selected metadata
+  over the default in that fallback. The exact fs2 contention error is
+  normalized to `WouldBlock` on Windows while unrelated I/O errors are kept.
+- Regressions cover independent-manager selection/validation, stale-manager
+  writes after installs/removals, startup during publication/selection, prompt
+  busy reads and post-release refresh, coherent version-status metadata, and
+  lock-error normalization. The cache/status/startup priority tests were
+  observed failing before their fixes and pass now. Astra high and Sol xhigh
+  completed read-only review with no remaining blocking findings. A marker
+  rollback can still fail after an underlying metadata I/O error; that rare
+  error path remains best-effort and is reported as a limitation.
+- Final local verification: `cargo test --all-targets --locked --quiet` passed
+  for workspace default members (the app-manager run in that pass preceded the
+  final startup-priority regression; the final focused app-manager rerun passed
+  199 tests). `cargo clippy --all-targets --all-features -- -D warnings`,
+  `cargo fmt --all -- --check`, and Windows GNU app-manager test compilation
+  passed. Frontend passed 713 tests, typecheck and lint; desktop-contract
+  conformance passed 48 tests; Electron passed 179 tests with one
+  platform-dependent skip; managed-Python acceptance passed 50 fixtures with
+  Ruff and Python compilation; release-attribution validation and
+  `git diff --check` passed.
+- These are local branch checks. A new PR workflow run is still required. Native
+  Windows/macOS E2E, provider-license integration, packaged desktop Torch
+  installation, CUDA/device execution, and v2.14.0 Tuldok/image generation are
+  still open; X1–X7 remain pending.

@@ -138,6 +138,7 @@ impl RuntimeProfileProcessOwner {
                 .map_err(|_| failure("Runtime process session poisoned"))?;
             if state.terminal.is_none()
                 || state.residual_child.is_some()
+                || session.child_custody.is_active()
                 || !state.joined
                 || state.observer.is_some()
                 || state.terminal_observer.is_some()
@@ -209,6 +210,7 @@ impl RuntimeProfileProcessOwner {
                         .map_err(|_| failure("Runtime process session poisoned"))?;
                     if state.terminal.is_none()
                         || state.residual_child.is_some()
+                        || previous.child_custody.is_active()
                         || !state.joined
                         || state.observer.is_some()
                         || state.terminal_observer.is_some()
@@ -1306,6 +1308,70 @@ mod tests {
             .await
             .unwrap();
         assert!(receipt.response.success);
+        assert!(fixture.owner.stop(&id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn failed_custody_drain_blocks_admission_until_retry_succeeds() {
+        let fixture = Fixture::new();
+        let (config, spec, guard) = fixture.launch("sleep 30 & wait");
+        let id = spec.profile_id.clone();
+        fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .unwrap();
+        assert!(fixture.owner.stop(&id).await.unwrap());
+        let session = fixture.owner.registry.lock().unwrap().sessions[&id].clone();
+        let generation = session.generation;
+
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args(["-c", "sleep 30 & wait"]);
+        let child = ManagedChild::spawn(&mut command, session.child_custody.clone()).unwrap();
+        {
+            let mut state = session.state.lock().unwrap();
+            state.residual_child = Some(child);
+            state.custody_drain = Some(ChildDrainCompletion(
+                async { Err(Arc::new("injected drain failure".to_string())) }
+                    .boxed()
+                    .shared(),
+            ));
+        }
+
+        assert!(drain_session(&session)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("injected drain failure"));
+        assert!(session.state.lock().unwrap().residual_child.is_none());
+        assert!(session.child_custody.is_active());
+        assert!(session.child_custody.has_parked_child());
+        assert!(fixture.owner.ensure_inactive(&id).is_err());
+
+        let (config, spec, guard) = fixture.launch("sleep 30 & wait");
+        assert!(fixture
+            .owner
+            .launch(config, spec, None, None, guard)
+            .await
+            .is_err());
+        assert_eq!(
+            fixture.owner.registry.lock().unwrap().sessions[&id].generation,
+            generation
+        );
+
+        assert!(drain_session(&session).await.unwrap());
+        assert!(!session.child_custody.is_active());
+        fixture.owner.ensure_inactive(&id).unwrap();
+        let (config, spec, guard) = fixture.launch("sleep 30 & wait");
+        assert!(
+            fixture
+                .owner
+                .launch(config, spec, None, None, guard)
+                .await
+                .unwrap()
+                .response
+                .success
+        );
         assert!(fixture.owner.stop(&id).await.unwrap());
     }
 

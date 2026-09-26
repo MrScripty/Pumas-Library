@@ -515,3 +515,30 @@ and packaged desktop Torch installation also remain unproven. Local v0.7.0
 Linux AppImage and deb packages were rebuilt
 with the updated uv notices and passed extracted-resource and bundled RPC
 `/health` smoke checks; this did not update the public toolbar-linked release.
+
+## 2026-09-25 — Torch metadata and lifecycle review repairs
+
+The current PR branch now serializes Torch metadata reads and writes across
+independent manager processes with a permanent `.torch-versions.lock`. The
+guard covers install/removal, explicit and default selection, validation, and
+startup cleanup/normalization. A snapshot uses one metadata generation; when a
+writer owns the lock, readers return the last coherent cached generation, and
+startup avoids reading a transitional active-version marker. Blocking workers
+retain their lock lease until writes finish even if their async caller is
+canceled. Read-only Astra high and Sol xhigh reviews found no remaining
+blocking issue in these concurrency, cache, startup, or Windows lock-error
+paths. A failed metadata write followed by a failed active-marker rollback is
+still a best-effort error case.
+
+Local verification on this branch passed 199 `pumas-app-manager` tests and the
+Rust default-member suite, all-target/all-feature Clippy with warnings denied,
+Rust formatting, Windows GNU app-manager test compilation, 713 frontend tests,
+48 desktop-contract tests, 179 Electron tests (one platform-dependent skip),
+50 managed-Python acceptance fixtures, Ruff, Python compilation, and
+release-attribution validation. These checks do not replace the next GitHub PR
+workflow run. Windows GNU compilation is not native Windows execution; native
+Windows/macOS E2E, provider-license integration, packaged desktop Torch
+installation, CUDA/device execution, and v2.14.0 Tuldok/image generation remain
+unverified. The Linux/macOS E2E issues recorded above also remain open pending
+a manual native rerun. X1–X7 remain pending, and the local Linux packages have
+not updated the public toolbar-linked release.

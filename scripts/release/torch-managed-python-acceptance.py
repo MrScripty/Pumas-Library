@@ -7,6 +7,7 @@ This downloads a managed Python and Torch wheels into a disposable launcher root
 
 import argparse
 from contextlib import contextmanager
+import errno
 import hashlib
 import io
 import json
@@ -550,6 +551,162 @@ class LauncherRootFinalizationFixture(unittest.TestCase):
 
 
 class RestartAcceptanceFixture(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "POSIX process group fixture")
+    def test_permission_denied_rechecks_group_liveness(self) -> None:
+        observations = iter((True, False))
+        signals = []
+
+        def denied(group, requested_signal):
+            signals.append((group, requested_signal))
+            raise PermissionError(errno.EPERM, "denied")
+
+        self.assertFalse(
+            signal_posix_group_once(42, observe=lambda _group: next(observations), send=denied)
+        )
+        self.assertEqual(signals, [(42, signal.SIGKILL)])
+
+        observations = iter((True, True))
+        with self.assertRaises(PermissionError):
+            signal_posix_group_once(42, observe=lambda _group: next(observations), send=denied)
+
+    @unittest.skipIf(os.name == "nt", "POSIX process group fixture")
+    def test_bounded_runner_does_not_signal_drained_group(self) -> None:
+        with patch.object(os, "killpg", side_effect=PermissionError(errno.EPERM, "denied")) as kill:
+            result = run_bounded_posix_subprocess(
+                [sys.executable, "-c", "pass"],
+                cwd=Path.cwd(),
+                env=os.environ.copy(),
+                timeout=5,
+            )
+        self.assertEqual(result.returncode, 0)
+        kill.assert_not_called()
+
+    @unittest.skipIf(os.name == "nt", "POSIX process group fixture")
+    def test_cleanup_reaps_leader_and_descendant_after_observer_failure(self) -> None:
+        real_observe = posix_group_has_live_members
+        observations = 0
+
+        def fail_once(group):
+            nonlocal observations
+            observations += 1
+            if observations == 1:
+                raise RuntimeError("group observation failed")
+            return real_observe(group)
+
+        with patch.object(
+            sys.modules[__name__],
+            "posix_group_has_live_members",
+            side_effect=fail_once,
+        ):
+            group = self.assert_failed_posix_cleanup(RuntimeError, "group observation failed")
+        self.assertFalse(posix_group_has_live_members(group))
+
+    @unittest.skipIf(os.name == "nt", "POSIX process group fixture")
+    def test_cleanup_reaps_leader_and_descendant_after_live_eperm(self) -> None:
+        real_killpg = os.killpg
+        signals = []
+
+        def deny_once(group, requested_signal):
+            signals.append((group, requested_signal))
+            if len(signals) == 1:
+                raise PermissionError(errno.EPERM, "denied")
+            return real_killpg(group, requested_signal)
+
+        with patch.object(os, "killpg", side_effect=deny_once):
+            group = self.assert_failed_posix_cleanup(PermissionError, "denied")
+        self.assertGreaterEqual(len(signals), 2)
+        self.assertLess(len(signals), 100)
+        self.assertFalse(posix_group_has_live_members(group))
+
+    @unittest.skipIf(os.name == "nt", "POSIX process group fixture")
+    def test_persistent_group_eperm_retains_custody_until_explicit_drain(self) -> None:
+        real_killpg = os.killpg
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            leader_path = root / "leader.pid"
+            marker = root / "descendant-escaped"
+            descendant = (
+                "import pathlib,sys,time; time.sleep(2); "
+                "pathlib.Path(sys.argv[1]).write_text('escaped')"
+            )
+            parent = (
+                "import os,pathlib,subprocess,sys,time; "
+                "pathlib.Path(sys.argv[2]).write_text(str(os.getpid())); "
+                "subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[3]],"
+                "stdout=sys.stdout,stderr=sys.stderr); time.sleep(10)"
+            )
+            retained = None
+            try:
+                with patch.object(os, "killpg", side_effect=PermissionError(errno.EPERM, "denied")):
+                    with self.assertRaises(PermissionError):
+                        run_bounded_posix_subprocess(
+                            [
+                                sys.executable,
+                                "-c",
+                                parent,
+                                descendant,
+                                str(leader_path),
+                                str(marker),
+                            ],
+                            cwd=root,
+                            env=os.environ.copy(),
+                            timeout=0.25,
+                        )
+                group = int(leader_path.read_text())
+                retained = next(child for child in UN_DRAINED_POSIX_CHILDREN if child.pid == group)
+                self.assertIsNone(retained.returncode, "leader was reaped before group drain")
+                self.assertTrue(posix_group_has_live_members(group))
+            finally:
+                if retained is not None:
+                    deadline = time.monotonic() + 5
+                    while posix_group_has_live_members(retained.pid):
+                        real_killpg(retained.pid, signal.SIGKILL)
+                        self.assertLess(time.monotonic(), deadline)
+                        time.sleep(0.02)
+                    retained.wait()
+                    UN_DRAINED_POSIX_CHILDREN.remove(retained)
+            self.assertFalse(posix_group_has_live_members(group))
+            time.sleep(2.2)
+            self.assertFalse(marker.exists())
+
+    def assert_failed_posix_cleanup(self, failure_type: type[Exception], message: str) -> int:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            leader_path = root / "leader.pid"
+            descendant_marker = root / "descendant-escaped"
+            descendant = (
+                "import pathlib,sys,time; time.sleep(1); "
+                "pathlib.Path(sys.argv[1]).write_text('escaped')"
+            )
+            parent = (
+                "import os,pathlib,subprocess,sys,time; "
+                "pathlib.Path(sys.argv[2]).write_text(str(os.getpid())); "
+                "subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[3]],"
+                "stdout=sys.stdout,stderr=sys.stderr); "
+                "os.write(1,b'partial-out'); time.sleep(10)"
+            )
+            with self.assertRaises(failure_type) as raised:
+                run_bounded_posix_subprocess(
+                    [
+                        sys.executable,
+                        "-c",
+                        parent,
+                        descendant,
+                        str(leader_path),
+                        str(descendant_marker),
+                    ],
+                    cwd=root,
+                    env=os.environ.copy(),
+                    timeout=0.25,
+                )
+            self.assertIn(message, str(raised.exception))
+            leader = int(leader_path.read_text())
+            with self.assertRaises(ProcessLookupError):
+                os.kill(leader, 0)
+            time.sleep(1.2)
+            self.assertFalse(descendant_marker.exists())
+            return leader
+
     def test_session_preserves_original_failure_when_stop_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -890,10 +1047,14 @@ class RestartAcceptanceFixture(unittest.TestCase):
     def test_bounded_runner_returns_promptly_when_descendant_escapes_group(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             pid_path = Path(temporary) / "detached.pid"
-            descendant = "import time; time.sleep(3)"
+            completion_path = Path(temporary) / "detached-completed"
+            descendant = (
+                "import pathlib,sys,time; time.sleep(2); "
+                "pathlib.Path(sys.argv[1]).write_text('completed')"
+            )
             parent = (
                 "import os,pathlib,subprocess,sys,time; "
-                "child=subprocess.Popen([sys.executable,'-c',sys.argv[1]],"
+                "child=subprocess.Popen([sys.executable,'-c',sys.argv[1],sys.argv[3]],"
                 "stdout=sys.stdout,stderr=sys.stderr,start_new_session=True); "
                 "pathlib.Path(sys.argv[2]).write_text(str(child.pid)); "
                 "os.write(1,b'parent-tail'); os.write(2,b'parent-error'); time.sleep(10)"
@@ -903,7 +1064,14 @@ class RestartAcceptanceFixture(unittest.TestCase):
             try:
                 with self.assertRaises(subprocess.TimeoutExpired) as raised:
                     run_bounded_subprocess(
-                        [sys.executable, "-c", parent, descendant, str(pid_path)],
+                        [
+                            sys.executable,
+                            "-c",
+                            parent,
+                            descendant,
+                            str(pid_path),
+                            str(completion_path),
+                        ],
                         cwd=Path(temporary),
                         env=os.environ.copy(),
                         timeout=0.25,
@@ -912,12 +1080,20 @@ class RestartAcceptanceFixture(unittest.TestCase):
                 self.assertIn(b"parent-tail", raised.exception.stdout)
                 self.assertIn(b"parent-error", raised.exception.stderr)
                 self.assertEqual({thread.ident for thread in threading.enumerate()} - before, set())
+                self.assertTrue(posix_group_has_live_members(int(pid_path.read_text())))
+                self.assertFalse(completion_path.exists())
             finally:
                 if pid_path.exists():
-                    try:
-                        os.kill(int(pid_path.read_text()), signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
+                    deadline = time.monotonic() + 5
+                    while not completion_path.exists() and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    self.assertTrue(completion_path.exists(), "detached descendant did not exit")
+                    detached_group = int(pid_path.read_text())
+                    while (
+                        posix_group_has_live_members(detached_group) and time.monotonic() < deadline
+                    ):
+                        time.sleep(0.05)
+                    self.assertFalse(posix_group_has_live_members(detached_group))
 
     def test_bounded_runner_cleans_up_if_reader_thread_cannot_start(self) -> None:
         spawned = []
@@ -2343,6 +2519,69 @@ def windows_kill_job():
     return Job()
 
 
+def posix_group_has_live_members(group: int) -> bool:
+    observed = subprocess.run(
+        ["/bin/ps", "-A", "-o", "pgid=,stat="],
+        capture_output=True,
+        check=True,
+        timeout=5,
+    )
+    for line in observed.stdout.decode("utf-8", errors="replace").splitlines():
+        fields = line.split()
+        if fields and fields[0] == str(group):
+            if len(fields) < 2:
+                raise RuntimeError("Incomplete POSIX process-group state")
+            if not fields[1].startswith("Z"):
+                return True
+    return False
+
+
+def signal_posix_group_once(group: int, *, observe=None, send=None) -> bool:
+    """Signal only observed live members; retain EPERM if any remain live."""
+    if observe is None:
+        observe = posix_group_has_live_members
+    if send is None:
+        send = os.killpg
+    if not observe(group):
+        return False
+    try:
+        send(group, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except PermissionError as error:
+        if error.errno != errno.EPERM or observe(group):
+            raise
+        return False
+    return observe(group)
+
+
+def drain_posix_group(group: int) -> None:
+    deadline = time.monotonic() + 5
+    while signal_posix_group_once(group):
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Owned POSIX process group did not drain")
+        time.sleep(0.02)
+
+
+def emergency_drain_posix_group(group: int) -> None:
+    """Retry only the owned group while its unreaped leader pins the PGID."""
+    deadline = time.monotonic() + 0.5
+    last_error = None
+    while True:
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except OSError as error:
+            last_error = error
+        if not posix_group_has_live_members(group):
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Owned POSIX process group did not drain") from last_error
+        time.sleep(0.02)
+
+
+UN_DRAINED_POSIX_CHILDREN: list[subprocess.Popen[bytes]] = []
+
+
 def run_bounded_posix_subprocess(
     args: list[str], *, cwd: Path, env: dict[str, str], timeout: float
 ) -> subprocess.CompletedProcess[bytes]:
@@ -2362,6 +2601,7 @@ def run_bounded_posix_subprocess(
     selector = None
     timed_out = False
     open_pipes = False
+    group_drained = False
 
     def drain_ready(wait_seconds: float) -> None:
         for key, _ in selector.select(wait_seconds):
@@ -2381,34 +2621,58 @@ def run_bounded_posix_subprocess(
             os.set_blocking(stream.fileno(), False)
             selector.register(stream, selectors.EVENT_READ, retained)
         deadline = time.monotonic() + timeout
-        while process.poll() is None:
+        while os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 timed_out = True
                 break
             drain_ready(min(remaining, 0.05))
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        # WNOWAIT keeps the leader present until descendants have drained,
+        # preventing its process-group ID from being reused before signaling.
+        drain_posix_group(process.pid)
+        group_drained = True
         process.wait()
         grace_deadline = time.monotonic() + 0.25
         while selector.get_map() and time.monotonic() < grace_deadline:
             drain_ready(max(0, grace_deadline - time.monotonic()))
         open_pipes = bool(selector.get_map())
     finally:
+        primary_error = sys.exc_info()[1]
+        cleanup_errors = []
         try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        if process.poll() is None:
-            process.kill()
-        process.wait()
-        if selector is not None:
-            selector.close()
-        for stream, _ in streams:
-            if stream is not None:
-                stream.close()
+            if not group_drained:
+                # The leader is still unreaped, so its PGID remains ours even
+                # if the normal observer or group signal failed.
+                try:
+                    emergency_drain_posix_group(process.pid)
+                    group_drained = True
+                except Exception as error:
+                    cleanup_errors.append(f"emergency group drain: {error}")
+                    try:
+                        os.kill(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    except OSError as leader_error:
+                        cleanup_errors.append(f"direct leader kill: {leader_error}")
+                    # Keep the unreaped leader alive as a custody pin if
+                    # descendants cannot be proven drained.
+                    UN_DRAINED_POSIX_CHILDREN.append(process)
+            if group_drained:
+                try:
+                    process.wait(timeout=5)
+                except Exception as error:
+                    cleanup_errors.append(f"leader reap: {error}")
+        finally:
+            if selector is not None:
+                selector.close()
+            for stream, _ in streams:
+                if stream is not None:
+                    stream.close()
+        if cleanup_errors:
+            if primary_error is not None:
+                primary_error.add_note("POSIX cleanup also failed: " + "; ".join(cleanup_errors))
+            else:
+                raise RuntimeError("POSIX cleanup failed: " + "; ".join(cleanup_errors))
     stdout = bytes(stdout_tail)
     stderr = bytes(stderr_tail)
     if timed_out:

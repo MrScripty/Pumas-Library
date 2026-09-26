@@ -299,10 +299,10 @@ mod resolver_diagnostic_tests {
         let diagnostic = b"Invalid wheel resolution: No SHA-256 provenance for torch\n";
         let mut contents = b"earlier valid stderr ".to_vec();
         contents.extend_from_slice("😀".as_bytes());
-        contents.extend(
-            std::iter::repeat(b'x')
-                .take(RESOLVER_STDERR_TAIL_BYTES as usize - 3 - diagnostic.len() - 1),
-        );
+        contents.extend(std::iter::repeat_n(
+            b'x',
+            RESOLVER_STDERR_TAIL_BYTES as usize - 3 - diagnostic.len() - 1,
+        ));
         contents.push(b'\n');
         contents.extend_from_slice(diagnostic);
         assert!(std::str::from_utf8(&contents).is_ok());

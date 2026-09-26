@@ -831,6 +831,23 @@ mod unix_tests {
                 self.0.store(true, Ordering::Release);
             }
         }
+        struct Cleanup {
+            child: Option<ManagedChild>,
+            custody: Arc<ManagedChildCustodySlot>,
+            force_eperm: Arc<AtomicBool>,
+            armed: bool,
+        }
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                if self.armed {
+                    // Park the child, clear any injected denial, then retry a
+                    // bounded drain through the normal signal path.
+                    drop(self.child.take());
+                    self.force_eperm.store(false, Ordering::Release);
+                    let _ = self.custody.drain(Duration::from_secs(5));
+                }
+            }
+        }
 
         let root = tempfile::tempdir().unwrap();
         let marker = root.path().join("descendant.pid");
@@ -839,17 +856,30 @@ mod unix_tests {
             .args(["-c", "sleep 30 & echo $! > \"$1\"; wait", "sh"])
             .arg(&marker);
         let custody = ManagedChildCustodySlot::new();
-        let mut child = ManagedChild::spawn(&mut command, custody.clone()).unwrap();
-        let group = child.id() as i32;
+        let child = ManagedChild::spawn(&mut command, custody.clone()).unwrap();
+        let force_eperm = child.force_group_signal_permission_denied.clone();
+        let mut cleanup = Cleanup {
+            child: Some(child),
+            custody: custody.clone(),
+            force_eperm: force_eperm.clone(),
+            armed: true,
+        };
+        let group = cleanup.child.as_ref().unwrap().id() as i32;
         let descendant = wait_for(&marker);
         assert!(macos_group_has_live_members(group).unwrap());
         assert!(super::super::process::is_process_alive(descendant));
 
         let released = Arc::new(AtomicBool::new(false));
-        child.attach_cleanup_lease(Arc::new(Lease(released.clone())));
-        let force_eperm = child.force_group_signal_permission_denied.clone();
+        cleanup
+            .child
+            .as_mut()
+            .unwrap()
+            .attach_cleanup_lease(Arc::new(Lease(released.clone())));
         force_eperm.store(true, Ordering::Release);
-        let error = child
+        let error = cleanup
+            .child
+            .as_mut()
+            .unwrap()
             .terminate_and_drain(Duration::from_secs(5))
             .unwrap_err();
         assert_eq!(error.raw_os_error(), Some(libc::EPERM));
@@ -857,7 +887,7 @@ mod unix_tests {
         assert!(custody.is_active());
         assert!(!released.load(Ordering::Acquire));
 
-        drop(child);
+        drop(cleanup.child.take());
         assert!(custody.has_parked_child());
         assert_eq!(
             custody
@@ -875,6 +905,7 @@ mod unix_tests {
         assert!(!custody.has_parked_child());
         assert!(!custody.is_active());
         assert!(released.load(Ordering::Acquire));
+        cleanup.armed = false;
     }
 
     #[cfg(target_os = "macos")]
@@ -974,9 +1005,12 @@ mod unix_tests {
 #[cfg(all(test, windows))]
 mod windows_tests {
     use super::*;
-    use std::os::windows::io::AsRawHandle;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
     use windows_sys::Win32::System::JobObjects::IsProcessInJob;
-    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+    };
 
     #[test]
     fn failed_resume_parks_suspended_job_for_bounded_retry() {
@@ -1019,16 +1053,39 @@ mod windows_tests {
             );
             std::thread::sleep(POLL_INTERVAL);
         };
-        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, descendant) };
+        // SAFETY: The descendant PID came from the launched fixture; OpenProcess
+        // returns a handle owned by this test when it succeeds.
+        let process = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                0,
+                descendant,
+            )
+        };
         assert!(!process.is_null());
+        // SAFETY: OpenProcess returned an owned handle, and OwnedHandle closes it once.
+        let process = unsafe { OwnedHandle::from_raw_handle(process) };
         let mut member = 0;
         assert_ne!(
-            unsafe { IsProcessInJob(process, child.job.as_raw_handle(), &mut member) },
+            // SAFETY: Both process and Job handles are live, and member is a
+            // valid writable output pointer for the duration of the call.
+            unsafe {
+                IsProcessInJob(
+                    process.as_raw_handle(),
+                    child.job.as_raw_handle(),
+                    &mut member,
+                )
+            },
             0
         );
         assert_ne!(member, 0, "descendant escaped the admitted Job");
-        unsafe { windows_sys::Win32::Foundation::CloseHandle(process) };
         child.terminate_and_drain(Duration::from_secs(10)).unwrap();
+        // The retained handle names the same process even after its PID can be reused.
+        assert_eq!(
+            // SAFETY: OwnedHandle keeps the process handle live through this wait.
+            unsafe { WaitForSingleObject(process.as_raw_handle(), 0) },
+            WAIT_OBJECT_0
+        );
         assert!(!windows::terminate_and_has_members(&child.job).unwrap());
     }
 }

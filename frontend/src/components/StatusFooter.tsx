@@ -98,10 +98,13 @@ export const StatusFooter: React.FC<StatusFooterProps> = ({
       };
 
       const stageName = stageNames[installationProgress.stage as keyof typeof stageNames] || 'Installing';
+      const speedInfo = installationProgress.stage === 'setup' && installationProgress.download_speed !== null
+        ? ` · ${formatSpeed(installationProgress.download_speed)}`
+        : '';
 
       return {
         icon: Download,
-        text: `${stageName} · ${installationProgress.overall_progress}% complete`,
+        text: `${stageName}${speedInfo} · ${installationProgress.overall_progress}% complete`,
         color: 'text-accent-info',
         bgColor: 'bg-[hsl(var(--accent-info)/0.1)]',
         spinning: false

@@ -346,6 +346,28 @@ resolver, manager, desktop, and platform runtime owners.
    The target uv binary and its embedded interpreter catalog are pinned
    together. Do not use ambient uv or runtime `latest` URLs.
 
+## Network activity monitoring
+
+- Use one platform-neutral activity registry for transfer observations, keyed
+  by operation and transfer IDs. Producers report cumulative bytes, optional
+  expected size/source, direction, state, measurement basis, and coverage; the
+  registry calculates rates from monotonic samples and never adds overlapping
+  payload and OS wire counters.
+- The first adapter is Torch package installation. The existing installer
+  download callback and the pip wheel worker feed the same registry. The
+  desktop progress view shows the measured payload rate and a copyable URL only
+  for sources on Pumas' approved artifact allowlist; other sources still report
+  byte rate without exposing an unapproved link.
+- Keep OS process monitoring optional. It may add partial wire-byte observations
+  under the same operation/transfer model, but permission-dependent OS counters
+  cannot identify a repository or artifact and must not be presented as the
+  exact package transfer. No Linux-only or administrator-required provider is
+  assumed by the shared API.
+- Current coverage is partial: the generic `DownloadManager` and Hugging Face
+  stream paths still need adapters, and no OS process sampler is implemented.
+  Do not claim that all Pumas network traffic is visible until those producer
+  paths and platform permissions are tested.
+
 ## Acceptance claims
 
 | ID | Observable criterion | Evidence required | Status |
@@ -357,6 +379,7 @@ resolver, manager, desktop, and platform runtime owners.
 | X5 | The actual install attempt retains the upstream distribution version, build, official wheel URL/hash, Python provider artifact identity, interpreter fingerprint, and complete dependency report; validates installed package names/versions and the exact staged file manifest before publication | Historical run `36223106097` resolved 25 hashed CPU/Core artifacts through the previous preview path on all targets; current direct-install resolver and Rust provenance tests cover post-install checks. Native packaged direct-install acceptance is pending. | partial |
 | X6 | Installed versions can be inspected, explicitly selected, started with health/protocol checks, and stopped by their owned generation; cancellation, timeout, RPC shutdown, and failed cleanup do not leak a resolver, installer, sidecar, interpreter provisioner, or unregistered runtime | Run `36223106097` passed second-session restart, fresh CPU operation, probe revalidation, protocol 3 sidecar trial/stop, and graceful shutdown on Linux, Windows, and macOS (see X2 reports); broader cancellation/timeout/failure cleanup remains | partial |
 | X7 | The same manager choices and lifecycle are reachable through packaged desktop controls and the existing RPC API; the user never has to choose Python, and the desktop offers no unsupported adapter | In the historical Linux v0.7.0 AppImage UI install, the first sampled state at 9 seconds showed the current phase in the header, indeterminate bars, Cancel, and readable controls under the previous package-resolution flow. A separate interaction/readability follow-up observed immediate artifact-check status but did not install again. The direct-install local AppImage/deb are now built and pass extracted-resource/backend health checks; source/UI tests cover local selection and visible install state. Manual packaged install remains pending. Packaged Windows/macOS installation remains unverified. | partial |
+| X8 | Network activity from each integrated producer uses the shared operation/transfer registry with explicit payload-versus-wire basis, coverage, lifecycle, and source; UI rates are derived from cumulative samples and artifact links are validated | Torch pip and installer progress use the registry; copyable allowlisted wheel URLs and active/idle speed are covered by Rust and frontend tests. Generic `DownloadManager` and Hugging Face adapters, OS telemetry providers, and cross-platform permission behavior remain open. | partial |
 
 Plan acceptance is `pending` until every required row is satisfied on its
 declared native environment. Cross-compilation, Linux simulation, packaging,

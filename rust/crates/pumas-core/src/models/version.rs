@@ -129,6 +129,10 @@ pub struct InstallationProgress {
     #[serde(default)]
     pub current_item: Option<String>,
     #[serde(default)]
+    pub download_source_url: Option<String>,
+    #[serde(default)]
+    pub download_active: bool,
+    #[serde(default)]
     pub download_speed: Option<f64>,
     #[serde(default)]
     pub eta_seconds: Option<f64>,

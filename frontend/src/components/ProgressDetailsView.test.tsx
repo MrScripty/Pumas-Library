@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ProgressDetailsView } from './ProgressDetailsView';
 import type { InstallationProgress } from '../hooks/useVersions';
@@ -66,6 +66,55 @@ describe('ProgressDetailsView', () => {
     />);
     expect(screen.getByRole('progressbar', { name: 'Overall installation progress' })).toHaveAttribute('aria-valuenow', '95');
     expect(screen.getByRole('progressbar', { name: 'Final Setup progress' })).toHaveAttribute('aria-valuenow', '40');
+  });
+
+  it('shows measured network speed and copies the active wheel source', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    try {
+      const { rerender } = render(<ProgressDetailsView
+        appId="torch"
+        progress={{
+          ...dependencyProgress,
+          tag: 'v2.14.0',
+          stage: 'setup',
+          download_speed: 12 * 1024 * 1024,
+          download_source_url: 'https://download.pytorch.org/whl/cu134/torch-2.14.0.whl',
+          download_active: true,
+          error: null,
+        }}
+        installingVersion="v2.14.0" showCompletedItems={false}
+        onToggleCompletedItems={vi.fn()} onBackToList={vi.fn()} onOpenLogPath={vi.fn()}
+      />);
+
+      expect(screen.getByText('Network download')).toBeInTheDocument();
+      expect(screen.getByText('12.0 MB/s')).toBeInTheDocument();
+      expect(screen.getByText('Latest file source')).toBeInTheDocument();
+      expect(screen.getByText('https://download.pytorch.org/whl/cu134/torch-2.14.0.whl')).toBeInTheDocument();
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Copy file source' }));
+        await Promise.resolve();
+      });
+      expect(writeText).toHaveBeenCalledWith('https://download.pytorch.org/whl/cu134/torch-2.14.0.whl');
+      expect(screen.getByText('Copied')).toBeInTheDocument();
+
+      rerender(<ProgressDetailsView
+        progress={{
+          ...dependencyProgress,
+          tag: 'v2.14.0',
+          stage: 'setup',
+          download_speed: null,
+          download_active: false,
+          download_source_url: 'https://download.pytorch.org/whl/cu134/torch-2.14.0.whl',
+          error: null,
+        }}
+        installingVersion="v2.14.0" showCompletedItems={false}
+        onToggleCompletedItems={vi.fn()} onBackToList={vi.fn()} onOpenLogPath={vi.fn()}
+      />);
+      expect(screen.getByText('Idle')).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('renders dependency progress details and routes detail actions', () => {

@@ -11,6 +11,8 @@ describe('projectInstallationProgress', () => {
       stageProgress: 125.5,
       overallProgress: 107.25,
       currentItem: 'torch',
+      downloadSourceUrl: 'https://download.pytorch.org/whl/cu134/torch-2.14.0.whl',
+      downloadActive: true,
       downloadSpeed: 42.5,
       etaSeconds: 0.5,
       totalSize: 1024,
@@ -31,6 +33,8 @@ describe('projectInstallationProgress', () => {
       stage_progress: 125.5,
       overall_progress: 107.25,
       current_item: 'torch',
+      download_source_url: 'https://download.pytorch.org/whl/cu134/torch-2.14.0.whl',
+      download_active: true,
       download_speed: 42.5,
       eta_seconds: 0.5,
       total_size: 1024,
@@ -50,6 +54,7 @@ describe('projectInstallationProgress', () => {
       tag: '', startedAt: '', stage: 'download', downloadedBytes: 0,
       completedDependencies: 0, completedItems: [], stageProgress: null,
       overallProgress: null, currentItem: null, downloadSpeed: null,
+      downloadSourceUrl: null, downloadActive: false,
       etaSeconds: null, totalSize: null, dependencyCount: null, error: null,
       completedAt: null, success: null, logPath: null,
     };
@@ -57,7 +62,7 @@ describe('projectInstallationProgress', () => {
     expect(projectInstallationProgress(wire)).toMatchObject({
       tag: '', started_at: '', stage: 'download', stage_progress: 0,
       overall_progress: 0, downloaded_bytes: 0, completed_dependencies: 0,
-      completed_items: [], completed_at: undefined, success: undefined,
+      completed_items: [], download_active: false, completed_at: undefined, success: undefined,
     });
   });
 });

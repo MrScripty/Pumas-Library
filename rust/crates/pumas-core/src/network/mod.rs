@@ -9,6 +9,7 @@
 //! - NetworkManager for centralized connectivity management
 //! - WebSource traits for extensible web source registration
 
+pub mod activity;
 mod circuit_breaker;
 mod client;
 mod download;
@@ -17,6 +18,11 @@ mod manager;
 mod retry;
 mod web_source;
 
+pub use activity::{
+    ActivityError, ActivityUpdate, CopyableSource, MeasurementBasis, MeasurementCoverage,
+    NetworkActivityRegistry, OperationId, TransferActivity, TransferDirection, TransferId,
+    TransferState,
+};
 pub use circuit_breaker::{
     CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats, CircuitState,
 };

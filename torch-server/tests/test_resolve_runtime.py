@@ -70,6 +70,83 @@ def report(
 
 
 class ResolverTests(unittest.TestCase):
+    def test_copyable_download_sources_are_limited_to_official_wheel_urls(self):
+        trusted = (
+            "https://files.pythonhosted.org/packages/ab/pkg-1.0-py3-none-any.whl",
+            "https://download.pytorch.org/whl/cu134/torch-2.14.0.whl",
+            "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0.whl",
+            "https://github.com/nunchux-ai/nunchaku/releases/download/v1.2.0/nunchaku-1.2.0.whl",
+        )
+        rejected = (
+            "http://files.pythonhosted.org/packages/pkg-1.0.whl",
+            "https://user:secret@files.pythonhosted.org/packages/pkg-1.0.whl",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl?token=secret",
+            "https://example.com/packages/pkg-1.0.whl",
+            "https://github.com/other/package/releases/download/v1/pkg-1.0.whl",
+            "https://files.pythonhosted.org/packages/pkg-1.0.tar.gz",
+        )
+        for source in trusted:
+            with self.subTest(source=source):
+                self.assertEqual(resolver.copyable_download_source(source), source)
+        for source in rejected:
+            with self.subTest(source=source):
+                self.assertIsNone(resolver.copyable_download_source(source))
+
+    def test_progress_worker_tracks_unlisted_downloads_without_exposing_their_urls(self):
+        pip_download = importlib.import_module("pip._internal.network.download")
+        pip_cli = importlib.import_module("pip._internal.cli.main")
+        response = object()
+        link = SimpleNamespace(url_without_fragment="https://example.com/private.whl")
+
+        def prepare_download(response, link, progress_bar):
+            del response, link, progress_bar
+            return iter((b"ab", b"cd"))
+
+        def fake_pip_main(_arguments):
+            return list(pip_download._prepare_download(response, link, None)) and 0
+
+        with tempfile.TemporaryDirectory() as directory:
+            progress_path = pathlib.Path(directory) / "download-progress.json"
+            with (
+                patch.object(pip_cli, "main", side_effect=fake_pip_main),
+                patch.object(pip_download, "_prepare_download", prepare_download),
+                patch.object(pip_download, "is_from_cache", return_value=False),
+                patch.object(pip_download, "_get_http_response_size", return_value=4),
+            ):
+                self.assertEqual(
+                    resolver.run_pip_progress_worker(progress_path, ["install", "pkg"]), 0
+                )
+
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+            self.assertIsNone(progress["source_url"])
+            self.assertFalse(progress["active"])
+            self.assertEqual(progress["downloaded_bytes"], 4)
+            self.assertEqual(progress["total_bytes"], 4)
+
+    def test_download_progress_reports_measured_rate_and_final_byte_count(self):
+        timestamps = iter((0.0, 0.5, 1.0))
+        writes = []
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(
+                resolver,
+                "_write_download_progress",
+                side_effect=lambda *values: writes.append(values),
+            ),
+        ):
+            chunks = resolver._track_download_chunks(
+                iter((b"ab", b"cd")),
+                "https://files.pythonhosted.org/packages/pkg-1.0.whl",
+                4,
+                pathlib.Path(directory) / "progress.json",
+                clock=lambda: next(timestamps),
+            )
+            self.assertEqual(list(chunks), [b"ab", b"cd"])
+
+        self.assertEqual(len(writes), 4)
+        self.assertEqual(writes[1][2:], (True, 2, 4, 4.0))
+        self.assertEqual(writes[-1][2:], (False, 4, 4, None))
+
     def test_staged_manifest_requires_exact_recorded_file_set_and_hashes(self):
         with tempfile.TemporaryDirectory() as directory:
             target = pathlib.Path(directory)
@@ -148,6 +225,63 @@ class ResolverTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "identity differs"):
                 resolver.installed_file_manifest(target, artifact)
 
+    def test_staged_manifest_accepts_pip_target_data_files_with_share_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory)
+            dist = target / "sympy-1.14.0.dist-info"
+            dist.mkdir()
+            metadata = dist / "METADATA"
+            metadata.write_text(
+                "Metadata-Version: 2.1\nName: sympy\nVersion: 1.14.0\n",
+                encoding="utf-8",
+            )
+            executable = target / "bin" / "isympy"
+            executable.parent.mkdir()
+            executable.write_bytes(b"#!/bin/sh\n")
+            man_page = target / "share" / "man" / "man1" / "isympy.1"
+            man_page.parent.mkdir(parents=True)
+            man_page.write_bytes(b"SymPy interactive shell manual\n")
+
+            def record_row(name, content):
+                digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest())
+                return f"{name},sha256={digest.rstrip(b'=').decode()},{len(content)}\n"
+
+            record = dist / "RECORD"
+            record.write_text(
+                record_row("sympy-1.14.0.dist-info/METADATA", metadata.read_bytes())
+                + record_row("../../bin/isympy", executable.read_bytes())
+                + record_row("../../share/man/man1/isympy.1", man_page.read_bytes())
+                + "sympy-1.14.0.dist-info/RECORD,,\n",
+                encoding="utf-8",
+            )
+
+            manifest = resolver.installed_file_manifest(
+                target, [{"name": "sympy", "version": "1.14.0"}]
+            )
+            self.assertEqual(
+                [item["path"] for item in manifest["files"]],
+                [
+                    "bin/isympy",
+                    "share/man/man1/isympy.1",
+                    "sympy-1.14.0.dist-info/METADATA",
+                    "sympy-1.14.0.dist-info/RECORD",
+                ],
+            )
+            good_record = record.read_text(encoding="utf-8")
+            for unsafe_path in ("../../etc/passwd", "../../share/../../outside"):
+                with self.subTest(unsafe_path=unsafe_path):
+                    record.write_text(
+                        good_record.replace(
+                            "../../share/man/man1/isympy.1", unsafe_path
+                        ),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(ValueError, "escapes its target"):
+                        resolver.installed_file_manifest(
+                            target, [{"name": "sympy", "version": "1.14.0"}]
+                        )
+            record.write_text(good_record, encoding="utf-8")
+
     def test_install_mode_stages_once_and_validates_report_before_writing_lock(self):
         fixture = report()
         commands = []
@@ -187,6 +321,7 @@ class ResolverTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             output = pathlib.Path(directory) / "manifest"
             target = pathlib.Path(directory) / "staged packages"
+            progress_file = output / "download-progress.json"
             with (
                 patch.object(
                     resolver.sys,
@@ -200,6 +335,8 @@ class ResolverTests(unittest.TestCase):
                         "--install",
                         "--target",
                         str(target),
+                        "--progress-file",
+                        str(progress_file),
                         "--output",
                         str(output),
                     ],
@@ -208,6 +345,8 @@ class ResolverTests(unittest.TestCase):
             ):
                 resolver.main()
             self.assertEqual(len(commands), 1)
+            self.assertEqual(commands[0][3], "--_pumas-pip-progress-worker")
+            self.assertEqual(commands[0][4], str(progress_file))
             self.assertEqual(commands[0][commands[0].index("--target") + 1], str(target))
             self.assertTrue(target.is_dir())
             self.assertEqual(

@@ -7,6 +7,40 @@ inventory, not a completed Pumas desktop acceptance. The prior
 evidence below uses a separate, exact Torch 2.10 tuple and does not qualify a
 newly resolved upstream release.
 
+## 2026-09-26 — Torch 2.14.0 staged RECORD failure and repaired local package
+
+The reported install log shows that Torch 2.14.0+cu132 and its dependencies
+downloaded and pip installed into private staging; the failure occurred during
+Pumas' staged-file manifest validation. SymPy 1.14.0's wheel places
+`isympy.1` under `share/man/man1` using pip's valid `../../share/...` target
+scheme. Pumas previously recognized the `../../bin/...` scheme only, so it
+misclassified this in-stage file as a path escape.
+
+The resolver now maps the known pip target scheme roots (`bin`, `share`,
+`Scripts`, and `Include`) into the stage before applying containment, file,
+size, and hash validation. Regression coverage accepts the SymPy share entry
+and still rejects paths into `/etc` or outside the stage. Python tests replayed
+the cached SymPy wheel and validated 1,573 staged files. Verification also
+passed 54 resolver tests, Ruff, 231 app-manager tests, 725 frontend tests,
+frontend typecheck/build, Rust formatting, RPC health, Linux artifact checks,
+and extracted AppImage/deb resource and backend health smoke tests.
+
+The rebuilt local AppImage is 154,937,978 bytes, SHA-256
+`9125fc53b9ff0d6bfbc02e2f3394e799418883dc3e80a262ce2758065ddae76e`; the deb
+is 120,530,972 bytes, SHA-256
+`777488fcf931a1e72e5508d35ed2c4caa7b65adb6e87e744dd0367b8bba880d3`. These
+are local, unpublished candidates and do not update the toolbar-linked release.
+The rebuilt desktop package has not yet been used for a fresh full Torch
+install, and this repair provides no new CUDA, Tuldok image, Windows, or macOS
+runtime evidence.
+
+The same work adds a shared network activity registry used by Torch wheel
+downloads and installer progress. It exposes payload rates across approved and
+unapproved sources, while only approved HTTPS artifact URLs are copyable.
+Generic DownloadManager and Hugging Face producers, OS-level supplementary
+sampling, and native cross-platform permissions remain unimplemented; network
+monitoring acceptance is partial.
+
 ## 2026-09-26 — Replace the long Torch check with the real install attempt
 
 The owner rejected the previous multi-minute compatibility check. For the

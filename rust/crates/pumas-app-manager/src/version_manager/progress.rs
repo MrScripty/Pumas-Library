@@ -4,10 +4,15 @@
 //! and persistence for recovery.
 
 use pumas_library::models::{InstallationProgress, InstallationProgressItem, InstallationStage};
+use pumas_library::network::{
+    ActivityUpdate, CopyableSource, MeasurementBasis, MeasurementCoverage, NetworkActivityRegistry,
+    OperationId, TransferDirection, TransferId, TransferState,
+};
 use pumas_library::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::Instant;
 use tokio::fs;
 use tracing::{debug, warn};
 
@@ -99,6 +104,8 @@ pub struct InstallationProgressTracker {
     state_filename: String,
     /// Current installation state.
     state: Mutex<Option<InstallationProgressState>>,
+    /// Transfer observations shared by the library's network producers.
+    network_activity: NetworkActivityRegistry,
 }
 
 /// Internal state for tracking.
@@ -111,6 +118,10 @@ struct InstallationProgressState {
     stage_progress: f32,
     overall_progress: f32,
     current_item: Option<String>,
+    #[serde(default)]
+    download_source_url: Option<String>,
+    #[serde(default)]
+    download_active: bool,
     download_speed: Option<f64>,
     eta_seconds: Option<f64>,
     total_size: Option<u64>,
@@ -134,6 +145,7 @@ impl InstallationProgressTracker {
             cache_dir,
             state_filename: "installation-state.json".to_string(),
             state: Mutex::new(None),
+            network_activity: NetworkActivityRegistry::new(),
         }
     }
 
@@ -180,6 +192,7 @@ impl InstallationProgressTracker {
         dependency_count: Option<u32>,
         log_path: Option<&str>,
     ) {
+        self.clear_network_activity();
         let state = InstallationProgressState {
             tag: tag.to_string(),
             started_at: chrono::Utc::now().to_rfc3339(),
@@ -187,6 +200,8 @@ impl InstallationProgressTracker {
             stage_progress: 0.0,
             overall_progress: 0.0,
             current_item: None,
+            download_source_url: None,
+            download_active: false,
             download_speed: None,
             eta_seconds: None,
             total_size,
@@ -215,11 +230,15 @@ impl InstallationProgressTracker {
         progress: f32,
         current_item: Option<&str>,
     ) {
+        self.clear_network_activity();
         let mut guard = self.state.lock().unwrap();
         if let Some(ref mut state) = *guard {
             state.stage = stage;
             state.stage_progress = progress.clamp(0.0, 100.0);
             state.current_item = current_item.map(String::from);
+            state.download_source_url = None;
+            state.download_active = false;
+            state.download_speed = None;
             state.overall_progress = self.calculate_overall_progress(state);
         }
         drop(guard);
@@ -233,17 +252,29 @@ impl InstallationProgressTracker {
         total_bytes: Option<u64>,
         speed_bytes_per_sec: Option<f64>,
     ) {
+        let active = total_bytes.map_or(true, |total| downloaded_bytes < total);
+        let measured_speed = self
+            .record_network_activity(
+                "installer-download",
+                None,
+                active,
+                downloaded_bytes,
+                total_bytes,
+            )
+            .or(speed_bytes_per_sec);
         let mut guard = self.state.lock().unwrap();
         if let Some(ref mut state) = *guard {
             state.downloaded_bytes = downloaded_bytes;
+            state.download_source_url = None;
+            state.download_active = active;
             if let Some(total) = total_bytes {
                 state.total_size = Some(total);
                 state.stage_progress = (downloaded_bytes as f32 / total as f32) * 100.0;
             }
-            state.download_speed = speed_bytes_per_sec;
+            state.download_speed = active.then_some(measured_speed).flatten();
 
             // Calculate ETA
-            if let (Some(speed), Some(total)) = (speed_bytes_per_sec, state.total_size) {
+            if let (Some(speed), Some(total)) = (measured_speed, state.total_size) {
                 if speed > 0.0 && downloaded_bytes < total {
                     let remaining = total - downloaded_bytes;
                     state.eta_seconds = Some(remaining as f64 / speed);
@@ -254,6 +285,97 @@ impl InstallationProgressTracker {
         }
         drop(guard);
         let _ = self.persist_state();
+    }
+
+    /// Record network transfer details without changing stage completion.
+    pub fn update_network_transfer(
+        &mut self,
+        source_url: Option<&str>,
+        active: bool,
+        downloaded_bytes: u64,
+        total_bytes: Option<u64>,
+        speed_bytes_per_sec: Option<f64>,
+    ) {
+        let transfer_key = source_url.map_or_else(
+            || "torch-pip-download".to_owned(),
+            |source| format!("torch-wheel:{source}"),
+        );
+        let measured_speed = self
+            .record_network_activity(
+                &transfer_key,
+                source_url,
+                active,
+                downloaded_bytes,
+                total_bytes,
+            )
+            .or(speed_bytes_per_sec);
+        let mut guard = self.state.lock().unwrap();
+        if let Some(ref mut state) = *guard {
+            state.download_source_url = source_url.map(str::to_owned);
+            state.download_active = active;
+            state.downloaded_bytes = downloaded_bytes;
+            state.total_size = total_bytes;
+            state.download_speed = active
+                .then_some(measured_speed)
+                .flatten()
+                .filter(|speed| speed.is_finite() && *speed >= 0.0);
+        }
+        drop(guard);
+        let _ = self.persist_state();
+    }
+
+    fn record_network_activity(
+        &self,
+        transfer_key: &str,
+        source_url: Option<&str>,
+        active: bool,
+        downloaded_bytes: u64,
+        total_bytes: Option<u64>,
+    ) -> Option<f64> {
+        let (operation_id, transfer_id) = {
+            let guard = self.state.lock().unwrap();
+            let state = guard.as_ref()?;
+            let operation_id = OperationId(format!("{}:{}", state.tag, state.started_at));
+            let transfer_id = TransferId(format!("{}:{transfer_key}", operation_id.0));
+            (operation_id, transfer_id)
+        };
+        let activity = self
+            .network_activity
+            .update(ActivityUpdate {
+                operation_id,
+                transfer_id: transfer_id.clone(),
+                direction: TransferDirection::Download,
+                source: Some(CopyableSource::new(source_url, None)),
+                expected_bytes: total_bytes,
+                cumulative_bytes: Some(downloaded_bytes),
+                state: if active {
+                    TransferState::Active
+                } else {
+                    TransferState::Completed
+                },
+                basis: MeasurementBasis::Payload,
+                coverage: MeasurementCoverage::Complete,
+                sampled_at: Instant::now(),
+            })
+            .ok()?;
+        if !active {
+            self.network_activity.remove(&transfer_id);
+        }
+        activity.rate_bytes_per_second
+    }
+
+    fn clear_network_activity(&self) {
+        let operation_id = {
+            let guard = self.state.lock().unwrap();
+            guard
+                .as_ref()
+                .map(|state| OperationId(format!("{}:{}", state.tag, state.started_at)))
+        };
+        if let Some(operation_id) = operation_id {
+            for activity in self.network_activity.for_operation(&operation_id) {
+                self.network_activity.remove(&activity.transfer_id);
+            }
+        }
     }
 
     /// Update dependency installation progress.
@@ -363,10 +485,13 @@ impl InstallationProgressTracker {
 
     /// Mark installation as completed.
     pub fn complete_installation(&mut self, success: bool) {
+        self.clear_network_activity();
         let mut guard = self.state.lock().unwrap();
         if let Some(ref mut state) = *guard {
             state.completed_at = Some(chrono::Utc::now().to_rfc3339());
             state.success = Some(success);
+            state.download_active = false;
+            state.download_speed = None;
             if success {
                 state.stage_progress = 100.0;
                 state.overall_progress = 100.0;
@@ -387,6 +512,8 @@ impl InstallationProgressTracker {
             stage_progress: Some(state.stage_progress),
             overall_progress: Some(state.overall_progress),
             current_item: state.current_item.clone(),
+            download_source_url: state.download_source_url.clone(),
+            download_active: state.download_active,
             download_speed: state.download_speed,
             eta_seconds: state.eta_seconds,
             total_size: state.total_size,
@@ -541,6 +668,8 @@ impl InstallationProgressTracker {
                         stage_progress: Some(state.stage_progress),
                         overall_progress: Some(state.overall_progress),
                         current_item: state.current_item.clone(),
+                        download_source_url: state.download_source_url.clone(),
+                        download_active: state.download_active,
                         download_speed: state.download_speed,
                         eta_seconds: state.eta_seconds,
                         total_size: state.total_size,
@@ -627,6 +756,112 @@ mod tests {
         assert_eq!(state.downloaded_bytes, Some(500));
         assert_eq!(state.download_speed, Some(100.0));
         assert!(state.eta_seconds.is_some());
+    }
+
+    #[test]
+    fn network_transfer_preserves_source_and_speed_without_advancing_stage() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut tracker = InstallationProgressTracker::new(temp_dir.path().to_path_buf());
+        tracker.start_installation("v2.14.0", None, None, None);
+        tracker.update_stage(
+            InstallationStage::Setup,
+            0.0,
+            Some("Resolving Torch packages"),
+        );
+        tracker.update_network_transfer(
+            Some("https://download.pytorch.org/whl/cu134/torch-2.14.0.whl"),
+            true,
+            1024,
+            Some(4096),
+            Some(512.0),
+        );
+
+        let state = tracker.get_current_state().unwrap();
+        assert_eq!(state.stage, Some(InstallationStage::Setup));
+        assert_eq!(state.stage_progress, Some(0.0));
+        assert!(state.download_active);
+        assert_eq!(
+            state.download_source_url.as_deref(),
+            Some("https://download.pytorch.org/whl/cu134/torch-2.14.0.whl")
+        );
+        assert_eq!(state.downloaded_bytes, Some(1024));
+        assert_eq!(state.total_size, Some(4096));
+        assert_eq!(state.download_speed, Some(512.0));
+    }
+
+    #[test]
+    fn stage_change_clears_previous_network_source_and_speed() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut tracker = InstallationProgressTracker::new(temp_dir.path().to_path_buf());
+        tracker.start_installation("v2.14.0", None, None, None);
+        tracker.update_network_transfer(
+            Some("https://files.pythonhosted.org/packages/pkg-1.0.whl"),
+            true,
+            20,
+            Some(40),
+            Some(10.0),
+        );
+        tracker.update_stage(
+            InstallationStage::Setup,
+            0.0,
+            Some("Checking installed Torch"),
+        );
+
+        let state = tracker.get_current_state().unwrap();
+        assert_eq!(state.download_source_url, None);
+        assert!(!state.download_active);
+        assert_eq!(state.download_speed, None);
+    }
+
+    #[test]
+    fn completed_transfer_and_installation_clear_active_rate() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut tracker = InstallationProgressTracker::new(temp_dir.path().to_path_buf());
+        tracker.start_installation("v2.14.0", None, None, None);
+        tracker.update_network_transfer(
+            Some("https://files.pythonhosted.org/packages/pkg-1.0.whl"),
+            true,
+            20,
+            Some(40),
+            Some(10.0),
+        );
+        tracker.update_network_transfer(
+            Some("https://files.pythonhosted.org/packages/pkg-1.0.whl"),
+            false,
+            40,
+            Some(40),
+            None,
+        );
+        let transfer = tracker.get_current_state().unwrap();
+        assert!(!transfer.download_active);
+        assert_eq!(transfer.download_speed, None);
+
+        tracker.update_network_transfer(
+            Some("https://files.pythonhosted.org/packages/pkg-1.0.whl"),
+            true,
+            20,
+            Some(40),
+            Some(10.0),
+        );
+        tracker.complete_installation(false);
+        let terminal = tracker.get_current_state().unwrap();
+        assert!(!terminal.download_active);
+        assert_eq!(terminal.download_speed, None);
+    }
+
+    #[test]
+    fn network_activity_measures_downloads_without_exposing_unapproved_sources() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut tracker = InstallationProgressTracker::new(temp_dir.path().to_path_buf());
+        tracker.start_installation("v2.14.0", None, None, None);
+        tracker.update_network_transfer(None, true, 0, Some(40), None);
+        tracker.update_network_transfer(None, true, 40, Some(40), None);
+
+        let state = tracker.get_current_state().unwrap();
+        assert_eq!(state.download_source_url, None);
+        assert!(state
+            .download_speed
+            .is_some_and(|speed| speed.is_finite() && speed > 0.0));
     }
 
     #[test]

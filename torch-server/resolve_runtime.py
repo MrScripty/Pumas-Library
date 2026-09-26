@@ -11,12 +11,14 @@ from email.parser import Parser
 from concurrent.futures import ThreadPoolExecutor, wait
 import hashlib
 from html.parser import HTMLParser
+import inspect
 import json
 import os
 import platform
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from pip._vendor.packaging import tags as packaging_tags
@@ -26,6 +28,140 @@ from urllib.parse import unquote, urljoin, urlparse, urlunparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 CORE = ("fastapi", "uvicorn", "psutil", "pillow", "safetensors")
+DOWNLOAD_PROGRESS_INTERVAL_SECONDS = 0.25
+
+
+def copyable_download_source(url: str) -> str | None:
+    """Keep progress links limited to the official HTTPS wheel hosts."""
+    parsed = urlparse(url)
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme != "https"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in (None, 443)
+        or parsed.query
+        or parsed.fragment
+        or not parsed.path.lower().endswith(".whl")
+    ):
+        return None
+    if parsed.hostname == "files.pythonhosted.org" and parsed.path.startswith("/packages/"):
+        return url
+    if parsed.hostname in {"download.pytorch.org", "download-r2.pytorch.org"} and parsed.path.startswith(
+        "/whl/"
+    ):
+        return url
+    if parsed.hostname == "github.com" and parsed.path.startswith(
+        "/nunchux-ai/nunchaku/releases/download/"
+    ):
+        return url
+    return None
+
+
+def _write_download_progress(
+    progress_path: Path,
+    source_url: str | None,
+    active: bool,
+    downloaded_bytes: int,
+    total_bytes: int | None,
+    speed_bytes_per_sec: float | None,
+) -> None:
+    """Atomically publish a private, best-effort progress snapshot."""
+    payload = {
+        "source_url": source_url,
+        "active": active,
+        "downloaded_bytes": downloaded_bytes,
+        "total_bytes": total_bytes,
+        "speed_bytes_per_sec": speed_bytes_per_sec,
+    }
+    temporary = progress_path.with_name(
+        f".{progress_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
+    try:
+        temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        os.replace(temporary, progress_path)
+    except OSError:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _track_download_chunks(
+    chunks,
+    source_url: str | None,
+    total_bytes: int | None,
+    progress_path: Path,
+    *,
+    clock=time.monotonic,
+    interval: float = DOWNLOAD_PROGRESS_INTERVAL_SECONDS,
+):
+    last_reported_at = clock()
+    downloaded_bytes = 0
+    last_reported_bytes = 0
+    _write_download_progress(progress_path, source_url, True, downloaded_bytes, total_bytes, None)
+    for chunk in chunks:
+        yield chunk
+        downloaded_bytes += len(chunk)
+        now = clock()
+        if now - last_reported_at >= interval:
+            elapsed = max(now - last_reported_at, 0.001)
+            _write_download_progress(
+                progress_path,
+                source_url,
+                True,
+                downloaded_bytes,
+                total_bytes,
+                (downloaded_bytes - last_reported_bytes) / elapsed,
+            )
+            last_reported_at = now
+            last_reported_bytes = downloaded_bytes
+    _write_download_progress(progress_path, source_url, False, downloaded_bytes, total_bytes, None)
+
+
+def run_pip_progress_worker(progress_path: Path, pip_arguments: list[str]) -> int:
+    """Run pip while exposing its active HTTPS wheel transfer to the parent."""
+    try:
+        from pip._internal.cli.main import main as pip_main
+    except ImportError:
+        return subprocess.run(
+            [sys.executable, "-I", "-m", "pip", *pip_arguments], check=False
+        ).returncode
+
+    try:
+        from pip._internal.network import download as pip_download
+        original_prepare_download = getattr(pip_download, "_prepare_download", None)
+        signature = inspect.signature(original_prepare_download)
+    except (ImportError, TypeError, ValueError):
+        return pip_main(pip_arguments)
+    if original_prepare_download is None or tuple(signature.parameters) != (
+        "response",
+        "link",
+        "progress_bar",
+    ):
+        return pip_main(pip_arguments)
+
+    def prepare_download(response, link, progress_bar):
+        chunks = original_prepare_download(response, link, progress_bar)
+        try:
+            if pip_download.is_from_cache(response):
+                return chunks
+            source_url = copyable_download_source(link.url_without_fragment)
+            total_bytes = pip_download._get_http_response_size(response)
+            return _track_download_chunks(chunks, source_url, total_bytes, progress_path)
+        except Exception:
+            # Progress is best-effort: an unexpected pip helper/API change must
+            # not turn an otherwise valid installation into a failure.
+            return chunks
+
+    pip_download._prepare_download = prepare_download
+    try:
+        return pip_main(pip_arguments)
+    finally:
+        pip_download._prepare_download = original_prepare_download
 
 
 def staged_file_digest(path: Path) -> tuple[bytes, int]:
@@ -86,11 +222,15 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
                 if len(row) != 3:
                     raise ValueError("Malformed staged wheel RECORD")
                 name, recorded_hash, recorded_size = row
-                if name.startswith("../../bin/"):
-                    script = name.removeprefix("../../bin/")
-                    if not script or "/" in script or script in (".", ".."):
-                        raise ValueError("Staged wheel RECORD escapes its target")
-                    relative = "bin/" + script
+                if name.startswith("../../"):
+                    relocated = name.removeprefix("../../")
+                    root, separator, nested = relocated.partition("/")
+                    if not separator or root not in {"bin", "share", "Scripts", "Include"}:
+                        raise ValueError(
+                            f"Staged wheel RECORD escapes its target: "
+                            f"{record.parent.name} {name[:256]!r}"
+                        )
+                    relative = root + "/" + nested
                 else:
                     relative = name
                 path = Path(relative)
@@ -100,7 +240,10 @@ def installed_file_manifest(target: Path, artifacts: list[dict] | None = None) -
                     or "\\" in relative
                     or any(part in ("", ".", "..") for part in relative.split("/"))
                 ):
-                    raise ValueError("Staged wheel RECORD escapes its target")
+                    raise ValueError(
+                        f"Staged wheel RECORD escapes its target: "
+                        f"{record.parent.name} {name[:256]!r}"
+                    )
                 if relative in claimed:
                     raise ValueError("Duplicate staged wheel file")
                 file = target / path
@@ -953,6 +1096,7 @@ def main() -> None:
     parser.add_argument("--install", action="store_true")
     parser.add_argument("--target", type=Path)
     parser.add_argument("--cache-dir", type=Path)
+    parser.add_argument("--progress-file", type=Path)
     parser.add_argument("--discover", action="store_true")
     parser.add_argument("--release-options", action="store_true")
     parser.add_argument("--selected-python")
@@ -970,6 +1114,7 @@ def main() -> None:
             or args.output
             or args.selected_python
             or args.cache_dir is not None
+            or args.progress_file is not None
             or args.adapter != "none"
             or args.torch_wheel is not None
             or args.torch_sha256 is not None
@@ -998,6 +1143,8 @@ def main() -> None:
         parser.error("--python-candidate is only valid with --release-options")
     if args.install and args.target is None:
         parser.error("--install requires an explicit staged --target")
+    if args.progress_file is not None and not args.install:
+        parser.error("--progress-file is only valid with --install")
     if not args.install and args.target is not None:
         parser.error("--target is only valid with --install")
     if args.torch_sha256 is not None and args.torch_wheel is None:
@@ -1021,6 +1168,11 @@ def main() -> None:
         return
     if args.output is None:
         parser.error("Resolution requires --output")
+    if args.progress_file is not None and (
+        args.progress_file.name != "download-progress.json"
+        or args.progress_file.resolve().parent != args.output.resolve()
+    ):
+        parser.error("--progress-file must be download-progress.json inside --output")
     if args.torch_wheel is None and not args.install:
         parser.error("Resolution requires --torch-wheel from official discovery")
     try:
@@ -1088,7 +1240,18 @@ def main() -> None:
         *CORE,
         *extras,
     ]
-    completed = subprocess.run(command, check=False, capture_output=True, text=True)
+    child_command = command
+    if args.progress_file is not None:
+        args.progress_file.unlink(missing_ok=True)
+        child_command = [
+            sys.executable,
+            "-I",
+            str(Path(__file__).resolve()),
+            "--_pumas-pip-progress-worker",
+            str(args.progress_file),
+            *command[4:],
+        ]
+    completed = subprocess.run(child_command, check=False, capture_output=True, text=True)
     print(completed.stdout, end="", flush=True)
     print(completed.stderr, end="", file=sys.stderr, flush=True)
     if completed.returncode:
@@ -1125,4 +1288,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--_pumas-pip-progress-worker"]:
+        if len(sys.argv) < 3:
+            raise SystemExit(2)
+        raise SystemExit(run_pip_progress_worker(Path(sys.argv[2]), sys.argv[3:]))
     main()

@@ -1,5 +1,43 @@
 # Execution Ledger: Cross-Platform Torch Runtime Management
 
+## 2026-09-26 — Torch 2.14.0 RECORD validation repair and network activity
+
+- Diagnosed `launcher-data/logs/install-v2.14.0-1790458099378.log`: Torch
+  2.14.0+cu132 and its dependencies downloaded and pip installed successfully,
+  then Pumas rejected the staged manifest with `Staged wheel RECORD escapes its
+  target`. SymPy's official wheel records `../../share/man/man1/isympy.1` under
+  pip's `--target` data scheme; pip correctly staged that file inside
+  `staged-packages/share/man/man1/`.
+- Fixed RECORD normalization to map recognized pip target scheme roots
+  (`bin`, `share`, `Scripts`, and `Include`) into the staging root while
+  continuing to reject traversal and files outside the staged tree. A regression
+  test covers the SymPy-style share entry and rejects `../../etc/passwd` and a
+  nested share traversal. The exact cached SymPy wheel replay validated all
+  1,573 staged files, including the man page.
+- Added the reusable platform-neutral network activity registry and connected
+  Torch pip downloads plus the installer's existing download callback. It
+  tracks concurrent operation/transfer identity, cumulative payload bytes,
+  expected bytes, rate, state, and measurement coverage. Allowed source URLs are
+  copyable; unapproved URLs remain hidden while their byte rate is still
+  reported. Generic DownloadManager/Hugging Face adapters and OS-level
+  supplemental providers remain open; X8 is partial.
+- Verification passed: 54 resolver tests, Ruff, 231 app-manager tests, 725
+  frontend tests, frontend typecheck and production build, Rust formatting,
+  desktop RPC `/health`, artifact checks, extracted AppImage/deb resource and
+  `/health` smoke tests, and `git diff --check`. The release smoke needed local
+  loopback permission; the initial Electron build needed access to its GitHub
+  packaging helper. Astra high's architecture review and Sol xhigh's narrow
+  source-privacy/fixture review found no remaining blocker.
+- Rebuilt local Linux v0.7.0 candidates: AppImage is 154,937,978 bytes with
+  SHA-256 `9125fc53b9ff0d6bfbc02e2f3394e799418883dc3e80a262ce2758065ddae76e`;
+  deb is 120,530,972 bytes with SHA-256
+  `777488fcf931a1e72e5508d35ed2c4caa7b65adb6e87e744dd0367b8bba880d3`.
+  These local packages pass extracted-resource and backend health checks. The
+  failed Torch install was not repeated through the rebuilt desktop package;
+  no fresh end-to-end Torch runtime or image-generation claim is made. Local
+  builds do not update the public toolbar-linked release. Native Windows/macOS
+  package acceptance, CUDA/MPS execution, and Tuldok generation remain open.
+
 ## 2026-09-26 — Direct-install local Linux release candidate
 
 - Rebuilt the local v0.7.0 RPC backend and Electron AppImage/deb from the

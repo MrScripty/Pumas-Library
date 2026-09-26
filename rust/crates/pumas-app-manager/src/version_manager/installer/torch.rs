@@ -11,7 +11,71 @@ use std::time::Duration;
 use tokio::process::Command;
 
 const MAX_TORCH_ORPHAN_QUARANTINES: usize = 2;
+const MAX_TORCH_DOWNLOAD_SOURCE_BYTES: usize = 2048;
+const TORCH_DOWNLOAD_SPEED_STALE_AFTER: Duration = Duration::from_secs(2);
 pub(super) const TORCH_PUBLISHING_MARKER: &[u8] = b"metadata pending";
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct TorchDownloadProgress {
+    #[serde(default)]
+    source_url: Option<String>,
+    active: bool,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+    speed_bytes_per_sec: Option<f64>,
+}
+
+fn trusted_torch_download_source(source: &str) -> bool {
+    if source.len() > MAX_TORCH_DOWNLOAD_SOURCE_BYTES {
+        return false;
+    }
+    let Ok(url) = reqwest::Url::parse(source) else {
+        return false;
+    };
+    let official_torch = matches!(
+        url.host_str(),
+        Some("download.pytorch.org" | "download-r2.pytorch.org")
+    ) && url.path().starts_with("/whl/");
+    let official_pypi =
+        url.host_str() == Some("files.pythonhosted.org") && url.path().starts_with("/packages/");
+    let official_nunchaku = url.host_str() == Some("github.com")
+        && url
+            .path()
+            .starts_with("/nunchux-ai/nunchaku/releases/download/");
+    url.scheme() == "https"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && matches!(url.port(), None | Some(443))
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && url.path().to_ascii_lowercase().ends_with(".whl")
+        && (official_torch || official_pypi || official_nunchaku)
+}
+
+fn read_torch_download_progress(path: &Path) -> Option<TorchDownloadProgress> {
+    let metadata = std::fs::symlink_metadata(path).ok()?;
+    if !metadata.file_type().is_file() || metadata.len() > 4096 {
+        return None;
+    }
+    let progress: TorchDownloadProgress =
+        serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    if progress
+        .source_url
+        .as_deref()
+        .is_some_and(|source| !trusted_torch_download_source(source))
+        || progress
+            .speed_bytes_per_sec
+            .is_some_and(|speed| !speed.is_finite() || speed < 0.0)
+        || (!progress.active && progress.speed_bytes_per_sec.is_some())
+        || progress
+            .total_bytes
+            .is_some_and(|total| progress.downloaded_bytes > total)
+    {
+        return None;
+    }
+    Some(progress)
+}
 
 /// This file is permanent: unlinking it could let another process lock a new
 /// inode while an existing installer still holds the old one.
@@ -1834,6 +1898,7 @@ impl VersionInstaller {
         let python = pumas_library::platform::paths::venv_python(&runtime);
         let packages = runtime.join("staged-packages");
         let resolver_output = runtime.join("resolver-result");
+        let download_progress_path = resolver_output.join("download-progress.json");
         let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
         let mut install = Command::new(&python);
         install
@@ -1841,6 +1906,8 @@ impl VersionInstaller {
             .arg(runtime.join("resolve_runtime.py"))
             .args(["--install", "--version", version, "--build", build])
             .args(["--adapter", &selection.adapter])
+            .arg("--progress-file")
+            .arg(&download_progress_path)
             .arg("--target")
             .arg(&packages)
             .arg("--output")
@@ -1848,7 +1915,7 @@ impl VersionInstaller {
             .arg("--cache-dir")
             .arg(pip_cache);
         let status = self
-            .run_runtime_command_status(
+            .run_runtime_command_status_with_download_progress(
                 install,
                 log_path,
                 &format!(
@@ -1856,6 +1923,7 @@ impl VersionInstaller {
                 ),
                 progress_tx,
                 Some(staging.clone()),
+                Some(&download_progress_path),
             )
             .await?;
         if !status.success() {
@@ -1999,8 +2067,13 @@ impl VersionInstaller {
         .map_err(PumasError::from)?;
         let python = pumas_library::platform::paths::venv_python(&runtime);
         let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
-        let mut install = Command::new(pumas_library::platform::paths::venv_pip(&runtime));
+        let download_progress_path = runtime.join("download-progress.json");
+        let mut install = Command::new(&python);
         install
+            .arg("-I")
+            .arg(runtime.join("resolve_runtime.py"))
+            .arg("--_pumas-pip-progress-worker")
+            .arg(&download_progress_path)
             .args([
                 "--isolated",
                 "install",
@@ -2013,14 +2086,21 @@ impl VersionInstaller {
             .arg(runtime.join("requirements.txt"))
             .arg("--cache-dir")
             .arg(pip_cache);
-        self.run_runtime_command(
-            install,
-            log_path,
-            "Installing resolved wheel artifacts",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
+        let status = self
+            .run_runtime_command_status_with_download_progress(
+                install,
+                log_path,
+                "Installing resolved wheel artifacts",
+                progress_tx,
+                Some(staging.clone()),
+                Some(&download_progress_path),
+            )
+            .await?;
+        if !status.success() {
+            return Err(failed(
+                "Installing resolved wheel artifacts failed; see installation log",
+            ));
+        }
         let mut probe = Command::new(&python);
         probe.arg(runtime.join("probe_runtime.py"));
         self.run_runtime_command(
@@ -2407,8 +2487,13 @@ impl VersionInstaller {
         .await?;
         let python = pumas_library::platform::paths::venv_python(&runtime);
         let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
-        let mut install = Command::new(pumas_library::platform::paths::venv_pip(&runtime));
+        let download_progress_path = runtime.join("download-progress.json");
+        let mut install = Command::new(&python);
         install
+            .arg("-I")
+            .arg(runtime.join("resolve_runtime.py"))
+            .arg("--_pumas-pip-progress-worker")
+            .arg(&download_progress_path)
             .args([
                 "--isolated",
                 "install",
@@ -2420,14 +2505,21 @@ impl VersionInstaller {
             .arg(runtime.join("requirements.txt"))
             .arg("--cache-dir")
             .arg(pip_cache);
-        self.run_runtime_command(
-            install,
-            log_path,
-            "Installing locked runtime dependencies",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
+        let status = self
+            .run_runtime_command_status_with_download_progress(
+                install,
+                log_path,
+                "Installing locked runtime dependencies",
+                progress_tx,
+                Some(staging.clone()),
+                Some(&download_progress_path),
+            )
+            .await?;
+        if !status.success() {
+            return Err(failed(
+                "Installing locked runtime dependencies failed; see installation log",
+            ));
+        }
         let mut validate = Command::new(&python);
         validate
             .arg(runtime.join("validate_runtime.py"))
@@ -2490,11 +2582,31 @@ impl VersionInstaller {
 
     async fn run_runtime_command_status(
         &self,
+        command: Command,
+        log_path: &Path,
+        stage: &str,
+        progress_tx: &mpsc::Sender<ProgressUpdate>,
+        stage_lease: Option<std::sync::Arc<TorchPendingStage>>,
+    ) -> Result<std::process::ExitStatus> {
+        self.run_runtime_command_status_with_download_progress(
+            command,
+            log_path,
+            stage,
+            progress_tx,
+            stage_lease,
+            None,
+        )
+        .await
+    }
+
+    async fn run_runtime_command_status_with_download_progress(
+        &self,
         mut command: Command,
         log_path: &Path,
         stage: &str,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
         stage_lease: Option<std::sync::Arc<TorchPendingStage>>,
+        download_progress_path: Option<&Path>,
     ) -> Result<std::process::ExitStatus> {
         self.check_cancelled()?;
         if let Some(stage_lease) = &stage_lease {
@@ -2530,10 +2642,46 @@ impl VersionInstaller {
             child.attach_cleanup_lease(stage_lease);
         }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(3600);
+        let mut last_download_progress: Option<TorchDownloadProgress> = None;
+        let mut last_download_progress_change_at: Option<tokio::time::Instant> = None;
+        let mut download_speed_expired = false;
         loop {
             let observed = child.observe_exit();
             let cancelled = self.cancel_flag.load(Ordering::SeqCst);
             let timed_out = tokio::time::Instant::now() >= deadline;
+            if let Some(path) = download_progress_path {
+                if let Some(download_progress) = read_torch_download_progress(path) {
+                    if last_download_progress.as_ref() != Some(&download_progress) {
+                        self.progress_tracker.write().await.update_network_transfer(
+                            download_progress.source_url.as_deref(),
+                            download_progress.active,
+                            download_progress.downloaded_bytes,
+                            download_progress.total_bytes,
+                            download_progress.speed_bytes_per_sec,
+                        );
+                        last_download_progress = Some(download_progress);
+                        last_download_progress_change_at = Some(tokio::time::Instant::now());
+                        download_speed_expired = false;
+                    } else if !download_speed_expired
+                        && last_download_progress.as_ref().is_some_and(|progress| {
+                            progress.active && progress.speed_bytes_per_sec.is_some()
+                        })
+                        && last_download_progress_change_at.is_some_and(|changed_at| {
+                            changed_at.elapsed() >= TORCH_DOWNLOAD_SPEED_STALE_AFTER
+                        })
+                    {
+                        let progress = last_download_progress.as_ref().expect("checked above");
+                        self.progress_tracker.write().await.update_network_transfer(
+                            progress.source_url.as_deref(),
+                            true,
+                            progress.downloaded_bytes,
+                            progress.total_bytes,
+                            None,
+                        );
+                        download_speed_expired = true;
+                    }
+                }
+            }
             if cancelled || timed_out || !matches!(&observed, Ok(None)) {
                 drop(child);
                 self.torch_cleanup
@@ -2544,6 +2692,9 @@ impl VersionInstaller {
                         "Torch installer cleanup incomplete; owned process cleanup remains pending",
                     )
                     })?;
+                if let Some(path) = download_progress_path {
+                    let _ = std::fs::remove_file(path);
+                }
                 self.check_cancelled()?;
                 if timed_out {
                     return Err(failed(format!(
@@ -2557,6 +2708,111 @@ impl VersionInstaller {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod download_progress_tests {
+    use super::*;
+
+    #[test]
+    fn progress_source_only_accepts_official_https_wheel_hosts() {
+        for source in [
+            "https://download.pytorch.org/whl/cu134/torch-2.14.0.whl",
+            "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0.whl",
+            "https://files.pythonhosted.org/packages/ab/pkg-1.0.whl",
+            "https://github.com/nunchux-ai/nunchaku/releases/download/v1.2.0/nunchaku-1.2.0.whl",
+        ] {
+            assert!(trusted_torch_download_source(source), "{source}");
+        }
+        for source in [
+            "http://files.pythonhosted.org/packages/pkg-1.0.whl",
+            "https://user:secret@files.pythonhosted.org/packages/pkg-1.0.whl",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl?token=secret",
+            "https://example.com/packages/pkg-1.0.whl",
+            "https://files.pythonhosted.org/packages/pkg-1.0.tar.gz",
+        ] {
+            assert!(!trusted_torch_download_source(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn progress_file_rejects_untrusted_sources_and_bad_rates() {
+        let workspace = tempfile::tempdir().unwrap();
+        let path = workspace.path().join("download-progress.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "source_url":"https://example.com/torch.whl",
+                "active":true,
+                "downloaded_bytes":1,
+                "total_bytes":2,
+                "speed_bytes_per_sec":1.0
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(read_torch_download_progress(&path).is_none());
+
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "source_url":"https://files.pythonhosted.org/packages/torch.whl",
+                "active":true,
+                "downloaded_bytes":3,
+                "total_bytes":2,
+                "speed_bytes_per_sec":1.0
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(read_torch_download_progress(&path).is_none());
+
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "source_url":"https://files.pythonhosted.org/packages/torch.whl",
+                "active":true,
+                "downloaded_bytes":1,
+                "total_bytes":2,
+                "speed_bytes_per_sec":10.0
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            read_torch_download_progress(&path),
+            Some(TorchDownloadProgress {
+                source_url: Some("https://files.pythonhosted.org/packages/torch.whl".into()),
+                active: true,
+                downloaded_bytes: 1,
+                total_bytes: Some(2),
+                speed_bytes_per_sec: Some(10.0),
+            })
+        );
+
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "source_url":null,
+                "active":true,
+                "downloaded_bytes":1,
+                "total_bytes":2,
+                "speed_bytes_per_sec":1.0
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            read_torch_download_progress(&path),
+            Some(TorchDownloadProgress {
+                source_url: None,
+                active: true,
+                downloaded_bytes: 1,
+                total_bytes: Some(2),
+                speed_bytes_per_sec: Some(1.0),
+            })
+        );
     }
 }
 

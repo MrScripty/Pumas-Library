@@ -5,9 +5,12 @@
  * Extracted from InstallDialog.tsx
  */
 
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Download,
+  Copy,
+  Check,
   Package,
   FolderArchive,
   Settings,
@@ -92,6 +95,48 @@ function getInstallationOutcome(
   return null;
 }
 
+function CopyDownloadSource({ source }: { source: string }) {
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+
+  useEffect(() => {
+    setCopyStatus('idle');
+  }, [source]);
+
+  const copySource = async () => {
+    try {
+      await navigator.clipboard.writeText(source);
+      setCopyStatus('copied');
+    } catch {
+      setCopyStatus('failed');
+    }
+  };
+
+  return (
+    <div className="mt-3 border-t border-[hsl(var(--border-subtle))] pt-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs text-[hsl(var(--text-muted))]">Latest file source</span>
+        <button
+          type="button"
+          onClick={() => void copySource()}
+          aria-label="Copy file source"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded px-2 py-1 text-xs text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--surface-tertiary))] hover:text-[hsl(var(--text-primary))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--accent-success))]"
+        >
+          {copyStatus === 'copied' ? <Check size={12} /> : <Copy size={12} />}
+          {copyStatus === 'copied' ? 'Copied' : 'Copy source'}
+        </button>
+      </div>
+      <code className="block max-h-20 overflow-y-auto break-all select-all text-xs text-[hsl(var(--text-secondary))]">
+        {source}
+      </code>
+      {copyStatus === 'failed' && (
+        <p role="status" className="mt-1 text-xs text-[hsl(var(--text-muted))]">
+          Clipboard unavailable. Select the source text to copy it.
+        </p>
+      )}
+    </div>
+  );
+}
+
 interface ProgressDetailsViewProps {
   appId?: string;
   progress: InstallationProgress;
@@ -127,6 +172,10 @@ export function ProgressDetailsView({
     : outcome?.kind === 'cancelled'
       ? 'text-[hsl(var(--accent-warning))]'
       : 'text-[hsl(var(--accent-error))]';
+  const downloadActive = progress.download_active ?? progress.download_speed !== null;
+  const downloadStatus = progress.download_speed !== null
+    ? formatSpeed(progress.download_speed)
+    : downloadActive ? 'Waiting…' : 'Idle';
 
   return (
     <div className="space-y-3 px-3">
@@ -206,15 +255,18 @@ export function ProgressDetailsView({
       </div>
 
       {/* Stage-specific Stats */}
-      {progress.download_speed !== null && (
+      {(progress.download_speed !== null || progress.download_source_url) && (
         <div className="bg-[hsl(var(--surface-low))] rounded-lg p-3">
-          <div className="flex items-center gap-2 mb-1">
-            <Download size={14} className="text-[hsl(var(--text-muted))]" />
-            <span className="text-xs text-[hsl(var(--text-muted))]">Speed</span>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Download size={14} className="text-[hsl(var(--text-muted))]" />
+              <span className="text-xs text-[hsl(var(--text-muted))]">Network download</span>
+            </div>
+            <span className="text-base font-semibold text-[hsl(var(--text-primary))]">
+              {downloadStatus}
+            </span>
           </div>
-          <span className="text-base font-semibold text-[hsl(var(--text-primary))]">
-            {formatSpeed(progress.download_speed)}
-          </span>
+          {progress.download_source_url && <CopyDownloadSource source={progress.download_source_url} />}
         </div>
       )}
 

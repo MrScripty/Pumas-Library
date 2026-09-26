@@ -1117,9 +1117,9 @@ class ResolverTests(unittest.TestCase):
         original_write_text = pathlib.Path.write_text
         written_text_options = {}
 
-        def read_with_windows_default(path, *args, **kwargs):
-            if path.name == "pip-resolution.json" and kwargs.get("encoding") is None:
-                return path.read_bytes().decode("cp1252")
+        def assert_utf8_report_read(path, *args, **kwargs):
+            if path.name == "pip-resolution.json":
+                self.assertEqual(kwargs.get("encoding"), "utf-8")
             return original_read_text(path, *args, **kwargs)
 
         def record_write_encoding(path, data, *args, **kwargs):
@@ -1150,7 +1150,7 @@ class ResolverTests(unittest.TestCase):
                     ],
                 ),
                 patch.object(resolver.subprocess, "run", side_effect=fake_run),
-                patch.object(pathlib.Path, "read_text", read_with_windows_default),
+                patch.object(pathlib.Path, "read_text", assert_utf8_report_read),
                 patch.object(pathlib.Path, "write_text", record_write_encoding),
             ):
                 resolver.main()

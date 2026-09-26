@@ -1,6 +1,6 @@
 # Upstream Torch version manager progress
 
-Date: 2026-09-25 (America/Vancouver). This is an implementation and evidence
+Date: 2026-09-26 (America/Vancouver). This is an implementation and evidence
 inventory, not a completed Pumas desktop acceptance. The prior
 [A1 packaged acceptance](a1-packaged-acceptance.md) applies only to its original
 `v2.9.1` / CPython 3.12 / CUDA 13.0 / Linux x86_64 combination. The Tuldok image
@@ -579,3 +579,32 @@ Packaged desktop Torch installation, provider-license integration, CUDA/MPS
 execution, and v2.14.0 Tuldok/image generation remain unverified. X1–X7 retain
 their partial/pending states until their full evidence gates pass, and the local
 Linux packages have not updated the public toolbar-linked release.
+
+## 2026-09-26 — Torch metadata lock contention follow-up
+
+A PR review identified a user-visible race: status snapshots briefly hold the
+exclusive `.torch-versions.lock`, so a selection, removal, or installation
+could fail immediately with `WouldBlock` during normal UI polling. Mutations
+that acquire this shared lock now retry only `WouldBlock`, asynchronously, every
+20 ms for at most 500 ms. A longer-lived owner still causes a bounded failure;
+other I/O errors return immediately. The change covers install, active/default
+selection, and removal. Read snapshots remain nonblocking, and startup
+normalization defers only expected lock contention. Existing stage and detached
+worker lock leases are unchanged.
+
+Regression coverage exercises short lock handoff, the 500 ms bound, propagation
+of non-contention errors, startup error classification, and manager mutation
+call sites. The current local `pumas-app-manager` library suite passes 205 tests;
+workspace check and Clippy, Rust formatting, 44 Torch resolver tests, Ruff, and
+`git diff --check` pass. The full local workspace test could not complete cleanly
+in this environment: 1432 `pumas-library` unit tests pass with four test threads,
+but the `intent_api_tests` fail while creating their local API TempDirs with
+`PermissionDenied`/temporary-storage errors. Astra high and Sol xhigh read-only
+reviews found no lock-lifecycle blockers. The three-platform native RPC evidence
+above predates this lock follow-up, so native verification of this change remains
+pending. PR run 36225003150 passed on `66ccbfe7` before this change; a new PR run
+must verify the follow-up.
+
+The Torch QA job now disables checkout credential persistence. Security review
+confirmed the job has `contents: read` and that PR caches use the PR merge-ref
+scope; no cache-mode change was needed ([GitHub cache scope](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching)).

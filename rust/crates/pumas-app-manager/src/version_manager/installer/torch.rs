@@ -43,6 +43,24 @@ impl TorchVersionsLock {
             _file: std::sync::Arc::new(file),
         })
     }
+
+    /// Briefly wait for another mutation to finish without blocking the async runtime.
+    pub(crate) async fn acquire_for_mutation(versions_dir: &Path) -> std::io::Result<Self> {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
+        loop {
+            match Self::try_acquire(versions_dir) {
+                Ok(lock) => return Ok(lock),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    let now = tokio::time::Instant::now();
+                    if now >= deadline {
+                        return Err(error);
+                    }
+                    tokio::time::sleep_until((now + Duration::from_millis(20)).min(deadline)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
 }
 
 impl Drop for TorchVersionsLock {
@@ -408,6 +426,49 @@ mod torch_upstream_contract_tests;
 mod cross_process_recovery_tests {
     use super::*;
     use fs2::FileExt;
+
+    #[tokio::test(start_paused = true)]
+    async fn mutation_lock_waits_for_short_handoff() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = TorchVersionsLock::try_acquire(root.path()).unwrap();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            drop(owner);
+        });
+
+        let acquired = TorchVersionsLock::acquire_for_mutation(root.path())
+            .await
+            .unwrap();
+        drop(acquired);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn mutation_lock_rejects_owner_past_bound() {
+        let root = tempfile::tempdir().unwrap();
+        let _owner = TorchVersionsLock::try_acquire(root.path()).unwrap();
+        let started = tokio::time::Instant::now();
+
+        let error = TorchVersionsLock::acquire_for_mutation(root.path())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+        assert!(started.elapsed() >= Duration::from_millis(500));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn mutation_lock_returns_non_contention_errors_without_waiting() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join(".torch-versions.lock")).unwrap();
+        let started = tokio::time::Instant::now();
+
+        let error = TorchVersionsLock::acquire_for_mutation(root.path())
+            .await
+            .err()
+            .unwrap();
+        assert_ne!(error.kind(), std::io::ErrorKind::WouldBlock);
+        assert_eq!(started.elapsed(), Duration::ZERO);
+    }
 
     #[test]
     fn only_fs2_contention_is_normalized_to_would_block() {
@@ -1208,8 +1269,9 @@ impl VersionInstaller {
             .await
             .map_err(PumasError::from)?;
         self.torch_cleanup.drain_residual_child_slots().await?;
-        let versions_lock =
-            TorchVersionsLock::try_acquire(&versions_dir).map_err(PumasError::from)?;
+        let versions_lock = TorchVersionsLock::acquire_for_mutation(&versions_dir)
+            .await
+            .map_err(PumasError::from)?;
         retry_pending_torch_cleanup_locked(&versions_dir, &self.metadata_manager, &versions_lock)
             .map_err(PumasError::from)?;
         if let Err(error) = prune_torch_orphan_quarantines_locked(

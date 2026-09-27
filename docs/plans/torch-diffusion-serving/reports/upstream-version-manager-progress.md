@@ -78,6 +78,28 @@ the Debian package SHA-256 is
 `b010a8e86cddd5c07cd19e28da56b0c09f9e5f62613af5d6b82bd1192fe574b3`.
 Neither package was used for a v2.14+FLUX install or real Tuldok generation.
 
+An isolated follow-up under
+`launcher-data/cache/torch-qualification/v214-flux2-e2e-root/` used the real
+`preview_torch_runtime` and `install_version` RPC flow for
+`v2.14.0`/`cu132`/Python `auto`/`flux2`. The first attempt was cancelled before
+completion to avoid a redundant large-wheel transfer from an empty isolated
+cache; a private copy of the existing managed pip cache was used for the second
+attempt. That attempt installed 67 resolved, hashed artifacts and completed
+successfully. Its managed Python 3.14.7 probe passed exact Torch
+`2.14.0+cu132` import, CPU and CUDA operations, and FLUX adapter imports
+(Diffusers 0.37.0, Transformers 4.57.6). The adapter probe is correctly
+`inconclusive` until a model loads. The isolated runtime was explicitly selected,
+and its owned Pumas Torch profile passed the protocol-3 startup trial.
+
+The isolated `serve_model` call reached the existing 42 GiB FLUX RAM admission
+gate and returned `insufficient_memory`; Pumas measured 39.16 GiB available RAM
+and 23.17 GiB free GPU memory. No model was loaded or advertised by
+`/v1/models`. The isolated profile and RPC server were stopped. The exact
+resolution, lock, probe, and install log remain in that qualification root.
+This confirms the managed v2.14+FLUX dependency and startup path but leaves
+Pumas image generation and Tuldok display/save untested until the RAM gate can
+pass. The main selected `v2.14.0` installation remains the earlier Core recipe.
+
 ## 2026-09-26 — Bounded live transfer and packaged code check
 
 The latest successful `install-v2.14.0-1790470772611.log` used cached wheels,

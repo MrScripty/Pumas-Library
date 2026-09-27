@@ -7,6 +7,70 @@ Tuldok browser acceptance from the main launcher root. The prior
 `v2.9.1` / CPython 3.12 / CUDA 13.0 / Linux x86_64 combination. The earlier
 Torch 2.10 Tuldok result is separate from the Torch 2.14 results below.
 
+## 2026-09-27 — Recover Nunchaku serving after FLUX
+
+After unloading FLUX, the user tried to serve
+`diffusion/nunchaku-ai/nunchaku-z-image-turbo` from the selected main-root
+`v2.14.0+cu132` FLUX-only runtime. Its sidecar log recorded
+`ModuleNotFoundError: No module named 'nunchaku'` before checkpoint loading.
+The selected runtime's probe had marked Nunchaku `not selected`; generic
+`image_generation` protocol capability alone did not mean every adapter was
+installed. The selected Nunchaku wheel is pinned by
+`torch-server/resolve_runtime.py` and the bundled lock to Nunchaku
+`1.2.0+torch2.9`, CPython 3.12, Torch 2.9.1+cu130, and Linux x86_64. Commit
+`04e4ce2b7` introduced that exact URL/hash and compatibility check on
+2026-09-23. The original CUDA 12.8 candidate failed a real native import
+because it required `libcudart.so.13`; the corrected CUDA 13.0 recipe is
+recorded in [the runtime report](runtime.md). This is the currently qualified
+binary combination, not a permanent Nunchaku restriction. The official
+[Nunchaku releases](https://github.com/nunchux-ai/nunchaku/releases) include
+newer Torch-targeted wheels, but no Torch 2.14/Python 3.14 wheel was qualified
+for this Pumas runtime.
+
+Through the rebuilt AppImage's managed RPC, Pumas installed the pinned
+`v2.9.1` `bundled` runtime alongside the preserved `v2.14.0` install. Its
+Torch/CUDA and both adapter import probes passed; real model inference remained
+unverified until the tests below. A managed protocol-3 startup trial and real
+Nunchaku model load passed. A 1280×720 gateway image also passed. The next real
+1920×1080 request failed before inference because the installed Z-Image
+pipeline requires dimensions divisible by 16. `NunchakuZImage` now opts into
+the shared adapter's round-up and center-crop behavior: infer at 1920×1088,
+return exactly 1920×1080. A native regression test reproduced the old failure
+and passed with the fix; the existing FLUX dimension test still passed.
+Independent read-only review found no lifecycle or output-validation blocker.
+
+The pre-fix 2.9.1 environment was preserved under
+`launcher-data/cache/torch-qualification/main-v214-nunchaku-repair-20260927/pre-dimension-backup/`.
+Pumas removed the inactive version and reinstalled it with the rebuilt embedded
+sidecar through a fresh managed preview. The second installer log is
+`launcher-data/logs/install-v2.9.1-1790507472804.log`; its materialized
+`diffusion.py` matches current source. The rebuilt release RPC SHA-256 is
+`4f50eb364c895021bc127803cfd9e7fca89e8059d07c35911e8452eefe5efe64`.
+The local, unpublished AppImage SHA-256 is
+`d8caa386a95d904e349c4dcaaf8bf54432fc9b842633ae3c7857ff4c688053d8`;
+the AppImage and deb passed the Linux artifact checker.
+
+The repaired managed gateway loaded Nunchaku and returned a real 1920×1080
+PNG in 20.081 seconds, SHA-256
+`513295f98937498f028a1bff8af879f578347b410a99fe27538b95befa16fbfe`.
+The **rebuilt AppImage's own** RPC then loaded Nunchaku. A task-owned Tuldok
+browser discovered it, generated a real 1920×1080 image, displayed it, saved
+it, and automatically imported it into its temporary collection in 20.751
+seconds; saved PNG SHA-256
+`a70255be804e829430f10e244deed53f004bed7edf9ac18a4081b7ef6fc71fdc`.
+The displayed image was visually inspected. Ignored evidence is under
+`main-v214-nunchaku-repair-20260927/tuldok-appimage-1920x1080/`. The gateway
+was `http://127.0.0.1:44581/v1` in this session; its port changes on restart.
+The model load used the AppImage RPC, not a repeat click through its UI.
+
+At this checkpoint `v2.9.1` is the active Torch version for Nunchaku, while
+`v2.14.0` remains installed and the configured default for FLUX. Torch version
+selection is global: the two versions cannot serve models simultaneously, and
+changing the active version requires unloading models and stopping the Torch
+profile. The current managed 2.9.1 bundled runtime passed both adapter import
+probes, but real FLUX generation in **that exact new runtime** was not rerun
+here. No release was published.
+
 ## 2026-09-27 — Repair Tuldok's 1920×1080 generation failure
 
 After the main-root FLUX installation below, Tuldok requested 1920×1080 from

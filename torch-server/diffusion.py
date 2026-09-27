@@ -65,6 +65,7 @@ class NunchakuZImage(DiffusionPipelineAdapter):
     steps = 8
     guidance = 0.0
     memory_policy = "sequential_cpu_offload"
+    dimension_multiple = 16
 
     def __init__(self, checkpoint: str, pipeline_path: str, device: torch.device):
         from diffusers import ZImagePipeline

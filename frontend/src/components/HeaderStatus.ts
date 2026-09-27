@@ -2,6 +2,7 @@ import { Clock, Database, Download, RefreshCw, WifiOff, type LucideIcon } from '
 import type { ActiveModelDownload } from '../hooks/useActiveModelDownload';
 import { formatBytes, formatSpeed } from '../utils/formatters';
 import { getInstallActivityPresentation } from '../utils/installActivityPresentation';
+import { getInstallationDownloadPresentation } from '../utils/installationDownloadPresentation';
 
 export interface InstallationProgress {
   tag: string;
@@ -11,6 +12,7 @@ export interface InstallationProgress {
   overall_progress: number;
   current_item: string | null;
   download_active?: boolean;
+  download_measurement_available?: boolean | null;
   download_speed: number | null;
   eta_seconds: number | null;
   total_size: number | null;
@@ -48,11 +50,13 @@ function joinDownloadParts(parts: string[]): string {
 }
 
 function getCombinedDownloadStatus({
+  appId,
   activeModelDownload,
   activeModelDownloadCount,
   installationProgress,
   runtimePending = false,
 }: {
+  appId?: string | null;
   activeModelDownload?: ActiveModelDownload | null;
   activeModelDownloadCount: number;
   installationProgress?: InstallationProgress | null;
@@ -77,6 +81,7 @@ function getCombinedDownloadStatus({
     ? installationProgress.download_speed
     : 0;
   const totalSpeed = modelSpeed + runtimeSpeed;
+  const downloadPresentation = getInstallationDownloadPresentation(appId, installationProgress);
   const runtimeDownloadExpected = installationProgress?.download_active === true ||
     installationProgress?.stage === 'download';
   const speedInfo = totalSpeed > 0 ? ` @ ${formatSpeed(totalSpeed)}` : '';
@@ -84,10 +89,11 @@ function getCombinedDownloadStatus({
     Boolean(activeModelDownload?.status === 'downloading') ||
     installationProgress?.stage === 'download' ||
     runtimeDownloadExpected ||
-    totalSpeed > 0;
+    totalSpeed > 0 ||
+    downloadPresentation?.kind === 'measuring';
   const visibleSpeedInfo = totalSpeed > 0
     ? speedInfo
-    : runtimeDownloadExpected ? ' · measuring speed…' : '';
+    : downloadPresentation ? ` · ${downloadPresentation.label.toLowerCase()}` : '';
   const activityVerb = hasDownloadActivity
     ? 'Downloading'
     : installationProgress?.stage === 'resolving' ? 'Preparing' : 'Installing';
@@ -190,6 +196,7 @@ export function getHeaderStatusInfo({
 }): HeaderStatusInfo {
   const activity = getInstallActivityPresentation({ appId, installingTag, progress: installationProgress });
   const combinedDownloadStatus = getCombinedDownloadStatus({
+    appId,
     activeModelDownload,
     activeModelDownloadCount,
     installationProgress,
@@ -197,14 +204,21 @@ export function getHeaderStatusInfo({
   });
   if (activity.active && activeModelDownload && activeModelDownload.status !== 'downloading') {
     const modelStatus = getActiveDownloadStatus(activeModelDownload, activeModelDownloadCount);
+    const downloadPresentation = appId === 'torch'
+      ? getInstallationDownloadPresentation(appId, installationProgress)
+      : null;
+    const downloadStatus = downloadPresentation
+      ? ` · Torch download: ${downloadPresentation.label}`
+      : '';
     return {
       ...modelStatus,
-      text: `${modelStatus.text} · ${appId === 'torch' ? 'Torch ' : ''}runtime: ${activity.phase}`,
+      text: `${modelStatus.text}${downloadStatus} · ${appId === 'torch' ? 'Torch ' : ''}runtime: ${activity.phase}`,
     };
   }
   const runtimeDownloadActive = installationProgress?.download_active === true ||
     installationProgress?.stage === 'download' ||
-    (installationProgress?.download_speed ?? 0) > 0;
+    (installationProgress?.download_speed ?? 0) > 0 ||
+    getInstallationDownloadPresentation(appId, installationProgress) !== null;
   const modelDownloadActive = activeModelDownload?.status === 'downloading';
   if (
     appId === 'torch' && activity.active && installationProgress && combinedDownloadStatus &&

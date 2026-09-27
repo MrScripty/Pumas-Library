@@ -57,7 +57,7 @@ describe('TorchInstallPreview', () => {
       tag: 'v2.14.0', startedAt: '2026-09-26T00:00:00Z', stage: 'resolving',
       stageProgress: 0, overallProgress: 0,
       currentItem: 'Preparing managed Python and resolving Torch packages',
-      downloadSourceUrl: null, downloadActive: false,
+      downloadSourceUrl: null, downloadActive: false, downloadMeasurementAvailable: null,
       downloadSpeed: null, etaSeconds: null, totalSize: null, downloadedBytes: 0,
       dependencyCount: null, completedDependencies: 0, completedItems: [],
       error: null, completedAt: null, success: null, logPath: null,

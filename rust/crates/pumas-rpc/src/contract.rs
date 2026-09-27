@@ -1726,6 +1726,7 @@ pub(crate) struct RuntimeInstallationProgress {
     current_item: Option<String>,
     download_source_url: Option<String>,
     download_active: bool,
+    download_measurement_available: Option<bool>,
     download_speed: Option<f64>,
     eta_seconds: Option<f64>,
     total_size: Option<u64>,
@@ -1807,6 +1808,7 @@ impl InstallationProgressOutcome {
             current_item: value.current_item,
             download_source_url: value.download_source_url,
             download_active: value.download_active,
+            download_measurement_available: value.download_measurement_available,
             download_speed: value.download_speed.filter(|value| value.is_finite()),
             eta_seconds: value.eta_seconds.filter(|value| value.is_finite()),
             total_size: value.total_size,
@@ -1846,6 +1848,7 @@ fn installation_progress_fixture() -> pumas_library::models::InstallationProgres
         current_item: Some("torch".into()),
         download_source_url: Some("https://download.pytorch.org/whl/cu134/torch-2.14.0.whl".into()),
         download_active: true,
+        download_measurement_available: Some(true),
         download_speed: Some(42.5),
         eta_seconds: Some(0.5),
         total_size: Some(1024),
@@ -1891,7 +1894,7 @@ mod installation_progress_contract_tests {
     #[test]
     fn installation_progress_preserves_literal_wire_and_null() {
         let value = installation_progress_fixture();
-        let expected = serde_json::json!({"tag":" vλ.1 ","startedAt":"started","stage":"dependencies","stageProgress":125.5,"overallProgress":107.25,"currentItem":"torch","downloadSourceUrl":"https://download.pytorch.org/whl/cu134/torch-2.14.0.whl","downloadActive":true,"downloadSpeed":42.5,"etaSeconds":0.5,"totalSize":1024,"downloadedBytes":512,"dependencyCount":2,"completedDependencies":1,"completedItems":[{"name":"torch","type":"package","size":null,"completedAt":"item done"}],"error":null,"completedAt":null,"success":null,"logPath":"runtime/install.log"});
+        let expected = serde_json::json!({"tag":" vλ.1 ","startedAt":"started","stage":"dependencies","stageProgress":125.5,"overallProgress":107.25,"currentItem":"torch","downloadSourceUrl":"https://download.pytorch.org/whl/cu134/torch-2.14.0.whl","downloadActive":true,"downloadMeasurementAvailable":true,"downloadSpeed":42.5,"etaSeconds":0.5,"totalSize":1024,"downloadedBytes":512,"dependencyCount":2,"completedDependencies":1,"completedItems":[{"name":"torch","type":"package","size":null,"completedAt":"item done"}],"error":null,"completedAt":null,"success":null,"logPath":"runtime/install.log"});
         assert_eq!(serde_json::to_value(&value).unwrap(), expected);
         let outcome = InstallationProgressOutcome::new(Some(value)).unwrap();
         assert_eq!(serde_json::to_value(&outcome).unwrap(), expected);
@@ -1916,11 +1919,14 @@ mod installation_progress_contract_tests {
             serde_json::to_value(InstallationProgressOutcome::new(Some(value)).unwrap()).unwrap();
         assert_eq!(encoded["stage"], "resolving");
         let schema = desktop_contract_schema().unwrap();
-        assert!(schema["schemas"]["RuntimeInstallationStage"]["enum"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|stage| stage == "resolving"));
+        assert!(
+            schema["schemas"]["InstallationProgressOutcome"]["definitions"]
+                ["RuntimeInstallationStage"]["enum"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|stage| stage == "resolving")
+        );
     }
 
     #[test]

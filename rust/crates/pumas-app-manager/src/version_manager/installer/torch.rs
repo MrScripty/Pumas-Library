@@ -24,6 +24,8 @@ struct TorchDownloadProgress {
     downloaded_bytes: u64,
     total_bytes: Option<u64>,
     speed_bytes_per_sec: Option<f64>,
+    #[serde(default)]
+    measurement_available: bool,
 }
 
 fn safe_torch_download_source(source: &str) -> bool {
@@ -2609,13 +2611,25 @@ impl VersionInstaller {
                 .env("TEMP", &scratch);
         }
         self.progress_tracker.write().await.update_stage(
-            InstallationStage::Setup,
+            if download_progress_path.is_some() {
+                InstallationStage::Dependencies
+            } else {
+                InstallationStage::Setup
+            },
             0.0,
             Some(stage),
         );
-        let _ = progress_tx.try_send(ProgressUpdate::Setup {
-            message: stage.to_string(),
-        });
+        let progress_update = if download_progress_path.is_some() {
+            ProgressUpdate::StageChanged {
+                stage: InstallationStage::Dependencies,
+                message: stage.to_string(),
+            }
+        } else {
+            ProgressUpdate::Setup {
+                message: stage.to_string(),
+            }
+        };
+        let _ = progress_tx.try_send(progress_update);
         let log = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -2650,6 +2664,7 @@ impl VersionInstaller {
                             download_progress.downloaded_bytes,
                             download_progress.total_bytes,
                             download_progress.speed_bytes_per_sec,
+                            download_progress.measurement_available,
                         );
                         last_download_progress = Some(download_progress);
                         last_download_progress_change_at = Some(tokio::time::Instant::now());
@@ -2669,6 +2684,7 @@ impl VersionInstaller {
                             progress.downloaded_bytes,
                             progress.total_bytes,
                             None,
+                            progress.measurement_available,
                         );
                         download_speed_expired = true;
                     }
@@ -2743,7 +2759,8 @@ mod download_progress_tests {
                 "active":true,
                 "downloaded_bytes":1,
                 "total_bytes":2,
-                "speed_bytes_per_sec":1.0
+                "speed_bytes_per_sec":1.0,
+                "measurement_available":true
             })
             .to_string(),
         )
@@ -2771,7 +2788,8 @@ mod download_progress_tests {
                 "active":true,
                 "downloaded_bytes":1,
                 "total_bytes":2,
-                "speed_bytes_per_sec":10.0
+                "speed_bytes_per_sec":10.0,
+                "measurement_available":true
             })
             .to_string(),
         )
@@ -2786,6 +2804,7 @@ mod download_progress_tests {
                 downloaded_bytes: 1,
                 total_bytes: Some(2),
                 speed_bytes_per_sec: Some(10.0),
+                measurement_available: true,
             })
         );
 
@@ -2796,7 +2815,8 @@ mod download_progress_tests {
                 "active":true,
                 "downloaded_bytes":1,
                 "total_bytes":2,
-                "speed_bytes_per_sec":1.0
+                "speed_bytes_per_sec":1.0,
+                "measurement_available":true
             })
             .to_string(),
         )
@@ -2809,6 +2829,7 @@ mod download_progress_tests {
                 downloaded_bytes: 1,
                 total_bytes: Some(2),
                 speed_bytes_per_sec: Some(1.0),
+                measurement_available: true,
             })
         );
     }

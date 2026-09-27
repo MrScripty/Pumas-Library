@@ -169,6 +169,18 @@ describe('Header Component', () => {
     expect(screen.getByRole('status')).toHaveTextContent('12.0 MB/s');
   });
 
+  it('keeps Torch package-transfer status visible while pip resolves or uses cached files', () => {
+    render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0" installationProgress={{
+      tag: 'v2.14.0', started_at: new Date().toISOString(), stage: 'dependencies',
+      stage_progress: 0, overall_progress: 0, current_item: 'Installing official Torch packages',
+      download_active: false, download_measurement_available: true, download_speed: null,
+      eta_seconds: null, total_size: null, downloaded_bytes: 0,
+      dependency_count: 1, completed_dependencies: 0, completed_items: [], error: null,
+    }} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('no package transfer active');
+  });
+
   it('shows the pending and current Torch installation phase in the header', () => {
     const { rerender } = render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0" />);
     const pendingStatus = screen.getByRole('status');
@@ -232,6 +244,29 @@ describe('Header Component', () => {
     />);
     expect(screen.getByText(/Downloading 1 model & 1 runtime/)).toHaveTextContent('4.0 MB/s');
     expect(screen.getByText(/Downloading 1 model & 1 runtime/)).toHaveTextContent('Starting installation…');
+  });
+
+  it('shows Torch download speed alongside a queued model download', () => {
+    render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0"
+      activeModelDownload={{
+        downloadId: 'model-1', repoId: 'org/model', status: 'queued', progress: 42,
+        downloadedBytes: 1024, totalBytes: 4096, speed: 0, etaSeconds: null,
+      }}
+      activeModelDownloadCount={1}
+      installationProgress={{
+        tag: 'v2.14.0', started_at: new Date().toISOString(), stage: 'dependencies',
+        stage_progress: 0, overall_progress: 0, current_item: 'Installing official Torch packages',
+        download_active: true, download_measurement_available: true,
+        download_speed: 12 * 1024 * 1024, eta_seconds: 30, total_size: 1024 * 1024 * 1024,
+        downloaded_bytes: 4 * 1024 * 1024, dependency_count: 1, completed_dependencies: 0,
+        completed_items: [], error: null,
+      }}
+    />);
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('Queued model download');
+    expect(status).toHaveTextContent('Torch download: 12.0 MB/s');
+    expect(status).toHaveTextContent('Torch runtime: Installing official Torch packages');
   });
 
   it.each([

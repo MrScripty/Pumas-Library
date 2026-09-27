@@ -57,6 +57,30 @@ describe('ProgressDetailsView', () => {
     expect(screen.getByRole('progressbar', { name: 'Final Setup progress' })).not.toHaveAttribute('aria-valuenow');
   });
 
+  it('keeps the long Torch dependency stage indeterminate at zero stage progress', () => {
+    render(<ProgressDetailsView
+      appId="torch"
+      progress={{
+        ...dependencyProgress,
+        tag: 'v2.14.0',
+        stage: 'dependencies',
+        stage_progress: 0,
+        overall_progress: 95,
+        current_item: 'Installing official Torch packages',
+        download_active: true,
+        download_speed: null,
+        error: null,
+      }}
+      installingVersion="v2.14.0" showCompletedItems={false}
+      onToggleCompletedItems={vi.fn()} onBackToList={vi.fn()} onOpenLogPath={vi.fn()}
+    />);
+    expect(screen.getByText('Working…')).toBeInTheDocument();
+    expect(screen.getByText('Installing official Torch packages')).toBeInTheDocument();
+    expect(screen.queryByText('95%')).not.toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Overall installation progress' })).not.toHaveAttribute('aria-valuenow');
+    expect(screen.getByRole('progressbar', { name: 'Installing Dependencies progress' })).not.toHaveAttribute('aria-valuenow');
+  });
+
   it('shows measured Torch setup progress when the stage reports real movement', () => {
     render(<ProgressDetailsView
       appId="torch"
@@ -111,7 +135,7 @@ describe('ProgressDetailsView', () => {
         installingVersion="v2.14.0" showCompletedItems={false}
         onToggleCompletedItems={vi.fn()} onBackToList={vi.fn()} onOpenLogPath={vi.fn()}
       />);
-      expect(screen.getByText('Idle')).toBeInTheDocument();
+      expect(screen.getByText('No package transfer active')).toBeInTheDocument();
     } finally {
       vi.unstubAllGlobals();
     }

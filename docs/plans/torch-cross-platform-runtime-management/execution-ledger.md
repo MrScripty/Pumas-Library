@@ -1,5 +1,41 @@
 # Execution Ledger: Cross-Platform Torch Runtime Management
 
+## 2026-09-26 — Repair pip rate collection across versions and keep it visible
+
+- The latest `install-v2.14.0-1790467476710.log` failed to resolve the
+  selected `2.14.0+cu134` package before any wheel transfer, so that attempt
+  had no numeric rate to display. A separate code defect also meant successful
+  transfers could be unmeasured: managed pip 26.2.1 has no
+  `_prepare_download`, and pip 24 names its first legacy parameter `resp`,
+  which the previous strict signature check rejected.
+- The worker now wraps pip's imported `response_chunks` stream when present and
+  falls back to legacy `_prepare_download` without parameter-name assumptions.
+  It publishes explicit monitoring availability when neither path is usable.
+  A real throttled 2 MiB wheel through managed CPython 3.13.15 / pip 26.2.1
+  produced two positive sidecar samples and pip reported 2.5 MB/s; the wheel
+  installed and its module was verified. The older pip path is covered by
+  tests, but was not run as a live pip installation.
+- During this pip phase, Pumas keeps the install banner, progress details, and
+  header network status visible. Zero-progress Torch dependency work stays
+  indeterminate instead of displaying a frozen overall 95%; queued model
+  activity no longer hides Torch speed, and inactive transfers do not retain a
+  synthesized rate. Copyable source URLs remain filtered for credentials,
+  query strings, fragments, and unsafe forms.
+- Verification passed: 741 frontend tests, frontend typecheck/build, 58 Torch
+  resolver tests and Ruff, 231 app-manager tests, 262 RPC unit tests plus 17
+  RPC integration tests, 180 Electron tests (1 skipped), desktop-contract
+  check, Rust formatting, Linux artifact validation, extracted AppImage/deb
+  resource checks and backend `/health` smoke tests. Astra High reviewed the
+  change and the three focused repairs without finding a remaining blocker.
+- Rebuilt local Linux v0.7.0 packages. AppImage SHA-256
+  `a656a3937335e1b45ef30c25f7a133c728520347cfdc50d5a1539d0e9a493135`; deb
+  SHA-256 `e33d418fc848e83e3c256cc07e1d87fab80f6243c1ece1bd4cedcf5e834f7c35`.
+  These are local, unpublished packages; the toolbar-linked release is
+  unchanged. No fresh external Torch install or Tuldok image run was made.
+  Managed Python/bootstrap downloads and non-pip producers remain outside this
+  rate collector, so this is package-transfer monitoring rather than complete
+  Pumas process-network accounting.
+
 ## 2026-09-26 — Show Torch transfer status and rate during installation
 
 - Diagnosed the latest `install-v2.14.0-1790465718491.log`: the selected

@@ -11,7 +11,6 @@ from email.parser import Parser
 from concurrent.futures import ThreadPoolExecutor, wait
 import hashlib
 from html.parser import HTMLParser
-import inspect
 import json
 import os
 import platform
@@ -66,6 +65,7 @@ def _write_download_progress(
     downloaded_bytes: int,
     total_bytes: int | None,
     speed_bytes_per_sec: float | None,
+    measurement_available: bool = True,
 ) -> None:
     """Atomically publish a private, best-effort progress snapshot."""
     payload = {
@@ -74,6 +74,7 @@ def _write_download_progress(
         "downloaded_bytes": downloaded_bytes,
         "total_bytes": total_bytes,
         "speed_bytes_per_sec": speed_bytes_per_sec,
+        "measurement_available": measurement_available,
     }
     temporary = progress_path.with_name(
         f".{progress_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
@@ -125,41 +126,71 @@ def run_pip_progress_worker(progress_path: Path, pip_arguments: list[str]) -> in
     try:
         from pip._internal.cli.main import main as pip_main
     except ImportError:
+        _write_download_progress(progress_path, None, False, 0, None, None, False)
         return subprocess.run(
             [sys.executable, "-I", "-m", "pip", *pip_arguments], check=False
         ).returncode
 
     try:
         from pip._internal.network import download as pip_download
-        original_prepare_download = getattr(pip_download, "_prepare_download", None)
-        signature = inspect.signature(original_prepare_download)
-    except (ImportError, TypeError, ValueError):
-        return pip_main(pip_arguments)
-    if original_prepare_download is None or tuple(signature.parameters) != (
-        "response",
-        "link",
-        "progress_bar",
-    ):
+    except ImportError:
+        _write_download_progress(progress_path, None, False, 0, None, None, False)
         return pip_main(pip_arguments)
 
-    def prepare_download(response, link, progress_bar):
-        chunks = original_prepare_download(response, link, progress_bar)
+    def track_response(response, chunks):
         try:
             if pip_download.is_from_cache(response):
                 return chunks
-            source_url = copyable_download_source(link.url_without_fragment)
-            total_bytes = pip_download._get_http_response_size(response)
-            return _track_download_chunks(chunks, source_url, total_bytes, progress_path)
-        except Exception:
-            # Progress is best-effort: an unexpected pip helper/API change must
-            # not turn an otherwise valid installation into a failure.
-            return chunks
+        except (AttributeError, TypeError, ValueError):
+            pass
 
-    pip_download._prepare_download = prepare_download
+        try:
+            source_url = copyable_download_source(response.url)
+        except (AttributeError, TypeError, ValueError):
+            source_url = None
+        try:
+            total_bytes = pip_download._get_http_response_size(response)
+        except (AttributeError, TypeError, ValueError):
+            total_bytes = None
+        return _track_download_chunks(chunks, source_url, total_bytes, progress_path)
+
+    original_response_chunks = getattr(pip_download, "response_chunks", None)
+    original_prepare_download = getattr(pip_download, "_prepare_download", None)
+    if callable(original_response_chunks):
+
+        def response_chunks(response, *args, **kwargs):
+            return track_response(
+                response,
+                original_response_chunks(response, *args, **kwargs),
+            )
+
+        pip_download.response_chunks = response_chunks
+
+        def restore_hook():
+            pip_download.response_chunks = original_response_chunks
+
+    elif callable(original_prepare_download):
+
+        def prepare_download(response, *args, **kwargs):
+            return track_response(
+                response,
+                original_prepare_download(response, *args, **kwargs),
+            )
+
+        pip_download._prepare_download = prepare_download
+
+        def restore_hook():
+            pip_download._prepare_download = original_prepare_download
+
+    else:
+        _write_download_progress(progress_path, None, False, 0, None, None, False)
+        return pip_main(pip_arguments)
+
+    _write_download_progress(progress_path, None, False, 0, None, None, True)
     try:
         return pip_main(pip_arguments)
     finally:
-        pip_download._prepare_download = original_prepare_download
+        restore_hook()
 
 
 def staged_file_digest(path: Path) -> tuple[bytes, int]:

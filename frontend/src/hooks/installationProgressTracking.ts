@@ -40,6 +40,7 @@ export function projectInstallationProgress(
     current_item: progress.currentItem,
     download_source_url: progress.downloadSourceUrl,
     download_active: progress.downloadActive,
+    download_measurement_available: progress.downloadMeasurementAvailable,
     download_speed: progress.downloadSpeed,
     eta_seconds: progress.etaSeconds,
     total_size: progress.totalSize,
@@ -150,6 +151,10 @@ export function normalizeInstallationProgress(
   const averageSpeed = computeAverageSpeed(trackerState.networkState.downloadSamples);
   const expectedTotal = computeExpectedTotal(progress, availableVersions);
   const etaSeconds = computeEtaSeconds(progress, averageSpeed, expectedTotal);
+  const transferActive = progress.download_active ?? Boolean(
+    progress.download_source_url || progress.stage === 'download'
+  );
+  const canReportSpeed = transferActive && progress.download_measurement_available !== false;
 
   const adjustedProgress: InstallationProgress = {
     tag: progress.tag || '',
@@ -160,9 +165,10 @@ export function normalizeInstallationProgress(
     current_item: progress.current_item || null,
     download_source_url: progress.download_source_url ?? null,
     download_active: progress.download_active ?? false,
-    download_speed: progress.download_source_url
-      ? progress.download_speed
-      : progress.download_speed ?? (averageSpeed > 0 ? averageSpeed : null),
+    download_measurement_available: progress.download_measurement_available ?? null,
+    download_speed: canReportSpeed
+      ? progress.download_speed ?? (averageSpeed > 0 ? averageSpeed : null)
+      : null,
     eta_seconds: etaSeconds,
     total_size: expectedTotal ?? progress.total_size ?? null,
     downloaded_bytes: downloadedBytes,

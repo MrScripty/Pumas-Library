@@ -100,22 +100,21 @@ class ResolverTests(unittest.TestCase):
     def test_progress_worker_tracks_any_safe_https_download_source(self):
         pip_download = importlib.import_module("pip._internal.network.download")
         pip_cli = importlib.import_module("pip._internal.cli.main")
-        response = object()
         source = "https://cdn.example.net/releases/package.whl"
-        link = SimpleNamespace(url_without_fragment=source)
+        response = SimpleNamespace(url=source, headers={"Content-Length": "4"})
 
-        def prepare_download(response, link, progress_bar):
-            del response, link, progress_bar
+        def response_chunks(_response, chunk_size=10):
+            del chunk_size
             return iter((b"ab", b"cd"))
 
         def fake_pip_main(_arguments):
-            return list(pip_download._prepare_download(response, link, None)) and 0
+            return list(pip_download.response_chunks(response, chunk_size=2)) and 0
 
         with tempfile.TemporaryDirectory() as directory:
             progress_path = pathlib.Path(directory) / "download-progress.json"
             with (
                 patch.object(pip_cli, "main", side_effect=fake_pip_main),
-                patch.object(pip_download, "_prepare_download", prepare_download),
+                patch.object(pip_download, "response_chunks", response_chunks),
                 patch.object(pip_download, "is_from_cache", return_value=False),
                 patch.object(pip_download, "_get_http_response_size", return_value=4),
             ):
@@ -128,24 +127,24 @@ class ResolverTests(unittest.TestCase):
             self.assertFalse(progress["active"])
             self.assertEqual(progress["downloaded_bytes"], 4)
             self.assertEqual(progress["total_bytes"], 4)
+            self.assertTrue(progress["measurement_available"])
 
     def test_progress_worker_reports_speed_during_a_real_chunk_interval(self):
         pip_download = importlib.import_module("pip._internal.network.download")
         pip_cli = importlib.import_module("pip._internal.cli.main")
-        response = object()
         source = "https://cdn.example.net/releases/package.whl"
-        link = SimpleNamespace(url_without_fragment=source)
+        response = SimpleNamespace(url=source, headers={"Content-Length": "4"})
         progress_writes = []
         write_progress = resolver._write_download_progress
 
-        def prepare_download(response, link, progress_bar):
-            del response, link, progress_bar
+        def response_chunks(_response, chunk_size=10):
+            del chunk_size
             yield b"ab"
             time.sleep(resolver.DOWNLOAD_PROGRESS_INTERVAL_SECONDS + 0.05)
             yield b"cd"
 
         def fake_pip_main(_arguments):
-            return list(pip_download._prepare_download(response, link, None)) and 0
+            return list(pip_download.response_chunks(response, chunk_size=2)) and 0
 
         def capture_progress(*values):
             progress_writes.append(values)
@@ -155,7 +154,8 @@ class ResolverTests(unittest.TestCase):
             progress_path = pathlib.Path(directory) / "download-progress.json"
             with (
                 patch.object(pip_cli, "main", side_effect=fake_pip_main),
-                patch.object(pip_download, "_prepare_download", prepare_download),
+                patch.object(pip_download, "_prepare_download", None, create=True),
+                patch.object(pip_download, "response_chunks", response_chunks),
                 patch.object(pip_download, "is_from_cache", return_value=False),
                 patch.object(pip_download, "_get_http_response_size", return_value=4),
                 patch.object(resolver, "_write_download_progress", side_effect=capture_progress),
@@ -173,16 +173,15 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(measured[-1][1], source)
         self.assertGreater(measured[-1][5], 0)
 
-    def test_progress_worker_does_not_expose_secret_bearing_download_urls(self):
+    def test_progress_worker_falls_back_to_legacy_prepare_download(self):
         pip_download = importlib.import_module("pip._internal.network.download")
         pip_cli = importlib.import_module("pip._internal.cli.main")
-        response = object()
-        link = SimpleNamespace(
-            url_without_fragment="https://cdn.example.net/private.whl?token=secret"
-        )
+        source = "https://cdn.example.net/releases/package.whl"
+        response = SimpleNamespace(url=source, headers={"Content-Length": "4"})
+        link = SimpleNamespace(url_without_fragment=source)
 
-        def prepare_download(response, link, progress_bar):
-            del response, link, progress_bar
+        def prepare_download(resp, link, progress_bar):
+            del resp, link, progress_bar
             return iter((b"ab", b"cd"))
 
         def fake_pip_main(_arguments):
@@ -192,7 +191,61 @@ class ResolverTests(unittest.TestCase):
             progress_path = pathlib.Path(directory) / "download-progress.json"
             with (
                 patch.object(pip_cli, "main", side_effect=fake_pip_main),
+                patch.object(pip_download, "response_chunks", None),
                 patch.object(pip_download, "_prepare_download", prepare_download),
+                patch.object(pip_download, "is_from_cache", return_value=False),
+                patch.object(pip_download, "_get_http_response_size", return_value=4),
+            ):
+                self.assertEqual(
+                    resolver.run_pip_progress_worker(progress_path, ["install", "pkg"]), 0
+                )
+
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+            self.assertEqual(progress["source_url"], source)
+            self.assertFalse(progress["active"])
+            self.assertEqual(progress["downloaded_bytes"], 4)
+            self.assertTrue(progress["measurement_available"])
+
+    def test_progress_worker_reports_when_pip_streaming_api_is_unavailable(self):
+        pip_download = importlib.import_module("pip._internal.network.download")
+        pip_cli = importlib.import_module("pip._internal.cli.main")
+
+        with tempfile.TemporaryDirectory() as directory:
+            progress_path = pathlib.Path(directory) / "download-progress.json"
+            with (
+                patch.object(pip_cli, "main", return_value=0),
+                patch.object(pip_download, "response_chunks", None),
+                patch.object(pip_download, "_prepare_download", None, create=True),
+            ):
+                self.assertEqual(
+                    resolver.run_pip_progress_worker(progress_path, ["install", "pkg"]), 0
+                )
+
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+            self.assertFalse(progress["measurement_available"])
+            self.assertFalse(progress["active"])
+            self.assertIsNone(progress["speed_bytes_per_sec"])
+
+    def test_progress_worker_does_not_expose_secret_bearing_download_urls(self):
+        pip_download = importlib.import_module("pip._internal.network.download")
+        pip_cli = importlib.import_module("pip._internal.cli.main")
+        response = SimpleNamespace(
+            url="https://cdn.example.net/private.whl?token=secret",
+            headers={"Content-Length": "4"},
+        )
+
+        def response_chunks(_response, chunk_size=10):
+            del chunk_size
+            return iter((b"ab", b"cd"))
+
+        def fake_pip_main(_arguments):
+            return list(pip_download.response_chunks(response, chunk_size=2)) and 0
+
+        with tempfile.TemporaryDirectory() as directory:
+            progress_path = pathlib.Path(directory) / "download-progress.json"
+            with (
+                patch.object(pip_cli, "main", side_effect=fake_pip_main),
+                patch.object(pip_download, "response_chunks", response_chunks),
                 patch.object(pip_download, "is_from_cache", return_value=False),
                 patch.object(pip_download, "_get_http_response_size", return_value=4),
             ):
@@ -204,6 +257,7 @@ class ResolverTests(unittest.TestCase):
             self.assertIsNone(progress["source_url"])
             self.assertFalse(progress["active"])
             self.assertEqual(progress["downloaded_bytes"], 4)
+            self.assertTrue(progress["measurement_available"])
 
     def test_download_progress_reports_measured_rate_and_final_byte_count(self):
         timestamps = iter((0.0, 0.5, 1.0))

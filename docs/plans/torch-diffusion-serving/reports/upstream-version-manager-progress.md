@@ -7,6 +7,39 @@ inventory, not a completed Pumas desktop acceptance. The prior
 evidence below uses a separate, exact Torch 2.10 tuple and does not qualify a
 newly resolved upstream release.
 
+## 2026-09-26 — Repair pip rate collection across versions and keep it visible
+
+The latest `install-v2.14.0-1790467476710.log` selected `2.14.0+cu134` but
+failed package resolution before wheel transfer. It had no rate to report. The
+previous collector also missed otherwise successful downloads: the managed
+pip 26.2.1 release removed `_prepare_download`, and pip 24's legacy helper
+uses `resp` rather than the strictly required `response` parameter name.
+
+The worker now instruments pip's imported `response_chunks` stream and keeps a
+fallback for older `_prepare_download` versions. If neither API exists, it
+reports monitoring unavailable. A real throttled 2 MiB wheel installed through
+the managed CPython 3.13.15 / pip 26.2.1 path; pip reported 2.5 MB/s and the
+sidecar recorded two positive-rate samples. The legacy pip path has mocked
+regression coverage, not a live install result.
+
+The install dialog shows the network status during package resolution and
+installation, and the header keeps it visible beside queued model activity.
+Zero-progress dependency work remains indeterminate (so the overall 95% does
+not look frozen), and explicitly inactive transfers no longer show a stale
+sampled rate. Astra High's read-only review approved these repairs. Verification
+passed: 741 frontend tests, typecheck/build, 58 resolver tests and Ruff, 231
+app-manager tests, 262 RPC unit tests, 17 RPC integration tests, 180 Electron
+tests (1 skipped), contract generation check, Rust formatting, artifact checks,
+and packaged Linux RPC `/health` smokes.
+
+The rebuilt local Linux v0.7.0 AppImage SHA-256 is
+`a656a3937335e1b45ef30c25f7a133c728520347cfdc50d5a1539d0e9a493135`; the deb
+SHA-256 is `e33d418fc848e83e3c256cc07e1d87fab80f6243c1ece1bd4cedcf5e834f7c35`.
+The packages are unpublished, so the toolbar-linked release is unchanged. No
+fresh Torch installation or Tuldok generation was performed. This collector
+measures pip package transfers; managed Python/bootstrap and other Pumas
+network producers remain uncovered.
+
 ## 2026-09-26 — Torch download speed visibility repair
 
 The latest reported log, `install-v2.14.0-1790465718491.log`, selected

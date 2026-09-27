@@ -133,6 +133,8 @@ pub struct InstallationProgress {
     #[serde(default)]
     pub download_active: bool,
     #[serde(default)]
+    pub download_measurement_available: Option<bool>,
+    #[serde(default)]
     pub download_speed: Option<f64>,
     #[serde(default)]
     pub eta_seconds: Option<f64>,

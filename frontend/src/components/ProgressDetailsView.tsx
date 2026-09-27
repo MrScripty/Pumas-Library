@@ -24,8 +24,9 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import type { InstallationProgress } from '../hooks/useVersions';
-import { formatBytes, formatSpeed } from '../utils/formatters';
+import { formatBytes } from '../utils/formatters';
 import { formatElapsedTime } from '../utils/installationFormatters';
+import { getInstallationDownloadPresentation } from '../utils/installationDownloadPresentation';
 import { IconButton } from './ui';
 import { getInstallActivityPresentation } from '../utils/installActivityPresentation';
 
@@ -172,18 +173,7 @@ export function ProgressDetailsView({
     : outcome?.kind === 'cancelled'
       ? 'text-[hsl(var(--accent-warning))]'
       : 'text-[hsl(var(--accent-error))]';
-  const downloadActive = progress.download_active ?? progress.download_speed !== null;
-  const downloadStatus = progress.download_speed !== null
-    ? formatSpeed(progress.download_speed)
-    : downloadActive || progress.stage === 'download'
-      ? 'Measuring speed…'
-      : appId === 'torch' && progress.stage === 'resolving' && !progress.completed_at
-        ? 'Waiting for package transfer…'
-        : 'Idle';
-  const awaitingPackageTransfer =
-    appId === 'torch' && progress.stage === 'resolving' && !progress.completed_at;
-  const showNetworkDownload = downloadActive || progress.stage === 'download' ||
-    progress.download_speed !== null || Boolean(progress.download_source_url) || awaitingPackageTransfer;
+  const downloadPresentation = getInstallationDownloadPresentation(appId, progress);
 
   return (
     <div className="space-y-3 px-3">
@@ -263,7 +253,7 @@ export function ProgressDetailsView({
       </div>
 
       {/* Stage-specific Stats */}
-      {showNetworkDownload && (
+      {downloadPresentation && (
         <div className="bg-[hsl(var(--surface-low))] rounded-lg p-3">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
@@ -271,7 +261,7 @@ export function ProgressDetailsView({
               <span className="text-xs text-[hsl(var(--text-muted))]">Network download</span>
             </div>
             <span className="text-base font-semibold text-[hsl(var(--text-primary))]">
-              {downloadStatus}
+              {downloadPresentation.label}
             </span>
           </div>
           {progress.download_source_url && <CopyDownloadSource source={progress.download_source_url} />}

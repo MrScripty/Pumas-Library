@@ -105,6 +105,25 @@ describe('InstallDialogContent', () => {
     );
   });
 
+  it('shows measured download speed in the visible Torch status banner', () => {
+    renderInstallDialogContent({
+      appId: 'torch',
+      installingVersion: 'v2.14.0',
+      progress: {
+        ...progress,
+        tag: 'v2.14.0',
+        stage: 'dependencies',
+        current_item: 'Installing official Torch packages',
+        download_active: true,
+        download_measurement_available: true,
+        download_speed: 12 * 1024 * 1024,
+        error: null,
+      },
+    });
+
+    expect(screen.getByRole('status')).toHaveTextContent('Network download · 12.0 MB/s');
+  });
+
   it('renders notices and routes install, release-link, and remove-error actions', async () => {
     const removeError = new Error('remove failed');
     const { props } = renderInstallDialogContent({

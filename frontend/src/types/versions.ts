@@ -31,6 +31,7 @@ export interface InstallationProgress {
   current_item: string | null;
   download_source_url?: string | null;
   download_active?: boolean;
+  download_measurement_available?: boolean | null;
   download_speed: number | null;
   eta_seconds: number | null;
   total_size: number | null;

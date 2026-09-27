@@ -122,6 +122,8 @@ struct InstallationProgressState {
     download_source_url: Option<String>,
     #[serde(default)]
     download_active: bool,
+    #[serde(default)]
+    download_measurement_available: Option<bool>,
     download_speed: Option<f64>,
     eta_seconds: Option<f64>,
     total_size: Option<u64>,
@@ -202,6 +204,7 @@ impl InstallationProgressTracker {
             current_item: None,
             download_source_url: None,
             download_active: false,
+            download_measurement_available: None,
             download_speed: None,
             eta_seconds: None,
             total_size,
@@ -238,6 +241,7 @@ impl InstallationProgressTracker {
             state.current_item = current_item.map(String::from);
             state.download_source_url = None;
             state.download_active = false;
+            state.download_measurement_available = None;
             state.download_speed = None;
             state.overall_progress = self.calculate_overall_progress(state);
         }
@@ -267,6 +271,7 @@ impl InstallationProgressTracker {
             state.downloaded_bytes = downloaded_bytes;
             state.download_source_url = None;
             state.download_active = active;
+            state.download_measurement_available = Some(true);
             if let Some(total) = total_bytes {
                 state.total_size = Some(total);
                 state.stage_progress = (downloaded_bytes as f32 / total as f32) * 100.0;
@@ -295,6 +300,7 @@ impl InstallationProgressTracker {
         downloaded_bytes: u64,
         total_bytes: Option<u64>,
         speed_bytes_per_sec: Option<f64>,
+        measurement_available: bool,
     ) {
         let transfer_key = source_url.map_or_else(
             || "torch-pip-download".to_owned(),
@@ -313,6 +319,7 @@ impl InstallationProgressTracker {
         if let Some(ref mut state) = *guard {
             state.download_source_url = source_url.map(str::to_owned);
             state.download_active = active;
+            state.download_measurement_available = Some(measurement_available);
             state.downloaded_bytes = downloaded_bytes;
             state.total_size = total_bytes;
             state.download_speed = active
@@ -491,6 +498,7 @@ impl InstallationProgressTracker {
             state.completed_at = Some(chrono::Utc::now().to_rfc3339());
             state.success = Some(success);
             state.download_active = false;
+            state.download_measurement_available = None;
             state.download_speed = None;
             if success {
                 state.stage_progress = 100.0;
@@ -514,6 +522,7 @@ impl InstallationProgressTracker {
             current_item: state.current_item.clone(),
             download_source_url: state.download_source_url.clone(),
             download_active: state.download_active,
+            download_measurement_available: state.download_measurement_available,
             download_speed: state.download_speed,
             eta_seconds: state.eta_seconds,
             total_size: state.total_size,
@@ -670,6 +679,7 @@ impl InstallationProgressTracker {
                         current_item: state.current_item.clone(),
                         download_source_url: state.download_source_url.clone(),
                         download_active: state.download_active,
+                        download_measurement_available: state.download_measurement_available,
                         download_speed: state.download_speed,
                         eta_seconds: state.eta_seconds,
                         total_size: state.total_size,
@@ -774,6 +784,7 @@ mod tests {
             1024,
             Some(4096),
             Some(512.0),
+            true,
         );
 
         let state = tracker.get_current_state().unwrap();
@@ -787,6 +798,7 @@ mod tests {
         assert_eq!(state.downloaded_bytes, Some(1024));
         assert_eq!(state.total_size, Some(4096));
         assert_eq!(state.download_speed, Some(512.0));
+        assert_eq!(state.download_measurement_available, Some(true));
     }
 
     #[test]
@@ -800,6 +812,7 @@ mod tests {
             20,
             Some(40),
             Some(10.0),
+            true,
         );
         tracker.update_stage(
             InstallationStage::Setup,
@@ -811,6 +824,7 @@ mod tests {
         assert_eq!(state.download_source_url, None);
         assert!(!state.download_active);
         assert_eq!(state.download_speed, None);
+        assert_eq!(state.download_measurement_available, None);
     }
 
     #[test]
@@ -824,6 +838,7 @@ mod tests {
             20,
             Some(40),
             Some(10.0),
+            true,
         );
         tracker.update_network_transfer(
             Some("https://files.pythonhosted.org/packages/pkg-1.0.whl"),
@@ -831,6 +846,7 @@ mod tests {
             40,
             Some(40),
             None,
+            true,
         );
         let transfer = tracker.get_current_state().unwrap();
         assert!(!transfer.download_active);
@@ -842,6 +858,7 @@ mod tests {
             20,
             Some(40),
             Some(10.0),
+            true,
         );
         tracker.complete_installation(false);
         let terminal = tracker.get_current_state().unwrap();
@@ -854,8 +871,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let mut tracker = InstallationProgressTracker::new(temp_dir.path().to_path_buf());
         tracker.start_installation("v2.14.0", None, None, None);
-        tracker.update_network_transfer(None, true, 0, Some(40), None);
-        tracker.update_network_transfer(None, true, 40, Some(40), None);
+        tracker.update_network_transfer(None, true, 0, Some(40), None, true);
+        tracker.update_network_transfer(None, true, 40, Some(40), None, true);
 
         let state = tracker.get_current_state().unwrap();
         assert_eq!(state.download_source_url, None);

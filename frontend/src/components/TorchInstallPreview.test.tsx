@@ -75,6 +75,7 @@ describe('TorchInstallPreview', () => {
     expect(getSelection).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Check selected combination' })).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: 'FLUX.2 image generation' })).not.toBeInTheDocument();
     expect(screen.queryByText(/exact artifacts resolved/i)).not.toBeInTheDocument();
   });
 
@@ -91,6 +92,82 @@ describe('TorchInstallPreview', () => {
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
     expect(getReleaseOptions).not.toHaveBeenCalled();
     expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' });
+  });
+
+  it('offers FLUX.2 only when supported and keeps the current manager Core default', async () => {
+    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2'] });
+    const onInstall = vi.fn();
+    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
+
+    expect(await screen.findByRole('radio', { name: 'Core Torch' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'FLUX.2 image generation' })).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
+    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' });
+  });
+
+  it('honors a supported manager default adapter and falls back to Core if it is unsupported', async () => {
+    getOptions.mockResolvedValueOnce({ ...options, adapters: ['none', 'flux2'], defaultAdapter: 'flux2' });
+    const onInstall = vi.fn();
+    const { rerender } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
+
+    expect(await screen.findByRole('radio', { name: 'FLUX.2 image generation' })).toBeChecked();
+    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
+    expect(getSelection).toHaveBeenLastCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'flux2' });
+
+    getOptions.mockResolvedValueOnce({ ...options, defaultAdapter: 'flux2' });
+    rerender(<TorchInstallPreview tag="v2.14.1" onBack={vi.fn()} onInstall={onInstall} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Install Torch' })).toBeEnabled());
+    expect(screen.queryByRole('radio', { name: 'FLUX.2 image generation' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    await waitFor(() => expect(onInstall).toHaveBeenCalledTimes(2));
+    expect(getSelection).toHaveBeenLastCalledWith({ tag: 'v2.14.1', build: 'auto', python: 'auto', adapter: 'none' });
+  });
+
+  it('previews the selected FLUX.2 adapter and rejects a token for another adapter', async () => {
+    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2'] });
+    const onInstall = vi.fn();
+    getSelection.mockResolvedValueOnce(readySelection({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' }));
+    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
+
+    fireEvent.click(await screen.findByRole('radio', { name: 'FLUX.2 image generation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'flux2' });
+    expect(await screen.findByRole('alert')).toHaveTextContent('Torch selection could not be confirmed');
+    expect(onInstall).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
+  });
+
+  it('resets the adapter for another tag and ignores its stale preview response', async () => {
+    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2'] });
+    let resolveSelection!: (value: TorchRuntimePreviewOutcome) => void;
+    getSelection.mockImplementationOnce(() => new Promise((resolve) => { resolveSelection = resolve; }));
+    const onInstall = vi.fn();
+    const { rerender } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
+
+    fireEvent.click(await screen.findByRole('radio', { name: 'FLUX.2 image generation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    rerender(<TorchInstallPreview tag="v2.14.1" onBack={vi.fn()} onInstall={onInstall} />);
+    expect(await screen.findByRole('radio', { name: 'Core Torch' })).toBeChecked();
+    await act(async () => { resolveSelection(readySelection({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'flux2' })); });
+    expect(onInstall).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
+    expect(getSelection).toHaveBeenLastCalledWith({ tag: 'v2.14.1', build: 'auto', python: 'auto', adapter: 'none' });
+  });
+
+  it('ignores options returned for a previous tag', async () => {
+    let resolveOldOptions!: (value: TorchRuntimeOptions) => void;
+    getOptions.mockImplementationOnce(() => new Promise((resolve) => { resolveOldOptions = resolve; }));
+    const { rerender } = render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
+    rerender(<TorchInstallPreview tag="v2.14.1" onBack={vi.fn()} onInstall={vi.fn()} />);
+
+    expect(await screen.findByRole('button', { name: 'Install Torch' })).toBeEnabled();
+    await act(async () => { resolveOldOptions({ ...options, adapters: ['none', 'flux2'] }); });
+    expect(screen.queryByRole('radio', { name: 'FLUX.2 image generation' })).not.toBeInTheDocument();
   });
 
   it('shows immediate pending status and starts the install with the selection token', async () => {

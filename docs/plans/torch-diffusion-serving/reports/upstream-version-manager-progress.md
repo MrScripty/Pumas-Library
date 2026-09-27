@@ -40,6 +40,44 @@ fresh Torch installation or Tuldok generation was performed. This collector
 measures pip package transfers; managed Python/bootstrap and other Pumas
 network producers remain uncovered.
 
+## 2026-09-26 — Installed Torch 2.14 image-serving gate check
+
+The selected local `v2.14.0` is `2.14.0+cu132` on managed Python 3.14.7 with
+`adapter: none`. Its environment has no Diffusers, Transformers, Accelerate, or
+PEFT distribution. A real CUDA tensor on the host RTX 5090 returned `5`; the
+managed Pumas `trial_torch_runtime` RPC passed startup, health, protocol 3, and
+the sidecar's `image_generation` handshake, then the trial profile was stopped.
+The public Pumas `GET /v1/models` returned an empty model list. A direct socket
+startup of the exact installed sidecar also returned HTTP 200 from `/health`.
+
+The library has the FLUX.2 Klein checkpoint, Qwen3-8B component package, and
+standalone VAE. A real `serve_model` RPC for the FLUX checkpoint returned
+`insufficient_memory` before model load: Pumas measured 66,815,033,344 bytes
+total RAM at 38.48% usage, below the existing 42 GiB available-RAM gate. The
+gateway still advertised no image model afterward. The temporary RPC and
+sidecar processes were stopped. These checks do **not** qualify v2.14 image
+generation or Tuldok display/save: the installed Core recipe lacks a supported
+image adapter, and this host currently fails FLUX admission.
+
+The desktop Torch install preview previously hardcoded `adapter: none` despite
+the managed installer supporting a separate `flux2` choice. The preview now
+offers that choice when reported by the manager, preserves the manager's
+supported default, sends the selected adapter to the one-use preview, and
+rejects a returned selection for a different adapter. Existing installed tags
+remain immutable; enabling images for the current v2.14 tag requires a managed
+replacement after an isolated v2.14+FLUX qualification and enough available
+RAM. No installed runtime, model, or public release was replaced here.
+
+Verification for the preview change passed 23 focused frontend tests, TypeScript,
+ESLint on the touched files, production frontend/Electron builds, Linux artifact
+checks, and extracted AppImage/deb resource plus RPC-health smokes. Independent
+read-only review found no blocking issue in its adapter authorization or stale
+request handling. The rebuilt local, unpublished AppImage SHA-256 is
+`f1d452c7bdb116e63634188c9756506c3bea66944fdee13a3ef15fb49890494b`;
+the Debian package SHA-256 is
+`b010a8e86cddd5c07cd19e28da56b0c09f9e5f62613af5d6b82bd1192fe574b3`.
+Neither package was used for a v2.14+FLUX install or real Tuldok generation.
+
 ## 2026-09-26 — Bounded live transfer and packaged code check
 
 The latest successful `install-v2.14.0-1790470772611.log` used cached wheels,

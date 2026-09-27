@@ -24,6 +24,7 @@ function errorText(error: unknown): string {
 
 export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPreviewProps) {
   const [runtimeOptions, setRuntimeOptions] = useState<TorchRuntimeOptions | null>(null);
+  const [adapter, setAdapter] = useState<'none' | 'flux2'>('none');
   const [loadingOptions, setLoadingOptions] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,12 +35,16 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     let active = true;
     requestNumber.current += 1;
     setRuntimeOptions(null);
+    setAdapter('none');
     setLoadingOptions(true);
     setStarting(false);
     setError(null);
 
     void api.get_torch_runtime_options().then((options) => {
-      if (active) setRuntimeOptions(options);
+      if (active) {
+        setAdapter(options.adapters.includes(options.defaultAdapter) ? options.defaultAdapter : 'none');
+        setRuntimeOptions(options);
+      }
     }).catch((cause: unknown) => {
       if (active) setError(`Torch runtime choices unavailable: ${errorText(cause)}`);
     }).finally(() => {
@@ -53,9 +58,10 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
   }, [tag, attempt]);
 
   const startInstallation = async () => {
-    if (!runtimeOptions || starting) return;
+    if (!runtimeOptions || starting || (adapter === 'flux2' && !runtimeOptions.adapters.includes('flux2'))) return;
     const currentRequest = ++requestNumber.current;
     const build = runtimeOptions.defaultBuild || 'auto';
+    const selectedAdapter = adapter;
     setStarting(true);
     setError(null);
 
@@ -64,7 +70,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
         tag,
         build,
         python: 'auto',
-        adapter: 'none',
+        adapter: selectedAdapter,
       });
       if (requestNumber.current !== currentRequest) return;
       if (outcome.status === 'rejected') {
@@ -79,7 +85,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       }
       const selection = outcome.preview;
       if (!selection.previewId || selection.expiresInSeconds <= 0 || selection.tag !== tag
-        || selection.build !== build || selection.adapter !== 'none') {
+        || selection.build !== build || selection.adapter !== selectedAdapter) {
         setError('Torch selection could not be confirmed. Try again.');
         setStarting(false);
         return;
@@ -111,6 +117,19 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
             This flow uses official binary wheels only. Device use, image generation, and socket startup need later runtime checks.
           </p>
         </div>
+        {runtimeOptions?.adapters.includes('flux2') && (
+          <fieldset className="space-y-2" disabled={starting}>
+            <legend className="text-sm font-medium">Image adapter</legend>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="radio" name="torch-image-adapter" value="none" checked={adapter === 'none'} onChange={() => setAdapter('none')} />
+              Core Torch
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="radio" name="torch-image-adapter" value="flux2" checked={adapter === 'flux2'} onChange={() => setAdapter('flux2')} />
+              FLUX.2 image generation
+            </label>
+          </fieldset>
+        )}
         {loadingOptions && <p role="status" className="flex items-center gap-2 text-sm text-[hsl(var(--text-secondary))]"><Loader2 aria-hidden="true" size={16} className="animate-spin" />Loading Torch choices…</p>}
         {starting && <p role="status" className="flex items-center gap-2 text-sm text-[hsl(var(--text-primary))]"><Loader2 aria-hidden="true" size={16} className="animate-spin" />Starting installation…</p>}
         {error && <p role="alert" className="text-sm text-[hsl(var(--accent-error))]">{error}</p>}

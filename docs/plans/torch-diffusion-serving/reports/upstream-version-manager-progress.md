@@ -1,11 +1,61 @@
 # Upstream Torch version manager progress
 
 Date: 2026-09-27 (America/Vancouver). This is an implementation and evidence
-inventory. Torch 2.14 FLUX.2 Klein now has real AppImage gateway and Tuldok
-browser acceptance from the main launcher root. The prior
+inventory. Torch 2.14 FLUX.2 Klein now has real 1920×1080 AppImage gateway and
+Tuldok browser acceptance from the main launcher root. The prior
 [A1 packaged acceptance](a1-packaged-acceptance.md) applies only to its original
 `v2.9.1` / CPython 3.12 / CUDA 13.0 / Linux x86_64 combination. The earlier
 Torch 2.10 Tuldok result is separate from the Torch 2.14 results below.
+
+## 2026-09-27 — Repair Tuldok's 1920×1080 generation failure
+
+After the main-root FLUX installation below, Tuldok requested 1920×1080 from
+the AppImage. The sidecar log showed all four GPU inference steps completing,
+then `/api/images/generate` returned HTTP 502. Diffusers rounded the requested
+1080 height down to 1072 because FLUX requires multiples of 16; the sidecar's
+exact-size check correctly rejected that image. Subsequent health/slot checks
+passed, so this was a response-size failure rather than a sidecar crash.
+
+The FLUX adapter now rounds pipeline dimensions **up** to multiples of 16,
+then center crops the result to the requested size. Its 1920×1080 request
+therefore generates at 1920×1088 and returns an exact 1920×1080 PNG. Other
+adapters retain their existing dimension behavior, and both sidecar and gateway
+PNG size checks remain in force. The native regression test failed against the
+old behavior and passed after the repair; three focused FLUX tests and ten image
+request contract tests passed. Independent read-only review found no lifecycle
+or security blocker.
+
+The previous managed FLUX runtime was backed up under
+`launcher-data/cache/torch-qualification/main-v214-flux-repair-20260927/pre-dimension-backup/`.
+With its profile stopped, Pumas switched to the installed fallback and used its
+preview/remove/install flow to materialize the repaired `v2.14.0+cu132` FLUX
+sidecar. The new runtime was selected and defaulted. The installer log is
+`launcher-data/logs/install-v2.14.0-1790505527380.log`; its source
+`diffusion.py` matches the repaired source file. The rebuilt release RPC has
+SHA-256 `36af552359f5ef1b522976bbc6cc2c61f0810fbcd69fd5757a2c676ae78e1e92`.
+The rebuilt local, unpublished AppImage has SHA-256
+`f12b98fc6d5c2dbfe2b469228ca90d1fdc7ebe09e000e95b6c45461a4885f9a8`.
+
+The managed gateway loaded and advertised the real FLUX checkpoint, then
+returned a 1920×1080 PNG in 23.389 seconds (SHA-256
+`702fc7d018b7d4b933497c3db6bb3c067f0219f137b91d9ea70e69b7ac8a8a19`).
+The **rebuilt AppImage's own** RPC loaded the same model. A temporary
+1920×1080 variant of Tuldok's real browser acceptance script discovered it
+through the AppImage gateway, generated a real image, displayed it at the
+requested size, saved it, and automatically imported it into the collection.
+The Tuldok job took 23.526 seconds and its saved PNG had the same hash. The
+local ignored evidence is under
+`main-v214-flux-repair-20260927/tuldok-appimage-1920x1080/`, including
+`result.json`, `saved.png`, and `display.png`. The screenshot was visually
+inspected. This acceptance used a task-owned Tuldok browser instance and the
+AppImage RPC; it did not click the AppImage's model-serving UI again. The
+observed gateway was `http://127.0.0.1:41253/v1`; its port changes on restart.
+The user's separately running Tuldok instance on port 8091 then submitted its
+own 1920×1080 FLUX request to that same gateway. Job
+`c06969191f5542e09c84931737fbc661` completed with one image and no error;
+`/api/samples` contained `synthetic-c0696919-00001.png` at 1920×1080 in
+session `2026-09-12-desk`. The user also confirmed image generation worked.
+No release was published.
 
 ## 2026-09-27 — Repair the real AppImage FLUX model load
 

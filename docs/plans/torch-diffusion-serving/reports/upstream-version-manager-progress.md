@@ -40,6 +40,30 @@ fresh Torch installation or Tuldok generation was performed. This collector
 measures pip package transfers; managed Python/bootstrap and other Pumas
 network producers remain uncovered.
 
+## 2026-09-26 — Bounded live transfer and packaged code check
+
+The latest successful `install-v2.14.0-1790470772611.log` used cached wheels,
+including Torch, and therefore offered no network transfer rate to display.
+To check the uncached collector without reinstalling Torch, a 2 MiB local wheel
+was served in 32 KiB chunks with 40 ms spacing and installed through the real
+managed CPython 3.14.7 / pip 26.2.1 progress worker. Polling its progress file
+captured 11 distinct snapshots, including eight active snapshots with positive
+rates (first about 936 kB/s). The final snapshot cleared the rate. The local
+HTTP source was intentionally omitted from the copyable URL field by the
+HTTPS-only source rule; byte and rate measurements remained available.
+
+The local AppImage (`a656a3937335e1b45ef30c25f7a133c728520347cfdc50d5a1539d0e9a493135`)
+contains a frontend bundle byte-identical to the current built bundle and a
+backend containing the `response_chunks` pip collector. Focused checks passed:
+52 frontend presentation tests, 58 resolver tests, 11 Rust progress tests,
+and six RPC installation-progress tests.
+The resolver's legacy-pip test fixture was corrected to create the removed
+`_prepare_download` attribute when running against pip 26. This evidence
+confirms the live worker and packaged files, while the earlier Playwright check
+remains a mocked-renderer acceptance. It does not establish a simultaneous
+real-transfer, packaged-RPC, renderer observation; no new release build is
+required for these findings.
+
 ## 2026-09-26 — Torch download speed visibility repair
 
 The latest reported log, `install-v2.14.0-1790465718491.log`, selected

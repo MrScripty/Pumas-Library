@@ -192,7 +192,7 @@ class ResolverTests(unittest.TestCase):
             with (
                 patch.object(pip_cli, "main", side_effect=fake_pip_main),
                 patch.object(pip_download, "response_chunks", None),
-                patch.object(pip_download, "_prepare_download", prepare_download),
+                patch.object(pip_download, "_prepare_download", prepare_download, create=True),
                 patch.object(pip_download, "is_from_cache", return_value=False),
                 patch.object(pip_download, "_get_http_response_size", return_value=4),
             ):

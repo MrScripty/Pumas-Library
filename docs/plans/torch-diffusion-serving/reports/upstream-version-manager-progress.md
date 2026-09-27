@@ -1,13 +1,47 @@
 # Upstream Torch version manager progress
 
-Date: 2026-09-26 (America/Vancouver). This is an implementation and evidence
-inventory. Torch 2.14 FLUX.2 Klein now has isolated real RPC/gateway and Tuldok
-browser acceptance; the main selected desktop runtime still has the Core recipe.
-The prior
+Date: 2026-09-27 (America/Vancouver). This is an implementation and evidence
+inventory. Torch 2.14 FLUX.2 Klein now has real AppImage gateway and Tuldok
+browser acceptance from the main launcher root. The prior
 [A1 packaged acceptance](a1-packaged-acceptance.md) applies only to its original
-`v2.9.1` / CPython 3.12 / CUDA 13.0 / Linux x86_64 combination. The Tuldok image
-evidence below uses a separate, exact Torch 2.10 tuple and does not qualify a
-newly resolved upstream release. The isolated Torch 2.14 result is recorded below.
+`v2.9.1` / CPython 3.12 / CUDA 13.0 / Linux x86_64 combination. The earlier
+Torch 2.10 Tuldok result is separate from the Torch 2.14 results below.
+
+## 2026-09-27 — Repair the real AppImage FLUX model load
+
+The user launched the local `Pumas.Library-0.7.0.AppImage` and tried to serve
+FLUX.2 Klein. Its Electron log recorded a real sidecar load failure:
+`No module named 'diffusers'`. The AppImage bundled the repaired RPC, but the
+main selected/default `v2.14.0` installation was the earlier Core recipe with
+`adapter: none`. The FLUX-enabled 2.14 installation from the previous trial
+was in an isolated launcher root, so it was not available to this AppImage.
+
+The failed profile, Electron log, Core runtime, selection/default metadata and
+profile metadata were preserved under
+`launcher-data/cache/torch-qualification/main-v214-flux-repair-20260927/core-backup/`.
+With the Torch profile stopped, Pumas selected the existing `torch-runtime-0.1.4`
+fallback, cleared the default, removed the inactive 2.14 entry through RPC,
+and installed `v2.14.0` again through its managed preview/install flow with
+`cu132`, Python 3.14 and `flux2`. The new main-root probe passed Torch
+`2.14.0+cu132`, CPU/CUDA operations, sidecar health, and FLUX imports. The
+installer log is `launcher-data/logs/install-v2.14.0-1790504224408.log`.
+Pumas then selected/defaulted the new 2.14 runtime; its managed startup trial
+passed protocol 3 and health.
+
+The local packaged RPC loaded FLUX Klein from the main root, advertised it in
+`/v1/models`, and returned a real 512×512 PNG. Tuldok browser generation,
+display, save and automatic collection import passed at 1280×720. The same
+checks then passed using the **running AppImage's own** RPC and gateway; its
+Tuldok result took 14.7 seconds and saved PNG SHA-256
+`ba32e3506ebee5a9e48c35c506777fa6b946b3ea9d7c45c86d1b6befd454750f`.
+At completion, the AppImage remained running with FLUX ready in `/v1/models`
+and the `torch-image-acceptance` profile running. The gateway URL observed in
+that session was `http://127.0.0.1:41009/v1`; its port is assigned at startup.
+Local ignored evidence is in `main-v214-flux-repair-20260927/`, including
+`tuldok-appimage/{result.json,saved.png,display.png}` and before/after RPC
+snapshots. No new source or release build was needed, and nothing was published.
+The successful model load was invoked through the AppImage's RPC; a second
+manual click through its model-serving UI was not part of this check.
 
 ## 2026-09-26 — Real Torch 2.14 FLUX.2 Klein endpoint and Tuldok acceptance
 
@@ -28,12 +62,10 @@ The full run used a 34 GiB capped scope with no OOM events; 490 memory-limit
 reclaim events show pressure at the cap. The host stayed at least 20.9 GiB
 available during that run. The model, profile, RPC and browser were stopped.
 
-This qualifies the isolated v2.14+FLUX tuple and the Pumas endpoint/Tuldok path.
-The main selected v2.14 installation is still Core (`adapter: none`) and cannot
-serve images. It needs a managed FLUX recipe replacement for desktop use. New
-local, unpublished AppImage/deb artifacts include this RPC change and passed
-extracted resource and backend-health smokes; packaged desktop install/serve
-and Tuldok acceptance remain open. No release was published.
+This qualified the isolated v2.14+FLUX tuple and the Pumas endpoint/Tuldok path.
+At this 2026-09-26 checkpoint the main selected v2.14 installation was still
+Core (`adapter: none`). The 2026-09-27 managed replacement and packaged desktop
+acceptance above supersede that deployment gap. No release was published.
 
 ## 2026-09-26 — Repair pip rate collection across versions and keep it visible
 

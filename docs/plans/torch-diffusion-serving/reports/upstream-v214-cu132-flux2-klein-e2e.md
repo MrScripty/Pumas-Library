@@ -25,13 +25,16 @@ Five focused Rust admission tests, Rust formatting, a rebuilt debug RPC binary, 
 
 ## Desktop deployment state
 
-The main selected `v2.14.0` runtime remains the earlier Core (`adapter: none`)
-installation; it cannot serve images until replaced through the managed
-installer with a FLUX.2-enabled recipe. A new local Linux AppImage and deb were
+At the time of this isolated trial, the main selected `v2.14.0` runtime was
+still the earlier Core (`adapter: none`) installation. A new local Linux
+AppImage and deb were
 built with the repaired release RPC. The AppImage SHA-256 is
 `b05e198d0a29ec5049b7afaaa9678afd41bde861e7ce34d5f7e27fabdc60711c`;
 the deb SHA-256 is
 `af8d0e8ae81e087806218aa254a1a28a7be656d75a04c0211c22bd7b8d0f17c6`.
 Both extracted packages matched their staged RPC/resources and passed RPC
-`/health` smoke tests. The packaged desktop install/serve/Tuldok flow still
-needs acceptance after the main runtime is replaced. Nothing was published.
+`/health` smoke tests. The main runtime was subsequently replaced through the
+managed installer, and the real AppImage load/gateway/Tuldok flow passed on
+2026-09-27 as recorded in the
+[version-manager inventory](upstream-version-manager-progress.md). Nothing was
+published.

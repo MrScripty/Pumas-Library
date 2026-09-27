@@ -1,11 +1,39 @@
 # Upstream Torch version manager progress
 
 Date: 2026-09-26 (America/Vancouver). This is an implementation and evidence
-inventory, not a completed Pumas desktop acceptance. The prior
+inventory. Torch 2.14 FLUX.2 Klein now has isolated real RPC/gateway and Tuldok
+browser acceptance; the main selected desktop runtime still has the Core recipe.
+The prior
 [A1 packaged acceptance](a1-packaged-acceptance.md) applies only to its original
 `v2.9.1` / CPython 3.12 / CUDA 13.0 / Linux x86_64 combination. The Tuldok image
 evidence below uses a separate, exact Torch 2.10 tuple and does not qualify a
-newly resolved upstream release.
+newly resolved upstream release. The isolated Torch 2.14 result is recorded below.
+
+## 2026-09-26 — Real Torch 2.14 FLUX.2 Klein endpoint and Tuldok acceptance
+
+The [exact v2.14/cu132/FLUX.2 report](upstream-v214-cu132-flux2-klein-e2e.md)
+records a real isolated managed runtime with the library's FLUX.2 Klein 9B KV
+FP8 checkpoint, FP8 Qwen3-8B encoder, and standalone VAE. Although the
+checkpoint is 9.14 GiB on disk, the adapter expands transformer weights to
+BF16 and the first high-resolution image touched a 32 GiB test limit. A native
+512×512 and 1280×720 PNG both generated. The previous 42 GiB admission was
+repaired to permit 38 GiB only for a selected validated FP8 Qwen artifact with
+matching in-package Qwen3 FP8 config; BF16 and unknown variants retain 42 GiB.
+
+The rebuilt source RPC loaded FLUX in a fresh isolated launcher root and
+advertised it in `/v1/models`. Real `/v1/images/generations` requests returned
+decoded PNGs. The actual Tuldok browser discovered the image model, generated
+at 1280×720, displayed the image, saved it, and imported it into its collection.
+The full run used a 34 GiB capped scope with no OOM events; 490 memory-limit
+reclaim events show pressure at the cap. The host stayed at least 20.9 GiB
+available during that run. The model, profile, RPC and browser were stopped.
+
+This qualifies the isolated v2.14+FLUX tuple and the Pumas endpoint/Tuldok path.
+The main selected v2.14 installation is still Core (`adapter: none`) and cannot
+serve images. It needs a managed FLUX recipe replacement for desktop use. New
+local, unpublished AppImage/deb artifacts include this RPC change and passed
+extracted resource and backend-health smokes; packaged desktop install/serve
+and Tuldok acceptance remain open. No release was published.
 
 ## 2026-09-26 — Repair pip rate collection across versions and keep it visible
 

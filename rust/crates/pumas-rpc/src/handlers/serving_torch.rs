@@ -14,7 +14,7 @@ use pumas_library::models::{
     UnserveModelRequest, UnserveModelResponse,
 };
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const NUNCHAKU_REPOSITORIES: &[&str] = &[
     "nunchaku-ai/nunchaku-z-image-turbo",
@@ -24,6 +24,12 @@ const Z_IMAGE_COMPONENTS_REPO: &str = "Tongyi-MAI/Z-Image-Turbo";
 const FLUX_REPOSITORY: &str = "black-forest-labs/FLUX.2-klein-9b-kv-fp8";
 const FLUX_CHECKPOINT: &str = "flux-2-klein-9b-kv-fp8.safetensors";
 const NUNCHAKU_CHECKPOINT: &str = "svdq-fp4_r128-z-image-turbo.safetensors";
+const GIB: u64 = 1024 * 1024 * 1024;
+
+struct ResolvedComponents {
+    path: String,
+    selected_fp8: bool,
+}
 
 pub(super) async fn serve_torch_model(
     state: &AppState,
@@ -66,7 +72,7 @@ pub(super) async fn serve_torch_model(
         )
         .await?;
         let vae = if is_flux {
-            Some(resolve_components(state, "Comfy-Org/flux2-dev").await?)
+            Some(resolve_components(state, "Comfy-Org/flux2-dev").await?.path)
         } else {
             None
         };
@@ -108,11 +114,23 @@ pub(super) async fn serve_torch_model(
     };
     let resources = state.api.get_system_resources().await?;
     if is_flux {
-        let ram = &resources.resources.ram;
-        let available = ram.total as f64 * (1.0 - f64::from(ram.usage) / 100.0);
-        if !resources.success || available < (42_u64 * 1024 * 1024 * 1024) as f64 {
-            return non_critical_failure_response(state, fail(ModelServeErrorCode::InsufficientMemory,
-                "Klein's scaled FP8 to BF16 CPU-offload policy requires 42 GiB available system RAM in Pumas telemetry")).await;
+        let fp8_encoder = is_validated_fp8_qwen3_encoder(&components).await;
+        if !flux_ram_sufficient(
+            resources.success,
+            resources.resources.ram.total,
+            resources.resources.ram.usage,
+            fp8_encoder,
+        ) {
+            let message = if fp8_encoder {
+                "Klein's FP8 CPU-offload policy requires 38 GiB available system RAM in Pumas telemetry"
+            } else {
+                "Klein's CPU-offload policy requires 42 GiB available system RAM in Pumas telemetry"
+            };
+            return non_critical_failure_response(
+                state,
+                fail(ModelServeErrorCode::InsufficientMemory, message),
+            )
+            .await;
         }
     }
     let gpu = resources.resources.gpu;
@@ -262,7 +280,7 @@ pub(super) async fn serve_torch_model(
                 "nunchaku-z-image-turbo"
             },
             &ImageModelComponents {
-                pipeline_path: &components,
+                pipeline_path: &components.path,
                 vae_path: vae.as_deref(),
             },
         )
@@ -365,8 +383,61 @@ pub(super) async fn serve_torch_model(
     })?)
 }
 
+fn flux_ram_sufficient(telemetry_success: bool, total: u64, usage: f32, fp8_encoder: bool) -> bool {
+    if !telemetry_success || total == 0 || !usage.is_finite() || !(0.0..=100.0).contains(&usage) {
+        return false;
+    }
+    let required_gib = if fp8_encoder { 38 } else { 42 };
+    let available = total as f64 * (1.0 - f64::from(usage) / 100.0);
+    available >= (required_gib * GIB) as f64
+}
+
+fn is_fp8_qwen3_config(config: &Value) -> bool {
+    config.get("model_type").and_then(Value::as_str) == Some("qwen3")
+        && config.get("hidden_size").and_then(Value::as_u64) == Some(4096)
+        && config
+            .pointer("/quantization_config/quant_method")
+            .and_then(Value::as_str)
+            == Some("fp8")
+        && config
+            .pointer("/quantization_config/weight_block_size")
+            .and_then(Value::as_array)
+            .is_some_and(|block| {
+                block.len() == 2 && block.iter().all(|size| size.as_u64() == Some(128))
+            })
+}
+
+async fn is_validated_fp8_qwen3_encoder(components: &ResolvedComponents) -> bool {
+    if !components.selected_fp8 {
+        return false;
+    }
+    let package = Path::new(&components.path);
+    // The component resolver already validated and canonicalized this package.
+    // Canonicalize the config as well so a symlink cannot escape the package.
+    let Ok(config_path) = tokio::fs::canonicalize(package.join("config.json")).await else {
+        return false;
+    };
+    if !config_path.starts_with(package) {
+        return false;
+    }
+    let Ok(contents) = tokio::fs::read(config_path).await else {
+        return false;
+    };
+    serde_json::from_slice::<Value>(&contents).is_ok_and(|config| is_fp8_qwen3_config(&config))
+}
+
+fn selected_artifact_is_fp8(metadata: &Value) -> bool {
+    metadata
+        .get("selected_artifact_quant")
+        .and_then(Value::as_str)
+        == Some("FP8")
+}
+
 /// Resolve a single validated package through the existing library authority.
-async fn resolve_components(state: &AppState, repository: &str) -> pumas_library::Result<String> {
+async fn resolve_components(
+    state: &AppState,
+    repository: &str,
+) -> pumas_library::Result<ResolvedComponents> {
     let mut candidates: Vec<_> = state
         .api
         .model_library()
@@ -378,21 +449,11 @@ async fn resolve_components(state: &AppState, repository: &str) -> pumas_library
     // Retain the BF16 source while preferring the library's converted encoder.
     // Ambiguous variants still require an explicit library correction below.
     if repository == "Qwen/Qwen3-8B"
-        && candidates.iter().any(|model| {
-            model
-                .metadata
-                .get("selected_artifact_quant")
-                .and_then(Value::as_str)
-                == Some("FP8")
-        })
+        && candidates
+            .iter()
+            .any(|model| selected_artifact_is_fp8(&model.metadata))
     {
-        candidates.retain(|model| {
-            model
-                .metadata
-                .get("selected_artifact_quant")
-                .and_then(Value::as_str)
-                == Some("FP8")
-        });
+        candidates.retain(|model| selected_artifact_is_fp8(&model.metadata));
     }
     let [model] = candidates.as_slice() else {
         return Err(pumas_library::PumasError::InvalidParams {
@@ -433,9 +494,15 @@ async fn resolve_components(state: &AppState, repository: &str) -> pumas_library
                 message: "FLUX.2 VAE is outside its validated component package".into(),
             });
         }
-        return Ok(vae.to_string_lossy().into_owned());
+        return Ok(ResolvedComponents {
+            path: vae.to_string_lossy().into_owned(),
+            selected_fp8: false,
+        });
     }
-    Ok(package.to_string_lossy().into_owned())
+    Ok(ResolvedComponents {
+        path: package.to_string_lossy().into_owned(),
+        selected_fp8: repository == "Qwen/Qwen3-8B" && selected_artifact_is_fp8(&model.metadata),
+    })
 }
 
 pub(super) async fn unserve_torch_model(
@@ -484,4 +551,123 @@ pub(super) async fn unserve_torch_model(
         unloaded: true,
         snapshot: Some(snapshot),
     })?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn fp8_requires_matching_config_in_resolved_package() {
+        let package = tempfile::tempdir().unwrap();
+        let config_path = package.path().join("config.json");
+        let components = ResolvedComponents {
+            path: package.path().to_string_lossy().into_owned(),
+            selected_fp8: true,
+        };
+        let fp8 = json!({
+            "model_type": "qwen3",
+            "hidden_size": 4096,
+            "quantization_config": {
+                "quant_method": "fp8",
+                "weight_block_size": [128, 128]
+            }
+        });
+        tokio::fs::write(&config_path, fp8.to_string())
+            .await
+            .unwrap();
+        assert!(is_validated_fp8_qwen3_encoder(&components).await);
+
+        for changed in [
+            json!({"model_type": "qwen2"}),
+            json!({"hidden_size": 8192}),
+            json!({"quantization_config": null}),
+            json!({"quantization_config": {"quant_method": "bitsandbytes", "weight_block_size": [128, 128]}}),
+            json!({"quantization_config": {"quant_method": "fp8", "weight_block_size": [64, 128]}}),
+            json!({"quantization_config": {"quant_method": "fp8"}}),
+        ] {
+            let mut config = fp8.clone();
+            for (key, value) in changed.as_object().unwrap() {
+                config[key] = value.clone();
+            }
+            tokio::fs::write(&config_path, config.to_string())
+                .await
+                .unwrap();
+            assert!(!is_validated_fp8_qwen3_encoder(&components).await);
+        }
+        tokio::fs::write(&config_path, "invalid json")
+            .await
+            .unwrap();
+        assert!(!is_validated_fp8_qwen3_encoder(&components).await);
+        tokio::fs::remove_file(&config_path).await.unwrap();
+        assert!(!is_validated_fp8_qwen3_encoder(&components).await);
+    }
+
+    #[tokio::test]
+    async fn fp8_looking_config_with_bf16_or_unknown_catalog_selection_keeps_42_gib() {
+        let package = tempfile::tempdir().unwrap();
+        let config = json!({
+            "model_type": "qwen3", "hidden_size": 4096,
+            "quantization_config": {"quant_method": "fp8", "weight_block_size": [128, 128]}
+        });
+        tokio::fs::write(package.path().join("config.json"), config.to_string())
+            .await
+            .unwrap();
+        for metadata in [
+            json!({"selected_artifact_quant": "BF16"}),
+            json!({"selected_artifact_quant": "UNKNOWN"}),
+            json!({}),
+        ] {
+            let components = ResolvedComponents {
+                path: package.path().to_string_lossy().into_owned(),
+                selected_fp8: selected_artifact_is_fp8(&metadata),
+            };
+            let fp8_encoder = is_validated_fp8_qwen3_encoder(&components).await;
+            assert!(!fp8_encoder);
+            assert!(!flux_ram_sufficient(true, 100 * GIB, 62.0, fp8_encoder));
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn fp8_config_symlink_cannot_escape_package() {
+        let package = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let components = ResolvedComponents {
+            path: package.path().to_string_lossy().into_owned(),
+            selected_fp8: true,
+        };
+        let config = json!({
+            "model_type": "qwen3", "hidden_size": 4096,
+            "quantization_config": {"quant_method": "fp8", "weight_block_size": [128, 128]}
+        });
+        std::fs::write(outside.path().join("config.json"), config.to_string()).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("config.json"),
+            package.path().join("config.json"),
+        )
+        .unwrap();
+        assert!(!is_validated_fp8_qwen3_encoder(&components).await);
+    }
+
+    #[test]
+    fn flux_ram_threshold_depends_on_verified_fp8_encoder() {
+        let total = 100 * GIB;
+        assert!(flux_ram_sufficient(true, total, 62.0, true));
+        assert!(!flux_ram_sufficient(true, total, 62.01, true));
+        assert!(!flux_ram_sufficient(true, total, 62.0, false));
+        assert!(flux_ram_sufficient(true, total, 58.0, false));
+        assert!(!flux_ram_sufficient(true, total, 58.01, false));
+    }
+
+    #[test]
+    fn flux_ram_rejects_failed_or_invalid_telemetry() {
+        let total = 100 * GIB;
+        assert!(!flux_ram_sufficient(false, total, 0.0, true));
+        assert!(!flux_ram_sufficient(true, 0, 0.0, true));
+        assert!(!flux_ram_sufficient(true, total, f32::NAN, true));
+        assert!(!flux_ram_sufficient(true, total, -1.0, true));
+        assert!(!flux_ram_sufficient(true, total, 101.0, true));
+    }
 }

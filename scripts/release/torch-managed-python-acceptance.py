@@ -64,10 +64,29 @@ class HTTPSOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
 DOWNLOAD_HTTP = urllib.request.build_opener(HTTPSOnlyRedirectHandler())
 
 
+class GitHubApiRedirectHandler(HTTPSOnlyRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        target = urlsplit(newurl)
+        require(
+            target.scheme == "https" and target.netloc == "api.github.com",
+            "GitHub API same-origin redirect",
+            newurl,
+        )
+        return super().redirect_request(request, fp, code, msg, headers, newurl)
+
+
+GITHUB_API_HTTP = urllib.request.build_opener(GitHubApiRedirectHandler())
+
+
 def backend_environment(root: Path) -> dict[str, str]:
     """Remove ambient interpreter selectors before launching the backend."""
     blocked = ("PYTHON", "PIP_", "UV_", "VIRTUAL_ENV", "CONDA", "PYENV", "PDM_")
-    env = {key: value for key, value in os.environ.items() if not key.upper().startswith(blocked)}
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.upper().startswith(blocked)
+        and key.upper() not in {"PUMAS_RELEASE_API_TOKEN", "GITHUB_TOKEN"}
+    }
     env["PATH"] = (
         str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32")
         if os.name == "nt"
@@ -1676,6 +1695,27 @@ class FullArchiveLicenseFixture(unittest.TestCase):
                     request, None, 302, "Found", {}, "http://example.invalid/asset"
                 )
 
+    def test_release_api_token_stays_out_of_backend_and_off_other_origins(self) -> None:
+        class Response(io.BytesIO):
+            def geturl(self) -> str:
+                return "https://api.github.com/repos/astral-sh/python-build-standalone/releases/tags/20260901"
+
+            def read1(self, size: int) -> bytes:
+                return self.read(size)
+
+        with (
+            patch.dict(os.environ, {"PUMAS_RELEASE_API_TOKEN": "fixture-secret"}),
+            patch.object(GITHUB_API_HTTP, "open", return_value=Response(b"{}")) as opened,
+        ):
+            self.assertEqual(worker_fetch_release(), b"{}")
+            request = opened.call_args.args[0]
+            self.assertEqual(request.get_header("Authorization"), "Bearer fixture-secret")
+            self.assertNotIn("PUMAS_RELEASE_API_TOKEN", backend_environment(Path("/tmp")))
+            with self.assertRaises(RuntimeError):
+                GitHubApiRedirectHandler().redirect_request(
+                    request, None, 302, "Found", {}, "https://example.invalid/release"
+                )
+
     def test_body_read_uses_remaining_deadline_for_socket_timeout(self) -> None:
         class Socket:
             timeout = None
@@ -2025,12 +2065,13 @@ def worker_fetch_release() -> bytes:
         "https://api.github.com/repos/astral-sh/python-build-standalone/releases/tags/"
         + REVIEWED_PBS_RELEASE
     )
-    request = urllib.request.Request(
-        url,
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "Pumas-release-acceptance"},
-    )
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "Pumas-release-acceptance"}
+    token = os.environ.get("PUMAS_RELEASE_API_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, headers=headers)
     deadline = time.monotonic() + 60
-    with DOWNLOAD_HTTP.open(
+    with GITHUB_API_HTTP.open(
         request, timeout=min(30, max(0.001, deadline - time.monotonic()))
     ) as response:
         require(

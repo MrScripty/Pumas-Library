@@ -30,6 +30,7 @@
 #[cfg(feature = "uniffi")]
 uniffi::setup_scaffolding!();
 
+pub mod acquisition;
 pub mod cache;
 pub mod cancel;
 pub mod config;

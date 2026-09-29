@@ -14,6 +14,7 @@
 //! - [`download`] - Download management with pause/resume/cancel
 //! - [`auth`] - Authentication token management
 
+mod acquisition_source;
 mod auth;
 mod bundles;
 mod download;

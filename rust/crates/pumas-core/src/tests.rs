@@ -288,6 +288,10 @@ async fn builder_retains_failed_download_import_and_retries_before_completion() 
     let destination = library_root.join("vision/idea-research/grounding-dino-base");
     std::fs::create_dir_all(&destination).unwrap();
     let payload = b"not-a-real-model";
+    let known_sha256 = {
+        use sha2::Digest;
+        Some(hex::encode(sha2::Sha256::digest(payload)))
+    };
     std::fs::write(destination.join("detector.onnx.part"), payload).unwrap();
     std::fs::write(destination.join(".pumas_download"), b"{}").unwrap();
     // Structurally valid provenance passes destination admission, while an
@@ -322,7 +326,7 @@ async fn builder_retains_failed_download_import_and_retries_before_completion() 
             license_status: Some("apache-2.0".into()),
         },
         created_at: chrono::Utc::now().to_rfc3339(),
-        known_sha256: None,
+        known_sha256,
         huggingface_evidence: None,
     };
     let mut client = HuggingFaceClient::new(temp.path().join("fixture-cache")).unwrap();

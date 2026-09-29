@@ -267,14 +267,32 @@ impl DownloadState {
             other => other,
         };
 
-        // Current persisted snapshots always contain an explicit file set.
+        // The durable snapshot stores aggregate size and the primary file's
+        // digest, not per-file metadata. Those values identify one file only
+        // when the persisted selection contains exactly that primary file.
+        // Never attach aggregate or primary evidence to an arbitrary member
+        // of a multi-file selection.
+        let single_file_evidence = (entry.filenames.len() == 1
+            && entry
+                .filenames
+                .first()
+                .is_some_and(|filename| filename == &entry.filename))
+        .then_some((
+            &entry.filename,
+            entry.total_bytes,
+            entry.known_sha256.as_deref(),
+        ));
         let files: Vec<FileToDownload> = entry
             .filenames
             .iter()
-            .map(|f| FileToDownload {
-                filename: f.clone(),
-                size: None, // Not persisted per-file; verified on disk
-                sha256: None,
+            .map(|filename| {
+                let evidence =
+                    single_file_evidence.filter(|(primary, _, _)| *primary == filename.as_str());
+                FileToDownload {
+                    filename: filename.clone(),
+                    size: evidence.and_then(|(_, size, _)| size),
+                    sha256: evidence.and_then(|(_, _, sha256)| sha256.map(str::to_owned)),
+                }
             })
             .collect();
 

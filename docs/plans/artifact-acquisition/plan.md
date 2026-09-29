@@ -2,7 +2,7 @@
 
 **Plan status:** `Active` — Q1 is admitted on the current accepted `main` base; AQ-HTTP remains not ready.
 **Objective acceptance status:** `pending`.
-**Current phase:** Q1 source, retained-state, and authority reconciliation; production implementation and required real acceptance are pending.
+**Current phase:** Q1 manifest/HTTP protocol and normal Hugging Face consumer slice implemented and under verification. The shared durable handoff owner, llama.cpp consumer, retained-store evolution, desktop path, and required real-source qualification remain pending.
 **Exactly one next slice:** Continue **Q1 — shared HTTP acquisition through the existing Hugging Face and native-runtime consumers.**
 **Canonical plan path:** `docs/plans/artifact-acquisition/plan.md`.
 **Owner:** Pumas acquisition integration. The repository owner assigns the implementation and integration roles when admitting source work.

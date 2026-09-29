@@ -1,15 +1,15 @@
 # Acquisition implementation write sets and coordination
 
-These are the proposed exact paths/closed path families. No production source is changed by this delivery. Before a slice edits files, its integrator records the exact members and actual tests in its ledger. New files below are intentional proposed paths, not claims of existing code. Same-owner amendments are recorded; new authority/consumer boundaries trigger re-plan.
+These are the admitted exact paths/closed path families. The actual source files selected for the current Q1 slice are listed in the execution ledger; remaining paths below are authorized Q1 boundaries, not claims that those implementations exist. Before a slice edits files, its integrator records the exact members and actual tests in its ledger. New authority/consumer boundaries trigger re-plan.
 
 ## Q1: one HTTP acquisition owner with real consumers
 
-**New canonical module paths, used only when the concern warrants the split:**
-`rust/crates/pumas-core/src/acquisition/{mod.rs,types.rs,service.rs,store.rs,workspace.rs,http.rs}`. Source-reader abstraction and current HF adaptation can remain in these owners or `acquisition/sources/{mod.rs,http.rs}` if that is the clearer implementation; choose one actual layout at admission, not both. The semantic split is independent source access, durable transfer owner and capability workspace, not file-count reduction.
+**Canonical module paths:** `rust/crates/pumas-core/src/acquisition/{mod.rs,manifest.rs,http.rs}` currently hold validated source-neutral selections and the HTTP representation/body-streaming protocol. The remaining Q1 design still needs one durable transfer owner and capability workspace; place those with the canonical module rather than creating another downloader. Source-reader adaptation may remain in that module or a focused `acquisition/sources/` child if the actual design supports it.
 
 **Existing owners allowed to change:**
 - `rust/crates/pumas-core/src/lib.rs`, `network/{mod.rs,download.rs}`, `model_library/hf/{mod.rs,download.rs,lifecycle.rs,types.rs,metadata.rs}`;
-- `rust/crates/pumas-core/src/model_library/{download_store.rs,download_recovery.rs,partial_download.rs}` only for the extracted authority and explicit supported migration;
+- `rust/crates/pumas-core/src/model_library/{download_store.rs,download_recovery.rs}` only for the extracted authority and explicit supported migration;
+- `rust/crates/pumas-core/src/tests.rs` when a builder/reopen fixture depends on the selected completion-evidence invariant;
 - directly affected core `api/hf.rs`, `api/state.rs` and current model-importer/intent completion call sites, selected from the actual producer/consumer trace before editing;
 - `rust/crates/pumas-app-manager/src/version_manager/{installer.rs,ollama.rs,progress.rs}` for the acquisition bridge and transfer progress, not installed-unit identity migration;
 - current core atomic JSON/capability-filesystem modules only where the same selected invariant requires a targeted change, never as an unrelated filesystem rewrite.

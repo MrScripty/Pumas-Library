@@ -1496,6 +1496,46 @@ class ResolverTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     resolver.requirements_from_report(fixture, "2.10.0", "cpu")
 
+    def test_macos_cpu_accepts_pypi_torch_wheels_with_matching_identity_and_tags(self):
+        torch_url = (
+            "https://files.pythonhosted.org/packages/ee/90/"
+            "torch-2.14.0-cp314-cp314-macosx_14_0_arm64.whl"
+        )
+        vision_url = (
+            "https://files.pythonhosted.org/packages/aa/bb/"
+            "torchvision-0.29.0-cp314-cp314-macosx_14_0_arm64.whl"
+        )
+        fixture = report(version="2.14.0+cpu", adapter="flux2")
+        fixture["install"][0]["metadata"]["version"] = "2.14.0"
+        fixture["install"][0]["download_info"]["url"] = torch_url
+        vision = next(
+            item for item in fixture["install"] if item["metadata"]["name"] == "torchvision"
+        )
+        vision["metadata"]["version"] = "0.29.0"
+        vision["download_info"]["url"] = vision_url
+        mac_tag = resolver.packaging_tags.Tag("cp314", "cp314", "macosx_14_0_arm64")
+        with (
+            patch.object(resolver.sys, "platform", "darwin"),
+            patch.object(resolver.platform, "machine", return_value="arm64"),
+            patch.object(resolver.sys, "version_info", SimpleNamespace(major=3, minor=14)),
+            patch.object(resolver.packaging_tags, "sys_tags", return_value=[mac_tag]),
+        ):
+            requirements, _ = resolver.requirements_from_report(fixture, "2.14.0", "cpu", "flux2")
+            self.assertTrue(any(torch_url in requirement for requirement in requirements))
+            self.assertTrue(any(vision_url in requirement for requirement in requirements))
+            for bad_url in (
+                torch_url.replace("torch-2.14.0", "torch-2.13.0"),
+                torch_url.replace("torch-2.14.0", "other-2.14.0"),
+                torch_url.replace("macosx_14_0_arm64", "manylinux_2_28_x86_64"),
+                torch_url.replace("files.pythonhosted.org", "files.pythonhosted.org.evil.test"),
+            ):
+                with self.subTest(bad_url=bad_url), self.assertRaisesRegex(ValueError, "Untrusted"):
+                    fixture["install"][0]["download_info"]["url"] = bad_url
+                    resolver.requirements_from_report(fixture, "2.14.0", "cpu", "flux2")
+            fixture["install"][0]["download_info"]["url"] = torch_url
+        with self.assertRaises(ValueError):
+            resolver.requirements_from_report(fixture, "2.14.0", "cpu", "flux2")
+
     def test_torchvision_wrong_build_is_rejected(self):
         fixture = report(adapter="flux2")
         fixture["install"][6]["metadata"]["version"] = "0.25.0+cu130"

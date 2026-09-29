@@ -21,7 +21,11 @@ import threading
 import time
 from pathlib import Path
 from pip._vendor.packaging import tags as packaging_tags
-from pip._vendor.packaging.utils import canonicalize_name
+from pip._vendor.packaging.utils import (
+    InvalidWheelFilename,
+    canonicalize_name,
+    parse_wheel_filename,
+)
 from pip._vendor.packaging.version import Version, InvalidVersion
 from urllib.parse import unquote, urljoin, urlparse, urlunparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -938,7 +942,9 @@ def official_torch_url(url: str, build: str) -> bool:
     )
 
 
-def trusted_wheel_url(url: str, build: str, name: str, adapter: str) -> bool:
+def trusted_wheel_url(
+    url: str, build: str, name: str, adapter: str, target: str, version: str
+) -> bool:
     parsed = urlparse(url)
     if (
         parsed.scheme != "https"
@@ -952,7 +958,28 @@ def trusted_wheel_url(url: str, build: str, name: str, adapter: str) -> bool:
     ):
         return False
     if name in {"torch", "torchvision"}:
-        return official_torch_url(url, build)
+        if official_torch_url(url, build):
+            return True
+        # PyTorch publishes plain-version macOS CPU wheels on PyPI. Match the
+        # report identity and this interpreter's wheel tags before trusting it.
+        if target != "macos" or build != "cpu" or not parsed.path.startswith("/packages/"):
+            return False
+        if parsed.hostname != "files.pythonhosted.org":
+            return False
+        try:
+            wheel_name, wheel_version, _, wheel_tags = parse_wheel_filename(
+                unquote(parsed.path.rsplit("/", 1)[-1])
+            )
+            return (
+                wheel_name == canonicalize_name(name)
+                and wheel_version == Version(version)
+                and any(
+                    tag in wheel_tags and tag.platform.startswith("macosx_")
+                    for tag in packaging_tags.sys_tags()
+                )
+            )
+        except (InvalidWheelFilename, InvalidVersion):
+            return False
     if parsed.hostname == "files.pythonhosted.org" and parsed.path.startswith("/packages/"):
         return True
     if parsed.hostname in {"download.pytorch.org", "download-r2.pytorch.org"}:
@@ -1016,7 +1043,7 @@ def requirements_from_report(
         digest = info.get("archive_info", {}).get("hashes", {}).get("sha256")
         if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
             raise ValueError(f"No SHA-256 provenance for {name}")
-        if not trusted_wheel_url(url, build, name, adapter):
+        if not trusted_wheel_url(url, build, name, adapter, target, item["metadata"]["version"]):
             raise ValueError(f"Untrusted or non-binary artifact for {name}: {url}")
         if name == "torchvision":
             vision_version = item["metadata"]["version"]

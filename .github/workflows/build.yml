@@ -242,6 +242,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - name: Install repository Rust toolchain
         run: rustup toolchain install --no-self-update
       - uses: Swatinem/rust-cache@v2

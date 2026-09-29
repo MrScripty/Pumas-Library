@@ -30,14 +30,20 @@ replaced or published. Image evidence remains limited to its exact previously
 recorded tuples. The exact managed-Python and sidecar run is retained in the
 [v2.14.0 acceptance evidence](../torch-cross-platform-runtime-management/reports/v2.14.0-linux-cpu-rpc-acceptance/acceptance.json).
 
-**Blockers:** Native Windows/macOS acceptance and provider license inventory
-remain pending. CUDA/device use, packaged desktop installation, and v2.14.0
-image/Tuldok behavior also remain untested.
+**Blockers:** Native CPU/Core install, restart, and sidecar acceptance passed
+on Linux x86_64, Windows x64, and macOS arm64 for historical source `21041697`
+in [run 36229508586](https://github.com/MrScripty/Pumas-Library/actions/runs/36229508586).
+The three provider-license collections are integrated into release attribution,
+but [missing declared upstream license references](../torch-cross-platform-runtime-management/reports/managed-python-license-collection/missing-declared-license-references.md)
+remain a release acceptance blocker. Packaged desktop installation through the
+Electron UI, CUDA/MPS device use, and v2.14.0 image/Tuldok behavior remain
+unqualified. Historical native success does not certify the intermediate PR trees.
 
-**Next slice:** Run and review the native Windows x64/macOS arm64 acceptance
-legs, then complete provider-license and packaged desktop acceptance. Keep this
-Torch install path separate from FLUX.2, image generation, and Tuldok claims,
-which require their own exact runtime evidence.
+**Next slice:** Qualify and independently review the managed runtime foundation
+PR, including its repairs and the missing upstream license evidence. Obtain
+fresh checks for the actual candidate and later complete packaged desktop and
+device acceptance. Keep this Torch install path separate from FLUX.2, image
+generation, and Tuldok claims, which require their own exact runtime evidence.
 
 ## Product contract
 
@@ -60,7 +66,7 @@ that every old tag has a wheel for every interpreter or build. Unsupported
 combinations and network-inconclusive checks remain distinct. Pumas provisions
 its own Python runtime and does not compile Torch from source in this plan. XPU
 remains outside this plan's accepted provider/runtime contract. Windows and
-macOS support is authorized but not yet accepted under the
+macOS native CPU/Core support has historical acceptance on `21041697` under the
 [cross-platform Torch runtime plan](../torch-cross-platform-runtime-management/plan.md).
 The fixed `v2.9.1` CUDA 13.0 / CPython 3.12 preset remains available as
 a separately qualified, previously accepted exception backed by the embedded
@@ -147,4 +153,5 @@ Python resolver. Changes to wire fields, generated contracts, the plugin
 manifest, or other platform support require a new exact handoff. The separate
 Windows/macOS handoff is
 [Cross-Platform Torch Runtime Management](../torch-cross-platform-runtime-management/plan.md);
-its pending acceptance does not change this plan's recorded Linux evidence.
+its remaining packaged-desktop and device acceptance does not change this
+plan's recorded Linux evidence.

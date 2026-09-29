@@ -81,11 +81,15 @@ fingerprint, exact wheel URLs, hashes, and package versions with the installed
 runtime. Installation uses official binary wheels only and never falls back to
 a source build.
 
-This managed-Python path is being integrated. Clean-host downloads and native
-provisioning/package acceptance on Linux, Windows, and macOS remain pending in
-the [cross-platform runtime plan](../docs/plans/torch-cross-platform-runtime-management/plan.md).
-Windows x86_64 and macOS arm64 support should be considered available only
-after that native acceptance passes. The sidecar is embedded in the Pumas app,
+Native managed-Python provisioning, Torch CPU/Core installation, restart,
+and sidecar lifecycle passed on Linux x86_64, Windows x64, and macOS arm64
+for source `21041697` in
+[run 36229508586](https://github.com/MrScripty/Pumas-Library/actions/runs/36229508586).
+That historical result does not qualify subsequent source changes, packaged
+Electron installation, CUDA/MPS device use, or image adapters. The
+[cross-platform runtime plan](../docs/plans/torch-cross-platform-runtime-management/plan.md)
+retains those acceptance gates and the provider-attribution follow-up.
+The sidecar is embedded in the Pumas app,
 so no Pumas-hosted Torch release bundle is required. Adapter dependencies are
 outside the core automatic install; an unavailable adapter affects its feature,
 not the installation of Torch itself.

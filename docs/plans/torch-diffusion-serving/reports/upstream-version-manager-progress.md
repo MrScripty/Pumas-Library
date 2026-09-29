@@ -201,7 +201,9 @@ bundle. The public toolbar-linked release remains unchanged.
   ten-page caps. Prereleases, nightlies, and source builds remain outside this
   scope. The v2.14.0 CPU/Core RPC install, managed-provider, restart, and
   sidecar acceptance passed on Linux x86_64, Windows x64, and macOS arm64 in
-  manual run [36223106097](https://github.com/MrScripty/Pumas-Library/actions/runs/36223106097).
+  manual run [36229508586](https://github.com/MrScripty/Pumas-Library/actions/runs/36229508586)
+  on `21041697`, including the metadata-lock follow-up. This is historical
+  evidence for that source, not qualification of later stacked PR candidates.
   This does not close packaged-desktop, non-CPU, image-adapter, or Tuldok gates;
   see the linked cross-platform plan. Installed local releases remain visible
   when upstream discovery fails.
@@ -610,10 +612,14 @@ workspace check and Clippy, Rust formatting, 44 Torch resolver tests, Ruff, and
 in this environment: 1432 `pumas-library` unit tests pass with four test threads,
 but the `intent_api_tests` fail while creating their local API TempDirs with
 `PermissionDenied`/temporary-storage errors. Astra high and Sol xhigh read-only
-reviews found no lock-lifecycle blockers. The three-platform native RPC evidence
-above predates this lock follow-up, so native verification of this change remains
-pending. PR run 36225003150 passed on `66ccbfe7` before this change; a new PR run
-must verify the follow-up.
+reviews found no lock-lifecycle blockers. The initial three-platform native RPC evidence
+above predates this lock follow-up. Subsequent native run
+[36229508586](https://github.com/MrScripty/Pumas-Library/actions/runs/36229508586)
+passed all three native legs on `21041697`, as recorded in the platform
+`v2.14.0-*-current-source-cpu-rpc-restart-acceptance` reports. Those report names
+refer to the source tested then, not later PR candidates. PR run 36225003150
+passed on `66ccbfe7` before the follow-up; each resulting PR candidate needs
+its own applicable checks.
 
 The Torch QA job now disables checkout credential persistence. Security review
 confirmed the job has `contents: read` and that PR caches use the PR merge-ref

@@ -28,3 +28,10 @@ separate from the selected install-only runtime URLs and uv archive hashes.
 The Linux evidence README describes the accepted installation that produced
 its selected archive record. All per-file hashes can be checked directly
 against the manifests.
+
+## Outstanding attribution evidence
+
+The inventory includes the collected files for all three targets. It does not
+certify completeness of declared references: the upstream Windows archive
+omits a declared zstd license file. See the
+[verified evidence gap and release gate](missing-declared-license-references.md).

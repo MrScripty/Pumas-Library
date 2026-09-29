@@ -2029,7 +2029,7 @@ def declared_license_paths(metadata: dict) -> set[str]:
     def visit(value) -> None:
         if isinstance(value, dict):
             for key, item in value.items():
-                if key == "license_path" and item is not None:
+                if key in ("license_path", "license_paths") and item is not None:
                     values = [item] if isinstance(item, str) else item
                     require(
                         isinstance(values, list) and all(isinstance(path, str) for path in values),
@@ -2050,6 +2050,27 @@ def declared_license_paths(metadata: dict) -> set[str]:
     visit(metadata)
     require(bool(paths), "declared full-archive licenses", metadata.get("license_path"))
     return paths
+
+
+class DeclaredLicensePathsFixture(unittest.TestCase):
+    def test_nested_plural_references_are_required(self) -> None:
+        metadata = {
+            "license_path": "licenses/LICENSE.cpython.txt",
+            "build_info": {
+                "extensions": {"_zstd": [{"license_paths": ["licenses/LICENSE.zstd.txt"]}]}
+            },
+        }
+        self.assertEqual(
+            declared_license_paths(metadata),
+            {"python/licenses/LICENSE.cpython.txt", "python/licenses/LICENSE.zstd.txt"},
+        )
+
+    def test_plural_references_reject_escaping_paths_and_invalid_types(self) -> None:
+        for references in (["../LICENSE.txt"], [42], {"path": "LICENSE.txt"}):
+            with self.subTest(references=references), self.assertRaises(RuntimeError):
+                declared_license_paths(
+                    {"license_path": "licenses/LICENSE.cpython.txt", "license_paths": references}
+                )
 
 
 def validate_full_archive_metadata(metadata: dict, asset: dict) -> None:
@@ -3180,6 +3201,7 @@ def main() -> None:
         suite = unittest.TestSuite(
             unittest.defaultTestLoader.loadTestsFromTestCase(fixture)
             for fixture in (
+                DeclaredLicensePathsFixture,
                 WindowsCanonicalPathFixture,
                 FailureSummaryFixture,
                 VersionPreflightFixture,

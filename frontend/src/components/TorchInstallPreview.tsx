@@ -37,6 +37,7 @@ function errorText(error: unknown): string {
 export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPreviewProps) {
   const [runtimeOptions, setRuntimeOptions] = useState<TorchRuntimeOptions | null>(null);
   const [releaseOptions, setReleaseOptions] = useState<TorchReleaseOptionsOutcome | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [releaseError, setReleaseError] = useState<string | null>(null);
   const [releaseAttempt, setReleaseAttempt] = useState(0);
   const [build, setBuild] = useState('');
@@ -60,6 +61,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
     setLoadingRuntimeOptions(true);
     setLoadingReleaseOptions(true);
     setRuntimeOptions(null);
+    setRuntimeError(null);
     setReleaseOptions(null);
     setReleaseError(null);
     setPreview(null);
@@ -89,7 +91,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       setRuntimeOptions(result);
       setAdapter(result.defaultAdapter);
     }).catch((cause: unknown) => {
-      if (active) setError(`Torch runtime choices unavailable: ${errorText(cause)}`);
+      if (active) setRuntimeError(`Torch runtime choices unavailable: ${errorText(cause)}`);
     }).finally(() => {
       if (active) setLoadingRuntimeOptions(false);
     });
@@ -260,6 +262,10 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
           </button>
         </>
       )}
+      {runtimeError && <div className="space-y-2 text-sm">
+        <p role="alert" className="text-[hsl(var(--accent-error))]">{runtimeError}</p>
+        <button type="button" onClick={() => setReleaseAttempt((attempt) => attempt + 1)} className="rounded border px-3 py-2">Retry Torch choices</button>
+      </div>}
       {!fixedPreset && releaseError && <div className="space-y-2 text-sm">
         <p role="alert" className="text-[hsl(var(--accent-error))]">{releaseError}</p>
         <button type="button" onClick={() => setReleaseAttempt((attempt) => attempt + 1)} className="rounded border px-3 py-2">Retry release discovery</button>
@@ -288,7 +294,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
                 if (!isEligibleAlternative(match)) return;
                 invalidatePreview();
                 setBuild(match.build);
-                void probe({ build: match.build, python: 'auto', adapter });
+                void probe({ build: match.build, python: match.python, adapter });
               }}>
                 Preview {match.tag} · {match.build} · {match.python}
               </button>

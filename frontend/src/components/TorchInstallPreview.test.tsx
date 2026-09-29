@@ -58,6 +58,17 @@ beforeEach(() => {
 });
 
 describe('TorchInstallPreview', () => {
+  it('retries runtime choices independently of a successful discovery and clears the error', async () => {
+    getPresetOptions.mockRejectedValueOnce(new Error('choices offline'));
+    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Torch runtime choices unavailable: choices offline');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Probe inconclusive');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Torch choices' }));
+    expect(await screen.findByText(/Recommended setup: cu130/)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(getPresetOptions).toHaveBeenCalledTimes(2);
+  });
+
   it('uses the manager recommendation with core Torch and no required profile selectors', async () => {
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
@@ -315,7 +326,7 @@ describe('TorchInstallPreview', () => {
     expect(screen.getByText(/Other dependencies have not been checked/)).toBeInTheDocument();
     expect(getAlternatives).toHaveBeenCalledWith('v2.14.0', 'cu130', 'python3.12');
     fireEvent.click(screen.getByRole('button', { name: 'Preview v2.14.0 · cpu · python3.11' }));
-    await waitFor(() => expect(getPreview).toHaveBeenLastCalledWith({ tag: 'v2.14.0', build: 'cpu', python: 'auto', adapter: 'none' }));
+    await waitFor(() => expect(getPreview).toHaveBeenLastCalledWith({ tag: 'v2.14.0', build: 'cpu', python: 'python3.11', adapter: 'none' }));
     expect(await screen.findByText('Exact artifacts resolved')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Install reviewed artifacts' }));
     expect(onInstall).toHaveBeenCalledWith('review-cpu');
@@ -354,7 +365,7 @@ describe('TorchInstallPreview', () => {
     expect(screen.queryByRole('button', { name: /Preview .*cu130|Preview .*rocm6\.4|Preview v2\.13\.0/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Preview v2.14.0 · cpu · python3.11' }));
     await waitFor(() => expect(getPreview).toHaveBeenCalledTimes(2));
-    expect(getPreview).toHaveBeenLastCalledWith({ tag: 'v2.14.0', build: 'cpu', python: 'auto', adapter: 'none' });
+    expect(getPreview).toHaveBeenLastCalledWith({ tag: 'v2.14.0', build: 'cpu', python: 'python3.11', adapter: 'none' });
   });
 
   it('keeps a long artifact list and its install action inside the scrollable preview region', async () => {

@@ -1,13 +1,14 @@
 # Plan: source-neutral artifact acquisition
 
-**Plan status:** `Planned` — implementation direction selected for this coordinated planning package; no production implementation is authorized or claimed by this delivery.
+**Plan status:** `Active` — Q1 is admitted on the current accepted `main` base; AQ-HTTP remains not ready.
 **Objective acceptance status:** `pending`.
-**Current phase:** contract and source-grounded implementation preparation.
-**Exactly one next slice:** **Q1 — shared HTTP acquisition through the existing Hugging Face and native-runtime consumers.**
+**Current phase:** Q1 source, retained-state, and authority reconciliation; production implementation and required real acceptance are pending.
+**Exactly one next slice:** Continue **Q1 — shared HTTP acquisition through the existing Hugging Face and native-runtime consumers.**
 **Canonical plan path:** `docs/plans/artifact-acquisition/plan.md`.
 **Owner:** Pumas acquisition integration. The repository owner assigns the implementation and integration roles when admitting source work.
-**Operation for a later implementation session:** `start` this exact plan; refresh repository state and the prerequisite dispositions below first.
-**Baselines:** Pumas `04e7f1568f00693c0ef26c77e0150e5e4dd112ea`; Coding-Standards `39d55dc330d44ecf940364ceada9d2527f7c7ea0`; delivered runtime plan revision 3 is the input, revision 4 is the companion output.
+**Operation:** `start` this exact plan on `work/acquisition-q1-http`.
+**Planning baseline:** Pumas `a8359512a580aa25fb2f9c9e4cd7e0dd64fd970d`, preserved and integrated by `f4dd7ff9`.
+**Implementation base:** accepted Pumas `main` `e37bbf4b964a0e2aadf25f80ab71edd8fa6b3eb3`; Coding-Standards `39d55dc330d44ecf940364ceada9d2527f7c7ea0`; delivered runtime plan revision 3 is the input, revision 4 is the companion output.
 
 ## Objective and scope
 
@@ -107,7 +108,7 @@ Each row is one coherent semantic unit including producer and actual consumers. 
 
 | Milestone | Goal | Dependencies | Gate / evidence | State |
 | --- | --- | --- | --- | --- |
-| **Q1** | Shared HTTP lifecycle, neutral persistence/handoff, and real HF/native consumer cutover; existing UI outcomes preserved. | Source/retained-state preparation and active recovery-owner handoff. No runtime milestone. | `AQ-HTTP`: AC01–AC10, AC15, AC16, AC18; real HF model import and native archive extraction plus corresponding UI/contract/cancellation/reopen evidence. | Planned |
+| **Q1** | Shared HTTP lifecycle, neutral persistence/handoff, and real HF/native consumer cutover; existing UI outcomes preserved. | Source/retained-state preparation and active recovery-owner handoff. No runtime milestone. | `AQ-HTTP`: AC01–AC10, AC15, AC16, AC18; real HF model import and native archive extraction plus corresponding UI/contract/cancellation/reopen evidence. | In progress; gate not ready |
 | **Q2** | Exact wheel-file-set acquisition and local-only consumption in the existing Torch installer. | AQ-HTTP. | `AQ-PACKAGES`: AC11, AC12 and Q1 regression evidence affected by this composition; network-denied installation and actual package identity. | Planned |
 | **Q3** | S3-compatible acquisition using the same lifecycle, direct explicit source workflow, tested credentials/version semantics, and a real model import through the existing model-facing operations. | AQ-HTTP. Q2 is the default next serial integration; Q3 can be delegated after shared files stabilize. | `AQ-S3`: AC13, AC14 and source-neutrality regressions; native AWS S3, one non-AWS compatible service, local MinIO, and S3-to-model-library evidence. | Planned |
 | **Q4** | Complete affected public/installed/native qualification, migration documentation and removal of superseded authority. | Q1–Q3 implemented. | `AQ-COMPLETE`: all AC01–AC18 satisfied and all four milestones Accepted; packaged/independent-consumer/native-platform evidence in AC17. | Planned |
@@ -121,6 +122,10 @@ Runtime **R1 requires AQ-HTTP**. Runtime **R2 requires AQ-PACKAGES** as well as 
 First refresh the selected checkout and current standards, preserve unrelated work, and reconcile the active recovery plan. State the supported retained-state population and exact seam between transfer completion and model/native finalization. Add regression evidence before/with changes. Implement a usable end-to-end HF/native path, not only a new trait or DTO. Do not open another generic engine while keeping old HF and native transfer owners active for the same migrated population.
 
 Bounded investigations belong inside their milestones: verify the current destination grant can support a neutral workspace, identify a real native artifact's accepted integrity evidence, and prove restart handoff with existing store readers. Stop each investigation when the chosen interface can be implemented safely; update the issue record only if its result changes ownership, migration or evidence.
+
+### Q1 current-checkout reconciliation — 2026-09-29
+
+The exact refs, PR/CI state, pre-existing worktrees and untracked work, source-owner trace, supported store formats, review findings and evidence limits are recorded in the [Q1 starting-state report](reports/q1-starting-state.md). That report is read-only source/repository evidence and does not satisfy acceptance claims. The actual deployed retained-state population and older-writer retirement/isolation remain unknown; no live root was read or changed. Q1 may proceed with source work and disposable fixtures, while live-root mutation remains blocked. The original `a8359512…` plan commit is preserved and integrated into the task branch; runtime R1 remains gated by AQ-HTTP.
 
 ## Acceptance and verification
 
@@ -140,6 +145,6 @@ Authorized planning does not authorize deleting user files, publishing releases,
 
 ## Linked records and terminal documentation
 
-[Ledger](execution-ledger.md) · [Issues](issues.md) · [Audit](reports/codebase-audit.md) · [Architecture](reports/architecture-review.md) · [Acceptance](reports/acceptance-matrix.md) · [Write sets](reports/write-sets.md) · [Dependency gates](reports/dependency-gates.md) · [Standards/source review](reports/standards-and-sources.md) · [Companion runtime plan](../runtime-installations-and-model-adapters/plan.md).
+[Ledger](execution-ledger.md) · [Issues](issues.md) · [Audit](reports/codebase-audit.md) · [Architecture](reports/architecture-review.md) · [Acceptance](reports/acceptance-matrix.md) · [Write sets](reports/write-sets.md) · [Dependency gates](reports/dependency-gates.md) · [Standards/source review](reports/standards-and-sources.md) · [Coding-Standards MCP usability](reports/coding-standards-mcp-usability.md) · [Companion runtime plan](../runtime-installations-and-model-adapters/plan.md).
 
 On adoption, link this plan from the source brief and add the bounded ownership disposition to the active Rust/library recovery and upstream-runtime plans. Do not create another master execution plan. The shared contract remains marked proposed until implemented; update it in the same slices. At acceptance, move durable decisions to current owner documentation/ADR as required, and follow Pumas's documented terminal-plan lifecycle rather than retain duplicate active instructions. Git and the delivered older packages preserve history.

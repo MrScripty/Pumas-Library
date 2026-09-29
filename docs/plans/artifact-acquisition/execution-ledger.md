@@ -11,3 +11,12 @@ Created this acquisition plan, a proposed shared contract, gate record, source a
 **Evidence:** source/docs inspection and mechanical delivery checks only. All AC production claims and AQ gates remain pending/not ready. No Rust/Python production suite, source-service integration, network-denied package installation, GUI, migration, GPU workload or native release was executed. No independent reviewer was run; independent review is a later explicit acceptance requirement.
 
 **Next slice:** Q1 after current checkout/consumer/retained-state preparation and exact source-work admission. Runtime R1 remains gated by AQ-HTTP.
+
+## 2026-09-29 — Q1 started from accepted current main
+
+- Resolved `a8359512` to `a8359512a580aa25fb2f9c9e4cd7e0dd64fd970d`. It was not an ancestor of current accepted `main` `e37bbf4b964a0e2aadf25f80ab71edd8fa6b3eb3`; the common ancestor is `04e7f1568f00693c0ef26c77e0150e5e4dd112ea`. Preserved the original planning commit through the plan-only integration merge `f4dd7ff9` on `work/acquisition-q1-http`. No accepted source was reset or replaced.
+- Current GitHub inventory: no open PRs; PRs #4, #5 and #6 are the latest merged runtime/Torch changes. On the exact base SHA, Build run `36624219733` and Scorecard run `36624219480` both completed successfully. These are base-only CI results. See the [starting-state report](reports/q1-starting-state.md) for links and source evidence.
+- Source preparation traced the normal model workflow, durable download owner, native runtime installer, and existing generic download API. The acquisition module, actual shared transfer owner and both production cutovers do not exist yet. The source inventory and independent architecture review are preliminary only; no Q1 gate claim is satisfied.
+- Existing local-TCP restart/import tests and historical native installation evidence retain their original scope. No real HF service, current llama.cpp archive, desktop workflow, live migration, or Q1 production test has been executed in this slice.
+- The store reader currently supports schema 5 and explicit schema 4 upgrade; deployed record population and old-writer retirement are unknown. No live retained state was opened or modified. Pending/unresolved cleanup replay remains refused under its existing recovery owner.
+- The sole implementation slice remains Q1. Q2, Q3 and runtime R1 remain dependency-gated; no acquisition gate is ready.

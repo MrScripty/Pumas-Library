@@ -1,6 +1,6 @@
 # Artifact acquisition contract
 
-**Status:** Proposed for the paired acquisition/runtime plans; not an implemented public API.
+**Status:** Q1 implementation contract; its public API and acceptance remain pending.
 **Canonical owner:** Pumas acquisition integration.
 **Implementation authority:** [Acquisition plan](../plans/artifact-acquisition/plan.md).
 **Consumer:** [Runtime installation and model-adapter plan](../plans/runtime-installations-and-model-adapters/plan.md), plus the existing model-library and native/package integrations.

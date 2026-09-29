@@ -1,6 +1,6 @@
 # Acquisition issues and dispositions
 
-All repairs are planned, not implemented. Evidence references [the source audit](reports/codebase-audit.md), [the canonical contract](../../contracts/artifact-acquisition.md), and its linked primary sources. Severity is consequence within this scope, not an asserted exploited vulnerability.
+Q1 is active; production repairs and acceptance claims remain pending until evidence is recorded. Evidence references [the source audit](reports/codebase-audit.md), [the canonical contract](../../contracts/artifact-acquisition.md), and its linked primary sources. Severity is consequence within this scope, not an asserted exploited vulnerability.
 
 | ID | Severity / issue | Owner / disposition | Deciding evidence and revisit condition |
 | --- | --- | --- | --- |
@@ -20,3 +20,5 @@ All repairs are planned, not implemented. Evidence references [the source audit]
 | AQ-E01 | Pending: required-real AWS/non-AWS/MinIO/native/desktop evidence | Assigned source/distribution integrator | AC14/AC17; missing environment blocks those claims, not fictional acceptance |
 
 Pending cleanup replay and unrelated whole-runtime remediation are owned by the existing Rust/library plan. Preserve current refusal while migrating the selected transfer family. Do not mark those unrelated work items accepted from this plan's link/schema checks.
+
+Q1 source preparation confirmed a public `DownloadManager` with no in-repository production caller, but did not establish its external compatibility population; removal or a compatibility disposition remains open. The supported download-store reader currently accepts schema 5 and upgrades schema 4, while deployment inventory and older-writer isolation are unavailable. Q1 must preserve both facts and keep live-root mutation blocked until that deployment evidence exists. The native llama.cpp cache currently uses size/filename admission and direct-final-directory extraction; these are admitted Q1 repair findings under AQ-I04/AQ-I07.

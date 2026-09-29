@@ -2,20 +2,22 @@
 
 **Revision:** 4 — coordinated with the separate prerequisite acquisition plan; supersedes revision 3 at the same canonical runtime plan path.
 
-**Status:** Planned, proposed for owner adoption; production implementation has not started.
+**Status:** Planned and adopted; runtime implementation has not started because R1 is gated by AQ-HTTP.
 
 **Objective acceptance:** pending; real runtime, model, migration, native-platform, and desktop acceptance has not been performed.
 
-**Current phase:** runtime design ready for prerequisite-led implementation; AQ-HTTP is not ready.
+**Current phase:** waiting for Acquisition Q1 to satisfy and merge AQ-HTTP; read-only preparation may continue.
 
-**Exactly one next slice:** **R1 — shared installation identity and bound launch for Torch and llama.cpp; source integration is gated by AQ-HTTP.**
+**Exactly one next runtime slice:** **R1 — shared installation identity and bound launch for Torch and llama.cpp; begin only after AQ-HTTP is accepted and merged for the target in scope.**
 
-**Canonical repository path on adoption:** `docs/plans/runtime-installations-and-model-adapters/plan.md`.
+**Canonical repository path:** `docs/plans/runtime-installations-and-model-adapters/plan.md`.
 
 **Integration owner:** Pumas runtime integration, sharing one serial integrator with the acquisition plan for overlapping contracts/files.
 **Prerequisite owner:** [Artifact acquisition](../artifact-acquisition/plan.md); [gate status](../artifact-acquisition/reports/dependency-gates.md). R1 may begin only after its target-scoped AQ-HTTP gate is ready. Read-only preparation can proceed independently.
 
 **Baselines:** Pumas `04e7f1568f00693c0ef26c77e0150e5e4dd112ea`; Coding-Standards `39d55dc330d44ecf940364ceada9d2527f7c7ea0`.
+
+**Current accepted integration base:** Pumas `e37bbf4b964a0e2aadf25f80ab71edd8fa6b3eb3`. Acquisition Q1 is active on its task branch; AQ-HTTP remains not ready. Runtime source changes must start from updated accepted `main` after that gate is merged.
 
 ## 1. Objective
 

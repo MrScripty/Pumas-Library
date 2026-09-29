@@ -30,8 +30,8 @@ and remediation inputs, not current operating instructions.
 
 ## Active and Planned Work
 
-- [Artifact acquisition](plans/artifact-acquisition/plan.md) — proposed plan for reusable HTTP, package, and S3 acquisition; implementation gates are not ready
-- [Runtime installations and model adapters](plans/runtime-installations-and-model-adapters/plan.md) — proposed plan for installation identity, bound profiles, and model-specific adapters; implementation is gated by acquisition evidence
+- [Artifact acquisition](plans/artifact-acquisition/plan.md) — Q1 shared HTTP acquisition is active; AQ-HTTP is not ready
+- [Runtime installations and model adapters](plans/runtime-installations-and-model-adapters/plan.md) — runtime implementation remains gated by acquisition evidence
 - [2026-09-03 current-standards remediation program](plans/current-standards-remediation-2026-09-03/plan.md)
 - [Local intent API and transport-independent domain language](plans/local-intent-api-2026-09-12/plan.md) — complete within the recorded local scope; native resolution, acquisition, durable declarations and existing IPC/RPC projections accepted; nodes/fleets/new networking deferred until after the next release
 

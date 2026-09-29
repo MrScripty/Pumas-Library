@@ -20,7 +20,7 @@ pub(crate) struct TorchInstallPlan {
 }
 pub(crate) enum TorchInstallInput {
     Selection(super::torch_preview::TorchInstallSelection),
-    Resolved(TorchInstallPlan),
+    Resolved(Box<TorchInstallPlan>),
 }
 #[cfg(test)]
 pub(crate) use torch::TorchPublicationPause;

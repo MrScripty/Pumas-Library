@@ -164,11 +164,7 @@ class ResolverTests(unittest.TestCase):
                     resolver.run_pip_progress_worker(progress_path, ["install", "pkg"]), 0
                 )
 
-        measured = [
-            sample
-            for sample in progress_writes
-            if sample[2] and sample[5] is not None
-        ]
+        measured = [sample for sample in progress_writes if sample[2] and sample[5] is not None]
         self.assertTrue(measured)
         self.assertEqual(measured[-1][1], source)
         self.assertGreater(measured[-1][5], 0)
@@ -407,9 +403,7 @@ class ResolverTests(unittest.TestCase):
             for unsafe_path in ("../../etc/passwd", "../../share/../../outside"):
                 with self.subTest(unsafe_path=unsafe_path):
                     record.write_text(
-                        good_record.replace(
-                            "../../share/man/man1/isympy.1", unsafe_path
-                        ),
+                        good_record.replace("../../share/man/man1/isympy.1", unsafe_path),
                         encoding="utf-8",
                     )
                     with self.assertRaisesRegex(ValueError, "escapes its target"):

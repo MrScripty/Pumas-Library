@@ -18,6 +18,8 @@ class GenerationCancelled(RuntimeError):
 class DiffusionPipelineAdapter:
     """Shared denoising cancellation and offload cleanup ownership."""
 
+    dimension_multiple = 1
+
     def generate(self, prompt: str, width: int, height: int, seed: int, cancel: threading.Event):
         def checkpoint(_pipeline, _step, _timestep, callback_kwargs):
             if cancel.is_set():
@@ -26,12 +28,15 @@ class DiffusionPipelineAdapter:
 
         if cancel.is_set():
             raise GenerationCancelled("Generation cancelled")
+        multiple = self.dimension_multiple
+        pipeline_width = (width + multiple - 1) // multiple * multiple
+        pipeline_height = (height + multiple - 1) // multiple * multiple
         try:
             with torch.inference_mode():
                 result = self.pipeline(
                     prompt=prompt,
-                    width=width,
-                    height=height,
+                    width=pipeline_width,
+                    height=pipeline_height,
                     num_inference_steps=self.steps,
                     guidance_scale=self.guidance,
                     generator=torch.Generator(device="cpu").manual_seed(seed),
@@ -39,6 +44,13 @@ class DiffusionPipelineAdapter:
                 ).images[0]
             if cancel.is_set():
                 raise GenerationCancelled("Generation cancelled")
+            if (pipeline_width, pipeline_height) != (width, height) and result.size == (
+                pipeline_width,
+                pipeline_height,
+            ):
+                left = (pipeline_width - width) // 2
+                top = (pipeline_height - height) // 2
+                result = result.crop((left, top, left + width, top + height))
             return result
         finally:
             # CUDA kernels and offload hooks must finish before the caller releases
@@ -53,6 +65,7 @@ class NunchakuZImage(DiffusionPipelineAdapter):
     steps = 8
     guidance = 0.0
     memory_policy = "sequential_cpu_offload"
+    dimension_multiple = 16
 
     def __init__(self, checkpoint: str, pipeline_path: str, device: torch.device):
         from diffusers import ZImagePipeline

@@ -60,6 +60,7 @@ class Flux2Klein(DiffusionPipelineAdapter):
     steps = 4
     guidance = 1.0
     memory_policy = "scaled_fp8_to_bf16_sequential_cpu_offload"
+    dimension_multiple = 16
 
     def __init__(self, checkpoint, encoder_path, vae_path, device):
         from diffusers import (

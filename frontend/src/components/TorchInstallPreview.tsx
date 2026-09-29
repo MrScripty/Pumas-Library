@@ -48,6 +48,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       if (active) {
         setRuntimeOptions(options);
         setBuildChoice(options.defaultBuild || 'auto');
+        setAdapterChoice(options.adapters.includes(options.defaultAdapter) ? options.defaultAdapter : 'none');
       }
     }).catch((cause: unknown) => {
       if (active) setError(`Torch runtime choices unavailable: ${errorText(cause)}`);
@@ -62,7 +63,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
   }, [tag, attempt]);
 
   const startInstallation = async () => {
-    if (!runtimeOptions || starting) return;
+    if (!runtimeOptions || starting || (!fixedPreset && adapterChoice === 'flux2' && !runtimeOptions.adapters.includes('flux2'))) return;
     const currentRequest = ++requestNumber.current;
     const build = fixedPreset ? runtimeOptions.preset.build : buildChoice;
     const python = fixedPreset ? runtimeOptions.preset.python : 'auto';
@@ -90,7 +91,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
       }
       const selection = outcome.preview;
       if (!selection.previewId || selection.expiresInSeconds <= 0 || selection.tag !== tag
-         || selection.build !== build || selection.python !== python || selection.adapter !== adapter) {
+        || selection.build !== build || selection.python !== python || selection.adapter !== adapter) {
         setError('Torch selection could not be confirmed. Try again.');
         setStarting(false);
         return;
@@ -122,6 +123,19 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
             This flow uses official binary wheels only. Device use, image generation, and socket startup need later runtime checks.
           </p>
         </div>
+        {!fixedPreset && runtimeOptions?.adapters.includes('flux2') && (
+          <fieldset className="space-y-2" disabled={starting}>
+            <legend className="text-sm font-medium">Image adapter</legend>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="radio" name="torch-image-adapter" value="none" checked={adapterChoice === 'none'} onChange={() => { setAdapterChoice('none'); setError(null); }} />
+              Core Torch
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="radio" name="torch-image-adapter" value="flux2" checked={adapterChoice === 'flux2'} onChange={() => { setAdapterChoice('flux2'); setError(null); }} />
+              FLUX.2 image generation
+            </label>
+          </fieldset>
+        )}
         {loadingOptions && <p role="status" className="flex items-center gap-2 text-sm text-[hsl(var(--text-secondary))]"><Loader2 aria-hidden="true" size={16} className="animate-spin" />Loading Torch choices…</p>}
         {runtimeOptions && <>
           {runtimeOptions.bundledPresetAvailable && tag === runtimeOptions.preset.tag && <div role="group" aria-label="Torch release choice" className="flex flex-wrap gap-2">
@@ -137,11 +151,7 @@ export function TorchInstallPreview({ tag, onBack, onInstall }: TorchInstallPrev
                   {runtimeOptions.builds.filter((build) => build !== 'auto').map((build) => <option key={build} value={build}>{build}</option>)}
                 </select>
               </label>
-              <label>Dependency profile
-                <select aria-label="Dependency profile" disabled={starting} value={adapterChoice} onChange={(event) => { setAdapterChoice(event.target.value); setError(null); }} className="mt-1 block w-full rounded border bg-[hsl(var(--surface-control))] p-2">
-                  {runtimeOptions.adapters.filter((adapter) => adapter === 'none' || adapter === 'flux2').map((adapter) => <option key={adapter} value={adapter}>{adapter === 'flux2' ? 'Pumas FLUX.2 image dependencies' : 'Core runtime only'}</option>)}
-                </select>
-              </label>
+
             </div>
             <p className="mt-2 text-xs">These are platform-supported choices. Release and package compatibility are checked during installation. Pumas image dependencies are separate from upstream Torch.</p>
           </details>}

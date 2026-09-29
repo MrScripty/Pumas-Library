@@ -1,11 +1,185 @@
 # Upstream Torch version manager progress
 
-Date: 2026-09-26 (America/Vancouver). This is an implementation and evidence
-inventory, not a completed Pumas desktop acceptance. The prior
+Date: 2026-09-27 (America/Vancouver). This is an implementation and evidence
+inventory. Torch 2.14 FLUX.2 Klein now has real 1920×1080 AppImage gateway and
+Tuldok browser acceptance from the main launcher root. The prior
 [A1 packaged acceptance](a1-packaged-acceptance.md) applies only to its original
-`v2.9.1` / CPython 3.12 / CUDA 13.0 / Linux x86_64 combination. The Tuldok image
-evidence below uses a separate, exact Torch 2.10 tuple and does not qualify a
-newly resolved upstream release.
+`v2.9.1` / CPython 3.12 / CUDA 13.0 / Linux x86_64 combination. The earlier
+Torch 2.10 Tuldok result is separate from the Torch 2.14 results below.
+
+## 2026-09-27 — Recover Nunchaku serving after FLUX
+
+After unloading FLUX, the user tried to serve
+`diffusion/nunchaku-ai/nunchaku-z-image-turbo` from the selected main-root
+`v2.14.0+cu132` FLUX-only runtime. Its sidecar log recorded
+`ModuleNotFoundError: No module named 'nunchaku'` before checkpoint loading.
+The selected runtime's probe had marked Nunchaku `not selected`; generic
+`image_generation` protocol capability alone did not mean every adapter was
+installed. The selected Nunchaku wheel is pinned by
+`torch-server/resolve_runtime.py` and the bundled lock to Nunchaku
+`1.2.0+torch2.9`, CPython 3.12, Torch 2.9.1+cu130, and Linux x86_64. Commit
+`04e4ce2b7` introduced that exact URL/hash and compatibility check on
+2026-09-23. The original CUDA 12.8 candidate failed a real native import
+because it required `libcudart.so.13`; the corrected CUDA 13.0 recipe is
+recorded in [the runtime report](runtime.md). This is the currently qualified
+binary combination, not a permanent Nunchaku restriction. The official
+[Nunchaku releases](https://github.com/nunchux-ai/nunchaku/releases) include
+newer Torch-targeted wheels, but no Torch 2.14/Python 3.14 wheel was qualified
+for this Pumas runtime.
+
+Through the rebuilt AppImage's managed RPC, Pumas installed the pinned
+`v2.9.1` `bundled` runtime alongside the preserved `v2.14.0` install. Its
+Torch/CUDA and both adapter import probes passed; real model inference remained
+unverified until the tests below. A managed protocol-3 startup trial and real
+Nunchaku model load passed. A 1280×720 gateway image also passed. The next real
+1920×1080 request failed before inference because the installed Z-Image
+pipeline requires dimensions divisible by 16. `NunchakuZImage` now opts into
+the shared adapter's round-up and center-crop behavior: infer at 1920×1088,
+return exactly 1920×1080. A native regression test reproduced the old failure
+and passed with the fix; the existing FLUX dimension test still passed.
+Independent read-only review found no lifecycle or output-validation blocker.
+
+The pre-fix 2.9.1 environment was preserved under
+`launcher-data/cache/torch-qualification/main-v214-nunchaku-repair-20260927/pre-dimension-backup/`.
+Pumas removed the inactive version and reinstalled it with the rebuilt embedded
+sidecar through a fresh managed preview. The second installer log is
+`launcher-data/logs/install-v2.9.1-1790507472804.log`; its materialized
+`diffusion.py` matches current source. The rebuilt release RPC SHA-256 is
+`4f50eb364c895021bc127803cfd9e7fca89e8059d07c35911e8452eefe5efe64`.
+The local, unpublished AppImage SHA-256 is
+`d8caa386a95d904e349c4dcaaf8bf54432fc9b842633ae3c7857ff4c688053d8`;
+the AppImage and deb passed the Linux artifact checker.
+
+The repaired managed gateway loaded Nunchaku and returned a real 1920×1080
+PNG in 20.081 seconds, SHA-256
+`513295f98937498f028a1bff8af879f578347b410a99fe27538b95befa16fbfe`.
+The **rebuilt AppImage's own** RPC then loaded Nunchaku. A task-owned Tuldok
+browser discovered it, generated a real 1920×1080 image, displayed it, saved
+it, and automatically imported it into its temporary collection in 20.751
+seconds; saved PNG SHA-256
+`a70255be804e829430f10e244deed53f004bed7edf9ac18a4081b7ef6fc71fdc`.
+The displayed image was visually inspected. Ignored evidence is under
+`main-v214-nunchaku-repair-20260927/tuldok-appimage-1920x1080/`. The gateway
+was `http://127.0.0.1:44581/v1` in this session; its port changes on restart.
+The model load used the AppImage RPC, not a repeat click through its UI.
+
+At this checkpoint `v2.9.1` is the active Torch version for Nunchaku, while
+`v2.14.0` remains installed and the configured default for FLUX. Torch version
+selection is global: the two versions cannot serve models simultaneously, and
+changing the active version requires unloading models and stopping the Torch
+profile. The current managed 2.9.1 bundled runtime passed both adapter import
+probes, but real FLUX generation in **that exact new runtime** was not rerun
+here. No release was published.
+
+## 2026-09-27 — Repair Tuldok's 1920×1080 generation failure
+
+After the main-root FLUX installation below, Tuldok requested 1920×1080 from
+the AppImage. The sidecar log showed all four GPU inference steps completing,
+then `/api/images/generate` returned HTTP 502. Diffusers rounded the requested
+1080 height down to 1072 because FLUX requires multiples of 16; the sidecar's
+exact-size check correctly rejected that image. Subsequent health/slot checks
+passed, so this was a response-size failure rather than a sidecar crash.
+
+The FLUX adapter now rounds pipeline dimensions **up** to multiples of 16,
+then center crops the result to the requested size. Its 1920×1080 request
+therefore generates at 1920×1088 and returns an exact 1920×1080 PNG. Other
+adapters retain their existing dimension behavior, and both sidecar and gateway
+PNG size checks remain in force. The native regression test failed against the
+old behavior and passed after the repair; three focused FLUX tests and ten image
+request contract tests passed. Independent read-only review found no lifecycle
+or security blocker.
+
+The previous managed FLUX runtime was backed up under
+`launcher-data/cache/torch-qualification/main-v214-flux-repair-20260927/pre-dimension-backup/`.
+With its profile stopped, Pumas switched to the installed fallback and used its
+preview/remove/install flow to materialize the repaired `v2.14.0+cu132` FLUX
+sidecar. The new runtime was selected and defaulted. The installer log is
+`launcher-data/logs/install-v2.14.0-1790505527380.log`; its source
+`diffusion.py` matches the repaired source file. The rebuilt release RPC has
+SHA-256 `36af552359f5ef1b522976bbc6cc2c61f0810fbcd69fd5757a2c676ae78e1e92`.
+The rebuilt local, unpublished AppImage has SHA-256
+`f12b98fc6d5c2dbfe2b469228ca90d1fdc7ebe09e000e95b6c45461a4885f9a8`.
+
+The managed gateway loaded and advertised the real FLUX checkpoint, then
+returned a 1920×1080 PNG in 23.389 seconds (SHA-256
+`702fc7d018b7d4b933497c3db6bb3c067f0219f137b91d9ea70e69b7ac8a8a19`).
+The **rebuilt AppImage's own** RPC loaded the same model. A temporary
+1920×1080 variant of Tuldok's real browser acceptance script discovered it
+through the AppImage gateway, generated a real image, displayed it at the
+requested size, saved it, and automatically imported it into the collection.
+The Tuldok job took 23.526 seconds and its saved PNG had the same hash. The
+local ignored evidence is under
+`main-v214-flux-repair-20260927/tuldok-appimage-1920x1080/`, including
+`result.json`, `saved.png`, and `display.png`. The screenshot was visually
+inspected. This acceptance used a task-owned Tuldok browser instance and the
+AppImage RPC; it did not click the AppImage's model-serving UI again. The
+observed gateway was `http://127.0.0.1:41253/v1`; its port changes on restart.
+The user's separately running Tuldok instance on port 8091 then submitted its
+own 1920×1080 FLUX request to that same gateway. Job
+`c06969191f5542e09c84931737fbc661` completed with one image and no error;
+`/api/samples` contained `synthetic-c0696919-00001.png` at 1920×1080 in
+session `2026-09-12-desk`. The user also confirmed image generation worked.
+No release was published.
+
+## 2026-09-27 — Repair the real AppImage FLUX model load
+
+The user launched the local `Pumas.Library-0.7.0.AppImage` and tried to serve
+FLUX.2 Klein. Its Electron log recorded a real sidecar load failure:
+`No module named 'diffusers'`. The AppImage bundled the repaired RPC, but the
+main selected/default `v2.14.0` installation was the earlier Core recipe with
+`adapter: none`. The FLUX-enabled 2.14 installation from the previous trial
+was in an isolated launcher root, so it was not available to this AppImage.
+
+The failed profile, Electron log, Core runtime, selection/default metadata and
+profile metadata were preserved under
+`launcher-data/cache/torch-qualification/main-v214-flux-repair-20260927/core-backup/`.
+With the Torch profile stopped, Pumas selected the existing `torch-runtime-0.1.4`
+fallback, cleared the default, removed the inactive 2.14 entry through RPC,
+and installed `v2.14.0` again through its managed preview/install flow with
+`cu132`, Python 3.14 and `flux2`. The new main-root probe passed Torch
+`2.14.0+cu132`, CPU/CUDA operations, sidecar health, and FLUX imports. The
+installer log is `launcher-data/logs/install-v2.14.0-1790504224408.log`.
+Pumas then selected/defaulted the new 2.14 runtime; its managed startup trial
+passed protocol 3 and health.
+
+The local packaged RPC loaded FLUX Klein from the main root, advertised it in
+`/v1/models`, and returned a real 512×512 PNG. Tuldok browser generation,
+display, save and automatic collection import passed at 1280×720. The same
+checks then passed using the **running AppImage's own** RPC and gateway; its
+Tuldok result took 14.7 seconds and saved PNG SHA-256
+`ba32e3506ebee5a9e48c35c506777fa6b946b3ea9d7c45c86d1b6befd454750f`.
+At completion, the AppImage remained running with FLUX ready in `/v1/models`
+and the `torch-image-acceptance` profile running. The gateway URL observed in
+that session was `http://127.0.0.1:41009/v1`; its port is assigned at startup.
+Local ignored evidence is in `main-v214-flux-repair-20260927/`, including
+`tuldok-appimage/{result.json,saved.png,display.png}` and before/after RPC
+snapshots. No new source or release build was needed, and nothing was published.
+The successful model load was invoked through the AppImage's RPC; a second
+manual click through its model-serving UI was not part of this check.
+
+## 2026-09-26 — Real Torch 2.14 FLUX.2 Klein endpoint and Tuldok acceptance
+
+The [exact v2.14/cu132/FLUX.2 report](upstream-v214-cu132-flux2-klein-e2e.md)
+records a real isolated managed runtime with the library's FLUX.2 Klein 9B KV
+FP8 checkpoint, FP8 Qwen3-8B encoder, and standalone VAE. Although the
+checkpoint is 9.14 GiB on disk, the adapter expands transformer weights to
+BF16 and the first high-resolution image touched a 32 GiB test limit. A native
+512×512 and 1280×720 PNG both generated. The previous 42 GiB admission was
+repaired to permit 38 GiB only for a selected validated FP8 Qwen artifact with
+matching in-package Qwen3 FP8 config; BF16 and unknown variants retain 42 GiB.
+
+The rebuilt source RPC loaded FLUX in a fresh isolated launcher root and
+advertised it in `/v1/models`. Real `/v1/images/generations` requests returned
+decoded PNGs. The actual Tuldok browser discovered the image model, generated
+at 1280×720, displayed the image, saved it, and imported it into its collection.
+The full run used a 34 GiB capped scope with no OOM events; 490 memory-limit
+reclaim events show pressure at the cap. The host stayed at least 20.9 GiB
+available during that run. The model, profile, RPC and browser were stopped.
+
+This qualified the isolated v2.14+FLUX tuple and the Pumas endpoint/Tuldok path.
+At this 2026-09-26 checkpoint the main selected v2.14 installation was still
+Core (`adapter: none`). The 2026-09-27 managed replacement and packaged desktop
+acceptance above supersede that deployment gap. No release was published.
 
 ## 2026-09-26 — Repair pip rate collection across versions and keep it visible
 
@@ -39,6 +213,66 @@ The packages are unpublished, so the toolbar-linked release is unchanged. No
 fresh Torch installation or Tuldok generation was performed. This collector
 measures pip package transfers; managed Python/bootstrap and other Pumas
 network producers remain uncovered.
+
+## 2026-09-26 — Installed Torch 2.14 image-serving gate check
+
+The selected local `v2.14.0` is `2.14.0+cu132` on managed Python 3.14.7 with
+`adapter: none`. Its environment has no Diffusers, Transformers, Accelerate, or
+PEFT distribution. A real CUDA tensor on the host RTX 5090 returned `5`; the
+managed Pumas `trial_torch_runtime` RPC passed startup, health, protocol 3, and
+the sidecar's `image_generation` handshake, then the trial profile was stopped.
+The public Pumas `GET /v1/models` returned an empty model list. A direct socket
+startup of the exact installed sidecar also returned HTTP 200 from `/health`.
+
+The library has the FLUX.2 Klein checkpoint, Qwen3-8B component package, and
+standalone VAE. A real `serve_model` RPC for the FLUX checkpoint returned
+`insufficient_memory` before model load: Pumas measured 66,815,033,344 bytes
+total RAM at 38.48% usage, below the existing 42 GiB available-RAM gate. The
+gateway still advertised no image model afterward. The temporary RPC and
+sidecar processes were stopped. These checks do **not** qualify v2.14 image
+generation or Tuldok display/save: the installed Core recipe lacks a supported
+image adapter, and this host currently fails FLUX admission.
+
+The desktop Torch install preview previously hardcoded `adapter: none` despite
+the managed installer supporting a separate `flux2` choice. The preview now
+offers that choice when reported by the manager, preserves the manager's
+supported default, sends the selected adapter to the one-use preview, and
+rejects a returned selection for a different adapter. Existing installed tags
+remain immutable; enabling images for the current v2.14 tag requires a managed
+replacement after an isolated v2.14+FLUX qualification and enough available
+RAM. No installed runtime, model, or public release was replaced here.
+
+Verification for the preview change passed 23 focused frontend tests, TypeScript,
+ESLint on the touched files, production frontend/Electron builds, Linux artifact
+checks, and extracted AppImage/deb resource plus RPC-health smokes. Independent
+read-only review found no blocking issue in its adapter authorization or stale
+request handling. The rebuilt local, unpublished AppImage SHA-256 is
+`f1d452c7bdb116e63634188c9756506c3bea66944fdee13a3ef15fb49890494b`;
+the Debian package SHA-256 is
+`b010a8e86cddd5c07cd19e28da56b0c09f9e5f62613af5d6b82bd1192fe574b3`.
+Neither package was used for a v2.14+FLUX install or real Tuldok generation.
+
+An isolated follow-up under
+`launcher-data/cache/torch-qualification/v214-flux2-e2e-root/` used the real
+`preview_torch_runtime` and `install_version` RPC flow for
+`v2.14.0`/`cu132`/Python `auto`/`flux2`. The first attempt was cancelled before
+completion to avoid a redundant large-wheel transfer from an empty isolated
+cache; a private copy of the existing managed pip cache was used for the second
+attempt. That attempt installed 67 resolved, hashed artifacts and completed
+successfully. Its managed Python 3.14.7 probe passed exact Torch
+`2.14.0+cu132` import, CPU and CUDA operations, and FLUX adapter imports
+(Diffusers 0.37.0, Transformers 4.57.6). The adapter probe is correctly
+`inconclusive` until a model loads. The isolated runtime was explicitly selected,
+and its owned Pumas Torch profile passed the protocol-3 startup trial.
+
+The isolated `serve_model` call reached the existing 42 GiB FLUX RAM admission
+gate and returned `insufficient_memory`; Pumas measured 39.16 GiB available RAM
+and 23.17 GiB free GPU memory. No model was loaded or advertised by
+`/v1/models`. The isolated profile and RPC server were stopped. The exact
+resolution, lock, probe, and install log remain in that qualification root.
+This confirms the managed v2.14+FLUX dependency and startup path but leaves
+Pumas image generation and Tuldok display/save untested until the RAM gate can
+pass. The main selected `v2.14.0` installation remains the earlier Core recipe.
 
 ## 2026-09-26 — Bounded live transfer and packaged code check
 

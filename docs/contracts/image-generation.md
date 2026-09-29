@@ -101,5 +101,9 @@ owns publication of the loaded model.
 The Klein adapter uses the local `flux-2-klein-9b-kv-fp8.safetensors` checkpoint,
 one library-managed `Qwen/Qwen3-8B` package and the standalone
 `split_files/vae/flux2-vae.safetensors` from `Comfy-Org/flux2-dev`. It requires
-42 GiB available system RAM according to Pumas telemetry. Acquire these components
-through Pumas; the adapter neither downloads them nor upgrades its dependencies.
+38 GiB available system RAM according to Pumas telemetry when the selected
+library artifact is FP8 and its Qwen3 config declares matching 128×128 block
+FP8 weights. BF16 or unrecognized encoder artifacts require 42 GiB. These are
+admission checks; generation still depends on available host and GPU memory.
+Acquire these components through Pumas; the adapter neither downloads them nor
+upgrades its dependencies.

@@ -74,7 +74,7 @@ describe('TorchInstallPreview', () => {
     expect(getReleaseOptions).not.toHaveBeenCalled();
     expect(getSelection).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Check selected combination' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    expect(screen.getByText('Advanced setup').closest('details')).not.toHaveAttribute('open');
     expect(screen.queryByText(/exact artifacts resolved/i)).not.toBeInTheDocument();
   });
 
@@ -122,6 +122,52 @@ describe('TorchInstallPreview', () => {
     fireEvent.click(installButton);
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
     expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' });
+  });
+
+  it('preserves an explicit CUDA build and Linux image dependencies without pre-install discovery', async () => {
+    getOptions.mockResolvedValue({ ...options, adapters: ['none', 'flux2'] });
+    const onInstall = vi.fn();
+    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
+    fireEvent.click(await screen.findByText('Advanced setup'));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Torch build' }), { target: { value: 'cu130' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Dependency profile' }), { target: { value: 'flux2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
+    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'cu130', python: 'auto', adapter: 'flux2' });
+    expect(getReleaseOptions).not.toHaveBeenCalled();
+  });
+
+  it('keeps the historical fixed preset distinct and submits its exact interpreter tuple', async () => {
+    getOptions.mockResolvedValue({ ...options, bundledPresetAvailable: true });
+    const onInstall = vi.fn();
+    render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
+    const presetButton = await screen.findByRole('button', { name: 'Fixed v2.9.1 preset' });
+    expect(presetButton).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(presetButton);
+    expect(screen.getByText(/This tuple has historical qualification/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
+    expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' });
+    expect(presetButton).toBeDisabled();
+  });
+
+  it('does not expose platform-unavailable adapters or a preset for another release', async () => {
+    getOptions.mockResolvedValue({ ...options, bundledPresetAvailable: true });
+    render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={vi.fn()} />);
+    await screen.findByText('Advanced setup');
+    expect(screen.queryByRole('option', { name: 'Pumas FLUX.2 image dependencies' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Fixed v2.9.1 preset' })).not.toBeInTheDocument();
+  });
+
+  it('rejects a ready token that changes the requested preset Python', async () => {
+    getOptions.mockResolvedValue({ ...options, bundledPresetAvailable: true });
+    const onInstall = vi.fn();
+    getSelection.mockImplementation(async (request) => readySelection({ ...request, python: 'auto' }));
+    render(<TorchInstallPreview tag="v2.9.1" onBack={vi.fn()} onInstall={onInstall} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Fixed v2.9.1 preset' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Torch selection could not be confirmed');
+    expect(onInstall).not.toHaveBeenCalled();
   });
 
   it('does not install a rejected or mismatched selection', async () => {

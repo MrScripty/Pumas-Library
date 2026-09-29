@@ -6698,12 +6698,12 @@
     "rust/Cargo.lock": "ec83a541f165ac6161d4f26b220152cebe422c594405a9dc982952ddef195927",
     "rust/Cargo.toml": "c81fc6cbbe7b8a371f7492cb08b8715cf567ba9ec5321f19ffc1a1b8df50fd28",
     "rust/crates/pumas-app-manager/Cargo.toml": "2974043227b88401adef73f0706344c804f9aa1447f49ff8c7ed19ddf66e2a8e",
-    "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "eb34506fb52ba21672e694f8aac3a4ae690b0e870e7e2eb4bea0a844db302677",
+    "rust/crates/pumas-app-manager/src/version_manager/managed_python.rs": "60b9d5fc33ca8305a5ee177477e68a90a2f1e61d0df720618ecaa9766b8849af",
     "rust/crates/pumas-core/Cargo.toml": "920dfa71dc7160c14c753b656d16f65ad2b3fcdc7cbe1c56525e195588897022",
     "rust/crates/pumas-rpc/Cargo.toml": "b51fc102e08bf9ba72cbec544cd8b933171031078b1ba273b289a6f4c5cf981a",
     "scripts/release/artifact-plan.json": "d5e4a2700728ba61cabca36d727efd477d716f3b50cc90fa9ce7f5e7959c7b0c",
     "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",
-    "scripts/release/torch-managed-python-acceptance.py": "d18cbf09bebecbe3e8bee1f009d88d6eb3cf838aa7df0eec398a05ef5d777c4f"
+    "scripts/release/torch-managed-python-acceptance.py": "b0486387627d6ae98b4b6533adcceed93e93ebf868385626f3b13f1fb949893b"
   },
   "notices_sha256": "b1631dab130001c76f70f116c2099bae0b87b8ba67d2f110c2f5bae7e465ef89"
 }

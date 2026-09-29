@@ -73,6 +73,22 @@ struct TorchCleanupState {
     child_receipts: std::collections::HashMap<usize, TorchChildReceipt>,
 }
 
+impl TorchCleanupState {
+    fn harvest_finished_tasks(&mut self) {
+        for mut task in std::mem::take(&mut self.tasks) {
+            if task.is_finished() {
+                match (&mut task).now_or_never() {
+                    Some(Err(error)) => self.failures.push(error.to_string()),
+                    Some(Ok(())) => continue,
+                    None => self.tasks.push(task),
+                }
+            } else {
+                self.tasks.push(task);
+            }
+        }
+    }
+}
+
 fn start_child_drain(
     slots: Vec<Arc<pumas_library::platform::managed_child::ManagedChildCustodySlot>>,
 ) -> TorchCleanupCompletion {
@@ -118,6 +134,7 @@ impl TorchCleanupTasks {
                 message: "Torch cleanup is closed".into(),
             });
         }
+        state.harvest_finished_tasks();
         state
             .child_slots
             .retain(|slot| slot.is_active() || Arc::strong_count(slot) > 1);
@@ -255,18 +272,7 @@ impl TorchCleanupTasks {
     pub(crate) fn schedule(&self, work: impl FnOnce() + Send + 'static) {
         let mut state = self.state.lock().expect("Torch cleanup lock poisoned");
         if !state.closed {
-            let tasks = std::mem::take(&mut state.tasks);
-            for mut task in tasks {
-                if task.is_finished() {
-                    match (&mut task).now_or_never() {
-                        Some(Err(error)) => state.failures.push(error.to_string()),
-                        Some(Ok(())) => continue,
-                        None => state.tasks.push(task),
-                    }
-                } else {
-                    state.tasks.push(task);
-                }
-            }
+            state.harvest_finished_tasks();
             state.tasks.push(tokio::task::spawn_blocking(work));
         }
     }

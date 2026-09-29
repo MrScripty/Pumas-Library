@@ -460,3 +460,41 @@ async fn cancelling_a_runtime_command_reaps_its_process_group() {
     trigger.await.unwrap();
     assert!(result.unwrap_err().to_string().contains("cancelled"));
 }
+
+#[tokio::test]
+async fn child_admission_harvests_completed_supervisors_and_retains_panics() {
+    let cleanup = TorchCleanupTasks::default();
+    for _ in 0..64 {
+        let slot = cleanup.new_child_slot().unwrap();
+        let mut command = std::process::Command::new("/pumas/nonexistent-test-command");
+        assert!(pumas_library::platform::managed_child::ManagedChild::spawn(
+            &mut command,
+            slot.clone()
+        )
+        .is_err());
+        cleanup.drain_child_slot(&slot).await.unwrap();
+        drop(slot);
+    }
+    assert!(cleanup.state.lock().unwrap().tasks.len() <= 2);
+    let panicked = tokio::spawn(async { panic!("cleanup regression sentinel") });
+    while !panicked.is_finished() {
+        tokio::task::yield_now().await;
+    }
+    cleanup.state.lock().unwrap().tasks.push(panicked);
+    let slot = cleanup.new_child_slot().unwrap();
+    let mut command = std::process::Command::new("/pumas/nonexistent-test-command");
+    assert!(pumas_library::platform::managed_child::ManagedChild::spawn(
+        &mut command,
+        slot.clone()
+    )
+    .is_err());
+    cleanup.drain_child_slot(&slot).await.unwrap();
+    assert!(cleanup
+        .state
+        .lock()
+        .unwrap()
+        .failures
+        .iter()
+        .any(|failure| failure.contains("cleanup regression sentinel")));
+    assert!(cleanup.drain().await.is_err());
+}

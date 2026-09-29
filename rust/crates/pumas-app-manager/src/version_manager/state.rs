@@ -624,16 +624,7 @@ impl VersionState {
             Ok(())
         })
         .await?;
-        let versions = self.metadata_manager.load_versions(Some(AppId::Torch))?;
-        let installed_tags: HashSet<String> = versions.installed.keys().cloned().collect();
-        let active_version = self
-            .determine_active_version(&versions, &installed_tags, true)
-            .await?;
-        self.installed_metadata = versions.installed;
-        self.installed_tags = installed_tags;
-        self.default_version = versions.default_version;
-        self.active_version = active_version;
-        Ok(())
+        self.refresh_inner(Some(lock)).await
     }
 
     /// Add a new installed version.

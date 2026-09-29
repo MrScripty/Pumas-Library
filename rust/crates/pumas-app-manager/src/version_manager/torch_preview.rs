@@ -1502,7 +1502,7 @@ impl VersionManager {
             .filter(|build| supported_torch_build(build))
             .collect();
         let mut installed = Vec::new();
-        for tag in self.state.read().await.get_installed_tags() {
+        for tag in self.get_installed_versions().await? {
             let recipe_path = self.versions_dir().join(&tag).join("runtime.json");
             let recipe = fs::read(&recipe_path)
                 .await

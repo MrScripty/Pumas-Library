@@ -30,8 +30,8 @@ export function TorchPanel({
   const isManagerOpen = versions.isSupported && showVersionManager;
 
   return (
-    <div className="flex-1 flex flex-col gap-4 p-6 overflow-hidden">
-      <div className="w-full flex flex-col gap-4">
+    <div className="flex-1 min-h-0 flex flex-col gap-4 p-6 overflow-hidden">
+      <div className={isManagerOpen ? 'w-full min-h-0 flex-1 flex flex-col gap-4' : 'w-full flex flex-col gap-4'}>
         <VersionManagementPanel
           appDisplayName={appDisplayName}
           versions={versions}
@@ -46,7 +46,7 @@ export function TorchPanel({
 
       {!isManagerOpen && (
         <>
-          <p className="text-sm text-[var(--text-secondary)]">
+          <p className="text-sm text-[hsl(var(--text-secondary))]">
             Create a Torch runtime profile, then use Serve on the image model.
             {' '}{gatewayUrl
               ? 'Copy the Pumas gateway URL above into Tuldok to generate images.'

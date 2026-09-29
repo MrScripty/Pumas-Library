@@ -459,7 +459,8 @@ test('installation progress rejects malformed replies and preserves nullable cam
   const harness = loadCompiledPreload();
   const valid = {
     tag: ' vλ.1 ', startedAt: 'started', stage: 'dependencies', stageProgress: 125.5,
-    overallProgress: 107.25, currentItem: 'torch', downloadSpeed: 42.5,
+    overallProgress: 107.25, currentItem: 'torch', downloadSourceUrl: null,
+    downloadActive: false, downloadMeasurementAvailable: true, downloadSpeed: 42.5,
     etaSeconds: 0.5, totalSize: 1024, downloadedBytes: 512, dependencyCount: 2,
     completedDependencies: 1,
     completedItems: [{ name: 'torch', type: 'package', size: null, completedAt: 'done' }],

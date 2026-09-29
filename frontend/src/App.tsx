@@ -211,9 +211,11 @@ export default function InferencePluginsApp() {
       onImportDialogClose={handleImportDialogClose}
       onPathsDropped={handlePathsDropped}
       header={buildAppShellHeader({
+        appId: appVersions.appId,
         activeModelDownload: activeDownload,
         activeModelDownloadCount: activeDownloadCount,
         installationProgress,
+        installingTag: appVersions.installingTag,
         isCheckingLauncherUpdates,
         launcherLatestVersion: getLauncherLatestVersion(launcherUpdateState),
         launcherUpdateAvailable,

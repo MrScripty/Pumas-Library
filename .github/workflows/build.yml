@@ -259,6 +259,8 @@ jobs:
       - name: Build native RPC for Torch acceptance
         run: cargo build --locked --manifest-path rust/Cargo.toml -p pumas-rpc
       - name: Accept v2.14 CPU/Core via native RPC (${{ runner.os }})
+        env:
+          PUMAS_RELEASE_API_TOKEN: ${{ github.token }}
         run: python scripts/release/torch-managed-python-acceptance.py rust/target/debug --evidence-dir torch-native-evidence
       - name: Upload native Torch acceptance evidence
         if: always()

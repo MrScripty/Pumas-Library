@@ -6,6 +6,7 @@ import { HeaderResourceStrip } from './HeaderResourceStrip';
 import { getHeaderStatusInfo, type InstallationProgress } from './HeaderStatus';
 
 interface HeaderProps {
+  appId?: string | null;
   systemResources?: SystemResources;
   appResources?: {
     gpu_memory?: number;
@@ -21,11 +22,13 @@ interface HeaderProps {
   networkAvailable?: boolean | null;
   modelLibraryLoaded?: boolean | null;
   installationProgress?: InstallationProgress | null;
+  installingTag?: string | null;
   activeModelDownload?: ActiveModelDownload | null;
   activeModelDownloadCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
+  appId,
   systemResources,
   appResources,
   launcherUpdateAvailable,
@@ -38,13 +41,16 @@ export const Header: React.FC<HeaderProps> = ({
   networkAvailable,
   modelLibraryLoaded,
   installationProgress,
+  installingTag,
   activeModelDownload,
   activeModelDownloadCount = 0,
 }) => {
   const status = getHeaderStatusInfo({
+    appId,
     activeModelDownload,
     activeModelDownloadCount,
     installationProgress,
+    installingTag,
     modelLibraryLoaded,
     networkAvailable,
   });

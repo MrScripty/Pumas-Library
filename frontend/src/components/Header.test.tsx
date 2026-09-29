@@ -144,6 +144,147 @@ describe('Header Component', () => {
     expect(screen.queryByText(/25% complete/)).not.toBeInTheDocument();
   });
 
+  it('shows that runtime download speed is being measured before the first sample', () => {
+    render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0" installationProgress={{
+      tag: 'v2.14.0', started_at: new Date().toISOString(), stage: 'dependencies',
+      stage_progress: 0, overall_progress: 0, current_item: 'torch', download_active: true,
+      download_speed: null, eta_seconds: null, total_size: null, downloaded_bytes: 0,
+      dependency_count: 1, completed_dependencies: 0, completed_items: [], error: null,
+    }} />);
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('Downloading 1 runtime');
+    expect(status).toHaveTextContent('measuring speed');
+  });
+
+  it('shows a measured Torch download rate without a concurrent model transfer', () => {
+    render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0" installationProgress={{
+      tag: 'v2.14.0', started_at: new Date().toISOString(), stage: 'dependencies',
+      stage_progress: 0, overall_progress: 0, current_item: 'torch', download_active: true,
+      download_speed: 12 * 1024 * 1024, eta_seconds: 30, total_size: 1024 * 1024 * 1024,
+      downloaded_bytes: 4 * 1024 * 1024, dependency_count: 1, completed_dependencies: 0,
+      completed_items: [], error: null,
+    }} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('12.0 MB/s');
+  });
+
+  it('keeps Torch package-transfer status visible while pip resolves or uses cached files', () => {
+    render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0" installationProgress={{
+      tag: 'v2.14.0', started_at: new Date().toISOString(), stage: 'dependencies',
+      stage_progress: 0, overall_progress: 0, current_item: 'Installing official Torch packages',
+      download_active: false, download_measurement_available: true, download_speed: null,
+      eta_seconds: null, total_size: null, downloaded_bytes: 0,
+      dependency_count: 1, completed_dependencies: 0, completed_items: [], error: null,
+    }} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('no package transfer active');
+  });
+
+  it('shows the pending and current Torch installation phase in the header', () => {
+    const { rerender } = render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0" />);
+    const pendingStatus = screen.getByRole('status');
+    expect(pendingStatus).toHaveTextContent('Installing Torch v2.14.0 · Starting installation…');
+    expect(pendingStatus).toHaveClass('text-xs', 'font-medium', 'text-[hsl(var(--text-primary))]');
+    rerender(<Header {...defaultProps} appId="torch" installingTag="v2.14.0" installationProgress={{
+      tag: 'v2.14.0', started_at: '2026-04-12T00:00:00Z', stage: 'setup', stage_progress: 0,
+      overall_progress: 95, current_item: 'Creating managed Python environment',
+      download_speed: null, eta_seconds: null, total_size: null, downloaded_bytes: 0,
+      dependency_count: null, completed_dependencies: 0, completed_items: [], error: null,
+    }} />);
+    expect(screen.getByText(/Creating managed Python environment/)).toHaveAttribute(
+      'title', 'Installing Torch v2.14.0 · Creating managed Python environment'
+    );
+    expect(screen.queryByText(/95%/)).not.toBeInTheDocument();
+  });
+
+  it('keeps concurrent model and Torch runtime counts and speed alongside the Torch phase', () => {
+    render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0"
+      activeModelDownload={{
+        downloadId: 'model-1', repoId: 'org/model', status: 'downloading', progress: 42,
+        downloadedBytes: 1024, totalBytes: 4096, speed: 4 * 1024 * 1024, etaSeconds: 30,
+      }}
+      activeModelDownloadCount={1}
+      installationProgress={{
+        tag: 'v2.14.0', started_at: '2026-04-12T00:00:00Z', stage: 'setup', stage_progress: 0,
+        overall_progress: 95, current_item: 'Creating managed Python environment',
+        download_speed: null, eta_seconds: null, total_size: null, downloaded_bytes: 0,
+        dependency_count: null, completed_dependencies: 0, completed_items: [], error: null,
+      }}
+    />);
+    expect(screen.getByText(/Downloading 1 model & 1 runtime/)).toHaveTextContent('4.0 MB/s');
+    expect(screen.getByText(/Downloading 1 model & 1 runtime/)).toHaveTextContent('Creating managed Python environment');
+  });
+
+  it('keeps download status when Torch resolution overlaps a model transfer', () => {
+    render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0"
+      activeModelDownload={{
+        downloadId: 'model-1', repoId: 'org/model', status: 'downloading', progress: 42,
+        downloadedBytes: 1024, totalBytes: 4096, speed: 4 * 1024 * 1024, etaSeconds: 30,
+      }}
+      activeModelDownloadCount={1}
+      installationProgress={{
+        tag: 'v2.14.0', started_at: '2026-04-12T00:00:00Z', stage: 'resolving', stage_progress: 0,
+        overall_progress: 0, current_item: 'Preparing Torch packages', download_speed: null,
+        eta_seconds: null, total_size: null, downloaded_bytes: 0, dependency_count: null,
+        completed_dependencies: 0, completed_items: [], error: null,
+      }}
+    />);
+    expect(screen.getByText(/Downloading 1 model & 1 runtime/)).toHaveTextContent('4.0 MB/s');
+    expect(screen.getByText(/Downloading 1 model & 1 runtime/)).toHaveTextContent('Preparing Torch packages');
+  });
+
+  it('keeps model download status when another runtime installation has not reported progress yet', () => {
+    render(<Header {...defaultProps} appId="ollama" installingTag="v0.6.0"
+      activeModelDownload={{
+        downloadId: 'model-1', repoId: 'org/model', status: 'downloading', progress: 42,
+        downloadedBytes: 1024, totalBytes: 4096, speed: 4 * 1024 * 1024, etaSeconds: 30,
+      }}
+      activeModelDownloadCount={1}
+    />);
+    expect(screen.getByText(/Downloading 1 model & 1 runtime/)).toHaveTextContent('4.0 MB/s');
+    expect(screen.getByText(/Downloading 1 model & 1 runtime/)).toHaveTextContent('Starting installation…');
+  });
+
+  it('shows Torch download speed alongside a queued model download', () => {
+    render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0"
+      activeModelDownload={{
+        downloadId: 'model-1', repoId: 'org/model', status: 'queued', progress: 42,
+        downloadedBytes: 1024, totalBytes: 4096, speed: 0, etaSeconds: null,
+      }}
+      activeModelDownloadCount={1}
+      installationProgress={{
+        tag: 'v2.14.0', started_at: new Date().toISOString(), stage: 'dependencies',
+        stage_progress: 0, overall_progress: 0, current_item: 'Installing official Torch packages',
+        download_active: true, download_measurement_available: true,
+        download_speed: 12 * 1024 * 1024, eta_seconds: 30, total_size: 1024 * 1024 * 1024,
+        downloaded_bytes: 4 * 1024 * 1024, dependency_count: 1, completed_dependencies: 0,
+        completed_items: [], error: null,
+      }}
+    />);
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('Queued model download');
+    expect(status).toHaveTextContent('Torch download: 12.0 MB/s');
+    expect(status).toHaveTextContent('Torch runtime: Installing official Torch packages');
+  });
+
+  it.each([
+    ['queued', 'Queued model download'],
+    ['pausing', 'Pausing model download'],
+    ['cancelling', 'Cancelling model download'],
+  ] as const)('keeps the %s model state while Torch installation is pending', (status, label) => {
+    render(<Header {...defaultProps} appId="torch" installingTag="v2.14.0"
+      activeModelDownload={{
+        downloadId: 'model-1', repoId: 'org/model', status, progress: 42,
+        downloadedBytes: 1024, totalBytes: 4096, speed: 0, etaSeconds: null,
+      }}
+      activeModelDownloadCount={1}
+    />);
+    expect(screen.getByText(new RegExp(label))).toHaveTextContent('model');
+    expect(screen.getByText(new RegExp(label))).toHaveTextContent('Torch runtime: Starting installation…');
+  });
+
   it('combines model and runtime download counts and speed in the header', () => {
     const activeModelDownload = {
       downloadId: 'dl-1',

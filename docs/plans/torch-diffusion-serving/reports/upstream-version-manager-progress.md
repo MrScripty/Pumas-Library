@@ -7,6 +7,157 @@ inventory, not a completed Pumas desktop acceptance. The prior
 evidence below uses a separate, exact Torch 2.10 tuple and does not qualify a
 newly resolved upstream release.
 
+## 2026-09-26 — Repair pip rate collection across versions and keep it visible
+
+The latest `install-v2.14.0-1790467476710.log` selected `2.14.0+cu134` but
+failed package resolution before wheel transfer. It had no rate to report. The
+previous collector also missed otherwise successful downloads: the managed
+pip 26.2.1 release removed `_prepare_download`, and pip 24's legacy helper
+uses `resp` rather than the strictly required `response` parameter name.
+
+The worker now instruments pip's imported `response_chunks` stream and keeps a
+fallback for older `_prepare_download` versions. If neither API exists, it
+reports monitoring unavailable. A real throttled 2 MiB wheel installed through
+the managed CPython 3.13.15 / pip 26.2.1 path; pip reported 2.5 MB/s and the
+sidecar recorded two positive-rate samples. The legacy pip path has mocked
+regression coverage, not a live install result.
+
+The install dialog shows the network status during package resolution and
+installation, and the header keeps it visible beside queued model activity.
+Zero-progress dependency work remains indeterminate (so the overall 95% does
+not look frozen), and explicitly inactive transfers no longer show a stale
+sampled rate. Astra High's read-only review approved these repairs. Verification
+passed: 741 frontend tests, typecheck/build, 58 resolver tests and Ruff, 231
+app-manager tests, 262 RPC unit tests, 17 RPC integration tests, 180 Electron
+tests (1 skipped), contract generation check, Rust formatting, artifact checks,
+and packaged Linux RPC `/health` smokes.
+
+The rebuilt local Linux v0.7.0 AppImage SHA-256 is
+`a656a3937335e1b45ef30c25f7a133c728520347cfdc50d5a1539d0e9a493135`; the deb
+SHA-256 is `e33d418fc848e83e3c256cc07e1d87fab80f6243c1ece1bd4cedcf5e834f7c35`.
+The packages are unpublished, so the toolbar-linked release is unchanged. No
+fresh Torch installation or Tuldok generation was performed. This collector
+measures pip package transfers; managed Python/bootstrap and other Pumas
+network producers remain uncovered.
+
+## 2026-09-26 — Bounded live transfer and packaged code check
+
+The latest successful `install-v2.14.0-1790470772611.log` used cached wheels,
+including Torch, and therefore offered no network transfer rate to display.
+To check the uncached collector without reinstalling Torch, a 2 MiB local wheel
+was served in 32 KiB chunks with 40 ms spacing and installed through the real
+managed CPython 3.14.7 / pip 26.2.1 progress worker. Polling its progress file
+captured 11 distinct snapshots, including eight active snapshots with positive
+rates (first about 936 kB/s). The final snapshot cleared the rate. The local
+HTTP source was intentionally omitted from the copyable URL field by the
+HTTPS-only source rule; byte and rate measurements remained available.
+
+The local AppImage (`a656a3937335e1b45ef30c25f7a133c728520347cfdc50d5a1539d0e9a493135`)
+contains a frontend bundle byte-identical to the current built bundle and a
+backend containing the `response_chunks` pip collector. Focused checks passed:
+52 frontend presentation tests, 58 resolver tests, 11 Rust progress tests,
+and six RPC installation-progress tests.
+The resolver's legacy-pip test fixture was corrected to create the removed
+`_prepare_download` attribute when running against pip 26. This evidence
+confirms the live worker and packaged files, while the earlier Playwright check
+remains a mocked-renderer acceptance. It does not establish a simultaneous
+real-transfer, packaged-RPC, renderer observation; no new release build is
+required for these findings.
+
+## 2026-09-26 — Torch download speed visibility repair
+
+The latest reported log, `install-v2.14.0-1790465718491.log`, selected
+`2.14.0+cu134` but pip could not find that package, so the attempt stopped
+before downloading wheel files. It therefore had no transfer speed to display.
+A worker test with a real delay between pip chunks confirmed that the backend
+does publish a positive rate during an active wheel transfer.
+
+The missing speed was also a UI issue. The progress dialog hid its network row
+until the first rate sample or source URL arrived, and the Torch-only header
+discarded rates when there was no concurrent model download. The dialog now
+shows “Waiting for package transfer…” while packages are being resolved and
+“Measuring speed…” while an active transfer awaits its first sample. Once a
+sample arrives, the Torch-only header displays the measured rate. Regression
+tests cover the pending, pre-sample, and measured-rate states.
+
+Verification passed: all 729 frontend tests, frontend typecheck and production
+build, 56 Torch resolver tests, Ruff, Linux artifact validation, and extracted
+AppImage/deb resource and backend `/health` smoke tests. The local Linux v0.7.0
+AppImage SHA-256 is
+`a16cd9e3a1d5cc30060c36e041fd7a4cab79f3b915ff33a449204e835369c982`; the deb
+SHA-256 is
+`cb51f204379d68405696fa9ae30356559f8f996234b7960088eabb078a5db68e`. These
+packages are unpublished and do not update the toolbar-linked release. No new
+Torch installation or Tuldok image run was performed. The cu134 resolution
+failure is separate from this display repair.
+
+## 2026-09-26 — Torch 2.14.0 staged RECORD failure and repaired local package
+
+The reported install log shows that Torch 2.14.0+cu132 and its dependencies
+downloaded and pip installed into private staging; the failure occurred during
+Pumas' staged-file manifest validation. SymPy 1.14.0's wheel places
+`isympy.1` under `share/man/man1` using pip's valid `../../share/...` target
+scheme. Pumas previously recognized the `../../bin/...` scheme only, so it
+misclassified this in-stage file as a path escape.
+
+The resolver now maps the known pip target scheme roots (`bin`, `share`,
+`Scripts`, and `Include`) into the stage before applying containment, file,
+size, and hash validation. Regression coverage accepts the SymPy share entry
+and still rejects paths into `/etc` or outside the stage. Python tests replayed
+the cached SymPy wheel and validated 1,573 staged files. Verification also
+passed 54 resolver tests, Ruff, 231 app-manager tests, 725 frontend tests,
+frontend typecheck/build, Rust formatting, RPC health, Linux artifact checks,
+and extracted AppImage/deb resource and backend health smoke tests.
+
+The rebuilt local AppImage is 154,937,978 bytes, SHA-256
+`9125fc53b9ff0d6bfbc02e2f3394e799418883dc3e80a262ce2758065ddae76e`; the deb
+is 120,530,972 bytes, SHA-256
+`777488fcf931a1e72e5508d35ed2c4caa7b65adb6e87e744dd0367b8bba880d3`. These
+are local, unpublished candidates and do not update the toolbar-linked release.
+The rebuilt desktop package has not yet been used for a fresh full Torch
+install, and this repair provides no new CUDA, Tuldok image, Windows, or macOS
+runtime evidence.
+
+The same work adds a shared network activity registry used by Torch wheel
+downloads and installer progress. Any direct HTTPS source host and path is
+copyable unless the URL contains embedded credentials, a query, or a fragment;
+those potentially secret-bearing sources still expose payload rates without
+displaying the URL. Copyable means safe to display, not officially sourced or
+hash-validated. Generic DownloadManager and Hugging Face producers, OS-level
+supplementary sampling, and native cross-platform permissions remain
+unimplemented; network monitoring acceptance is partial.
+
+## 2026-09-26 — Replace the long Torch check with the real install attempt
+
+The owner rejected the previous multi-minute compatibility check. For the
+normal Core Torch desktop/API path, selection now creates a local one-use token;
+installation does not refetch GitHub release metadata, scan every build/Python
+combination, or run `pip --dry-run` before it starts. The install task becomes
+visible and cancellable, provisions Pumas-managed CPython, and runs a real
+binary-only pip install into private staging. Package resolution and large
+wheel downloads are part of that installation task, rather than a separate
+check whose results are discarded before downloading again.
+
+Linux automatic selection makes a bounded sequence of up to four
+driver-compatible CUDA install attempts, followed by CPU. Windows and macOS use
+CPU automatically. Python candidates come from the pinned uv catalog in
+newest-first order. Only conclusive missing-wheel/dependency errors permit the
+next candidate; network, integrity, timeout, and ambiguous failures stop. Each
+successful pip report is checked against official artifact sources and hashes,
+staged distribution names/versions, the interpreter/host identity, and a full
+installed-file manifest before staged Python runs or files are published. The
+generated requirements lock records the result for provenance and repeatable
+future installs; dynamic installs do not run pip with the old pre-install
+`--require-hashes` preview lock.
+
+Focused Rust/Python tests and read-only security/lifecycle reviews cover this
+source path. The existing AppImage UI install report below used the previous
+preview flow and is not acceptance for this change. A rebuilt local Linux
+AppImage/deb now passes artifact checks and extracted-backend `/health` smoke;
+manual Torch installation through that package remains pending. The fixed
+`v2.9.1` bundled adapter remains a separate pinned recipe; image/Tuldok support
+claims are unchanged.
+
 ## Scope handoff authorized 2026-09-24
 
 The repository owner selected the broad release-management scope after reviewing
@@ -17,16 +168,20 @@ an error without a partial list presented as complete. Installation is offered f
 an exact official CPU, CUDA, or ROCm binary wheel plus fully resolved dependencies
 on Linux x86_64 with an already installed CPython 3.10–3.13. This records the
 original Linux-only scope and is superseded for the in-progress install flow by
-the 2026-09-25 managed-CPython authorization below. The current implementation
-provisions stable native CPython 3.10+ from a pinned provider and chooses the
-newest candidate whose exact official wheel and complete dependencies resolve.
-The current-source Torch 2.14.0 CPU/Core RPC install/restart and native QA pass
-on Linux x86_64, Windows x86_64, and macOS arm64 in manual run
+the 2026-09-25 managed-CPython authorization below. The normal path provisions
+stable native CPython 3.10+ from a pinned provider. The previous implementation
+chose the newest candidate through an exact wheel/dependency preview; the
+direct-install path and its narrower acceptance are recorded above.
+On the previous runtime source at `21041697`, Torch 2.14.0 CPU/Core RPC
+install/restart and native QA passed on Linux x86_64, Windows x86_64, and macOS
+arm64 in manual run
 [36229508586](https://github.com/MrScripty/Pumas-Library/actions/runs/36229508586)
 on runtime commit `21041697`; each target provisioned Pumas-managed CPython
-3.14.7 and installed 25 hashed official artifacts. The broader support claim
-remains bounded by Electron UI-driven and packaged Windows/macOS installation,
-provider cancellation/tamper, and non-CPU runtime gates. CPython notices are
+3.14.7 and installed 25 hashed official artifacts. The earlier Linux v0.7.0
+AppImage UI install/progress flow passed locally under the preview-based path;
+it does not validate the direct-install change. The broader support claim
+remains bounded by packaged Windows/macOS installation, provider
+cancellation/tamper, and non-CPU runtime gates. CPython notices are
 generated for all three desktop targets, with fail-closed provider-pin,
 archive-mapping, and exact legal-file checks. Pumas does not compile Torch from
 source; XPU remains outside this
@@ -83,11 +238,13 @@ The install flow no longer requires host-installed Python or a Python choice.
 PyTorch wheels do not declare one Python version for an entire release: each
 official wheel declares its compatible CPython ABI and platform tags. Pumas
 uses its pinned provider catalog to provision stable native CPython candidates
-from newest to oldest, then retains the first interpreter whose exact selected
-Torch wheel and complete dependency profile resolve. CPython 3.10 is the
-minimum; no upper minor cap is configured. A newer candidate is skipped only
-after a definite wheel or dependency incompatibility. Provider, network, and
-incomplete-scan failures remain inconclusive. See the
+from newest to oldest. Under the previous preview-based path, the manager
+retained the first interpreter whose exact selected Torch wheel and complete
+dependency profile resolved. The normal install now learns that compatibility
+from each real staged pip install. CPython 3.10 is the minimum; no upper minor
+cap is configured. A newer candidate is skipped only after a definite wheel or
+dependency incompatibility. Provider, network, and incomplete-scan failures
+remain inconclusive. See the
 [managed Python provider report](../../torch-cross-platform-runtime-management/reports/managed-python-provider.md).
 
 The manager now defaults every target to Core Torch (`none`). Linux exposes
@@ -649,17 +806,21 @@ come from Electron's `api:call` allowlist before Rust dispatch. The public
 `v0.7.0` tag lacks that method in `electron/src/rpc-method-registry.ts`; the
 current branch contains it and the regression test passes. The toolbar-linked
 public release is still v0.7.0, so it has not received the branch's updated
-bridge. Current-branch local Linux AppImage/deb candidates include the updated
-bridge and generated CPython notices, pass extracted-resource hash checks, and
-start their packaged backends through `/health`. Their SHA-256 values are
-`1398ef0a9da1c0aab90681d3c91674ef88c6229a84984047938e7bd6eb350acd` (AppImage)
-and `468b6f7c2af00ff8785f80e5486cd5133979e875dd351b4b9f5284ddfd195043` (deb).
-The packaged Linux RPC backend then passed Torch 2.14.0 CPU/Core install and
-restart using managed CPython 3.14.7, the 25-hash official artifact resolution,
-CPU operation, probe, protocol 3 sidecar start/stop, and graceful cleanup; see
-the [packaged acceptance report](../../torch-cross-platform-runtime-management/reports/v2.14.0-linux-packaged-cpu-acceptance/README.md).
-This is backend acceptance rather than GUI-driven installation. These are local
-candidates and have not been uploaded to the toolbar-linked release. Packaged
-Electron UI interaction, Windows/macOS packaged installation, provider
-cancellation/tamper/retry, CUDA/MPS execution, and v2.14.0 Tuldok image
-generation remain open.
+bridge. The latest current-branch local Linux AppImage/deb candidates include
+the updated bridge and generated CPython notices, pass extracted-resource hash
+checks, and start their packaged backends through `/health`. Their SHA-256
+values are
+`a28f302822ce99a9d687797606574c93a5afb9c184f293526b16b972294a670b` (AppImage)
+and `d8effc33ba37466171c5fae0178e2555064850e40544c93249966fedbf4bce88` (deb).
+The packaged Linux RPC backend passed Torch 2.14.0 CPU/Core install and restart
+using managed CPython 3.14.7 and 25 hashed official artifacts; see the
+[packaged backend acceptance](../../torch-cross-platform-runtime-management/reports/v2.14.0-linux-packaged-cpu-acceptance/README.md).
+The latest AppImage also passed the real UI install flow for Torch v2.14.0
+cu132: at the first sampled install state, the header named the current phase,
+the dialog showed Cancel, setup bars were indeterminate with no `aria-valuenow`,
+and the runtime reached Ready. The exact report records the 44-artifact review,
+managed CPython 3.14.7, CPU tensor result 5, and the warm-cache limit:
+[packaged UI acceptance](../../torch-cross-platform-runtime-management/reports/v2.14.0-linux-appimage-cu132-ui-acceptance/README.md).
+These are local candidates and have not been uploaded to the toolbar-linked
+release. Packaged Windows/macOS installation, provider cancellation/tamper/retry,
+CUDA/MPS execution, and v2.14.0 Tuldok image generation remain open.

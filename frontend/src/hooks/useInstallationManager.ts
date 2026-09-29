@@ -77,6 +77,7 @@ export function useInstallationManager({
   const renderIdentityRef = useRef({ appId: resolvedAppId, enabled: isEnabled });
   const lastDownloadTagRef = useRef<string | null>(null);
   const lastStageRef = useRef<InstallationProgress['stage'] | null>(null);
+  const lastDownloadSourceUrlRef = useRef<string | null>(null);
   const pendingInstallTagRef = useRef<string | null>(null);
   const missingProgressPollsRef = useRef(0);
   const networkStateRef = useRef<NetworkStatusState>(createNetworkStatusState());
@@ -93,10 +94,12 @@ export function useInstallationManager({
     resetInstallationProgressTracking({
       lastDownloadTag: lastDownloadTagRef.current,
       lastStage: lastStageRef.current,
+      lastDownloadSourceUrl: lastDownloadSourceUrlRef.current,
       networkState: networkStateRef.current,
     });
     lastDownloadTagRef.current = null;
     lastStageRef.current = null;
+    lastDownloadSourceUrlRef.current = null;
     pendingInstallTagRef.current = null;
     missingProgressPollsRef.current = 0;
   }, []);
@@ -204,6 +207,7 @@ export function useInstallationManager({
           const trackerState = {
             lastDownloadTag: lastDownloadTagRef.current,
             lastStage: lastStageRef.current,
+            lastDownloadSourceUrl: lastDownloadSourceUrlRef.current,
             networkState: networkStateRef.current,
           };
           const { adjustedProgress, networkStatus } = normalizeInstallationProgress(
@@ -214,6 +218,7 @@ export function useInstallationManager({
           );
           lastDownloadTagRef.current = trackerState.lastDownloadTag;
           lastStageRef.current = trackerState.lastStage;
+          lastDownloadSourceUrlRef.current = trackerState.lastDownloadSourceUrl;
           setInstallationProgress(adjustedProgress);
           setInstallNetworkStatus(networkStatus);
           return true;
@@ -223,6 +228,7 @@ export function useInstallationManager({
           const trackerState = {
             lastDownloadTag: lastDownloadTagRef.current,
             lastStage: lastStageRef.current,
+            lastDownloadSourceUrl: lastDownloadSourceUrlRef.current,
             networkState: networkStateRef.current,
           };
           const { adjustedProgress } = normalizeInstallationProgress(
@@ -233,6 +239,7 @@ export function useInstallationManager({
           );
           lastDownloadTagRef.current = trackerState.lastDownloadTag;
           lastStageRef.current = trackerState.lastStage;
+          lastDownloadSourceUrlRef.current = trackerState.lastDownloadSourceUrl;
 
           if (progress.success) {
             await onRefreshVersions();

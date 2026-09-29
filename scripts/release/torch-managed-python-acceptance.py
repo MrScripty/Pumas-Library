@@ -64,10 +64,29 @@ class HTTPSOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
 DOWNLOAD_HTTP = urllib.request.build_opener(HTTPSOnlyRedirectHandler())
 
 
+class GitHubApiRedirectHandler(HTTPSOnlyRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        target = urlsplit(newurl)
+        require(
+            target.scheme == "https" and target.netloc == "api.github.com",
+            "GitHub API same-origin redirect",
+            newurl,
+        )
+        return super().redirect_request(request, fp, code, msg, headers, newurl)
+
+
+GITHUB_API_HTTP = urllib.request.build_opener(GitHubApiRedirectHandler())
+
+
 def backend_environment(root: Path) -> dict[str, str]:
     """Remove ambient interpreter selectors before launching the backend."""
     blocked = ("PYTHON", "PIP_", "UV_", "VIRTUAL_ENV", "CONDA", "PYENV", "PDM_")
-    env = {key: value for key, value in os.environ.items() if not key.upper().startswith(blocked)}
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.upper().startswith(blocked)
+        and key.upper() not in {"PUMAS_RELEASE_API_TOKEN", "GITHUB_TOKEN"}
+    }
     env["PATH"] = (
         str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32")
         if os.name == "nt"
@@ -298,6 +317,105 @@ class FailureSummaryFixture(unittest.TestCase):
         self.assertIn("GitHub release asset scan stopped", message)
         self.assertLess(message.index('"error"'), message.index('"checkedChannels"'))
         self.assertLessEqual(len(message), len("release options failed: ") + 1200)
+
+
+class InstallSelectionFixture(unittest.TestCase):
+    def test_advisory_options_and_ready_token_start_install_without_premature_resolution(self):
+        calls = []
+
+        def fake_rpc(base, method, params, timeout):
+            calls.append((base, method, params, timeout))
+            if method == "get_torch_release_options":
+                return {
+                    "tag": TAG,
+                    "status": "inconclusive",
+                    "completeScan": False,
+                    "combinations": [],
+                }
+            return {
+                "status": "ready",
+                "preview": {
+                    "tag": TAG,
+                    "build": "cpu",
+                    "python": "auto",
+                    "adapter": "none",
+                    "qualification": "unverified",
+                    "artifacts": [],
+                    "previewId": "selection-token",
+                    "expiresInSeconds": 300,
+                },
+            }
+
+        preview = request_install_selection("http://127.0.0.1:1", rpc_call=fake_rpc)
+        self.assertEqual(preview["previewId"], "selection-token")
+        self.assertEqual(
+            [call[1] for call in calls], ["get_torch_release_options", "preview_torch_runtime"]
+        )
+        self.assertEqual(
+            calls[1][2], {"tag": TAG, "build": "cpu", "python": "auto", "adapter": "none"}
+        )
+
+    def test_old_resolved_preview_cannot_stand_in_for_a_ready_selection(self):
+        def fake_rpc(_base, method, _params, timeout):
+            if method == "get_torch_release_options":
+                return {
+                    "tag": TAG,
+                    "status": "inconclusive",
+                    "completeScan": False,
+                    "combinations": [],
+                }
+            return {"status": "resolved", "preview": {"previewId": "old-token"}}
+
+        with self.assertRaisesRegex(RuntimeError, "Torch selection failed"):
+            request_install_selection("http://127.0.0.1:1", rpc_call=fake_rpc)
+
+    def test_installed_resolution_counts_only_validated_persisted_artifacts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "torch-versions" / TAG
+            runtime.mkdir(parents=True)
+            resolution = {
+                "release": TAG.removeprefix("v"),
+                "build": "cpu",
+                "adapter": "none",
+                "python": "3.14",
+                "artifacts": [
+                    {
+                        "name": "torch",
+                        "version": "2.14.0",
+                        "url": "https://download.pytorch.org/whl/cpu/torch.whl",
+                        "sha256": "a" * 64,
+                    }
+                ],
+            }
+            path = runtime / "resolution.json"
+            path.write_text(json.dumps(resolution), encoding="utf-8")
+            self.assertEqual(
+                installed_resolution_evidence(root, "python3.14"), {"artifact_count": 1}
+            )
+            resolution["artifacts"][0]["sha256"] = "invalid"
+            path.write_text(json.dumps(resolution), encoding="utf-8")
+            with self.assertRaisesRegex(RuntimeError, "installed Torch resolution failed"):
+                installed_resolution_evidence(root, "python3.14")
+
+    def test_install_failure_log_capture_is_bounded_to_launcher_logs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "launcher"
+            logs = root / "launcher-data" / "logs"
+            logs.mkdir(parents=True)
+            log = logs / "install.log"
+            log.write_text(
+                "earlier\n" + "x" * 20000 + "\nInvalid wheel resolution: bad record\n",
+                encoding="utf-8",
+            )
+            capture_install_failure_log(root, {"logPath": str(log)})
+            retained = (root / "install-failure-tail.txt").read_bytes()
+            self.assertLessEqual(len(retained), 16384)
+            self.assertIn(b"Invalid wheel resolution: bad record", retained)
+            outside = Path(directory) / "outside.log"
+            outside.write_text("private", encoding="utf-8")
+            capture_install_failure_log(root, {"logPath": str(outside)})
+            self.assertEqual((root / "install-failure-tail.txt").read_bytes(), retained)
 
 
 class VersionPreflightFixture(unittest.TestCase):
@@ -863,7 +981,7 @@ class RestartAcceptanceFixture(unittest.TestCase):
             ) as evidence,
         ):
             restart = exercise_restart("http://second", Path("/launcher"), first)
-        evidence.assert_called_once_with(Path("/launcher"), {"python": "python3.14"})
+        evidence.assert_called_once_with(Path("/launcher"), "python3.14")
         cpu_operation.assert_called_once_with(Path("/launcher"))
         self.assertEqual(restart["active_version"], TAG)
         self.assertEqual(restart["profile_id"], PROFILE_ID)
@@ -1577,6 +1695,27 @@ class FullArchiveLicenseFixture(unittest.TestCase):
                     request, None, 302, "Found", {}, "http://example.invalid/asset"
                 )
 
+    def test_release_api_token_stays_out_of_backend_and_off_other_origins(self) -> None:
+        class Response(io.BytesIO):
+            def geturl(self) -> str:
+                return "https://api.github.com/repos/astral-sh/python-build-standalone/releases/tags/20260901"
+
+            def read1(self, size: int) -> bytes:
+                return self.read(size)
+
+        with (
+            patch.dict(os.environ, {"PUMAS_RELEASE_API_TOKEN": "fixture-secret"}),
+            patch.object(GITHUB_API_HTTP, "open", return_value=Response(b"{}")) as opened,
+        ):
+            self.assertEqual(worker_fetch_release(), b"{}")
+            request = opened.call_args.args[0]
+            self.assertEqual(request.get_header("Authorization"), "Bearer fixture-secret")
+            self.assertNotIn("PUMAS_RELEASE_API_TOKEN", backend_environment(Path("/tmp")))
+            with self.assertRaises(RuntimeError):
+                GitHubApiRedirectHandler().redirect_request(
+                    request, None, 302, "Found", {}, "https://example.invalid/release"
+                )
+
     def test_body_read_uses_remaining_deadline_for_socket_timeout(self) -> None:
         class Socket:
             timeout = None
@@ -1926,12 +2065,13 @@ def worker_fetch_release() -> bytes:
         "https://api.github.com/repos/astral-sh/python-build-standalone/releases/tags/"
         + REVIEWED_PBS_RELEASE
     )
-    request = urllib.request.Request(
-        url,
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "Pumas-release-acceptance"},
-    )
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "Pumas-release-acceptance"}
+    token = os.environ.get("PUMAS_RELEASE_API_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = urllib.request.Request(url, headers=headers)
     deadline = time.monotonic() + 60
-    with DOWNLOAD_HTTP.open(
+    with GITHUB_API_HTTP.open(
         request, timeout=min(30, max(0.001, deadline - time.monotonic()))
     ) as response:
         require(
@@ -2306,6 +2446,9 @@ def collect_evidence(root: Path, output: Path, result: dict, *, install_succeede
     cpu_failure = root / "restart-cpu-operation-failure.json"
     if cpu_failure.is_file():
         shutil.copyfile(cpu_failure, output / cpu_failure.name)
+    install_failure = root / "install-failure-tail.txt"
+    if install_failure.is_file():
+        shutil.copyfile(install_failure, output / install_failure.name)
     if install_succeeded:
         runtime = root / "torch-versions" / TAG
         for name in INSTALL_REPORTS:
@@ -2323,7 +2466,24 @@ def finalize_launcher_root(root: Path, *, cleanup_safe: bool) -> None:
         shutil.rmtree(root)
 
 
-def wait_for_install(base: str, deadline_seconds: int = 2700) -> dict:
+def capture_install_failure_log(root: Path, progress: dict) -> None:
+    """Retain a bounded tail only from the launcher's own installation logs."""
+    raw_path = progress.get("logPath")
+    if not isinstance(raw_path, str):
+        return
+    try:
+        candidate = Path(raw_path).resolve(strict=True)
+        logs = (root / "launcher-data" / "logs").resolve(strict=True)
+        if not candidate.is_file() or not path_is_within(candidate, logs, windows=native_windows()):
+            return
+        with candidate.open("rb") as log:
+            log.seek(max(0, candidate.stat().st_size - 16384))
+            (root / "install-failure-tail.txt").write_bytes(log.read(16384))
+    except OSError:
+        pass
+
+
+def wait_for_install(base: str, root: Path, deadline_seconds: int = 2700) -> dict:
     deadline = time.monotonic() + deadline_seconds
     last = None
     while time.monotonic() < deadline:
@@ -2332,6 +2492,7 @@ def wait_for_install(base: str, deadline_seconds: int = 2700) -> dict:
             last = progress
             require(progress.get("tag") == TAG, "installation tag", progress)
             if progress.get("success") is False or progress.get("error"):
+                capture_install_failure_log(root, progress)
                 raise RuntimeError(f"Torch installation failed: {json.dumps(progress)[:1200]}")
             if progress.get("success") is True and progress.get("completedAt"):
                 return progress
@@ -2339,7 +2500,7 @@ def wait_for_install(base: str, deadline_seconds: int = 2700) -> dict:
     raise RuntimeError(f"Torch installation timed out: {json.dumps(last)[:1200]}")
 
 
-def managed_python_evidence(root: Path, preview: dict) -> dict:
+def managed_python_evidence(root: Path, expected_python: str | None) -> dict:
     recipe_path = root / "torch-versions" / TAG / "runtime.json"
     with recipe_path.open(encoding="utf-8") as recipe_file:
         recipe = json.load(recipe_file)
@@ -2366,7 +2527,10 @@ def managed_python_evidence(root: Path, preview: dict) -> dict:
         distribution.get("implementation") == "CPython"
         and isinstance(python_version, str)
         and re.fullmatch(r"\d+\.\d+\.\d+", python_version) is not None
-        and "python" + ".".join(python_version.split(".")[:2]) == preview["python"]
+        and (
+            expected_python is None
+            or "python" + ".".join(python_version.split(".")[:2]) == expected_python
+        )
         and isinstance(target, str)
         and bool(target)
         and isinstance(source_url, str)
@@ -2907,54 +3071,91 @@ def run_restart_cpu_operation(root: Path) -> dict:
         raise
 
 
-def exercise(base: str, root: Path, state: dict) -> dict:
-    preflight_torch_release(base, state)
-    options = rpc(
+def request_install_selection(base: str, *, rpc_call=None) -> dict:
+    """Confirm the advisory response and obtain an install-time selection token."""
+    if rpc_call is None:
+        rpc_call = rpc
+    options = rpc_call(
         base,
         "get_torch_release_options",
         {"tag": TAG},
         timeout=RELEASE_OPTIONS_RPC_TIMEOUT_SECONDS,
     )
     require(
-        options.get("tag") == TAG and options.get("completeScan") is True,
-        "release options",
-        options,
-    )
-    require(
-        options.get("status") == "matches"
-        and any(item.get("build") == "cpu" for item in options.get("combinations", [])),
-        "CPU release combination",
+        options.get("tag") == TAG
+        and options.get("status") == "inconclusive"
+        and options.get("completeScan") is False
+        and options.get("combinations") == [],
+        "advisory release options",
         options,
     )
 
-    preview_result = rpc(
+    preview_result = rpc_call(
         base,
         "preview_torch_runtime",
         {"tag": TAG, "build": "cpu", "python": "auto", "adapter": "none"},
         timeout=900,
     )
-    require(preview_result.get("status") == "resolved", "Torch preview", preview_result)
+    require(preview_result.get("status") == "ready", "Torch selection", preview_result)
     preview = preview_result["preview"]
     require(
         preview.get("tag") == TAG
         and preview.get("build") == "cpu"
         and preview.get("adapter") == "none"
-        and preview.get("python", "").startswith("python3.")
-        and preview.get("qualification") in {"qualified", "unverified"}
+        and preview.get("python") == "auto"
+        and preview.get("qualification") == "unverified"
+        and preview.get("artifacts") == []
         and isinstance(preview.get("previewId"), str)
-        and bool(preview["previewId"]),
-        "qualified managed Python preview",
+        and bool(preview["previewId"])
+        and type(preview.get("expiresInSeconds")) is int
+        and preview["expiresInSeconds"] > 0,
+        "ready Torch selection",
         preview,
     )
+    return preview
+
+
+def installed_resolution_evidence(root: Path, python: str) -> dict:
+    resolution_path = root / "torch-versions" / TAG / "resolution.json"
+    with resolution_path.open(encoding="utf-8") as resolution_file:
+        resolution = json.load(resolution_file)
+    artifacts = resolution.get("artifacts")
+    require(
+        resolution.get("release") == TAG.removeprefix("v")
+        and resolution.get("build") == "cpu"
+        and resolution.get("adapter") == "none"
+        and resolution.get("python") == python.removeprefix("python")
+        and isinstance(artifacts, list)
+        and bool(artifacts)
+        and all(
+            isinstance(item, dict)
+            and isinstance(item.get("name"), str)
+            and isinstance(item.get("version"), str)
+            and isinstance(item.get("url"), str)
+            and isinstance(item.get("sha256"), str)
+            and re.fullmatch(r"[0-9a-fA-F]{64}", item["sha256"]) is not None
+            for item in artifacts
+        ),
+        "installed Torch resolution",
+        resolution,
+    )
+    return {"artifact_count": len(artifacts)}
+
+
+def exercise(base: str, root: Path, state: dict) -> dict:
+    preflight_torch_release(base, state)
+    preview = request_install_selection(base)
     started = rpc(
         base,
         "install_version",
         {"appId": "torch", "tag": TAG, "previewId": preview["previewId"]},
     )
     require(started.get("success") is True, "installation start", started)
-    wait_for_install(base)
+    wait_for_install(base, root)
     state["install_succeeded"] = True
-    python_evidence = managed_python_evidence(root, preview)
+    python_evidence = managed_python_evidence(root, None)
+    selected_python = "python" + ".".join(python_evidence["cpython_version"].split(".")[:2])
+    resolution_evidence = installed_resolution_evidence(root, selected_python)
 
     probe = rpc(base, "get_torch_runtime_probe", {"tag": TAG}, timeout=60)
     capabilities = probe.get("capabilities", {})
@@ -3013,9 +3214,9 @@ def exercise(base: str, root: Path, state: dict) -> dict:
         "version_preflight": state["version_preflight"],
         "release": TAG,
         "build": "cpu",
-        "python": preview["python"],
+        "python": selected_python,
         **python_evidence,
-        "artifact_count": len(preview["artifacts"]),
+        **resolution_evidence,
         "platform": sys.platform,
         "architecture": platform.machine(),
         "probe": "passed",
@@ -3048,7 +3249,7 @@ def exercise_restart(base: str, root: Path, first: dict) -> dict:
         "persisted managed CPU profile after restart",
         snapshot,
     )
-    python_evidence = managed_python_evidence(root, {"python": first["python"]})
+    python_evidence = managed_python_evidence(root, first["python"])
     identity_keys = (
         "cpython_version",
         "provider",
@@ -3204,6 +3405,7 @@ def main() -> None:
                 DeclaredLicensePathsFixture,
                 WindowsCanonicalPathFixture,
                 FailureSummaryFixture,
+                InstallSelectionFixture,
                 VersionPreflightFixture,
                 EvidenceCollectionFixture,
                 LauncherRootFinalizationFixture,

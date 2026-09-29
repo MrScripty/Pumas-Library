@@ -31,6 +31,11 @@ const ollamaPatchReleases: VersionRelease[] = [
   },
 ];
 
+const torchRelease: VersionRelease = {
+  tagName: 'v2.14.0', name: 'Torch v2.14.0',
+  publishedAt: '2026-04-12T00:00:00Z', prerelease: false,
+};
+
 const activeProgress: InstallationProgress = {
   tag: 'v0.22.1',
   started_at: '2026-04-12T00:00:00Z',
@@ -49,6 +54,43 @@ const activeProgress: InstallationProgress = {
 };
 
 describe('InstallDialog', () => {
+  it('shows pending Torch installation immediately and offers cancellation before the first poll', async () => {
+    const onCancelInstallation = vi.fn().mockResolvedValue(true);
+    render(<InstallDialog
+      isOpen={true} onClose={vi.fn()} availableVersions={[torchRelease]}
+      installedVersions={[]} isLoading={false} appId="torch" appDisplayName="Torch"
+      onInstallVersion={vi.fn().mockResolvedValue(true)} onCancelInstallation={onCancelInstallation}
+      onRefreshAll={vi.fn().mockResolvedValue(undefined)} onRemoveVersion={vi.fn().mockResolvedValue(true)}
+      installingTag="v2.14.0" installationProgress={null}
+    />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Starting installation…');
+    expect(screen.queryByText('Downloading...')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel current installation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel installation' }));
+    await waitFor(() => expect(onCancelInstallation).toHaveBeenCalledOnce());
+  });
+
+  it('shows the Torch setup phase without a weighted percent and keeps Cancel visible', async () => {
+    const onCancelInstallation = vi.fn().mockResolvedValue(true);
+    render(<InstallDialog
+      isOpen={true} onClose={vi.fn()} availableVersions={[]}
+      installedVersions={[]} isLoading={false} appId="torch" appDisplayName="Torch"
+      onInstallVersion={vi.fn().mockResolvedValue(true)} onCancelInstallation={onCancelInstallation}
+      onRefreshAll={vi.fn().mockResolvedValue(undefined)} onRemoveVersion={vi.fn().mockResolvedValue(true)}
+      installingTag="v2.14.0" installationProgress={{
+        ...activeProgress, tag: 'v2.14.0', stage: 'setup', stage_progress: 0,
+        overall_progress: 95, current_item: 'Creating managed Python environment',
+        download_speed: null, total_size: null, downloaded_bytes: 0,
+      }}
+    />);
+    expect(screen.getByRole('status')).toHaveTextContent('Creating managed Python environment');
+    expect(screen.queryByText('95%')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel current installation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel installation' }));
+    await waitFor(() => expect(onCancelInstallation).toHaveBeenCalledOnce());
+  });
+
   it('keeps installed runtimes manageable when remote releases are unavailable', () => {
     render(<InstallDialog
       isOpen={true} onClose={vi.fn()} availableVersions={[]}
@@ -196,7 +238,7 @@ describe('InstallDialog', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-    fireEvent.click(screen.getByRole('button', { name: '25%' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel current version installation' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel installation' }));
 
     await waitFor(() => expect(onCancelInstallation).toHaveBeenCalledTimes(1));
@@ -224,7 +266,7 @@ describe('InstallDialog', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-    fireEvent.click(screen.getByRole('button', { name: '25%' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel current version installation' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel installation' }));
 
     expect(await screen.findByText('Cancellation unavailable')).toBeInTheDocument();

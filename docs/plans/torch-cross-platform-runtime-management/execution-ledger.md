@@ -1,5 +1,182 @@
 # Execution Ledger: Cross-Platform Torch Runtime Management
 
+## 2026-09-26 — Repair pip rate collection across versions and keep it visible
+
+- The latest `install-v2.14.0-1790467476710.log` failed to resolve the
+  selected `2.14.0+cu134` package before any wheel transfer, so that attempt
+  had no numeric rate to display. A separate code defect also meant successful
+  transfers could be unmeasured: managed pip 26.2.1 has no
+  `_prepare_download`, and pip 24 names its first legacy parameter `resp`,
+  which the previous strict signature check rejected.
+- The worker now wraps pip's imported `response_chunks` stream when present and
+  falls back to legacy `_prepare_download` without parameter-name assumptions.
+  It publishes explicit monitoring availability when neither path is usable.
+  A real throttled 2 MiB wheel through managed CPython 3.13.15 / pip 26.2.1
+  produced two positive sidecar samples and pip reported 2.5 MB/s; the wheel
+  installed and its module was verified. The older pip path is covered by
+  tests, but was not run as a live pip installation.
+- During this pip phase, Pumas keeps the install banner, progress details, and
+  header network status visible. Zero-progress Torch dependency work stays
+  indeterminate instead of displaying a frozen overall 95%; queued model
+  activity no longer hides Torch speed, and inactive transfers do not retain a
+  synthesized rate. Copyable source URLs remain filtered for credentials,
+  query strings, fragments, and unsafe forms.
+- Verification passed: 741 frontend tests, frontend typecheck/build, 58 Torch
+  resolver tests and Ruff, 231 app-manager tests, 262 RPC unit tests plus 17
+  RPC integration tests, 180 Electron tests (1 skipped), desktop-contract
+  check, Rust formatting, Linux artifact validation, extracted AppImage/deb
+  resource checks and backend `/health` smoke tests. Astra High reviewed the
+  change and the three focused repairs without finding a remaining blocker.
+- Rebuilt local Linux v0.7.0 packages. AppImage SHA-256
+  `a656a3937335e1b45ef30c25f7a133c728520347cfdc50d5a1539d0e9a493135`; deb
+  SHA-256 `e33d418fc848e83e3c256cc07e1d87fab80f6243c1ece1bd4cedcf5e834f7c35`.
+  These are local, unpublished packages; the toolbar-linked release is
+  unchanged. No fresh external Torch install or Tuldok image run was made.
+  Managed Python/bootstrap downloads and non-pip producers remain outside this
+  rate collector, so this is package-transfer monitoring rather than complete
+  Pumas process-network accounting.
+
+## 2026-09-26 — Show Torch transfer status and rate during installation
+
+- Diagnosed the latest `install-v2.14.0-1790465718491.log`: the selected
+  `2.14.0+cu134` package could not be resolved, so that attempt failed before
+  wheel downloads began and had no transfer speed to report. Separately, a
+  worker-level chunk-interval test confirmed that an active pip wheel transfer
+  publishes a positive measured rate.
+- Fixed two UI gaps: the progress dialog now keeps the network row visible while
+  an active transfer waits for its first sample, and the Torch-only header now
+  displays both “measuring speed” and positive measured rates. During package
+  resolution the dialog explains “Waiting for package transfer…” so it does not
+  imply that artifacts are already downloading.
+- Verification passed: 729 frontend tests, frontend typecheck and production
+  build, 56 Torch resolver tests, Ruff, Linux artifact checks, extracted
+  AppImage/deb resource checks and backend `/health` smoke tests, and
+  `git diff --check`. The package smoke required local loopback permission;
+  Electron packaging required access to its GitHub helper.
+- Rebuilt local Linux v0.7.0 packages: AppImage SHA-256
+  `a16cd9e3a1d5cc30060c36e041fd7a4cab79f3b915ff33a449204e835369c982`;
+  Debian package SHA-256
+  `cb51f204379d68405696fa9ae30356559f8f996234b7960088eabb078a5db68e`.
+  The packages are local and unpublished, so the toolbar-linked release is
+  unchanged. No fresh Torch installation or image-generation run was made;
+  the cu134 package-resolution failure is separate from this progress-display
+  repair.
+
+## 2026-09-26 — Copy direct download sources across hosts
+
+- The earlier Torch telemetry host allowlist was too restrictive for the
+  requested copyable source. Copyable progress URLs now accept any HTTPS host,
+  port, and path, with no wheel-extension or official-host requirement. URLs
+  containing credentials, a query, fragment, whitespace/control character, or
+  more than 2,048 bytes are withheld while download bytes and speed remain
+  visible. The general activity registry accepts similarly safe direct HTTP(S)
+  URLs, including local-network sources.
+- This is a display-safety rule, not an upstream trust decision. Torch package
+  provenance, official artifact URLs, and hash validation are unchanged. Signed
+  or authenticated URLs with query credentials stay hidden because copying
+  their query could disclose access tokens.
+- Focused verification passed: 55 resolver tests and Ruff, 2 Torch source
+  handoff tests, 2 shared registry source tests, formatting, and
+  `git diff --check`. The full `pumas-library` crate run returned 1,373 passed,
+  66 failed, and 6 ignored; failures were outside the changed source tests in
+  API, network, and runtime areas subject to this environment's socket/temp
+  directory restrictions.
+- Rebuilt the local Linux v0.7.0 packages and passed artifact checks plus
+  extracted resource/backend `/health` smoke tests. AppImage SHA-256
+  `19de13f4e429dd931196900e43028752e3900095546fa4a6d13dde5a9c3a6f51`;
+  Debian package SHA-256
+  `4cfc5735786d4677614ae5cc1604b866902b785fc910f506b099a0a7c0b3ff77`.
+  The package is local and unpublished; broader OS-level network sampling and
+  DownloadManager/Hugging Face producer adapters remain open.
+
+## 2026-09-26 — Torch 2.14.0 RECORD validation repair and network activity
+
+- Diagnosed `launcher-data/logs/install-v2.14.0-1790458099378.log`: Torch
+  2.14.0+cu132 and its dependencies downloaded and pip installed successfully,
+  then Pumas rejected the staged manifest with `Staged wheel RECORD escapes its
+  target`. SymPy's official wheel records `../../share/man/man1/isympy.1` under
+  pip's `--target` data scheme; pip correctly staged that file inside
+  `staged-packages/share/man/man1/`.
+- Fixed RECORD normalization to map recognized pip target scheme roots
+  (`bin`, `share`, `Scripts`, and `Include`) into the staging root while
+  continuing to reject traversal and files outside the staged tree. A regression
+  test covers the SymPy-style share entry and rejects `../../etc/passwd` and a
+  nested share traversal. The exact cached SymPy wheel replay validated all
+  1,573 staged files, including the man page.
+- Added the reusable platform-neutral network activity registry and connected
+  Torch pip downloads plus the installer's existing download callback. It
+  tracks concurrent operation/transfer identity, cumulative payload bytes,
+  expected bytes, rate, state, and measurement coverage. Copyable direct URLs
+  accept any HTTPS host/path without embedded credentials, query, or fragment;
+  potentially secret-bearing URLs still report byte rate without exposing the
+  URL. Copyable status does not certify artifact provenance; official package
+  hash validation stays separate. Generic DownloadManager/Hugging Face adapters
+  and OS-level supplemental providers remain open; X8 is partial.
+- Verification passed: 54 resolver tests, Ruff, 231 app-manager tests, 725
+  frontend tests, frontend typecheck and production build, Rust formatting,
+  desktop RPC `/health`, artifact checks, extracted AppImage/deb resource and
+  `/health` smoke tests, and `git diff --check`. The release smoke needed local
+  loopback permission; the initial Electron build needed access to its GitHub
+  packaging helper. Astra high's architecture review and Sol xhigh's narrow
+  source-privacy/fixture review found no remaining blocker.
+- Rebuilt local Linux v0.7.0 candidates: AppImage is 154,937,978 bytes with
+  SHA-256 `9125fc53b9ff0d6bfbc02e2f3394e799418883dc3e80a262ce2758065ddae76e`;
+  deb is 120,530,972 bytes with SHA-256
+  `777488fcf931a1e72e5508d35ed2c4caa7b65adb6e87e744dd0367b8bba880d3`.
+  These local packages pass extracted-resource and backend health checks. The
+  failed Torch install was not repeated through the rebuilt desktop package;
+  no fresh end-to-end Torch runtime or image-generation claim is made. Local
+  builds do not update the public toolbar-linked release. Native Windows/macOS
+  package acceptance, CUDA/MPS execution, and Tuldok generation remain open.
+
+## 2026-09-26 — Direct-install local Linux release candidate
+
+- Rebuilt the local v0.7.0 RPC backend and Electron AppImage/deb from the
+  direct-install source. `stage-rpc.py`, the packaged RPC `/health` smoke,
+  Electron build, Linux artifact checks, and extracted AppImage/deb backend
+  `/health` smokes passed. The smoke scripts needed local loopback permission;
+  both backend and extracted package checks passed when allowed.
+- Torch package resolution now runs inside the visible, cancellable install
+  task. The normal Core path does not wait for release metadata, a release-wide
+  wheel scan, or a pre-install dry run. Optional release-options requests return
+  immediately as unchecked; the install itself resolves official packages.
+- The candidate AppImage SHA-256 is
+  `2beab4b5fb0a4d3d7482f7e8040f7f3a01c934cac5e936b7b8d53ffe3f268b6d`; the deb
+  SHA-256 is
+  `57792a65941ffa2c6a7abc6e839e383c6866ee09989790ec9e432dd772c3c794`.
+  These local files replace the repository's prior local 0.7.0 candidates, but
+  do not update the public toolbar-linked release.
+- No Torch install was run through this candidate. Its artifact and backend
+  health checks are not Torch-install acceptance; manual packaged Linux install
+  and packaged Windows/macOS acceptance remain pending.
+
+## 2026-09-26 — Packaged Linux AppImage progress UX acceptance
+
+- Rebuilt the local Linux v0.7.0 AppImage and deb after fixing the Torch
+  install-progress presentation. The artifact/resource checks passed, and both
+  extracted backend packages passed `/health`.
+- Through the rebuilt AppImage at 800×1000, removed the previous test install,
+  reviewed the v2.14.0 cu132/Core preset with automatic Python selection, and
+  installed 44 exact hashed artifacts. At the first sampled install state
+  (9 seconds elapsed), the header named the Torch install and current phase; the
+  dialog showed `Working…`, indeterminate setup bars, and accessible Cancel.
+  Neither bar exposed `aria-valuenow`, and the old false 95% was absent. The row
+  returned to Ready after completion. Focused source tests verify the pending
+  state before the first progress poll.
+- Managed CPython 3.14.7 reported Torch `2.14.0+cu132`; a CPU tensor sum
+  returned 5. The host pip cache matched its pre-test snapshot and resolver
+  scratch was cleaned. The package cache was warm, so this run does not claim
+  cold-cache transfer progress. CUDA/device and Tuldok generation remain
+  untested.
+- See
+  `reports/v2.14.0-linux-appimage-cu132-ui-acceptance/README.md`. AppImage
+  SHA-256 is
+  `a28f302822ce99a9d687797606574c93a5afb9c184f293526b16b972294a670b`; deb
+  SHA-256 is
+  `d8effc33ba37466171c5fae0178e2555064850e40544c93249966fedbf4bce88`.
+  These are local candidates and do not update the public toolbar-linked
+  package; packaged Windows/macOS acceptance remains open.
+
 ## 2026-09-26 — Current-source native Torch acceptance
 
 - Manual workflow
@@ -565,3 +742,88 @@
   Windows/macOS E2E, provider-license integration, packaged desktop Torch
   installation, CUDA/device execution, and v2.14.0 Tuldok/image generation are
   still open; X1–X7 remain pending.
+
+## 2026-09-26 — Torch install feedback and readability follow-up
+
+- Reproduced the remaining packaged UI complaints in the exact Linux v0.7.0
+  AppImage path. The Install row opened its review but gave too little feedback;
+  the preview CTA used dark text and the artifact check only changed its label.
+- The Install row now has a visible label and clearer hover/pressed/focus
+  feedback. The review CTA uses light primary text on a dark green-accent
+  surface. Artifact checking and the pre-progress Torch install phase display
+  a spinner and explicit status; the header status is larger, brighter, and a
+  polite live region. The immediate Cancel action has readable text and
+  keyboard focus feedback.
+- Browser-level interaction against the rebuilt AppImage at 800×1000 confirmed
+  green Install-row hover, a darker pressed state, white review/CTA text, the
+  prerequisite explanation while Install is disabled, and an immediate
+  “Checking official Torch artifacts…” live status on click. The separate
+  source tests verify the header and dialog show “Installing Torch v2.14.0 ·
+  Starting installation…” before the first backend progress response.
+- Local artifacts: AppImage SHA-256
+  `34a5ffc88f5f42aa03bd9ed72ead37e5ca385838037247b74186a67d9d128aaf`; deb
+  SHA-256
+  `fea54b4694d7ddb77a797327a9e15d0f0e66e0cf4f2d38fc9169feb4a4811386`.
+  Artifact naming/resource checks and extracted AppImage/deb RPC health checks
+  passed. The initial sandboxed build could not resolve GitHub for the
+  AppImage helper; the authorized rebuild with helper download access passed.
+- Frontend acceptance: 60 focused tests, TypeScript check, scoped ESLint,
+  frontend production build, and `git diff --check` passed. Astra high and Sol
+  xhigh completed read-only repair reviews with no remaining blocker.
+- The follow-up records UI feedback only; it did not complete a new artifact
+  preview or Torch install. The prior successful cu132 install remains tied to
+  its historical AppImage hash in the [UI report](reports/v2.14.0-linux-appimage-cu132-ui-acceptance/README.md).
+  Both builds are local candidates and do not replace the toolbar-linked public
+  release. Windows/macOS packaged install, CUDA/device execution, and Tuldok
+  image generation remain unverified.
+
+## 2026-09-26 — Torch artifact probe timeout and cache reuse repair
+
+- The reported `cu132 · Python selected automatically · none: probe
+  inconclusive` result led to a source-level diagnosis. A pip resolution
+  timeout and an unclassified pip failure both mapped to the same generic
+  message. Preview cached package files in a temporary resolver directory,
+  while installation used a separate persistent pip cache.
+- The full preview now has one 13-minute deadline across discovery, managed
+  Python provisioning, and every automatic-Python candidate. This stays below
+  Electron's 15-minute preview RPC deadline. When it expires, the operation
+  cancels and drains owned child processes before returning a typed inconclusive
+  result with a timeout-specific message. Unclassified pip failure has its own
+  safe message; the RPC boundary exposes only these allowlisted diagnostics.
+- Preview and installation now use the same canonical Pumas-managed pip cache;
+  the managed-CPython depot remains separate. This permits pip to reuse eligible
+  cached wheel responses. It does not guarantee reuse because pip may revalidate
+  artifacts or fetch them again. The review UI now says that large wheels may be
+  downloaded and that completed cache entries can be reused.
+- Verification passed: 116 focused Torch/app-manager tests, 4 Torch preview RPC
+  contract tests, 44 Torch resolver tests, 20 preview UI tests, and
+  `git diff --check`. Astra high and Sol xhigh completed read-only reviews; no
+  remaining source blocker was reported.
+- The user-reported run itself was not captured, so the original result cannot
+  be distinguished between its 180-second timeout and an unclassified pip
+  error. Packaged preview-to-install cache reuse has not yet been exercised;
+  this repair is source-tested only and does not claim a new Torch install or
+  broader desktop/device/Tuldok acceptance.
+
+## 2026-09-26 — Local Linux package rebuild for Torch probe repair
+
+- Rebuilt the optimized `pumas-rpc`, frontend, and local Electron v0.7.0 Linux
+  packages from the repaired worktree. The AppImage at
+  `electron/release/Pumas.Library-0.7.0.AppImage` is 154,855,688 bytes with
+  SHA-256 `b39f869e32001e3755e57746c4a20841d0447537f57af885de80d48e3aa19075`;
+  the Debian package is 120,460,880 bytes with SHA-256
+  `f6b8525e4452f17cae2021360fa2736a2cb2a6195cdfee7236a763b254514c40`.
+- The artifact checker accepted both packages. The package smoke extracted each
+  installer, matched bundled RPC/frontend/license resources to build inputs,
+  and passed `/health` for both bundled RPC processes. The x86_64 Windows GNU
+  app-manager test target compiled successfully; this is cross-target compile
+  evidence only.
+- Local verification: 116 focused Torch/app-manager tests, 4 Torch preview RPC
+  contract tests, 44 resolver tests, 20 preview UI tests, frontend type-check,
+  release-attribution check, and Linux package smoke passed. No actual Torch
+  package resolution or install was run, so timeout handling and cache reuse
+  have not been observed against the user's cu132 selection.
+- This local build overwrites the repository's v0.7.0 Linux installer files.
+  It was not published and does not change the desktop toolbar link. Native
+  Windows/macOS packages, device use, and Tuldok image generation remain
+  unverified.

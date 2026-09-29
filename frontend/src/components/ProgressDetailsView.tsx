@@ -5,9 +5,12 @@
  * Extracted from InstallDialog.tsx
  */
 
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Download,
+  Copy,
+  Check,
   Package,
   FolderArchive,
   Settings,
@@ -18,13 +21,17 @@ import {
   ChevronUp,
   AlertCircle,
   FileText,
+  RefreshCw,
 } from 'lucide-react';
 import type { InstallationProgress } from '../hooks/useVersions';
-import { formatBytes, formatSpeed } from '../utils/formatters';
+import { formatBytes } from '../utils/formatters';
 import { formatElapsedTime } from '../utils/installationFormatters';
+import { getInstallationDownloadPresentation } from '../utils/installationDownloadPresentation';
 import { IconButton } from './ui';
+import { getInstallActivityPresentation } from '../utils/installActivityPresentation';
 
 const STAGE_LABELS = {
+  resolving: 'Preparing Torch Packages',
   download: 'Downloading',
   extract: 'Extracting',
   venv: 'Creating Environment',
@@ -33,6 +40,7 @@ const STAGE_LABELS = {
 };
 
 const STAGE_ICONS = {
+  resolving: RefreshCw,
   download: Download,
   extract: FolderArchive,
   venv: Settings,
@@ -88,7 +96,50 @@ function getInstallationOutcome(
   return null;
 }
 
+function CopyDownloadSource({ source }: { source: string }) {
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'failed'>('idle');
+
+  useEffect(() => {
+    setCopyStatus('idle');
+  }, [source]);
+
+  const copySource = async () => {
+    try {
+      await navigator.clipboard.writeText(source);
+      setCopyStatus('copied');
+    } catch {
+      setCopyStatus('failed');
+    }
+  };
+
+  return (
+    <div className="mt-3 border-t border-[hsl(var(--border-subtle))] pt-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <span className="text-xs text-[hsl(var(--text-muted))]">Latest file source</span>
+        <button
+          type="button"
+          onClick={() => void copySource()}
+          aria-label="Copy file source"
+          className="inline-flex shrink-0 items-center gap-1.5 rounded px-2 py-1 text-xs text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--surface-tertiary))] hover:text-[hsl(var(--text-primary))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--accent-success))]"
+        >
+          {copyStatus === 'copied' ? <Check size={12} /> : <Copy size={12} />}
+          {copyStatus === 'copied' ? 'Copied' : 'Copy source'}
+        </button>
+      </div>
+      <code className="block max-h-20 overflow-y-auto break-all select-all text-xs text-[hsl(var(--text-secondary))]">
+        {source}
+      </code>
+      {copyStatus === 'failed' && (
+        <p role="status" className="mt-1 text-xs text-[hsl(var(--text-muted))]">
+          Clipboard unavailable. Select the source text to copy it.
+        </p>
+      )}
+    </div>
+  );
+}
+
 interface ProgressDetailsViewProps {
+  appId?: string;
   progress: InstallationProgress;
   installingVersion: string | null;
   showCompletedItems: boolean;
@@ -98,6 +149,7 @@ interface ProgressDetailsViewProps {
 }
 
 export function ProgressDetailsView({
+  appId,
   progress,
   installingVersion,
   showCompletedItems,
@@ -108,6 +160,7 @@ export function ProgressDetailsView({
   const CurrentStageIcon = STAGE_ICONS[progress.stage];
   const overallProgress = clampProgress(progress.overall_progress);
   const stageProgress = clampProgress(progress.stage_progress);
+  const activity = getInstallActivityPresentation({ appId, installingTag: installingVersion, progress });
   const outcome = getInstallationOutcome(progress, installingVersion);
   const OutcomeIcon = outcome?.kind === 'succeeded' ? CheckCircle2 : AlertCircle;
   const outcomeContainerClass = outcome?.kind === 'succeeded'
@@ -120,6 +173,7 @@ export function ProgressDetailsView({
     : outcome?.kind === 'cancelled'
       ? 'text-[hsl(var(--accent-warning))]'
       : 'text-[hsl(var(--accent-error))]';
+  const downloadPresentation = getInstallationDownloadPresentation(appId, progress);
 
   return (
     <div className="space-y-3 px-3">
@@ -140,22 +194,22 @@ export function ProgressDetailsView({
       <div>
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium text-[hsl(var(--text-secondary))]">Overall Progress</span>
-          <span className="text-sm font-semibold text-[hsl(var(--text-primary))]">{overallProgress}%</span>
+          <span className="text-sm font-semibold text-[hsl(var(--text-primary))]">{activity.indeterminate ? 'Working…' : `${overallProgress}%`}</span>
         </div>
         <div
           role="progressbar"
           aria-label="Overall installation progress"
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-valuenow={overallProgress}
+          aria-valuenow={activity.indeterminate ? undefined : overallProgress}
           className="w-full h-2 bg-[hsl(var(--surface-low))] rounded-full overflow-hidden"
         >
-          <motion.div
+          {activity.indeterminate ? <div className="h-full w-1/3 animate-pulse rounded-full bg-[hsl(var(--accent-success))]" /> : <motion.div
             className="h-full bg-[hsl(var(--accent-success))] rounded-full"
             initial={{ width: 0 }}
             animate={{ width: `${overallProgress}%` }}
             transition={{ duration: 0.3 }}
-          />
+          />}
         </div>
       </div>
 
@@ -171,7 +225,7 @@ export function ProgressDetailsView({
                 {STAGE_LABELS[progress.stage]}
               </h3>
               <span className="text-sm text-[hsl(var(--text-muted))]">
-                {stageProgress}%
+                {activity.indeterminate ? 'In progress' : `${stageProgress}%`}
               </span>
             </div>
             {progress.current_item && (
@@ -184,30 +238,33 @@ export function ProgressDetailsView({
               aria-label={`${STAGE_LABELS[progress.stage]} progress`}
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-valuenow={stageProgress}
+              aria-valuenow={activity.indeterminate ? undefined : stageProgress}
               className="w-full h-1.5 bg-[hsl(var(--surface-lowest))] rounded-full overflow-hidden mt-2"
             >
-              <motion.div
+              {activity.indeterminate ? <div className="h-full w-1/3 animate-pulse rounded-full bg-[hsl(var(--accent-success))]/50" /> : <motion.div
                 className="h-full bg-[hsl(var(--accent-success))]/50 rounded-full"
                 initial={{ width: 0 }}
                 animate={{ width: `${stageProgress}%` }}
                 transition={{ duration: 0.3 }}
-              />
+              />}
             </div>
           </div>
         </div>
       </div>
 
       {/* Stage-specific Stats */}
-      {progress.download_speed !== null && (
+      {downloadPresentation && (
         <div className="bg-[hsl(var(--surface-low))] rounded-lg p-3">
-          <div className="flex items-center gap-2 mb-1">
-            <Download size={14} className="text-[hsl(var(--text-muted))]" />
-            <span className="text-xs text-[hsl(var(--text-muted))]">Speed</span>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Download size={14} className="text-[hsl(var(--text-muted))]" />
+              <span className="text-xs text-[hsl(var(--text-muted))]">Network download</span>
+            </div>
+            <span className="text-base font-semibold text-[hsl(var(--text-primary))]">
+              {downloadPresentation.label}
+            </span>
           </div>
-          <span className="text-base font-semibold text-[hsl(var(--text-primary))]">
-            {formatSpeed(progress.download_speed)}
-          </span>
+          {progress.download_source_url && <CopyDownloadSource source={progress.download_source_url} />}
         </div>
       )}
 

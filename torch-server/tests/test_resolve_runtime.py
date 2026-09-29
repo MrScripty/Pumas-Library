@@ -1,6 +1,8 @@
 """Deterministic resolution checks; no network or large wheels."""
 
 import importlib.util
+import base64
+import hashlib
 import json
 import pathlib
 import re
@@ -68,6 +70,538 @@ def report(
 
 
 class ResolverTests(unittest.TestCase):
+    def test_copyable_download_sources_accept_any_safe_https_host_and_path(self):
+        safe = (
+            "https://files.pythonhosted.org/packages/ab/pkg-1.0-py3-none-any.whl",
+            "https://download.pytorch.org/whl/cu134/torch-2.14.0.whl",
+            "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0.whl",
+            "https://github.com/nunchux-ai/nunchaku/releases/download/v1.2.0/nunchaku-1.2.0.whl",
+            "https://mirror.example.net:8443/releases/model.safetensors",
+        )
+        rejected = (
+            "http://files.pythonhosted.org/packages/pkg-1.0.whl",
+            "https://user:secret@files.pythonhosted.org/packages/pkg-1.0.whl",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl?token=secret",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl?",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl#download",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl#",
+            "https://mirror.example.net/releases/model file.bin",
+            f"https://mirror.example.net/{'a' * 2048}",
+            "https://mirror.example.net:99999/releases/model.safetensors",
+            "https:///packages/pkg-1.0.whl",
+        )
+        for source in safe:
+            with self.subTest(source=source):
+                self.assertEqual(resolver.copyable_download_source(source), source)
+        for source in rejected:
+            with self.subTest(source=source):
+                self.assertIsNone(resolver.copyable_download_source(source))
+
+    def test_progress_worker_tracks_any_safe_https_download_source(self):
+        pip_download = importlib.import_module("pip._internal.network.download")
+        pip_cli = importlib.import_module("pip._internal.cli.main")
+        source = "https://cdn.example.net/releases/package.whl"
+        response = SimpleNamespace(url=source, headers={"Content-Length": "4"})
+
+        def response_chunks(_response, chunk_size=10):
+            del chunk_size
+            return iter((b"ab", b"cd"))
+
+        def fake_pip_main(_arguments):
+            return list(pip_download.response_chunks(response, chunk_size=2)) and 0
+
+        with tempfile.TemporaryDirectory() as directory:
+            progress_path = pathlib.Path(directory) / "download-progress.json"
+            with (
+                patch.object(pip_cli, "main", side_effect=fake_pip_main),
+                patch.object(pip_download, "response_chunks", response_chunks),
+                patch.object(pip_download, "is_from_cache", return_value=False),
+                patch.object(pip_download, "_get_http_response_size", return_value=4),
+            ):
+                self.assertEqual(
+                    resolver.run_pip_progress_worker(progress_path, ["install", "pkg"]), 0
+                )
+
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+            self.assertEqual(progress["source_url"], source)
+            self.assertFalse(progress["active"])
+            self.assertEqual(progress["downloaded_bytes"], 4)
+            self.assertEqual(progress["total_bytes"], 4)
+            self.assertTrue(progress["measurement_available"])
+
+    def test_progress_worker_reports_speed_during_a_real_chunk_interval(self):
+        pip_download = importlib.import_module("pip._internal.network.download")
+        pip_cli = importlib.import_module("pip._internal.cli.main")
+        source = "https://cdn.example.net/releases/package.whl"
+        response = SimpleNamespace(url=source, headers={"Content-Length": "4"})
+        progress_writes = []
+        write_progress = resolver._write_download_progress
+
+        def response_chunks(_response, chunk_size=10):
+            del chunk_size
+            yield b"ab"
+            time.sleep(resolver.DOWNLOAD_PROGRESS_INTERVAL_SECONDS + 0.05)
+            yield b"cd"
+
+        def fake_pip_main(_arguments):
+            return list(pip_download.response_chunks(response, chunk_size=2)) and 0
+
+        def capture_progress(*values):
+            progress_writes.append(values)
+            write_progress(*values)
+
+        with tempfile.TemporaryDirectory() as directory:
+            progress_path = pathlib.Path(directory) / "download-progress.json"
+            with (
+                patch.object(pip_cli, "main", side_effect=fake_pip_main),
+                patch.object(pip_download, "_prepare_download", None, create=True),
+                patch.object(pip_download, "response_chunks", response_chunks),
+                patch.object(pip_download, "is_from_cache", return_value=False),
+                patch.object(pip_download, "_get_http_response_size", return_value=4),
+                patch.object(resolver, "_write_download_progress", side_effect=capture_progress),
+            ):
+                self.assertEqual(
+                    resolver.run_pip_progress_worker(progress_path, ["install", "pkg"]), 0
+                )
+
+        measured = [sample for sample in progress_writes if sample[2] and sample[5] is not None]
+        self.assertTrue(measured)
+        self.assertEqual(measured[-1][1], source)
+        self.assertGreater(measured[-1][5], 0)
+
+    def test_progress_worker_falls_back_to_legacy_prepare_download(self):
+        pip_download = importlib.import_module("pip._internal.network.download")
+        pip_cli = importlib.import_module("pip._internal.cli.main")
+        source = "https://cdn.example.net/releases/package.whl"
+        response = SimpleNamespace(url=source, headers={"Content-Length": "4"})
+        link = SimpleNamespace(url_without_fragment=source)
+
+        def prepare_download(resp, link, progress_bar):
+            del resp, link, progress_bar
+            return iter((b"ab", b"cd"))
+
+        def fake_pip_main(_arguments):
+            return list(pip_download._prepare_download(response, link, None)) and 0
+
+        with tempfile.TemporaryDirectory() as directory:
+            progress_path = pathlib.Path(directory) / "download-progress.json"
+            with (
+                patch.object(pip_cli, "main", side_effect=fake_pip_main),
+                patch.object(pip_download, "response_chunks", None),
+                patch.object(pip_download, "_prepare_download", prepare_download, create=True),
+                patch.object(pip_download, "is_from_cache", return_value=False),
+                patch.object(pip_download, "_get_http_response_size", return_value=4),
+            ):
+                self.assertEqual(
+                    resolver.run_pip_progress_worker(progress_path, ["install", "pkg"]), 0
+                )
+
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+            self.assertEqual(progress["source_url"], source)
+            self.assertFalse(progress["active"])
+            self.assertEqual(progress["downloaded_bytes"], 4)
+            self.assertTrue(progress["measurement_available"])
+
+    def test_progress_worker_reports_when_pip_streaming_api_is_unavailable(self):
+        pip_download = importlib.import_module("pip._internal.network.download")
+        pip_cli = importlib.import_module("pip._internal.cli.main")
+
+        with tempfile.TemporaryDirectory() as directory:
+            progress_path = pathlib.Path(directory) / "download-progress.json"
+            with (
+                patch.object(pip_cli, "main", return_value=0),
+                patch.object(pip_download, "response_chunks", None),
+                patch.object(pip_download, "_prepare_download", None, create=True),
+            ):
+                self.assertEqual(
+                    resolver.run_pip_progress_worker(progress_path, ["install", "pkg"]), 0
+                )
+
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+            self.assertFalse(progress["measurement_available"])
+            self.assertFalse(progress["active"])
+            self.assertIsNone(progress["speed_bytes_per_sec"])
+
+    def test_progress_worker_does_not_expose_secret_bearing_download_urls(self):
+        pip_download = importlib.import_module("pip._internal.network.download")
+        pip_cli = importlib.import_module("pip._internal.cli.main")
+        response = SimpleNamespace(
+            url="https://cdn.example.net/private.whl?token=secret",
+            headers={"Content-Length": "4"},
+        )
+
+        def response_chunks(_response, chunk_size=10):
+            del chunk_size
+            return iter((b"ab", b"cd"))
+
+        def fake_pip_main(_arguments):
+            return list(pip_download.response_chunks(response, chunk_size=2)) and 0
+
+        with tempfile.TemporaryDirectory() as directory:
+            progress_path = pathlib.Path(directory) / "download-progress.json"
+            with (
+                patch.object(pip_cli, "main", side_effect=fake_pip_main),
+                patch.object(pip_download, "response_chunks", response_chunks),
+                patch.object(pip_download, "is_from_cache", return_value=False),
+                patch.object(pip_download, "_get_http_response_size", return_value=4),
+            ):
+                self.assertEqual(
+                    resolver.run_pip_progress_worker(progress_path, ["install", "pkg"]), 0
+                )
+
+            progress = json.loads(progress_path.read_text(encoding="utf-8"))
+            self.assertIsNone(progress["source_url"])
+            self.assertFalse(progress["active"])
+            self.assertEqual(progress["downloaded_bytes"], 4)
+            self.assertTrue(progress["measurement_available"])
+
+    def test_download_progress_reports_measured_rate_and_final_byte_count(self):
+        timestamps = iter((0.0, 0.5, 1.0))
+        writes = []
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(
+                resolver,
+                "_write_download_progress",
+                side_effect=lambda *values: writes.append(values),
+            ),
+        ):
+            chunks = resolver._track_download_chunks(
+                iter((b"ab", b"cd")),
+                "https://files.pythonhosted.org/packages/pkg-1.0.whl",
+                4,
+                pathlib.Path(directory) / "progress.json",
+                clock=lambda: next(timestamps),
+            )
+            self.assertEqual(list(chunks), [b"ab", b"cd"])
+
+        self.assertEqual(len(writes), 4)
+        self.assertEqual(writes[1][2:], (True, 2, 4, 4.0))
+        self.assertEqual(writes[-1][2:], (False, 4, 4, None))
+
+    def test_staged_manifest_requires_exact_recorded_file_set_and_hashes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory)
+            metadata = target / "torch-2.10.0.dist-info"
+            metadata.mkdir()
+            wheel = target / "torch.pth"
+            wheel.write_bytes(b"safe staged data")
+            digest = (
+                base64.urlsafe_b64encode(hashlib.sha256(wheel.read_bytes()).digest())
+                .rstrip(b"=")
+                .decode()
+            )
+            (target / "bin").mkdir()
+            script = target / "bin" / "torchcmd"
+            script.write_bytes(b"#!/bin/sh\n")
+            script_digest = (
+                base64.urlsafe_b64encode(hashlib.sha256(script.read_bytes()).digest())
+                .rstrip(b"=")
+                .decode()
+            )
+            (target / "__pycache__").mkdir()
+            bytecode = target / "__pycache__" / "torch.cpython-312.pyc"
+            bytecode.write_bytes(b"pip generated")
+            record = metadata / "RECORD"
+            record.write_text(
+                f"torch.pth,sha256={digest},{wheel.stat().st_size}\n"
+                f"../../bin/torchcmd,sha256={script_digest},{script.stat().st_size}\n"
+                "__pycache__/torch.cpython-312.pyc,,\n"
+                "torch-2.10.0.dist-info/RECORD,,\n",
+                encoding="utf-8",
+            )
+            manifest = resolver.installed_file_manifest(target)
+            self.assertEqual(
+                [item["path"] for item in manifest["files"]],
+                ["bin/torchcmd", "torch-2.10.0.dist-info/RECORD", "torch.pth"],
+            )
+            self.assertFalse(bytecode.exists())
+            (target / "unreported.pth").write_text("exec('bad')")
+            with self.assertRaisesRegex(ValueError, "unreported"):
+                resolver.installed_file_manifest(target)
+            (target / "unreported.pth").unlink()
+            wheel.write_bytes(b"changed")
+            with self.assertRaisesRegex(ValueError, "hash or size"):
+                resolver.installed_file_manifest(target)
+            wheel.write_bytes(b"safe staged data")
+            (target / "linked.pth").symlink_to(wheel)
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                resolver.installed_file_manifest(target)
+
+    def test_staged_distribution_identity_must_match_pip_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory)
+            dist = target / "torch-2.10.0+cpu.dist-info"
+            dist.mkdir()
+            metadata = dist / "METADATA"
+            good = "Metadata-Version: 2.1\nName: torch\nVersion: 2.10.0+cpu\n"
+            metadata.write_text(good, encoding="utf-8")
+            digest = (
+                base64.urlsafe_b64encode(hashlib.sha256(metadata.read_bytes()).digest())
+                .rstrip(b"=")
+                .decode()
+            )
+            (dist / "RECORD").write_text(
+                f"{dist.name}/METADATA,sha256={digest},{metadata.stat().st_size}\n"
+                f"{dist.name}/RECORD,,\n",
+                encoding="utf-8",
+            )
+            artifact = [{"name": "torch", "version": "2.10.0+cpu"}]
+            self.assertEqual(len(resolver.installed_file_manifest(target, artifact)["files"]), 2)
+            metadata.write_text(good.replace("2.10.0+cpu", "1.0"), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "identity differs"):
+                resolver.installed_file_manifest(target, artifact)
+            metadata.write_text(good, encoding="utf-8")
+            wrong_dist = target / "torch-1.0.dist-info"
+            dist.rename(wrong_dist)
+            with self.assertRaisesRegex(ValueError, "identity differs"):
+                resolver.installed_file_manifest(target, artifact)
+
+    def test_staged_manifest_accepts_pip_target_data_files_with_share_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = pathlib.Path(directory)
+            dist = target / "sympy-1.14.0.dist-info"
+            dist.mkdir()
+            metadata = dist / "METADATA"
+            metadata.write_text(
+                "Metadata-Version: 2.1\nName: sympy\nVersion: 1.14.0\n",
+                encoding="utf-8",
+            )
+            executable = target / "bin" / "isympy"
+            executable.parent.mkdir()
+            executable.write_bytes(b"#!/bin/sh\n")
+            man_page = target / "share" / "man" / "man1" / "isympy.1"
+            man_page.parent.mkdir(parents=True)
+            man_page.write_bytes(b"SymPy interactive shell manual\n")
+
+            def record_row(name, content):
+                digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest())
+                return f"{name},sha256={digest.rstrip(b'=').decode()},{len(content)}\n"
+
+            record = dist / "RECORD"
+            record.write_text(
+                record_row("sympy-1.14.0.dist-info/METADATA", metadata.read_bytes())
+                + record_row("../../bin/isympy", executable.read_bytes())
+                + record_row("../../share/man/man1/isympy.1", man_page.read_bytes())
+                + "sympy-1.14.0.dist-info/RECORD,,\n",
+                encoding="utf-8",
+            )
+
+            manifest = resolver.installed_file_manifest(
+                target, [{"name": "sympy", "version": "1.14.0"}]
+            )
+            self.assertEqual(
+                [item["path"] for item in manifest["files"]],
+                [
+                    "bin/isympy",
+                    "share/man/man1/isympy.1",
+                    "sympy-1.14.0.dist-info/METADATA",
+                    "sympy-1.14.0.dist-info/RECORD",
+                ],
+            )
+            good_record = record.read_text(encoding="utf-8")
+            for unsafe_path in ("../../etc/passwd", "../../share/../../outside"):
+                with self.subTest(unsafe_path=unsafe_path):
+                    record.write_text(
+                        good_record.replace("../../share/man/man1/isympy.1", unsafe_path),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(ValueError, "escapes its target"):
+                        resolver.installed_file_manifest(
+                            target, [{"name": "sympy", "version": "1.14.0"}]
+                        )
+            record.write_text(good_record, encoding="utf-8")
+
+    def test_install_mode_stages_once_and_validates_report_before_writing_lock(self):
+        fixture = report()
+        commands = []
+
+        def fake_run(command, **_kwargs):
+            commands.append(command)
+            self.assertIn("--target", command)
+            self.assertNotIn("--dry-run", command)
+            self.assertIn("--only-binary=:all:", command)
+            self.assertIn("torch==2.10.0+cpu", command)
+            pathlib.Path(command[command.index("--report") + 1]).write_text(
+                json.dumps(fixture), encoding="utf-8"
+            )
+            target_dir = pathlib.Path(command[command.index("--target") + 1])
+            for item in fixture["install"]:
+                name = item["metadata"]["name"]
+                version = item["metadata"]["version"]
+                metadata = target_dir / f"{name}-{version}.dist-info"
+                metadata.mkdir()
+                metadata_file = metadata / "METADATA"
+                metadata_file.write_text(
+                    f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n",
+                    encoding="utf-8",
+                )
+                digest = (
+                    base64.urlsafe_b64encode(hashlib.sha256(metadata_file.read_bytes()).digest())
+                    .rstrip(b"=")
+                    .decode()
+                )
+                (metadata / "RECORD").write_text(
+                    f"{metadata.name}/METADATA,sha256={digest},{metadata_file.stat().st_size}\n"
+                    f"{metadata.name}/RECORD,,\n",
+                    encoding="utf-8",
+                )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            progress_file = output / "download-progress.json"
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--install",
+                        "--target",
+                        str(target),
+                        "--progress-file",
+                        str(progress_file),
+                        "--output",
+                        str(output),
+                    ],
+                ),
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(resolver.subprocess, "run", side_effect=fake_run),
+            ):
+                resolver.main()
+            self.assertEqual(len(commands), 1)
+            self.assertEqual(commands[0][3], "--_pumas-pip-progress-worker")
+            self.assertEqual(commands[0][4], str(progress_file))
+            self.assertEqual(commands[0][commands[0].index("--target") + 1], str(target))
+            self.assertTrue(target.is_dir())
+            self.assertEqual(
+                json.loads((output / "resolution.json").read_text())["artifacts"][0]["sha256"],
+                "a" * 64,
+            )
+            self.assertIn("--hash=sha256:" + "a" * 64, (output / "requirements.txt").read_text())
+            self.assertEqual(
+                len(json.loads((output / "installed-files.json").read_text())["files"]),
+                2 * len(fixture["install"]),
+            )
+
+    def test_install_mode_rejects_untrusted_or_hashless_report_before_lock_publication(self):
+        fixtures = {
+            "untrusted origin": report(url="https://example.com/torch.whl"),
+            "missing digest": report(),
+            "malformed report": {"install": "not a list"},
+        }
+        fixtures["missing digest"]["install"][0]["download_info"]["archive_info"] = {}
+        for name, fixture in fixtures.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                output = pathlib.Path(directory) / "manifest"
+                target = pathlib.Path(directory) / "staged packages"
+
+                def fake_run(command, **_kwargs):
+                    pathlib.Path(command[command.index("--report") + 1]).write_text(
+                        json.dumps(fixture), encoding="utf-8"
+                    )
+                    return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+                with (
+                    patch.object(
+                        resolver.sys,
+                        "argv",
+                        [
+                            "resolve_runtime.py",
+                            "--version",
+                            "2.10.0",
+                            "--build",
+                            "cpu",
+                            "--install",
+                            "--target",
+                            str(target),
+                            "--output",
+                            str(output),
+                        ],
+                    ),
+                    patch.object(resolver.subprocess, "run", side_effect=fake_run),
+                    redirect_stderr(StringIO()),
+                ):
+                    with self.assertRaises(SystemExit) as exit_result:
+                        resolver.main()
+                self.assertEqual(exit_result.exception.code, 3)
+                self.assertFalse((output / "requirements.txt").exists())
+                self.assertFalse((output / "resolution.json").exists())
+
+    def test_install_mode_requires_an_empty_explicit_staged_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            target.mkdir()
+            (target / "existing.py").write_text("leave intact", encoding="utf-8")
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--install",
+                        "--target",
+                        str(target),
+                        "--output",
+                        str(output),
+                    ],
+                ),
+                patch.object(resolver.subprocess, "run") as run,
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 2)
+            run.assert_not_called()
+            self.assertEqual((target / "existing.py").read_text(), "leave intact")
+
+    def test_install_mode_reports_pip_failure_without_publishing_a_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "manifest"
+            target = pathlib.Path(directory) / "staged packages"
+            failed = SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr="No matching distribution found for torch==2.10.0+cpu",
+            )
+            with (
+                patch.object(
+                    resolver.sys,
+                    "argv",
+                    [
+                        "resolve_runtime.py",
+                        "--version",
+                        "2.10.0",
+                        "--build",
+                        "cpu",
+                        "--install",
+                        "--target",
+                        str(target),
+                        "--output",
+                        str(output),
+                    ],
+                ),
+                patch.object(resolver, "native_target", return_value="linux"),
+                patch.object(resolver.subprocess, "run", return_value=failed),
+                redirect_stderr(StringIO()),
+            ):
+                with self.assertRaises(SystemExit) as exit_result:
+                    resolver.main()
+            self.assertEqual(exit_result.exception.code, 4)
+            self.assertFalse((output / "requirements.txt").exists())
+            self.assertFalse((output / "resolution.json").exists())
+
     def test_bootstrap_platform_tags_keep_only_the_native_host(self):
         cases = (
             ("win32", "AMD64", ["win_amd64", "win32"], ["win_amd64"], "windows"),
@@ -443,6 +977,7 @@ class ResolverTests(unittest.TestCase):
         digest = "a" * 64
         fixture = report(version="2.14.0", url=wheel)
         commands = []
+        cache_dir = pathlib.Path(tempfile.gettempdir()) / "Pumas shared pip cache"
 
         def fake_run(command, **_kwargs):
             commands.append(command)
@@ -452,6 +987,7 @@ class ResolverTests(unittest.TestCase):
             return SimpleNamespace(returncode=0, stdout="", stderr="")
 
         with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "resolver workspace with spaces"
             with (
                 patch.object(
                     resolver.sys,
@@ -467,7 +1003,9 @@ class ResolverTests(unittest.TestCase):
                         "--torch-sha256",
                         digest,
                         "--output",
-                        directory,
+                        str(output),
+                        "--cache-dir",
+                        str(cache_dir),
                     ],
                 ),
                 patch.object(resolver.sys, "platform", "darwin"),
@@ -484,11 +1022,12 @@ class ResolverTests(unittest.TestCase):
                 resolver.main()
             self.assertEqual(len(commands), 1)
             command = commands[0]
+            self.assertEqual(command[command.index("--cache-dir") + 1], str(cache_dir))
             self.assertIn(f"torch @ {wheel}#sha256={digest}", command)
             self.assertNotIn("torch==2.14.0", command)
             self.assertTrue(set(resolver.CORE).issubset(command))
             self.assertEqual(
-                json.loads((pathlib.Path(directory) / "resolution.json").read_text())["torch"],
+                json.loads((output / "resolution.json").read_text())["torch"],
                 "2.14.0",
             )
 
@@ -956,6 +1495,46 @@ class ResolverTests(unittest.TestCase):
             with self.subTest(fixture=fixture):
                 with self.assertRaises(ValueError):
                     resolver.requirements_from_report(fixture, "2.10.0", "cpu")
+
+    def test_macos_cpu_accepts_pypi_torch_wheels_with_matching_identity_and_tags(self):
+        torch_url = (
+            "https://files.pythonhosted.org/packages/ee/90/"
+            "torch-2.14.0-cp314-cp314-macosx_14_0_arm64.whl"
+        )
+        vision_url = (
+            "https://files.pythonhosted.org/packages/aa/bb/"
+            "torchvision-0.29.0-cp314-cp314-macosx_14_0_arm64.whl"
+        )
+        fixture = report(version="2.14.0+cpu", adapter="flux2")
+        fixture["install"][0]["metadata"]["version"] = "2.14.0"
+        fixture["install"][0]["download_info"]["url"] = torch_url
+        vision = next(
+            item for item in fixture["install"] if item["metadata"]["name"] == "torchvision"
+        )
+        vision["metadata"]["version"] = "0.29.0"
+        vision["download_info"]["url"] = vision_url
+        mac_tag = resolver.packaging_tags.Tag("cp314", "cp314", "macosx_14_0_arm64")
+        with (
+            patch.object(resolver.sys, "platform", "darwin"),
+            patch.object(resolver.platform, "machine", return_value="arm64"),
+            patch.object(resolver.sys, "version_info", SimpleNamespace(major=3, minor=14)),
+            patch.object(resolver.packaging_tags, "sys_tags", return_value=[mac_tag]),
+        ):
+            requirements, _ = resolver.requirements_from_report(fixture, "2.14.0", "cpu", "flux2")
+            self.assertTrue(any(torch_url in requirement for requirement in requirements))
+            self.assertTrue(any(vision_url in requirement for requirement in requirements))
+            for bad_url in (
+                torch_url.replace("torch-2.14.0", "torch-2.13.0"),
+                torch_url.replace("torch-2.14.0", "other-2.14.0"),
+                torch_url.replace("macosx_14_0_arm64", "manylinux_2_28_x86_64"),
+                torch_url.replace("files.pythonhosted.org", "files.pythonhosted.org.evil.test"),
+            ):
+                with self.subTest(bad_url=bad_url), self.assertRaisesRegex(ValueError, "Untrusted"):
+                    fixture["install"][0]["download_info"]["url"] = bad_url
+                    resolver.requirements_from_report(fixture, "2.14.0", "cpu", "flux2")
+            fixture["install"][0]["download_info"]["url"] = torch_url
+        with self.assertRaises(ValueError):
+            resolver.requirements_from_report(fixture, "2.14.0", "cpu", "flux2")
 
     def test_torchvision_wrong_build_is_rejected(self):
         fixture = report(adapter="flux2")

@@ -1,14 +1,18 @@
 import { Clock, Database, Download, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react';
 import type { ActiveModelDownload } from '../hooks/useActiveModelDownload';
 import { formatBytes, formatSpeed } from '../utils/formatters';
+import { getInstallActivityPresentation } from '../utils/installActivityPresentation';
+import { getInstallationDownloadPresentation } from '../utils/installationDownloadPresentation';
 
 export interface InstallationProgress {
   tag: string;
   started_at: string;
-  stage: 'download' | 'extract' | 'venv' | 'dependencies' | 'setup';
+  stage: 'resolving' | 'download' | 'extract' | 'venv' | 'dependencies' | 'setup';
   stage_progress: number;
   overall_progress: number;
   current_item: string | null;
+  download_active?: boolean;
+  download_measurement_available?: boolean | null;
   download_speed: number | null;
   eta_seconds: number | null;
   total_size: number | null;
@@ -46,15 +50,19 @@ function joinDownloadParts(parts: string[]): string {
 }
 
 function getCombinedDownloadStatus({
+  appId,
   activeModelDownload,
   activeModelDownloadCount,
   installationProgress,
+  runtimePending = false,
 }: {
+  appId?: string | null;
   activeModelDownload?: ActiveModelDownload | null;
   activeModelDownloadCount: number;
   installationProgress?: InstallationProgress | null;
+  runtimePending?: boolean;
 }): HeaderStatusInfo | null {
-  const runtimeActive = Boolean(installationProgress && !installationProgress.completed_at);
+  const runtimeActive = runtimePending || Boolean(installationProgress && !installationProgress.completed_at);
   const modelCount = activeModelDownload ? Math.max(activeModelDownloadCount, 1) : 0;
   const runtimeCount = runtimeActive ? 1 : 0;
 
@@ -73,16 +81,27 @@ function getCombinedDownloadStatus({
     ? installationProgress.download_speed
     : 0;
   const totalSpeed = modelSpeed + runtimeSpeed;
+  const downloadPresentation = getInstallationDownloadPresentation(appId, installationProgress);
+  const runtimeDownloadExpected = installationProgress?.download_active === true ||
+    installationProgress?.stage === 'download';
   const speedInfo = totalSpeed > 0 ? ` @ ${formatSpeed(totalSpeed)}` : '';
   const hasDownloadActivity =
     Boolean(activeModelDownload?.status === 'downloading') ||
     installationProgress?.stage === 'download' ||
-    totalSpeed > 0;
+    runtimeDownloadExpected ||
+    totalSpeed > 0 ||
+    downloadPresentation?.kind === 'measuring';
+  const visibleSpeedInfo = totalSpeed > 0
+    ? speedInfo
+    : downloadPresentation ? ` · ${downloadPresentation.label.toLowerCase()}` : '';
+  const activityVerb = hasDownloadActivity
+    ? 'Downloading'
+    : installationProgress?.stage === 'resolving' ? 'Preparing' : 'Installing';
 
   return {
     icon: Download,
-    spinning: false,
-    text: `${hasDownloadActivity ? 'Downloading' : 'Installing'} ${joinDownloadParts(parts)}${speedInfo}`,
+    spinning: installationProgress?.stage === 'resolving',
+    text: `${activityVerb} ${joinDownloadParts(parts)}${visibleSpeedInfo}`,
   };
 }
 
@@ -159,23 +178,72 @@ function getActiveDownloadStatus(
 }
 
 export function getHeaderStatusInfo({
+  appId,
   activeModelDownload,
   activeModelDownloadCount,
   installationProgress,
+  installingTag,
   modelLibraryLoaded,
   networkAvailable,
 }: {
+  appId?: string | null;
   activeModelDownload?: ActiveModelDownload | null;
   activeModelDownloadCount: number;
   installationProgress?: InstallationProgress | null;
+  installingTag?: string | null;
   modelLibraryLoaded?: boolean | null;
   networkAvailable?: boolean | null;
 }): HeaderStatusInfo {
+  const activity = getInstallActivityPresentation({ appId, installingTag, progress: installationProgress });
   const combinedDownloadStatus = getCombinedDownloadStatus({
+    appId,
     activeModelDownload,
     activeModelDownloadCount,
     installationProgress,
+    runtimePending: activity.active,
   });
+  if (activity.active && activeModelDownload && activeModelDownload.status !== 'downloading') {
+    const modelStatus = getActiveDownloadStatus(activeModelDownload, activeModelDownloadCount);
+    const downloadPresentation = appId === 'torch'
+      ? getInstallationDownloadPresentation(appId, installationProgress)
+      : null;
+    const downloadStatus = downloadPresentation
+      ? ` · Torch download: ${downloadPresentation.label}`
+      : '';
+    return {
+      ...modelStatus,
+      text: `${modelStatus.text}${downloadStatus} · ${appId === 'torch' ? 'Torch ' : ''}runtime: ${activity.phase}`,
+    };
+  }
+  const runtimeDownloadActive = installationProgress?.download_active === true ||
+    installationProgress?.stage === 'download' ||
+    (installationProgress?.download_speed ?? 0) > 0 ||
+    getInstallationDownloadPresentation(appId, installationProgress) !== null;
+  const modelDownloadActive = activeModelDownload?.status === 'downloading';
+  if (
+    appId === 'torch' && activity.active && installationProgress && combinedDownloadStatus &&
+    (runtimeDownloadActive || modelDownloadActive)
+  ) {
+    return {
+      ...combinedDownloadStatus,
+      text: `${combinedDownloadStatus.text} · Torch: ${activity.phase}`,
+    };
+  }
+  if (activity.active && !installationProgress && activeModelDownload && combinedDownloadStatus) {
+    return {
+      ...combinedDownloadStatus,
+      text: `${combinedDownloadStatus.text} · ${activity.phase}`,
+    };
+  }
+  if (activity.active && (appId === 'torch' || !installationProgress)) {
+    return {
+      icon: activity.indeterminate ? RefreshCw : Download,
+      spinning: activity.indeterminate,
+      text: appId === 'torch'
+        ? `Installing Torch ${installingTag ?? installationProgress?.tag} · ${activity.phase}`
+        : activity.phase,
+    };
+  }
   if (combinedDownloadStatus) {
     return combinedDownloadStatus;
   }

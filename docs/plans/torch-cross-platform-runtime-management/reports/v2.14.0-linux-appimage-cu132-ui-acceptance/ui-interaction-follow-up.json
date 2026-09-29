@@ -1,0 +1,73 @@
+{
+  "status": "passed_ui_feedback_only",
+  "date": "2026-09-26",
+  "environment": "Linux x86_64 local AppImage with an isolated Pumas library profile",
+  "execution_mode": "manual-packaged-ui",
+  "application_version": "0.7.0",
+  "application_artifacts": {
+    "appimage": {
+      "name": "Pumas.Library-0.7.0.AppImage",
+      "sha256": "34a5ffc88f5f42aa03bd9ed72ead37e5ca385838037247b74186a67d9d128aaf"
+    },
+    "deb": {
+      "name": "pumas-library-electron_0.7.0_amd64.deb",
+      "sha256": "fea54b4694d7ddb77a797327a9e15d0f0e66e0cf4f2d38fc9169feb4a4811386"
+    }
+  },
+  "viewport": {
+    "width": 800,
+    "height": 1000
+  },
+  "observations": {
+    "install_row": {
+      "label": "Install",
+      "hover": {
+        "foreground": "rgb(82, 255, 82)",
+        "background": "rgb(38, 38, 38)",
+        "border": "rgb(82, 255, 82)",
+        "transform": "scale(1.05)"
+      },
+      "pressed": {
+        "active": true,
+        "foreground": "rgb(82, 255, 82)",
+        "background": "rgb(29, 29, 29)"
+      }
+    },
+    "review": {
+      "heading_foreground": "rgb(255, 255, 255)",
+      "body_foreground": "rgb(255, 255, 255)",
+      "install_cta_foreground": "rgb(255, 255, 255)",
+      "install_cta_background": "rgba(82, 255, 82, 0.14)",
+      "install_cta_disabled_before_artifact_review": true,
+      "install_cta_explanation": "Check the selected combination to review its artifacts and enable installation."
+    },
+    "artifact_check": {
+      "hover_background": "rgba(82, 255, 82, 0.12)",
+      "pressed_background": "rgba(82, 255, 82, 0.157)",
+      "first_paint_status": "Checking official Torch artifacts… Package files may download to Pumas’ private cache.",
+      "button_label": "Checking…",
+      "install_cta_explanation": "Checking the selected combination before installation."
+    },
+    "install_status": {
+      "header_and_dialog_status": "Installing Torch v2.14.0 · Starting installation…",
+      "packaged_header_foreground": "rgb(255, 255, 255)",
+      "packaged_header_font_size": "12px",
+      "verified_by": [
+        "Header.test.tsx pending Torch status coverage",
+        "InstallDialogContent.test.tsx pre-progress status and Cancel coverage"
+      ]
+    }
+  },
+  "verification": {
+    "focused_frontend_tests": "60 passed",
+    "frontend_typecheck": "passed",
+    "scoped_eslint": "passed",
+    "linux_artifact_contract": "passed",
+    "appimage_and_deb_rpc_smoke": "passed"
+  },
+  "limits": [
+    "This follow-up confirms interaction feedback and text contrast; it did not complete a new artifact preview or Torch installation.",
+    "The prior successful Torch installation remains recorded separately in acceptance.json and applies to the AppImage SHA recorded there.",
+    "CUDA/device execution, Windows/macOS packaged installation, and Tuldok image generation were not tested."
+  ]
+}

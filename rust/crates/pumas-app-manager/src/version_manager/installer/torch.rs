@@ -11,7 +11,65 @@ use std::time::Duration;
 use tokio::process::Command;
 
 const MAX_TORCH_ORPHAN_QUARANTINES: usize = 2;
+const MAX_TORCH_DOWNLOAD_SOURCE_BYTES: usize = 2048;
+const TORCH_DOWNLOAD_SPEED_STALE_AFTER: Duration = Duration::from_secs(2);
 pub(super) const TORCH_PUBLISHING_MARKER: &[u8] = b"metadata pending";
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct TorchDownloadProgress {
+    #[serde(default)]
+    source_url: Option<String>,
+    active: bool,
+    downloaded_bytes: u64,
+    total_bytes: Option<u64>,
+    speed_bytes_per_sec: Option<f64>,
+    #[serde(default)]
+    measurement_available: bool,
+}
+
+fn safe_torch_download_source(source: &str) -> bool {
+    if source.len() > MAX_TORCH_DOWNLOAD_SOURCE_BYTES
+        || source
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+    {
+        return false;
+    }
+    let Ok(url) = reqwest::Url::parse(source) else {
+        return false;
+    };
+    url.scheme() == "https"
+        && url.host().is_some()
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.query().is_none()
+        && url.fragment().is_none()
+}
+
+fn read_torch_download_progress(path: &Path) -> Option<TorchDownloadProgress> {
+    let metadata = std::fs::symlink_metadata(path).ok()?;
+    if !metadata.file_type().is_file() || metadata.len() > 4096 {
+        return None;
+    }
+    let progress: TorchDownloadProgress =
+        serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    if progress
+        .source_url
+        .as_deref()
+        .is_some_and(|source| !safe_torch_download_source(source))
+        || progress
+            .speed_bytes_per_sec
+            .is_some_and(|speed| !speed.is_finite() || speed < 0.0)
+        || (!progress.active && progress.speed_bytes_per_sec.is_some())
+        || progress
+            .total_bytes
+            .is_some_and(|total| progress.downloaded_bytes > total)
+    {
+        return None;
+    }
+    Some(progress)
+}
 
 /// This file is permanent: unlinking it could let another process lock a new
 /// inode while an existing installer still holds the old one.
@@ -209,6 +267,26 @@ impl TorchPendingStage {
 
     fn path(&self) -> &Path {
         self.directory.path()
+    }
+
+    fn scratch_path(&self) -> Result<PathBuf> {
+        let scratch = self.path().join("temp");
+        match std::fs::create_dir(&scratch) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(PumasError::from(error)),
+        }
+        let stage_root = std::fs::canonicalize(self.path()).map_err(PumasError::from)?;
+        let scratch = std::fs::canonicalize(&scratch).map_err(PumasError::from)?;
+        if !scratch.starts_with(&stage_root) || scratch == stage_root {
+            return Err(failed(
+                "Torch installer scratch directory escaped its stage",
+            ));
+        }
+        if !scratch.is_dir() {
+            return Err(failed("Torch installer scratch path is not a directory"));
+        }
+        Ok(scratch)
     }
 }
 
@@ -506,6 +584,115 @@ mod cross_process_recovery_tests {
         drop(stage);
         retry_pending_torch_cleanup(versions, &metadata).unwrap();
         assert!(!stage_path.exists() && !marker.exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runtime_command_uses_stage_scratch_and_preserves_other_environment() {
+        let root = tempfile::tempdir().unwrap();
+        let launcher_root = root.path().join("launcher with spaces");
+        let metadata = Arc::new(MetadataManager::new(&launcher_root));
+        metadata.ensure_directories().unwrap();
+        let tracker = Arc::new(RwLock::new(InstallationProgressTracker::new(
+            launcher_root.join("launcher-data/cache"),
+        )));
+        let installer = VersionInstaller::new(
+            launcher_root,
+            AppId::Torch,
+            metadata,
+            tracker,
+            Arc::new(AtomicBool::new(false)),
+        );
+        let versions = installer.versions_dir();
+        std::fs::create_dir_all(&versions).unwrap();
+        let stage = Arc::new(
+            TorchPendingStage::new(
+                &versions,
+                "v2.9.1",
+                TorchVersionsLock::try_acquire(&versions).unwrap(),
+            )
+            .unwrap(),
+        );
+        let expected_scratch = std::fs::canonicalize(stage.path()).unwrap().join("temp");
+        let log = root.path().join("child.log");
+        let mut command = Command::new("/bin/sh");
+        command
+            .args([
+                "-c",
+                "printf '%s\\n' \"$TMPDIR\" \"$TMP\" \"$TEMP\" \"$TORCH_UNRELATED_ENV\"",
+            ])
+            .env("TORCH_UNRELATED_ENV", "retained value");
+        let (progress_tx, _progress_rx) = mpsc::channel(4);
+
+        installer
+            .run_runtime_command(
+                command,
+                &log,
+                "Testing scratch",
+                &progress_tx,
+                Some(stage.clone()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&log)
+                .unwrap()
+                .lines()
+                .collect::<Vec<_>>(),
+            vec![
+                expected_scratch.to_str().unwrap(),
+                expected_scratch.to_str().unwrap(),
+                expected_scratch.to_str().unwrap(),
+                "retained value",
+            ]
+        );
+        assert!(expected_scratch.is_dir());
+        drop(stage);
+        assert!(!expected_scratch.exists());
+
+        let stage = Arc::new(
+            TorchPendingStage::new(
+                &versions,
+                "v2.9.1",
+                TorchVersionsLock::try_acquire(&versions).unwrap(),
+            )
+            .unwrap(),
+        );
+        std::fs::write(stage.path().join("temp"), b"not a directory").unwrap();
+        let sentinel = root.path().join("child-ran");
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "touch \"$1\"", "sh"]).arg(&sentinel);
+        assert!(installer
+            .run_runtime_command(
+                command,
+                &log,
+                "Testing invalid scratch",
+                &progress_tx,
+                Some(stage)
+            )
+            .await
+            .is_err());
+        assert!(!sentinel.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stage_scratch_rejects_a_link_outside_the_stage() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = TorchVersionsLock::try_acquire(root.path()).unwrap();
+        let stage = TorchPendingStage::new(root.path(), "v2.9.1", owner).unwrap();
+        let outside = root.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, stage.path().join("temp")).unwrap();
+
+        assert!(stage.scratch_path().is_err());
+
+        std::fs::remove_file(stage.path().join("temp")).unwrap();
+        let missing_outside = root.path().join("missing-outside");
+        std::os::unix::fs::symlink(&missing_outside, stage.path().join("temp")).unwrap();
+        assert!(stage.scratch_path().is_err());
+        assert!(!missing_outside.exists());
     }
 
     #[tokio::test]
@@ -1072,25 +1259,32 @@ fn failed(message: impl Into<String>) -> PumasError {
     }
 }
 
-fn managed_python_record(plan: &super::TorchInstallPlan) -> serde_json::Value {
+fn managed_python_identity_record(
+    managed_python: &super::super::managed_python::ManagedPythonIdentity,
+    interpreter_hash: &str,
+) -> serde_json::Value {
     serde_json::json!({
         "provider": {
             "name": "uv",
-            "version": plan.managed_python.uv_version,
-            "archiveSha256": plan.managed_python.uv_archive_sha256,
+            "version": managed_python.uv_version,
+            "archiveSha256": managed_python.uv_archive_sha256,
         },
         "distribution": {
             "implementation": "CPython",
-            "version": plan.managed_python.version,
-            "catalogKey": plan.managed_python.catalog_key,
-            "sourceUrl": plan.managed_python.source_url,
-            "targetTriple": plan.managed_python.target_triple,
+            "version": managed_python.version,
+            "catalogKey": managed_python.catalog_key,
+            "sourceUrl": managed_python.source_url,
+            "targetTriple": managed_python.target_triple,
         },
         "executable": {
-            "path": plan.managed_python.executable,
-            "sha256": plan.interpreter_hash,
+            "path": managed_python.executable,
+            "sha256": interpreter_hash,
         },
     })
+}
+
+fn managed_python_record(plan: &super::TorchInstallPlan) -> serde_json::Value {
+    managed_python_identity_record(&plan.managed_python, &plan.interpreter_hash)
 }
 
 fn record_managed_python(runtime: &Path, plan: &super::TorchInstallPlan) -> Result<()> {
@@ -1109,7 +1303,753 @@ fn record_managed_python(runtime: &Path, plan: &super::TorchInstallPlan) -> Resu
     .map_err(PumasError::from)
 }
 
+fn cuda_build_for_driver(version: (u32, u32, u32)) -> Option<&'static str> {
+    if version >= (580, 0, 0) {
+        Some("cu134")
+    } else if version >= (525, 60, 13) {
+        Some("cu129")
+    } else if version >= (450, 80, 2) {
+        Some("cu118")
+    } else if version >= (440, 33, 0) {
+        Some("cu102")
+    } else if version >= (418, 39, 0) {
+        Some("cu101")
+    } else if version >= (410, 48, 0) {
+        Some("cu100")
+    } else {
+        None
+    }
+}
+
+fn cuda_build_candidates_for_driver(version: (u32, u32, u32)) -> Vec<&'static str> {
+    let Some(maximum) = cuda_build_for_driver(version)
+        .and_then(|build| build.strip_prefix("cu"))
+        .and_then(|channel| channel.parse::<u32>().ok())
+    else {
+        return Vec::new();
+    };
+    // BUILDS is a fixed, ascending channel list. The maximum above follows
+    // the same Linux NVIDIA driver floors used for release recommendations.
+    super::super::torch_preview::BUILDS
+        .iter()
+        .rev()
+        .copied()
+        .filter(|build| {
+            build
+                .strip_prefix("cu")
+                .and_then(|channel| channel.parse::<u32>().ok())
+                .is_some_and(|channel| (100..=maximum).contains(&channel))
+        })
+        .take(4)
+        .collect()
+}
+
+fn automatic_torch_builds_for_driver(version: (u32, u32, u32)) -> Vec<&'static str> {
+    let mut builds = cuda_build_candidates_for_driver(version);
+    builds.push("cpu");
+    builds
+}
+
+fn retry_torch_python_candidate(exit_code: Option<i32>, automatic: bool) -> bool {
+    automatic && matches!(exit_code, Some(2 | 4))
+}
+
+fn retry_direct_torch_attempt(
+    exit_code: Option<i32>,
+    python_auto: bool,
+    cpu_fallback: bool,
+) -> bool {
+    retry_torch_python_candidate(exit_code, python_auto || cpu_fallback)
+}
+
+async fn automatic_torch_builds() -> Vec<&'static str> {
+    if !cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        return vec!["cpu"];
+    }
+    let mut command = Command::new("nvidia-smi");
+    command
+        .kill_on_drop(true)
+        .args(["--query-gpu=driver_version", "--format=csv,noheader"]);
+    let Ok(Ok(output)) = tokio::time::timeout(Duration::from_secs(3), command.output()).await
+    else {
+        return vec!["cpu"];
+    };
+    if !output.status.success() {
+        return vec!["cpu"];
+    }
+    let Ok(text) = std::str::from_utf8(&output.stdout) else {
+        return vec!["cpu"];
+    };
+    let mut versions = text.lines().map(|line| {
+        let mut parts = line.trim().split('.');
+        let major = parts.next()?.parse::<u32>().ok()?;
+        let minor = parts.next().unwrap_or("0").parse::<u32>().ok()?;
+        let patch = parts.next().unwrap_or("0").parse::<u32>().ok()?;
+        parts.next().is_none().then_some((major, minor, patch))
+    });
+    let Some(Some(mut lowest)) = versions.next() else {
+        return vec!["cpu"];
+    };
+    for version in versions {
+        let Some(version) = version else {
+            return vec!["cpu"];
+        };
+        lowest = lowest.min(version);
+    }
+    automatic_torch_builds_for_driver(lowest)
+}
+
+#[derive(Deserialize)]
+struct DirectTorchResolution {
+    release: String,
+    torch: String,
+    build: String,
+    python: String,
+    interpreter: String,
+    implementation: String,
+    platform: String,
+    machine: String,
+    adapter: String,
+    artifacts: Vec<crate::version_manager::TorchArtifact>,
+}
+
+struct DirectTorchSelection<'a> {
+    version: &'a str,
+    build: &'a str,
+    minor: &'a str,
+    adapter: &'a str,
+    python: &'a Path,
+}
+
+struct TorchAttemptContext<'a> {
+    staging: &'a std::sync::Arc<TorchPendingStage>,
+    log_path: &'a Path,
+    progress_tx: &'a mpsc::Sender<ProgressUpdate>,
+}
+
+fn trusted_macos_pypi_torch_wheel(
+    url: &reqwest::Url,
+    name: &str,
+    version: &str,
+    macos_cpu: bool,
+) -> bool {
+    if !macos_cpu
+        || !matches!(name, "torch" | "torchvision")
+        || url.host_str() != Some("files.pythonhosted.org")
+        || !url.path().starts_with("/packages/")
+        || version.contains('+')
+    {
+        return false;
+    }
+    let Some(filename) = url.path().rsplit('/').next() else {
+        return false;
+    };
+    let prefix = format!("{name}-{version}-");
+    let Some(tags) = filename
+        .strip_prefix(&prefix)
+        .and_then(|value| value.strip_suffix(".whl"))
+    else {
+        return false;
+    };
+    let mut parts = tags.split('-');
+    let (Some(python), Some(abi), Some(platform), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    !python.is_empty()
+        && !abi.is_empty()
+        && platform.split('.').any(|tag| {
+            tag.starts_with("macosx_") && (tag.ends_with("_arm64") || tag.ends_with("_universal2"))
+        })
+}
+
+fn validate_direct_torch_report(
+    resolution: &DirectTorchResolution,
+    report: &serde_json::Value,
+    requirements: &str,
+    selection: &DirectTorchSelection<'_>,
+) -> Result<()> {
+    let version = selection.version;
+    let build = selection.build;
+    let minor = selection.minor;
+    let adapter = selection.adapter;
+    let python = selection.python;
+    let expected_torch = if cfg!(target_os = "macos") && build == "cpu" {
+        version.to_owned()
+    } else {
+        format!("{version}+{build}")
+    };
+    if resolution.release != version
+        || resolution.torch != expected_torch
+        || resolution.build != build
+        || resolution.python != minor
+        || resolution.adapter != adapter
+        || resolution.implementation != "cpython"
+        || Path::new(&resolution.interpreter) != python
+        || resolution.artifacts.is_empty()
+        || !match std::env::consts::OS {
+            "linux" => resolution.machine == "x86_64" && resolution.platform.starts_with("Linux-"),
+            "windows" => {
+                resolution.machine == "AMD64" && resolution.platform.starts_with("Windows-")
+            }
+            "macos" => resolution.machine == "arm64" && resolution.platform.starts_with("macOS-"),
+            _ => false,
+        }
+    {
+        return Err(failed(
+            "Torch installation report differs from the selection or host",
+        ));
+    }
+    let entries = report["install"]
+        .as_array()
+        .ok_or_else(|| failed("Torch pip installation report has no artifact list"))?;
+    if entries.len() != resolution.artifacts.len()
+        || requirements.lines().count() != resolution.artifacts.len()
+    {
+        return Err(failed(
+            "Torch report and hash lock have different artifact counts",
+        ));
+    }
+    let mut names = std::collections::HashSet::new();
+    let mut torch_count = 0;
+    for (index, artifact) in resolution.artifacts.iter().enumerate() {
+        if artifact.name.is_empty()
+            || !artifact.name.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"-.".contains(&byte)
+            })
+            || !names.insert(artifact.name.as_str())
+            || artifact.sha256.len() != 64
+            || !artifact.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(failed(
+                "Torch report contains an invalid distribution or SHA-256",
+            ));
+        }
+        let url = reqwest::Url::parse(&artifact.url)
+            .map_err(|_| failed("Torch report contains an invalid artifact URL"))?;
+        let trusted_source = url.scheme() == "https"
+            && !artifact.url.chars().any(char::is_whitespace)
+            && url.username().is_empty()
+            && url.password().is_none()
+            && matches!(url.port(), None | Some(443))
+            && url.query().is_none()
+            && url.fragment().is_none()
+            && url.path().to_ascii_lowercase().ends_with(".whl")
+            && if artifact.name == "torch" || artifact.name == "torchvision" {
+                (matches!(
+                    url.host_str(),
+                    Some("download.pytorch.org" | "download-r2.pytorch.org")
+                ) && url.path().starts_with(&format!("/whl/{build}/")))
+                    || trusted_macos_pypi_torch_wheel(
+                        &url,
+                        &artifact.name,
+                        &artifact.version,
+                        cfg!(target_os = "macos") && build == "cpu",
+                    )
+            } else {
+                (url.host_str() == Some("files.pythonhosted.org")
+                    && url.path().starts_with("/packages/"))
+                    || (matches!(
+                        url.host_str(),
+                        Some("download.pytorch.org" | "download-r2.pytorch.org")
+                    ) && url.path().starts_with("/whl/"))
+            };
+        if !trusted_source {
+            return Err(failed("Torch report contains an untrusted wheel source"));
+        }
+        if artifact.name == "torch" {
+            torch_count += 1;
+            if artifact.version != expected_torch {
+                return Err(failed(
+                    "Torch wheel version differs from the selected release",
+                ));
+            }
+        }
+        if artifact.name == "torchvision"
+            && (adapter == "none"
+                || !(artifact.version.ends_with(&format!("+{build}"))
+                    || (cfg!(target_os = "macos")
+                        && build == "cpu"
+                        && artifact.version.split('.').count() == 3
+                        && artifact
+                            .version
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || byte == b'.'))))
+        {
+            return Err(failed(
+                "Torchvision build differs from selected Torch build",
+            ));
+        }
+        let item = &entries[index];
+        let report_name = item["metadata"]["name"]
+            .as_str()
+            .map(|name| name.to_ascii_lowercase().replace('_', "-"));
+        if report_name.as_deref() != Some(artifact.name.as_str())
+            || item["metadata"]["version"].as_str() != Some(artifact.version.as_str())
+            || item["download_info"]["url"].as_str() != Some(artifact.url.as_str())
+            || item["download_info"]["archive_info"]["hashes"]["sha256"].as_str()
+                != Some(artifact.sha256.as_str())
+            || requirements.lines().nth(index)
+                != Some(
+                    format!(
+                        "{} @ {} --hash=sha256:{}",
+                        artifact.name, artifact.url, artifact.sha256
+                    )
+                    .as_str(),
+                )
+        {
+            return Err(failed("Torch report, resolution, and hash lock disagree"));
+        }
+    }
+    if torch_count != 1 {
+        return Err(failed("Torch report must contain one selected Torch wheel"));
+    }
+    for required in [
+        "torch",
+        "fastapi",
+        "uvicorn",
+        "psutil",
+        "pillow",
+        "safetensors",
+    ] {
+        if !names.contains(required) {
+            return Err(failed("Torch report omitted a required core dependency"));
+        }
+    }
+    if adapter == "flux2" {
+        for required in [
+            "torchvision",
+            "diffusers",
+            "transformers",
+            "accelerate",
+            "peft",
+            "sentencepiece",
+            "protobuf",
+        ] {
+            if !names.contains(required) {
+                return Err(failed("Torch report omitted an image dependency"));
+            }
+        }
+    }
+    Ok(())
+}
+
+enum DirectTorchAttempt {
+    Installed(PathBuf),
+    Retry,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StagedFilesManifest {
+    files: Vec<StagedFile>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StagedFile {
+    path: String,
+    sha256: String,
+    size: u64,
+}
+
+fn validate_staged_files(target: &Path, manifest: &StagedFilesManifest) -> Result<()> {
+    if manifest.files.is_empty() || manifest.files.len() > 200_000 {
+        return Err(failed("Torch staged file manifest is empty or oversized"));
+    }
+    let mut expected = std::collections::HashMap::new();
+    for item in &manifest.files {
+        let path = Path::new(&item.path);
+        if item.path.len() > 1024
+            || item.path.contains('\\')
+            || path
+                .components()
+                .any(|part| !matches!(part, std::path::Component::Normal(_)))
+            || item.sha256.len() != 64
+            || !item.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || expected.insert(item.path.as_str(), item).is_some()
+        {
+            return Err(failed("Torch staged file manifest has an invalid entry"));
+        }
+    }
+    let mut seen = 0;
+    for entry in walkdir::WalkDir::new(target).follow_links(false) {
+        let entry = entry.map_err(|_| failed("Cannot inspect Torch staged packages"))?;
+        if entry.file_type().is_symlink() {
+            return Err(failed("Torch staged packages contain a symlink"));
+        }
+        if entry.file_type().is_dir() {
+            continue;
+        }
+        if !entry.file_type().is_file() {
+            return Err(failed("Torch staged packages contain a special file"));
+        }
+        let relative = entry
+            .path()
+            .strip_prefix(target)
+            .map_err(|_| failed("Torch staged file escaped its target"))?;
+        let name = relative
+            .to_str()
+            .ok_or_else(|| failed("Torch staged file name is invalid"))?
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        let item = expected
+            .get(name.as_str())
+            .ok_or_else(|| failed("Torch staged packages contain an unreported file"))?;
+        let mut file = std::fs::File::open(entry.path()).map_err(PumasError::from)?;
+        let mut hasher = Sha256::new();
+        let mut size = 0_u64;
+        let mut buffer = [0_u8; 1024 * 1024];
+        loop {
+            use std::io::Read;
+            let count = file.read(&mut buffer).map_err(PumasError::from)?;
+            if count == 0 {
+                break;
+            }
+            hasher.update(&buffer[..count]);
+            size += count as u64;
+        }
+        if size != item.size || format!("{:x}", hasher.finalize()) != item.sha256 {
+            return Err(failed(
+                "Torch staged file differs from the validated wheel manifest",
+            ));
+        }
+        seen += 1;
+    }
+    if seen != expected.len() {
+        return Err(failed("Torch staged wheel manifest names missing files"));
+    }
+    Ok(())
+}
+
+fn move_verified_packages(target: &Path, runtime: &Path, python_minor: &str) -> Result<()> {
+    #[cfg(windows)]
+    let packages = runtime.join("venv").join("Lib").join("site-packages");
+    #[cfg(not(windows))]
+    let packages = runtime
+        .join("venv")
+        .join("lib")
+        .join(format!("python{python_minor}"))
+        .join("site-packages");
+    std::fs::create_dir_all(&packages).map_err(PumasError::from)?;
+    let entries = std::fs::read_dir(target)
+        .map_err(PumasError::from)?
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(PumasError::from)?;
+    if entries.is_empty() {
+        return Err(failed("Torch installer staged no packages"));
+    }
+    for entry in &entries {
+        let file_type = entry.file_type().map_err(PumasError::from)?;
+        let destination = packages.join(entry.file_name());
+        if file_type.is_symlink() || destination.exists() {
+            return Err(failed(
+                "Torch package staging contains a link or venv collision",
+            ));
+        }
+    }
+    for entry in entries {
+        std::fs::rename(entry.path(), packages.join(entry.file_name()))
+            .map_err(PumasError::from)?;
+    }
+    std::fs::remove_dir(target).map_err(PumasError::from)?;
+    Ok(())
+}
+
+fn validate_and_move_direct_torch_packages(
+    resolution: &DirectTorchResolution,
+    report: &serde_json::Value,
+    requirements: &str,
+    selection: &DirectTorchSelection<'_>,
+    target: &Path,
+    runtime: &Path,
+    manifest: &StagedFilesManifest,
+) -> Result<()> {
+    validate_direct_torch_report(resolution, report, requirements, selection)?;
+    validate_staged_files(target, manifest)?;
+    move_verified_packages(target, runtime, selection.minor)
+}
+
 impl VersionInstaller {
+    async fn run_provider_with_cancel<F, T>(&self, operation: F) -> Result<T>
+    where
+        F: std::future::Future<Output = Result<T>>,
+    {
+        let outcome = tokio::select! {
+            biased;
+            _ = async {
+                loop {
+                    if self.cancel_flag.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            } => None,
+            result = operation => Some(result),
+        };
+        match outcome {
+            Some(result) => result,
+            None => {
+                // The losing provider future has been dropped before draining all
+                // registered children, including its newly abandoned uv child.
+                self.torch_cleanup.drain_child_slots().await?;
+                Err(failed("Installation cancelled by user"))
+            }
+        }
+    }
+
+    async fn stage_selected_torch_runtime(
+        &self,
+        selection: &super::super::torch_preview::TorchInstallSelection,
+        staging: &std::sync::Arc<TorchPendingStage>,
+        log_path: &Path,
+        progress_tx: &mpsc::Sender<ProgressUpdate>,
+    ) -> Result<PathBuf> {
+        if selection.adapter != "none" && selection.adapter != "flux2" {
+            return Err(failed(
+                "This Torch dependency profile requires a resolved plan",
+            ));
+        }
+        let builds: Vec<String> = if selection.build == "auto" {
+            automatic_torch_builds()
+                .await
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
+        } else if super::super::torch_preview::valid_torch_channel(&selection.build) {
+            vec![selection.build.clone()]
+        } else {
+            return Err(failed("Invalid Torch build channel"));
+        };
+        self.check_cancelled()?;
+        let python_root = self.launcher_root.join("launcher-data/managed-python");
+        let candidates = self
+            .run_provider_with_cancel(
+                super::super::torch_alternatives::managed_torch_candidate_minors(
+                    &python_root,
+                    &self.torch_cleanup,
+                ),
+            )
+            .await?;
+        self.check_cancelled()?;
+        let minors = if selection.python == "auto" {
+            candidates
+        } else {
+            let selected = selection.python.strip_prefix("python");
+            selected
+                .filter(|selected| candidates.iter().any(|candidate| candidate == *selected))
+                .map(str::to_owned)
+                .into_iter()
+                .collect()
+        };
+        if minors.is_empty() {
+            return Err(failed(
+                "No managed CPython candidate is available for Torch",
+            ));
+        }
+        for build in builds {
+            for minor in &minors {
+                self.check_cancelled()?;
+                let attempt = self
+                    .stage_selected_torch_attempt(
+                        selection,
+                        &build,
+                        minor,
+                        &python_root,
+                        &TorchAttemptContext {
+                            staging,
+                            log_path,
+                            progress_tx,
+                        },
+                    )
+                    .await?;
+                match attempt {
+                    DirectTorchAttempt::Installed(runtime) => return Ok(runtime),
+                    DirectTorchAttempt::Retry => {
+                        let runtime = staging.path().join("runtime");
+                        spawn_blocking_with_stage(staging.clone(), move || {
+                            std::fs::remove_dir_all(runtime)
+                        })
+                        .await
+                        .map_err(|error| {
+                            failed(format!("Torch retry cleanup task failed: {error}"))
+                        })?
+                        .map_err(PumasError::from)?;
+                    }
+                }
+            }
+        }
+        Err(failed(
+            "No managed Python candidate has compatible Torch wheels and dependencies",
+        ))
+    }
+
+    async fn stage_selected_torch_attempt(
+        &self,
+        selection: &super::super::torch_preview::TorchInstallSelection,
+        build: &str,
+        minor: &str,
+        python_root: &Path,
+        context: &TorchAttemptContext<'_>,
+    ) -> Result<DirectTorchAttempt> {
+        let staging = context.staging;
+        let log_path = context.log_path;
+        let progress_tx = context.progress_tx;
+        let managed_python = self
+            .run_provider_with_cancel(async {
+                super::super::managed_python::ensure_managed_torch_interpreter(
+                    python_root,
+                    &self.torch_cleanup,
+                    minor,
+                )
+                .await
+                .map_err(|error| failed(error.message))
+            })
+            .await?;
+        self.check_cancelled()?;
+        let interpreter_hash = format!(
+            "{:x}",
+            Sha256::digest(std::fs::read(&managed_python.executable).map_err(PumasError::from)?)
+        );
+
+        let runtime = staging.path().join("runtime");
+        let runtime_for_write = runtime.clone();
+        spawn_blocking_with_stage(staging.clone(), move || {
+            write_embedded_torch_runtime(&runtime_for_write)
+        })
+        .await
+        .map_err(|error| failed(format!("Runtime staging task failed: {error}")))??;
+        std::fs::remove_file(runtime.join("requirements.txt")).map_err(PumasError::from)?;
+        std::fs::remove_file(runtime.join("validate_runtime.py")).map_err(PumasError::from)?;
+        let mut venv = Command::new(&managed_python.executable);
+        venv.args(["-I", "-m", "venv"]).arg(runtime.join("venv"));
+        self.run_runtime_command(
+            venv,
+            log_path,
+            &format!("Creating managed Python {minor} environment"),
+            progress_tx,
+            Some(staging.clone()),
+        )
+        .await?;
+
+        let version = selection
+            .tag
+            .strip_prefix('v')
+            .ok_or_else(|| failed("Invalid Torch release tag"))?;
+        let python = pumas_library::platform::paths::venv_python(&runtime);
+        let packages = runtime.join("staged-packages");
+        let resolver_output = runtime.join("resolver-result");
+        let download_progress_path = resolver_output.join("download-progress.json");
+        let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
+        let mut install = Command::new(&python);
+        install
+            .arg("-I")
+            .arg(runtime.join("resolve_runtime.py"))
+            .args(["--install", "--version", version, "--build", build])
+            .args(["--adapter", &selection.adapter])
+            .arg("--progress-file")
+            .arg(&download_progress_path)
+            .arg("--target")
+            .arg(&packages)
+            .arg("--output")
+            .arg(&resolver_output)
+            .arg("--cache-dir")
+            .arg(pip_cache);
+        let status = self
+            .run_runtime_command_status_with_download_progress(
+                install,
+                log_path,
+                &format!(
+                    "Resolving and installing official Torch {build} wheels for Python {minor}"
+                ),
+                progress_tx,
+                Some(staging.clone()),
+                Some(&download_progress_path),
+            )
+            .await?;
+        if !status.success() {
+            if retry_direct_torch_attempt(
+                status.code(),
+                selection.python == "auto",
+                selection.build == "auto" && build != "cpu",
+            ) {
+                return Ok(DirectTorchAttempt::Retry);
+            }
+            return Err(failed(format!(
+                "Torch package installation failed ({status}); see installation log"
+            )));
+        }
+        // No staged package code runs until the resolver has validated the
+        // installation report and published its lock and resolution manifest.
+        let resolution: DirectTorchResolution = serde_json::from_slice(
+            &std::fs::read(resolver_output.join("resolution.json")).map_err(PumasError::from)?,
+        )
+        .map_err(|error| failed(format!("Invalid Torch installation report: {error}")))?;
+        let report: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(resolver_output.join("pip-resolution.json"))
+                .map_err(PumasError::from)?,
+        )
+        .map_err(|error| failed(format!("Invalid Torch pip report: {error}")))?;
+        let requirements = std::fs::read_to_string(resolver_output.join("requirements.txt"))
+            .map_err(PumasError::from)?;
+        let manifest: StagedFilesManifest = serde_json::from_slice(
+            &std::fs::read(resolver_output.join("installed-files.json"))
+                .map_err(PumasError::from)?,
+        )
+        .map_err(|error| failed(format!("Invalid Torch staged file manifest: {error}")))?;
+        validate_and_move_direct_torch_packages(
+            &resolution,
+            &report,
+            &requirements,
+            &DirectTorchSelection {
+                version,
+                build,
+                minor,
+                adapter: &selection.adapter,
+                python: &python,
+            },
+            &packages,
+            &runtime,
+            &manifest,
+        )?;
+        for name in [
+            "requirements.txt",
+            "resolution.json",
+            "pip-resolution.json",
+            "installed-files.json",
+        ] {
+            std::fs::copy(resolver_output.join(name), runtime.join(name))
+                .map_err(PumasError::from)?;
+        }
+        let recipe = serde_json::json!({
+            "recipe_id": format!("upstream-install-{}-{}-{}-{}", selection.tag, build, minor, selection.adapter),
+            "protocol": SUPPORTED_TORCH_PROTOCOL,
+            "capabilities": [TORCH_IMAGE_GENERATION_CAPABILITY],
+            "qualification": "not verified by Pumas",
+            "build": build,
+            "python": format!("python{minor}"),
+            "adapter": selection.adapter,
+            "managed_python": managed_python_identity_record(&managed_python, &interpreter_hash),
+            "artifacts": resolution.artifacts,
+        });
+        std::fs::write(
+            runtime.join("runtime.json"),
+            serde_json::to_vec_pretty(&recipe).map_err(|error| failed(error.to_string()))?,
+        )
+        .map_err(PumasError::from)?;
+        let mut probe = Command::new(&python);
+        probe.arg(runtime.join("probe_runtime.py"));
+        self.run_runtime_command(
+            probe,
+            log_path,
+            "Checking installed Torch identity and CPU operation",
+            progress_tx,
+            Some(staging.clone()),
+        )
+        .await?;
+        Ok(DirectTorchAttempt::Installed(runtime))
+    }
+
     async fn stage_resolved_torch_runtime(
         &self,
         plan: &TorchInstallPlan,
@@ -1169,8 +2109,14 @@ impl VersionInstaller {
         )
         .map_err(PumasError::from)?;
         let python = pumas_library::platform::paths::venv_python(&runtime);
-        let mut install = Command::new(pumas_library::platform::paths::venv_pip(&runtime));
+        let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
+        let download_progress_path = runtime.join("download-progress.json");
+        let mut install = Command::new(&python);
         install
+            .arg("-I")
+            .arg(runtime.join("resolve_runtime.py"))
+            .arg("--_pumas-pip-progress-worker")
+            .arg(&download_progress_path)
             .args([
                 "--isolated",
                 "install",
@@ -1182,15 +2128,22 @@ impl VersionInstaller {
             ])
             .arg(runtime.join("requirements.txt"))
             .arg("--cache-dir")
-            .arg(self.launcher_root.join("launcher-data/cache/pip"));
-        self.run_runtime_command(
-            install,
-            log_path,
-            "Installing resolved wheel artifacts",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
+            .arg(pip_cache);
+        let status = self
+            .run_runtime_command_status_with_download_progress(
+                install,
+                log_path,
+                "Installing resolved wheel artifacts",
+                progress_tx,
+                Some(staging.clone()),
+                Some(&download_progress_path),
+            )
+            .await?;
+        if !status.success() {
+            return Err(failed(
+                "Installing resolved wheel artifacts failed; see installation log",
+            ));
+        }
         let mut probe = Command::new(&python);
         probe.arg(runtime.join("probe_runtime.py"));
         self.run_runtime_command(
@@ -1209,7 +2162,7 @@ impl VersionInstaller {
         tag: &str,
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
-        plan: Option<TorchInstallPlan>,
+        input: Option<TorchInstallInput>,
     ) -> Result<()> {
         let _attempt = self
             .torch_attempt_lock
@@ -1217,7 +2170,7 @@ impl VersionInstaller {
             .map_err(|_| failed("Torch installation already active"))?;
         self.torch_control.start();
         let result = self
-            .install_torch_runtime_inner(tag, release, progress_tx, plan)
+            .install_torch_runtime_inner(tag, release, progress_tx, input)
             .await;
         self.torch_control.finish();
         result
@@ -1228,7 +2181,7 @@ impl VersionInstaller {
         tag: &str,
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
-        plan: Option<TorchInstallPlan>,
+        input: Option<TorchInstallInput>,
     ) -> Result<()> {
         if !cfg!(any(
             all(target_os = "linux", target_arch = "x86_64"),
@@ -1246,16 +2199,25 @@ impl VersionInstaller {
                 "Unsupported upstream PyTorch release or mismatched tag",
             ));
         }
-        let recipe = if cfg!(all(target_os = "linux", target_arch = "x86_64"))
-            && plan
-                .as_ref()
-                .is_none_or(|p| p.preview.qualification == "qualified")
+        let plan = match input.as_ref() {
+            Some(TorchInstallInput::Resolved(plan)) => Some(plan.as_ref()),
+            _ => None,
+        };
+        let selection = match input.as_ref() {
+            Some(TorchInstallInput::Selection(selection)) => Some(selection),
+            _ => None,
+        };
+        let recipe = if selection.is_none()
+            && cfg!(all(target_os = "linux", target_arch = "x86_64"))
+            && plan.is_none_or(|p| p.preview.qualification == "qualified")
         {
             torch_recipe_for_tag(tag)
         } else {
             None
         };
-        if plan.as_ref().is_some_and(|p| p.preview.tag != tag) {
+        if plan.is_some_and(|p| p.preview.tag != tag)
+            || selection.is_some_and(|selection| selection.tag != tag)
+        {
             return Err(failed("Torch preview tag mismatch"));
         }
         if !tag
@@ -1320,7 +2282,7 @@ impl VersionInstaller {
                 ));
             }
         }
-        if recipe.is_none() && plan.is_none() {
+        if recipe.is_none() && input.is_none() {
             #[cfg(test)]
             if self.torch_stage_override.is_none() {
                 return Err(failed(
@@ -1350,14 +2312,7 @@ impl VersionInstaller {
             Some(log_path.to_string_lossy().as_ref()),
         );
         let result = self
-            .stage_torch_runtime(
-                tag,
-                recipe,
-                plan.as_ref(),
-                &staging,
-                &log_path,
-                &progress_tx,
-            )
+            .stage_torch_runtime(recipe, plan, selection, &staging, &log_path, &progress_tx)
             .await;
         #[cfg(test)]
         if result.is_ok() && self.torch_stage_override.is_some() {
@@ -1414,7 +2369,7 @@ impl VersionInstaller {
                             &destination,
                             &progress_tx,
                             staging.clone(),
-                            plan.as_ref()
+                            plan
                                 .map(|plan| format!("Python {}", plan.managed_python.version)),
                         )
                         .await;
@@ -1464,9 +2419,9 @@ impl VersionInstaller {
 
     async fn stage_torch_runtime(
         &self,
-        _tag: &str,
         recipe_spec: Option<&TorchRuntimeRecipe>,
         plan: Option<&TorchInstallPlan>,
+        selection: Option<&super::super::torch_preview::TorchInstallSelection>,
         staging: &std::sync::Arc<TorchPendingStage>,
         log_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
@@ -1478,6 +2433,11 @@ impl VersionInstaller {
         if let Some(plan) = plan.filter(|p| p.preview.qualification != "qualified") {
             return self
                 .stage_resolved_torch_runtime(plan, staging, log_path, progress_tx)
+                .await;
+        }
+        if let Some(selection) = selection {
+            return self
+                .stage_selected_torch_runtime(selection, staging, log_path, progress_tx)
                 .await;
         }
         let recipe_spec = recipe_spec.expect("checked above");
@@ -1560,8 +2520,14 @@ impl VersionInstaller {
         )
         .await?;
         let python = pumas_library::platform::paths::venv_python(&runtime);
-        let mut install = Command::new(pumas_library::platform::paths::venv_pip(&runtime));
+        let pip_cache = super::super::torch_workspace::managed_pip_cache_dir(&self.launcher_root)?;
+        let download_progress_path = runtime.join("download-progress.json");
+        let mut install = Command::new(&python);
         install
+            .arg("-I")
+            .arg(runtime.join("resolve_runtime.py"))
+            .arg("--_pumas-pip-progress-worker")
+            .arg(&download_progress_path)
             .args([
                 "--isolated",
                 "install",
@@ -1572,15 +2538,22 @@ impl VersionInstaller {
             ])
             .arg(runtime.join("requirements.txt"))
             .arg("--cache-dir")
-            .arg(self.launcher_root.join("launcher-data/cache/pip"));
-        self.run_runtime_command(
-            install,
-            log_path,
-            "Installing locked runtime dependencies",
-            progress_tx,
-            Some(staging.clone()),
-        )
-        .await?;
+            .arg(pip_cache);
+        let status = self
+            .run_runtime_command_status_with_download_progress(
+                install,
+                log_path,
+                "Installing locked runtime dependencies",
+                progress_tx,
+                Some(staging.clone()),
+                Some(&download_progress_path),
+            )
+            .await?;
+        if !status.success() {
+            return Err(failed(
+                "Installing locked runtime dependencies failed; see installation log",
+            ));
+        }
         let mut validate = Command::new(&python);
         validate
             .arg(runtime.join("validate_runtime.py"))
@@ -1623,21 +2596,80 @@ impl VersionInstaller {
 
     pub(super) async fn run_runtime_command(
         &self,
-        mut command: Command,
+        command: Command,
         log_path: &Path,
         stage: &str,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
         stage_lease: Option<std::sync::Arc<TorchPendingStage>>,
     ) -> Result<()> {
+        let status = self
+            .run_runtime_command_status(command, log_path, stage, progress_tx, stage_lease)
+            .await?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(failed(format!(
+                "{stage} failed ({status}); see installation log"
+            )))
+        }
+    }
+
+    async fn run_runtime_command_status(
+        &self,
+        command: Command,
+        log_path: &Path,
+        stage: &str,
+        progress_tx: &mpsc::Sender<ProgressUpdate>,
+        stage_lease: Option<std::sync::Arc<TorchPendingStage>>,
+    ) -> Result<std::process::ExitStatus> {
+        self.run_runtime_command_status_with_download_progress(
+            command,
+            log_path,
+            stage,
+            progress_tx,
+            stage_lease,
+            None,
+        )
+        .await
+    }
+
+    async fn run_runtime_command_status_with_download_progress(
+        &self,
+        mut command: Command,
+        log_path: &Path,
+        stage: &str,
+        progress_tx: &mpsc::Sender<ProgressUpdate>,
+        stage_lease: Option<std::sync::Arc<TorchPendingStage>>,
+        download_progress_path: Option<&Path>,
+    ) -> Result<std::process::ExitStatus> {
         self.check_cancelled()?;
+        if let Some(stage_lease) = &stage_lease {
+            let scratch = stage_lease.scratch_path()?;
+            command
+                .env("TMPDIR", &scratch)
+                .env("TMP", &scratch)
+                .env("TEMP", &scratch);
+        }
         self.progress_tracker.write().await.update_stage(
-            InstallationStage::Setup,
+            if download_progress_path.is_some() {
+                InstallationStage::Dependencies
+            } else {
+                InstallationStage::Setup
+            },
             0.0,
             Some(stage),
         );
-        let _ = progress_tx.try_send(ProgressUpdate::Setup {
-            message: stage.to_string(),
-        });
+        let progress_update = if download_progress_path.is_some() {
+            ProgressUpdate::StageChanged {
+                stage: InstallationStage::Dependencies,
+                message: stage.to_string(),
+            }
+        } else {
+            ProgressUpdate::Setup {
+                message: stage.to_string(),
+            }
+        };
+        let _ = progress_tx.try_send(progress_update);
         let log = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -1656,10 +2688,48 @@ impl VersionInstaller {
             child.attach_cleanup_lease(stage_lease);
         }
         let deadline = tokio::time::Instant::now() + Duration::from_secs(3600);
+        let mut last_download_progress: Option<TorchDownloadProgress> = None;
+        let mut last_download_progress_change_at: Option<tokio::time::Instant> = None;
+        let mut download_speed_expired = false;
         loop {
             let observed = child.observe_exit();
             let cancelled = self.cancel_flag.load(Ordering::SeqCst);
             let timed_out = tokio::time::Instant::now() >= deadline;
+            if let Some(path) = download_progress_path {
+                if let Some(download_progress) = read_torch_download_progress(path) {
+                    if last_download_progress.as_ref() != Some(&download_progress) {
+                        self.progress_tracker.write().await.update_network_transfer(
+                            download_progress.source_url.as_deref(),
+                            download_progress.active,
+                            download_progress.downloaded_bytes,
+                            download_progress.total_bytes,
+                            download_progress.speed_bytes_per_sec,
+                            download_progress.measurement_available,
+                        );
+                        last_download_progress = Some(download_progress);
+                        last_download_progress_change_at = Some(tokio::time::Instant::now());
+                        download_speed_expired = false;
+                    } else if !download_speed_expired
+                        && last_download_progress.as_ref().is_some_and(|progress| {
+                            progress.active && progress.speed_bytes_per_sec.is_some()
+                        })
+                        && last_download_progress_change_at.is_some_and(|changed_at| {
+                            changed_at.elapsed() >= TORCH_DOWNLOAD_SPEED_STALE_AFTER
+                        })
+                    {
+                        let progress = last_download_progress.as_ref().expect("checked above");
+                        self.progress_tracker.write().await.update_network_transfer(
+                            progress.source_url.as_deref(),
+                            true,
+                            progress.downloaded_bytes,
+                            progress.total_bytes,
+                            None,
+                            progress.measurement_available,
+                        );
+                        download_speed_expired = true;
+                    }
+                }
+            }
             if cancelled || timed_out || !matches!(&observed, Ok(None)) {
                 drop(child);
                 self.torch_cleanup
@@ -1670,6 +2740,9 @@ impl VersionInstaller {
                         "Torch installer cleanup incomplete; owned process cleanup remains pending",
                     )
                     })?;
+                if let Some(path) = download_progress_path {
+                    let _ = std::fs::remove_file(path);
+                }
                 self.check_cancelled()?;
                 if timed_out {
                     return Err(failed(format!(
@@ -1679,13 +2752,7 @@ impl VersionInstaller {
                 let status = observed
                     .map_err(PumasError::from)?
                     .ok_or_else(|| failed("Missing terminal installer status"))?;
-                return if status.success() {
-                    Ok(())
-                } else {
-                    Err(failed(format!(
-                        "{stage} failed ({status}); see installation log"
-                    )))
-                };
+                return Ok(status);
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
@@ -1693,8 +2760,341 @@ impl VersionInstaller {
 }
 
 #[cfg(test)]
+mod download_progress_tests {
+    use super::*;
+
+    #[test]
+    fn progress_source_accepts_any_safe_https_host_and_path() {
+        for source in [
+            "https://download.pytorch.org/whl/cu134/torch-2.14.0.whl",
+            "https://download-r2.pytorch.org/whl/cpu/torch-2.14.0.whl",
+            "https://files.pythonhosted.org/packages/ab/pkg-1.0.whl",
+            "https://github.com/nunchux-ai/nunchaku/releases/download/v1.2.0/nunchaku-1.2.0.whl",
+            "https://mirror.example.net:8443/releases/model.safetensors",
+        ] {
+            assert!(safe_torch_download_source(source), "{source}");
+        }
+        for source in [
+            "http://files.pythonhosted.org/packages/pkg-1.0.whl",
+            "https://user:secret@files.pythonhosted.org/packages/pkg-1.0.whl",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl?token=secret",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl?",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl#download",
+            "https://files.pythonhosted.org/packages/pkg-1.0.whl#",
+            "https://mirror.example.net/releases/model file.bin",
+            &format!("https://mirror.example.net/{}", "a".repeat(2048)),
+        ] {
+            assert!(!safe_torch_download_source(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn progress_file_rejects_secret_sources_and_bad_rates() {
+        let workspace = tempfile::tempdir().unwrap();
+        let path = workspace.path().join("download-progress.json");
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "source_url":"https://example.com/torch.whl?token=secret",
+                "active":true,
+                "downloaded_bytes":1,
+                "total_bytes":2,
+                "speed_bytes_per_sec":1.0,
+                "measurement_available":true
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(read_torch_download_progress(&path).is_none());
+
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "source_url":"https://mirror.example.net:8443/releases/model.safetensors",
+                "active":true,
+                "downloaded_bytes":3,
+                "total_bytes":2,
+                "speed_bytes_per_sec":1.0
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(read_torch_download_progress(&path).is_none());
+
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "source_url":"https://mirror.example.net:8443/releases/model.safetensors",
+                "active":true,
+                "downloaded_bytes":1,
+                "total_bytes":2,
+                "speed_bytes_per_sec":10.0,
+                "measurement_available":true
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            read_torch_download_progress(&path),
+            Some(TorchDownloadProgress {
+                source_url: Some(
+                    "https://mirror.example.net:8443/releases/model.safetensors".into(),
+                ),
+                active: true,
+                downloaded_bytes: 1,
+                total_bytes: Some(2),
+                speed_bytes_per_sec: Some(10.0),
+                measurement_available: true,
+            })
+        );
+
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "source_url":null,
+                "active":true,
+                "downloaded_bytes":1,
+                "total_bytes":2,
+                "speed_bytes_per_sec":1.0,
+                "measurement_available":true
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            read_torch_download_progress(&path),
+            Some(TorchDownloadProgress {
+                source_url: None,
+                active: true,
+                downloaded_bytes: 1,
+                total_bytes: Some(2),
+                speed_bytes_per_sec: Some(1.0),
+                measurement_available: true,
+            })
+        );
+    }
+}
+
+#[cfg(test)]
 mod managed_python_provenance_tests {
     use super::*;
+
+    #[test]
+    fn macos_pypi_torch_wheels_require_matching_identity_and_platform() {
+        let source = "https://files.pythonhosted.org/packages/ee/90/torch-2.14.0-cp314-cp314-macosx_14_0_arm64.whl";
+        let url = reqwest::Url::parse(source).unwrap();
+        assert!(trusted_macos_pypi_torch_wheel(
+            &url, "torch", "2.14.0", true
+        ));
+        assert!(!trusted_macos_pypi_torch_wheel(
+            &url, "torch", "2.14.0", false
+        ));
+        for altered in [
+            source.replace("torch-2.14.0", "torch-2.13.0"),
+            source.replace("torch-2.14.0", "other-2.14.0"),
+            source.replace("macosx_14_0_arm64", "manylinux_2_28_x86_64"),
+            source.replace("files.pythonhosted.org", "files.pythonhosted.org.evil.test"),
+        ] {
+            let altered = reqwest::Url::parse(&altered).unwrap();
+            assert!(!trusted_macos_pypi_torch_wheel(
+                &altered, "torch", "2.14.0", true
+            ));
+        }
+    }
+
+    #[test]
+    fn direct_install_report_requires_trusted_hash_locked_wheels_before_probe() {
+        let torch_version = if cfg!(target_os = "macos") {
+            "2.14.0"
+        } else {
+            "2.14.0+cpu"
+        };
+        let artifacts = [
+            "torch",
+            "fastapi",
+            "uvicorn",
+            "psutil",
+            "pillow",
+            "safetensors",
+        ]
+        .into_iter()
+        .map(|name| crate::version_manager::TorchArtifact {
+            name: name.into(),
+            version: if name == "torch" {
+                torch_version.into()
+            } else {
+                "1.0".into()
+            },
+            url: if name == "torch" {
+                "https://download.pytorch.org/whl/cpu/torch/torch-fixture.whl".into()
+            } else {
+                format!("https://files.pythonhosted.org/packages/{name}-fixture.whl")
+            },
+            sha256: "a".repeat(64),
+        })
+        .collect::<Vec<_>>();
+        let (platform, machine) = match std::env::consts::OS {
+            "linux" => ("Linux-fixture", "x86_64"),
+            "windows" => ("Windows-fixture", "AMD64"),
+            "macos" => ("macOS-fixture", "arm64"),
+            _ => return,
+        };
+        let mut resolution = DirectTorchResolution {
+            release: "2.14.0".into(),
+            torch: torch_version.into(),
+            build: "cpu".into(),
+            python: "3.12".into(),
+            interpreter: "/staged/venv/python".into(),
+            implementation: "cpython".into(),
+            platform: platform.into(),
+            machine: machine.into(),
+            adapter: "none".into(),
+            artifacts,
+        };
+        let report = serde_json::json!({
+            "install": resolution.artifacts.iter().map(|artifact| serde_json::json!({
+                "metadata": {"name": artifact.name, "version": artifact.version},
+                "download_info": {"url": artifact.url, "archive_info": {"hashes": {"sha256": artifact.sha256}}}
+            })).collect::<Vec<_>>()
+        });
+        let requirements = resolution
+            .artifacts
+            .iter()
+            .map(|artifact| {
+                format!(
+                    "{} @ {} --hash=sha256:{}",
+                    artifact.name, artifact.url, artifact.sha256
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let python = Path::new("/staged/venv/python");
+        let selection = DirectTorchSelection {
+            version: "2.14.0",
+            build: "cpu",
+            minor: "3.12",
+            adapter: "none",
+            python,
+        };
+        let check = |resolution: &DirectTorchResolution, report: &serde_json::Value, lock: &str| {
+            validate_direct_torch_report(resolution, report, lock, &selection)
+        };
+        assert!(check(&resolution, &report, &requirements).is_ok());
+        resolution.artifacts[0].url = "https://example.com/torch.whl".into();
+        assert!(check(&resolution, &report, &requirements).is_err());
+        resolution.artifacts[0].url = report["install"][0]["download_info"]["url"]
+            .as_str()
+            .unwrap()
+            .into();
+        resolution.artifacts[0].sha256 = "invalid".into();
+        assert!(check(&resolution, &report, &requirements).is_err());
+        resolution.artifacts[0].sha256 = "a".repeat(64);
+        assert!(check(&resolution, &report, "torch @ https://download.pytorch.org/whl/cpu/torch/torch-fixture.whl --hash=sha256:bad").is_err());
+
+        let stage = tempfile::tempdir().unwrap();
+        let runtime = stage.path().join("runtime");
+        let target = runtime.join("staged-packages");
+        std::fs::create_dir_all(&target).unwrap();
+        let contents = "raise RuntimeError('executed')";
+        std::fs::write(target.join("verified.pth"), contents).unwrap();
+        let manifest = StagedFilesManifest {
+            files: vec![StagedFile {
+                path: "verified.pth".into(),
+                sha256: format!("{:x}", Sha256::digest(contents.as_bytes())),
+                size: contents.len() as u64,
+            }],
+        };
+        let publish = |lock: &str| {
+            validate_and_move_direct_torch_packages(
+                &resolution,
+                &report,
+                lock,
+                &selection,
+                &target,
+                &runtime,
+                &manifest,
+            )
+        };
+        assert!(publish("malformed lock").is_err());
+        assert!(target.join("verified.pth").exists());
+        #[cfg(windows)]
+        let installed = runtime.join("venv/Lib/site-packages/verified.pth");
+        #[cfg(not(windows))]
+        let installed = runtime.join("venv/lib/python3.12/site-packages/verified.pth");
+        assert!(!installed.exists());
+        std::fs::write(target.join("unreported.pth"), "evil").unwrap();
+        assert!(publish(&requirements).is_err());
+        assert!(!installed.exists());
+        std::fs::remove_file(target.join("unreported.pth")).unwrap();
+        publish(&requirements).unwrap();
+        assert!(installed.exists());
+        assert!(!target.exists());
+    }
+
+    #[test]
+    fn automatic_cuda_channel_uses_existing_linux_driver_floors() {
+        assert_eq!(cuda_build_for_driver((579, 99, 99)), Some("cu129"));
+        assert_eq!(cuda_build_for_driver((580, 0, 0)), Some("cu134"));
+        assert_eq!(cuda_build_for_driver((525, 60, 13)), Some("cu129"));
+        assert_eq!(cuda_build_for_driver((450, 80, 2)), Some("cu118"));
+        assert_eq!(cuda_build_for_driver((440, 33, 0)), Some("cu102"));
+        assert_eq!(cuda_build_for_driver((409, 99, 99)), None);
+    }
+
+    #[test]
+    fn automatic_build_candidates_try_supported_cuda_channels_before_cpu() {
+        let builds = automatic_torch_builds_for_driver((580, 0, 0));
+        assert_eq!(builds, ["cu134", "cu132", "cu130", "cu129", "cpu"]);
+        assert!(!builds.contains(&"cu75"));
+
+        // An unsupported cu134 wheel can proceed to cu132 and stop there.
+        assert!(retry_direct_torch_attempt(Some(2), false, true));
+        assert_eq!(builds[1], "cu132");
+        assert!(!retry_direct_torch_attempt(Some(1), false, true));
+    }
+
+    #[test]
+    fn automatic_build_candidates_reach_cpu_after_unsupported_cuda_wheels() {
+        let builds = automatic_torch_builds_for_driver((525, 60, 13));
+        assert_eq!(builds, ["cu129", "cu128", "cu126", "cu124", "cpu"]);
+        assert!(builds[..builds.len() - 1]
+            .iter()
+            .all(|_| retry_direct_torch_attempt(Some(4), false, true)));
+        assert_eq!(automatic_torch_builds_for_driver((409, 99, 99)), ["cpu"]);
+    }
+
+    #[test]
+    fn automatic_python_fallback_only_accepts_conclusive_wheel_failures() {
+        for code in [2, 4] {
+            assert!(retry_torch_python_candidate(Some(code), true));
+            assert!(!retry_torch_python_candidate(Some(code), false));
+            assert!(retry_direct_torch_attempt(Some(code), false, true));
+            assert!(!retry_direct_torch_attempt(Some(code), false, false));
+        }
+        for code in [1, 3, 75, 124] {
+            assert!(!retry_torch_python_candidate(Some(code), true));
+        }
+        assert!(!retry_torch_python_candidate(None, true));
+    }
+
+    #[test]
+    fn validated_staged_packages_move_into_venv_only_without_collisions() {
+        let root = tempfile::tempdir().unwrap();
+        let runtime = root.path().join("runtime");
+        let target = runtime.join("staged-packages");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("torch.py"), "trusted staged wheel").unwrap();
+        move_verified_packages(&target, &runtime, "3.12").unwrap();
+        #[cfg(windows)]
+        let installed = runtime.join("venv/Lib/site-packages/torch.py");
+        #[cfg(not(windows))]
+        let installed = runtime.join("venv/lib/python3.12/site-packages/torch.py");
+        assert_eq!(
+            std::fs::read_to_string(installed).unwrap(),
+            "trusted staged wheel"
+        );
+        assert!(!target.exists());
+    }
 
     #[tokio::test]
     async fn installed_runtime_recipe_retains_managed_python_provider_identity() {

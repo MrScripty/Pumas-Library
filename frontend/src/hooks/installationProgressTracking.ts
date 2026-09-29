@@ -15,6 +15,7 @@ import {
 export interface InstallationProgressTrackerState {
   lastDownloadTag: string | null;
   lastStage: InstallationProgress['stage'] | null;
+  lastDownloadSourceUrl: string | null;
   networkState: NetworkStatusState;
 }
 
@@ -24,6 +25,7 @@ export function resetInstallationProgressTracking(
   resetNetworkStatusState(state.networkState);
   state.lastDownloadTag = null;
   state.lastStage = null;
+  state.lastDownloadSourceUrl = null;
 }
 
 export function projectInstallationProgress(
@@ -36,6 +38,9 @@ export function projectInstallationProgress(
     stage_progress: progress.stageProgress ?? 0,
     overall_progress: progress.overallProgress ?? 0,
     current_item: progress.currentItem,
+    download_source_url: progress.downloadSourceUrl,
+    download_active: progress.downloadActive,
+    download_measurement_available: progress.downloadMeasurementAvailable,
     download_speed: progress.downloadSpeed,
     eta_seconds: progress.etaSeconds,
     total_size: progress.totalSize,
@@ -106,6 +111,7 @@ function synchronizeTrackerState(
   if (progress.tag !== trackerState.lastDownloadTag) {
     trackerState.lastDownloadTag = progress.tag || null;
     trackerState.lastStage = progress.stage;
+    trackerState.lastDownloadSourceUrl = progress.download_source_url ?? null;
     resetNetworkStatusState(trackerState.networkState);
     trackerState.networkState.lastDownload = { bytes: downloadedBytes, speed, ts: now };
     trackerState.networkState.topSpeed = speed || 0;
@@ -115,6 +121,11 @@ function synchronizeTrackerState(
   if (progress.stage !== trackerState.lastStage) {
     trackerState.networkState.downloadSamples = [];
     trackerState.lastStage = progress.stage;
+  }
+
+  if ((progress.download_source_url ?? null) !== trackerState.lastDownloadSourceUrl) {
+    trackerState.networkState.downloadSamples = [];
+    trackerState.lastDownloadSourceUrl = progress.download_source_url ?? null;
   }
 }
 
@@ -140,6 +151,10 @@ export function normalizeInstallationProgress(
   const averageSpeed = computeAverageSpeed(trackerState.networkState.downloadSamples);
   const expectedTotal = computeExpectedTotal(progress, availableVersions);
   const etaSeconds = computeEtaSeconds(progress, averageSpeed, expectedTotal);
+  const transferActive = progress.download_active ?? Boolean(
+    progress.download_source_url || progress.stage === 'download'
+  );
+  const canReportSpeed = transferActive && progress.download_measurement_available !== false;
 
   const adjustedProgress: InstallationProgress = {
     tag: progress.tag || '',
@@ -148,7 +163,12 @@ export function normalizeInstallationProgress(
     stage_progress: progress.stage_progress || 0,
     overall_progress: progress.overall_progress || 0,
     current_item: progress.current_item || null,
-    download_speed: progress.download_speed ?? (averageSpeed > 0 ? averageSpeed : null),
+    download_source_url: progress.download_source_url ?? null,
+    download_active: progress.download_active ?? false,
+    download_measurement_available: progress.download_measurement_available ?? null,
+    download_speed: canReportSpeed
+      ? progress.download_speed ?? (averageSpeed > 0 ? averageSpeed : null)
+      : null,
     eta_seconds: etaSeconds,
     total_size: expectedTotal ?? progress.total_size ?? null,
     downloaded_bytes: downloadedBytes,

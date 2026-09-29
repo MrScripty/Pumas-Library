@@ -1724,6 +1724,9 @@ pub(crate) struct RuntimeInstallationProgress {
     stage_progress: Option<f32>,
     overall_progress: Option<f32>,
     current_item: Option<String>,
+    download_source_url: Option<String>,
+    download_active: bool,
+    download_measurement_available: Option<bool>,
     download_speed: Option<f64>,
     eta_seconds: Option<f64>,
     total_size: Option<u64>,
@@ -1742,6 +1745,7 @@ pub(crate) struct RuntimeInstallationProgress {
 #[serde(rename_all = "lowercase")]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 enum RuntimeInstallationStage {
+    Resolving,
     Download,
     Extract,
     Venv,
@@ -1791,6 +1795,7 @@ impl InstallationProgressOutcome {
             tag: value.tag.ok_or_else(missing)?,
             started_at: value.started_at.ok_or_else(missing)?,
             stage: match value.stage.ok_or_else(missing)? {
+                InstallationStage::Resolving => RuntimeInstallationStage::Resolving,
                 InstallationStage::Download => RuntimeInstallationStage::Download,
                 InstallationStage::Extract => RuntimeInstallationStage::Extract,
                 InstallationStage::Venv => RuntimeInstallationStage::Venv,
@@ -1801,6 +1806,9 @@ impl InstallationProgressOutcome {
             stage_progress: value.stage_progress.filter(|value| value.is_finite()),
             overall_progress: value.overall_progress.filter(|value| value.is_finite()),
             current_item: value.current_item,
+            download_source_url: value.download_source_url,
+            download_active: value.download_active,
+            download_measurement_available: value.download_measurement_available,
             download_speed: value.download_speed.filter(|value| value.is_finite()),
             eta_seconds: value.eta_seconds.filter(|value| value.is_finite()),
             total_size: value.total_size,
@@ -1838,6 +1846,9 @@ fn installation_progress_fixture() -> pumas_library::models::InstallationProgres
         stage_progress: Some(125.5),
         overall_progress: Some(107.25),
         current_item: Some("torch".into()),
+        download_source_url: Some("https://download.pytorch.org/whl/cu134/torch-2.14.0.whl".into()),
+        download_active: true,
+        download_measurement_available: Some(true),
         download_speed: Some(42.5),
         eta_seconds: Some(0.5),
         total_size: Some(1024),
@@ -1883,7 +1894,7 @@ mod installation_progress_contract_tests {
     #[test]
     fn installation_progress_preserves_literal_wire_and_null() {
         let value = installation_progress_fixture();
-        let expected = serde_json::json!({"tag":" vλ.1 ","startedAt":"started","stage":"dependencies","stageProgress":125.5,"overallProgress":107.25,"currentItem":"torch","downloadSpeed":42.5,"etaSeconds":0.5,"totalSize":1024,"downloadedBytes":512,"dependencyCount":2,"completedDependencies":1,"completedItems":[{"name":"torch","type":"package","size":null,"completedAt":"item done"}],"error":null,"completedAt":null,"success":null,"logPath":"runtime/install.log"});
+        let expected = serde_json::json!({"tag":" vλ.1 ","startedAt":"started","stage":"dependencies","stageProgress":125.5,"overallProgress":107.25,"currentItem":"torch","downloadSourceUrl":"https://download.pytorch.org/whl/cu134/torch-2.14.0.whl","downloadActive":true,"downloadMeasurementAvailable":true,"downloadSpeed":42.5,"etaSeconds":0.5,"totalSize":1024,"downloadedBytes":512,"dependencyCount":2,"completedDependencies":1,"completedItems":[{"name":"torch","type":"package","size":null,"completedAt":"item done"}],"error":null,"completedAt":null,"success":null,"logPath":"runtime/install.log"});
         assert_eq!(serde_json::to_value(&value).unwrap(), expected);
         let outcome = InstallationProgressOutcome::new(Some(value)).unwrap();
         assert_eq!(serde_json::to_value(&outcome).unwrap(), expected);
@@ -1897,6 +1908,28 @@ mod installation_progress_contract_tests {
             serde_json::to_value(InstallationProgressOutcome::new(None).unwrap()).unwrap(),
             Value::Null
         );
+    }
+
+    #[test]
+    fn resolving_progress_stage_has_an_explicit_wire_value() {
+        use pumas_library::models::InstallationStage;
+        let mut value = installation_progress_fixture();
+        value.stage = Some(InstallationStage::Resolving);
+        let encoded =
+            serde_json::to_value(InstallationProgressOutcome::new(Some(value)).unwrap()).unwrap();
+        assert_eq!(encoded["stage"], "resolving");
+        #[cfg(feature = "export-contract")]
+        {
+            let schema = desktop_contract_schema().unwrap();
+            assert!(
+                schema["schemas"]["InstallationProgressOutcome"]["definitions"]
+                    ["RuntimeInstallationStage"]["enum"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|stage| stage == "resolving")
+            );
+        }
     }
 
     #[test]
@@ -3985,6 +4018,9 @@ pub(crate) struct PreviewTorchRuntimeParams {
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 #[cfg_attr(feature = "export-contract", derive(schemars::JsonSchema))]
 pub(crate) enum TorchRuntimePreviewOutcome {
+    Ready {
+        preview: TorchRuntimePreview,
+    },
     Resolved {
         preview: TorchRuntimePreview,
     },
@@ -4087,6 +4123,37 @@ fn torch_runtime_preview_fixture() -> TorchRuntimePreview {
 }
 
 #[cfg(feature = "inference-plugins")]
+impl TryFrom<pumas_app_manager::version_manager::TorchPreview> for TorchRuntimePreview {
+    type Error = PumasError;
+
+    fn try_from(
+        preview: pumas_app_manager::version_manager::TorchPreview,
+    ) -> Result<Self, Self::Error> {
+        let qualification =
+            TorchRuntimePreviewQualification::try_from(preview.qualification.as_str())?;
+        Ok(Self {
+            preview_id: preview.preview_id,
+            tag: preview.tag,
+            build: preview.build,
+            python: preview.python,
+            adapter: preview.adapter,
+            artifacts: preview
+                .artifacts
+                .into_iter()
+                .map(|artifact| TorchRuntimePreviewArtifact {
+                    name: artifact.name,
+                    version: artifact.version,
+                    url: artifact.url,
+                    sha256: artifact.sha256,
+                })
+                .collect(),
+            qualification,
+            expires_in_seconds: preview.expires_in_seconds,
+        })
+    }
+}
+
+#[cfg(feature = "inference-plugins")]
 impl TryFrom<pumas_app_manager::version_manager::TorchPreviewOutcome>
     for TorchRuntimePreviewOutcome
 {
@@ -4099,32 +4166,13 @@ impl TryFrom<pumas_app_manager::version_manager::TorchPreviewOutcome>
             TorchPreviewOutcome, TorchPreviewRejectionReason,
         };
         Ok(match outcome {
-            TorchPreviewOutcome::Resolved { preview } => {
-                let qualification =
-                    TorchRuntimePreviewQualification::try_from(preview.qualification.as_str())?;
-                Self::Resolved {
-                    preview: TorchRuntimePreview {
-                        preview_id: preview.preview_id,
-                        tag: preview.tag,
-                        build: preview.build,
-                        python: preview.python,
-                        adapter: preview.adapter,
-                        artifacts: preview
-                            .artifacts
-                            .into_iter()
-                            .map(|artifact| TorchRuntimePreviewArtifact {
-                                name: artifact.name,
-                                version: artifact.version,
-                                url: artifact.url,
-                                sha256: artifact.sha256,
-                            })
-                            .collect(),
-                        qualification,
-                        expires_in_seconds: preview.expires_in_seconds,
-                    },
-                }
-            }
-            TorchPreviewOutcome::Rejected { reason, .. } => {
+            TorchPreviewOutcome::Ready { preview } => Self::Ready {
+                preview: preview.try_into()?,
+            },
+            TorchPreviewOutcome::Resolved { preview } => Self::Resolved {
+                preview: preview.try_into()?,
+            },
+            TorchPreviewOutcome::Rejected { reason, message } => {
                 let reason = match reason {
                     TorchPreviewRejectionReason::Unsupported => {
                         TorchRuntimePreviewRejectionReason::Unsupported
@@ -4139,10 +4187,32 @@ impl TryFrom<pumas_app_manager::version_manager::TorchPreviewOutcome>
                         TorchRuntimePreviewRejectionReason::Inconclusive
                     }
                 };
-                Self::Rejected {
-                    reason,
-                    message: reason.message(),
-                }
+                // The manager's message is static but may still contain private text.
+                // Only these known stage messages are safe to expose verbatim.
+                let message = match reason {
+                    TorchRuntimePreviewRejectionReason::Unsupported
+                        if message
+                            == "No compatible official Torch wheel was found for this version, build, and Python selection." =>
+                    {
+                        message
+                    }
+                    TorchRuntimePreviewRejectionReason::Inconclusive
+                        if matches!(
+                            message,
+                            "The managed Python catalog exceeded the bounded candidate scan."
+                                | "The managed Python catalog could not be verified."
+                                | "Official wheel discovery did not complete conclusively."
+                                | "No stable native CPython candidate is available from the managed provider."
+                                | "The managed Python interpreter could not be provisioned."
+                                | "Torch artifact checking timed out. Cached wheel downloads may be reused if you retry."
+                                | "Pip could not complete dependency resolution. Wheel availability is inconclusive; check network or package-index access and retry."
+                        ) =>
+                    {
+                        message
+                    }
+                    _ => reason.message(),
+                };
+                Self::Rejected { reason, message }
             }
         })
     }
@@ -4154,6 +4224,22 @@ mod torch_preview_contract_tests {
 
     #[test]
     fn typed_preview_outcomes_have_closed_wire_shapes() {
+        let mut quick_selection = torch_runtime_preview_fixture();
+        quick_selection.build = "auto".into();
+        quick_selection.python = "auto".into();
+        quick_selection.adapter = "none".into();
+        quick_selection.artifacts.clear();
+        quick_selection.qualification = TorchRuntimePreviewQualification::Unverified;
+        let ready = serde_json::to_value(TorchRuntimePreviewOutcome::Ready {
+            preview: quick_selection,
+        })
+        .unwrap();
+        assert_eq!(ready["status"], "ready");
+        assert_eq!(ready["preview"]["artifacts"], serde_json::json!([]));
+        assert_eq!(ready["preview"]["qualification"], "unverified");
+        assert_eq!(ready["preview"]["build"], "auto");
+        assert_eq!(ready.as_object().unwrap().len(), 2);
+
         let resolved = serde_json::to_value(TorchRuntimePreviewOutcome::Resolved {
             preview: torch_runtime_preview_fixture(),
         })
@@ -4198,22 +4284,122 @@ mod torch_preview_contract_tests {
 
     #[cfg(feature = "inference-plugins")]
     #[test]
-    fn manager_rejection_message_cannot_cross_rpc_boundary() {
-        let outcome = pumas_app_manager::version_manager::TorchPreviewOutcome::Rejected {
-            reason:
-                pumas_app_manager::version_manager::TorchPreviewRejectionReason::ValidationFailed,
-            message: "private resolver stderr /secret/path",
+    fn manager_ready_selection_keeps_empty_artifacts_and_unverified_qualification() {
+        use pumas_app_manager::version_manager::{TorchPreview, TorchPreviewOutcome};
+
+        let preview = TorchPreview {
+            preview_id: "retained-selection".into(),
+            tag: "v2.14.0".into(),
+            build: "auto".into(),
+            python: "auto".into(),
+            adapter: "none".into(),
+            artifacts: Vec::new(),
+            qualification: "unverified".into(),
+            expires_in_seconds: 1800,
         };
-        let projected: TorchRuntimePreviewOutcome = outcome.try_into().unwrap();
-        let value = RpcOutcome::TorchRuntimePreview(projected)
-            .into_value()
-            .unwrap();
-        assert_eq!(value["reason"], "validation_failed");
-        assert_eq!(
-            value["message"],
-            TorchRuntimePreviewRejectionReason::ValidationFailed.message()
-        );
-        assert!(!value.to_string().contains("private resolver"));
+        let projected =
+            TorchRuntimePreviewOutcome::try_from(TorchPreviewOutcome::Ready { preview }).unwrap();
+        let value = serde_json::to_value(projected).unwrap();
+        assert_eq!(value["status"], "ready");
+        assert_eq!(value["preview"]["previewId"], "retained-selection");
+        assert_eq!(value["preview"]["artifacts"], serde_json::json!([]));
+        assert_eq!(value["preview"]["qualification"], "unverified");
+    }
+
+    #[cfg(feature = "inference-plugins")]
+    #[test]
+    fn manager_rejection_message_survives_rpc_boundary() {
+        use pumas_app_manager::version_manager::{
+            TorchPreviewOutcome, TorchPreviewRejectionReason,
+        };
+
+        for (reason, expected_reason, message) in [
+            (
+                TorchPreviewRejectionReason::Unsupported,
+                "unsupported",
+                "No compatible official Torch wheel was found for this version, build, and Python selection.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "The managed Python catalog exceeded the bounded candidate scan.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "The managed Python catalog could not be verified.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "Official wheel discovery did not complete conclusively.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "No stable native CPython candidate is available from the managed provider.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "The managed Python interpreter could not be provisioned.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "Wheel resolution did not complete conclusively.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "Torch artifact checking timed out. Cached wheel downloads may be reused if you retry.",
+            ),
+            (
+                TorchPreviewRejectionReason::Inconclusive,
+                "inconclusive",
+                "Pip could not complete dependency resolution. Wheel availability is inconclusive; check network or package-index access and retry.",
+            ),
+        ] {
+            let outcome = TorchPreviewOutcome::Rejected { reason, message };
+            let projected: TorchRuntimePreviewOutcome = outcome.try_into().unwrap();
+            let value = RpcOutcome::TorchRuntimePreview(projected)
+                .into_value()
+                .unwrap();
+            assert_eq!(value["reason"], expected_reason);
+            assert_eq!(value["message"], message);
+        }
+    }
+
+    #[cfg(feature = "inference-plugins")]
+    #[test]
+    fn manager_unknown_or_mismatched_rejection_message_is_redacted() {
+        use pumas_app_manager::version_manager::{
+            TorchPreviewOutcome, TorchPreviewRejectionReason,
+        };
+
+        for (reason, message, expected_reason, expected_message) in [
+            (
+                TorchPreviewRejectionReason::ValidationFailed,
+                "private resolver stderr /secret/path",
+                "validation_failed",
+                TorchRuntimePreviewRejectionReason::ValidationFailed.message(),
+            ),
+            (
+                TorchPreviewRejectionReason::Unsupported,
+                "The managed Python catalog could not be verified.",
+                "unsupported",
+                TorchRuntimePreviewRejectionReason::Unsupported.message(),
+            ),
+        ] {
+            let outcome = TorchPreviewOutcome::Rejected { reason, message };
+            let projected: TorchRuntimePreviewOutcome = outcome.try_into().unwrap();
+            let value = RpcOutcome::TorchRuntimePreview(projected)
+                .into_value()
+                .unwrap();
+            assert_eq!(value["reason"], expected_reason);
+            assert_eq!(value["message"], expected_message);
+            assert!(!value.to_string().contains(message));
+        }
     }
 
     #[cfg(feature = "inference-plugins")]
@@ -4260,6 +4446,9 @@ mod torch_preview_contract_tests {
     fn export_includes_preview_outcome_and_fixtures() {
         let schema = desktop_contract_schema().unwrap();
         assert!(schema["schemas"]["TorchRuntimePreviewOutcome"].is_object());
+        assert!(schema["schemas"]["TorchRuntimePreviewOutcome"]
+            .to_string()
+            .contains("\"ready\""));
         assert!(schema["schemas"]["TorchRuntimePreview"].is_object());
         assert!(schema["schemas"]["TorchRuntimePreviewArtifact"].is_object());
         assert!(schema["schemas"]["TorchRuntimePreviewQualification"].is_object());

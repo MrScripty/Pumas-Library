@@ -6703,7 +6703,7 @@
     "rust/crates/pumas-rpc/Cargo.toml": "b51fc102e08bf9ba72cbec544cd8b933171031078b1ba273b289a6f4c5cf981a",
     "scripts/release/artifact-plan.json": "d5e4a2700728ba61cabca36d727efd477d716f3b50cc90fa9ce7f5e7959c7b0c",
     "scripts/release/licenses/managed-python-sources.json": "eabda4e2a25a92cfa8610865e79d11a50836930f53098efe89dd90778c4212ca",
-    "scripts/release/torch-managed-python-acceptance.py": "1ddb8f7ff8433750a49e855c2392eb701a0616619ef2d241e3f4159d454b8ac9"
+    "scripts/release/torch-managed-python-acceptance.py": "b0486387627d6ae98b4b6533adcceed93e93ebf868385626f3b13f1fb949893b"
   },
   "notices_sha256": "b1631dab130001c76f70f116c2099bae0b87b8ba67d2f110c2f5bae7e465ef89"
 }

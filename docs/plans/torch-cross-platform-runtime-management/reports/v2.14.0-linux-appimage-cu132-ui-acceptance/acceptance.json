@@ -1,0 +1,59 @@
+{
+  "success": true,
+  "evidence_kind": "user-workflow",
+  "environment": "representative-linux-x86_64",
+  "execution_mode": "manual-real-ui",
+  "application_version": "0.7.0",
+  "application_artifacts": {
+    "appimage": {
+      "name": "Pumas.Library-0.7.0.AppImage",
+      "sha256": "a28f302822ce99a9d687797606574c93a5afb9c184f293526b16b972294a670b"
+    },
+    "deb": {
+      "name": "pumas-library-electron_0.7.0_amd64.deb",
+      "sha256": "d8effc33ba37466171c5fae0178e2555064850e40544c93249966fedbf4bce88"
+    }
+  },
+  "viewport": {
+    "width": 800,
+    "height": 1000
+  },
+  "runtime": {
+    "release": "v2.14.0",
+    "build": "cu132",
+    "python_selection": "automatic",
+    "managed_cpython": "3.14.7",
+    "torch_version": "2.14.0+cu132",
+    "resolved_hashed_artifact_count": 44,
+    "terminal_state": "Ready",
+    "cpu_tensor_sum": 5,
+    "cuda_available": false
+  },
+  "progress_observation": {
+    "elapsed_seconds": 9,
+    "header": "Installing Torch v2.14.0 · Installing resolved wheel artifacts",
+    "phase": "Installing resolved wheel artifacts",
+    "setup_state": "indeterminate",
+    "cancel_visible": true,
+    "cancel_accessible_name": "Cancel current installation",
+    "cancel_triggered": false,
+    "aria_valuenow_present": false,
+    "false_95_percent_displayed": false
+  },
+  "isolation": {
+    "launcher_root": "task-owned isolated test root",
+    "host_pip_cache_unchanged": true,
+    "resolver_scratch_removed": true,
+    "package_cache_state": "warm"
+  },
+  "package_smoke": {
+    "artifact_names_and_resource_hashes": "passed",
+    "appimage_rpc_health": "passed",
+    "deb_rpc_health": "passed"
+  },
+  "limits": [
+    "This local AppImage result does not update the public toolbar-linked release.",
+    "CUDA/device execution, Windows/macOS packaged installation, and v2.14.0 Tuldok image generation were not tested.",
+    "The runtime cache was warm, so the report makes no cold-cache download-progress claim."
+  ]
+}

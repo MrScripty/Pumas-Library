@@ -25,10 +25,13 @@ export type VersionInfo = import('../generated/desktop-contract').VersionInfoOut
 export interface InstallationProgress {
   tag: string;
   started_at: string;
-  stage: 'download' | 'extract' | 'venv' | 'dependencies' | 'setup';
+  stage: 'resolving' | 'download' | 'extract' | 'venv' | 'dependencies' | 'setup';
   stage_progress: number;
   overall_progress: number;
   current_item: string | null;
+  download_source_url?: string | null;
+  download_active?: boolean;
+  download_measurement_available?: boolean | null;
   download_speed: number | null;
   eta_seconds: number | null;
   total_size: number | null;

@@ -18,6 +18,10 @@ pub(crate) struct TorchInstallPlan {
     pub(crate) interpreter_hash: String,
     pub(crate) managed_python: ManagedPythonIdentity,
 }
+pub(crate) enum TorchInstallInput {
+    Selection(super::torch_preview::TorchInstallSelection),
+    Resolved(Box<TorchInstallPlan>),
+}
 #[cfg(test)]
 pub(crate) use torch::TorchPublicationPause;
 
@@ -497,16 +501,16 @@ impl VersionInstaller {
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
-        self.install_version_with_torch_plan(tag, release, progress_tx, None)
+        self.install_version_with_torch_input(tag, release, progress_tx, None)
             .await
     }
 
-    pub(crate) async fn install_version_with_torch_plan(
+    pub(crate) async fn install_version_with_torch_input(
         &self,
         tag: &str,
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
-        torch_plan: Option<TorchInstallPlan>,
+        torch_input: Option<TorchInstallInput>,
     ) -> Result<()> {
         match self.app_id {
             AppId::Ollama => self.install_ollama_binary(tag, release, progress_tx).await,
@@ -515,7 +519,7 @@ impl VersionInstaller {
                     .await
             }
             AppId::Torch => {
-                self.install_torch_runtime(tag, release, progress_tx, torch_plan)
+                self.install_torch_runtime(tag, release, progress_tx, torch_input)
                     .await
             }
             AppId::OnnxRuntime => Err(PumasError::Other(

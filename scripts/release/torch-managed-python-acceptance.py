@@ -379,6 +379,25 @@ class InstallSelectionFixture(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "installed Torch resolution failed"):
                 installed_resolution_evidence(root, "python3.14")
 
+    def test_install_failure_log_capture_is_bounded_to_launcher_logs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "launcher"
+            logs = root / "launcher-data" / "logs"
+            logs.mkdir(parents=True)
+            log = logs / "install.log"
+            log.write_text(
+                "earlier\n" + "x" * 20000 + "\nInvalid wheel resolution: bad record\n",
+                encoding="utf-8",
+            )
+            capture_install_failure_log(root, {"logPath": str(log)})
+            retained = (root / "install-failure-tail.txt").read_bytes()
+            self.assertLessEqual(len(retained), 16384)
+            self.assertIn(b"Invalid wheel resolution: bad record", retained)
+            outside = Path(directory) / "outside.log"
+            outside.write_text("private", encoding="utf-8")
+            capture_install_failure_log(root, {"logPath": str(outside)})
+            self.assertEqual((root / "install-failure-tail.txt").read_bytes(), retained)
+
 
 class VersionPreflightFixture(unittest.TestCase):
     @staticmethod
@@ -2365,6 +2384,9 @@ def collect_evidence(root: Path, output: Path, result: dict, *, install_succeede
     cpu_failure = root / "restart-cpu-operation-failure.json"
     if cpu_failure.is_file():
         shutil.copyfile(cpu_failure, output / cpu_failure.name)
+    install_failure = root / "install-failure-tail.txt"
+    if install_failure.is_file():
+        shutil.copyfile(install_failure, output / install_failure.name)
     if install_succeeded:
         runtime = root / "torch-versions" / TAG
         for name in INSTALL_REPORTS:
@@ -2382,7 +2404,24 @@ def finalize_launcher_root(root: Path, *, cleanup_safe: bool) -> None:
         shutil.rmtree(root)
 
 
-def wait_for_install(base: str, deadline_seconds: int = 2700) -> dict:
+def capture_install_failure_log(root: Path, progress: dict) -> None:
+    """Retain a bounded tail only from the launcher's own installation logs."""
+    raw_path = progress.get("logPath")
+    if not isinstance(raw_path, str):
+        return
+    try:
+        candidate = Path(raw_path).resolve(strict=True)
+        logs = (root / "launcher-data" / "logs").resolve(strict=True)
+        if not candidate.is_file() or not path_is_within(candidate, logs, windows=native_windows()):
+            return
+        with candidate.open("rb") as log:
+            log.seek(max(0, candidate.stat().st_size - 16384))
+            (root / "install-failure-tail.txt").write_bytes(log.read(16384))
+    except OSError:
+        pass
+
+
+def wait_for_install(base: str, root: Path, deadline_seconds: int = 2700) -> dict:
     deadline = time.monotonic() + deadline_seconds
     last = None
     while time.monotonic() < deadline:
@@ -2391,6 +2430,7 @@ def wait_for_install(base: str, deadline_seconds: int = 2700) -> dict:
             last = progress
             require(progress.get("tag") == TAG, "installation tag", progress)
             if progress.get("success") is False or progress.get("error"):
+                capture_install_failure_log(root, progress)
                 raise RuntimeError(f"Torch installation failed: {json.dumps(progress)[:1200]}")
             if progress.get("success") is True and progress.get("completedAt"):
                 return progress
@@ -3049,7 +3089,7 @@ def exercise(base: str, root: Path, state: dict) -> dict:
         {"appId": "torch", "tag": TAG, "previewId": preview["previewId"]},
     )
     require(started.get("success") is True, "installation start", started)
-    wait_for_install(base)
+    wait_for_install(base, root)
     state["install_succeeded"] = True
     python_evidence = managed_python_evidence(root, None)
     selected_python = "python" + ".".join(python_evidence["cpython_version"].split(".")[:2])

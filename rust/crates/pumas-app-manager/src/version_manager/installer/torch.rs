@@ -1413,16 +1413,31 @@ struct DirectTorchResolution {
     artifacts: Vec<crate::version_manager::TorchArtifact>,
 }
 
+struct DirectTorchSelection<'a> {
+    version: &'a str,
+    build: &'a str,
+    minor: &'a str,
+    adapter: &'a str,
+    python: &'a Path,
+}
+
+struct TorchAttemptContext<'a> {
+    staging: &'a std::sync::Arc<TorchPendingStage>,
+    log_path: &'a Path,
+    progress_tx: &'a mpsc::Sender<ProgressUpdate>,
+}
+
 fn validate_direct_torch_report(
     resolution: &DirectTorchResolution,
     report: &serde_json::Value,
     requirements: &str,
-    version: &str,
-    build: &str,
-    minor: &str,
-    adapter: &str,
-    python: &Path,
+    selection: &DirectTorchSelection<'_>,
 ) -> Result<()> {
+    let version = selection.version;
+    let build = selection.build;
+    let minor = selection.minor;
+    let adapter = selection.adapter;
+    let python = selection.python;
     let expected_torch = if cfg!(target_os = "macos") && build == "cpu" {
         version.to_owned()
     } else {
@@ -1508,8 +1523,8 @@ fn validate_direct_torch_report(
                 ));
             }
         }
-        if artifact.name == "torchvision" {
-            if adapter == "none"
+        if artifact.name == "torchvision"
+            && (adapter == "none"
                 || !(artifact.version.ends_with(&format!("+{build}"))
                     || (cfg!(target_os = "macos")
                         && build == "cpu"
@@ -1517,12 +1532,11 @@ fn validate_direct_torch_report(
                         && artifact
                             .version
                             .bytes()
-                            .all(|byte| byte.is_ascii_digit() || byte == b'.')))
-            {
-                return Err(failed(
-                    "Torchvision build differs from selected Torch build",
-                ));
-            }
+                            .all(|byte| byte.is_ascii_digit() || byte == b'.'))))
+        {
+            return Err(failed(
+                "Torchvision build differs from selected Torch build",
+            ));
         }
         let item = &entries[index];
         let report_name = item["metadata"]["name"]
@@ -1703,27 +1717,14 @@ fn validate_and_move_direct_torch_packages(
     resolution: &DirectTorchResolution,
     report: &serde_json::Value,
     requirements: &str,
-    version: &str,
-    build: &str,
-    minor: &str,
-    adapter: &str,
-    python: &Path,
+    selection: &DirectTorchSelection<'_>,
     target: &Path,
     runtime: &Path,
     manifest: &StagedFilesManifest,
 ) -> Result<()> {
-    validate_direct_torch_report(
-        resolution,
-        report,
-        requirements,
-        version,
-        build,
-        minor,
-        adapter,
-        python,
-    )?;
+    validate_direct_torch_report(resolution, report, requirements, selection)?;
     validate_staged_files(target, manifest)?;
-    move_verified_packages(target, runtime, minor)
+    move_verified_packages(target, runtime, selection.minor)
 }
 
 impl VersionInstaller {
@@ -1812,9 +1813,11 @@ impl VersionInstaller {
                         &build,
                         minor,
                         &python_root,
-                        staging,
-                        log_path,
-                        progress_tx,
+                        &TorchAttemptContext {
+                            staging,
+                            log_path,
+                            progress_tx,
+                        },
                     )
                     .await?;
                 match attempt {
@@ -1844,10 +1847,11 @@ impl VersionInstaller {
         build: &str,
         minor: &str,
         python_root: &Path,
-        staging: &std::sync::Arc<TorchPendingStage>,
-        log_path: &Path,
-        progress_tx: &mpsc::Sender<ProgressUpdate>,
+        context: &TorchAttemptContext<'_>,
     ) -> Result<DirectTorchAttempt> {
+        let staging = context.staging;
+        let log_path = context.log_path;
+        let progress_tx = context.progress_tx;
         let managed_python = self
             .run_provider_with_cancel(async {
                 super::super::managed_python::ensure_managed_torch_interpreter(
@@ -1954,11 +1958,13 @@ impl VersionInstaller {
             &resolution,
             &report,
             &requirements,
-            version,
-            build,
-            minor,
-            &selection.adapter,
-            &python,
+            &DirectTorchSelection {
+                version,
+                build,
+                minor,
+                adapter: &selection.adapter,
+                python: &python,
+            },
             &packages,
             &runtime,
             &manifest,
@@ -2151,7 +2157,7 @@ impl VersionInstaller {
             ));
         }
         let plan = match input.as_ref() {
-            Some(TorchInstallInput::Resolved(plan)) => Some(plan),
+            Some(TorchInstallInput::Resolved(plan)) => Some(plan.as_ref()),
             _ => None,
         };
         let selection = match input.as_ref() {
@@ -2263,15 +2269,7 @@ impl VersionInstaller {
             Some(log_path.to_string_lossy().as_ref()),
         );
         let result = self
-            .stage_torch_runtime(
-                tag,
-                recipe,
-                plan,
-                selection,
-                &staging,
-                &log_path,
-                &progress_tx,
-            )
+            .stage_torch_runtime(recipe, plan, selection, &staging, &log_path, &progress_tx)
             .await;
         #[cfg(test)]
         if result.is_ok() && self.torch_stage_override.is_some() {
@@ -2378,7 +2376,6 @@ impl VersionInstaller {
 
     async fn stage_torch_runtime(
         &self,
-        _tag: &str,
         recipe_spec: Option<&TorchRuntimeRecipe>,
         plan: Option<&TorchInstallPlan>,
         selection: Option<&super::super::torch_preview::TorchInstallSelection>,
@@ -2906,10 +2903,15 @@ mod managed_python_provenance_tests {
             .collect::<Vec<_>>()
             .join("\n");
         let python = Path::new("/staged/venv/python");
+        let selection = DirectTorchSelection {
+            version: "2.14.0",
+            build: "cpu",
+            minor: "3.12",
+            adapter: "none",
+            python,
+        };
         let check = |resolution: &DirectTorchResolution, report: &serde_json::Value, lock: &str| {
-            validate_direct_torch_report(
-                resolution, report, lock, "2.14.0", "cpu", "3.12", "none", python,
-            )
+            validate_direct_torch_report(resolution, report, lock, &selection)
         };
         assert!(check(&resolution, &report, &requirements).is_ok());
         resolution.artifacts[0].url = "https://example.com/torch.whl".into();
@@ -2941,11 +2943,7 @@ mod managed_python_provenance_tests {
                 &resolution,
                 &report,
                 lock,
-                "2.14.0",
-                "cpu",
-                "3.12",
-                "none",
-                python,
+                &selection,
                 &target,
                 &runtime,
                 &manifest,

@@ -910,7 +910,7 @@ impl VersionManager {
                                 manager.torch_cleanup.clone(),
                             )
                             .await?;
-                            Some(installer::TorchInstallInput::Resolved(plan))
+                            Some(installer::TorchInstallInput::Resolved(Box::new(plan)))
                         }
                         Some(selection) => Some(installer::TorchInstallInput::Selection(selection)),
                         None => None,

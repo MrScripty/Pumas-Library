@@ -256,7 +256,7 @@ impl InstallationProgressTracker {
         total_bytes: Option<u64>,
         speed_bytes_per_sec: Option<f64>,
     ) {
-        let active = total_bytes.map_or(true, |total| downloaded_bytes < total);
+        let active = total_bytes.is_none_or(|total| downloaded_bytes < total);
         let measured_speed = self
             .record_network_activity(
                 "installer-download",

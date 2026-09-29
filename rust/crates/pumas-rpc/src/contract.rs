@@ -1918,15 +1918,18 @@ mod installation_progress_contract_tests {
         let encoded =
             serde_json::to_value(InstallationProgressOutcome::new(Some(value)).unwrap()).unwrap();
         assert_eq!(encoded["stage"], "resolving");
-        let schema = desktop_contract_schema().unwrap();
-        assert!(
-            schema["schemas"]["InstallationProgressOutcome"]["definitions"]
-                ["RuntimeInstallationStage"]["enum"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|stage| stage == "resolving")
-        );
+        #[cfg(feature = "export-contract")]
+        {
+            let schema = desktop_contract_schema().unwrap();
+            assert!(
+                schema["schemas"]["InstallationProgressOutcome"]["definitions"]
+                    ["RuntimeInstallationStage"]["enum"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|stage| stage == "resolving")
+            );
+        }
     }
 
     #[test]

@@ -33,8 +33,7 @@ DOWNLOAD_PROGRESS_INTERVAL_SECONDS = 0.25
 def copyable_download_source(url: str) -> str | None:
     """Allow any direct HTTPS source without embedded credentials or query secrets."""
     if len(url.encode("utf-8")) > 2048 or any(
-        character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
-        for character in url
+        character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F for character in url
     ):
         return None
     try:

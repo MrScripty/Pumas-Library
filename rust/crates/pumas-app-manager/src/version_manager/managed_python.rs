@@ -1182,12 +1182,19 @@ mod tests {
                 key.to_str().unwrap()
             })
             .collect();
-        assert_eq!(forwarded.len(), 10);
-        for key in &keys[..10] {
-            assert!(forwarded.contains(key));
-        }
+        let normalize = |key: &str| {
+            if cfg!(windows) {
+                key.to_ascii_lowercase()
+            } else {
+                key.to_owned()
+            }
+        };
+        let actual: std::collections::HashSet<_> = forwarded.into_iter().map(normalize).collect();
+        let expected: std::collections::HashSet<_> =
+            keys[..10].iter().map(|key| normalize(key)).collect();
+        assert_eq!(actual, expected);
         for key in &keys[10..] {
-            assert!(!forwarded.contains(key));
+            assert!(!actual.contains(&normalize(key)));
         }
     }
 

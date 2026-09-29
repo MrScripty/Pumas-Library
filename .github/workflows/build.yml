@@ -5,7 +5,8 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    # Temporary review bases for the three-part Torch PR stack.
+    branches: [main, prep/torch-managed-foundation, prep/torch-install-flow]
   workflow_dispatch:
 
 permissions:

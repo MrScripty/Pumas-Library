@@ -9,6 +9,13 @@ const workflow = fs.readFileSync(path.join(root, '.github/workflows/build.yml'),
 const versionTagGuard = "github.ref_type == 'tag' && startsWith(github.ref_name, 'v')";
 const escapedVersionTagGuard = versionTagGuard.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+test('Build runs for every current Torch review base', () => {
+  assert.match(
+    workflow,
+    /^  pull_request:\n(?:    #.*\n)*    branches: \[main, prep\/torch-managed-foundation, prep\/torch-install-flow\]$/m,
+  );
+});
+
 function job(name) {
   const markers = [...workflow.matchAll(/^  ([a-z][a-z0-9-]+):\n/gm)];
   const index = markers.findIndex(marker => marker[1] === name);

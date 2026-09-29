@@ -471,6 +471,7 @@ class ResolverTests(unittest.TestCase):
                         str(output),
                     ],
                 ),
+                patch.object(resolver, "native_target", return_value="linux"),
                 patch.object(resolver.subprocess, "run", side_effect=fake_run),
             ):
                 resolver.main()
@@ -591,6 +592,7 @@ class ResolverTests(unittest.TestCase):
                         str(output),
                     ],
                 ),
+                patch.object(resolver, "native_target", return_value="linux"),
                 patch.object(resolver.subprocess, "run", return_value=failed),
                 redirect_stderr(StringIO()),
             ):

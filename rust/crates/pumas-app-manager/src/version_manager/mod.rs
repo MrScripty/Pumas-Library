@@ -1357,11 +1357,34 @@ mod tests {
                 r#"{"torch":"test-fixture"}"#,
             )
             .unwrap();
-            std::fs::write(&python, b"#!/bin/sh\necho test-fixture\n").unwrap();
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
+                std::fs::write(&python, b"#!/bin/sh\necho test-fixture\n").unwrap();
                 std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            #[cfg(windows)]
+            {
+                // Build a real PE executable without depending on installed Python.
+                // The containing test TempDir owns both source and executable.
+                let source = runtime.join("identity_fixture.rs");
+                std::fs::write(&source, r#"fn main() { println!("test-fixture"); }"#).unwrap();
+                let mut compiler = tokio::process::Command::new("rustc");
+                compiler
+                    .kill_on_drop(true)
+                    .args(["--crate-name", "torch_identity_fixture", "--edition=2021"])
+                    .arg(&source)
+                    .arg("-o")
+                    .arg(&python);
+                let output = tokio::time::timeout(Duration::from_secs(60), compiler.output())
+                    .await
+                    .expect("Windows fixture compilation timed out")
+                    .expect("Windows fixture compiler must run");
+                assert!(
+                    output.status.success(),
+                    "Windows fixture compilation failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
             }
         }
         let metadata = pumas_library::metadata::InstalledVersionMetadata {

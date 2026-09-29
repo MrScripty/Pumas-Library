@@ -218,6 +218,9 @@ jobs:
           }
           cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager $testName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test Windows Torch activation fixture
+        if: runner.os == 'Windows'
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager restart_falls_back_from_invalid_active_torch_to_verified_default
       - name: Test Windows locked-stage cleanup ownership
         if: runner.os == 'Windows'
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager locked_stage_stays_owned

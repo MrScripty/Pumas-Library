@@ -418,7 +418,10 @@ fn auto_wheel_candidates(
     build: &str,
     discovery: &TorchReleaseOptionsDiscovery,
 ) -> Option<Vec<TorchPythonPreviewCandidate>> {
-    if !discovery.complete_scan || discovery.status == TorchReleaseOptionsStatus::Inconclusive {
+    if catalog_minors.is_empty()
+        || !discovery.complete_scan
+        || discovery.status == TorchReleaseOptionsStatus::Inconclusive
+    {
         return None;
     }
     Some(
@@ -1090,6 +1093,15 @@ mod platform_neutral_tests {
             recommended: None,
             recommendation_note: String::new(),
         };
+        // An empty provider catalog cannot prove wheel incompatibility, whereas
+        // a complete scan with known candidates can prove no wheel matches.
+        assert!(auto_wheel_candidates(&[], "cu136", &discovery).is_none());
+        let mut no_wheels = discovery.clone();
+        no_wheels.combinations.clear();
+        no_wheels.status = TorchReleaseOptionsStatus::None;
+        assert!(auto_wheel_candidates(&catalog, "cu136", &no_wheels)
+            .unwrap()
+            .is_empty());
         let candidates = auto_wheel_candidates(&catalog, "cu136", &discovery).unwrap();
         assert_eq!(
             candidates
@@ -1817,6 +1829,13 @@ impl VersionManager {
                 });
             }
         };
+        if candidates.is_empty() {
+            return Ok(TorchPreviewOutcome::Rejected {
+                reason: TorchPreviewRejectionReason::Inconclusive,
+                message:
+                    "No stable native CPython candidate is available from the managed provider.",
+            });
+        }
         let mut release_verified = false;
         let requested_candidates = if python == "auto" && adapter == "bundled" {
             if !is_bundled_preset(tag, build, "python3.12", adapter) {

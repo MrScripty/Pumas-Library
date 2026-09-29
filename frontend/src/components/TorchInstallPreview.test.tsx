@@ -109,10 +109,17 @@ describe('TorchInstallPreview', () => {
   });
 
   it('falls back to automatic build when the quick options omit defaultBuild', async () => {
-    getOptions.mockResolvedValue({ ...options, defaultBuild: undefined });
+    let resolveOptions!: (value: TorchRuntimeOptions) => void;
+    getOptions.mockImplementation(() => new Promise((resolve) => {
+      resolveOptions = resolve;
+    }));
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Install Torch' }));
+    expect(screen.getByRole('button', { name: 'Install Torch' })).toBeDisabled();
+    await act(async () => { resolveOptions({ ...options, defaultBuild: undefined }); });
+    const installButton = screen.getByRole('button', { name: 'Install Torch' });
+    expect(installButton).toBeEnabled();
+    fireEvent.click(installButton);
     await waitFor(() => expect(onInstall).toHaveBeenCalledWith('selection-token'));
     expect(getSelection).toHaveBeenCalledWith({ tag: 'v2.14.0', build: 'auto', python: 'auto', adapter: 'none' });
   });

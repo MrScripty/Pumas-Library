@@ -11,10 +11,11 @@ source mapping, and hashes for the raw `PYTHON.json` and each extracted license
 text. The collection contains 19 license texts from `python/licenses/` and any
 declared file references outside that directory.
 
-The files document the Linux archive only. They are not yet part of the 0.7.0
-release attribution inventory: the selected Windows x86_64 and macOS arm64
-archives still need the same collection and review before complete provider
-attribution can be claimed.
+The files document the Linux archive only. Corresponding Windows x86_64 and
+macOS arm64 collections are retained beside this directory; all three are
+included in the 0.7.0 attribution inventory. Collection does not establish
+complete upstream license coverage: see the [missing declared license
+report](../missing-declared-license-references.md) before release acceptance.
 
 See [`full-archive-manifest.json`](managed-python-licenses/full-archive-manifest.json)
 for exact source identities and per-file hashes. The raw `PYTHON.json` and

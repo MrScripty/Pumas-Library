@@ -415,6 +415,7 @@ impl ManagedPythonProvider {
 
     fn private_environment(&self, command: &mut Command, cache: &Path, depot: &Path) {
         command.env_clear();
+        forward_transport_environment(command, std::env::vars_os());
         command.current_dir(&self.root);
         command.env("UV_CACHE_DIR", cache);
         command.env("UV_PYTHON_INSTALL_DIR", depot);
@@ -1113,6 +1114,33 @@ struct ObservedPython {
     bits: u8,
 }
 
+// Keep enterprise network settings without inheriting Python/uv configuration.
+fn forward_transport_environment(
+    command: &mut Command,
+    environment: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
+) {
+    const KEYS: &[&str] = &[
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+    ];
+    for (key, value) in environment {
+        if KEYS
+            .iter()
+            .any(|allowed| key == std::ffi::OsStr::new(allowed))
+        {
+            command.env(key, value);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1125,6 +1153,43 @@ mod tests {
     use windows_sys::Win32::System::Threading::{
         OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
     };
+
+    #[test]
+    fn private_transport_settings_preserve_proxy_and_tls_without_python_configuration() {
+        let keys = [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "NO_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+            "no_proxy",
+            "SSL_CERT_FILE",
+            "SSL_CERT_DIR",
+            "PYTHONPATH",
+            "UV_PYTHON_INSTALL_DIR",
+            "PUMAS_RELEASE_API_TOKEN",
+        ];
+        let mut command = Command::new("uv");
+        command.env_clear();
+        forward_transport_environment(&mut command, keys.map(|key| (key.into(), "value".into())));
+        let forwarded: Vec<_> = command
+            .as_std()
+            .get_envs()
+            .map(|(key, value)| {
+                assert_eq!(value, Some(std::ffi::OsStr::new("value")));
+                key.to_str().unwrap()
+            })
+            .collect();
+        assert_eq!(forwarded.len(), 10);
+        for key in &keys[..10] {
+            assert!(forwarded.contains(key));
+        }
+        for key in &keys[10..] {
+            assert!(!forwarded.contains(key));
+        }
+    }
 
     #[test]
     fn all_shipped_targets_have_distinct_official_uv_pins() {

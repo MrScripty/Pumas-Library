@@ -2047,6 +2047,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn torch_runtime_options_refresh_installs_and_removals_from_another_manager() {
+        let (observer, root) = create_torch_test_manager().await;
+        let owner = VersionManager::new(root.path(), AppId::Torch)
+            .await
+            .unwrap();
+        register_test_version(&owner, "v2.14.0").await;
+        let options = observer.torch_runtime_options().await.unwrap();
+        assert_eq!(options["installed"][0]["tag"], "v2.14.0");
+        owner.remove_version("v2.14.0").await.unwrap();
+        let options = observer.torch_runtime_options().await.unwrap();
+        assert_eq!(options["installed"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
     async fn torch_status_uses_one_metadata_generation_while_versions_lock_is_busy() {
         let (manager, root) = create_torch_test_manager().await;
         register_test_version(&manager, "keep").await;

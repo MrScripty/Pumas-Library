@@ -1427,6 +1427,43 @@ struct TorchAttemptContext<'a> {
     progress_tx: &'a mpsc::Sender<ProgressUpdate>,
 }
 
+fn trusted_macos_pypi_torch_wheel(
+    url: &reqwest::Url,
+    name: &str,
+    version: &str,
+    macos_cpu: bool,
+) -> bool {
+    if !macos_cpu
+        || !matches!(name, "torch" | "torchvision")
+        || url.host_str() != Some("files.pythonhosted.org")
+        || !url.path().starts_with("/packages/")
+        || version.contains('+')
+    {
+        return false;
+    }
+    let Some(filename) = url.path().rsplit('/').next() else {
+        return false;
+    };
+    let prefix = format!("{name}-{version}-");
+    let Some(tags) = filename
+        .strip_prefix(&prefix)
+        .and_then(|value| value.strip_suffix(".whl"))
+    else {
+        return false;
+    };
+    let mut parts = tags.split('-');
+    let (Some(python), Some(abi), Some(platform), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    !python.is_empty()
+        && !abi.is_empty()
+        && platform.split('.').any(|tag| {
+            tag.starts_with("macosx_") && (tag.ends_with("_arm64") || tag.ends_with("_universal2"))
+        })
+}
+
 fn validate_direct_torch_report(
     resolution: &DirectTorchResolution,
     report: &serde_json::Value,
@@ -1500,10 +1537,16 @@ fn validate_direct_torch_report(
             && url.fragment().is_none()
             && url.path().to_ascii_lowercase().ends_with(".whl")
             && if artifact.name == "torch" || artifact.name == "torchvision" {
-                matches!(
+                (matches!(
                     url.host_str(),
                     Some("download.pytorch.org" | "download-r2.pytorch.org")
-                ) && url.path().starts_with(&format!("/whl/{build}/"))
+                ) && url.path().starts_with(&format!("/whl/{build}/")))
+                    || trusted_macos_pypi_torch_wheel(
+                        &url,
+                        &artifact.name,
+                        &artifact.version,
+                        cfg!(target_os = "macos") && build == "cpu",
+                    )
             } else {
                 (url.host_str() == Some("files.pythonhosted.org")
                     && url.path().starts_with("/packages/"))
@@ -2835,6 +2878,29 @@ mod download_progress_tests {
 #[cfg(test)]
 mod managed_python_provenance_tests {
     use super::*;
+
+    #[test]
+    fn macos_pypi_torch_wheels_require_matching_identity_and_platform() {
+        let source = "https://files.pythonhosted.org/packages/ee/90/torch-2.14.0-cp314-cp314-macosx_14_0_arm64.whl";
+        let url = reqwest::Url::parse(source).unwrap();
+        assert!(trusted_macos_pypi_torch_wheel(
+            &url, "torch", "2.14.0", true
+        ));
+        assert!(!trusted_macos_pypi_torch_wheel(
+            &url, "torch", "2.14.0", false
+        ));
+        for altered in [
+            source.replace("torch-2.14.0", "torch-2.13.0"),
+            source.replace("torch-2.14.0", "other-2.14.0"),
+            source.replace("macosx_14_0_arm64", "manylinux_2_28_x86_64"),
+            source.replace("files.pythonhosted.org", "files.pythonhosted.org.evil.test"),
+        ] {
+            let altered = reqwest::Url::parse(&altered).unwrap();
+            assert!(!trusted_macos_pypi_torch_wheel(
+                &altered, "torch", "2.14.0", true
+            ));
+        }
+    }
 
     #[test]
     fn direct_install_report_requires_trusted_hash_locked_wheels_before_probe() {

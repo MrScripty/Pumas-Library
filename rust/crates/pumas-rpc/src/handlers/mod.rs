@@ -810,6 +810,22 @@ async fn dispatch_admitted_command(
                 .map(RpcOutcome::TorchRuntimeOptions)
         }
         #[cfg(feature = "inference-plugins")]
+        RpcCommand::GetTorchReleaseOptions { tag } => {
+            let vm = require_version_manager(state, "torch").await?;
+            let discovery = vm
+                .discover_torch_release_options(&tag)
+                .await
+                .map_err(|error| {
+                    warn!(%error, "Torch release-options discovery failed");
+                    error
+                })?;
+            let outcome = discovery.try_into().map_err(|error| {
+                warn!(%error, "Torch release-options contract projection failed");
+                error
+            })?;
+            Ok(RpcOutcome::TorchReleaseOptions(outcome))
+        }
+        #[cfg(feature = "inference-plugins")]
         RpcCommand::PreviewTorchRuntime {
             tag,
             build,

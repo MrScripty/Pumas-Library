@@ -38,7 +38,7 @@ export const AppIndicator: React.FC<AppIndicatorProps> = ({
 
   // Spinner animation for running state
   useEffect(() => {
-    if (state === 'running') {
+    if (appId !== 'torch' && state === 'running') {
       logger.debug(`Starting spinner animation for app: ${appId}`);
       const interval = setInterval(() => {
         setSpinnerFrame(prev => (prev + 1) % spinnerFrames.length);
@@ -53,7 +53,7 @@ export const AppIndicator: React.FC<AppIndicatorProps> = ({
 
   // Error flash animation
   useEffect(() => {
-    if (launchError) {
+    if (appId !== 'torch' && launchError) {
       logger.warn(`Launch error detected for app: ${appId}, starting error flash animation`);
       const interval = setInterval(() => {
         setErrorFlash(prev => !prev);
@@ -68,6 +68,8 @@ export const AppIndicator: React.FC<AppIndicatorProps> = ({
     return undefined;
   }, [launchError, appId]);
 
+  // Torch launch and stop are owned by explicit runtime profiles in TorchPanel.
+  if (appId === 'torch') return null;
 
   const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();

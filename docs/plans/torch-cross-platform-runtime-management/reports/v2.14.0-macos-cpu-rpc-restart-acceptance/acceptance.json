@@ -1,0 +1,70 @@
+{
+  "architecture": "arm64",
+  "artifact_count": 25,
+  "build": "cpu",
+  "cleanup_safe": true,
+  "cpython_version": "3.14.7",
+  "distribution_catalog_key": "cpython-3.14.7-macos-aarch64-none",
+  "distribution_implementation": "CPython",
+  "distribution_source_url": "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-aarch64-apple-darwin-install_only_stripped.tar.gz",
+  "executable_path": "/private/var/folders/nj/vtw8zd2j31d1gdrtntc5y4600000gn/T/pumas-torch-native-cpu-5kinhxp0/launcher-data/managed-python/python/39ab90495ce6de1a1c2c546c0f0802acaadfb3727d07f042d0a2d1e90c1b66b3/cpython-3.14.7-macos-aarch64-none/bin/python3.14",
+  "executable_sha256": "e925fab5e8f595817ff36ff28e214b91520c040d5b7d47249b0199bc5f68015e",
+  "platform": "darwin",
+  "probe": "passed",
+  "provider": "uv",
+  "provider_archive_sha256": "cf40e0c6a202190ccd9e0406dcfdd5b2d6668a9a5c779b17948963df32aafe5b",
+  "provider_version": "0.12.18",
+  "python": "python3.14",
+  "release": "v2.14.0",
+  "restart": {
+    "active_version": "v2.14.0",
+    "cpu_operation": {
+      "device": "cpu",
+      "result": 14,
+      "version": "2.14.0"
+    },
+    "interpreter": "persisted",
+    "managed_python": {
+      "cpython_version": "3.14.7",
+      "distribution_catalog_key": "cpython-3.14.7-macos-aarch64-none",
+      "distribution_implementation": "CPython",
+      "distribution_source_url": "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-aarch64-apple-darwin-install_only_stripped.tar.gz",
+      "executable_path": "/private/var/folders/nj/vtw8zd2j31d1gdrtntc5y4600000gn/T/pumas-torch-native-cpu-5kinhxp0/launcher-data/managed-python/python/39ab90495ce6de1a1c2c546c0f0802acaadfb3727d07f042d0a2d1e90c1b66b3/cpython-3.14.7-macos-aarch64-none/bin/python3.14",
+      "executable_sha256": "e925fab5e8f595817ff36ff28e214b91520c040d5b7d47249b0199bc5f68015e",
+      "provider": "uv",
+      "provider_archive_sha256": "cf40e0c6a202190ccd9e0406dcfdd5b2d6668a9a5c779b17948963df32aafe5b",
+      "provider_version": "0.12.18",
+      "target": "aarch64-apple-darwin"
+    },
+    "probe": "passed",
+    "profile_id": "torch-managed-python-acceptance",
+    "same_launcher_root": true,
+    "shutdown": "graceful",
+    "sidecar_generation": "1",
+    "sidecar_protocol": 3,
+    "stop_result": true,
+    "trial": "passed"
+  },
+  "sidecar_generation": "1",
+  "sidecar_protocol": 3,
+  "stop_result": true,
+  "stopped": true,
+  "success": true,
+  "target": "aarch64-apple-darwin",
+  "trial": "passed",
+  "version_preflight": {
+    "attempts": [
+      {
+        "number": 1,
+        "retry_after_secs": 913,
+        "status": "rate_limited"
+      },
+      {
+        "number": 2,
+        "status": "requested_tag_found"
+      }
+    ],
+    "elapsed_seconds": 916.889,
+    "status": "passed"
+  }
+}

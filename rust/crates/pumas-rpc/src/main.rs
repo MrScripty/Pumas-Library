@@ -188,6 +188,15 @@ async fn run(args: Args, host: server::LoopbackHost) -> Result<()> {
     info!("RPC server running on {}", addr);
 
     // Wait for shutdown signal
+    #[cfg(windows)]
+    {
+        let mut ctrl_break = tokio::signal::windows::ctrl_break()?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result?,
+            Some(()) = ctrl_break.recv() => {}
+        }
+    }
+    #[cfg(not(windows))]
     tokio::signal::ctrl_c().await?;
     info!("Shutdown signal received, exiting");
     server.shutdown().await?;

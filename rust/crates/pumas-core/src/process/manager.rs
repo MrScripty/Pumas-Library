@@ -1,7 +1,7 @@
 //! High-level process management.
 
 use super::launcher::{BinaryLaunchConfig, LaunchResult, ProcessLauncher};
-use crate::error::Result;
+use crate::error::{PumasError, Result};
 use crate::system::{ProcessResources, ResourceTracker};
 use std::collections::HashMap;
 use std::fs;
@@ -10,6 +10,13 @@ use std::process::Child;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tracing::{debug, error, info, warn};
+
+const LEGACY_TORCH_REJECTION: &str =
+    "Legacy Torch process control is unavailable on this platform; use owned Torch runtime-profile APIs";
+
+fn legacy_torch_requires_owned_api() -> bool {
+    !cfg!(target_os = "linux")
+}
 
 #[derive(Debug, Clone, Default)]
 struct CachedProcessStatus {
@@ -249,6 +256,17 @@ impl ProcessManager {
         version_dir: &Path,
         log_dir: Option<&Path>,
     ) -> LaunchResult {
+        if legacy_torch_requires_owned_api() {
+            let message = LEGACY_TORCH_REJECTION.to_owned();
+            *self.last_launch_error.lock().unwrap() = Some(message.clone());
+            return LaunchResult {
+                success: false,
+                process: None,
+                log_path: None,
+                error: Some(message),
+                ready: false,
+            };
+        }
         // Clear previous error
         {
             let mut error = self.last_launch_error.lock().unwrap();
@@ -307,6 +325,12 @@ impl ProcessManager {
     ///
     /// Looks for torch.pid files in the torch-versions directory and stops those processes.
     pub fn stop_torch(&self) -> Result<bool> {
+        if legacy_torch_requires_owned_api() {
+            return Err(PumasError::LaunchFailed {
+                app: "torch".to_owned(),
+                message: LEGACY_TORCH_REJECTION.to_owned(),
+            });
+        }
         let timeout_ms = 2000;
         let mut stopped_any = false;
 
@@ -371,6 +395,9 @@ impl ProcessManager {
     }
 
     fn detect_torch_running(root_dir: &Path) -> bool {
+        if legacy_torch_requires_owned_api() {
+            return false;
+        }
         // Check for PID files in torch-versions directory
         let versions_dir = root_dir.join("torch-versions");
         if versions_dir.exists() {
@@ -552,6 +579,7 @@ mod tests {
         assert!(manager.is_ollama_running());
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn torch_liveness_read_uses_cache_until_explicit_refresh() {
         let temp_dir = TempDir::new().unwrap();
@@ -569,6 +597,44 @@ mod tests {
 
         assert!(manager.refresh_torch_running());
         assert!(manager.is_torch_running());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_legacy_torch_path_remains_enabled() {
+        assert!(!legacy_torch_requires_owned_api());
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn non_linux_legacy_torch_control_rejects_before_pid_or_process_actions() {
+        assert!(legacy_torch_requires_owned_api());
+        let temp_dir = TempDir::new().unwrap();
+        let version_dir = temp_dir.path().join("torch-versions").join("test");
+        fs::create_dir_all(&version_dir).unwrap();
+        let pid_file = version_dir.join("torch.pid");
+        fs::write(&pid_file, "4294967295").unwrap();
+        let manager = ProcessManager::new(temp_dir.path(), None).unwrap();
+        assert!(!manager.is_torch_running());
+        assert!(!manager.refresh_torch_running());
+
+        let launched = manager.launch_torch("test", &version_dir, None);
+        assert!(!launched.success);
+        assert!(launched.process.is_none());
+        assert!(launched.log_path.is_none());
+        assert!(!launched.ready);
+        assert!(launched
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("owned Torch runtime-profile APIs"));
+        assert_eq!(manager.last_launch_error(), launched.error);
+
+        let stopped = manager.stop_torch().unwrap_err();
+        assert!(stopped
+            .to_string()
+            .contains("owned Torch runtime-profile APIs"));
+        assert!(pid_file.exists());
     }
 
     #[cfg(unix)]

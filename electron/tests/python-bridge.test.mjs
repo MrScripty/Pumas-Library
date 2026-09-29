@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { readFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import {
@@ -14,19 +15,21 @@ import {
   parseStatusTelemetryUpdateSseChunk,
 } from '../dist/python-bridge.js';
 
-test('Torch artifact preview has time to complete while other RPC calls keep the normal timeout', () => {
-  assert.equal(rpcRequestTimeoutMs('preview_torch_runtime'), 195_000);
+test('managed-Python Torch requests have finite bridge deadlines', () => {
+  assert.equal(rpcRequestTimeoutMs('get_torch_release_options'), 900_000);
+  assert.equal(rpcRequestTimeoutMs('preview_torch_runtime'), 900_000);
   assert.equal(rpcRequestTimeoutMs('trial_torch_runtime'), 90_000);
-  assert.equal(rpcRequestTimeoutMs('find_torch_alternatives'), 75_000);
+  assert.equal(rpcRequestTimeoutMs('find_torch_alternatives'), 900_000);
   assert.equal(rpcRequestTimeoutMs('install_version'), 60_000);
-  assert.equal(rpcRequestTimeoutMs('get_torch_runtime_options'), 60_000);
+  assert.equal(rpcRequestTimeoutMs('get_torch_runtime_options'), 900_000);
 });
 
-test('bridge applies the longer timeout only to Torch preview HTTP requests', async () => {
+test('bridge applies method-specific socket deadlines to Torch requests', async () => {
   const bridgeUrl = new URL('../dist/python-bridge.js', import.meta.url);
   const requireBridge = createRequire(bridgeUrl);
   const exports = {};
   const seen = [];
+  const timers = new FakeTimerController();
   runInNewContext(readFileSync(bridgeUrl, 'utf8'), {
     exports,
     Buffer,
@@ -54,14 +57,17 @@ test('bridge applies the longer timeout only to Torch preview HTTP requests', as
   });
   const bridge = new exports.PythonBridge({
     port: 49152, debug: false, rustBinaryPath: process.execPath, launcherRoot: process.cwd(),
+    timerController: timers,
   });
   bridge.process = {};
 
+  await bridge.call('get_torch_release_options', { tag: 'v2.10.0' });
   await bridge.call('preview_torch_runtime', { tag: 'v2.10.0' });
   await bridge.call('trial_torch_runtime', { tag: 'v2.10.0', profileId: 'torch-profile' });
   await bridge.call('find_torch_alternatives', { tag: 'v2.10.0', build: 'cpu', python: 'python3.12' });
   await bridge.call('get_torch_runtime_options', {});
-  assert.deepEqual(seen.map((request) => request.timeout), [195_000, 90_000, 75_000, 60_000]);
+  assert.deepEqual(seen.map((request) => request.timeout), [900_000, 900_000, 90_000, 900_000, 900_000]);
+  assert.equal(timers.pendingCount(), 0);
 });
 
 class FakeTimerController {
@@ -94,6 +100,109 @@ class FakeTimerController {
     return entry.delayMs;
   }
 }
+
+test('bridge wall-clock deadline closes a connected response that keeps sending bytes', { timeout: 5_000 }, async () => {
+  const timers = new FakeTimerController();
+  let streamed;
+  const streaming = new Promise((resolve) => { streamed = resolve; });
+  let responseClosed;
+  const closed = new Promise((resolve) => { responseClosed = resolve; });
+  let chunksSent = 0;
+  const server = createServer((_request, response) => {
+    response.writeHead(200, { 'Content-Type': 'application/json' });
+    response.write('{"result":');
+    const interval = setInterval(() => {
+      response.write(' ');
+      chunksSent += 1;
+      if (chunksSent === 2) streamed();
+    }, 5);
+    response.on('close', () => {
+      clearInterval(interval);
+      responseClosed();
+    });
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const bridge = new PythonBridge({
+    port: address.port, debug: false, rustBinaryPath: process.execPath,
+    launcherRoot: process.cwd(), timerController: timers,
+  });
+  bridge.port = address.port;
+  bridge.process = {};
+
+  try {
+    const call = bridge.call('preview_torch_runtime', { tag: 'v2.10.0' });
+    void call.catch(() => {});
+    await streaming;
+    assert.equal(chunksSent >= 2, true);
+    assert.equal(timers.nextDelay(), 900_000);
+    await timers.runNext();
+    await assert.rejects(call, /RPC request timeout/);
+    await closed;
+    assert.equal(timers.pendingCount(), 0);
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('stop cancels outstanding RPC calls and releases their deadlines', async () => {
+  const bridgeUrl = new URL('../dist/python-bridge.js', import.meta.url);
+  const requireBridge = createRequire(bridgeUrl);
+  const exports = {};
+  const timers = new FakeTimerController();
+  const requests = [];
+  let destroyed = 0;
+  runInNewContext(readFileSync(bridgeUrl, 'utf8'), {
+    exports,
+    Buffer,
+    process: { env: {} },
+    setTimeout,
+    clearTimeout,
+    require(specifier) {
+      if (specifier === 'electron-log') return { info() {}, warn() {}, error() {} };
+      if (specifier === 'http') return {
+        request() {
+          const request = new EventEmitter();
+          request.write = () => {};
+          request.end = () => {
+            if (requests.length === 2) request.emit('error', new Error('shutdown unavailable'));
+          };
+          request.destroy = () => {
+            destroyed += 1;
+            request.emit('error', new Error('aborted'));
+          };
+          requests.push(request);
+          return request;
+        },
+      };
+      return requireBridge(specifier);
+    },
+  });
+  const bridge = new exports.PythonBridge({
+    port: 49152, debug: false, rustBinaryPath: process.execPath,
+    launcherRoot: process.cwd(), timerController: timers,
+  });
+  bridge.process = {
+    kill() {},
+    once(_event, callback) { queueMicrotask(callback); },
+  };
+
+  const pending = bridge.call('preview_torch_runtime', { tag: 'v2.10.0' });
+  assert.equal(timers.nextDelay(), 900_000);
+  const stopped = bridge.stop();
+  const late = bridge.call('preview_torch_runtime', { tag: 'v2.10.0' });
+  void late.catch(() => {});
+  assert.equal(requests.length, 2, 'new RPC calls are rejected after stop begins');
+  await assert.rejects(late, /Backend bridge stopping/);
+  await assert.rejects(pending, /Backend bridge stopped/);
+  await stopped;
+  assert.equal(requests.length, 2, 'shutdown is attempted after cancelling pending calls');
+  assert.equal(destroyed, 1);
+  assert.equal(timers.pendingCount(), 0);
+});
 
 function createBridge(timerController) {
   return new PythonBridge({

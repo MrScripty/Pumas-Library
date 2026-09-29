@@ -1,0 +1,21 @@
+{
+  "architecture": "x86_64",
+  "artifact_count": 25,
+  "build": "cpu",
+  "cleanup_safe": true,
+  "cpython_version": "3.14.7",
+  "platform": "linux",
+  "probe": "passed",
+  "provider": "uv",
+  "provider_archive_sha256": "89eadd7c76fc063887959510d5ba0ab1264dfd5f1143b925ddb73021a40acf16",
+  "provider_version": "0.12.18",
+  "python": "python3.14",
+  "release": "v2.14.0",
+  "sidecar_generation": "1",
+  "sidecar_protocol": 3,
+  "stop_result": true,
+  "stopped": true,
+  "success": true,
+  "target": "x86_64-unknown-linux-gnu",
+  "trial": "passed"
+}

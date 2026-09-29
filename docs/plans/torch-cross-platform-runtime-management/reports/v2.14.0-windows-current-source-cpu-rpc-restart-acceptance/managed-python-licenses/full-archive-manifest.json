@@ -1,0 +1,114 @@
+{
+  "archive_name": "cpython-3.14.7+20260901-x86_64-pc-windows-msvc-pgo-full.tar.zst",
+  "archive_sha256": "5363ec4aab59c24417f9877217aae95ca17f9ae6eb99c3bbfb25e4a76dcadafe",
+  "archive_size": 49262780,
+  "archive_url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-pc-windows-msvc-pgo-full.tar.zst",
+  "asset_id": 539917754,
+  "files": [
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.bdb.txt",
+      "sha256": "8f2d533ab34899499d5b07f209854b101b17dba2c69f3251860aecf3e4005faa"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.bzip2.txt",
+      "sha256": "bd5628cc76fb0ebf9c657d1dd4d1a240a1a7b216c31663e7bbf1131c0b70a910"
+    },
+    {
+      "declared": true,
+      "path": "licenses/LICENSE.cpython.txt",
+      "sha256": "8fe98bf9822926d854f56ffd8d97877d8b942617aa44eb7ea77fd99e22f2537e"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.expat.txt",
+      "sha256": "8a9cfe4b5924f4b25881aa0c9f5e4561c5f31065d0c4a13cdcdbcf917edf39aa"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.libX11.txt",
+      "sha256": "f353accfe2976df31ea297a77d1d454bd51ef6be8c3df39bd6aca95901579357"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.libXau.txt",
+      "sha256": "cec808cd2163fccdc8de4a91d526490777afbaeea060e1168c40a804694b7444"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.libedit.txt",
+      "sha256": "d9932ccdd42eccf6cdded7bcb35b088e64cfc7c24d355af2cc0d02edb6b637d3"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.libffi.txt",
+      "sha256": "9afb8970cd29fc1031fa647278e4bef613399e2e3468a1e3a397f4d158c6101c"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.liblzma.txt",
+      "sha256": "d87d218dd908b3243ec4cbc72af400e5b7437513ea9d9229291d0812b8464fec"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.libuuid.txt",
+      "sha256": "cbccaa3efe07a9a602751375085be572d4410a250b996716fbe8c5255c7ec6f2"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.libxcb.txt",
+      "sha256": "29a9539190e6de1af5fd06a9139c7103137cd1f9290b08c7b11bce89c01c14d2"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.mpdecimal.txt",
+      "sha256": "f094277cd46e1f6e4d87916cc4b51e22f613d45eb81f48231c3cb7caf8fc8a6a"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.ncurses.txt",
+      "sha256": "4f571cad3ea6c888bf0a7092e5b215dddb3142e9e3f1857fd5fac6cf13d345d7"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.openssl-1.1.txt",
+      "sha256": "ad89e3fed746413af1d34d5353978ee1520cedd361c853f8022e7bb210ac6b31"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.openssl-3.txt",
+      "sha256": "ed72ce2b51ee58f117e5a021e2e04af158857f40269fbc03491f0b2a99dbcc96"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.sqlite.txt",
+      "sha256": "d8eb9aba7ef6b5ed06cb3ec19a7242316af2e5933c638eb67fb781c13884e01d"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.tcl.txt",
+      "sha256": "41613eabfc08921a7da9c4bfd7f3ce5d5406f55214b253d89f392ed86eebeb8f"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.tix.txt",
+      "sha256": "8cdff3addb9e9eb108c78e2cf5e05f26b216c098304945733bbec382b2eaef66"
+    },
+    {
+      "declared": false,
+      "path": "licenses/LICENSE.zlib.txt",
+      "sha256": "365e36720db366054863235aea5d6f440142ab968834bfaf81fa9d187c99b9b8"
+    }
+  ],
+  "mapping_authority": "https://github.com/astral-sh/python-build-standalone/blob/20260901/src/release.rs",
+  "python_json": {
+    "path": "PYTHON.json",
+    "sha256": "621218c8ca0ff0d9a92ba0533a2d460d6832cc277286852800e605e8062ec401",
+    "size": 68368
+  },
+  "release_id": 380696527,
+  "scope": "selected_full_archive_license_directory_and_declared_references",
+  "source_url": "https://releases.astral.sh/github/python-build-standalone/releases/download/20260901/cpython-3.14.7%2B20260901-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+  "target": "x86_64-pc-windows-msvc"
+}

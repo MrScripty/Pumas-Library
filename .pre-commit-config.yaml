@@ -18,10 +18,10 @@ repos:
     rev: v4.5.0
     hooks:
       - id: trailing-whitespace
-        # Preserve verbatim upstream legal texts and their recorded hashes.
-        exclude: ^(scripts/release/licenses/|docs/release-attribution/)
+        # Preserve verbatim upstream legal texts and hash-pinned archive evidence.
+        exclude: ^(scripts/release/licenses/|docs/release-attribution/|docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/.*/managed-python-licenses/full-archive/)
       - id: end-of-file-fixer
-        exclude: ^(scripts/release/licenses/|docs/release-attribution/)
+        exclude: ^(scripts/release/licenses/|docs/release-attribution/|docs/plans/torch-cross-platform-runtime-management/reports/managed-python-license-collection/.*/managed-python-licenses/full-archive/)
       - id: check-yaml
       - id: check-merge-conflict
       - id: check-json

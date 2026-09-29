@@ -26,6 +26,21 @@ afterEach(() => {
 
 describe('AppIndicator rendering and states', () => {
   describe('Rendering', () => {
+    it('does not offer legacy launch or stop actions for Torch', () => {
+      const onLaunch = vi.fn();
+      const onStop = vi.fn();
+      const { rerender } = render(
+        <AppIndicator {...defaultProps} appId="torch" state="offline" onLaunch={onLaunch} onStop={onStop} />
+      );
+      expect(screen.queryByTestId('app-indicator')).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Launch torch' })).not.toBeInTheDocument();
+
+      rerender(<AppIndicator {...defaultProps} appId="torch" state="running" onLaunch={onLaunch} onStop={onStop} />);
+      expect(screen.queryByRole('button', { name: 'Stop torch' })).not.toBeInTheDocument();
+      expect(onLaunch).not.toHaveBeenCalled();
+      expect(onStop).not.toHaveBeenCalled();
+    });
+
     it('should render without crashing', () => {
       const { container } = render(<AppIndicator {...defaultProps} />);
       expect(container).toBeTruthy();

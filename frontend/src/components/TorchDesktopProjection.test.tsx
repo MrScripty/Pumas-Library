@@ -81,11 +81,27 @@ describe('Torch desktop projection', () => {
       builds: ['cpu', 'cu130'],
       pythons: [{ id: 'python3.12', label: 'Python 3.12' }],
       adapters: ['none', 'flux2'],
+      bundledPresetAvailable: true, defaultAdapter: 'flux2',
       preset: { tag: installedTag, build: 'cu130', python: 'python3.12', adapter: 'bundled' },
       installed: [
         { tag: installedTag, build: 'cu130', python: 'python3.12', adapter: 'bundled', qualification: 'qualified' },
         { tag: releaseTag, build: 'cpu', python: 'python3.12', adapter: 'flux2', qualification: 'unverified' },
       ],
+    });
+    const getReleaseOptions = vi.fn().mockResolvedValue({
+      tag: releaseTag,
+      status: 'matches',
+      completeScan: true,
+      checkedChannels: ['cpu', 'cu130'],
+      combinations: [
+        { build: 'cpu', python: 'python3.12', wheelUrl: 'https://download.pytorch.org/whl/cpu/torch.whl' },
+        { build: 'cu130', python: 'python3.12', wheelUrl: 'https://download.pytorch.org/whl/cu130/torch.whl' },
+      ],
+      issues: [],
+      detectedGpuVendors: [],
+      driverStatus: { nvidia: 'not_present', amd: 'not_present' },
+      recommended: { build: 'cpu', python: 'python3.12' },
+      recommendationNote: null,
     });
     const preview = vi.fn().mockResolvedValue({
       status: 'resolved', preview: {
@@ -107,6 +123,7 @@ describe('Torch desktop projection', () => {
     const unconditionalStop = vi.fn();
     vi.stubGlobal('electronAPI', {
       get_torch_runtime_options: getOptions,
+      get_torch_release_options: getReleaseOptions,
       preview_torch_runtime: preview,
       get_torch_runtime_probe: probe,
       get_runtime_profiles_snapshot: vi.fn().mockResolvedValue({ success: true, snapshot: { profiles: [
@@ -130,10 +147,11 @@ describe('Torch desktop projection', () => {
     if (!installButton) throw new TypeError('Expected install button');
     fireEvent.click(installButton);
     expect(installVersion).not.toHaveBeenCalled();
-    fireEvent.change(await screen.findByRole('combobox', { name: 'Image adapter' }), { target: { value: 'flux2' } });
+    expect(await screen.findByText('Pumas image dependencies are selected by Pumas for its FLUX.2 path; they are not part of upstream Torch.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Check selected combination' }));
     await waitFor(() => expect(screen.getByText('SHA-256: abc123')).toBeInTheDocument());
-    expect(preview).toHaveBeenCalledWith({ tag: releaseTag, build: 'cpu', python: 'python3.12', adapter: 'flux2' });
+    expect(preview).toHaveBeenCalledWith({ tag: releaseTag, build: 'cpu', python: 'auto', adapter: 'flux2' });
+    expect(screen.getByText('Selected Python: python3.12')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Install reviewed artifacts' }));
     await waitFor(() => expect(installVersion).toHaveBeenCalledWith(releaseTag, previewId));
     expect(switchVersion).not.toHaveBeenCalled();

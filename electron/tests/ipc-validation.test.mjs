@@ -19,6 +19,14 @@ test('RPC method registry has stable unique method names', () => {
   assert.ok(ALLOWED_RPC_METHODS.includes('torch_configure'));
 });
 
+test('Torch release options request reaches the registered RPC method', () => {
+  assert.ok(ALLOWED_RPC_METHODS.includes('get_torch_release_options'));
+  assert.deepEqual(validateApiCallPayload('get_torch_release_options', { tag: 'v2.14.0' }), {
+    method: 'get_torch_release_options',
+    params: { tag: 'v2.14.0' },
+  });
+});
+
 test('backend setup IPC validates exact backend and retry identity before forwarding', () => {
   const token = '2e038924-e0e3-4266-95ef-f7a02997b7b6';
   for (const backend of ['python_conversion', 'llama_cpp', 'nvfp4', 'sherry']) {

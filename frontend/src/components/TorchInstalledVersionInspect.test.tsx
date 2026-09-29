@@ -14,6 +14,7 @@ describe('installed Torch version review', () => {
     vi.stubGlobal('electronAPI', {
       get_torch_runtime_options: vi.fn().mockResolvedValue({
         builds: ['cpu', 'cu130'], pythons: [], adapters: ['none', 'flux2'],
+        bundledPresetAvailable: false, defaultAdapter: 'flux2',
         preset: { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled' },
         installed: [
           { tag: 'v2.9.1', build: 'cu130', python: 'python3.12', adapter: 'bundled', qualification: 'qualified' },

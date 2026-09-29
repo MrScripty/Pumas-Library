@@ -237,6 +237,13 @@ def probe(root: Path) -> dict:
         "hip": hardware["hip"],
         "device_count": len(hardware["devices"]),
         "devices": hardware["devices"],
+        "mps_available": bool(
+            getattr(
+                getattr(getattr(torch, "backends", None), "mps", None),
+                "is_available",
+                lambda: False,
+            )()
+        ),
     }
     hardware_fingerprint = hashlib.sha256(
         json.dumps(hardware_identity, sort_keys=True, separators=(",", ":")).encode()

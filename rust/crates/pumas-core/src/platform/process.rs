@@ -9,6 +9,43 @@ use crate::error::{PumasError, Result};
 use std::process::Command;
 use tracing::{debug, warn};
 
+/// Compare open file identities before deleting owned process metadata.
+#[allow(unsafe_code)]
+pub(crate) fn same_file_identity(
+    left: &std::fs::File,
+    right: &std::fs::File,
+) -> std::io::Result<bool> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let left = left.metadata()?;
+        let right = right.metadata()?;
+        Ok(left.dev() == right.dev() && left.ino() == right.ino())
+    }
+    #[cfg(windows)]
+    {
+        use std::mem::zeroed;
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        };
+        let mut left_info: BY_HANDLE_FILE_INFORMATION = unsafe { zeroed() };
+        let mut right_info: BY_HANDLE_FILE_INFORMATION = unsafe { zeroed() };
+        // SAFETY: both file handles are live; the output buffers have the
+        // exact Win32 structure layout and remain valid during each call.
+        if unsafe { GetFileInformationByHandle(left.as_raw_handle(), &mut left_info) } == 0
+            || unsafe { GetFileInformationByHandle(right.as_raw_handle(), &mut right_info) } == 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(
+            left_info.dwVolumeSerialNumber == right_info.dwVolumeSerialNumber
+                && left_info.nFileIndexHigh == right_info.nFileIndexHigh
+                && left_info.nFileIndexLow == right_info.nFileIndexLow,
+        )
+    }
+}
+
 /// Check if a process with the given PID is alive.
 ///
 /// # Platform Behavior

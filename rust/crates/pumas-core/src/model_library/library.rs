@@ -28,7 +28,7 @@ use crate::model_library::hashing::{verify_blake3, verify_sha256};
 use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
 use crate::model_library::importer::detect_dllm_from_config_json;
 use crate::model_library::mutation_authority::{
-    authority_unavailable, owned_mutation_outcome, LibraryMutationAuthority,
+    authority_unavailable, owned_mutation_outcome, LibraryImportGuard, LibraryMutationAuthority,
 };
 use crate::model_library::naming::normalize_name;
 use crate::model_library::package_facts::{
@@ -208,6 +208,8 @@ pub struct ModelLibrary {
     /// Installed once by the composition owner. Standalone libraries remain
     /// read-only for destructive operations until trusted authority is supplied.
     mutation_authority: Arc<OnceLock<LibraryMutationAuthority>>,
+    /// Present only on the private clone used by one admitted importer effect.
+    import_guard: Option<Arc<LibraryImportGuard>>,
 }
 
 impl ModelLibrary {
@@ -248,6 +250,7 @@ impl ModelLibrary {
             package_facts_locks: Arc::new(Mutex::new(HashMap::new())),
             metadata_write_notifier: Arc::new(StdMutex::new(None)),
             mutation_authority: Arc::new(OnceLock::new()),
+            import_guard: None,
         };
 
         // Rebuild index from existing metadata files on disk
@@ -305,6 +308,44 @@ impl ModelLibrary {
             .get()
             .cloned()
             .ok_or_else(|| authority_unavailable("trusted composition was not installed"))
+    }
+
+    pub(crate) fn with_import_guard(&self, guard: Arc<LibraryImportGuard>) -> Self {
+        let mut library = self.clone();
+        library.import_guard = Some(guard);
+        library
+    }
+
+    pub(crate) async fn run_import_blocking<T: Send + 'static>(
+        &self,
+        operation: &'static str,
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> Result<T> {
+        if let Some(guard) = &self.import_guard {
+            return guard.run_blocking(operation, work).await;
+        }
+        tokio::task::spawn_blocking(work)
+            .await
+            .map_err(|error| PumasError::Other(format!("Library blocking effect failed: {error}")))
+    }
+
+    async fn validate_import_effect_async(&self, model_dir: &Path) -> Result<()> {
+        if self.import_guard.is_none() {
+            return Ok(());
+        }
+        let library = self.clone();
+        let path = model_dir.to_path_buf();
+        self.run_import_blocking("validate import binding", move || {
+            library.validate_import_effect(&path)
+        })
+        .await?
+    }
+
+    fn validate_import_effect(&self, model_dir: &Path) -> Result<()> {
+        if let Some(guard) = &self.import_guard {
+            guard.validate(model_dir)?;
+        }
+        Ok(())
     }
 
     /// Return the canonical SQLite-backed model count.
@@ -564,6 +605,9 @@ impl ModelLibrary {
     ///
     /// * `model_dir` - Path to the model directory
     pub fn load_metadata(&self, model_dir: &Path) -> Result<Option<ModelMetadata>> {
+        if let Some(guard) = &self.import_guard {
+            return guard.read_metadata(model_dir);
+        }
         let path = model_dir.join(METADATA_FILENAME);
         atomic_read_json(&path)
     }
@@ -612,6 +656,7 @@ impl ModelLibrary {
     ///
     /// * `model_dir` - Path to the model directory
     pub async fn index_model_dir(&self, model_dir: &Path) -> Result<()> {
+        self.validate_import_effect_async(model_dir).await?;
         let prepared = self.prepare_index_projection_async(model_dir).await?;
         self.persist_index_projection(model_dir, prepared).await?;
 
@@ -2284,18 +2329,19 @@ impl ModelLibrary {
 
         // Keep file-signature detection independent from resolver rules and use it as fallback.
         let model_dir_for_type = model_dir.clone();
-        let type_info = tokio::task::spawn_blocking(move || {
-            find_primary_model_file(&model_dir_for_type)
-                .as_ref()
-                .and_then(|f| identify_model_type(f).ok())
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join redetect type inspection task: {}",
-                err
-            ))
-        })?;
+        let type_info = self
+            .run_import_blocking("classify imported model", move || {
+                find_primary_model_file(&model_dir_for_type)
+                    .as_ref()
+                    .and_then(|f| identify_model_type(f).ok())
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join redetect type inspection task: {}",
+                    err
+                ))
+            })?;
         let resolved = resolve_local_model_type_with_persisted_hints_async(
             self.index().clone(),
             model_dir.clone(),
@@ -2311,16 +2357,17 @@ impl ModelLibrary {
             .map(|f| f.as_str().to_string());
         let new_subtype = if resolved.model_type == ModelType::Llm {
             let model_dir_for_subtype = model_dir.clone();
-            let is_dllm = tokio::task::spawn_blocking(move || {
-                detect_dllm_from_config_json(&model_dir_for_subtype)
-            })
-            .await
-            .map_err(|err| {
-                PumasError::Other(format!(
-                    "Failed to join redetect dLLM subtype task: {}",
-                    err
-                ))
-            })?;
+            let is_dllm = self
+                .run_import_blocking("classify imported model", move || {
+                    detect_dllm_from_config_json(&model_dir_for_subtype)
+                })
+                .await
+                .map_err(|err| {
+                    PumasError::Other(format!(
+                        "Failed to join redetect dLLM subtype task: {}",
+                        err
+                    ))
+                })?;
             if is_dllm {
                 Some("dllm".to_string())
             } else {
@@ -2671,6 +2718,9 @@ impl ModelLibrary {
         &self,
         model_id: &str,
     ) -> Result<ResolvedModelPackageFacts> {
+        if let Some(guard) = &self.import_guard {
+            guard.require_package_facts()?;
+        }
         let descriptor = self.resolve_model_execution_descriptor(model_id).await?;
         let model_dir = self.library_root.join(model_id);
         let metadata = load_effective_metadata_by_id_async(self.clone(), model_id.to_string())
@@ -2708,6 +2758,8 @@ impl ModelLibrary {
                 {
                     match serde_json::from_str::<ResolvedModelPackageFacts>(&cached.facts_json) {
                         Ok(facts) => {
+                            self.validate_import_effect_async(context.model_dir())
+                                .await?;
                             self.upsert_model_package_facts_summary_cache(
                                 &context,
                                 &source_fingerprint,
@@ -2870,6 +2922,8 @@ impl ModelLibrary {
                 .unwrap_or_default(),
         };
         if can_persist_package_facts {
+            self.validate_import_effect_async(context.model_dir())
+                .await?;
             self.upsert_model_package_facts_summary_cache(&context, &source_fingerprint, &facts)?;
             let now = chrono::Utc::now().to_rfc3339();
             self.index
@@ -3950,7 +4004,11 @@ async fn load_model_metadata_async(
     library: ModelLibrary,
     model_dir: PathBuf,
 ) -> Result<Option<ModelMetadata>> {
-    tokio::task::spawn_blocking(move || library.load_metadata(&model_dir))
+    library
+        .clone()
+        .run_import_blocking("import library metadata effect", move || {
+            library.load_metadata(&model_dir)
+        })
         .await
         .map_err(|err| PumasError::Other(format!("Failed to join metadata load task: {}", err)))?
 }
@@ -3959,7 +4017,11 @@ async fn load_effective_metadata_by_id_async(
     library: ModelLibrary,
     model_id: String,
 ) -> Result<Option<ModelMetadata>> {
-    tokio::task::spawn_blocking(move || library.load_effective_metadata_by_id(&model_id))
+    library
+        .clone()
+        .run_import_blocking("import library metadata effect", move || {
+            library.load_effective_metadata_by_id(&model_id)
+        })
         .await
         .map_err(|err| {
             PumasError::Other(format!(
@@ -3989,39 +4051,41 @@ async fn save_metadata_projection_async(
     model_dir: PathBuf,
     metadata: ModelMetadata,
 ) -> Result<()> {
-    tokio::task::spawn_blocking(move || {
-        let mut normalized = metadata;
-        if let Some(model_id) = library.get_model_id(&model_dir) {
-            normalized.model_id = Some(model_id);
-        }
-        let active_bindings = normalized
-            .model_id
-            .as_deref()
-            .map(|model_id| {
-                library
-                    .index
-                    .list_active_model_dependency_bindings(model_id, None)
-            })
-            .transpose()?
-            .unwrap_or_default();
-        apply_recommended_backend_hint(&mut normalized, &active_bindings);
-        let path = model_dir.join(METADATA_FILENAME);
-        if let Some(existing) = atomic_read_json::<ModelMetadata>(&path)? {
-            let existing_json = serde_json::to_value(existing).unwrap_or(Value::Null);
-            let next_json = serde_json::to_value(&normalized).unwrap_or(Value::Null);
-            if existing_json == next_json {
-                return Ok(());
+    library
+        .clone()
+        .run_import_blocking("import library metadata effect", move || {
+            let mut normalized = metadata;
+            if let Some(model_id) = library.get_model_id(&model_dir) {
+                normalized.model_id = Some(model_id);
             }
-        }
-        library.write_metadata_projection(&path, &normalized)
-    })
-    .await
-    .map_err(|err| {
-        PumasError::Other(format!(
-            "Failed to join metadata projection save task: {}",
-            err
-        ))
-    })?
+            let active_bindings = normalized
+                .model_id
+                .as_deref()
+                .map(|model_id| {
+                    library
+                        .index
+                        .list_active_model_dependency_bindings(model_id, None)
+                })
+                .transpose()?
+                .unwrap_or_default();
+            apply_recommended_backend_hint(&mut normalized, &active_bindings);
+            let path = model_dir.join(METADATA_FILENAME);
+            if let Some(existing) = library.load_metadata(&model_dir)? {
+                let existing_json = serde_json::to_value(existing).unwrap_or(Value::Null);
+                let next_json = serde_json::to_value(&normalized).unwrap_or(Value::Null);
+                if existing_json == next_json {
+                    return Ok(());
+                }
+            }
+            library.write_metadata_projection(&path, &normalized)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join metadata projection save task: {}",
+                err
+            ))
+        })?
 }
 
 async fn save_overrides_projection_async(
@@ -4235,6 +4299,7 @@ impl ModelLibrary {
             }
         }
 
+        self.validate_import_effect_async(model_dir).await?;
         let mut mutated = self.index.upsert(&prepared.record)?;
         if let Some(projection) = prepared.projection.as_ref() {
             mutated |= self.ensure_custom_runtime_binding(&prepared.model_id, projection)?;
@@ -4312,6 +4377,12 @@ impl ModelLibrary {
 
     fn write_metadata_projection(&self, path: &Path, metadata: &ModelMetadata) -> Result<()> {
         self.notify_metadata_projection_write(path);
+        if let Some(guard) = &self.import_guard {
+            let model_dir = path
+                .parent()
+                .ok_or_else(|| authority_unavailable("import metadata has no parent"))?;
+            return guard.write_metadata(model_dir, metadata);
+        }
         atomic_write_json(path, metadata, true)
     }
 

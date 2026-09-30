@@ -20,6 +20,9 @@ use crate::model_library::download_store::{
     DownloadPersistence, LifecycleCleanupDisposition, LifecycleQuarantine,
     LifecycleQuarantineDomain, PersistedDownload, PersistedDownloadInventory,
 };
+use crate::model_library::mutation_authority::{
+    ModelFinalImportCapability, ModelPartialImportCapability,
+};
 use crate::model_library::sharding;
 use crate::model_library::types::{DownloadRequest, DownloadStatus, ModelDownloadProgress};
 use crate::model_library::SelectedArtifactIdentity;
@@ -750,6 +753,7 @@ async fn import_completed_download(
     context: &TaskContext,
     info: Option<DownloadCompletionInfo>,
     revision: DownloadRevision,
+    capability: Option<ModelFinalImportCapability>,
 ) -> Result<()> {
     let Some(importer) = importer.clone() else {
         return Ok(());
@@ -757,10 +761,19 @@ async fn import_completed_download(
     let info = info.ok_or_else(|| PumasError::Config {
         message: "Download import requires completion metadata".into(),
     })?;
+    let capability = capability.ok_or_else(|| PumasError::Config {
+        message: "Download import requires its exact verified-use capability".into(),
+    })?;
+    let import_context = context.clone();
     context
         .run_fallible_async_named("finalize downloaded model import", move || async move {
             importer
-                .finalize_downloaded_directory_at_revision(&info, &revision)
+                .finalize_downloaded_directory_with_capability(
+                    &info,
+                    &revision,
+                    &import_context,
+                    capability,
+                )
                 .await
                 .map(|_| ())
         })
@@ -1119,6 +1132,21 @@ impl PreparedDownloadTask {
                 context,
                 info,
                 self.revision.clone(),
+                self.download_importer
+                    .as_ref()
+                    .map(|_| {
+                        Ok::<_, PumasError>(ModelFinalImportCapability::new(
+                            self.acquisition.use_proof(context, &lease)?,
+                            &self.download_id,
+                            if self.destination.is_recovery() {
+                                DownloadAdmissionDomain::Recovery
+                            } else {
+                                DownloadAdmissionDomain::Ambient
+                            },
+                            context.held_root_execution_grant()?,
+                        ))
+                    })
+                    .transpose()?,
             )
             .await
             .map_err(RestoredFinalizationError::Import)?;
@@ -4433,14 +4461,31 @@ impl HuggingFaceClient {
                         if let Some(importer) = download_importer.clone() {
                             let import_info = info.clone();
                             let import_revision = revision.clone();
+                            let capability = ModelPartialImportCapability::new(
+                                acquisition.transfer_proof(
+                                    &task_context,
+                                    &operation,
+                                    &workspace,
+                                )?,
+                                download_id,
+                                if destination.is_recovery() {
+                                    DownloadAdmissionDomain::Recovery
+                                } else {
+                                    DownloadAdmissionDomain::Ambient
+                                },
+                                task_context.held_root_execution_grant()?,
+                            );
+                            let import_context = task_context.clone();
                             task_context
                                 .run_fallible_async_named(
                                     "persist auxiliary download metadata",
                                     move || async move {
                                         importer
-                                            .upsert_download_metadata_stub_at_revision(
+                                            .upsert_download_metadata_stub_with_capability(
                                                 &import_info,
                                                 &import_revision,
+                                                &import_context,
+                                                capability,
                                             )
                                             .await
                                     },
@@ -4653,6 +4698,21 @@ impl HuggingFaceClient {
                 &task_context,
                 completion_info,
                 revision.clone(),
+                download_importer
+                    .as_ref()
+                    .map(|_| {
+                        Ok::<_, PumasError>(ModelFinalImportCapability::new(
+                            acquisition.use_proof(&task_context, &use_lease)?,
+                            download_id,
+                            if destination.is_recovery() {
+                                DownloadAdmissionDomain::Recovery
+                            } else {
+                                DownloadAdmissionDomain::Ambient
+                            },
+                            task_context.held_root_execution_grant()?,
+                        ))
+                    })
+                    .transpose()?,
             )
             .await?;
         }
@@ -8019,9 +8079,8 @@ mod tests {
         client
             .configure_download_destination_root(library.library_root())
             .unwrap();
-        client.set_download_importer(Arc::new(crate::model_library::ModelImporter::new(
-            library.clone(),
-        )));
+        let importer = importer_with_authority_for_test(library.clone(), &client).await;
+        client.set_download_importer(importer);
         let revision =
             DownloadRevision::from_commit("0123456789abcdef0123456789abcdef01234567").unwrap();
         let revision_value = revision.as_str().to_owned();
@@ -8113,9 +8172,8 @@ mod tests {
         reopened
             .configure_download_destination_root(library.library_root())
             .unwrap();
-        reopened.set_download_importer(Arc::new(crate::model_library::ModelImporter::new(
-            library.clone(),
-        )));
+        let importer = importer_with_authority_for_test(library.clone(), &reopened).await;
+        reopened.set_download_importer(importer);
         assert!(reopened
             .restore_persisted_downloads()
             .await
@@ -11160,6 +11218,37 @@ mod tests {
         client.download_tasks.set_blocking_observer(None);
     }
 
+    async fn importer_with_authority_for_test(
+        library: Arc<crate::model_library::ModelLibrary>,
+        client: &HuggingFaceClient,
+    ) -> Arc<crate::model_library::ModelImporter> {
+        // Reopening installs the new composition's exact store rather than
+        // reusing a prior invocation's store/admission confirmations.
+        let library = if library.mutation_authority().is_ok() {
+            Arc::new(
+                crate::model_library::ModelLibrary::new(library.library_root())
+                    .await
+                    .unwrap(),
+            )
+        } else {
+            library
+        };
+        library
+            .install_mutation_authority(
+                crate::api::RuntimeTasks::new(),
+                crate::model_library::download_recovery::DownloadDestinationRoot::open(
+                    library.library_root(),
+                )
+                .unwrap(),
+                client
+                    .persistence
+                    .clone()
+                    .expect("managed import fixture requires its store"),
+            )
+            .unwrap();
+        Arc::new(crate::model_library::ModelImporter::new(library))
+    }
+
     async fn imported_download_fixture(
         root: &Path,
     ) -> (
@@ -11181,9 +11270,8 @@ mod tests {
             .configure_download_destination_root(library.library_root())
             .unwrap();
         client.set_persistence(Arc::new(DownloadPersistence::new(root)));
-        client.set_download_importer(Arc::new(crate::model_library::ModelImporter::new(
-            library.clone(),
-        )));
+        let importer = importer_with_authority_for_test(library.clone(), &client).await;
+        client.set_download_importer(importer);
         let mut request = recovery_test_request("acme/model", &["model.onnx".into()]);
         request.model_type = Some("vision".into());
         request.pipeline_tag = Some("image-classification".into());
@@ -18819,9 +18907,8 @@ mod tests {
             .configure_download_destination_root(library.library_root())
             .unwrap();
         client.set_persistence(persistence.clone());
-        client.set_download_importer(Arc::new(crate::model_library::ModelImporter::new(
-            library.clone(),
-        )));
+        let importer = importer_with_authority_for_test(library.clone(), &client).await;
+        client.set_download_importer(importer);
         client.set_test_download_base_url(base_url.clone());
         *client.auth_token.write().await = None;
         cache_pinned_repo_tree(
@@ -18881,9 +18968,8 @@ mod tests {
             .unwrap();
         let reopened_persistence = Arc::new(DownloadPersistence::new(temp.path()));
         reopened.set_persistence(reopened_persistence.clone());
-        reopened.set_download_importer(Arc::new(crate::model_library::ModelImporter::new(
-            library.clone(),
-        )));
+        let importer = importer_with_authority_for_test(library.clone(), &reopened).await;
+        reopened.set_download_importer(importer);
         reopened.set_test_download_base_url(base_url);
         *reopened.auth_token.write().await = None;
         reopened.restore_persisted_downloads().await.unwrap();

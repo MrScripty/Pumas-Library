@@ -590,6 +590,25 @@ impl DownloadPersistence {
     ) -> Result<()> {
         let transaction = self.transaction(StoreOperation::Load)?;
         let data = self.load_data_strict(&transaction)?;
+        self.validate_queue_execution_data(
+            &data,
+            download_id,
+            attempt_id,
+            domain,
+            destination,
+            execution_files,
+        )
+    }
+
+    fn validate_queue_execution_data(
+        &self,
+        data: &DownloadStoreData,
+        download_id: &str,
+        attempt_id: &str,
+        domain: DownloadAdmissionDomain,
+        destination: &PersistedDestinationIdentity,
+        execution_files: &[String],
+    ) -> Result<()> {
         let invalid = |message: &str| crate::PumasError::Validation {
             field: "downloads.queue_admissions".into(),
             message: message.into(),
@@ -737,7 +756,48 @@ impl DownloadPersistence {
 
     pub(crate) fn load_lifecycle_inventory_strict(&self) -> Result<PersistedDownloadInventory> {
         let transaction = self.transaction(StoreOperation::Load)?;
-        let mut data = self.load_data_strict(&transaction)?;
+        let data = self.load_data_strict(&transaction)?;
+        self.lifecycle_inventory(data)
+    }
+
+    /// One coherent custody read for the importer boundary. Execution identity
+    /// is present only for a private HF stage capability.
+    pub(crate) fn load_import_custody_strict(
+        &self,
+        execution: Option<(
+            &str,
+            &str,
+            DownloadAdmissionDomain,
+            &PersistedDestinationIdentity,
+            &[String],
+        )>,
+    ) -> Result<(
+        PersistedDownloadInventory,
+        BTreeMap<Uuid, crate::acquisition::AcquisitionRecord>,
+    )> {
+        let transaction = self.transaction(StoreOperation::Load)?;
+        let (partition, acquisitions) = transaction.target.import_custody_partition()?;
+        let data = match partition {
+            Some(value) => normalize_legacy_store(value, &self.path)?,
+            None => DownloadStoreData::empty(),
+        };
+        if let Some((download_id, attempt, domain, destination, files)) = execution {
+            self.validate_queue_execution_data(
+                &data,
+                download_id,
+                attempt,
+                domain,
+                destination,
+                files,
+            )?;
+        }
+        Ok((self.lifecycle_inventory(data)?, acquisitions))
+    }
+
+    fn lifecycle_inventory(
+        &self,
+        mut data: DownloadStoreData,
+    ) -> Result<PersistedDownloadInventory> {
         let confirmed = self.confirmed_admission_ids()?;
         let mut hidden_admissions: BTreeMap<String, HiddenDownloadAdmission> = data
             .admission_attempts

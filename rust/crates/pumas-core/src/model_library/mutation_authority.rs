@@ -1,13 +1,197 @@
 //! Shared authority for destructive model-library mutations.
 
+use crate::acquisition::store::{AcquisitionProof, AcquisitionTransferProof, AcquisitionUseProof};
 use crate::api::RuntimeTasks;
 use crate::index::{IntentDeletionClaimResult, ModelIndex};
-use crate::model_library::download_recovery::{DownloadDestinationRoot, RootExecutionGrant};
+use crate::model_library::download_recovery::{
+    DownloadDestinationRoot, DownloadRecoveryDestination, RootExecutionGrant,
+};
+use crate::model_library::download_store::DownloadAdmissionDomain;
 use crate::model_library::download_store::{DownloadPersistence, PersistedDestinationIdentity};
 use crate::{PumasError, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use uuid::Uuid;
+
+/// Model policy composes exact neutral proof with the current HF admission
+/// and its already-held native grant. Stage types expose no generic bypass.
+pub(crate) struct ModelFinalImportCapability(ModelImportProof);
+pub(crate) struct ModelPartialImportCapability(ModelImportProof);
+
+struct ModelImportProof {
+    acquisition: AcquisitionProof,
+    grant: Arc<RootExecutionGrant>,
+    download_id: String,
+    domain: DownloadAdmissionDomain,
+}
+
+impl ModelFinalImportCapability {
+    pub(crate) fn new(
+        proof: AcquisitionUseProof,
+        download_id: &str,
+        domain: DownloadAdmissionDomain,
+        grant: Arc<RootExecutionGrant>,
+    ) -> Self {
+        Self(ModelImportProof {
+            acquisition: proof.into_proof(),
+            grant,
+            download_id: download_id.into(),
+            domain,
+        })
+    }
+
+    pub(crate) fn validate_provenance(
+        &self,
+        download_id: &str,
+        repo_id: &str,
+        revision: &str,
+        files: &[String],
+    ) -> Result<()> {
+        self.0
+            .validate_provenance(download_id, repo_id, revision, files)
+    }
+}
+
+impl ModelPartialImportCapability {
+    pub(crate) fn new(
+        proof: AcquisitionTransferProof,
+        download_id: &str,
+        domain: DownloadAdmissionDomain,
+        grant: Arc<RootExecutionGrant>,
+    ) -> Self {
+        Self(ModelImportProof {
+            acquisition: proof.into_proof(),
+            grant,
+            download_id: download_id.into(),
+            domain,
+        })
+    }
+
+    pub(crate) fn validate_provenance(
+        &self,
+        download_id: &str,
+        repo_id: &str,
+        revision: &str,
+        files: &[String],
+    ) -> Result<()> {
+        self.0
+            .validate_provenance(download_id, repo_id, revision, files)
+    }
+}
+
+impl ModelImportProof {
+    fn validate(
+        &self,
+        downloads: &DownloadPersistence,
+        destination: &PersistedDestinationIdentity,
+        partial: bool,
+    ) -> Result<()> {
+        let record = self.acquisition.record();
+        if record.demand.consumer != "hf.model"
+            || record.workspace.root_identity != destination.library_root
+            || record.workspace.relative_target != destination.relative_target
+            || if partial {
+                record.phase != crate::acquisition::AcquisitionPhase::Transferring
+            } else {
+                !matches!(
+                    record.phase,
+                    crate::acquisition::AcquisitionPhase::Using { .. }
+                )
+            }
+        {
+            return Err(import_invalid(
+                "Model import proof does not identify its stage/workspace",
+            ));
+        }
+        let files = record
+            .manifest
+            .files()
+            .iter()
+            .map(|file| file.logical_path().to_string())
+            .collect::<Vec<_>>();
+        let (inventory, current) = downloads.load_import_custody_strict(Some((
+            &self.download_id,
+            &record.demand.operation,
+            self.domain,
+            destination,
+            &files,
+        )))?;
+        self.acquisition
+            .validate_current(&downloads.acquisition_store(), &current)?;
+        let admission = inventory
+            .queue_admissions
+            .get(&self.download_id)
+            .ok_or_else(|| import_invalid("Model import admission is unavailable"))?;
+        // Confirmed FIFO successors wait for this predecessor's release. A
+        // hidden owner or quarantine supplies no equivalent execution proof.
+        if !inventory.quarantines.is_empty()
+            || inventory
+                .hidden_admissions
+                .values()
+                .any(|hidden| &hidden.request.destination == destination)
+            || inventory.queue_admissions.iter().any(|(id, other)| {
+                id != &self.download_id
+                    && &other.destination == destination
+                    && other.position.ordinal <= admission.position.ordinal
+            })
+            || current.values().any(|other| {
+                other.id != record.id
+                    && other.workspace == record.workspace
+                    && !matches!(
+                        other.phase,
+                        crate::acquisition::AcquisitionPhase::Adopted { .. }
+                            | crate::acquisition::AcquisitionPhase::Withdrawn
+                    )
+            })
+        {
+            return Err(PumasError::DownloadRootBusy);
+        }
+        if !partial {
+            self.acquisition.verify_receipts()?;
+        }
+        Ok(())
+    }
+
+    fn validate_binding(&self) -> Result<()> {
+        self.acquisition.validate_binding()
+    }
+
+    fn validate_provenance(
+        &self,
+        download_id: &str,
+        repo_id: &str,
+        revision: &str,
+        files: &[String],
+    ) -> Result<()> {
+        let manifest = &self.acquisition.record().manifest;
+        let mut selected = manifest
+            .files()
+            .iter()
+            .map(|file| file.logical_path().to_string())
+            .collect::<Vec<_>>();
+        let mut requested = files.to_vec();
+        selected.sort();
+        requested.sort();
+        if download_id != self.download_id
+            || selected != requested
+            || manifest.source().provider() != "huggingface"
+            || manifest.source().source_id() != repo_id
+            || manifest.source().revision().value() != revision
+        {
+            return Err(import_invalid(
+                "Model import provenance does not match its exact manifest",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn import_invalid(message: &str) -> PumasError {
+    PumasError::Validation {
+        field: "model_library.mutation".into(),
+        message: message.into(),
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct LibraryMutationAuthority {
@@ -42,6 +226,70 @@ impl LibraryMutationAuthority {
 
     pub(crate) fn root(&self) -> &DownloadDestinationRoot {
         &self.root
+    }
+
+    /// Import admission is checked under native root exclusion, including
+    /// idempotent imports whose indexing can still rewrite metadata.
+    pub(crate) fn protect_import(
+        &self,
+        model_dir: &Path,
+        context: crate::api::RuntimeTaskContext,
+    ) -> Result<Arc<LibraryImportGuard>> {
+        let grant = Arc::new(self.root.try_acquire_execution_grant()?);
+        let destination = self.root.resolve(model_dir)?;
+        let identity = destination.persisted_identity()?;
+        self.require_no_download_custody(&[identity])?;
+        // Bind the existing directory now, rather than accepting a replacement
+        // first encountered by a later metadata worker.
+        destination.read_model_metadata()?;
+        Ok(Arc::new(LibraryImportGuard {
+            root: self.root.clone(),
+            grant,
+            destination,
+            proof: None,
+            partial: false,
+            context: ImportEffectContext::Runtime(context),
+        }))
+    }
+
+    pub(crate) fn protect_final_import(
+        &self,
+        model_dir: &Path,
+        capability: ModelFinalImportCapability,
+        context: crate::acquisition::task_custody::TaskContext,
+    ) -> Result<Arc<LibraryImportGuard>> {
+        self.protect_hf_import(model_dir, capability.0, false, context)
+    }
+
+    pub(crate) fn protect_partial_import(
+        &self,
+        model_dir: &Path,
+        capability: ModelPartialImportCapability,
+        context: crate::acquisition::task_custody::TaskContext,
+    ) -> Result<Arc<LibraryImportGuard>> {
+        self.protect_hf_import(model_dir, capability.0, true, context)
+    }
+
+    fn protect_hf_import(
+        &self,
+        model_dir: &Path,
+        proof: ModelImportProof,
+        partial: bool,
+        context: crate::acquisition::task_custody::TaskContext,
+    ) -> Result<Arc<LibraryImportGuard>> {
+        let grant = proof.grant.clone();
+        grant.validate_root(&self.root)?;
+        let destination = self.root.resolve(model_dir)?;
+        proof.validate(&self.downloads, &destination.persisted_identity()?, partial)?;
+        destination.read_model_metadata()?;
+        Ok(Arc::new(LibraryImportGuard {
+            root: self.root.clone(),
+            grant,
+            destination,
+            proof: Some(proof),
+            partial,
+            context: ImportEffectContext::Acquisition(context),
+        }))
     }
 
     pub(crate) fn acquire(
@@ -152,7 +400,7 @@ impl LibraryMutationAuthority {
     }
 
     fn require_no_download_custody(&self, targets: &[PersistedDestinationIdentity]) -> Result<()> {
-        let inventory = self.downloads.load_lifecycle_inventory_strict()?;
+        let (inventory, acquisitions) = self.downloads.load_import_custody_strict(None)?;
         let queued = inventory
             .queue_admissions
             .values()
@@ -161,7 +409,6 @@ impl LibraryMutationAuthority {
             .hidden_admissions
             .values()
             .any(|admission| targets.contains(&admission.request.destination));
-        let acquisitions = self.downloads.acquisition_store().acquisitions()?;
         let acquiring = acquisitions.values().any(|record| {
             !matches!(
                 record.phase,
@@ -179,6 +426,92 @@ impl LibraryMutationAuthority {
             return Err(PumasError::DownloadRootBusy);
         }
         Ok(())
+    }
+}
+
+/// One scoped import retains the existing exclusion and held destination.
+/// This is an effect lease, not an owner or a persistent custody record.
+pub(crate) struct LibraryImportGuard {
+    root: DownloadDestinationRoot,
+    grant: Arc<RootExecutionGrant>,
+    destination: DownloadRecoveryDestination,
+    proof: Option<ModelImportProof>,
+    partial: bool,
+    context: ImportEffectContext,
+}
+
+enum ImportEffectContext {
+    Runtime(crate::api::RuntimeTaskContext),
+    Acquisition(crate::acquisition::task_custody::TaskContext),
+}
+
+impl LibraryImportGuard {
+    pub(crate) async fn run_blocking<T: Send + 'static>(
+        self: &Arc<Self>,
+        operation: &'static str,
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> Result<T> {
+        let guard = self.clone();
+        let work = move || {
+            let _guard = guard;
+            work()
+        };
+        match &self.context {
+            ImportEffectContext::Runtime(context) => context.run_blocking(operation, work).await,
+            // HF registers the complete non-abortable importer future as one
+            // TaskContext async effect. That owner awaits every worker join,
+            // including after cancellation replaces the worker generation.
+            // Re-registering children against the retired generation would
+            // manufacture a failure while that already-admitted effect drains.
+            ImportEffectContext::Acquisition(_context) => {
+                tokio::task::spawn_blocking(work).await.map_err(|error| {
+                    PumasError::Other(format!("Import effect observation failed: {error}"))
+                })
+            }
+        }
+    }
+
+    pub(crate) fn validate(&self, path: &Path) -> Result<()> {
+        self.grant.validate_root(&self.root)?;
+        if let Some(proof) = &self.proof {
+            proof.validate_binding()?;
+        }
+        let current = self.root.resolve(path)?;
+        if current.persisted_identity()? != self.destination.persisted_identity()? {
+            return Err(PumasError::Validation {
+                field: "model_library.mutation".into(),
+                message: "Import effect does not identify its admitted destination".into(),
+            });
+        }
+        self.destination.read_model_metadata()?;
+        Ok(())
+    }
+
+    pub(crate) fn require_package_facts(&self) -> Result<()> {
+        if self.partial {
+            return Err(PumasError::Validation {
+                field: "model_library.mutation".into(),
+                message: "Partial metadata authority cannot resolve package facts".into(),
+            });
+        }
+        Ok(())
+    }
+
+    pub(crate) fn read_metadata(
+        &self,
+        path: &Path,
+    ) -> Result<Option<crate::models::ModelMetadata>> {
+        self.validate(path)?;
+        self.destination.read_model_metadata()
+    }
+
+    pub(crate) fn write_metadata(
+        &self,
+        path: &Path,
+        metadata: &crate::models::ModelMetadata,
+    ) -> Result<()> {
+        self.validate(path)?;
+        self.destination.write_model_metadata(metadata)
     }
 }
 

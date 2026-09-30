@@ -2,16 +2,18 @@
 //!
 //! This module owns validated selection data and the shared HTTP response and
 //! body-streaming protocol plus consumer-scoped task/effect supervision. Durable
-//! acquisition state and consumer publication remain with their current owners.
+//! acquisition custody and the canonical store are shared; consumer publication
+//! remains with its consumer.
 
 mod github_release;
 mod http;
 mod manifest;
+mod service;
+pub(crate) mod store;
 pub(crate) mod task_custody;
+mod workspace;
 
-pub(crate) use http::{
-    open_http_artifact, stream_http_artifact, HttpArtifactSink, HttpAttemptHost, HttpBodyOutcome,
-};
+pub(crate) use http::HttpAttemptHost;
 
 pub(crate) use github_release::{select_github_release_asset, GitHubReleaseAssetMetadata};
 pub use github_release::{
@@ -22,3 +24,8 @@ pub use manifest::{
     FileVerificationRequirement, ManifestValidationError, RevisionStrength, Sha256Evidence,
     CURRENT_MANIFEST_VERSION,
 };
+
+pub use service::{AcquisitionDemand, AcquisitionPhase, AcquisitionRecord, AcquisitionService};
+pub(crate) use service::{AcquisitionHost, AcquisitionRetryPolicy};
+pub use store::AcquisitionStore;
+pub use workspace::{AcquisitionWorkspace, VerifiedFile, WorkspaceIdentity};

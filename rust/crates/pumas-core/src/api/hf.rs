@@ -2126,6 +2126,7 @@ pub(super) mod tests {
                 provider_registry,
             )),
             model_library: library,
+            acquisition: client.acquisition.clone(),
             hf_client: Some(client),
             intent_service,
             runtime_tasks: tasks.clone(),

@@ -408,6 +408,15 @@ impl TaskContext {
         Ok(scoped)
     }
 
+    pub(crate) fn held_execution_lease(&self) -> crate::Result<Arc<dyn Send + Sync>> {
+        self.root_grant
+            .clone()
+            .map(|grant| grant as Arc<dyn Send + Sync>)
+            .ok_or_else(|| crate::PumasError::Config {
+                message: "Verified-file handoff requires a held execution grant".into(),
+            })
+    }
+
     pub(crate) fn without_root_grant(&self) -> Self {
         let mut context = self.clone();
         context.inner = context.inner.with_effect_lease(None);
@@ -439,6 +448,7 @@ impl DownloadTaskOwner {
         Self::new_with_finalizer(|| async { Ok(()) })
     }
 
+    #[cfg(test)]
     pub(super) fn new_with_finalizer<F, Fut>(finalizer: F) -> Self
     where
         F: FnOnce() -> Fut + Send + 'static,

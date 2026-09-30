@@ -99,6 +99,51 @@ This report records agent experience using the Coding-Standards MCP during Acqui
 - **Smallest sufficient workflow:** Reuse retained route facts, route the focused shutdown change, read Rust Async and Concurrency, then inspect the exact diff and tests.
 - **Recommendations:** Keep the minimal policy-only workflow easy to repeat and make source review context explicit. A concise owner inventory would help identify wrappers that must delegate to a newly introduced lifecycle owner.
 
+## Native-custody contributor — public Ollama wrapper drain
+
+- **Useful calls:** The contributor reused its retained standards snapshot, routed the wrapper lifecycle boundary to 26 standards with zero unresolved categories, then read Rust Async, Concurrency and Rust API. Those obligations clarified that the public wrapper also had to close admission and retain completion receipts for its owned `VersionState` mutations.
+- **Confusing or redundant steps:** No new broad discovery was necessary. The route still carried relation metadata; scoped reads were sufficient.
+- **Missing context:** The MCP did not identify that `OllamaVersionManager` owns private state and runs removal/download activity inline. Repository source established the activity and shutdown order.
+- **Where the contributor left MCP:** The wrapper receipt, cancellation behavior, file-write settlement, regression tests and exact-candidate Cargo results came from source inspection and execution in the worker worktree. The MCP supplied obligations only.
+- **Smallest sufficient workflow:** Reuse facts and snapshot, route the newly discovered owner boundary, read async/concurrency/API, then inspect and test the exact candidate.
+- **Recommendations:** Show the exact affected owner boundary and prior relevant reads in a compact view; offer section-scoped policy reads. Keep repository evidence explicitly outside the MCP compliance claim.
+
+## Native-custody independent reviewer — final wrapper candidate
+
+- **Useful calls:** The reviewer reused registered facts, routed the final wrapper scope to 27 standards with no unresolved questions, and read Concurrency and Rust Async. This was sufficient to assess close-admission ordering, completion ownership after waiter cancellation, and shutdown draining.
+- **Confusing or redundant steps:** No extra discovery call was needed. Source inspection remained necessary to check the actual wrapper receipt and queued-install cancellation reset.
+- **Missing context:** The MCP did not supply the candidate digest, activity registry, or exact call graph; repository/Git inspection did.
+- **Where the reviewer left MCP:** Findings, exact source evidence, tests inspected, and the disposition of the previous wrapper limitation came from read-only source/diff review. The reviewer ran no tests.
+- **Smallest sufficient workflow:** Reuse the prior route, read the two lifecycle policies, and inspect the exact diff and named regression tests.
+- **Recommendations:** Make candidate identity and affected owner paths easy to provide as non-authoritative review context. Keep it clear that policy routing does not inspect or approve source.
+
+## Q1 store-cutover reviewer — source-neutral lifecycle design
+
+- **Useful calls:** The reviewer discovered routing facts, routed the Q1 persistence/concurrency/contract/async/replay/architecture/verification slice, and read focused selected policies. The route completed with 28 standards and no unresolved questions. It helped expose the single-writer, supported-state, no-assumed-compatibility, supervised-effect, and claim-scoped-evidence requirements.
+- **Confusing or redundant steps:** Seven whole-policy reads produced excessive output and truncation; the reviewer had to retrieve obscured concurrency/async/replay bodies separately. Text and structured forms repeated content.
+- **Missing context:** The MCP did not know the existing v4-to-v5 migration-on-load behavior, model-library marker semantics, hidden custody inventory, mutation-authority reader, or composition boundaries. Repository inspection supplied these facts.
+- **Where the reviewer left MCP:** Exact migration populations, unknown deployed-root scope, consumer ownership and proposed cutover were established from source and plan inspection. No files were edited and no tests were run.
+- **Smallest sufficient workflow:** One `routing_facts`, one concise `route`, one focused `read_many`; schema discovery only when the tool contract actually requires it.
+- **Recommendations:** Keep route output free of repeated relation graphs; support section-scoped policy reads; distinguish applicability from repository compliance; avoid duplicate policy text in structured and textual results; provide examples for selecting routing facts.
+
+## Primary integrator — merged native-custody candidate and shared-owner boundary
+
+- **Useful calls:** For the merged native custody scope, I refreshed `routing_facts`, routed 32 standards with no unresolved categories under snapshot `snapshot:v1:37f8f667-71b0-4580-9084-4d202fdcc04c`, and read focused Architecture, Concurrency, Rust Async, Rust API, Persistence, Contract Evolution, Resilience, Verification and Commit standards. The final route captured the actual app-manager/RPC, async shutdown, persistence-adjacent and verification boundaries. Reading Concurrency/Async and Architecture again after lifecycle review exposed that one supervisor needs consumer-scoped handles rather than sharing the current HF owner unchanged.
+- **Confusing or redundant steps:** The route summary is compact only without policy bodies; focused `read_many` still returns whole policy text and repeated handles/relationship context. The first larger batch truncated output, so I split further review into smaller groups.
+- **Missing context:** The MCP did not know the current owner scans global task IDs/projections or that HF Drop supplies the owner-wide shutdown callback. Repository source and the exact reviewer identified that coupling. It also did not know that the downloaded model root initializer writes a model library marker.
+- **Where I left MCP:** Candidate identities, Git ancestry, staged scope, source ownership, tests, feature checks, and CI state were verified with repository and GitHub tools. MCP routing did not inspect source or supply acceptance evidence.
+- **Smallest sufficient workflow:** Discover or reuse the routing facts; route without inline policy content; read only Architecture, Concurrency, Rust Async/API, Persistence/Evolution, Verification, Resilience and Commit obligations implicated by the actual boundary; inspect source and evidence; run a final route on the completed candidate.
+- **Recommendations:** Support policy-section reads and compact route deltas; keep candidate/source context clearly marked non-authoritative; expose the already-read standards list; and state explicitly that MCP applicability is neither source inspection nor compliance evidence.
+
+### Primary integrator — shared-custody slice routing
+
+- **Useful calls:** A fresh `routing_facts` snapshot and a concise route selected 34 applicable standards with zero unresolved facts after marking unrelated framework routing known-absent. The selected closure covered Rust core/API/async, acquisition ownership, concurrency, security/trust, persistence-adjacent behavior, verification and commit workflow.
+- **Confusing or redundant steps:** Omitting the unrelated `routing.frameworks` fact left it as a required unresolved category; the router needs an explicit known-absent marker. A single `read_many` across 17 selected policies produced a very large repeated result and was truncated by the client, so future reads need smaller batches. Relationship and policy metadata is repeated around full policy text.
+- **Missing context:** The MCP did not identify that the current HF supervisor globally scans operation IDs/projections, that HF shutdown closes the whole owner, or that `DownloadDestinationRoot` creates model-specific marker/deletion authority. Source and reviewer inspection supplied those ownership facts.
+- **Where I left MCP:** Git ancestry, exact write sets, existing task APIs, migration-on-load behavior, current CI, and all executed test evidence come from Git, repository source, and command results. The route supplies obligations only.
+- **Smallest sufficient workflow:** Declare every routing fact, route the actual slice, read focused Architecture, Concurrency, Rust Async/API, Persistence/Evolution, Security, Verification and Commit policies, then inspect/test the exact implementation and route it again before handoff.
+- **Recommendations:** Treat omitted facts as unknown only when the fact is genuinely unknown; make known-absent explicit in concise examples. Support policy-section reads and compact incremental route output, and avoid repeating relation graphs in every result. Preserve a clear boundary between applicable standards and source compliance evidence.
+
 ## Participation
 
 The primary integrator, independent architecture reviewer, native-custody contributor, native-custody independent reviewer, and shared-owner design reviewer used the MCP and are represented above. The bounded source-inventory reviewer did not use it, so there is no MCP usability report from that agent.

@@ -1021,6 +1021,46 @@ impl TaskScope {
         result
     }
 
+    /// Run one consumer operation as an owner-held worker. The waiter may
+    /// disappear without detaching its registered effects, and operation
+    /// proofs remain current until the worker finishes publication.
+    pub(crate) async fn run_worker_invocation<T, F, Fut>(
+        self: &Arc<Self>,
+        operation: F,
+    ) -> crate::Result<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(TaskContext) -> Fut + Send + 'static,
+        Fut: Future<Output = crate::Result<T>> + Send + 'static,
+    {
+        let id = format!("consumer-worker-{}", uuid::Uuid::new_v4());
+        let (sender, receiver) = oneshot::channel();
+        let prepared = self.prepare(id.clone(), TaskRole::Worker, move |context| async move {
+            let result = operation(context).await;
+            let _ = sender.send(result);
+        })?;
+        let generation = prepared.generation.clone();
+        let installed = self
+            .install_gated(prepared)
+            .map_err(|_| crate::PumasError::DownloadLifecycleClosed)?;
+        let waiter = InvocationWaiter {
+            owner: self.clone(),
+            id,
+            generation,
+        };
+        installed.start();
+        let result = receiver.await.map_err(|_| {
+            if self.is_closed() {
+                crate::PumasError::DownloadLifecycleClosed
+            } else {
+                crate::PumasError::DownloadShutdownFailed { failures: 1 }
+            }
+        })?;
+        drop(waiter);
+        self.ensure_open()?;
+        result
+    }
+
     pub(crate) async fn shutdown(self: &Arc<Self>) -> crate::Result<()> {
         self.request_shutdown().wait().await
     }

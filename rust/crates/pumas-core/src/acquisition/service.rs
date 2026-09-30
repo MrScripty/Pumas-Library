@@ -8,6 +8,8 @@ use super::workspace::{write_chunk, AcquisitionWorkspace, VerifiedFile, Workspac
 use super::ArtifactManifest;
 use crate::{PumasError, Result};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -46,6 +48,84 @@ pub struct AcquisitionRecord {
     pub workspace: WorkspaceIdentity,
     pub phase: AcquisitionPhase,
     pub files: Vec<VerifiedFile>,
+}
+
+/// Versioned consumer-owned completion data, paired with the exact acquisition
+/// record and use lease that authorized publication.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AcquisitionConsumerReceipt {
+    pub receipt_kind: String,
+    pub receipt_version: u32,
+    pub owner: String,
+    pub acquisition_id: String,
+    pub use_lease: String,
+    pub demand: AcquisitionDemand,
+    pub manifest: ArtifactManifest,
+    pub workspace: WorkspaceIdentity,
+    pub verified_files: Vec<VerifiedFile>,
+    pub payload: Value,
+}
+
+impl AcquisitionConsumerReceipt {
+    const KIND: &'static str = "pumas.consumer-completion";
+
+    fn for_record(record: &AcquisitionRecord, lease: Uuid, payload: Value) -> Result<Self> {
+        let receipt = Self {
+            receipt_kind: Self::KIND.into(),
+            receipt_version: 1,
+            owner: record.demand.consumer.clone(),
+            acquisition_id: record.id.to_string(),
+            use_lease: lease.to_string(),
+            demand: record.demand.clone(),
+            manifest: record.manifest.clone(),
+            workspace: record.workspace.clone(),
+            verified_files: record.files.clone(),
+            payload,
+        };
+        receipt.validate_for_record(record, lease)?;
+        Ok(receipt)
+    }
+
+    pub(crate) fn validate_for_record(
+        &self,
+        record: &AcquisitionRecord,
+        lease: Uuid,
+    ) -> Result<()> {
+        if self.receipt_kind != Self::KIND
+            || self.receipt_version != 1
+            || self.owner != record.demand.consumer
+            || self.acquisition_id != record.id.to_string()
+            || self.use_lease != lease.to_string()
+            || self.demand != record.demand
+            || self.manifest != record.manifest
+            || self.workspace != record.workspace
+            || self.verified_files != record.files
+        {
+            return Err(invalid(
+                "Consumer completion receipt does not bind the exact acquisition use",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Ephemeral location and optional authorization for one manifest file. These
+/// values are used for the request only and are never persisted.
+#[derive(Clone, Default)]
+pub struct AcquisitionHttpSource {
+    pub url: String,
+    pub authorization: Option<String>,
+}
+
+/// Request data for the shared HTTP acquisition lifecycle.
+#[derive(Clone)]
+pub struct AcquisitionHttpRequest {
+    pub demand: AcquisitionDemand,
+    pub manifest: ArtifactManifest,
+    pub workspace: AcquisitionWorkspace,
+    pub sources: Vec<AcquisitionHttpSource>,
+    pub retry: AcquisitionRetryPolicy,
 }
 
 fn invalid(message: &str) -> PumasError {
@@ -135,6 +215,26 @@ pub(crate) struct AcquisitionUseLease {
     context: TaskContext,
 }
 
+impl AcquisitionUseLease {
+    pub(crate) fn record(&self) -> &AcquisitionRecord {
+        &self.operation.record
+    }
+}
+
+/// Cold observation of a retained `Using` lease. It proves only that the
+/// historic selection and file receipts still match under the reopened
+/// workspace; it cannot resume importer effects or renew the lease.
+pub(crate) struct AcquisitionReopenProof {
+    record: AcquisitionRecord,
+    _workspace: AcquisitionWorkspace,
+}
+
+impl AcquisitionReopenProof {
+    pub(crate) fn record(&self) -> &AcquisitionRecord {
+        &self.record
+    }
+}
+
 /// Source-neutral, exact runtime proofs. A retained row or workspace locator
 /// cannot construct either proof or reopen unresolved consumer use.
 pub(crate) struct AcquisitionUseProof(AcquisitionProof);
@@ -193,20 +293,107 @@ impl AcquisitionProof {
 }
 
 #[derive(Clone)]
-pub(crate) struct AcquisitionRetryPolicy {
-    pub(crate) attempts: Option<u32>,
-    pub(crate) elapsed: Duration,
-    pub(crate) backoff: crate::network::RetryConfig,
+pub struct AcquisitionRetryPolicy {
+    pub attempts: Option<u32>,
+    pub elapsed: Duration,
+    pub backoff: crate::network::RetryConfig,
 }
 
 #[async_trait::async_trait]
-pub(crate) trait AcquisitionHost: HttpAttemptHost {
+pub trait AcquisitionHost: HttpAttemptHost {
     async fn retry(
         &mut self,
         attempt: u32,
         delay: Option<Duration>,
         error: Option<&str>,
     ) -> Result<()>;
+}
+
+/// Verified manifest file use held inside one current acquisition worker.
+/// The workspace capability and exact `Using` lease remain held until the
+/// consumer callback returns and its completion receipt is atomically settled.
+pub struct AcquiredArtifactUse {
+    store: Arc<AcquisitionStore>,
+    context: TaskContext,
+    lease: AcquisitionUseLease,
+}
+
+impl AcquiredArtifactUse {
+    /// Join registered effects, then durably revoke and reclaim consumer output.
+    /// Only successful cleanup permits exact, receipt-free Using withdrawal.
+    /// Cleanup must revoke this attempt before reclaiming it. Cleanup errors retain
+    /// Using; withdrawal publication failures propagate durability uncertainty.
+    pub async fn withdraw_after_cleanup(
+        self,
+        cleanup: impl FnOnce() -> Result<()> + Send + 'static,
+    ) -> Result<()> {
+        match self.context.drain_blocking().await {
+            Ok(0) => {}
+            result => {
+                return Err(PumasError::Other(format!(
+                    "Consumer effects unsettled before cancellation cleanup: {result:?}"
+                )))
+            }
+        }
+        let store = self.store.clone();
+        let expected = self.lease.record().clone();
+        owned(
+            &self.context,
+            "check exact unreceipted consumer use",
+            move || store.require_unreceipted_use(&expected),
+        )
+        .await?;
+        owned(
+            &self.context,
+            "revoke and clean cancelled consumer output",
+            cleanup,
+        )
+        .await?;
+        let store = self.store.clone();
+        let expected = self.lease.record().clone();
+        owned(
+            &self.context,
+            "withdraw exact cancelled consumer use",
+            move || store.withdraw_unreceipted_use(&expected),
+        )
+        .await
+    }
+
+    pub fn record(&self) -> &AcquisitionRecord {
+        self.lease.record()
+    }
+
+    /// Open a file only after rechecking the receipt through the held directory
+    /// capability. The returned descriptor is read-only and no-follow.
+    pub async fn open_file(&self, file_index: usize) -> Result<std::fs::File> {
+        let record = self.lease.record();
+        let selected = record
+            .manifest
+            .files()
+            .get(file_index)
+            .ok_or_else(|| invalid("Selected file is unavailable"))?
+            .clone();
+        let verified = record
+            .files
+            .get(file_index)
+            .ok_or_else(|| invalid("Verified file receipt is unavailable"))?
+            .clone();
+        let workspace = self.lease.workspace.clone();
+        owned(&self.context, "open verified consumer input", move || {
+            workspace.open_verified_readonly(&selected, &verified)
+        })
+        .await
+    }
+
+    /// Run blocking consumer effects under the same custody worker. Dropping a
+    /// waiter cannot detach the blocking effect from acquisition shutdown.
+    pub async fn run_blocking<T: Send + 'static>(
+        &self,
+        name: &'static str,
+        work: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        owned(&self.context, name, work).await
+    }
 }
 
 /// One durable lifecycle/store owner and the existing shared task supervisor.
@@ -234,8 +421,80 @@ impl AcquisitionService {
     pub fn store(&self) -> &Arc<AcquisitionStore> {
         &self.store
     }
+
+    /// Open a narrow consumer scope on this service's one existing supervisor.
+    /// The returned consumer never creates a second store or task owner.
+    pub fn open_consumer(
+        self: &Arc<Self>,
+        owner: impl Into<String>,
+    ) -> Result<AcquisitionConsumer> {
+        let owner = owner.into();
+        if owner.trim().is_empty() {
+            return Err(invalid("Consumer identity is empty"));
+        }
+        let scope = self.supervisor.open_scope(|| async { Ok(()) })?;
+        Ok(AcquisitionConsumer {
+            service: self.clone(),
+            scope,
+            owner,
+        })
+    }
+
+    /// Read a consumer-owned receipt without granting filesystem or settlement
+    /// authority. Reopen callers must still validate their own durable outputs.
+    pub fn consumer_receipt(&self, id: Uuid) -> Result<Option<AcquisitionConsumerReceipt>> {
+        self.store.consumer_receipt(id)
+    }
     pub(crate) fn supervisor(&self) -> Arc<TaskCustodyOwner> {
         self.supervisor.clone()
+    }
+
+    async fn settle_consumer_use(
+        &self,
+        context: &TaskContext,
+        expected: &AcquisitionRecord,
+        lease: Uuid,
+        payload: Value,
+    ) -> Result<()> {
+        let receipt = AcquisitionConsumerReceipt::for_record(expected, lease, payload)?;
+        let store = self.store.clone();
+        let expected = expected.clone();
+        owned(
+            context,
+            "settle exact consumer completion receipt",
+            move || store.settle_consumer_use(&expected, lease, receipt),
+        )
+        .await
+    }
+
+    async fn issue_consumer_receipt(
+        &self,
+        context: &TaskContext,
+        expected: &AcquisitionRecord,
+        lease: Uuid,
+        receipt: AcquisitionConsumerReceipt,
+    ) -> Result<()> {
+        let store = self.store.clone();
+        let expected = expected.clone();
+        owned(context, "issue consumer completion receipt", move || {
+            store.issue_consumer_receipt(&expected, lease, &receipt)
+        })
+        .await
+    }
+
+    async fn settle_consumer_receipt(
+        &self,
+        context: &TaskContext,
+        expected: &AcquisitionRecord,
+        lease: Uuid,
+        receipt: AcquisitionConsumerReceipt,
+    ) -> Result<()> {
+        let store = self.store.clone();
+        let expected = expected.clone();
+        owned(context, "settle issued consumer receipt", move || {
+            store.settle_consumer_receipt(&expected, lease, &receipt)
+        })
+        .await
     }
 
     /// Global closure after every consumer has stopped admitting work. Narrow
@@ -625,6 +884,68 @@ impl AcquisitionService {
         .await
     }
 
+    /// Reopen the exact historical `Using` record without changing its lease
+    /// or publishing state. The returned proof retains the verified workspace
+    /// through caller-owned, receipt-qualified settlement.
+    pub(crate) async fn reopen_using(
+        &self,
+        context: &TaskContext,
+        demand: &AcquisitionDemand,
+        manifest: &ArtifactManifest,
+        workspace: &AcquisitionWorkspace,
+    ) -> Result<Option<AcquisitionReopenProof>> {
+        if !context.is_current_role(super::task_custody::TaskRole::Worker) {
+            return Err(invalid("Cold reconciliation requires its active worker"));
+        }
+        let store = self.store.clone();
+        let demand = demand.clone();
+        let manifest = manifest.clone();
+        let expected_workspace = workspace.identity().clone();
+        let record = owned(context, "observe retained acquisition use", move || {
+            let Some(record) = store
+                .acquisitions()?
+                .into_values()
+                .find(|record| record.demand == demand)
+            else {
+                return Ok(None);
+            };
+            if record.workspace != expected_workspace {
+                return Err(invalid(
+                    "Retained acquisition does not match the reopened workspace",
+                ));
+            }
+            match &record.phase {
+                AcquisitionPhase::Using { .. } => {
+                    if record.manifest != manifest {
+                        return Err(invalid(
+                            "Retained acquisition use does not match the reopened selection",
+                        ));
+                    }
+                    Ok(Some(record))
+                }
+                AcquisitionPhase::Transferring | AcquisitionPhase::FilesReady => Ok(None),
+                AcquisitionPhase::Adopted { .. } | AcquisitionPhase::Withdrawn => Err(invalid(
+                    "Retained terminal acquisition cannot be replayed by a reopened consumer",
+                )),
+            }
+        })
+        .await?;
+        let Some(record) = record else {
+            return Ok(None);
+        };
+        let verify = workspace.clone();
+        let manifest = record.manifest.clone();
+        let files = record.files.clone();
+        owned(context, "verify retained acquisition receipts", move || {
+            verify.verify_receipts(&manifest, &files)
+        })
+        .await?;
+        Ok(Some(AcquisitionReopenProof {
+            record,
+            _workspace: workspace.clone(),
+        }))
+    }
+
     pub(crate) async fn files_ready(
         &self,
         context: &TaskContext,
@@ -750,6 +1071,293 @@ impl AcquisitionService {
                 Ok(())
             })
         }).await
+    }
+}
+
+/// Consumer-facing view of the existing shared acquisition lifecycle.
+pub struct AcquisitionConsumer {
+    service: Arc<AcquisitionService>,
+    scope: Arc<super::task_custody::TaskScope>,
+    owner: String,
+}
+
+impl AcquisitionConsumer {
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    /// Read and validate this consumer's completion receipt for an exact
+    /// retained record. This grants no filesystem or settlement authority;
+    /// adopted consumers use it to verify their own published output before
+    /// retrying local workspace cleanup.
+    pub fn completion_receipt(
+        &self,
+        record: &AcquisitionRecord,
+    ) -> Result<Option<AcquisitionConsumerReceipt>> {
+        if record.demand.consumer != self.owner {
+            return Err(invalid("Completion receipt belongs to another consumer"));
+        }
+        let lease = match &record.phase {
+            AcquisitionPhase::Using { lease } | AcquisitionPhase::Adopted { lease } => *lease,
+            _ => {
+                return Err(invalid(
+                    "Completion receipt requires a retained consumer use",
+                ))
+            }
+        };
+        let Some(receipt) = self.service.consumer_receipt(record.id)? else {
+            return Ok(None);
+        };
+        receipt.validate_for_record(record, lease)?;
+        Ok(Some(receipt))
+    }
+
+    /// Close this consumer scope and join every transfer and registered effect.
+    pub async fn shutdown(&self) -> Result<()> {
+        self.scope.shutdown().await
+    }
+
+    /// Revalidate a retained consumer receipt under the supplied held
+    /// workspace and exact source selection. The callback owns interpretation
+    /// of its payload and must verify its durable output before returning.
+    /// This method never repeats transfer or consumer effects.
+    pub async fn reconcile<T, F, Fut>(
+        &self,
+        demand: AcquisitionDemand,
+        manifest: ArtifactManifest,
+        workspace: AcquisitionWorkspace,
+        validate_output: F,
+    ) -> Result<Option<T>>
+    where
+        T: Send + 'static,
+        F: FnOnce(AcquisitionConsumerReceipt, AcquiredArtifactUse) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<T>> + Send + 'static,
+    {
+        if demand.consumer != self.owner {
+            return Err(invalid("Consumer demand identity does not match its scope"));
+        }
+        let service = self.service.clone();
+        self.scope
+            .run_worker_invocation(move |context| async move {
+                service.require_schema(&context).await?;
+                let records = service.store.clone();
+                let demand_lookup = demand.clone();
+                let current = owned(&context, "observe consumer completion record", move || {
+                    Ok(records
+                        .acquisitions()?
+                        .into_values()
+                        .find(|record| record.demand == demand_lookup))
+                })
+                .await?;
+                let Some(record) = current else {
+                    return Ok(None);
+                };
+                if record.manifest != manifest || &record.workspace != workspace.identity() {
+                    return Err(invalid(
+                        "Retained consumer operation changed selection or workspace",
+                    ));
+                }
+                let lease = match &record.phase {
+                    AcquisitionPhase::Using { lease } | AcquisitionPhase::Adopted { lease } => {
+                        *lease
+                    }
+                    AcquisitionPhase::Transferring | AcquisitionPhase::FilesReady => {
+                        return Ok(None)
+                    }
+                    AcquisitionPhase::Withdrawn => {
+                        return Err(invalid("Withdrawn consumer operation cannot be reconciled"))
+                    }
+                };
+                if matches!(&record.phase, AcquisitionPhase::Using { .. }) {
+                    let proof = service
+                        .reopen_using(&context, &demand, &manifest, &workspace)
+                        .await?
+                        .ok_or_else(|| invalid("Retained consumer use disappeared"))?;
+                    if proof.record() != &record {
+                        return Err(invalid("Retained consumer use changed during reopen"));
+                    }
+                } else {
+                    let verify = workspace.clone();
+                    let manifest = manifest.clone();
+                    let files = record.files.clone();
+                    owned(
+                        &context,
+                        "verify adopted consumer input receipts",
+                        move || verify.verify_receipts(&manifest, &files),
+                    )
+                    .await?;
+                }
+                let receipt_store = service.store.clone();
+                let receipt = owned(
+                    &context,
+                    "read exact consumer completion receipt",
+                    move || {
+                        receipt_store.consumer_receipt(record.id)?.ok_or_else(|| {
+                            PumasError::Validation {
+                                field: "acquisition.consumer_recovery_required".into(),
+                                message:
+                                    "Retained consumer use has no authoritative completion receipt"
+                                        .into(),
+                            }
+                        })
+                    },
+                )
+                .await?;
+                receipt.validate_for_record(&record, lease)?;
+                let use_handle = AcquiredArtifactUse {
+                    store: service.store.clone(),
+                    context: context.clone(),
+                    lease: AcquisitionUseLease {
+                        operation: AcquisitionOperation {
+                            record: record.clone(),
+                            context: context.clone(),
+                        },
+                        workspace: workspace.clone(),
+                        lease,
+                        context: context.clone(),
+                    },
+                };
+                let result = validate_output(receipt.clone(), use_handle).await?;
+                match context.drain_blocking().await {
+                    Ok(0) => {}
+                    Ok(failures) => {
+                        return Err(PumasError::Other(format!(
+                            "Consumer recovery effects failed before settlement: {failures}"
+                        )))
+                    }
+                    Err(error) => {
+                        return Err(PumasError::Other(format!(
+                            "Consumer recovery effect drain failed before settlement: {error}"
+                        )))
+                    }
+                }
+                service
+                    .settle_consumer_use(&context, &record, lease, receipt.payload)
+                    .await?;
+                Ok(Some(result))
+            })
+            .await
+    }
+
+    /// Acquire the exact manifest using shared HTTP custody, then run the
+    /// consumer's extraction/publication while the verified use lease remains
+    /// held. The callback returns its owner-specific durable receipt payload.
+    pub async fn acquire_http<Staged, Output, F, Fut, Publish, PublishFut>(
+        &self,
+        request: AcquisitionHttpRequest,
+        client: reqwest::Client,
+        mut host: Box<dyn AcquisitionHost>,
+        prepare: F,
+        publish: Publish,
+    ) -> Result<Output>
+    where
+        Staged: Send + 'static,
+        Output: Send + 'static,
+        F: FnOnce(AcquiredArtifactUse) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<(Staged, Value)>> + Send + 'static,
+        Publish: FnOnce(Staged, AcquisitionConsumerReceipt) -> PublishFut + Send + 'static,
+        PublishFut: Future<Output = Result<Output>> + Send + 'static,
+    {
+        if request.demand.consumer != self.owner {
+            return Err(invalid("Consumer demand identity does not match its scope"));
+        }
+        if request.sources.len() != request.manifest.files().len()
+            || request
+                .sources
+                .iter()
+                .any(|source| source.url.trim().is_empty())
+        {
+            return Err(invalid(
+                "HTTP sources must match the exact selected manifest files",
+            ));
+        }
+        let service = self.service.clone();
+        self.scope
+            .run_worker_invocation(move |context| async move {
+                service.require_schema(&context).await?;
+                let operation = service
+                    .begin(
+                        &context,
+                        request.demand,
+                        request.manifest.clone(),
+                        request.workspace.identity().clone(),
+                        None,
+                    )
+                    .await?;
+                if operation.is_adopted() {
+                    return Err(PumasError::Validation {
+                        field: "acquisition.consumer_recovery_required".into(),
+                        message: "An adopted consumer operation cannot be replayed".into(),
+                    });
+                }
+                for (file_index, source) in request.sources.iter().enumerate() {
+                    service
+                        .acquire_file(
+                            &context,
+                            &operation,
+                            &request.workspace,
+                            file_index,
+                            &client,
+                            &source.url,
+                            source.authorization.as_deref(),
+                            &request.retry,
+                            host.as_mut(),
+                        )
+                        .await?;
+                }
+                let lease = service
+                    .files_ready(&context, operation, request.workspace)
+                    .await?;
+                let expected = lease.record().clone();
+                let use_lease = match &expected.phase {
+                    AcquisitionPhase::Using { lease } | AcquisitionPhase::Adopted { lease } => {
+                        *lease
+                    }
+                    _ => return Err(invalid("Verified consumer handoff has no exact use lease")),
+                };
+                let (staged, payload) = prepare(AcquiredArtifactUse {
+                    store: service.store.clone(),
+                    context: context.clone(),
+                    lease,
+                })
+                .await?;
+                match context.drain_blocking().await {
+                    Ok(0) => {}
+                    Ok(failures) => {
+                        return Err(PumasError::Other(format!(
+                            "Consumer effects failed before receipt settlement: {failures}"
+                        )))
+                    }
+                    Err(error) => {
+                        return Err(PumasError::Other(format!(
+                            "Consumer effect drain failed before receipt settlement: {error}"
+                        )))
+                    }
+                }
+                let receipt = AcquisitionConsumerReceipt::for_record(&expected, use_lease, payload)?;
+                service
+                    .issue_consumer_receipt(&context, &expected, use_lease, receipt.clone())
+                    .await?;
+                let result = publish(staged, receipt.clone()).await?;
+                match context.drain_blocking().await {
+                    Ok(0) => {}
+                    Ok(failures) => {
+                        return Err(PumasError::Other(format!(
+                            "Consumer publication effects failed before receipt settlement: {failures}"
+                        )))
+                    }
+                    Err(error) => {
+                        return Err(PumasError::Other(format!(
+                            "Consumer publication effect drain failed before receipt settlement: {error}"
+                        )))
+                    }
+                }
+                service
+                    .settle_consumer_receipt(&context, &expected, use_lease, receipt)
+                    .await?;
+                Ok(result)
+            })
+            .await
     }
 }
 

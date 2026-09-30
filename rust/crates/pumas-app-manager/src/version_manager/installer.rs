@@ -29,17 +29,23 @@ use crate::version_manager::progress::{InstallationProgressTracker, ProgressUpda
 use chrono::Utc;
 use futures::future::{BoxFuture, Shared};
 use futures::FutureExt;
+use pumas_library::acquisition::{
+    AcquisitionConsumer, AcquisitionDemand, AcquisitionHttpRequest, AcquisitionHttpSource,
+    AcquisitionRetryPolicy, AcquisitionWorkspace,
+};
 use pumas_library::config::{AppId, InstallationConfig, PathsConfig};
 use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
 use pumas_library::models::InstallationStage;
-use pumas_library::network::{GitHubAsset, GitHubRelease};
+use pumas_library::network::{GitHubAsset, GitHubClient, GitHubRelease, RetryConfig};
 use pumas_library::{PumasError, Result};
+use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
+use std::time::Instant;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -54,6 +60,295 @@ async fn path_exists(path: &Path) -> Result<bool> {
     })
 }
 
+fn sync_native_directory(path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    let directory = File::open(path);
+    #[cfg(windows)]
+    let directory = {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x02000000;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(path)
+    };
+    #[cfg(not(any(unix, windows)))]
+    let directory: std::io::Result<File> = Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "Native directory durability is unsupported",
+    ));
+    directory
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| PumasError::io_with_path(error, path))
+}
+
+fn sync_native_file(path: &Path) -> Result<()> {
+    let metadata =
+        std::fs::symlink_metadata(path).map_err(|error| PumasError::io_with_path(error, path))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(PumasError::InstallationFailed {
+            message: format!(
+                "Native durability requires a regular file: {}",
+                path.display()
+            ),
+        });
+    }
+    #[cfg(unix)]
+    let file = File::open(path);
+    #[cfg(windows)]
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path);
+    #[cfg(not(any(unix, windows)))]
+    let file: std::io::Result<File> = Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "Native file durability is unsupported",
+    ));
+    file.and_then(|file| file.sync_all())
+        .map_err(|error| PumasError::io_with_path(error, path))
+}
+
+fn sync_native_tree(root: &Path) -> Result<()> {
+    VersionInstaller::validate_native_output(root)?;
+    let mut directories = Vec::new();
+    for entry in walkdir::WalkDir::new(root).follow_links(false) {
+        let entry = entry.map_err(|error| PumasError::InstallationFailed {
+            message: format!("Native durability traversal failed: {error}"),
+        })?;
+        if entry.file_type().is_file() {
+            sync_native_file(entry.path())?;
+        } else if entry.file_type().is_dir() {
+            directories.push(entry.path().to_path_buf());
+        }
+    }
+    for directory in directories.into_iter().rev() {
+        sync_native_directory(&directory)?;
+    }
+    Ok(())
+}
+
+fn sync_native_metadata(versions: &Path, app_id: AppId) -> Result<()> {
+    let launcher = versions
+        .parent()
+        .ok_or_else(|| PumasError::InstallationFailed {
+            message: "Native versions have no launcher root".into(),
+        })?;
+    let metadata_dir = launcher.join("launcher-data/metadata");
+    let path = metadata_dir.join(format!(
+        "versions-{}.json",
+        app_id.to_string().to_lowercase()
+    ));
+    sync_native_file(&path)?;
+    sync_native_directory(&metadata_dir)?;
+    sync_native_directory(&launcher.join("launcher-data"))?;
+    sync_native_directory(launcher)
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NativeAttemptIdentity {
+    schema_version: u32,
+    tag: String,
+    attempt: String,
+    removed: bool,
+}
+
+fn native_attempt_path(versions: &Path, tag: &str) -> PathBuf {
+    let digest = format!("{:x}", Sha256::digest(tag.as_bytes()));
+    versions.join(format!(".llama-attempt-{}.json", &digest[..24]))
+}
+
+fn native_workspace_path(versions: &Path, tag: &str, attempt: &str) -> PathBuf {
+    let digest = format!("{:x}", Sha256::digest(tag.as_bytes()));
+    versions.join(format!(".llama-install-{}-{attempt}", &digest[..24]))
+}
+
+fn cleanup_native_workspace_if_present(directory: &Path, versions: &Path) -> Result<()> {
+    if !path_exists_sync(directory)? {
+        return Ok(());
+    }
+    let metadata = std::fs::symlink_metadata(directory)
+        .map_err(|error| PumasError::io_with_path(error, directory))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(PumasError::InstallationFailed {
+            message: "Native workspace is not a safe owned directory; reclamation required".into(),
+        });
+    }
+    std::fs::remove_dir_all(directory).map_err(|error| PumasError::Io {
+        message: format!("Native workspace cleanup incomplete; reclamation required: {error}"),
+        path: Some(directory.to_path_buf()),
+        source: Some(error),
+    })?;
+    sync_native_directory(versions)
+}
+
+fn read_native_attempt(versions: &Path, tag: &str) -> Result<Option<NativeAttemptIdentity>> {
+    let path = native_attempt_path(versions, tag);
+    if path_exists_sync(&path)? {
+        let metadata = std::fs::symlink_metadata(&path)
+            .map_err(|error| PumasError::io_with_path(error, &path))?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(PumasError::Validation {
+                field: "acquisition.consumer_recovery_required".into(),
+                message: "Native attempt identity is not a regular file".into(),
+            });
+        }
+    }
+    let identity: Option<NativeAttemptIdentity> = pumas_library::metadata::atomic_read_json(&path)?;
+    if let Some(identity) = &identity {
+        if identity.schema_version != 1
+            || identity.tag != tag
+            || identity.attempt.len() != 32
+            || !identity
+                .attempt
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(PumasError::Validation {
+                field: "acquisition.consumer_recovery_required".into(),
+                message: "Native attempt identity is malformed".into(),
+            });
+        }
+    }
+    Ok(identity)
+}
+
+fn write_native_attempt(versions: &Path, identity: &NativeAttemptIdentity) -> Result<()> {
+    pumas_library::metadata::atomic_write_json(
+        &native_attempt_path(versions, &identity.tag),
+        identity,
+        false,
+    )?;
+    sync_native_directory(versions)
+}
+
+/// Called only while removal holds the permanent native versions lease.
+/// Persist revocation before deleting output so restart can never republish it.
+pub(crate) fn mark_native_attempt_removed(versions: &Path, tag: &str) -> Result<()> {
+    VersionInstaller::validate_native_tag(tag)?;
+    if let Some(mut identity) = read_native_attempt(versions, tag)? {
+        identity.removed = true;
+        write_native_attempt(versions, &identity)?;
+        let directory = native_workspace_path(versions, tag, &identity.attempt);
+        cleanup_native_workspace_if_present(&directory, versions)?;
+    }
+    Ok(())
+}
+
+fn path_exists_sync(path: &Path) -> Result<bool> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(PumasError::io_with_path(error, path)),
+    }
+}
+
+fn hash_metadata(metadata: &InstalledVersionMetadata) -> Result<String> {
+    Ok(format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(metadata)?)
+    ))
+}
+
+fn metadata_matches(left: &InstalledVersionMetadata, right: &InstalledVersionMetadata) -> bool {
+    matches!((hash_metadata(left), hash_metadata(right)), (Ok(left), Ok(right)) if left == right)
+}
+
+fn hash_regular_file(path: &Path) -> Result<String> {
+    let metadata =
+        std::fs::symlink_metadata(path).map_err(|error| PumasError::io_with_path(error, path))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(PumasError::InstallationFailed {
+            message: format!("Native receipt requires a regular file: {}", path.display()),
+        });
+    }
+    let mut file = File::open(path).map_err(|error| PumasError::io_with_path(error, path))?;
+    let mut digest = Sha256::new();
+    std::io::copy(&mut file, &mut digest).map_err(|error| PumasError::io_with_path(error, path))?;
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn hash_native_tree(root: &Path) -> Result<String> {
+    let metadata =
+        std::fs::symlink_metadata(root).map_err(|error| PumasError::io_with_path(error, root))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err(PumasError::InstallationFailed {
+            message: "Native output root is not a directory".into(),
+        });
+    }
+    VersionInstaller::validate_native_output(root)?;
+    let mut digest = Sha256::new();
+    for entry in walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .sort_by_file_name()
+    {
+        let entry = entry.map_err(|error| PumasError::InstallationFailed {
+            message: format!("Could not hash native output: {error}"),
+        })?;
+        let relative = entry
+            .path()
+            .strip_prefix(root)
+            .map_err(|error| PumasError::Other(error.to_string()))?;
+        let name = relative
+            .to_str()
+            .ok_or_else(|| PumasError::InstallationFailed {
+                message: "Native output name is not UTF-8".into(),
+            })?
+            .replace('\\', "/");
+        digest.update((name.len() as u64).to_le_bytes());
+        digest.update(name.as_bytes());
+        let metadata = std::fs::symlink_metadata(entry.path())
+            .map_err(|error| PumasError::io_with_path(error, entry.path()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            digest.update(metadata.permissions().mode().to_le_bytes());
+        }
+        if metadata.file_type().is_symlink() {
+            digest.update(b"link");
+            let target = std::fs::read_link(entry.path())
+                .map_err(|error| PumasError::io_with_path(error, entry.path()))?;
+            let target = target
+                .to_str()
+                .ok_or_else(|| PumasError::InstallationFailed {
+                    message: "Native link target is not UTF-8".into(),
+                })?;
+            digest.update((target.len() as u64).to_le_bytes());
+            digest.update(target.as_bytes());
+        } else if metadata.is_file() {
+            digest.update(b"file");
+            digest.update(hash_regular_file(entry.path())?.as_bytes());
+        } else if metadata.is_dir() {
+            digest.update(b"directory");
+        } else {
+            return Err(PumasError::InstallationFailed {
+                message: "Native output contains a special file".into(),
+            });
+        }
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
+fn verify_llama_cpp_output(root: &Path, proof: &LlamaCppInstallReceiptV1) -> Result<()> {
+    let expected_launcher = if cfg!(windows) {
+        "bin/llama-server.exe"
+    } else {
+        "bin/llama-server"
+    };
+    if proof.launcher_relative_path != expected_launcher
+        || hash_native_tree(root)? != proof.output_tree_sha256
+        || hash_regular_file(&root.join(expected_launcher))? != proof.launcher_sha256
+    {
+        return Err(PumasError::InstallationFailed {
+            message: "Native output differs from its durable llama.cpp receipt; recovery required"
+                .into(),
+        });
+    }
+    Ok(())
+}
+
 /// Coordinates Torch cancellation with the irreversible publication boundary.
 pub(crate) struct TorchInstallControl(AtomicU8);
 
@@ -64,6 +359,7 @@ struct NativeInstallWorkspace {
     // Implicit destruction must preserve uncertain work. Reclamation is an
     // explicit fallible operation after all file/extraction effects settle.
     directory: PathBuf,
+    attempt: String,
     _lock: NativeVersionsLock,
 }
 
@@ -107,15 +403,68 @@ impl NativeVersionsLock {
 }
 
 impl NativeInstallWorkspace {
-    fn create(versions: &Path) -> Result<Self> {
+    #[cfg(test)]
+    fn create(versions: &Path, tag: &str) -> Result<Self> {
+        Self::create_for_attempt(versions, tag, None)
+    }
+
+    fn create_for_attempt(versions: &Path, tag: &str, expected: Option<&str>) -> Result<Self> {
+        VersionInstaller::validate_native_tag(tag)?;
         let lock = NativeVersionsLock::try_acquire(versions)?;
-        let directory = tempfile::Builder::new()
-            .prefix(".llama-install-")
-            .tempdir_in(versions)
-            .map_err(|error| PumasError::io_with_path(error, versions))?
-            .keep();
+        let current = read_native_attempt(versions, tag)?;
+        let identity = match (current, expected) {
+            (Some(identity), Some(expected))
+                if !identity.removed && identity.attempt == expected =>
+            {
+                identity
+            }
+            (_, Some(_)) => {
+                return Err(PumasError::Validation {
+                    field: "acquisition.consumer_recovery_required".into(),
+                    message: "Native recovery attempt was removed or changed".into(),
+                })
+            }
+            (Some(identity), None) if !identity.removed => identity,
+            (previous, None) => {
+                if path_exists_sync(&versions.join(tag))? {
+                    return Err(PumasError::VersionAlreadyInstalled { tag: tag.into() });
+                }
+                if previous.is_some() {
+                    mark_native_attempt_removed(versions, tag)?;
+                }
+                let mut entropy = [0u8; 16];
+                getrandom::fill(&mut entropy).map_err(|error| {
+                    PumasError::Other(format!("Native attempt identity failed: {error}"))
+                })?;
+                let identity = NativeAttemptIdentity {
+                    schema_version: 1,
+                    tag: tag.into(),
+                    attempt: entropy.iter().map(|byte| format!("{byte:02x}")).collect(),
+                    removed: false,
+                };
+                write_native_attempt(versions, &identity)?;
+                identity
+            }
+        };
+        let directory = native_workspace_path(versions, tag, &identity.attempt);
+        std::fs::create_dir_all(&directory)
+            .map_err(|error| PumasError::io_with_path(error, &directory))?;
+        let metadata = std::fs::symlink_metadata(&directory)
+            .map_err(|error| PumasError::io_with_path(error, &directory))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(PumasError::InstallationFailed {
+                message: "Native acquisition stage is not a held directory".into(),
+            });
+        }
+        sync_native_directory(versions)?;
+        sync_native_directory(
+            versions
+                .parent()
+                .ok_or_else(|| PumasError::Other("Native versions parent absent".into()))?,
+        )?;
         Ok(Self {
             directory,
+            attempt: identity.attempt,
             _lock: lock,
         })
     }
@@ -129,8 +478,130 @@ impl NativeInstallWorkspace {
             message: format!("Native staging cleanup incomplete; retained workspace requires reconciliation: {error}"),
             path: Some(self.directory.clone()),
             source: Some(error),
-        })
+        })?;
+        sync_native_directory(
+            self.directory
+                .parent()
+                .ok_or_else(|| PumasError::Other("Native workspace parent absent".into()))?,
+        )
     }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LlamaCppInstallReceiptV1 {
+    schema_version: u32,
+    tag: String,
+    metadata: InstalledVersionMetadata,
+    metadata_sha256: String,
+    output_tree_sha256: String,
+    launcher_relative_path: String,
+    launcher_sha256: String,
+}
+
+struct PreparedLlamaCppInstall {
+    use_set: pumas_library::acquisition::AcquiredArtifactUse,
+    stage: PathBuf,
+    destination: PathBuf,
+    custody: Arc<NativeInstallWorkspace>,
+}
+
+struct LlamaCppPublication {
+    versions: PathBuf,
+    app_id: AppId,
+    manager: Arc<MetadataManager>,
+    custody: Arc<NativeInstallWorkspace>,
+    stage: PathBuf,
+    destination: PathBuf,
+    proof: LlamaCppInstallReceiptV1,
+}
+
+struct LlamaCppHttpAttemptHost {
+    cancel_flag: Arc<AtomicBool>,
+    progress_tracker: Arc<RwLock<InstallationProgressTracker>>,
+    progress_tx: mpsc::Sender<ProgressUpdate>,
+    total_size: Option<u64>,
+    started: Instant,
+}
+
+#[async_trait::async_trait]
+impl pumas_library::acquisition::HttpAttemptHost for LlamaCppHttpAttemptHost {
+    async fn pause_requested(&self) {
+        super::wait_for_install_cancel(self.cancel_flag.clone()).await;
+    }
+
+    fn pause_requested_now(&self) -> bool {
+        false
+    }
+
+    fn cancel_requested(&self) -> bool {
+        self.cancel_flag.load(Ordering::SeqCst)
+    }
+
+    async fn record_progress(&mut self, downloaded_for_file: u64) -> Result<()> {
+        let elapsed = self.started.elapsed().as_secs_f64();
+        let speed = (elapsed > 0.0).then_some(downloaded_for_file as f64 / elapsed);
+        self.progress_tracker
+            .write()
+            .await
+            .update_download_progress(downloaded_for_file, self.total_size, speed);
+        let _ = self
+            .progress_tx
+            .send(ProgressUpdate::Download {
+                downloaded_bytes: downloaded_for_file,
+                total_bytes: self.total_size,
+                speed_bytes_per_sec: speed,
+            })
+            .await;
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl pumas_library::acquisition::AcquisitionHost for LlamaCppHttpAttemptHost {
+    async fn retry(
+        &mut self,
+        _attempt: u32,
+        _delay: Option<std::time::Duration>,
+        _error: Option<&str>,
+    ) -> Result<()> {
+        Ok(())
+    }
+}
+
+async fn open_native_acquisition_workspace(
+    versions: PathBuf,
+    tag: String,
+    expected: Option<String>,
+) -> Result<(Arc<NativeInstallWorkspace>, AcquisitionWorkspace)> {
+    tokio::task::spawn_blocking(move || {
+        let custody = Arc::new(NativeInstallWorkspace::create_for_attempt(
+            &versions,
+            &tag,
+            expected.as_deref(),
+        )?);
+        let relative = custody
+            .path()
+            .strip_prefix(&versions)
+            .map_err(|_| PumasError::InstallationFailed {
+                message: "Native acquisition stage escaped the versions root".into(),
+            })?
+            .to_path_buf();
+        let execution_lease: Arc<dyn Send + Sync> = Arc::new(custody._lock.clone());
+        let validator_lease = execution_lease.clone();
+        let workspace = AcquisitionWorkspace::from_reserved_directory(
+            &versions,
+            &relative,
+            execution_lease,
+            move || {
+                let _held = &validator_lease;
+                Ok(())
+            },
+        )?;
+        Ok((custody, workspace))
+    })
+    .await
+    .map_err(|error| PumasError::Other(format!("Failed to join native staging: {error}")))?
 }
 
 fn settled_result<T>(outcome: Result<T>, settlement: Result<()>) -> Result<T> {
@@ -502,9 +973,13 @@ pub struct VersionInstaller {
     /// Cancellation flag.
     cancel_flag: Arc<AtomicBool>,
     shutdown_flag: Arc<AtomicBool>,
+    github_client: Option<Arc<GitHubClient>>,
+    acquisition_consumer: Option<Arc<AcquisitionConsumer>>,
     torch_control: Arc<TorchInstallControl>,
     torch_cleanup: Arc<TorchCleanupTasks>,
     torch_attempt_lock: Mutex<()>,
+    #[cfg(test)]
+    native_receipt_pause: Option<Arc<TorchPublicationPause>>,
     #[cfg(test)]
     torch_stage_override: Option<TorchStageOverride>,
     #[cfg(test)]
@@ -536,9 +1011,13 @@ impl VersionInstaller {
             progress_tracker,
             cancel_flag,
             shutdown_flag: Arc::new(AtomicBool::new(false)),
+            github_client: None,
+            acquisition_consumer: None,
             torch_control: Arc::new(TorchInstallControl::new()),
             torch_cleanup: Arc::new(TorchCleanupTasks::default()),
             torch_attempt_lock: Mutex::new(()),
+            #[cfg(test)]
+            native_receipt_pause: None,
             #[cfg(test)]
             torch_stage_override: None,
             #[cfg(test)]
@@ -546,6 +1025,233 @@ impl VersionInstaller {
             #[cfg(test)]
             torch_stage_pause: None,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_native_receipt_pause(mut self, pause: Arc<TorchPublicationPause>) -> Self {
+        self.native_receipt_pause = Some(pause);
+        self
+    }
+
+    pub(crate) fn with_github_client(mut self, client: Arc<GitHubClient>) -> Self {
+        self.github_client = Some(client);
+        self
+    }
+
+    pub(crate) fn with_acquisition_consumer(
+        mut self,
+        consumer: Option<Arc<AcquisitionConsumer>>,
+    ) -> Self {
+        self.acquisition_consumer = consumer;
+        self
+    }
+
+    /// Reconcile historic native uses from the shared store before admitting
+    /// new work. Publisher lookup cannot change a retained manifest or receipt.
+    pub(crate) async fn reconcile_retained_llama_cpp(
+        &self,
+        records: Vec<pumas_library::acquisition::AcquisitionRecord>,
+    ) -> Result<()> {
+        let consumer = self
+            .acquisition_consumer
+            .as_ref()
+            .ok_or_else(|| PumasError::Config {
+                message: "Native recovery requires the shared acquisition consumer".into(),
+            })?;
+        for record in records {
+            if record.demand.consumer != consumer.owner()
+                || !matches!(
+                    &record.phase,
+                    pumas_library::acquisition::AcquisitionPhase::Using { .. }
+                        | pumas_library::acquisition::AcquisitionPhase::Adopted { .. }
+                )
+            {
+                continue;
+            }
+            let (version_platform, attempt) =
+                record
+                    .demand
+                    .operation
+                    .rsplit_once(':')
+                    .ok_or_else(|| PumasError::Validation {
+                        field: "acquisition.consumer_recovery_required".into(),
+                        message: "Retained native demand has no exact attempt identity".into(),
+                    })?;
+            let (tag, platform) =
+                version_platform
+                    .rsplit_once(':')
+                    .ok_or_else(|| PumasError::Validation {
+                        field: "acquisition.consumer_recovery_required".into(),
+                        message: "Retained native demand has no exact version/platform".into(),
+                    })?;
+            Self::validate_native_tag(tag)?;
+            if platform != format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH) {
+                return Err(PumasError::Validation {
+                    field: "acquisition.consumer_recovery_required".into(),
+                    message: "Retained native acquisition belongs to another platform".into(),
+                });
+            }
+            let tag = tag.to_owned();
+            let versions = self.versions_dir();
+            let current =
+                read_native_attempt(&versions, &tag)?.ok_or_else(|| PumasError::Validation {
+                    field: "acquisition.consumer_recovery_required".into(),
+                    message: "Retained native acquisition has no attempt identity".into(),
+                })?;
+            if current.removed || current.attempt != attempt {
+                // Removal revokes the attempt before output reclamation. A new
+                // current attempt proves explicit removal/reinstall occurred.
+                continue;
+            }
+            if matches!(
+                &record.phase,
+                pumas_library::acquisition::AcquisitionPhase::Adopted { .. }
+            ) {
+                let consumer = consumer.clone();
+                let retained = record.clone();
+                let receipt =
+                    tokio::task::spawn_blocking(move || consumer.completion_receipt(&retained))
+                        .await
+                        .map_err(|error| {
+                            PumasError::Other(format!("Native receipt lookup failed: {error}"))
+                        })??
+                        .ok_or_else(|| PumasError::Validation {
+                            field: "acquisition.consumer_recovery_required".into(),
+                            message: "Adopted native installation has no exact completion receipt"
+                                .into(),
+                        })?;
+                let proof: LlamaCppInstallReceiptV1 = serde_json::from_value(receipt.payload)
+                    .map_err(|error| PumasError::Validation {
+                        field: "acquisition.consumer_recovery_required".into(),
+                        message: format!("Adopted native receipt is malformed: {error}"),
+                    })?;
+                let versions_for_cleanup = versions.clone();
+                let tag_for_cleanup = tag.to_owned();
+                let attempt_for_cleanup = attempt.to_owned();
+                let expected_workspace = record.workspace.clone();
+                let manager = self.metadata_manager.clone();
+                let app_id = self.app_id;
+                let lock = NativeVersionsLock::acquire(versions.clone()).await?;
+                tokio::task::spawn_blocking(move || {
+                    let _lock = lock;
+                    let current = read_native_attempt(&versions_for_cleanup, &tag_for_cleanup)?;
+                    let Some(current) = current else {
+                        return Err(PumasError::Validation {
+                            field: "acquisition.consumer_recovery_required".into(),
+                            message: "Adopted native receipt has no attempt identity".into(),
+                        });
+                    };
+                    if current.removed || current.attempt != attempt_for_cleanup {
+                        return Ok(());
+                    }
+                    let workspace = native_workspace_path(
+                        &versions_for_cleanup,
+                        &tag_for_cleanup,
+                        &attempt_for_cleanup,
+                    );
+                    let relative_workspace = workspace
+                        .strip_prefix(&versions_for_cleanup)
+                        .map_err(|_| PumasError::Validation {
+                            field: "acquisition.consumer_recovery_required".into(),
+                            message: "Adopted native workspace escaped its versions root".into(),
+                        })?;
+                    let actual_workspace =
+                        pumas_library::acquisition::AcquisitionWorkspace::identity_for_reserved_directory(
+                            &versions_for_cleanup,
+                            relative_workspace,
+                        )?;
+                    if actual_workspace != expected_workspace {
+                        return Err(PumasError::Validation {
+                            field: "acquisition.consumer_recovery_required".into(),
+                            message: "Adopted native workspace identity changed".into(),
+                        });
+                    }
+                    let destination = versions_for_cleanup.join(&tag_for_cleanup);
+                    let metadata = std::fs::symlink_metadata(&destination)
+                        .map_err(|error| PumasError::io_with_path(error, &destination))?;
+                    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                        return Err(PumasError::InstallationFailed {
+                            message: "Adopted llama.cpp output is not a safe directory".into(),
+                        });
+                    }
+                    Self::validate_llama_cpp_receipt(&tag_for_cleanup, &proof, &destination)?;
+                    verify_llama_cpp_output(&destination, &proof)?;
+                    match manager.get_installed_version(&tag_for_cleanup, Some(app_id))? {
+                        Some(installed) if metadata_matches(&installed, &proof.metadata) => {}
+                        _ => {
+                            return Err(PumasError::InstallationFailed {
+                                message: "Adopted llama.cpp metadata does not match its receipt"
+                                    .into(),
+                            })
+                        }
+                    }
+                    cleanup_native_workspace_if_present(&workspace, &versions_for_cleanup)
+                })
+                .await
+                .map_err(|error| {
+                    PumasError::Other(format!("Native adopted cleanup task failed: {error}"))
+                })??;
+                continue;
+            }
+            let (custody, workspace) = open_native_acquisition_workspace(
+                versions.clone(),
+                tag.clone(),
+                Some(attempt.to_owned()),
+            )
+            .await?;
+            let custody_for_reconcile = custody.clone();
+            let manager = self.metadata_manager.clone();
+            let app_id = self.app_id;
+            consumer
+                .reconcile(
+                    record.demand,
+                    record.manifest,
+                    workspace,
+                    move |receipt, use_set| async move {
+                        let proof: LlamaCppInstallReceiptV1 =
+                            serde_json::from_value(receipt.payload).map_err(|error| {
+                                PumasError::Validation {
+                                    field: "acquisition.consumer_recovery_required".into(),
+                                    message: format!(
+                                        "Retained native receipt is malformed: {error}"
+                                    ),
+                                }
+                            })?;
+                        use_set
+                            .run_blocking("reconcile retained native installation", move || {
+                                Self::reconcile_llama_cpp_installation(
+                                    &versions,
+                                    &tag,
+                                    app_id,
+                                    &manager,
+                                    custody_for_reconcile,
+                                    proof,
+                                )
+                            })
+                            .await
+                    },
+                )
+                .await?
+                .ok_or_else(|| PumasError::Validation {
+                    field: "acquisition.consumer_recovery_required".into(),
+                    message: "Retained native use disappeared before reconciliation".into(),
+                })?;
+            tokio::task::spawn_blocking(move || {
+                Arc::try_unwrap(custody)
+                    .map_err(|workspace| PumasError::InstallationFailed {
+                        message: format!(
+                            "Reconciled native workspace remains in use: {}",
+                            workspace.path().display()
+                        ),
+                    })?
+                    .cleanup()
+            })
+            .await
+            .map_err(|error| {
+                PumasError::Other(format!("Native recovery cleanup task failed: {error}"))
+            })??;
+        }
+        Ok(())
     }
 
     /// Drain Torch quarantine cleanup after the last direct install call.
@@ -795,13 +1501,40 @@ impl VersionInstaller {
         info!("Starting llama.cpp binary installation for {}", tag);
 
         let asset = self.select_llama_cpp_asset(&release.assets)?;
-        let download_url = &asset.download_url;
-        let total_size = asset.size;
         let asset_name = asset.name.clone();
+        let github = self
+            .github_client
+            .as_ref()
+            .ok_or_else(|| PumasError::Config {
+                message: "llama.cpp requires the configured shared GitHub asset resolver".into(),
+            })?;
+        // GitHub discovery appends a runtime flavor to the upstream release
+        // tag. Resolve the publisher release, while retaining the full local tag.
+        let publisher_tag = release
+            .tag_name
+            .rsplit_once('+')
+            .map_or(release.tag_name.as_str(), |(publisher, _)| publisher);
+        let selection = github
+            .resolve_release_asset(self.app_id.github_repo(), publisher_tag, &asset_name)
+            .await
+            .map_err(|error| PumasError::InstallationFailed {
+                message: format!("Could not verify llama.cpp release asset: {error}"),
+            })?;
+        let manifest = selection.manifest().clone();
+        let selected_file =
+            manifest
+                .files()
+                .first()
+                .ok_or_else(|| PumasError::InstallationFailed {
+                    message: "Verified llama.cpp release selection has no file".into(),
+                })?;
+        let total_size = selected_file.expected_size();
+        let download_url = selection.download_url().to_owned();
 
         info!(
-            "Selected llama.cpp asset: {} ({} bytes)",
-            asset_name, total_size
+            "Selected publisher-verified llama.cpp asset: {} ({} bytes)",
+            asset_name,
+            total_size.unwrap_or_default()
         );
 
         let log_dir = self.logs_dir();
@@ -816,52 +1549,293 @@ impl VersionInstaller {
             let mut tracker = self.progress_tracker.write().await;
             tracker.start_installation(
                 tag,
-                Some(total_size),
+                total_size,
                 None,
                 Some(log_path.to_string_lossy().as_ref()),
             );
         }
 
-        // No digest is supplied by GitHubAsset. Filename and size are not
-        // integrity evidence: do not reuse or mutate retained download caches.
         let versions = self.versions_dir();
         fs::create_dir_all(&versions)
             .await
             .map_err(|e| PumasError::io_with_path(e, &versions))?;
-        let custody = Arc::new(
-            tokio::task::spawn_blocking(move || NativeInstallWorkspace::create(&versions))
-                .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Failed to join native staging: {error}"))
-                })??,
-        );
-        let archive_path = custody.path().join("archive");
-        let result = self
-            .do_llama_cpp_install(
-                tag,
-                release,
-                download_url,
-                &asset_name,
-                &archive_path,
-                custody.clone(),
-                &progress_tx,
+        let (custody, workspace) =
+            open_native_acquisition_workspace(versions.clone(), tag.to_owned(), None).await?;
+        let consumer = self
+            .acquisition_consumer
+            .clone()
+            .ok_or_else(|| PumasError::Config {
+                message: "llama.cpp requires the shared artifact acquisition consumer".into(),
+            })?;
+        let demand = AcquisitionDemand {
+            consumer: consumer.owner().to_owned(),
+            operation: format!(
+                "{tag}:{}-{}:{}",
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+                custody.attempt
+            ),
+        };
+        let custody_for_reconcile = custody.clone();
+        let manager_for_reconcile = self.metadata_manager.clone();
+        let versions_for_reconcile = versions.clone();
+        let tag_for_reconcile = tag.to_owned();
+        let cancel_for_reconcile = self.cancel_flag.clone();
+        let control_for_reconcile = self.torch_control.clone();
+        let app_id = self.app_id;
+        let reconcile = consumer
+            .reconcile(
+                demand.clone(),
+                manifest.clone(),
+                workspace.clone(),
+                move |receipt, use_set| async move {
+                    let proof: LlamaCppInstallReceiptV1 = serde_json::from_value(receipt.payload)
+                        .map_err(|error| {
+                        PumasError::Validation {
+                            field: "acquisition.consumer_receipt".into(),
+                            message: format!("llama.cpp receipt is malformed: {error}"),
+                        }
+                    })?;
+                    if cancel_for_reconcile.load(Ordering::SeqCst)
+                        || !control_for_reconcile.try_begin_publication()
+                    {
+                        return Err(VersionInstaller::cancellation_error());
+                    }
+                    use_set
+                        .run_blocking("reconcile verified llama.cpp installation", move || {
+                            Self::reconcile_llama_cpp_installation(
+                                &versions_for_reconcile,
+                                &tag_for_reconcile,
+                                app_id,
+                                &manager_for_reconcile,
+                                custody_for_reconcile,
+                                proof,
+                            )
+                        })
+                        .await?;
+                    Ok(())
+                },
             )
             .await;
 
-        // Stage reclamation can traverse a large archive. The supervised
-        // installation awaits that blocking cleanup before releasing admission.
-        let cleanup = tokio::task::spawn_blocking(move || {
-            Arc::try_unwrap(custody)
-                .map_err(|workspace| PumasError::InstallationFailed {
-                    message: format!("Native workspace remains in use; retained stage requires reconciliation: {}", workspace.path().display()),
-                })?
-                .cleanup()
-        })
+        let result = match reconcile {
+            Ok(Some(())) => Ok(()),
+            Ok(None) => {
+                let client = reqwest::Client::builder()
+                    .connect_timeout(InstallationConfig::URL_FETCH_TIMEOUT)
+                    .user_agent("pumas-library")
+                    .build()
+                    .map_err(|error| PumasError::Network {
+                        message: "Failed to create shared artifact HTTP client".into(),
+                        cause: Some(error.to_string()),
+                    })?;
+                let host = LlamaCppHttpAttemptHost {
+                    cancel_flag: self.cancel_flag.clone(),
+                    progress_tracker: self.progress_tracker.clone(),
+                    progress_tx: progress_tx.clone(),
+                    total_size,
+                    started: Instant::now(),
+                };
+                let retry = AcquisitionRetryPolicy {
+                    attempts: Some(InstallationConfig::DOWNLOAD_RETRY_ATTEMPTS),
+                    elapsed: std::time::Duration::ZERO,
+                    backoff: RetryConfig::new()
+                        .with_max_attempts(InstallationConfig::DOWNLOAD_RETRY_ATTEMPTS)
+                        .with_base_delay(std::time::Duration::from_secs(2)),
+                };
+                let stage = custody.path().join("output");
+                let destination = versions.join(tag);
+                let asset_for_prepare = asset_name.clone();
+                let tag_for_prepare = tag.to_owned();
+                let release_date = Some(release.published_at.clone());
+                let release_notes = release.body.clone();
+                let metadata = InstalledVersionMetadata {
+                    path: tag.to_owned(),
+                    installed_date: Utc::now().to_rfc3339(),
+                    release_tag: tag.to_owned(),
+                    python_version: None,
+                    git_commit: None,
+                    release_date,
+                    release_notes,
+                    // Retrieval URLs are ephemeral source access, not durable
+                    // installation provenance.
+                    download_url: None,
+                    size: total_size,
+                    requirements_hash: None,
+                    dependencies_installed: Some(true),
+                };
+                let metadata_for_prepare = metadata.clone();
+                let versions_for_publish = versions.clone();
+                let manager_for_publish = self.metadata_manager.clone();
+                let progress_for_publish = self.progress_tracker.clone();
+                let progress_tx_for_publish = progress_tx.clone();
+                #[cfg(test)]
+                let native_receipt_pause = self.native_receipt_pause.clone();
+                let cancel_for_prepare = self.cancel_flag.clone();
+                let control_for_prepare = self.torch_control.clone();
+                let custody_for_prepare = custody.clone();
+                let versions_for_cancel = versions.clone();
+                let tag_for_cancel = tag.to_owned();
+                let request = AcquisitionHttpRequest {
+                    demand,
+                    manifest,
+                    workspace,
+                    sources: vec![AcquisitionHttpSource {
+                        url: download_url,
+                        authorization: None,
+                    }],
+                    retry,
+                };
+                consumer
+                    .acquire_http(
+                        request,
+                        client,
+                        Box::new(host),
+                        move |use_set| async move {
+                            let archive = use_set.open_file(0).await?;
+                            let stage_for_extract = stage.clone();
+                            let asset_name = asset_for_prepare.clone();
+                            let extracted = use_set
+                                .run_blocking("extract publisher-verified llama.cpp archive", move || {
+                                    if path_exists_sync(&stage_for_extract)? {
+                                        return Err(PumasError::InstallationFailed {
+                                            message: "llama.cpp output stage already contains unresolved work".into(),
+                                        });
+                                    }
+                                    std::fs::create_dir(&stage_for_extract)
+                                        .map_err(|error| PumasError::io_with_path(error, &stage_for_extract))?;
+                                    VersionInstaller::extract_llama_cpp_binary_from(
+                                        archive,
+                                        &stage_for_extract,
+                                        &asset_name,
+                                    )?;
+                                    sync_native_tree(&stage_for_extract)?;
+                                    sync_native_directory(stage_for_extract.parent().ok_or_else(|| PumasError::Other("Native output parent absent".into()))?)?;
+                                    let output_tree_sha256 = hash_native_tree(&stage_for_extract)?;
+                                    let launcher = stage_for_extract.join(if cfg!(windows) {
+                                        "bin/llama-server.exe"
+                                    } else {
+                                        "bin/llama-server"
+                                    });
+                                    let launcher_sha256 = hash_regular_file(&launcher)?;
+                                    Ok((output_tree_sha256, launcher_sha256))
+                                })
+                                .await?;
+                            let metadata_sha256 = hash_metadata(&metadata_for_prepare)?;
+                            let proof = LlamaCppInstallReceiptV1 {
+                                schema_version: 1,
+                                tag: tag_for_prepare,
+                                metadata: metadata_for_prepare,
+                                metadata_sha256,
+                                output_tree_sha256: extracted.0,
+                                launcher_relative_path: if cfg!(windows) {
+                                    "bin/llama-server.exe".into()
+                                } else {
+                                    "bin/llama-server".into()
+                                },
+                                launcher_sha256: extracted.1,
+                            };
+                            #[cfg(test)]
+                            if let Some(pause) = native_receipt_pause {
+                                pause.reached.notify_one();
+                                let permit = pause.resume.acquire().await.map_err(|_| {
+                                    PumasError::Other("Native receipt test pause closed".into())
+                                })?;
+                                permit.forget();
+                            }
+                            // Once this receipt can be persisted, restart will
+                            // finish publication from its staged output. Win
+                            // the cancellation race first so an accepted
+                            // cancel cannot turn into a later installation.
+                            if cancel_for_prepare.load(Ordering::SeqCst)
+                                || !control_for_prepare.try_begin_publication()
+                            {
+                                use_set.withdraw_after_cleanup(move || {
+                                    let mut identity = read_native_attempt(&versions_for_cancel, &tag_for_cancel)?
+                                        .ok_or_else(|| PumasError::Other("Cancelled native attempt identity absent".into()))?;
+                                    if identity.attempt != custody_for_prepare.attempt || identity.removed {
+                                        return Err(PumasError::Other("Cancelled native attempt identity changed".into()));
+                                    }
+                                    identity.removed = true;
+                                    write_native_attempt(&versions_for_cancel, &identity)?;
+                                    cleanup_native_workspace_if_present(custody_for_prepare.path(), &versions_for_cancel)
+                                }).await?;
+                                return Err(VersionInstaller::cancellation_error());
+                            }
+                            let prepared = PreparedLlamaCppInstall {
+                                use_set,
+                                stage,
+                                destination: destination.clone(),
+                                custody: custody_for_prepare,
+                            };
+                            Ok((prepared, serde_json::to_value(proof)?))
+                        },
+                        move |prepared, issued| async move {
+                            let proof: LlamaCppInstallReceiptV1 =
+                                serde_json::from_value(issued.payload).map_err(|error| {
+                                    PumasError::Validation {
+                                        field: "acquisition.consumer_receipt".into(),
+                                        message: format!("llama.cpp publication receipt is malformed: {error}"),
+                                    }
+                                })?;
+                            prepared
+                                .use_set
+                                .run_blocking("publish verified llama.cpp installation", move || {
+                                    VersionInstaller::publish_llama_cpp_installation(
+                                        LlamaCppPublication {
+                                            versions: versions_for_publish,
+                                            app_id,
+                                            manager: manager_for_publish,
+                                            custody: prepared.custody,
+                                            stage: prepared.stage,
+                                            destination: prepared.destination,
+                                            proof,
+                                        },
+                                    )
+                                })
+                                .await?;
+                            progress_for_publish.write().await.update_stage(
+                                InstallationStage::Setup,
+                                100.0,
+                                Some("Installation complete"),
+                            );
+                            let _ = progress_tx_for_publish
+                                .send(ProgressUpdate::Setup {
+                                    message: "Installation complete".into(),
+                                })
+                                .await;
+                            Ok(())
+                        },
+                    )
+                    .await
+            }
+            Err(error) => Err(error),
+        };
+
+        let result = match result {
+            Err(PumasError::DownloadPaused) if self.cancel_flag.load(Ordering::SeqCst) => {
+                Err(PumasError::DownloadCancelled)
+            }
+            result => result,
+        };
+
+        let result = if result.is_ok() {
+            let cleanup = tokio::task::spawn_blocking(move || {
+                Arc::try_unwrap(custody)
+                    .map_err(|workspace| PumasError::InstallationFailed {
+                        message: format!(
+                            "Native workspace remains in use: {}",
+                            workspace.path().display()
+                        ),
+                    })?
+                    .cleanup()
+            })
             .await
-            .unwrap_or_else(|error| Err(
-                PumasError::Other(format!("Failed to join native cleanup: {error}"))
-            ));
-        let result = settled_result(result, cleanup);
+            .map_err(|error| PumasError::Other(format!("Native cleanup join failed: {error}")))?;
+            settled_result(result, cleanup)
+        } else {
+            result
+        };
 
         {
             let mut tracker = self.progress_tracker.write().await;
@@ -977,69 +1951,6 @@ impl VersionInstaller {
         Ok(())
     }
 
-    /// Execute llama.cpp installation steps.
-    #[allow(clippy::too_many_arguments)]
-    async fn do_llama_cpp_install(
-        &self,
-        tag: &str,
-        release: &GitHubRelease,
-        download_url: &str,
-        asset_name: &str,
-        archive_path: &Path,
-        custody: Arc<NativeInstallWorkspace>,
-        progress_tx: &mpsc::Sender<ProgressUpdate>,
-    ) -> Result<()> {
-        Self::validate_native_tag(tag)?;
-        let version_dir = self.versions_dir().join(tag);
-        // Replacement requires a durable directory/metadata transaction owned
-        // elsewhere. Never delete or replace retained output here.
-        if path_exists(&version_dir).await? {
-            return Err(PumasError::VersionAlreadyInstalled { tag: tag.into() });
-        }
-        self.check_cancelled()?;
-        self.download_archive(download_url, archive_path, progress_tx)
-            .await?;
-        self.check_cancelled()?;
-        let stage = custody.path().join("output");
-        fs::create_dir(&stage)
-            .await
-            .map_err(|e| PumasError::io_with_path(e, &stage))?;
-        {
-            let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(
-                InstallationStage::Extract,
-                0.0,
-                Some("Extracting binary archive..."),
-            );
-        }
-        self.send_progress(
-            progress_tx,
-            ProgressUpdate::StageChanged {
-                stage: InstallationStage::Extract,
-                message: "Extracting binary archive...".into(),
-            },
-        )
-        .await;
-        let archive_path = archive_path.to_path_buf();
-        let extracted = stage.clone();
-        let asset_name = asset_name.to_owned();
-        // The blocking worker holds custody even if a direct caller drops its
-        // future. The manager never aborts its registered installation task.
-        let held = custody.clone();
-        tokio::task::spawn_blocking(move || {
-            let _held = held;
-            Self::extract_llama_cpp_binary(&archive_path, &extracted, &asset_name)
-        })
-        .await
-        .map_err(|e| {
-            PumasError::Other(format!("Failed to join llama.cpp extraction task: {e}"))
-        })??;
-        self.check_cancelled()?;
-        self.finalize_llama_cpp_installation(tag, release, &stage, custody, progress_tx)
-            .await?;
-        Ok(())
-    }
-
     fn publish_native_stage(
         stage: &Path,
         destination: &Path,
@@ -1054,8 +1965,19 @@ impl VersionInstaller {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(PumasError::io_with_path(error, destination)),
         }
+        sync_native_tree(stage)?;
         std::fs::rename(stage, destination)
             .map_err(|e| PumasError::io_with_path(e, destination))?;
+        sync_native_directory(
+            stage
+                .parent()
+                .ok_or_else(|| PumasError::Other("Native stage parent absent".into()))?,
+        )?;
+        sync_native_directory(
+            destination
+                .parent()
+                .ok_or_else(|| PumasError::Other("Native destination parent absent".into()))?,
+        )?;
         if let Err((error, can_withdraw)) = finalize() {
             if !can_withdraw {
                 return Err(error);
@@ -1068,7 +1990,157 @@ impl VersionInstaller {
                     ),
                 }
             })?;
+            sync_native_directory(
+                stage
+                    .parent()
+                    .ok_or_else(|| PumasError::Other("Native stage parent absent".into()))?,
+            )?;
+            sync_native_directory(
+                destination
+                    .parent()
+                    .ok_or_else(|| PumasError::Other("Native destination parent absent".into()))?,
+            )?;
             return Err(error);
+        }
+        Ok(())
+    }
+
+    fn publish_llama_cpp_installation(publication: LlamaCppPublication) -> Result<()> {
+        let LlamaCppPublication {
+            versions,
+            app_id,
+            manager,
+            custody,
+            stage,
+            destination,
+            proof,
+        } = publication;
+        Self::validate_llama_cpp_receipt(&proof.tag, &proof, &stage)?;
+        if manager
+            .get_installed_version(&proof.tag, Some(app_id))?
+            .is_some()
+        {
+            return Err(PumasError::VersionAlreadyInstalled {
+                tag: proof.tag.clone(),
+            });
+        }
+        Self::publish_native_stage(&stage, &destination, || {
+            match manager.update_installed_version(
+                &proof.tag,
+                proof.metadata.clone(),
+                Some(app_id),
+            ) {
+                Ok(()) => Ok(()),
+                Err(error) => match manager.get_installed_version(&proof.tag, Some(app_id)) {
+                    Ok(None) => Err((error, true)),
+                    _ => Err((
+                        PumasError::InstallationFailed {
+                            message: format!("Native metadata publication is uncertain; retained output requires reconciliation: {error}"),
+                        },
+                        false,
+                    )),
+                },
+            }
+        })?;
+        sync_native_metadata(&versions, app_id)?;
+        drop(custody);
+        Ok(())
+    }
+
+    fn reconcile_llama_cpp_installation(
+        versions: &Path,
+        tag: &str,
+        app_id: AppId,
+        manager: &MetadataManager,
+        custody: Arc<NativeInstallWorkspace>,
+        proof: LlamaCppInstallReceiptV1,
+    ) -> Result<()> {
+        Self::validate_llama_cpp_receipt(tag, &proof, custody.path().join("output").as_path())?;
+        let destination = versions.join(tag);
+        let staged_output = custody.path().join("output");
+        match std::fs::symlink_metadata(&destination) {
+            Ok(metadata) => {
+                if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                    return Err(PumasError::InstallationFailed {
+                        message: "Retained llama.cpp destination is not a directory".into(),
+                    });
+                }
+                verify_llama_cpp_output(&destination, &proof)?;
+                if path_exists_sync(&staged_output)? {
+                    return Err(PumasError::InstallationFailed {
+                        message: "Both staged and published llama.cpp output exist".into(),
+                    });
+                }
+                match manager.get_installed_version(tag, Some(app_id))? {
+                    Some(current) if metadata_matches(&current, &proof.metadata) => {}
+                    Some(_) => {
+                        return Err(PumasError::InstallationFailed {
+                            message: "Installed llama.cpp metadata conflicts with its receipt"
+                                .into(),
+                        })
+                    }
+                    None => manager.update_installed_version(
+                        tag,
+                        proof.metadata.clone(),
+                        Some(app_id),
+                    )?,
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                verify_llama_cpp_output(&staged_output, &proof)?;
+                if manager.get_installed_version(tag, Some(app_id))?.is_some() {
+                    return Err(PumasError::InstallationFailed {
+                        message: "Installed metadata exists without its llama.cpp output".into(),
+                    });
+                }
+                Self::publish_native_stage(&staged_output, &destination, || {
+                    match manager.update_installed_version(
+                        tag,
+                        proof.metadata.clone(),
+                        Some(app_id),
+                    ) {
+                        Ok(()) => Ok(()),
+                        Err(error) => match manager.get_installed_version(tag, Some(app_id)) {
+                            Ok(None) => Err((error, true)),
+                            _ => Err((
+                                PumasError::InstallationFailed {
+                                    message: format!(
+                                        "Native metadata recovery is uncertain: {error}"
+                                    ),
+                                },
+                                false,
+                            )),
+                        },
+                    }
+                })?;
+            }
+            Err(error) => return Err(PumasError::io_with_path(error, &destination)),
+        }
+        sync_native_tree(&destination)?;
+        sync_native_directory(versions)?;
+        sync_native_metadata(versions, app_id)?;
+        drop(custody);
+        Ok(())
+    }
+
+    fn validate_llama_cpp_receipt(
+        tag: &str,
+        proof: &LlamaCppInstallReceiptV1,
+        output: &Path,
+    ) -> Result<()> {
+        if proof.schema_version != 1
+            || proof.tag != tag
+            || proof.metadata.path != tag
+            || proof.metadata.release_tag != tag
+            || hash_metadata(&proof.metadata)? != proof.metadata_sha256
+        {
+            return Err(PumasError::Validation {
+                field: "acquisition.consumer_receipt".into(),
+                message: "llama.cpp receipt does not match its exact version or metadata".into(),
+            });
+        }
+        if path_exists_sync(output)? {
+            verify_llama_cpp_output(output, proof)?;
         }
         Ok(())
     }
@@ -1277,19 +2349,30 @@ impl VersionInstaller {
     }
 
     /// Extract a llama.cpp binary archive and ensure llama-server is executable.
+    #[cfg(test)]
     fn extract_llama_cpp_binary(
         archive_path: &Path,
+        version_dir: &Path,
+        asset_name: &str,
+    ) -> Result<()> {
+        let archive = File::open(archive_path)
+            .map_err(|error| PumasError::io_with_path(error, archive_path))?;
+        Self::extract_llama_cpp_binary_from(archive, version_dir, asset_name)
+    }
+
+    fn extract_llama_cpp_binary_from(
+        archive: File,
         version_dir: &Path,
         asset_name: &str,
     ) -> Result<()> {
         info!("Extracting llama.cpp binary from {}", asset_name);
 
         if asset_name.ends_with(".tar.zst") {
-            Self::extract_tar_zst(archive_path, version_dir)?;
+            Self::extract_tar_zst_from(archive, version_dir)?;
         } else if asset_name.ends_with(".tgz") || asset_name.ends_with(".tar.gz") {
-            Self::extract_tarball(archive_path, version_dir)?;
+            Self::extract_tarball_from(archive, version_dir)?;
         } else if asset_name.ends_with(".zip") {
-            Self::extract_zip(archive_path, version_dir)?;
+            Self::extract_zip_from(archive, version_dir)?;
         } else {
             return Err(PumasError::InstallationFailed {
                 message: format!("Unsupported llama.cpp archive format: {}", asset_name),
@@ -1435,10 +2518,13 @@ impl VersionInstaller {
             path: Some(archive_path.to_path_buf()),
             source: Some(e),
         })?;
+        Self::extract_tar_zst_from(file, dest_dir)
+    }
 
+    fn extract_tar_zst_from(file: File, dest_dir: &Path) -> Result<()> {
         let decoder = zstd::Decoder::new(BufReader::new(file)).map_err(|e| PumasError::Io {
             message: format!("Failed to create zstd decoder: {}", e),
-            path: Some(archive_path.to_path_buf()),
+            path: Some(dest_dir.to_path_buf()),
             source: Some(std::io::Error::other(e)),
         })?;
 
@@ -1686,106 +2772,6 @@ impl VersionInstaller {
         Ok(())
     }
 
-    /// Finalize llama.cpp installation metadata.
-    async fn finalize_llama_cpp_installation(
-        &self,
-        tag: &str,
-        release: &GitHubRelease,
-        stage: &Path,
-        custody: Arc<NativeInstallWorkspace>,
-        progress_tx: &mpsc::Sender<ProgressUpdate>,
-    ) -> Result<()> {
-        info!("Finalizing llama.cpp installation for {}", tag);
-
-        {
-            let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(
-                InstallationStage::Setup,
-                0.0,
-                Some("Finalizing installation..."),
-            );
-        }
-        self.send_progress(
-            progress_tx,
-            ProgressUpdate::StageChanged {
-                stage: InstallationStage::Setup,
-                message: "Finalizing installation...".to_string(),
-            },
-        )
-        .await;
-
-        let selected = self.select_llama_cpp_asset(&release.assets)?;
-        let (download_url, size) = (Some(selected.download_url.clone()), Some(selected.size));
-
-        let metadata = InstalledVersionMetadata {
-            path: tag.to_string(),
-            installed_date: Utc::now().to_rfc3339(),
-            release_tag: tag.to_string(),
-            python_version: None,
-            git_commit: None,
-            release_date: Some(release.published_at.clone()),
-            release_notes: release.body.clone(),
-            download_url,
-            size,
-            requirements_hash: None,
-            dependencies_installed: Some(true),
-        };
-
-        self.check_cancelled()?;
-        if !self.torch_control.try_begin_publication() {
-            return Err(PumasError::InstallationFailed {
-                message: "Installation cancelled before publication".into(),
-            });
-        }
-        let stage = stage.to_path_buf();
-        let destination = self.versions_dir().join(tag);
-        let manager = self.metadata_manager.clone();
-        let app_id = self.app_id;
-        let tag = tag.to_owned();
-        tokio::task::spawn_blocking(move || {
-            let _custody = custody;
-            if manager.get_installed_version(&tag, Some(app_id))?.is_some() {
-                return Err(PumasError::VersionAlreadyInstalled { tag });
-            }
-            Self::publish_native_stage(&stage, &destination, || {
-                match manager.update_installed_version(&tag, metadata, Some(app_id)) {
-                    Ok(()) => Ok(()),
-                    Err(error) => {
-                        // atomic_write_json may fail after replacement. Withdraw
-                        // output only when the metadata owner proves no entry.
-                        match manager.get_installed_version(&tag, Some(app_id)) {
-                            Ok(None) => Err((error, true)),
-                            _ => Err((PumasError::InstallationFailed {
-                                message: format!("Native metadata publication failed with retained complete output; reconciliation required: {error}"),
-                            }, false)),
-                        }
-                    }
-                }
-            })
-        })
-        .await
-        .map_err(|e| PumasError::Other(format!("Failed to join native publication: {e}")))??;
-
-        {
-            let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(
-                InstallationStage::Setup,
-                100.0,
-                Some("Installation complete"),
-            );
-        }
-        self.send_progress(
-            progress_tx,
-            ProgressUpdate::Setup {
-                message: "Installation complete".to_string(),
-            },
-        )
-        .await;
-
-        info!("llama.cpp installation finalized");
-        Ok(())
-    }
-
     async fn download_archive(
         &self,
         url: &str,
@@ -1959,7 +2945,10 @@ impl VersionInstaller {
             path: Some(archive_path.to_path_buf()),
             source: Some(e),
         })?;
+        Self::extract_zip_from(file, extract_dir)
+    }
 
+    fn extract_zip_from(file: File, extract_dir: &Path) -> Result<()> {
         let mut archive =
             zip::ZipArchive::new(file).map_err(|e| PumasError::InstallationFailed {
                 message: format!("Invalid zip archive: {}", e),
@@ -2026,7 +3015,10 @@ impl VersionInstaller {
             path: Some(archive_path.to_path_buf()),
             source: Some(e),
         })?;
+        Self::extract_tarball_from(file, extract_dir)
+    }
 
+    fn extract_tarball_from(file: File, extract_dir: &Path) -> Result<()> {
         let decoder = flate2::read::GzDecoder::new(BufReader::new(file));
         let mut archive = tar::Archive::new(decoder);
 
@@ -2182,6 +3174,127 @@ fn shell_single_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_attempt_reopen_preserves_identity_and_remove_reinstall_renews_it() {
+        let root = tempfile::tempdir().unwrap();
+        let first = NativeInstallWorkspace::create(root.path(), "b1234+cpu").unwrap();
+        let first_identity = first.attempt.clone();
+        let first_path = first.path().to_path_buf();
+        drop(first);
+        let reopened = NativeInstallWorkspace::create(root.path(), "b1234+cpu").unwrap();
+        assert_eq!(reopened.attempt, first_identity);
+        assert_eq!(reopened.path(), first_path);
+        drop(reopened);
+        let lock = NativeVersionsLock::try_acquire(root.path()).unwrap();
+        mark_native_attempt_removed(root.path(), "b1234+cpu").unwrap();
+        assert!(!first_path.exists());
+        drop(lock);
+        assert!(NativeInstallWorkspace::create_for_attempt(
+            root.path(),
+            "b1234+cpu",
+            Some(&first_identity)
+        )
+        .is_err());
+        let reinstalled = NativeInstallWorkspace::create(root.path(), "b1234+cpu").unwrap();
+        assert_ne!(reinstalled.attempt, first_identity);
+        assert_ne!(reinstalled.path(), first_path);
+        reinstalled.cleanup().unwrap();
+    }
+
+    #[test]
+    fn native_receipt_reconciles_staged_publication_and_rejects_changed_output() {
+        let root = tempfile::tempdir().unwrap();
+        let versions = root.path().join("llama-cpp-versions");
+        let custody = Arc::new(NativeInstallWorkspace::create(&versions, "b1234+cpu").unwrap());
+        let stage = custody.path().join("output");
+        std::fs::create_dir_all(stage.join("bin")).unwrap();
+        let launcher = stage.join("bin").join(if cfg!(windows) {
+            "llama-server.exe"
+        } else {
+            "llama-server"
+        });
+        std::fs::write(&launcher, b"verified native output").unwrap();
+        let metadata = InstalledVersionMetadata {
+            path: "b1234+cpu".into(),
+            installed_date: "2026-09-30T00:00:00Z".into(),
+            release_tag: "b1234+cpu".into(),
+            python_version: None,
+            git_commit: None,
+            release_date: None,
+            release_notes: None,
+            download_url: None,
+            size: Some(22),
+            requirements_hash: None,
+            dependencies_installed: Some(true),
+        };
+        let proof = LlamaCppInstallReceiptV1 {
+            schema_version: 1,
+            tag: "b1234+cpu".into(),
+            metadata_sha256: hash_metadata(&metadata).unwrap(),
+            metadata,
+            output_tree_sha256: hash_native_tree(&stage).unwrap(),
+            launcher_relative_path: if cfg!(windows) {
+                "bin/llama-server.exe".into()
+            } else {
+                "bin/llama-server".into()
+            },
+            launcher_sha256: hash_regular_file(&launcher).unwrap(),
+        };
+        // Reopen the stable workspace after a prepare-before-publish interruption.
+        drop(custody);
+        let custody = Arc::new(NativeInstallWorkspace::create(&versions, "b1234+cpu").unwrap());
+        let manager = MetadataManager::new(root.path());
+        manager.ensure_directories().unwrap();
+        VersionInstaller::reconcile_llama_cpp_installation(
+            &versions,
+            "b1234+cpu",
+            AppId::LlamaCpp,
+            &manager,
+            custody.clone(),
+            proof.clone(),
+        )
+        .unwrap();
+        assert!(!stage.exists());
+        let destination = versions.join("b1234+cpu");
+        assert!(metadata_matches(
+            &manager
+                .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+                .unwrap()
+                .unwrap(),
+            &proof.metadata
+        ));
+        // Already-published recovery checks exact bytes and metadata before success.
+        VersionInstaller::reconcile_llama_cpp_installation(
+            &versions,
+            "b1234+cpu",
+            AppId::LlamaCpp,
+            &manager,
+            custody.clone(),
+            proof.clone(),
+        )
+        .unwrap();
+        std::fs::write(
+            destination.join(&proof.launcher_relative_path),
+            b"changed output",
+        )
+        .unwrap();
+        let published_launcher = destination.join(&proof.launcher_relative_path);
+        let error = VersionInstaller::reconcile_llama_cpp_installation(
+            &versions,
+            "b1234+cpu",
+            AppId::LlamaCpp,
+            &manager,
+            custody,
+            proof,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("recovery required"));
+        assert_eq!(
+            std::fs::read(published_launcher).unwrap(),
+            b"changed output"
+        );
+    }
 
     #[test]
     fn torch_cancel_and_publication_are_mutually_exclusive() {
@@ -2471,7 +3584,7 @@ mod tests {
     #[tokio::test]
     async fn native_worker_retains_custody_after_waiter_is_cancelled() {
         let root = tempfile::tempdir().unwrap();
-        let custody = Arc::new(NativeInstallWorkspace::create(root.path()).unwrap());
+        let custody = Arc::new(NativeInstallWorkspace::create(root.path(), "fixture").unwrap());
         let path = custody.path().to_path_buf();
         std::fs::write(path.join("archive"), "owned").unwrap();
         let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
@@ -2490,21 +3603,21 @@ mod tests {
         drop(custody);
         worker.abort(); // spawn_blocking is already running and cannot be aborted.
         assert!(path.exists());
-        assert!(NativeInstallWorkspace::create(root.path()).is_err());
+        assert!(NativeInstallWorkspace::create(root.path(), "fixture").is_err());
         release_tx.send(()).unwrap();
         worker.await.unwrap();
         // Cancellation loses the receipt, so implicit destruction preserves
         // bytes for reconciliation even after the blocking worker has settled.
         assert!(path.exists());
-        let next = NativeInstallWorkspace::create(root.path()).unwrap();
+        let next = NativeInstallWorkspace::create(root.path(), "fixture").unwrap();
         next.cleanup().unwrap();
-        std::fs::remove_dir_all(path).unwrap();
+        assert!(!path.exists());
     }
 
     #[test]
     fn native_cleanup_failure_reports_and_retains_its_path() {
         let root = tempfile::tempdir().unwrap();
-        let custody = NativeInstallWorkspace::create(root.path()).unwrap();
+        let custody = NativeInstallWorkspace::create(root.path(), "fixture").unwrap();
         let path = custody.path().to_owned();
         std::fs::remove_dir(&path).unwrap();
         std::fs::write(&path, "retained uncertainty").unwrap();
@@ -2512,16 +3625,13 @@ mod tests {
         assert!(error.contains("cleanup incomplete"));
         assert!(error.contains(&path.display().to_string()));
         assert_eq!(std::fs::read(&path).unwrap(), b"retained uncertainty");
-        NativeInstallWorkspace::create(root.path())
-            .unwrap()
-            .cleanup()
-            .unwrap();
+        assert!(NativeInstallWorkspace::create(root.path(), "fixture").is_err());
     }
 
     #[test]
     fn native_cancelled_archive_settles_queued_writes_before_reclamation() {
         let root = tempfile::tempdir().unwrap();
-        let custody = NativeInstallWorkspace::create(root.path()).unwrap();
+        let custody = NativeInstallWorkspace::create(root.path(), "fixture").unwrap();
         let path = custody.path().join("archive");
         let file = std::fs::File::create(&path).unwrap();
         let runtime = tokio::runtime::Builder::new_current_thread()

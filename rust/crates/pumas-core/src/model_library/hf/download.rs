@@ -21,7 +21,7 @@ use crate::model_library::download_store::{
     LifecycleQuarantineDomain, PersistedDownload, PersistedDownloadInventory,
 };
 use crate::model_library::mutation_authority::{
-    ModelFinalImportCapability, ModelPartialImportCapability,
+    DownloadCancellation, ModelFinalImportCapability, ModelPartialImportCapability,
 };
 use crate::model_library::sharding;
 use crate::model_library::types::{DownloadRequest, DownloadStatus, ModelDownloadProgress};
@@ -579,7 +579,7 @@ struct PreparedDownloadTask {
     files: Vec<FileToDownload>,
     destination: DownloadDestination,
     configured_root: Option<crate::model_library::download_recovery::DownloadDestinationRoot>,
-    cancel_flag: Arc<AtomicBool>,
+    cancel_flag: Arc<DownloadCancellation>,
     pause_flag: Arc<AtomicBool>,
     completion_callback: Option<DownloadCompletionCallback>,
     aux_complete_callback: Option<AuxFilesCompleteCallback>,
@@ -1007,7 +1007,7 @@ impl PreparedDownloadTask {
     }
 
     async fn finalize_restored(
-        &self,
+        &mut self,
         context: &TaskContext,
         initial_status: DownloadStatus,
     ) -> std::result::Result<(), RestoredFinalizationError> {
@@ -1064,15 +1064,136 @@ impl PreparedDownloadTask {
             consumer: "hf.model".into(),
             operation: attempt.clone(),
         };
-        let reconciliation = self
-            .acquisition
-            .reconciliation_lease(context, &demand)
-            .await?;
-        let manifest = super::acquisition_source::manifest_for_download(
+        let mut manifest = super::acquisition_source::manifest_for_download(
             &self.repo_id,
             &self.revision,
             &self.files,
         )?;
+        // A retained `Using` lease means import effects may already have
+        // committed before the previous worker stopped. Reopen that exact
+        // lease read-only and require its issued output receipt; never begin a
+        // replacement lease or replay import effects on this path.
+        if let Some(reopened) = self
+            .acquisition
+            .reopen_using(context, &demand, &manifest, &workspace)
+            .await?
+        {
+            let expected = reopened.record().clone();
+            let persistence = self.persistence.clone().ok_or_else(|| PumasError::Config {
+                message: "Restored managed HF completion persistence is unavailable".into(),
+            })?;
+            let acquisition_id = expected.id;
+            let receipt = context
+                .run_fallible_blocking_named("read restored HF completion receipt", move || {
+                    persistence.read_hf_completion_receipt(acquisition_id)
+                })
+                .await
+                .map_err(|error| {
+                    PumasError::Other(format!("Restored receipt observation failed: {error}"))
+                })??
+                .ok_or_else(|| PumasError::Validation {
+                    field: "downloads.hf_completion_receipts".into(),
+                    message:
+                        "Retained HF use has no completion receipt; custody remains unresolved"
+                            .into(),
+                })?;
+            if receipt.download_id != self.download_id
+                || receipt.demand.operation != attempt
+                || receipt.manifest != manifest
+                || &receipt.workspace != workspace.identity()
+            {
+                return Err(PumasError::Validation {
+                    field: "downloads.hf_completion_receipts".into(),
+                    message: "Restored receipt does not match the retained download admission"
+                        .into(),
+                }
+                .into());
+            }
+            let info = self
+                .downloads
+                .read()
+                .await
+                .get(&self.download_id)
+                .and_then(download_completion_info)
+                .ok_or_else(|| PumasError::Config {
+                    message: "Restored receipt validation requires completion metadata".into(),
+                })?;
+            let importer = self
+                .download_importer
+                .clone()
+                .ok_or_else(|| PumasError::Config {
+                    message: "Restored managed HF completion requires its model importer".into(),
+                })?;
+            let record = expected.clone();
+            let revision = self.revision.clone();
+            let validation_context = context.clone();
+            let importer = importer.clone();
+            let info_for_settlement = info.clone();
+            let receipt_for_settlement = receipt.clone();
+            let settled = context
+                .run_fallible_async_named(
+                    "validate and settle restored HF completion receipt",
+                    move || async move {
+                        importer
+                            .settle_hf_completion_receipt(
+                                &info_for_settlement,
+                                &revision,
+                                &record,
+                                &receipt_for_settlement,
+                                &validation_context,
+                            )
+                            .await
+                    },
+                )
+                .await
+                .map_err(|error| {
+                    PumasError::Other(format!("Restored receipt settlement failed: {error}"))
+                })??;
+            if !matches!(context.drain_blocking().await, Ok(0)) {
+                return Err(PumasError::Other(
+                    "Restored receipt validation effects did not drain".into(),
+                )
+                .into());
+            }
+            if !settled || !matches!(context.drain_blocking().await, Ok(0)) {
+                return Err(PumasError::Other(
+                    "Restored receipt settlement was not confirmed".into(),
+                )
+                .into());
+            }
+            {
+                let mut states = self.downloads.write().await;
+                let state = current_worker_state(
+                    &mut states,
+                    &self.download_id,
+                    context,
+                    &[DownloadStatus::Downloading],
+                )?;
+                state.status = DownloadStatus::Completed;
+                state.progress = 1.0;
+                state.files_completed = state.files.len();
+                state.task_registered = false;
+                state.speed = 0.0;
+            }
+            drop(destination_guard);
+            publish_download_snapshot_from_parts(&self.download_publications).await;
+            return Ok(());
+        }
+        if let Some(files) = self.revalidate_pinned_execution_tree(context).await? {
+            self.install_validated_pinned_files(context, &files).await?;
+            self.files = files;
+            manifest = super::acquisition_source::manifest_for_download(
+                &self.repo_id,
+                &self.revision,
+                &self.files,
+            )?;
+        }
+        let expected_manifest = manifest.clone();
+        let expected_workspace = workspace.identity().clone();
+        let reconciliation = self
+            .acquisition
+            .reconciliation_lease(context, &demand)
+            .await?;
         let operation = self
             .acquisition
             .begin(
@@ -1144,6 +1265,7 @@ impl PreparedDownloadTask {
                                 DownloadAdmissionDomain::Ambient
                             },
                             context.held_root_execution_grant()?,
+                            self.cancel_flag.clone(),
                         ))
                     })
                     .transpose()?,
@@ -1164,19 +1286,82 @@ impl PreparedDownloadTask {
         if !matches!(context.drain_blocking().await, Ok(0)) {
             return Err(PumasError::Other("Restored consumer effects did not drain".into()).into());
         }
-        self.acquisition.acknowledge(context, lease).await?;
-        let persistence = self.persistence.clone().ok_or_else(|| PumasError::Config {
-            message: "Restore finalization persistence is unavailable".into(),
-        })?;
-        let id = self.download_id.clone();
-        let settled = context
-            .run_fallible_blocking_named("settle restored download admission", move || {
-                persistence.settle_queue_admission(&id, &attempt)
-            })
-            .await
-            .map_err(|error| {
-                PumasError::Other(format!("Restore settlement owner failed: {error}"))
-            })??;
+        let settled = if let Some(importer) = self.download_importer.clone() {
+            let expected = lease.record().clone();
+            let persistence = self.persistence.clone().ok_or_else(|| PumasError::Config {
+                message: "Managed HF restore persistence is unavailable".into(),
+            })?;
+            let acquisition_id = expected.id;
+            let receipt = context
+                .run_fallible_blocking_named("read restored managed HF receipt", move || {
+                    persistence.read_hf_completion_receipt(acquisition_id)
+                })
+                .await
+                .map_err(|error| {
+                    PumasError::Other(format!("Restored receipt observation failed: {error}"))
+                })??
+                .ok_or_else(|| PumasError::Validation {
+                    field: "downloads.hf_completion_receipts".into(),
+                    message: "Restored managed HF import completed without a durable receipt"
+                        .into(),
+                })?;
+            if receipt.download_id != self.download_id
+                || receipt.demand.operation != attempt
+                || receipt.manifest != expected_manifest
+                || receipt.workspace != expected_workspace
+            {
+                return Err(PumasError::Validation {
+                    field: "downloads.hf_completion_receipts".into(),
+                    message: "Restored receipt does not match the current download admission"
+                        .into(),
+                }
+                .into());
+            }
+            let info = self
+                .downloads
+                .read()
+                .await
+                .get(&self.download_id)
+                .and_then(download_completion_info)
+                .ok_or_else(|| PumasError::Config {
+                    message: "Restored managed HF settlement metadata is unavailable".into(),
+                })?;
+            let revision = self.revision.clone();
+            let validation_context = context.clone();
+            context
+                .run_fallible_async_named(
+                    "validate and settle restored managed HF receipt",
+                    move || async move {
+                        importer
+                            .settle_hf_completion_receipt(
+                                &info,
+                                &revision,
+                                &expected,
+                                &receipt,
+                                &validation_context,
+                            )
+                            .await
+                    },
+                )
+                .await
+                .map_err(|error| {
+                    PumasError::Other(format!("Restore receipt settlement failed: {error}"))
+                })??
+        } else {
+            self.acquisition.acknowledge(context, lease).await?;
+            let persistence = self.persistence.clone().ok_or_else(|| PumasError::Config {
+                message: "Restore finalization persistence is unavailable".into(),
+            })?;
+            let id = self.download_id.clone();
+            context
+                .run_fallible_blocking_named("settle restored download admission", move || {
+                    persistence.settle_queue_admission(&id, &attempt)
+                })
+                .await
+                .map_err(|error| {
+                    PumasError::Other(format!("Restore settlement owner failed: {error}"))
+                })??
+        };
         if !settled || !matches!(context.drain_blocking().await, Ok(0)) {
             return Err(PumasError::Other(
                 "Restore finalization settlement was not confirmed".into(),
@@ -1291,7 +1476,7 @@ impl PreparedDownloadTask {
         }
         // A pause before execution does not need upstream evidence. Observation
         // refusals enter the ordinary owned error settlement, preserving custody.
-        let evidence_result = if acquired == Some(true) {
+        let evidence_result = if acquired == Some(true) && self.restore_finalization.is_none() {
             match self.revalidate_pinned_execution_tree(&task_context).await {
                 Ok(Some(files)) => match self
                     .install_validated_pinned_files(&task_context, &files)
@@ -1865,7 +2050,7 @@ struct HuggingFaceHttpAttemptHost<'a> {
     destination_guard: &'a mut Option<OwnedMutexGuard<()>>,
     download_id: &'a str,
     destination: &'a DownloadDestination,
-    cancel_flag: &'a AtomicBool,
+    cancel_flag: &'a DownloadCancellation,
     pause_flag: &'a AtomicBool,
     task_context: &'a TaskContext,
     bytes_offset: u64,
@@ -1887,7 +2072,7 @@ impl crate::acquisition::HttpAttemptHost for HuggingFaceHttpAttemptHost<'_> {
     fn cancel_requested(&self) -> bool {
         #[cfg(test)]
         self.task_context.observe_cancellation_check();
-        self.cancel_flag.load(Ordering::Relaxed)
+        self.cancel_flag.is_cancelled()
     }
 
     async fn record_progress(&mut self, downloaded_for_file: u64) -> Result<()> {
@@ -2051,7 +2236,7 @@ fn interrupted_state_matches(
         || state.recovery_destination().is_some()
         || state.admission.is_none()
         || state.pause_flag.load(Ordering::Acquire)
-        || state.cancel_flag.load(Ordering::Acquire)
+        || state.cancel_flag.is_cancelled()
         || destination.capability().library_model_id() != expected.model_id
         || state.revision.as_persisted() != Some(commit)
     {
@@ -2316,7 +2501,7 @@ async fn publish_worker_snapshot_and_revalidate(
         let mut states = downloads.write().await;
         current_worker_state(&mut states, download_id, task_context, expected_statuses).map(
             |state| {
-                !state.cancel_flag.load(Ordering::Relaxed)
+                !state.cancel_flag.is_cancelled()
                     && state.matches_destination(&destination.identity())
             },
         )
@@ -3124,11 +3309,90 @@ impl HuggingFaceClient {
         self.publish_download_snapshot().await;
         let mut completed = Vec::new();
         for id in restored_ids {
-            if let Some(info) = self.finalize_restored_download(context, &id).await? {
-                completed.push(info);
+            match self.finalize_restored_download(context, &id).await {
+                Ok(Some(info)) => completed.push(info),
+                Ok(None) => {}
+                Err(error) => {
+                    if !self
+                        .has_receiptless_managed_using_custody(context, &id)
+                        .await?
+                    {
+                        return Err(error);
+                    }
+                    warn!("Download {id} remains in Error with durable recovery custody: {error}");
+                }
             }
         }
         Ok(completed)
+    }
+
+    async fn has_receiptless_managed_using_custody(
+        &self,
+        context: &TaskContext,
+        download_id: &str,
+    ) -> Result<bool> {
+        let Some(persistence) = self.persistence.clone() else {
+            return Ok(false);
+        };
+        let Some((attempt_id, destination)) = self
+            .downloads
+            .read()
+            .await
+            .get(download_id)
+            .filter(|state| {
+                state.status == DownloadStatus::Error
+                    && state.error.is_some()
+                    && state.admission.is_some()
+            })
+            .and_then(|state| {
+                Some((
+                    state.admission.as_ref()?.attempt_id.clone(),
+                    state.destination.clone()?,
+                ))
+            })
+        else {
+            return Ok(false);
+        };
+        let acquisitions = self.acquisition.store().clone();
+        let id = download_id.to_string();
+        context
+            .run_fallible_blocking_named(
+                "inspect receiptless managed HF recovery custody",
+                move || -> Result<bool> {
+                    let destination = destination.persisted_identity()?;
+                    let inventory = persistence.load_lifecycle_inventory_strict()?;
+                    if !inventory
+                        .queue_admissions
+                        .get(&id)
+                        .is_some_and(|admission| {
+                            admission.attempt_id == attempt_id
+                                && admission.destination == destination
+                        })
+                    {
+                        return Ok(false);
+                    }
+                    let record = acquisitions.acquisitions()?.into_values().find(|record| {
+                        record.demand.consumer == "hf.model"
+                            && record.demand.operation == attempt_id
+                    });
+                    let Some(record) = record else {
+                        return Ok(false);
+                    };
+                    if !matches!(
+                        record.phase,
+                        crate::acquisition::AcquisitionPhase::Using { .. }
+                    ) {
+                        return Ok(false);
+                    }
+                    Ok(persistence.read_hf_completion_receipt(record.id)?.is_none())
+                },
+            )
+            .await
+            .map_err(|error| {
+                PumasError::Other(format!(
+                    "Receiptless recovery custody observation failed: {error}"
+                ))
+            })?
     }
 
     async fn finalize_restored_download(
@@ -3183,7 +3447,7 @@ impl HuggingFaceClient {
                 state.status,
             )
         };
-        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_flag = Arc::new(DownloadCancellation::new());
         let pause_flag = Arc::new(AtomicBool::new(false));
         let mut prepared_download = self
             .prepare_download_task(
@@ -3369,7 +3633,7 @@ impl HuggingFaceClient {
         self.observe_finished_download_tasks().await;
 
         let download_id = uuid::Uuid::new_v4().to_string();
-        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_flag = Arc::new(DownloadCancellation::new());
 
         // Get file info
         let metadata_client = self.clone_for_invocation();
@@ -3534,7 +3798,7 @@ impl HuggingFaceClient {
                                 | DownloadStatus::Downloading
                                 | DownloadStatus::Pausing
                         )
-                        && !state.cancel_flag.load(Ordering::Relaxed)
+                        && !state.cancel_flag.is_cancelled()
                 }) {
                     return Ok(existing_id);
                 }
@@ -3588,7 +3852,7 @@ impl HuggingFaceClient {
                     && state.repo_id == request.repo_id
                     && state.revision == revision
                     && same_files
-                    && !state.cancel_flag.load(Ordering::Relaxed)
+                    && !state.cancel_flag.is_cancelled()
                     && matches!(
                         state.status,
                         DownloadStatus::Queued
@@ -3884,7 +4148,7 @@ impl HuggingFaceClient {
         revision: DownloadRevision,
         files: Vec<FileToDownload>,
         destination: DownloadDestination,
-        cancel_flag: Arc<AtomicBool>,
+        cancel_flag: Arc<DownloadCancellation>,
         pause_flag: Arc<AtomicBool>,
         completion_callback: Option<DownloadCompletionCallback>,
         aux_complete_callback: Option<AuxFilesCompleteCallback>,
@@ -3941,7 +4205,7 @@ impl HuggingFaceClient {
         repo_id: String,
         files: Vec<FileToDownload>,
         destination: DownloadDestination,
-        cancel_flag: Arc<AtomicBool>,
+        cancel_flag: Arc<DownloadCancellation>,
         pause_flag: Arc<AtomicBool>,
         completion_callback: Option<DownloadCompletionCallback>,
         aux_complete_callback: Option<AuxFilesCompleteCallback>,
@@ -4137,7 +4401,7 @@ impl HuggingFaceClient {
         revision: &DownloadRevision,
         files: &[FileToDownload],
         destination: &DownloadDestination,
-        cancel_flag: Arc<AtomicBool>,
+        cancel_flag: Arc<DownloadCancellation>,
         pause_flag: Arc<AtomicBool>,
         persistence: Option<Arc<DownloadPersistence>>,
         terminal_cleanup_persistence: Option<Arc<DownloadPersistence>>,
@@ -4174,7 +4438,7 @@ impl HuggingFaceClient {
             )
             .ok()
             .and_then(|state| {
-                if state.cancel_flag.load(Ordering::Relaxed) {
+                if state.cancel_flag.is_cancelled() {
                     return None;
                 }
                 if state.pause_flag.load(Ordering::Relaxed) {
@@ -4526,7 +4790,7 @@ impl HuggingFaceClient {
                                 &[DownloadStatus::Downloading],
                             )
                             .is_ok_and(|state| {
-                                !state.cancel_flag.load(Ordering::Relaxed)
+                                !state.cancel_flag.is_cancelled()
                                     && state.matches_destination(&destination.identity())
                             })
                         };
@@ -4710,12 +4974,38 @@ impl HuggingFaceClient {
                                 DownloadAdmissionDomain::Ambient
                             },
                             task_context.held_root_execution_grant()?,
+                            cancel_flag.clone(),
                         ))
                     })
                     .transpose()?,
             )
             .await?;
         }
+        let managed_hf_completion = if download_importer.is_some() {
+            let expected = use_lease.record().clone();
+            let acquisition_id = expected.id;
+            let persistence = terminal_cleanup_persistence
+                .as_ref()
+                .cloned()
+                .ok_or_else(|| PumasError::Config {
+                    message: "Managed HF completion requires durable download persistence".into(),
+                })?;
+            let receipt = task_context
+                .run_fallible_blocking_named("read managed HF completion receipt", move || {
+                    persistence.read_hf_completion_receipt(acquisition_id)
+                })
+                .await
+                .map_err(|error| {
+                    PumasError::Other(format!("Completion receipt observation failed: {error}"))
+                })??
+                .ok_or_else(|| PumasError::Validation {
+                    field: "downloads.hf_completion_receipts".into(),
+                    message: "Managed HF import completed without a durable receipt".into(),
+                })?;
+            Some((expected, receipt))
+        } else {
+            None
+        };
         destination_guard = Some(destination_lock.clone().lock_owned().await);
         {
             let mut states = downloads.write().await;
@@ -4743,53 +5033,97 @@ impl HuggingFaceClient {
             }
         }
 
-        acquisition.acknowledge(&task_context, use_lease).await?;
-        if !matches!(task_context.drain_blocking().await, Ok(0)) {
-            return Err(PumasError::Other(
-                "Acquisition adoption effects did not drain".into(),
-            ));
-        }
-
-        // Persistence cleanup is part of successful completion. It is
-        // registered with the same task owner and must finish before the final
-        // drain, Completed projection, or recovery-capability release.
         let completion_admission = downloads.read().await.get(download_id).and_then(|state| {
             state
                 .admission
                 .as_ref()
                 .map(|entry| entry.attempt_id.clone())
         });
-        if let Some(persistence) = terminal_cleanup_persistence
-            .as_ref()
-            .filter(|_| completion_admission.is_some() || !destination.is_recovery())
-        {
-            let persistence = persistence.clone();
-            let persisted_id = download_id.to_string();
-            let attempt = completion_admission;
-            match task_context
-                .run_fallible_blocking_named("remove completed persisted download", move || {
-                    if let Some(attempt) = attempt {
-                        if persistence.settle_queue_admission(&persisted_id, &attempt)? {
-                            Ok(())
-                        } else {
-                            Err(PumasError::Other(
-                                "Completed download queue settlement was not confirmed".into(),
-                            ))
-                        }
-                    } else {
-                        Err(PumasError::Config {
-                            message: "Ordinary completion requires durable admission".into(),
-                        })
-                    }
-                })
+        if let Some((expected, receipt)) = managed_hf_completion {
+            let importer = download_importer
+                .clone()
+                .ok_or_else(|| PumasError::Config {
+                    message: "Managed HF completion importer is unavailable".into(),
+                })?;
+            let info = downloads
+                .read()
                 .await
+                .get(download_id)
+                .and_then(download_completion_info)
+                .ok_or_else(|| PumasError::Config {
+                    message: "Managed HF completion metadata is unavailable".into(),
+                })?;
+            let settlement_revision = revision.clone();
+            let settlement_context = task_context.clone();
+            let settled = task_context
+                .run_fallible_async_named(
+                    "validate and settle managed HF completion receipt",
+                    move || async move {
+                        importer
+                            .settle_hf_completion_receipt(
+                                &info,
+                                &settlement_revision,
+                                &expected,
+                                &receipt,
+                                &settlement_context,
+                            )
+                            .await
+                    },
+                )
+                .await
+                .map_err(|error| {
+                    PumasError::Other(format!("Managed HF settlement owner failed: {error}"))
+                })??;
+            if !settled {
+                return Err(PumasError::Other(
+                    "Managed HF completion settlement was not confirmed".into(),
+                ));
+            }
+        } else {
+            acquisition.acknowledge(&task_context, use_lease).await?;
+            if !matches!(task_context.drain_blocking().await, Ok(0)) {
+                return Err(PumasError::Other(
+                    "Acquisition adoption effects did not drain".into(),
+                ));
+            }
+        }
+
+        // Persistence cleanup is part of successful completion. Managed HF
+        // settlement already commits receipt, adoption, and queue release in
+        // one store publication; other consumers retain ordinary cleanup.
+        if download_importer.is_none() {
+            if let Some(persistence) = terminal_cleanup_persistence
+                .as_ref()
+                .filter(|_| completion_admission.is_some() || !destination.is_recovery())
             {
-                Ok(Ok(_)) => {}
-                Ok(Err(error)) => return Err(error),
-                Err(error) => {
-                    return Err(PumasError::Other(format!(
-                        "failed to observe completed-download persistence cleanup: {error}"
-                    )));
+                let persistence = persistence.clone();
+                let persisted_id = download_id.to_string();
+                let attempt = completion_admission;
+                match task_context
+                    .run_fallible_blocking_named("remove completed persisted download", move || {
+                        if let Some(attempt) = attempt {
+                            if persistence.settle_queue_admission(&persisted_id, &attempt)? {
+                                Ok(())
+                            } else {
+                                Err(PumasError::Other(
+                                    "Completed download queue settlement was not confirmed".into(),
+                                ))
+                            }
+                        } else {
+                            Err(PumasError::Config {
+                                message: "Ordinary completion requires durable admission".into(),
+                            })
+                        }
+                    })
+                    .await
+                {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(error)) => return Err(error),
+                    Err(error) => {
+                        return Err(PumasError::Other(format!(
+                            "failed to observe completed-download persistence cleanup: {error}"
+                        )));
+                    }
                 }
             }
         }
@@ -4959,7 +5293,10 @@ impl HuggingFaceClient {
             });
             let protected_context = context.clone();
             let configured_root = self.destination_root.clone();
-            let transition = self.download_tasks.begin_cancel(
+            let Some(cancel_prepared) = state.cancel_flag.prepare_cancel() else {
+                return Ok(false);
+            };
+            let transition = match self.download_tasks.begin_cancel(
                 download_id,
                 move |task_context, predecessor| async move {
                     use futures::FutureExt;
@@ -5162,23 +5499,44 @@ impl HuggingFaceClient {
                         Err(payload) => std::panic::resume_unwind(payload),
                     }
                 },
-            );
-            let finalizer = match transition? {
+            ) {
+                Ok(transition) => transition,
+                Err(error) => {
+                    state.cancel_flag.abort_cancel(cancel_prepared);
+                    return Err(error);
+                }
+            };
+            let finalizer = match transition {
                 super::lifecycle::CancelTransition::Started(finalizer)
                 | super::lifecycle::CancelTransition::Existing(finalizer) => finalizer,
-                super::lifecycle::CancelTransition::AlreadyRunning => return Ok(true),
+                super::lifecycle::CancelTransition::AlreadyRunning => {
+                    if !state.cancel_flag.finish_cancel(cancel_prepared) {
+                        return Ok(false);
+                    }
+                    return Ok(true);
+                }
             };
             let reservation_bound = self.destination_executions.reserve(
-                cleanup_identity,
+                cleanup_identity.clone(),
                 download_id.to_string(),
                 cleanup_domain,
                 finalizer.generation().clone(),
             );
             if !reservation_bound {
+                state.cancel_flag.abort_cancel(cancel_prepared);
+                drop(finalizer);
+                None
+            } else if !state.cancel_flag.finish_cancel(cancel_prepared) {
+                let generation = finalizer.generation().clone();
+                self.destination_executions.release(
+                    &cleanup_identity,
+                    download_id,
+                    cleanup_domain,
+                    &generation,
+                );
                 drop(finalizer);
                 None
             } else {
-                state.cancel_flag.store(true, Ordering::Relaxed);
                 state.status = DownloadStatus::Cancelling;
                 state.speed = 0.0;
                 state.task_registered = true;
@@ -5409,7 +5767,7 @@ impl HuggingFaceClient {
             }
         };
 
-        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_flag = Arc::new(DownloadCancellation::new());
         let pause_flag = Arc::new(AtomicBool::new(false));
         let prepared_download = self
             .prepare_download_task(
@@ -6102,7 +6460,7 @@ impl HuggingFaceClient {
         };
 
         if let Some((repo_id, revision, files, recovery_destination)) = recovery_resume {
-            let cancel_flag = Arc::new(AtomicBool::new(false));
+            let cancel_flag = Arc::new(DownloadCancellation::new());
             let pause_flag = Arc::new(AtomicBool::new(false));
             let prepared_download = self
                 .prepare_download_task(
@@ -6229,7 +6587,7 @@ impl HuggingFaceClient {
                 message: "Cannot resume a mutable source selection without a digest for every file; start a fresh selection to reacquire the current source".into(),
             });
         }
-        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_flag = Arc::new(DownloadCancellation::new());
         let pause_flag = Arc::new(AtomicBool::new(false));
         let mut prepared_download = self
             .prepare_download_task(
@@ -7903,7 +8261,7 @@ mod tests {
             downloaded_bytes: 2,
             total_bytes: Some(4),
             speed: 0.0,
-            cancel_flag: Arc::new(AtomicBool::new(false)),
+            cancel_flag: Arc::new(DownloadCancellation::new()),
             pause_flag: Arc::new(AtomicBool::new(false)),
             error: None,
             retry_attempt: 0,
@@ -11289,6 +11647,410 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn receipt_reopen_settles_after_publication_failure_without_network_or_reimport() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        let temp = TempDir::new().unwrap();
+        let library = Arc::new(
+            crate::model_library::ModelLibrary::new(temp.path().join("library"))
+                .await
+                .unwrap(),
+        );
+        let destination = library.build_model_path("vision", "acme", "model");
+        std::fs::create_dir_all(&destination).unwrap();
+        std::fs::write(destination.join("model.onnx"), b"data").unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(AtomicU64::new(0));
+        let server_requests = requests.clone();
+        let server = tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                server_requests.fetch_add(1, Ordering::SeqCst);
+                let mut request = [0_u8; 2048];
+                let _ = socket.read(&mut request).await;
+                let _ = socket
+                    .write_all(
+                        b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    )
+                    .await;
+            }
+        });
+
+        let publisher = Arc::new(
+            crate::model_library::download_store::FailAfterReceiptSettlementPublisher::new(),
+        );
+        let persistence = Arc::new(
+            DownloadPersistence::new(temp.path())
+                .with_receipt_settlement_failure_publisher_for_test(publisher.clone()),
+        );
+        let mut client = HuggingFaceClient::new(temp.path().join("cache")).unwrap();
+        client
+            .configure_download_destination_root(library.library_root())
+            .unwrap();
+        client.set_persistence(persistence.clone());
+        let importer = importer_with_authority_for_test(library.clone(), &client).await;
+        client.set_download_importer(importer);
+        client.set_test_download_base_url(endpoint.clone());
+        *client.auth_token.write().await = None;
+
+        let revision = DownloadRevision::from_commit(COMMIT).unwrap();
+        cache_pinned_repo_tree(
+            &client,
+            "acme/model",
+            &revision,
+            vec![LfsFileInfo {
+                filename: "model.onnx".into(),
+                size: 4,
+                sha256: "3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7".into(),
+            }],
+            Vec::new(),
+        );
+        let mut request = recovery_test_request("acme/model", &["model.onnx".into()]);
+        request.model_type = Some("vision".into());
+        request.pipeline_tag = Some("image-classification".into());
+        let download_id = client
+            .start_download_at_revision(&request, &destination, None, revision)
+            .await
+            .unwrap();
+
+        let terminal = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                client.observe_finished_download_tasks().await;
+                if matches!(
+                    client.get_download_status(&download_id).await,
+                    Some(DownloadStatus::Error | DownloadStatus::Completed)
+                ) && !client.download_tasks.contains(&download_id)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        assert!(terminal.is_ok(), "unexpected wait state: status={:?}, error={:?}, publisher_triggered={}, network_requests={}",
+            client.get_download_status(&download_id).await,
+            client.downloads.read().await.get(&download_id).and_then(|state| state.error.clone()),
+            publisher.was_triggered(),
+            requests.load(Ordering::SeqCst));
+        assert!(publisher.was_triggered());
+        assert_eq!(
+            client.get_download_status(&download_id).await,
+            Some(DownloadStatus::Error)
+        );
+        assert_eq!(requests.load(Ordering::SeqCst), 0);
+
+        let records = client.acquisition.store().acquisitions().unwrap();
+        let using = records
+            .values()
+            .find(|record| record.demand.consumer == "hf.model")
+            .unwrap()
+            .clone();
+        assert!(matches!(
+            using.phase,
+            crate::acquisition::AcquisitionPhase::Using { .. }
+        ));
+        let receipt = persistence
+            .read_hf_completion_receipt(using.id)
+            .unwrap()
+            .expect("the import receipt must survive the settlement failure");
+        assert!(persistence
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .contains_key(&download_id));
+        let pinned_tree_cache = client.get_cache_path(
+            &format!("acme/model@{}", using.manifest.source().revision().value()),
+            "files",
+        );
+        drop(client);
+        std::fs::remove_file(&pinned_tree_cache).unwrap();
+        assert!(!pinned_tree_cache.exists());
+
+        let mut reopened = HuggingFaceClient::new(temp.path().join("cache")).unwrap();
+        reopened
+            .configure_download_destination_root(library.library_root())
+            .unwrap();
+        let reopened_persistence = Arc::new(DownloadPersistence::new(temp.path()));
+        reopened.set_persistence(reopened_persistence.clone());
+        let importer = importer_with_authority_for_test(library.clone(), &reopened).await;
+        reopened.set_download_importer(importer);
+        reopened.set_test_download_base_url(endpoint);
+        let completed = reopened.restore_persisted_downloads().await.unwrap();
+        assert!(completed.iter().any(|info| info.download_id == download_id));
+        assert_eq!(requests.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            reopened_persistence
+                .read_hf_completion_receipt(using.id)
+                .unwrap(),
+            Some(receipt)
+        );
+        assert!(matches!(
+            reopened.acquisition.store().acquisitions().unwrap()[&using.id].phase,
+            crate::acquisition::AcquisitionPhase::Adopted { .. }
+        ));
+        assert!(!reopened_persistence
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .contains_key(&download_id));
+        assert_eq!(
+            std::fs::read(destination.join("model.onnx")).unwrap(),
+            b"data"
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn restored_files_ready_settlement_is_atomic_and_receipt_reopen_does_not_reimport() {
+        const SHA256: &str = "3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7";
+
+        let temp = TempDir::new().unwrap();
+        let library_root = temp.path().join("library");
+        let library = Arc::new(
+            crate::model_library::ModelLibrary::new(&library_root)
+                .await
+                .unwrap(),
+        );
+        let destination = library.build_model_path("vision", "acme", "model");
+        std::fs::create_dir_all(&destination).unwrap();
+        std::fs::write(destination.join("model.onnx"), b"data").unwrap();
+
+        let publisher = Arc::new(
+            crate::model_library::download_store::FailAfterReceiptSettlementPublisher::new(),
+        );
+        let persistence = Arc::new(
+            DownloadPersistence::new(temp.path())
+                .with_receipt_settlement_failure_publisher_for_test(publisher.clone()),
+        );
+        let revision = DownloadRevision::legacy_main();
+        let files = vec![FileToDownload {
+            filename: "model.onnx".into(),
+            size: Some(4),
+            sha256: Some(SHA256.into()),
+        }];
+        let mut request = recovery_test_request("acme/model", &["model.onnx".into()]);
+        request.model_type = Some("vision".into());
+        request.pipeline_tag = Some("image-classification".into());
+        let download_id = "files-ready-reopen".to_string();
+        let snapshot = PersistedDownload {
+            download_id: download_id.clone(),
+            repo_id: request.repo_id.clone(),
+            filename: "model.onnx".into(),
+            filenames: vec!["model.onnx".into()],
+            dest_dir: destination.clone(),
+            total_bytes: Some(4),
+            status: DownloadStatus::Error,
+            download_request: request.clone(),
+            revision: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            known_sha256: Some(SHA256.into()),
+            huggingface_evidence: None,
+        };
+        let attempt = admit_snapshot_at_root(&persistence, &snapshot, &library_root);
+        std::fs::write(
+            destination.join(".pumas_download"),
+            serialize_download_marker(&request, vec!["model.onnx".into()], None, &revision)
+                .unwrap(),
+        )
+        .unwrap();
+
+        let mut client = HuggingFaceClient::new(temp.path().join("cache")).unwrap();
+        client
+            .configure_download_destination_root(&library_root)
+            .unwrap();
+        client.set_persistence(persistence.clone());
+        let importer = importer_with_authority_for_test(library.clone(), &client).await;
+        client.set_download_importer(importer);
+
+        let setup_client = client.clone_for_invocation();
+        let setup_destination = destination.clone();
+        let setup_files = files.clone();
+        let setup_attempt = attempt.clone();
+        client
+            .run_download_invocation(move |context| async move {
+                let context = setup_client.protect_download_mutation(&context).await?;
+                let root =
+                    setup_client
+                        .destination_root
+                        .clone()
+                        .ok_or_else(|| PumasError::Config {
+                            message: "FilesReady fixture requires a configured root".into(),
+                        })?;
+                let path = setup_destination.clone();
+                let destination = context
+                    .run_fallible_blocking_named(
+                        "resolve FilesReady fixture destination",
+                        move || root.resolve(&path),
+                    )
+                    .await
+                    .map_err(|error| {
+                        PumasError::Other(format!(
+                            "FilesReady destination observation failed: {error}"
+                        ))
+                    })??;
+                let managed = DownloadDestination::Managed(destination);
+                managed.prepare(&context).await?;
+                let capability = managed.capability().clone();
+                let execution_lease = context.held_execution_lease()?;
+                let workspace = context
+                    .run_fallible_blocking_named(
+                        "capture FilesReady fixture workspace",
+                        move || capability.acquisition_workspace(execution_lease),
+                    )
+                    .await
+                    .map_err(|error| {
+                        PumasError::Other(format!(
+                            "FilesReady workspace observation failed: {error}"
+                        ))
+                    })??;
+                let manifest = crate::model_library::hf::acquisition_source::manifest_for_download(
+                    "acme/model",
+                    &revision,
+                    &setup_files,
+                )?;
+                let demand = crate::acquisition::AcquisitionDemand {
+                    consumer: "hf.model".into(),
+                    operation: setup_attempt,
+                };
+                let operation = setup_client
+                    .acquisition
+                    .begin(
+                        &context,
+                        demand.clone(),
+                        manifest.clone(),
+                        workspace.identity().clone(),
+                        None,
+                    )
+                    .await?;
+                drop(operation);
+                let store = setup_client.acquisition.store().clone();
+                context
+                    .run_fallible_blocking_named("persist restored FilesReady fixture", move || {
+                        let verified = workspace.seal(&manifest)?;
+                        let acquisition_id = store
+                            .acquisitions()?
+                            .into_values()
+                            .find(|record| record.demand == demand)
+                            .map(|record| record.id)
+                            .ok_or_else(|| PumasError::Validation {
+                                field: "acquisition.custody".into(),
+                                message: "FilesReady fixture acquisition disappeared".into(),
+                            })?;
+                        store.update_acquisitions(|records| {
+                            let record = records.get_mut(&acquisition_id).ok_or_else(|| {
+                                PumasError::Validation {
+                                    field: "acquisition.custody".into(),
+                                    message: "FilesReady fixture acquisition disappeared".into(),
+                                }
+                            })?;
+                            if !matches!(
+                                record.phase,
+                                crate::acquisition::AcquisitionPhase::Transferring
+                            ) {
+                                return Err(PumasError::Validation {
+                                    field: "acquisition.custody".into(),
+                                    message: "FilesReady fixture started from another phase".into(),
+                                });
+                            }
+                            record.files = verified;
+                            record.phase = crate::acquisition::AcquisitionPhase::FilesReady;
+                            Ok(())
+                        })
+                    })
+                    .await
+                    .map_err(|error| {
+                        PumasError::Other(format!("FilesReady fixture publication failed: {error}"))
+                    })??;
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        let first_restore = client.restore_persisted_downloads().await.unwrap_err();
+        assert!(publisher.was_triggered());
+        assert!(first_restore
+            .to_string()
+            .contains("injected failure after HF receipt publication"));
+        let records = client.acquisition.store().acquisitions().unwrap();
+        let using = records
+            .values()
+            .find(|record| record.demand.operation == attempt)
+            .unwrap()
+            .clone();
+        assert!(matches!(
+            using.phase,
+            crate::acquisition::AcquisitionPhase::Using { .. }
+        ));
+        let receipt = persistence
+            .read_hf_completion_receipt(using.id)
+            .unwrap()
+            .expect("import completed before settlement publication failed");
+        assert!(persistence
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .contains_key(&download_id));
+        drop(client);
+
+        let mut reopened = HuggingFaceClient::new(temp.path().join("cache")).unwrap();
+        reopened
+            .configure_download_destination_root(&library_root)
+            .unwrap();
+        let reopened_persistence = Arc::new(DownloadPersistence::new(temp.path()));
+        reopened.set_persistence(reopened_persistence.clone());
+        let reopened_library = Arc::new(
+            crate::model_library::ModelLibrary::new(&library_root)
+                .await
+                .unwrap(),
+        );
+        reopened_library
+            .install_mutation_authority(
+                crate::api::RuntimeTasks::new(),
+                crate::model_library::download_recovery::DownloadDestinationRoot::open(
+                    &library_root,
+                )
+                .unwrap(),
+                reopened_persistence.clone(),
+            )
+            .unwrap();
+        let writes = Arc::new(AtomicU64::new(0));
+        let observed_writes = writes.clone();
+        reopened_library.set_metadata_write_notifier(Some(Arc::new(move |_| {
+            observed_writes.fetch_add(1, Ordering::SeqCst);
+        })));
+        reopened.set_download_importer(Arc::new(crate::model_library::ModelImporter::new(
+            reopened_library.clone(),
+        )));
+
+        let completed = reopened.restore_persisted_downloads().await.unwrap();
+        assert!(completed.iter().any(|info| info.download_id == download_id));
+        assert_eq!(writes.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            reopened_persistence
+                .read_hf_completion_receipt(using.id)
+                .unwrap(),
+            Some(receipt)
+        );
+        assert!(matches!(
+            reopened.acquisition.store().acquisitions().unwrap()[&using.id].phase,
+            crate::acquisition::AcquisitionPhase::Adopted { .. }
+        ));
+        assert!(!reopened_persistence
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .contains_key(&download_id));
+        assert_eq!(
+            std::fs::read(destination.join("model.onnx")).unwrap(),
+            b"data"
+        );
+        assert_eq!(writes.load(Ordering::SeqCst), 0);
+        reopened.shutdown_downloads().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn busy_root_refuses_mutation_but_preserves_idle_runtime_reads() {
         let temp = TempDir::new().unwrap();
         let (library, client, destination, request) = imported_download_fixture(temp.path()).await;
@@ -11644,7 +12406,11 @@ mod tests {
                         async move { client.shutdown_downloads().await },
                     ))
                 } else {
-                    assert!(client.cancel_download(&download_id).await.unwrap());
+                    assert_eq!(
+                        client.cancel_download(&download_id).await.unwrap(),
+                        !final_import,
+                        "cancellation wins only before managed final import claims publication"
+                    );
                     None
                 };
                 if shutdown {
@@ -11679,9 +12445,15 @@ mod tests {
                     assert_eq!(outcome.is_err(), fail_import);
                 } else {
                     tokio::time::timeout(Duration::from_secs(3), async {
-                        while client.get_download_status(&download_id).await
-                            == Some(DownloadStatus::Cancelling)
-                        {
+                        while matches!(
+                            client.get_download_status(&download_id).await,
+                            Some(
+                                DownloadStatus::Queued
+                                    | DownloadStatus::Downloading
+                                    | DownloadStatus::Pausing
+                                    | DownloadStatus::Cancelling
+                            )
+                        ) {
                             tokio::task::yield_now().await;
                         }
                     })
@@ -11698,7 +12470,7 @@ mod tests {
                 assert!(!before.quarantines.contains_key(&download_id));
                 assert_eq!(
                     status,
-                    Some(if shutdown {
+                    Some(if shutdown || final_import {
                         DownloadStatus::Downloading
                     } else {
                         DownloadStatus::Cancelling
@@ -11708,9 +12480,13 @@ mod tests {
                     client.get_download_status(&download_id).await,
                     Some(if shutdown || fail_import {
                         DownloadStatus::Error
+                    } else if final_import {
+                        DownloadStatus::Completed
                     } else {
                         DownloadStatus::Cancelled
-                    })
+                    }),
+                    "wrong terminal status: final_import={final_import}, shutdown={shutdown}, fail_import={fail_import}, error={:?}",
+                    client.downloads.read().await.get(&download_id).and_then(|state| state.error.clone())
                 );
                 if final_import {
                     assert_eq!(
@@ -16307,7 +17083,7 @@ mod tests {
                 downloaded_bytes: 1,
                 total_bytes: Some(2),
                 speed: 0.0,
-                cancel_flag: Arc::new(AtomicBool::new(false)),
+                cancel_flag: Arc::new(DownloadCancellation::new()),
                 pause_flag: Arc::new(AtomicBool::new(false)),
                 error: None,
                 retry_attempt: 0,
@@ -16394,7 +17170,7 @@ mod tests {
                 downloaded_bytes: 0,
                 total_bytes: Some(1),
                 speed: 0.0,
-                cancel_flag: Arc::new(AtomicBool::new(false)),
+                cancel_flag: Arc::new(DownloadCancellation::new()),
                 pause_flag: Arc::new(AtomicBool::new(false)),
                 error: None,
                 retry_attempt: 0,
@@ -17411,7 +18187,7 @@ mod tests {
                     downloaded_bytes: 256,
                     total_bytes: Some(1024),
                     speed: 0.0,
-                    cancel_flag: Arc::new(AtomicBool::new(false)),
+                    cancel_flag: Arc::new(DownloadCancellation::new()),
                     pause_flag: Arc::new(AtomicBool::new(false)),
                     error: None,
                     retry_attempt: 2,
@@ -17491,7 +18267,7 @@ mod tests {
                     downloaded_bytes: 256,
                     total_bytes: Some(1024),
                     speed: 0.0,
-                    cancel_flag: Arc::new(AtomicBool::new(false)),
+                    cancel_flag: Arc::new(DownloadCancellation::new()),
                     pause_flag: Arc::new(AtomicBool::new(false)),
                     error: None,
                     retry_attempt: 0,
@@ -17575,7 +18351,7 @@ mod tests {
                     downloaded_bytes: 256,
                     total_bytes: Some(1024),
                     speed: 0.0,
-                    cancel_flag: Arc::new(AtomicBool::new(false)),
+                    cancel_flag: Arc::new(DownloadCancellation::new()),
                     pause_flag: Arc::new(AtomicBool::new(false)),
                     error: None,
                     retry_attempt: 0,
@@ -17683,7 +18459,7 @@ mod tests {
                     downloaded_bytes: 512,
                     total_bytes: Some(1024),
                     speed: 1024.0,
-                    cancel_flag: Arc::new(AtomicBool::new(false)),
+                    cancel_flag: Arc::new(DownloadCancellation::new()),
                     pause_flag: Arc::new(AtomicBool::new(false)),
                     error: None,
                     retry_attempt: 0,
@@ -18332,7 +19108,7 @@ mod tests {
                     downloaded_bytes: 256,
                     total_bytes: Some(1024),
                     speed: 0.0,
-                    cancel_flag: Arc::new(AtomicBool::new(false)),
+                    cancel_flag: Arc::new(DownloadCancellation::new()),
                     pause_flag: Arc::new(AtomicBool::new(false)),
                     error: None,
                     retry_attempt: 0,
@@ -18398,7 +19174,7 @@ mod tests {
             .get(&download_id)
             .unwrap()
             .cancel_flag
-            .load(Ordering::Relaxed);
+            .is_cancelled();
         assert!(cancel_flag_set);
         client.observe_finished_download_tasks().await;
         assert!(!client.download_tasks.contains(&download_id));

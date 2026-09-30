@@ -176,3 +176,142 @@ This report records agent experience using the Coding-Standards MCP during Acqui
 The primary integrator, independent architecture reviewer, native-custody contributor, native-custody independent reviewer, shared-owner design reviewer, and Q1 next-slice architecture investigator used the MCP and are represented above. The bounded source-inventory reviewer did not use it, so there is no MCP usability report from that agent.
 
 The architecture reviewer’s narrow follow-up inspected the repaired current source without making a new MCP call and reused the prior routed obligations; its findings confirm the two identified integrity paths are closed at source level, not that Q1 is accepted. The MCP `review` operation is an authoring workflow for changes to the standards corpus; it does not review application source. Application compliance was checked by final routing, standards reads, source/test inspection, and the independent code review.
+
+## Import-receipt feasibility investigator — GPT-6.1 Sol High
+
+- **Useful calls:** Reused the existing routing facts and selected snapshot for a focused route over persistence, architecture/replay, contract evolution/schema, concurrency, Rust/API/async and verification concerns. Snapshot `snapshot:v1:869927cd-0134-4833-89c9-c545393f1dff` selected 21 standards with zero unresolved facts. Focused reads of Persistence and Architecture informed the separation between the model-owned completion proof and acquisition's exact lease/workspace custody. A final same-snapshot route confirmed the design scope.
+- **Confusing or redundant steps:** No confusing or redundant operation was reported beyond long full policy text; source-specific questions were not answered by another MCP call.
+- **Missing context:** The MCP did not expose the exact schema-6 partition writer, importer effects, held root grant, or orphan adoption call graph. Those required source inspection.
+- **Where the investigator left MCP:** Candidate identity, schema decoder behavior, finalizer publication ordering, and concrete required tests were established in repository source, not by routing.
+- **Smallest sufficient workflow:** Reuse the fact vocabulary/snapshot, route the exact slice, read two focused policies, reroute the final design, then verify the actual source boundaries and evidence separately.
+- **Recommendations:** Offer section-scoped policy reads and make the distinction between a complete standards route and source/evidence qualification explicit.
+
+## Primary integrator — initial combined receipt/guard routing, later split by source review
+
+- **Useful calls:** I refreshed `routing_facts` at snapshot `snapshot:v1:af0c1e53-2199-4992-9b93-a00d526934fe`, then routed persistence, schema/evolution, replay, concurrency, delegated-execution security, test-oracle, verification, documentation and commit facts. The final same-snapshot route selected 32 standards with zero unresolved facts. Focused reads of Persistence, Contract Evolution, Architecture Replay, Concurrency, Untrusted Execution, Independent Test Oracles and Commit Workflow made conditional publication, exact replay authority, effect-boundary guards and candidate-matched tests explicit.
+- **Confusing or redundant steps:** `ALL_TOOLS` keyword discovery returned long descriptions for both app-code routing/read operations and standards-authoring operations. The first route omitted the explicitly required empty framework category and returned `needs-facts`; correcting that on the same snapshot was straightforward. A 21-policy `read_many` produced more text than the visible output window, so I read the seven relevant policies in two smaller batches. Repeating the same complete route to inspect the selected count was unnecessary but provided a precise record.
+- **Missing context:** The MCP did not know the current `d0b71b5` source boundary, schema-6 partition decoder, exact `Using` lease, importer side effects, metadata durability, mutation authority, or orphan-adoption entry points. Repository source and the separate exact-candidate design review are establishing those facts. Routing does not decide receipt schema/ownership or prove behavior.
+- **Where I left MCP:** Git/PR/CI state, store and importer ownership, publication failure semantics, all adoption paths, and local test evidence came from repository/GitHub inspection. No standards-corpus authoring, attestation, or approval operation was performed.
+- **Smallest sufficient workflow:** Capture the fact vocabulary once, route the exact library/persistence/lifecycle/security/verification/commit scope with every required category explicit, read three or four applicable policies at a time, inspect source and tests, and reroute the final candidate after implementation.
+- **Recommendations:** Filter initial tool discovery to application-routing/read operations before exposing authoring tools; keep selection-only routing compact; surface required empty applicability facts before policy evaluation; cap `read_many` by a practical byte budget; show the selected count without another call; and provide section-scoped policy reads. Continue to distinguish a complete applicability route from implementation evidence and acceptance.
+
+This is MCP usability feedback only. The Q1 product boundary and its acceptance state are recorded in the acquisition plan and execution ledger, not inferred from this report.
+
+## Primary integrator — current importer/adoption custody-guard slice
+
+- **Useful calls:** A fresh `routing_facts` snapshot (`snapshot:v1:9881b6be-4a0e-4d72-b0cd-4e4307cdc710`) and a complete route selected 26 standards with zero unresolved facts. Focused `read_many` covered Concurrency, Rust Async, Persistence, Rust API, Untrusted Execution, and Verification. This narrower route made effect-boundary ownership, cancellation retention, configured-authority refusal, and negative lifecycle evidence applicable without carrying receipt/output-proof policies into the current implementation slice.
+- **Confusing or redundant steps:** The same empty `routing.frameworks` value had to be supplied explicitly despite no framework being used. The earlier combined route and broad 21-policy read remain separate historical discovery for receipt feasibility; neither is needed to implement this guard. The current focused reads were sufficient.
+- **Missing context:** Routing did not identify the common importer shortcut, Diffusers delegation, HF use lease, already-held root grant, exact queue admission, or the unconfigured `ModelLibrary::new` path. Source inspection and a separate read-only architecture review supplied those facts.
+- **Where I left MCP:** The precise private capability contents, caller cancellation behavior, and stale-scan race are grounded in Rust source and tests. The MCP supplied obligations, not the design choice or evidence.
+- **Smallest sufficient workflow:** Refresh the facts once when the slice boundary changes, route the exact guard scope without inline policy text, read the six focused obligations in one bounded call, inspect source and lifecycle tests, then route the final implemented candidate.
+- **Recommendations:** Make applicability-empty facts visible before route evaluation; retain the selection-only route and compact policy reads; allow a slice-oriented policy view that separates immediate obligations from later-slice closure; keep route completion distinct from source/test compliance.
+
+This MCP usability report is separate from product acceptance. The guard was subsequently implemented on candidate `8b6c5f70c55a3d124189d0cd88dc85c780f47c84`; it remains under independent review and is not an accepted Q1 gate.
+
+## Primary integrator — revised partial-HF-stage custody guard route
+
+- **Useful calls:** After source inspection changed the guard boundary, I refreshed `routing_facts` and captured a new snapshot (`snapshot:v1:0ed9c25a-060e-4970-a5ca-a7286eda1601`). A complete route for the revised implementation scope selected 28 standards with zero unresolved fact categories. Focused reads included Independent Test Oracles, Code Design and Ownership, Commit Workflow, Verification, Rust, Architecture, and Security; earlier reads on the same guard work covered Concurrency, Rust Async, Persistence, Rust API, and Untrusted Execution. This surfaced the one-owner, exact-effect-boundary, cancellation-custody, typed-unavailable, and decision-fixture obligations relevant to the partial metadata stage.
+- **Confusing or redundant steps:** The no-framework fact still needed an explicit `known-absent` value. A seven-policy `read_many` returned roughly 40,000 tokens of full policy text, exceeding the visible output window and truncating the result; compact reads do not provide a practical section-level summary for a narrow code slice. Routing the complete set was still useful, but rereading long whole policies was not.
+- **Missing context:** The MCP did not identify the HF partial-stub call before weights, the fact it also indexes, or that index projection can rewrite metadata and custom runtime projections. Repository tracing established those concrete effects and showed that the design needed a separate exact `Transferring` stage capability.
+- **Where I left MCP:** Source call chains, queue admission, stage timing, existing owner contexts, root grants, index side effects, tests, and Git/PR state were established from repository and service evidence. The MCP supplied applicable obligations; it did not choose or validate the code design.
+- **Smallest sufficient workflow:** Refresh the fact vocabulary at the changed slice boundary; complete one exact route with all required categories; read only the handful of policy sections for ownership, persistence, async cancellation, delegated authority, and verification; inspect the source; then route the final implemented candidate.
+- **Recommendations:** Add section-scoped obligation reads with an output-byte budget; show required empty applicability values before route evaluation; make the selected set and unresolved count visible in the initial response; and distinguish immediate slice obligations from downstream closure. Keep source and test evidence explicitly outside the route result.
+
+This MCP usability feedback is separate from product acceptance. The revised partial-stage guard was implemented on candidate `8b6c5f70c55a3d124189d0cd88dc85c780f47c84`; implementation evidence does not certify its acceptance.
+
+## Q1 importer custody-guard implementer — GPT-6.1 Sol High
+
+- **Useful calls:** `describe_input` and `routing_facts` exposed the exact registered fact vocabulary; snapshot-bound routes made the scope reproducible. Focused reads covered Concurrency, Rust Async, Persistence, Rust API, Untrusted Execution and Verification. The worker rerouted after the partial-stage capability and aggregate-effect lifecycle boundaries changed, then routed the final candidate. The final route selected 24 standards with zero unresolved categories.
+- **Confusing or redundant steps:** Discovery and schema descriptions were large, and some MCP results duplicated content between textual and structured forms. This was cumbersome; consuming the structured result avoided part of the duplication. No standards-corpus mutation or application-source attestation operation was useful or performed.
+- **Missing context:** The MCP did not know the repository call graph, exact `TaskContext` lifecycle, admitted write set or candidate diff. Those were established locally and translated into registered routing facts.
+- **Where the worker left MCP:** It used source inspection, tests, Git and local evidence for implementation and verification, returning to MCP when the design boundary materially changed and for final routing. Routing supplied obligations but did not certify the code.
+- **Smallest sufficient workflow:** Discover input shape and routing facts once; route known facts on a pinned snapshot; read focused applicable policies; implement and verify locally; reroute when ownership changes and against the final candidate.
+- **Recommendations:** Make discovery/results compact, avoid duplicate text and structured bodies, allow concise routing summaries with selected IDs and unresolved questions, and provide a clearly non-authoritative place to associate candidate/tree/write-set context with an evidence record.
+
+## Q1 importer custody-guard independent reviewer — GPT-6.1 Sol High
+
+- **Useful calls:** The reviewer reused `routing_facts` snapshot `snapshot:v1:9881b6be-4a0e-4d72-b0cd-4e4307cdc710`, ran a selection-only route with implementation/verification, library, persistence, Rust/API/async/security/cross-platform, architecture/concurrency/contracts/security/resilience/diagnostics and code-design/evolution/delegated-authority/oracle details, and received 24 selected standards with zero unresolved facts. Two focused `read_many` calls covered Rust Security, Untrusted Execution, Independent Test Oracles, Concurrency, Rust Async and Persistence. These obligations helped assess resource/stage authority, coherent reads, held capabilities, effect drainage, failure ownership and no-effect tests.
+- **Confusing or redundant steps:** No MCP errors or schema-discovery calls were needed. Route explanations and repeated continuation suggestions were verbose.
+- **Missing context:** The MCP did not expose the repository HF effect envelope or capability-relative metadata publisher. Source inspection was needed to trace those actual boundaries.
+- **Where the reviewer left MCP:** Candidate identity, diff, source lifecycle and test claims were checked with Git and repository tools. The reviewer ran `git diff --check`, but no build or tests.
+- **Smallest sufficient workflow:** Reuse the pinned snapshot, route the concrete review scope, read focused policies, then inspect the exact diff and tests independently.
+- **Recommendations:** Return a compact selected-policy/count view by default and provide task-focused policy excerpts while keeping source and evidence qualification outside the routing result.
+
+The review found no P0–P3 issue in its slice. That source-review conclusion and the writer-reported test evidence remain separate.
+
+## Q1 receipt/reopen design reviewer
+
+- **Useful calls:** The reviewer used one initial route and a final route on snapshot `snapshot:v1:968b380d-c352-496b-9a5f-f522222e09ab`; both selected 21 standards with zero unresolved questions. Two focused `read_many` calls read Persistence and Replay, then Contract Evolution and Schemas. Those obligations clarified that a receipt follows durable output publication, that current projections cannot stand in for exact historical completion, and that the receipt format must be explicit and versioned.
+- **Confusing or redundant steps:** No vocabulary rediscovery was needed. Whole-policy reads were long, and the final route repeated the same facts because the slice workflow requires a final route.
+- **Missing context:** The MCP could not identify actual schema writers, metadata no-op publication, startup index rebuild, cache fingerprint inputs, custody guard, or cancellation order. Source inspection was necessary and cannot establish deployed retained-state population.
+- **Where the reviewer left MCP:** It inspected the repository for each persistence writer, output effect, migration/reopen path, startup rebuild, package-facts cache, and cancellation boundary; no tests or edits were performed.
+- **Smallest sufficient workflow:** Route retained facts, read four focused policies, inspect source lifecycle, then route the final design.
+- **Recommendations:** Add section-scoped policy reads, compact obligation references, and an explicit result label saying routing is complete while implementation and evidence remain unverified.
+
+This design review is not product acceptance. Its source audit found no existing exact importer completion receipt; schema-7 implementation, cold-reopen tests, and independent final-candidate review remain required.
+
+## Primary integrator — Q1 receipt/reopen slice routing
+
+- **Useful calls:** A fresh `routing_facts` snapshot and route selected 28 standards with zero unresolved categories for persistence/replay, schema evolution, concurrency, Rust APIs/async/security, implementation, verification, planning and commit obligations. Focused reads on the same snapshot covered Persistence, Replay, Schemas, Contract Evolution, Concurrency, Code Design, Rust Async, Untrusted Execution, Verification Oracles, Resilience, Rust API, Commit, Platform Verification, Implementation and Documentation. Explicit policy text made the transaction boundary, old-reader handling, exact publication, platform evidence scope and commit obligations concrete.
+- **Confusing or redundant steps:** The first five-policy read response was too large for the visible output window, duplicating full policy text across structured and text results; later small batches were more useful. The complete route is necessary at slice start, but verbose continuation explanations added little.
+- **Missing context:** Routing could not tell that schema-6 `legacy` flattening would either drop or contaminate a receipt, that current schema-6 import metadata is capability-published but can no-op without a fresh barrier, or that package-facts fingerprints omit payload bytes and serialize `HashMap` metadata. Repository source and a read-only feasibility review established those facts.
+- **Where I left MCP:** Exact reader/writer inventories, output formats, startup rebuild effects, marker order, and current CI/PR state came from source/GitHub tools. The package-facts fingerprint investigation and feasibility review are design evidence, not MCP evidence.
+- **Smallest sufficient workflow:** Snapshot-bound route once; read the selected ownership, schema, replay, async, security and oracle policies in small focused batches; inspect exact source; reroute the implemented candidate before handoff.
+- **Recommendations:** Add section-scoped reads with a practical byte budget; avoid returning policy bodies twice; surface the selected count and unresolved questions in compact form; keep routing status distinct from implementation evidence and acceptance.
+
+This usability record is separate from product acceptance. At the time of this entry, the local candidate did not yet implement a receipt or reopen path; a later uncommitted worktree update is now being verified.
+
+## Primary integrator — resumed Q1 acquisition and native-consumer route
+
+- **Useful calls:** Reused the accepted snapshot `snapshot:v1:425e276a-fc0b-4282-9889-a76742027c42`, refreshed its fact definitions with `routing_facts`, and completed the route for launcher/library consumers, durable receipts, async lifecycle, security, platform/UI evidence, implementation, planning, release and commit work. The route selected 43 standards with zero unresolved facts. Paginated policy reads returned the full selected set in six bounded batches.
+- **Confusing or redundant steps:** The first expanded route remained `needs-facts` until the workflow-profile condition was answered. The valid answer was `known-absent` for concurrent plan integration in this serial Q1 slice. The route accepted that fact and completed on the same snapshot. Policy retrieval is bounded by record count, but each selected item still contains its full policy text; reading 43 policies required six calls and substantial output handling.
+- **Missing context:** The standards service did not expose repository state, current acquisition schema, the previously uncommitted receipt implementation, production RPC composition, or the Passeur service failure. These came from Git/source and separate Passeur diagnostics. Routing did not establish any implementation or acceptance claim.
+- **Where I left MCP:** The route and policy reads supplied obligations only. Source review, test evidence, GitHub PR/CI state and exact plan-gate status remain separate repository or service observations.
+- **Smallest sufficient workflow:** Reuse the accepted snapshot when its authority still applies; refresh facts, state every conditional applicability question explicitly, route, then page selected policy text in small batches. Reroute the completed source/evidence boundary after implementation.
+- **Recommendations:** Let callers request focused policy sections from a completed route, preserve the compact selected-ID/count summary while paging, and show the exact missing fact prompt in a directly actionable form. Continue to label routing as obligations rather than implementation certification.
+
+This usability feedback is separate from product acceptance. The schema-7 receipt implementation and native consumer changes remain subject to source review and their required real-consumer evidence.
+
+## Independent Q1 composed reviewer — GPT-6.1 Sol High
+
+- **Useful calls:** The pinned standards snapshot supported fact discovery, routing, and focused reads. The reviewer routed 29 standards with zero unresolved facts. A focused three-policy `read_many` returned complete, usable policy text.
+- **Confusing or redundant steps:** Requesting 32 full policy texts exceeded the visible output window. The smaller focused read was easier to use.
+- **Missing context:** Routing supplied applicable obligations but did not provide repository-specific source facts or establish implementation compliance or product acceptance.
+- **Where the reviewer left MCP:** The reviewer inspected the exact current diff and source independently. It did not run tests or builds.
+- **Smallest sufficient workflow:** Reuse the pinned snapshot, route the focused review scope, read a small number of relevant policies, then verify source and evidence separately.
+- **Recommendations:** Keep complete policy reads bounded by output size; label a completed route as obligations only, separate from source compliance and acceptance.
+
+This reviewer’s source findings are recorded separately from the MCP observations and do not certify the candidate.
+
+## Shared native-consumer contributor — GPT-6.1 Sol Medium fallback
+
+- **Useful calls:** After correcting the route tool's input shape, the contributor completed a focused standards route and used its selected obligations to inform implementation.
+- **Confusing or redundant steps:** `describe_input({tool: "route"})` failed because the operation discriminator was missing and `tool` was an extra field; `describe_input({operation: "route"})` worked. Invented fact keys `language` and `scope` were rejected with a generic `/facts` message that did not identify the invalid keys; the contributor had to discover `routing_facts`. Route output repeated full content in both text and structured results, risking truncation.
+- **Missing context:** The route did not identify the repository-specific acquisition service boundary; the contributor found that in source. Its route selected 28 standards and left two facts unresolved; the primary integrator separately completed the broader accepted route with zero unresolved facts.
+- **Where the contributor left MCP:** It reported route obligations, not whether source changes complied or passed product acceptance.
+- **Smallest sufficient workflow:** Describe the operation using its actual discriminator, retrieve the supported fact vocabulary before routing, resolve all returned facts explicitly, and keep full policy reads bounded.
+- **Recommendations:** Make input descriptions work with the public tool name or provide a direct schema index; report each invalid fact key and valid alternatives; avoid duplicating large route bodies in text and structured output; retain the route's unresolved-fact count and distinguish obligations from evidence.
+
+This feedback documents actual MCP usability only; it is not an implementation approval.
+
+## Primary integrator — final Q1 candidate route
+
+- **Useful calls:** Reused the accepted snapshot `snapshot:v1:425e276a-fc0b-4282-9889-a76742027c42`, refreshed its registered fact vocabulary, and routed the final implementation/verification scope. It selected 40 standards with zero unresolved questions. The route remained compact and returned actionable policy IDs.
+- **Confusing or redundant steps:** A six-policy compact `read_many` still returned full policy bodies, exceeding the visible output window. Earlier bounded batches and the already-read policies supplied the remaining applicable obligations.
+- **Missing context:** The route did not know the final native attempt identity, local HTTP fixture, current CI head, or platform execution results; those were checked in source, test output, and repository state.
+- **Where I left MCP:** The route supplied obligations only. Review, exact source checks and test evidence were performed independently.
+- **Smallest sufficient workflow:** Refresh facts, complete a snapshot-bound route, read only the relevant small policy subset, and check implementation/evidence separately.
+- **Recommendations:** Add section-scoped reads and budget the response by serialized bytes, not number of policy records. Return selected IDs/count without repeating full bodies across structured and text output.
+
+This is final-route usability evidence, not a Coding-Standards compliance or product-acceptance result.
+
+## Primary integrator — resumed exact-candidate route
+
+- **Useful calls:** A fresh route on snapshot `snapshot:v1:10b3e01e-6a86-4185-83e0-65ca7b0db870` selected 44 standards with zero unresolved questions. Two bounded `read_many` calls read the focused `core`, persistence, and concurrency policies.
+- **Confusing or redundant steps:** The earlier snapshot handle was unavailable after session restart, so the route facts had to be refreshed and the same scope routed on a fresh handle. The small policy reads returned complete policy text and remained usable.
+- **Missing context:** The standards service still supplied obligations rather than the actual Git diff, candidate test output, Passeur service health, or hosted CI status; these were checked separately.
+- **Where I left MCP:** The current route and focused policy reads inform the final candidate obligations. They do not establish source compliance or gate acceptance.
+- **Smallest sufficient workflow:** Refresh routing facts after a session restart, route the actual implementation/verification scope on the new snapshot, then read only the relevant policies in small batches.
+- **Recommendations:** Provide a safe snapshot-refresh path after session loss and retain the clear distinction between standards obligations and independent source/test evidence.
+
+This entry records the resumed candidate route only; implementation review and acceptance evidence remain separate.

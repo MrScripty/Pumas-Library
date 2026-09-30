@@ -6,6 +6,10 @@
 //! durable terminal proofs may outlive the resumable snapshot they protect.
 
 use crate::acquisition::store::{AcquisitionStore, AcquisitionTransaction};
+use crate::acquisition::{
+    AcquisitionConsumerReceipt, AcquisitionDemand, AcquisitionPhase, AcquisitionRecord,
+    ArtifactManifest, VerifiedFile, WorkspaceIdentity,
+};
 use crate::error::Result;
 use crate::metadata::{
     AtomicPublication, AtomicPublishFailure, AtomicPublishFailureKind, AtomicPublishResult,
@@ -16,6 +20,7 @@ use crate::model_library::types::DownloadRequest;
 use crate::models::DownloadStatus;
 use crate::models::HuggingFaceEvidence;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -132,7 +137,7 @@ pub(crate) struct DownloadAdmissionPosition {
     pub(crate) predecessor: Option<QueuePredecessor>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PersistedQueueAdmission {
     pub(crate) attempt_id: String,
@@ -141,6 +146,208 @@ pub(crate) struct PersistedQueueAdmission {
     pub(crate) requested_payload_files: Vec<String>,
     pub(crate) execution_files: Vec<String>,
     pub(crate) position: DownloadAdmissionPosition,
+}
+
+/// Model-owned proof that one exact Hugging Face import completed. The
+/// acquisition document stores its serialized form opaquely; this model
+/// facade alone interprets its version and output projection.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HfCompletionReceipt {
+    pub(crate) receipt_version: u16,
+    pub(crate) output_proof_version: u16,
+    pub(crate) acquisition_id: String,
+    pub(crate) use_lease: String,
+    pub(crate) demand: AcquisitionDemand,
+    pub(crate) manifest: ArtifactManifest,
+    pub(crate) workspace: WorkspaceIdentity,
+    pub(crate) verified_files: Vec<VerifiedFile>,
+    pub(crate) download_id: String,
+    pub(crate) queue_admission: PersistedQueueAdmission,
+    pub(crate) model_id: String,
+    pub(crate) outputs: HfCompletionOutputProof,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HfCompletionOutputProof {
+    pub(crate) metadata_sha256: String,
+    pub(crate) index_sha256: String,
+    pub(crate) package_facts: Option<HfPackageFactsProof>,
+}
+
+pub(crate) struct HfCompletionReceiptRequest<'a> {
+    pub(crate) expected: &'a AcquisitionRecord,
+    pub(crate) use_lease: Uuid,
+    pub(crate) download_id: &'a str,
+    pub(crate) domain: DownloadAdmissionDomain,
+    pub(crate) destination: &'a PersistedDestinationIdentity,
+    pub(crate) model_id: &'a str,
+    pub(crate) outputs: HfCompletionOutputProof,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HfPackageFactsProof {
+    pub(crate) contract_version: i64,
+    pub(crate) content_sha256: String,
+}
+
+impl HfCompletionReceipt {
+    pub(crate) fn validate_for_record(&self, record: &AcquisitionRecord) -> Result<()> {
+        let receipt_lease = Uuid::parse_str(&self.use_lease)
+            .map_err(|_| invalid_completion_receipt("Receipt use-lease identity is malformed"))?;
+        let lease_matches = matches!(
+            record.phase,
+            AcquisitionPhase::Using { lease } | AcquisitionPhase::Adopted { lease }
+                if lease == receipt_lease
+        );
+        let selected_files = record
+            .manifest
+            .files()
+            .iter()
+            .map(|file| file.logical_path().to_string())
+            .collect::<Vec<_>>();
+        if self.receipt_version != 1
+            || self.output_proof_version != 1
+            || self.acquisition_id != record.id.to_string()
+            || receipt_lease.is_nil()
+            || self.demand != record.demand
+            || self.demand.consumer != "hf.model"
+            || self.demand.operation != self.queue_admission.attempt_id
+            || self.manifest != record.manifest
+            || self.workspace != record.workspace
+            || self.verified_files != record.files
+            || self.download_id.is_empty()
+            || self.queue_admission.execution_files != selected_files
+            || self.queue_admission.destination.library_root != self.workspace.root_identity
+            || self.queue_admission.destination.relative_target != self.workspace.relative_target
+            || self.model_id.is_empty()
+            || !lease_matches
+        {
+            return Err(invalid_completion_receipt(
+                "Receipt identity does not match the exact HF acquisition and queue admission",
+            ));
+        }
+        validate_sha256(&self.outputs.metadata_sha256)?;
+        validate_sha256(&self.outputs.index_sha256)?;
+        if let Some(package_facts) = &self.outputs.package_facts {
+            if package_facts.contract_version <= 0 {
+                return Err(invalid_completion_receipt(
+                    "Receipt package-facts contract version is invalid",
+                ));
+            }
+            validate_sha256(&package_facts.content_sha256)?;
+        }
+        Ok(())
+    }
+
+    fn validate_versioned(&self) -> Result<()> {
+        if self.receipt_version != 1 || self.output_proof_version != 1 {
+            return Err(invalid_completion_receipt(
+                "Receipt or output-proof version is unsupported",
+            ));
+        }
+        validate_sha256(&self.outputs.metadata_sha256)?;
+        validate_sha256(&self.outputs.index_sha256)?;
+        if let Some(package_facts) = &self.outputs.package_facts {
+            if package_facts.contract_version <= 0 {
+                return Err(invalid_completion_receipt(
+                    "Receipt package-facts contract version is invalid",
+                ));
+            }
+            validate_sha256(&package_facts.content_sha256)?;
+        }
+        Ok(())
+    }
+}
+
+fn invalid_completion_receipt(message: &str) -> crate::PumasError {
+    crate::PumasError::Validation {
+        field: "downloads.hf_completion_receipts".into(),
+        message: message.into(),
+    }
+}
+
+fn validate_hf_completion_receipts(
+    acquisitions: &BTreeMap<Uuid, AcquisitionRecord>,
+    receipts: &BTreeMap<Uuid, serde_json::Value>,
+) -> Result<()> {
+    let mut identities = HashSet::new();
+    for (key, value) in receipts {
+        let value = if value
+            .get("receipt_kind")
+            .and_then(serde_json::Value::as_str)
+            == Some("pumas.consumer-completion")
+        {
+            let receipt: AcquisitionConsumerReceipt = serde_json::from_value(value.clone())
+                .map_err(|_| invalid_completion_receipt("Stored consumer receipt is malformed"))?;
+            if receipt.owner != "hf.model" {
+                continue;
+            }
+            receipt.payload
+        } else {
+            value.clone()
+        };
+        let receipt: HfCompletionReceipt = serde_json::from_value(value)
+            .map_err(|_| invalid_completion_receipt("Stored completion receipt is malformed"))?;
+        if receipt.acquisition_id != key.to_string()
+            || !identities.insert(receipt.acquisition_id.clone())
+        {
+            return Err(invalid_completion_receipt(
+                "Stored completion receipt identity is duplicated or mismatched",
+            ));
+        }
+        let record = acquisitions
+            .get(key)
+            .ok_or_else(|| invalid_completion_receipt("Stored completion receipt is orphaned"))?;
+        receipt.validate_for_record(record)?;
+    }
+    Ok(())
+}
+
+fn validate_sha256(value: &str) -> Result<()> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(invalid_completion_receipt(
+            "Receipt contains a malformed SHA-256 digest",
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn canonical_json_sha256(value: &serde_json::Value) -> Result<String> {
+    fn normalize(value: &serde_json::Value) -> Result<serde_json::Value> {
+        match value {
+            serde_json::Value::Object(values) => {
+                let sorted = values.iter().collect::<BTreeMap<_, _>>();
+                let mut canonical = serde_json::Map::new();
+                for (key, value) in sorted {
+                    canonical.insert(key.clone(), normalize(value)?);
+                }
+                Ok(serde_json::Value::Object(canonical))
+            }
+            serde_json::Value::Array(values) => values
+                .iter()
+                .map(normalize)
+                .collect::<Result<Vec<_>>>()
+                .map(serde_json::Value::Array),
+            serde_json::Value::Number(number)
+                if number.as_f64().is_some_and(|value| !value.is_finite()) =>
+            {
+                Err(invalid_completion_receipt(
+                    "Receipt output projection contains a non-finite number",
+                ))
+            }
+            _ => Ok(value.clone()),
+        }
+    }
+
+    let canonical = serde_json::to_vec(&normalize(value)?)?;
+    Ok(format!("{:x}", Sha256::digest(canonical)))
 }
 
 #[derive(Debug, Clone)]
@@ -515,6 +722,14 @@ impl DownloadPersistence {
     }
 
     #[cfg(test)]
+    pub(crate) fn with_receipt_settlement_failure_publisher_for_test(
+        self,
+        publisher: Arc<FailAfterReceiptSettlementPublisher>,
+    ) -> Self {
+        self.with_test_publisher(publisher)
+    }
+
+    #[cfg(test)]
     fn with_test_observer(mut self, observer: Arc<dyn StoreTransactionObserver>) -> Self {
         self.observer = observer;
         self
@@ -725,6 +940,182 @@ impl DownloadPersistence {
             .stage_consumer_settlement("hf.model", attempt_id);
         self.write_data(&transaction, &mut data)?;
         Ok(true)
+    }
+
+    /// Durably issue a complete-HF-import receipt together with a locked
+    /// revalidation of its exact active queue admission and acquisition lease.
+    pub(crate) fn publish_hf_completion_receipt(
+        &self,
+        request: HfCompletionReceiptRequest<'_>,
+    ) -> Result<HfCompletionReceipt> {
+        let HfCompletionReceiptRequest {
+            expected,
+            use_lease,
+            download_id,
+            domain,
+            destination,
+            model_id,
+            outputs,
+        } = request;
+        if !matches!(expected.phase, AcquisitionPhase::Using { lease } if lease == use_lease)
+            || expected.demand.consumer != "hf.model"
+            || expected.demand.operation.is_empty()
+            || model_id.is_empty()
+        {
+            return Err(invalid_completion_receipt(
+                "Receipt issuance lacks the exact active HF use lease",
+            ));
+        }
+        let mut transaction = self.transaction(StoreOperation::UpdateStatus)?;
+        let data = self.load_data_strict(&transaction)?;
+        let admission = data.queue_admissions.get(download_id).ok_or_else(|| {
+            invalid_completion_receipt("Receipt queue admission is no longer active")
+        })?;
+        if admission.domain != domain || &admission.destination != destination {
+            return Err(invalid_completion_receipt(
+                "Receipt queue admission has another domain or destination",
+            ));
+        }
+        self.validate_queue_execution_data(
+            &data,
+            download_id,
+            &expected.demand.operation,
+            admission.domain,
+            &admission.destination,
+            &admission.execution_files,
+        )?;
+        let receipt = HfCompletionReceipt {
+            receipt_version: 1,
+            output_proof_version: 1,
+            acquisition_id: expected.id.to_string(),
+            use_lease: use_lease.to_string(),
+            demand: expected.demand.clone(),
+            manifest: expected.manifest.clone(),
+            workspace: expected.workspace.clone(),
+            verified_files: expected.files.clone(),
+            download_id: download_id.into(),
+            queue_admission: admission.clone(),
+            model_id: model_id.into(),
+            outputs,
+        };
+        receipt.validate_for_record(expected)?;
+        transaction
+            .target
+            .stage_consumer_receipt_issuance(expected, serde_json::to_value(&receipt)?);
+        let mut unchanged = data;
+        self.write_data(&transaction, &mut unchanged)?;
+        Ok(receipt)
+    }
+
+    /// Read and strictly decode the model-owned receipt. Unsupported versions
+    /// and malformed contents never fall back to output-path inference.
+    pub(crate) fn read_hf_completion_receipt(
+        &self,
+        acquisition_id: Uuid,
+    ) -> Result<Option<HfCompletionReceipt>> {
+        let transaction = self.transaction(StoreOperation::Load)?;
+        self.load_data_strict(&transaction)?;
+        let (_, receipts) = transaction.target.consumer_completion_partition()?;
+        let Some(value) = receipts.get(&acquisition_id).cloned() else {
+            return Ok(None);
+        };
+        let value = if value
+            .get("receipt_kind")
+            .and_then(serde_json::Value::as_str)
+            == Some("pumas.consumer-completion")
+        {
+            let envelope: AcquisitionConsumerReceipt = serde_json::from_value(value)?;
+            if envelope.owner != "hf.model" {
+                return Ok(None);
+            }
+            envelope.payload
+        } else {
+            value
+        };
+        let receipt: HfCompletionReceipt = serde_json::from_value(value)?;
+        receipt.validate_versioned()?;
+        if receipt.acquisition_id != acquisition_id.to_string() {
+            return Err(invalid_completion_receipt(
+                "Receipt key does not match its acquisition identity",
+            ));
+        }
+        Ok(Some(receipt))
+    }
+
+    /// Atomically acknowledge the exact imported acquisition and release its
+    /// FIFO admission. The immutable receipt remains paired with the Adopted
+    /// acquisition as durable completion history.
+    pub(super) fn settle_hf_completion(
+        &self,
+        expected: &AcquisitionRecord,
+        receipt: &HfCompletionReceipt,
+    ) -> Result<bool> {
+        receipt.validate_for_record(expected)?;
+        let mut transaction = self.transaction(StoreOperation::Remove)?;
+        let mut data = self.load_data_strict(&transaction)?;
+        let receipt_value = serde_json::to_value(receipt)?;
+        let (current_record, current_receipt) =
+            transaction.target.consumer_completion_state(expected.id)?;
+        if current_record.as_ref() != Some(expected)
+            || current_receipt.as_ref() != Some(&receipt_value)
+        {
+            return Err(invalid_completion_receipt(
+                "Receipt or acquisition changed before exact settlement",
+            ));
+        }
+
+        if let Some(admission) = data.queue_admissions.get(&receipt.download_id) {
+            if admission != &receipt.queue_admission {
+                return Err(invalid_completion_receipt(
+                    "Receipt queue admission changed before settlement",
+                ));
+            }
+            self.validate_queue_execution_data(
+                &data,
+                &receipt.download_id,
+                &receipt.demand.operation,
+                admission.domain,
+                &admission.destination,
+                &admission.execution_files,
+            )?;
+            if let Some(admission) = data.queue_admissions.remove(&receipt.download_id) {
+                data.released_queue_admissions
+                    .insert(receipt.download_id.clone(), admission);
+            }
+            data.downloads
+                .retain(|download| download.download_id != receipt.download_id);
+            data.lifecycle_quarantines
+                .retain(|id, quarantine| id != &receipt.download_id || quarantine.sticky_failure);
+            match &expected.phase {
+                AcquisitionPhase::Using { .. } => transaction
+                    .target
+                    .stage_consumer_receipt_settlement(expected, receipt_value),
+                AcquisitionPhase::Adopted { .. } => {}
+                _ => {
+                    return Err(invalid_completion_receipt(
+                        "Receipt settlement requires an active or already-adopted use",
+                    ));
+                }
+            }
+            self.write_data(&transaction, &mut data)?;
+            return Ok(true);
+        }
+
+        let already_released = data
+            .released_queue_admissions
+            .get(&receipt.download_id)
+            .is_some_and(|admission| admission == &receipt.queue_admission);
+        let already_adopted = matches!(
+            current_record.map(|record| record.phase),
+            Some(AcquisitionPhase::Adopted { lease })
+                if lease.to_string() == receipt.use_lease
+        );
+        if already_released && already_adopted {
+            return Ok(true);
+        }
+        Err(invalid_completion_receipt(
+            "Receipt settlement has no exact active or already released queue admission",
+        ))
     }
 
     /// Load all persisted downloads.
@@ -1550,9 +1941,9 @@ impl DownloadPersistence {
         Ok(true)
     }
 
-    /// Explicit one-shot offline migration of the complete supported v4/v5
-    /// model custody representation into schema 6. The caller must stop all
-    /// old readers and writers first; the advisory lock cannot prove that.
+    /// Explicit one-shot offline migration of supported v4/v5 model custody
+    /// or pre-receipt schema 6 into schema 7. The caller must stop every old
+    /// reader and writer first; the advisory lock cannot prove that.
     /// Normal construction/open never invokes this operation.
     pub fn migrate_legacy_offline(data_dir: impl AsRef<Path>) -> Result<()> {
         let store = Self::new(data_dir.as_ref());
@@ -1576,6 +1967,8 @@ impl DownloadPersistence {
     }
 
     fn load_data_strict(&self, transaction: &StoreTransaction<'_>) -> Result<DownloadStoreData> {
+        let (acquisitions, receipts) = transaction.target.consumer_completion_partition()?;
+        validate_hf_completion_receipts(&acquisitions, &receipts)?;
         let Some(value) = transaction.target.model_partition()? else {
             return Ok(DownloadStoreData::empty());
         };
@@ -2300,8 +2693,75 @@ fn validate_store_data(data: &DownloadStoreData) -> Result<()> {
 }
 
 #[cfg(test)]
+pub(crate) struct FailAfterReceiptSettlementPublisher {
+    failed: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(test)]
+impl FailAfterReceiptSettlementPublisher {
+    pub(crate) fn new() -> Self {
+        Self {
+            failed: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    pub(crate) fn was_triggered(&self) -> bool {
+        self.failed.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[cfg(test)]
+impl DownloadStorePublisher for FailAfterReceiptSettlementPublisher {
+    fn publish(
+        &self,
+        target: &AcquisitionTransaction<'_>,
+        data: &DownloadStoreData,
+    ) -> AtomicPublishResult {
+        let (_, receipts) = target.consumer_completion_partition().map_err(|error| {
+            Box::new(AtomicPublishFailure {
+                stage: AtomicPublishStage::Serialization,
+                kind: AtomicPublishFailureKind::InvalidData,
+                error,
+                cleanup: StagingCleanup::NotRequired,
+            })
+        })?;
+        let receipt_qualified_release = receipts.values().any(|value| {
+            serde_json::from_value::<HfCompletionReceipt>(value.clone()).is_ok_and(|receipt| {
+                data.released_queue_admissions.get(&receipt.download_id)
+                    == Some(&receipt.queue_admission)
+            })
+        });
+        if receipt_qualified_release
+            && self
+                .failed
+                .compare_exchange(
+                    false,
+                    true,
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                )
+                .is_ok()
+        {
+            return Err(Box::new(AtomicPublishFailure {
+                stage: AtomicPublishStage::Staging,
+                kind: AtomicPublishFailureKind::Filesystem,
+                error: crate::PumasError::Other(
+                    "injected failure after HF receipt publication".to_string(),
+                ),
+                cleanup: StagingCleanup::NotRequired,
+            }));
+        }
+        target.publish_model_partition(data)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::acquisition::{
+        ArtifactFile, ArtifactRevisionEvidence, ArtifactSourceIdentity,
+        FileVerificationRequirement, RevisionStrength,
+    };
     use std::collections::VecDeque;
     use std::io::{BufRead, BufReader, Write};
     use std::process::{Command, Stdio};
@@ -2607,6 +3067,269 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let store = DownloadPersistence::new(tmp.path());
         assert_eq!(store.load_all().len(), 0);
+    }
+
+    #[test]
+    fn receipt_output_hash_canonicalizes_objects_but_preserves_arrays_and_null() {
+        let left = serde_json::json!({"z": [1, null], "a": {"y": true, "x": 2}});
+        let reordered = serde_json::json!({"a": {"x": 2, "y": true}, "z": [1, null]});
+        let array_reordered = serde_json::json!({"a": {"x": 2, "y": true}, "z": [null, 1]});
+        let missing_null = serde_json::json!({"a": {"x": 2, "y": true}, "z": [1]});
+
+        assert_eq!(
+            canonical_json_sha256(&left).unwrap(),
+            canonical_json_sha256(&reordered).unwrap()
+        );
+        assert_ne!(
+            canonical_json_sha256(&left).unwrap(),
+            canonical_json_sha256(&array_reordered).unwrap()
+        );
+        assert_ne!(
+            canonical_json_sha256(&left).unwrap(),
+            canonical_json_sha256(&missing_null).unwrap()
+        );
+    }
+
+    #[test]
+    fn persisted_completion_reader_rejects_unknown_receipt_version_without_rewrite() {
+        let tmp = TempDir::new().unwrap();
+        let store = DownloadPersistence::new(tmp.path());
+        let snapshot = persisted("unknown-receipt-version");
+        let attempt = store.admit_test_download(&snapshot).unwrap();
+        let (record, lease) = using_hf_acquisition(&store, &snapshot, &attempt);
+        let destination = PersistedDestinationIdentity {
+            library_root: "store-test-root".into(),
+            relative_target: snapshot.dest_dir.to_string_lossy().into_owned(),
+        };
+        store
+            .publish_hf_completion_receipt(HfCompletionReceiptRequest {
+                expected: &record,
+                use_lease: lease,
+                download_id: &snapshot.download_id,
+                domain: DownloadAdmissionDomain::Ambient,
+                destination: &destination,
+                model_id: "fixture-model-id",
+                outputs: HfCompletionOutputProof {
+                    metadata_sha256: "b".repeat(64),
+                    index_sha256: "c".repeat(64),
+                    package_facts: None,
+                },
+            })
+            .unwrap();
+
+        let path = tmp.path().join("downloads.json");
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        document["consumer_receipts"][record.id.to_string()]["receipt_version"] = 2.into();
+        let corrupt = serde_json::to_vec(&document).unwrap();
+        std::fs::write(&path, &corrupt).unwrap();
+        let reopened = DownloadPersistence::new(tmp.path());
+        let transaction = reopened.transaction(StoreOperation::Load).unwrap();
+        assert!(matches!(
+            reopened.load_data_strict(&transaction),
+            Err(crate::PumasError::Validation { ref field, .. })
+                if field == "acquisition.consumer_receipts"
+        ));
+        drop(transaction);
+        assert_eq!(std::fs::read(&path).unwrap(), corrupt);
+    }
+
+    fn using_hf_acquisition(
+        store: &DownloadPersistence,
+        snapshot: &PersistedDownload,
+        attempt: &str,
+    ) -> (AcquisitionRecord, Uuid) {
+        let lease = Uuid::new_v4();
+        let id = Uuid::new_v4();
+        let manifest = ArtifactManifest::new(
+            ArtifactSourceIdentity::new(
+                "huggingface",
+                snapshot.repo_id.clone(),
+                ArtifactRevisionEvidence::new(
+                    "huggingface.commit",
+                    "candidate-commit",
+                    RevisionStrength::Immutable,
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+            vec![ArtifactFile::new(
+                "model.gguf",
+                "model.gguf",
+                Some(1000),
+                None,
+                FileVerificationRequirement::SizeAndImmutableRevision,
+            )
+            .unwrap()],
+        )
+        .unwrap();
+        let record = AcquisitionRecord {
+            id,
+            demand: AcquisitionDemand {
+                consumer: "hf.model".into(),
+                operation: attempt.into(),
+            },
+            manifest,
+            workspace: WorkspaceIdentity {
+                root_identity: "store-test-root".into(),
+                relative_target: snapshot.dest_dir.to_string_lossy().into_owned(),
+            },
+            phase: AcquisitionPhase::Using { lease },
+            files: vec![VerifiedFile {
+                path: "model.gguf".into(),
+                bytes: 1000,
+                sha256: "a".repeat(64),
+            }],
+        };
+        store
+            .store
+            .update_acquisitions(|records| {
+                records.insert(id, record.clone());
+                Ok(())
+            })
+            .unwrap();
+        (record, lease)
+    }
+
+    #[test]
+    fn receipt_partition_rejects_the_same_acquisition_receipt_under_two_keys() {
+        let tmp = TempDir::new().unwrap();
+        let store = DownloadPersistence::new(tmp.path());
+        let snapshot = persisted("duplicate-receipt");
+        let attempt = store.admit_test_download(&snapshot).unwrap();
+        let (record, lease) = using_hf_acquisition(&store, &snapshot, &attempt);
+        let destination = PersistedDestinationIdentity {
+            library_root: "store-test-root".into(),
+            relative_target: snapshot.dest_dir.to_string_lossy().into_owned(),
+        };
+        let receipt = store
+            .publish_hf_completion_receipt(HfCompletionReceiptRequest {
+                expected: &record,
+                use_lease: lease,
+                download_id: &snapshot.download_id,
+                domain: DownloadAdmissionDomain::Ambient,
+                destination: &destination,
+                model_id: "fixture-model-id",
+                outputs: HfCompletionOutputProof {
+                    metadata_sha256: "b".repeat(64),
+                    index_sha256: "c".repeat(64),
+                    package_facts: None,
+                },
+            })
+            .unwrap();
+        let duplicate_id = Uuid::new_v4();
+        let mut duplicate_record = record.clone();
+        duplicate_record.id = duplicate_id;
+        duplicate_record.demand.operation = "other-hf-operation".into();
+        duplicate_record.phase = AcquisitionPhase::Adopted {
+            lease: Uuid::new_v4(),
+        };
+        store
+            .store
+            .update_acquisitions(|records| {
+                records.insert(duplicate_id, duplicate_record.clone());
+                Ok(())
+            })
+            .unwrap();
+
+        let acquisitions = store.store.acquisitions().unwrap();
+        let receipt_value = serde_json::to_value(receipt).unwrap();
+        let duplicate_partition = BTreeMap::from([
+            (record.id, receipt_value.clone()),
+            (duplicate_id, receipt_value),
+        ]);
+        assert!(matches!(
+            validate_hf_completion_receipts(&acquisitions, &duplicate_partition),
+            Err(crate::PumasError::Validation { ref field, .. })
+                if field == "downloads.hf_completion_receipts"
+        ));
+    }
+
+    #[test]
+    fn managed_hf_receipt_settlement_is_one_restart_safe_publication() {
+        let tmp = TempDir::new().unwrap();
+        let store = DownloadPersistence::new(tmp.path());
+        let snapshot = persisted("managed-hf-receipt");
+        let attempt = store.admit_test_download(&snapshot).unwrap();
+        let (record, lease) = using_hf_acquisition(&store, &snapshot, &attempt);
+        let destination = PersistedDestinationIdentity {
+            library_root: "store-test-root".into(),
+            relative_target: snapshot.dest_dir.to_string_lossy().into_owned(),
+        };
+        let outputs = HfCompletionOutputProof {
+            metadata_sha256: "b".repeat(64),
+            index_sha256: "c".repeat(64),
+            package_facts: None,
+        };
+        let receipt = store
+            .publish_hf_completion_receipt(HfCompletionReceiptRequest {
+                expected: &record,
+                use_lease: lease,
+                download_id: &snapshot.download_id,
+                domain: DownloadAdmissionDomain::Ambient,
+                destination: &destination,
+                model_id: "fixture-model-id",
+                outputs,
+            })
+            .unwrap();
+        assert_eq!(
+            store
+                .read_hf_completion_receipt(record.id)
+                .unwrap()
+                .as_ref(),
+            Some(&receipt)
+        );
+
+        // Simulate restart after receipt publication but before settlement.
+        let interrupted = DownloadPersistence::new(tmp.path()).with_test_publisher(Arc::new(
+            ScriptedPublisher::new([
+                ScriptedPublication::Durable,
+                ScriptedPublication::NotPublished,
+            ]),
+        ));
+        interrupted.reconcile_lifecycle_inventory_strict().unwrap();
+        assert!(interrupted.settle_hf_completion(&record, &receipt).is_err());
+        let (still_using, still_receipt) = interrupted
+            .store
+            .transaction(true)
+            .unwrap()
+            .consumer_completion_state(record.id)
+            .unwrap();
+        assert_eq!(still_using.as_ref(), Some(&record));
+        assert_eq!(still_receipt, Some(serde_json::to_value(&receipt).unwrap()));
+        assert!(interrupted
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .contains_key(&snapshot.download_id));
+
+        // A later writer reopens the same Using lease and commits adoption,
+        // receipt retention, and queue release together.
+        let reopened = DownloadPersistence::new(tmp.path());
+        reopened.reconcile_lifecycle_inventory_strict().unwrap();
+        assert!(reopened.settle_hf_completion(&record, &receipt).unwrap());
+        let adopted = reopened.store.acquisitions().unwrap();
+        assert!(matches!(
+            adopted[&record.id].phase,
+            AcquisitionPhase::Adopted { lease: observed } if observed == lease
+        ));
+        assert_eq!(
+            reopened.read_hf_completion_receipt(record.id).unwrap(),
+            Some(receipt.clone())
+        );
+        let inventory = reopened.load_lifecycle_inventory_strict().unwrap();
+        assert!(!inventory
+            .queue_admissions
+            .contains_key(&snapshot.download_id));
+        assert!(inventory.queue_admissions.is_empty());
+        assert_eq!(
+            reopened
+                .load_data_strict(&reopened.transaction(StoreOperation::Load).unwrap())
+                .unwrap()
+                .released_queue_admissions[&snapshot.download_id]
+                .attempt_id,
+            attempt
+        );
     }
 
     #[test]
@@ -3402,7 +4125,7 @@ mod tests {
         assert_eq!(reopened.downloads[0].revision.as_deref(), Some(commit));
         let document = std::fs::read_to_string(&store.path).unwrap();
         assert!(document.contains(&format!("\"revision\": \"{commit}\"")));
-        assert!(document.contains("\"schema_version\": 6"));
+        assert!(document.contains("\"schema_version\": 7"));
     }
 
     #[test]
@@ -3491,6 +4214,7 @@ mod tests {
                 serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
             let mut legacy = expected.clone();
             legacy.as_object_mut().unwrap().remove("acquisitions");
+            legacy.as_object_mut().unwrap().remove("consumer_receipts");
             legacy["schema_version"] = 5.into();
             std::fs::write(&store.path, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
             if version == 4 {
@@ -3507,7 +4231,7 @@ mod tests {
             assert!(fresh.reconcile_lifecycle_inventory_strict().is_err());
             assert_eq!(std::fs::read(&store.path).unwrap(), original);
             DownloadPersistence::migrate_legacy_offline(tmp.path()).unwrap();
-            expected["schema_version"] = 6.into();
+            expected["schema_version"] = 7.into();
             let migrated_bytes = std::fs::read(&store.path).unwrap();
             let actual: serde_json::Value = serde_json::from_slice(&migrated_bytes).unwrap();
             assert_eq!(
@@ -3543,6 +4267,7 @@ mod tests {
             .unwrap();
         legacy["schema_version"] = serde_json::Value::from(4);
         legacy.as_object_mut().unwrap().remove("acquisitions");
+        legacy.as_object_mut().unwrap().remove("consumer_receipts");
         legacy["downloads"][0]
             .as_object_mut()
             .unwrap()
@@ -3561,7 +4286,7 @@ mod tests {
 
         let durable: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&reopened.path).unwrap()).unwrap();
-        assert_eq!(durable["schema_version"], 6);
+        assert_eq!(durable["schema_version"], 7);
         assert!(durable["downloads"][0]["revision"].is_null());
     }
 
@@ -3673,6 +4398,10 @@ mod tests {
             serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
         document["schema_version"] = serde_json::Value::from(4);
         document.as_object_mut().unwrap().remove("acquisitions");
+        document
+            .as_object_mut()
+            .unwrap()
+            .remove("consumer_receipts");
         for snapshot in document["downloads"].as_array_mut().unwrap() {
             snapshot.as_object_mut().unwrap().remove("revision");
         }
@@ -3735,6 +4464,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
         legacy["schema_version"] = serde_json::Value::from(4);
         legacy.as_object_mut().unwrap().remove("acquisitions");
+        legacy.as_object_mut().unwrap().remove("consumer_receipts");
         let original = serde_json::to_vec_pretty(&legacy).unwrap();
         std::fs::write(&store.path, &original).unwrap();
 
@@ -3758,6 +4488,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
         legacy["schema_version"] = serde_json::Value::from(4);
         legacy.as_object_mut().unwrap().remove("acquisitions");
+        legacy.as_object_mut().unwrap().remove("consumer_receipts");
         legacy["downloads"][0]
             .as_object_mut()
             .unwrap()

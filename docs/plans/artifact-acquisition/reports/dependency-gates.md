@@ -1,7 +1,7 @@
 # Acquisition prerequisites and runtime handoffs
 
 **Owner:** acquisition integration, with one serial cross-plan integrator. This is the single status record for acquisition-provided gates. The runtime plan references these rows and does not independently declare them ready.
-**All gates:** not ready. No production evidence exists for the proposed implementation.
+**All gates:** not ready. Local candidate tests exist, but no objective-level production acceptance evidence has been recorded for this candidate.
 
 | Gate | Provider milestone / claims | Required consumer observation | Unblocks | Current status |
 | --- | --- | --- | --- | --- |

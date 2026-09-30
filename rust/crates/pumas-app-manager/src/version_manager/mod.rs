@@ -72,6 +72,7 @@ pub use torch_preview::{
     TorchArtifact, TorchPreview, TorchPreviewOutcome, TorchPreviewRejectionReason,
 };
 
+use pumas_library::acquisition::{AcquisitionConsumer, AcquisitionService};
 use pumas_library::config::{AppId, PathsConfig};
 use pumas_library::metadata::MetadataManager;
 use pumas_library::models::InstallationProgress;
@@ -182,6 +183,8 @@ pub struct VersionManager {
     metadata_manager: Arc<MetadataManager>,
     /// GitHub client for fetching releases.
     github_client: Arc<GitHubClient>,
+    /// Native release consumers share PumasApi's single acquisition service.
+    acquisition_consumer: Option<Arc<AcquisitionConsumer>>,
     /// Version state tracker.
     state: Arc<RwLock<VersionState>>,
     /// Installation progress tracker.
@@ -199,6 +202,8 @@ pub struct VersionManager {
     torch_install_selections: torch_preview::TorchInstallSelections,
     #[cfg(test)]
     torch_publication_pause: Option<Arc<installer::TorchPublicationPause>>,
+    #[cfg(test)]
+    native_receipt_pause: Option<Arc<installer::TorchPublicationPause>>,
     #[cfg(test)]
     torch_stage_override: Option<installer::TorchStageOverride>,
     #[cfg(test)]
@@ -326,6 +331,7 @@ impl VersionManager {
             app_id,
             metadata_manager,
             github_client,
+            acquisition_consumer: None,
             state,
             progress_tracker,
             cancel_flag: Arc::new(AtomicBool::new(false)),
@@ -340,6 +346,8 @@ impl VersionManager {
             torch_install_selections: Arc::new(Mutex::new(Default::default())),
             #[cfg(test)]
             torch_publication_pause: None,
+            #[cfg(test)]
+            native_receipt_pause: None,
             #[cfg(test)]
             torch_stage_override: None,
             #[cfg(test)]
@@ -392,6 +400,51 @@ impl VersionManager {
                 }
             }
         }
+        Ok(manager)
+    }
+
+    /// Construct the llama.cpp manager with the application's existing shared
+    /// acquisition owner. A second service/store is never created here.
+    pub async fn new_with_acquisition(
+        launcher_root: impl Into<PathBuf>,
+        app_id: AppId,
+        acquisition: Arc<AcquisitionService>,
+    ) -> Result<Self> {
+        if app_id != AppId::LlamaCpp {
+            return Err(PumasError::Config {
+                message: "Shared artifact acquisition is currently required for llama.cpp".into(),
+            });
+        }
+        let mut manager = Self::new(launcher_root, app_id).await?;
+        manager.acquisition_consumer =
+            Some(Arc::new(acquisition.open_consumer("runtime.llama.cpp")?));
+        let store = acquisition.store().clone();
+        let records = tokio::task::spawn_blocking(move || store.acquisitions())
+            .await
+            .map_err(|error| {
+                PumasError::Other(format!("Native recovery lookup failed: {error}"))
+            })??;
+        let installer = VersionInstaller::new(
+            manager.launcher_root.clone(),
+            app_id,
+            manager.metadata_manager.clone(),
+            manager.progress_tracker.clone(),
+            manager.cancel_flag.clone(),
+        )
+        .with_acquisition_consumer(manager.acquisition_consumer.clone());
+        if let Err(error) = installer
+            .reconcile_retained_llama_cpp(records.into_values().collect())
+            .await
+        {
+            let settlement = manager.shutdown_installations().await;
+            return Err(match settlement {
+                Ok(()) => error,
+                Err(settlement) => PumasError::InstallationFailed {
+                    message: format!("{error}; native recovery shutdown: {settlement}"),
+                },
+            });
+        }
+        manager.state.write().await.refresh().await?;
         Ok(manager)
     }
 
@@ -806,6 +859,11 @@ impl VersionManager {
                                 errors.push(error.to_string());
                             }
                         }
+                        if let Some(consumer) = &manager.acquisition_consumer {
+                            if let Err(error) = consumer.shutdown().await {
+                                errors.push(error.to_string());
+                            }
+                        }
                         if errors.is_empty() {
                             Ok(())
                         } else {
@@ -849,6 +907,12 @@ impl VersionManager {
         tag: &str,
         preview_id: Option<&str>,
     ) -> Result<mpsc::Receiver<ProgressUpdate>> {
+        if self.app_id == AppId::LlamaCpp && self.acquisition_consumer.is_none() {
+            return Err(PumasError::Config {
+                message: "llama.cpp installation requires the shared artifact acquisition service"
+                    .into(),
+            });
+        }
         if self.app_id == AppId::Torch && torch_alternatives::stable_release_version(tag).is_none()
         {
             return Err(PumasError::VersionNotFound {
@@ -968,7 +1032,15 @@ impl VersionManager {
         )
         .with_torch_control(self.torch_control.clone())
         .with_torch_cleanup(self.torch_cleanup.clone())
-        .with_shutdown_flag(self.torch_shutting_down.clone());
+        .with_shutdown_flag(self.torch_shutting_down.clone())
+        .with_github_client(self.github_client.clone())
+        .with_acquisition_consumer(self.acquisition_consumer.clone());
+        #[cfg(test)]
+        let installer = if let Some(pause) = &self.native_receipt_pause {
+            installer.with_native_receipt_pause(pause.clone())
+        } else {
+            installer
+        };
         #[cfg(test)]
         let installer = if let Some(pause) = &self.torch_publication_pause {
             installer.with_torch_publication_pause(pause.clone())
@@ -1258,7 +1330,11 @@ impl VersionManager {
         let metadata = self.metadata_manager.clone();
         let removed_tag = tag.to_owned();
         let app_id = self.app_id;
+        let versions_for_removal = self.versions_dir();
         let remove = move || {
+            if app_id == AppId::LlamaCpp {
+                installer::mark_native_attempt_removed(&versions_for_removal, &removed_tag)?;
+            }
             info!("Removing version directory: {}", version_path.display());
             match std::fs::remove_dir_all(&version_path) {
                 Ok(()) => {}
@@ -1424,7 +1500,9 @@ mod tests {
         tokio::task::JoinHandle<()>,
         tokio::sync::oneshot::Receiver<()>,
         tokio::sync::oneshot::Sender<bool>,
+        String,
     ) {
+        use sha2::Digest;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let payload = b"#!/bin/sh\nprintf 'native-fixture'\n";
         let compressed = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
@@ -1439,7 +1517,9 @@ mod tests {
         let bytes = archive.into_inner().unwrap().finish().unwrap();
         let size = bytes.len() as u64;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/archive", listener.local_addr().unwrap());
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let url = format!("{base_url}/archive");
+        let digest = format!("{:x}", sha2::Sha256::digest(&bytes));
         let releases = pumas_library::network::ReleasesCache::new(
             root.join("launcher-data/cache"),
             Duration::from_secs(3600),
@@ -1458,7 +1538,7 @@ mod tests {
                     assets: vec![pumas_library::network::GitHubAsset {
                         name: "llama-b1234-bin-ubuntu-x64.tar.gz".into(),
                         size,
-                        download_url: url,
+                        download_url: url.clone(),
                         content_type: Some("application/gzip".into()),
                     }],
                     html_url: "https://github.com/ggml-org/llama.cpp/releases/tag/b1234".into(),
@@ -1471,6 +1551,33 @@ mod tests {
         let (entered, observed) = tokio::sync::oneshot::channel();
         let (release, wait) = tokio::sync::oneshot::channel();
         let server = tokio::spawn(async move {
+            // Real HTTP release metadata supplies the exact publisher asset ID
+            // and SHA; cached discovery has neither and cannot authorize bytes.
+            let (mut metadata_stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            let read = metadata_stream.read(&mut request).await.unwrap();
+            assert!(String::from_utf8_lossy(&request[..read])
+                .starts_with("GET /repos/ggml-org/llama.cpp/releases/tags/b1234 HTTP/1.1"));
+            let body = serde_json::to_vec(&serde_json::json!({
+                "tag_name": "b1234", "assets": [{
+                    "id": 1234, "name": "llama-b1234-bin-ubuntu-x64.tar.gz",
+                    "size": size, "browser_download_url": url,
+                    "digest": format!("sha256:{digest}")
+                }]
+            }))
+            .unwrap();
+            metadata_stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            metadata_stream.write_all(&body).await.unwrap();
+            drop(metadata_stream);
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut request = [0; 4096];
             assert!(stream.read(&mut request).await.unwrap() > 0);
@@ -1489,7 +1596,7 @@ mod tests {
                 stream.write_all(&bytes).await.unwrap();
             }
         });
-        (server, observed, release)
+        (server, observed, release, base_url)
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -1759,12 +1866,194 @@ mod tests {
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[tokio::test]
-    async fn native_archive_publishes_complete_output_and_reopens_metadata() {
+    async fn native_cancel_before_completion_receipt_prevents_publication() {
         let root = TempDir::new().unwrap();
-        let (server, observed, release) = native_archive_fixture(root.path()).await;
-        let manager = VersionManager::new(root.path(), AppId::LlamaCpp)
+        let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
+        let api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
             .await
             .unwrap();
+        let mut manager = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        manager.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                manager.cache_dir(),
+                Duration::from_secs(3600),
+                base_url,
+            )
+            .unwrap(),
+        );
+        let pause = Arc::new(installer::TorchPublicationPause::new());
+        manager.native_receipt_pause = Some(pause.clone());
+        let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        release.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), pause.reached.notified())
+            .await
+            .expect("native extraction and proof hashes must reach the receipt boundary");
+        assert!(manager.cancel_installation().await.unwrap());
+        pause.resume.add_permits(1);
+        let message = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match updates
+                    .recv()
+                    .await
+                    .expect("installation must send its terminal result")
+                {
+                    ProgressUpdate::Error { message } => break message,
+                    ProgressUpdate::Completed { success } => {
+                        panic!("cancelled installation reported completion: {success}")
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("cancelled attempt must settle");
+        assert!(message.to_lowercase().contains("cancel"), "{message}");
+        server.await.unwrap();
+        // Shutdown joins the registered installer task and observes its failure.
+        assert!(manager.shutdown_installations().await.is_err());
+        assert!(!manager.is_installing().await);
+        let document: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(root.path().join("launcher-data/downloads.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(document["acquisitions"].as_object().unwrap().len(), 1);
+        assert!(document["consumer_receipts"]
+            .as_object()
+            .unwrap()
+            .is_empty());
+        assert!(!manager.version_path("b1234+cpu").exists());
+        assert!(manager
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            document["acquisitions"]
+                .as_object()
+                .unwrap()
+                .values()
+                .next()
+                .unwrap()["phase"]["state"],
+            "withdrawn"
+        );
+        assert!(!std::fs::read_dir(manager.versions_dir())
+            .unwrap()
+            .any(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".llama-install-")
+            }));
+        api.shutdown_acquisition().await.unwrap();
+        drop(manager);
+        drop(api);
+        // A fresh service and manager must admit a new attempt for the same tag.
+        let (retry_server, retry_observed, retry_release, retry_base_url) =
+            native_archive_fixture(root.path()).await;
+        let reopened_api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let mut reopened = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            reopened_api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        reopened.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                reopened.cache_dir(),
+                Duration::from_secs(3600),
+                retry_base_url,
+            )
+            .unwrap(),
+        );
+        let mut retry_updates = reopened.install_version("b1234+cpu").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), retry_observed)
+            .await
+            .unwrap()
+            .unwrap();
+        retry_release.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match retry_updates.recv().await.unwrap() {
+                    ProgressUpdate::Completed { success: true } => break,
+                    ProgressUpdate::Error { message } => panic!("same-tag retry failed: {message}"),
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        retry_server.await.unwrap();
+        reopened.shutdown_installations().await.unwrap();
+        assert!(reopened
+            .version_path("b1234+cpu")
+            .join("bin/llama-server")
+            .is_file());
+        assert!(reopened
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_some());
+        let retry_document: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(root.path().join("launcher-data/downloads.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(retry_document["acquisitions"].as_object().unwrap().len(), 2);
+        assert_eq!(
+            retry_document["consumer_receipts"]
+                .as_object()
+                .unwrap()
+                .len(),
+            1
+        );
+        reopened_api.shutdown_acquisition().await.unwrap();
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_archive_publishes_complete_output_and_reopens_metadata() {
+        let root = TempDir::new().unwrap();
+        let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
+        let api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let mut manager = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        manager.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                manager.cache_dir(),
+                Duration::from_secs(3600),
+                base_url,
+            )
+            .unwrap(),
+        );
         let mut updates = manager.install_version("b1234+cpu").await.unwrap();
         tokio::time::timeout(Duration::from_secs(2), observed)
             .await
@@ -1799,9 +2088,37 @@ mod tests {
                 .unwrap();
         assert!(output.status.success());
         assert_eq!(output.stdout, b"native-fixture");
-        let reopened = VersionManager::new(root.path(), AppId::LlamaCpp)
-            .await
+        use sha2::Digest;
+        let document: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(root.path().join("launcher-data/downloads.json")).unwrap(),
+        )
+        .unwrap();
+        let operation = document["acquisitions"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()["demand"]["operation"]
+            .as_str()
             .unwrap();
+        let attempt = operation.rsplit_once(':').unwrap().1;
+        let tag_digest = format!("{:x}", sha2::Sha256::digest(b"b1234+cpu"));
+        let stale_workspace = manager
+            .versions_dir()
+            .join(format!(".llama-install-{}-{attempt}", &tag_digest[..24]));
+        std::fs::create_dir(&stale_workspace).unwrap();
+        std::fs::write(
+            stale_workspace.join("stale"),
+            b"retry cleanup after adoption",
+        )
+        .unwrap();
+        let reopened = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
         assert_eq!(
             reopened.get_installed_versions().await.unwrap(),
             vec!["b1234+cpu"]
@@ -1816,16 +2133,124 @@ mod tests {
                     .starts_with(".llama-install-")
             }));
         reopened.shutdown_installations().await.unwrap();
+        let document: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(root.path().join("launcher-data/downloads.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(document["acquisitions"].as_object().unwrap().len(), 1);
+        assert_eq!(document["consumer_receipts"].as_object().unwrap().len(), 1);
+        let receipt = document["consumer_receipts"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap();
+        assert_eq!(receipt["owner"], "runtime.llama.cpp");
+        // Exercise explicit removal through the real manager and reinstall the
+        // same tag with a new publisher-verified acquisition identity.
+        let reinstall = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        let mut keep = reinstall
+            .get_version_info("b1234+cpu")
+            .await
+            .unwrap()
+            .unwrap();
+        keep.path = "b9999+cpu".into();
+        keep.release_tag = "b9999+cpu".into();
+        std::fs::create_dir(reinstall.version_path("b9999+cpu")).unwrap();
+        reinstall
+            .state
+            .write()
+            .await
+            .add_installed_version("b9999+cpu", keep)
+            .unwrap();
+        reinstall.set_active_version("b9999+cpu").await.unwrap();
+        assert!(reinstall.remove_version("b1234+cpu").await.unwrap());
+        reinstall.shutdown_installations().await.unwrap();
+        let mut reinstall = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        assert!(!reinstall.version_path("b1234+cpu").exists());
+        let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
+        reinstall.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                reinstall.cache_dir(),
+                Duration::from_secs(3600),
+                base_url,
+            )
+            .unwrap(),
+        );
+        let mut updates = reinstall.install_version("b1234+cpu").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        release.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(update) = updates.recv().await {
+                match update {
+                    ProgressUpdate::Completed { success: true } => return,
+                    ProgressUpdate::Error { message } => panic!("Reinstall failed: {message}"),
+                    _ => {}
+                }
+            }
+            panic!("Reinstall ended without completion");
+        })
+        .await
+        .unwrap();
+        server.await.unwrap();
+        reinstall.shutdown_installations().await.unwrap();
+        let document: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(root.path().join("launcher-data/downloads.json")).unwrap(),
+        )
+        .unwrap();
+        let records = document["acquisitions"].as_object().unwrap();
+        assert_eq!(records.len(), 2);
+        let demands: std::collections::BTreeSet<_> = records
+            .values()
+            .map(|record| record["demand"]["operation"].as_str().unwrap())
+            .collect();
+        assert_eq!(demands.len(), 2);
+        assert_eq!(document["consumer_receipts"].as_object().unwrap().len(), 2);
+        api.shutdown_intent().await.unwrap();
+        api.shutdown_acquisition().await.unwrap();
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[tokio::test]
     async fn native_shutdown_cancels_stalled_transfer_and_retains_failed_outcome() {
         let root = TempDir::new().unwrap();
-        let (server, observed, release) = native_archive_fixture(root.path()).await;
-        let manager = VersionManager::new(root.path(), AppId::LlamaCpp)
+        let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
+        let api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
             .await
             .unwrap();
+        let mut manager = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        manager.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                manager.cache_dir(),
+                Duration::from_secs(3600),
+                base_url,
+            )
+            .unwrap(),
+        );
         let _updates = manager.install_version("b1234+cpu").await.unwrap();
         tokio::time::timeout(Duration::from_secs(2), observed)
             .await
@@ -1836,7 +2261,7 @@ mod tests {
             .unwrap()
             .unwrap_err()
             .to_string();
-        assert!(error.contains("cancelled"));
+        assert!(error.to_ascii_lowercase().contains("cancelled"), "{error}");
         assert_eq!(
             manager
                 .shutdown_installations()
@@ -1855,13 +2280,15 @@ mod tests {
             .is_none());
         assert!(std::fs::read_dir(manager.versions_dir())
             .unwrap()
-            .all(|entry| {
-                !entry
+            .any(|entry| {
+                entry
                     .unwrap()
                     .file_name()
                     .to_string_lossy()
                     .starts_with(".llama-install-")
             }));
+        api.shutdown_intent().await.unwrap();
+        api.shutdown_acquisition().await.unwrap();
         assert!(!manager.is_installing().await);
         assert!(manager.get_installation_progress().await.unwrap().success == Some(false));
     }

@@ -13,7 +13,7 @@ pub(crate) mod store;
 pub(crate) mod task_custody;
 mod workspace;
 
-pub(crate) use http::HttpAttemptHost;
+pub use http::HttpAttemptHost;
 
 pub(crate) use github_release::{select_github_release_asset, GitHubReleaseAssetMetadata};
 pub use github_release::{
@@ -25,7 +25,10 @@ pub use manifest::{
     CURRENT_MANIFEST_VERSION,
 };
 
-pub use service::{AcquisitionDemand, AcquisitionPhase, AcquisitionRecord, AcquisitionService};
-pub(crate) use service::{AcquisitionHost, AcquisitionRetryPolicy};
+pub use service::{
+    AcquiredArtifactUse, AcquisitionConsumer, AcquisitionConsumerReceipt, AcquisitionDemand,
+    AcquisitionHost, AcquisitionHttpRequest, AcquisitionHttpSource, AcquisitionPhase,
+    AcquisitionRecord, AcquisitionRetryPolicy, AcquisitionService,
+};
 pub use store::AcquisitionStore;
 pub use workspace::{AcquisitionWorkspace, VerifiedFile, WorkspaceIdentity};

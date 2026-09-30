@@ -1,6 +1,6 @@
 # Acquisition acceptance matrix
 
-**Production status: all AC01–AC18 pending.** No code, production tests, source service, GUI, migration or installed artifact was executed in this planning delivery. A required unavailable environment changes its claim to blocked, not satisfied. All claim owners are roles for the assigned integrator to resolve.
+**Acceptance status: all AC01–AC18 pending.** The local Q1 candidate has focused Rust tests and controlled loopback/filesystem evidence, but the required real-source, desktop, retained-deployment, public-interface, and supported-platform evidence has not been collected. A required unavailable environment changes its claim to blocked, not satisfied. All claim owners are roles for the assigned integrator to resolve.
 
 | ID | Observable claim / deciding procedure | Evidence kind | Environment | Mode | Milestone / owner | Status |
 | --- | --- | --- | --- | --- | --- | --- |

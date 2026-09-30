@@ -20,6 +20,9 @@ use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::artifact_load_target::{
     library_unavailable_response, resolve_artifact_load_target_from_index,
 };
+use crate::model_library::download_store::{
+    canonical_json_sha256, HfCompletionOutputProof, HfPackageFactsProof,
+};
 use crate::model_library::external_assets::{
     get_diffusers_bundle_lookup_hints, is_diffusers_bundle, is_external_reference,
     refresh_external_metadata_validation, MODEL_EXECUTION_CONTRACT_VERSION,
@@ -314,6 +317,76 @@ impl ModelLibrary {
         let mut library = self.clone();
         library.import_guard = Some(guard);
         library
+    }
+
+    pub(crate) async fn issue_managed_hf_completion_receipt(
+        &self,
+        model_id: &str,
+        require_package_facts: bool,
+    ) -> Result<()> {
+        let Some(guard) = self.import_guard.as_ref() else {
+            return Ok(());
+        };
+        if !guard.has_managed_final_import_proof() {
+            return Ok(());
+        }
+        guard
+            .publish_hf_completion_receipt(self, model_id, require_package_facts)
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn validate_hf_completion_receipt(
+        &self,
+        model_dir: &Path,
+        receipt: &crate::model_library::download_store::HfCompletionReceipt,
+        record: &crate::acquisition::AcquisitionRecord,
+        grant: Arc<crate::model_library::RootExecutionGrant>,
+    ) -> Result<()> {
+        let authority = self.mutation_authority()?;
+        receipt.validate_for_record(record)?;
+        let model_dir = model_dir.to_path_buf();
+        let receipt = receipt.clone();
+        let require_package_facts = receipt.outputs.package_facts.is_some();
+        let model_id = receipt.model_id.clone();
+        let expected_outputs = receipt.outputs.clone();
+        let destination = self
+            .run_import_blocking("validate HF completion destination", move || {
+                authority.validate_hf_completion_destination(&model_dir, &receipt, grant.as_ref())
+            })
+            .await??;
+        let outputs = self
+            .hf_completion_output_proof(&destination, &model_id, require_package_facts)
+            .await?;
+        if outputs != expected_outputs {
+            return Err(PumasError::Validation {
+                field: "downloads.hf_completion_receipts".into(),
+                message: "Current model outputs do not match the issued completion proof".into(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Revalidate both current model outputs and the exact receipt before
+    /// committing acquisition adoption and queue release through one store
+    /// transaction. Callers cannot bypass output proof validation at the
+    /// persistence settlement boundary.
+    pub(crate) async fn settle_hf_completion_receipt(
+        &self,
+        model_dir: &Path,
+        record: &crate::acquisition::AcquisitionRecord,
+        receipt: &crate::model_library::download_store::HfCompletionReceipt,
+        grant: Arc<crate::model_library::RootExecutionGrant>,
+    ) -> Result<bool> {
+        self.validate_hf_completion_receipt(model_dir, receipt, record, grant)
+            .await?;
+        let persistence = self.mutation_authority()?.downloads();
+        let record = record.clone();
+        let receipt = receipt.clone();
+        self.run_import_blocking("settle validated HF completion receipt", move || {
+            persistence.settle_hf_completion(&record, &receipt)
+        })
+        .await?
     }
 
     pub(crate) async fn run_import_blocking<T: Send + 'static>(
@@ -1270,7 +1343,7 @@ impl ModelLibrary {
         let Some(record) = self.index.get(model_id)? else {
             return Ok(false);
         };
-        self.refresh_external_asset_state(&record).await
+        Box::pin(self.refresh_external_asset_state(&record)).await
     }
 
     fn indexed_model_dir(&self, record: &ModelRecord) -> Result<PathBuf> {
@@ -2711,6 +2784,107 @@ impl ModelLibrary {
                 && facts.artifact.selected_files == context.selected_files()
                 && facts.inspection_manifest.as_ref() == Some(&context.inspection_manifest()),
         )
+    }
+
+    /// Read the final model outputs through the held destination and canonical
+    /// index. This path never repairs metadata, refreshes facts, or upserts an
+    /// index row; callers retain root custody through comparison/publication.
+    pub(crate) async fn hf_completion_output_proof(
+        &self,
+        destination: &crate::model_library::DownloadRecoveryDestination,
+        model_id: &str,
+        require_package_facts: bool,
+    ) -> Result<HfCompletionOutputProof> {
+        let held_destination = destination.clone();
+        let index = self.index.clone();
+        let model_id_owned = model_id.to_string();
+        let (metadata_value, metadata, record, package_facts) = self
+            .run_import_blocking("observe HF completion output projections", move || {
+                let metadata_value =
+                    held_destination
+                        .read_model_metadata_value()?
+                        .ok_or_else(|| PumasError::Validation {
+                            field: "downloads.hf_completion_receipts".into(),
+                            message: "Receipt model metadata is missing".into(),
+                        })?;
+                let metadata = serde_json::from_value::<ModelMetadata>(metadata_value.clone())?;
+                if metadata.model_id.as_deref() != Some(model_id_owned.as_str()) {
+                    return Err(PumasError::Validation {
+                        field: "downloads.hf_completion_receipts".into(),
+                        message: "Receipt metadata identifies another model".into(),
+                    });
+                }
+                let record = index
+                    .get(&model_id_owned)?
+                    .ok_or_else(|| PumasError::Validation {
+                        field: "downloads.hf_completion_receipts".into(),
+                        message: "Receipt model index projection is missing".into(),
+                    })?;
+                if record.id != model_id_owned {
+                    return Err(PumasError::Validation {
+                        field: "downloads.hf_completion_receipts".into(),
+                        message: "Receipt index projection identifies another model".into(),
+                    });
+                }
+                let package_facts = if require_package_facts {
+                    Some(
+                        index
+                            .get_model_package_facts_cache(
+                                &model_id_owned,
+                                metadata.selected_artifact_id.as_deref(),
+                                ModelPackageFactsCacheScope::Detail,
+                            )?
+                            .ok_or_else(|| PumasError::Validation {
+                                field: "downloads.hf_completion_receipts".into(),
+                                message: "Required pinned package-facts output is missing".into(),
+                            })?,
+                    )
+                } else {
+                    None
+                };
+                Ok((metadata_value, metadata, record, package_facts))
+            })
+            .await??;
+
+        let index_projection = serde_json::json!({
+            "id": record.id,
+            "path": record.path,
+            "cleaned_name": record.cleaned_name,
+            "official_name": record.official_name,
+            "model_type": record.model_type,
+            "tags": record.tags,
+            "hashes": record.hashes,
+            "metadata": record.metadata,
+        });
+        let package_facts = match package_facts {
+            Some(row) => {
+                if row.package_facts_contract_version != i64::from(PACKAGE_FACTS_CONTRACT_VERSION)
+                    || !self
+                        .cached_model_package_facts_are_current(&row, None, None)
+                        .await?
+                {
+                    return Err(PumasError::Validation {
+                        field: "downloads.hf_completion_receipts".into(),
+                        message: "Required pinned package-facts output is stale or unsupported"
+                            .into(),
+                    });
+                }
+                let facts: Value = serde_json::from_str(&row.facts_json)?;
+                Some(HfPackageFactsProof {
+                    contract_version: row.package_facts_contract_version,
+                    content_sha256: canonical_json_sha256(&facts)?,
+                })
+            }
+            None => None,
+        };
+        let _ = metadata;
+        Ok(HfCompletionOutputProof {
+            metadata_sha256: canonical_json_sha256(&metadata_value)?,
+            // `updated_at` records index maintenance time, not the semantic
+            // imported model projection, so it is deliberately excluded.
+            index_sha256: canonical_json_sha256(&index_projection)?,
+            package_facts,
+        })
     }
 
     /// Resolve versioned package facts for a model without selecting a runtime.

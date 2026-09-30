@@ -392,6 +392,17 @@ pub async fn start_server(
                 Err(anyhow::anyhow!(summary.errors.join("; ")))
             }
         });
+        // Consumer owners must finish draining before the shared supervisor
+        // closes admission. Always observe its settlement, including failures.
+        let acquisition_cleanup = state.api.shutdown_acquisition().await;
+        let installation_cleanup = match (installation_cleanup, acquisition_cleanup) {
+            (Ok(()), Ok(())) => Ok(()),
+            (Err(error), Ok(())) => Err(error),
+            (Ok(()), Err(error)) => Err(anyhow::anyhow!("Acquisition cleanup: {error}")),
+            (Err(installation), Err(acquisition)) => Err(anyhow::anyhow!(
+                "{installation}; Acquisition cleanup: {acquisition}"
+            )),
+        };
         let owners = match (owners, installation_cleanup) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(error), Ok(())) => Err(error),
@@ -886,9 +897,13 @@ mod tests {
     async fn real_server_shutdown_closes_native_installation_admission() {
         let root = TempDir::new().unwrap();
         let api = crate::handlers::test_support::build_test_api_with_hf(root.path()).await;
-        let manager = VersionManager::new(root.path(), AppId::LlamaCpp)
-            .await
-            .unwrap();
+        let manager = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
         let managers = HashMap::from([("llama-cpp".into(), manager.clone())]);
         let sizes = SizeCalculator::new_with_cache(root.path().join("launcher-data/cache")).await;
         let plugins = PluginLoader::new_async(root.path().join("launcher-data/plugins"))

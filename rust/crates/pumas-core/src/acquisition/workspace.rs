@@ -10,7 +10,7 @@ use cap_std::fs::{Dir, Metadata, OpenOptions};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -98,6 +98,54 @@ pub struct AcquisitionWorkspace {
 }
 
 impl AcquisitionWorkspace {
+    /// Reconstruct the equality-only identity for a reserved child without
+    /// opening or creating that child. Consumers use this after durable
+    /// adoption, when owned input cleanup may already have removed it.
+    pub fn identity_for_reserved_directory(
+        root: &Path,
+        relative_target: &Path,
+    ) -> Result<WorkspaceIdentity> {
+        let relative = normalized_relative_path(relative_target)?;
+        let root_directory = crate::platform::capability_fs::open_directory(root)?;
+        let root_binding = identity(&root_directory.dir_metadata()?)?;
+        Ok(WorkspaceIdentity {
+            root_identity: format!("{:x}:{:x}", root_binding.0, root_binding.1),
+            relative_target: relative,
+        })
+    }
+
+    /// Open a previously reserved child of a consumer-owned root.
+    ///
+    /// `execution_lease` retains the consumer's reservation for the root, and
+    /// `validate_root` rechecks its authority on every workspace operation.
+    /// The locator is equality-only; the held directory capability, not the
+    /// serialized locator, authorizes reads and writes.
+    pub fn from_reserved_directory(
+        root: &Path,
+        relative_target: &Path,
+        execution_lease: Arc<dyn Send + Sync>,
+        validate_root: impl Fn() -> Result<()> + Send + Sync + 'static,
+    ) -> Result<Self> {
+        let relative = normalized_relative_path(relative_target)?;
+        validate_root()?;
+        let root_directory = crate::platform::capability_fs::open_directory(root)?;
+        let root_binding = identity(&root_directory.dir_metadata()?)?;
+        let directory = open_relative_directory(&root_directory, relative_target)?;
+        let held_root = root_directory.try_clone()?;
+        let validate_root = move || {
+            validate_root()?;
+            if identity(&held_root.dir_metadata()?)? != root_binding {
+                return Err(changed());
+            }
+            Ok(())
+        };
+        let locator = WorkspaceIdentity {
+            root_identity: format!("{:x}:{:x}", root_binding.0, root_binding.1),
+            relative_target: relative,
+        };
+        Self::from_capability(directory, locator, execution_lease, validate_root)
+    }
+
     pub(crate) fn from_capability(
         directory: Dir,
         locator: WorkspaceIdentity,
@@ -314,6 +362,57 @@ impl AcquisitionWorkspace {
         })
     }
 
+    /// Open the exact verified file through the held directory capability.
+    /// Hashing and identity checks use the returned file handle itself, so a
+    /// consumer can move it to a blocking worker without reopening a path.
+    pub(crate) fn open_verified_readonly(
+        &self,
+        file: &ArtifactFile,
+        expected: &VerifiedFile,
+    ) -> Result<std::fs::File> {
+        if expected.path != file.logical_path() {
+            return Err(changed());
+        }
+        self.validate()?;
+        let (parent, name) = self.parent(file.logical_path(), false)?;
+        let mut open_options = options();
+        open_options.read(true);
+        let mut handle = parent.open_with(&name, &open_options)?.into_std();
+        let before = Metadata::from_file(&handle)?;
+        if !before.is_file() || before.len() != expected.bytes {
+            return Err(changed());
+        }
+        let binding = identity(&before)?;
+        let mut hasher = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let read = handle.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+        let digest = hex::encode(hasher.finalize());
+        let after = Metadata::from_file(&handle)?;
+        let current = Metadata::from_file(&parent.open_with(&name, &open_options)?.into_std())?;
+        if digest != expected.sha256
+            || file
+                .expected_sha256()
+                .is_some_and(|selected| selected.value() != digest)
+            || identity(&after)? != binding
+            || identity(&current)? != binding
+            || before.len() != after.len()
+            || before.len() != current.len()
+            || before.modified()? != after.modified()?
+            || before.modified()? != current.modified()?
+        {
+            return Err(changed());
+        }
+        handle.seek(SeekFrom::Start(0))?;
+        self.validate()?;
+        Ok(handle)
+    }
+
     pub(crate) fn publish_part(
         &self,
         file: &ArtifactFile,
@@ -368,6 +467,43 @@ impl AcquisitionWorkspace {
     }
 }
 
+fn normalized_relative_path(path: &Path) -> Result<String> {
+    let mut components = Vec::new();
+    for component in path.components() {
+        let Component::Normal(part) = component else {
+            return Err(changed());
+        };
+        let part = part.to_str().ok_or_else(changed)?;
+        if part.is_empty() {
+            return Err(changed());
+        }
+        components.push(part);
+    }
+    if components.is_empty() {
+        return Err(changed());
+    }
+    Ok(components.join("/"))
+}
+
+fn open_relative_directory(root: &Dir, relative: &Path) -> Result<Dir> {
+    let mut current = root.try_clone()?;
+    for component in relative.components() {
+        let Component::Normal(component) = component else {
+            return Err(changed());
+        };
+        let metadata = current.symlink_metadata(component)?;
+        if !metadata.is_dir() || metadata.is_symlink() {
+            return Err(changed());
+        }
+        let next = current.open_dir(component)?;
+        if identity(&metadata)? != identity(&next.dir_metadata()?)? {
+            return Err(changed());
+        }
+        current = next;
+    }
+    Ok(current)
+}
+
 pub(crate) fn write_chunk(file: &mut std::fs::File, bytes: &[u8]) -> Result<()> {
     file.write_all(bytes)?;
     Ok(())
@@ -377,6 +513,26 @@ pub(crate) fn write_chunk(file: &mut std::fs::File, bytes: &[u8]) -> Result<()> 
 mod tests {
     use super::*;
     use crate::acquisition::FileVerificationRequirement;
+
+    #[test]
+    fn identity_only_lookup_matches_a_reserved_child_without_creating_it() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let relative = Path::new(".native-attempt");
+        let identity =
+            AcquisitionWorkspace::identity_for_reserved_directory(temp.path(), relative).unwrap();
+        assert_eq!(identity.relative_target, ".native-attempt");
+        assert!(!temp.path().join(relative).exists());
+
+        std::fs::create_dir(temp.path().join(relative)).unwrap();
+        let workspace = AcquisitionWorkspace::from_reserved_directory(
+            temp.path(),
+            relative,
+            Arc::new(()),
+            || Ok(()),
+        )
+        .unwrap();
+        assert_eq!(workspace.identity(), &identity);
+    }
 
     #[test]
     fn concurrent_parent_creation_is_coalesced_and_replacement_is_refused() {

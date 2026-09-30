@@ -548,6 +548,35 @@ impl GitHubClient {
         Self::with_config(cache_dir, ttl, NetworkConfig::GITHUB_API_BASE.to_string())
     }
 
+    /// Construct a real HTTP integration fixture against a literal loopback
+    /// address. This seam is excluded from ordinary product builds.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_loopback_api(cache_dir: PathBuf, ttl: Duration, api_base: String) -> Result<Self> {
+        let url = Url::parse(&api_base).map_err(|error| PumasError::Config {
+            message: format!("Invalid fixture API URL: {error}"),
+        })?;
+        let loopback = url
+            .host_str()
+            .and_then(|host| {
+                host.trim_matches(['[', ']'])
+                    .parse::<std::net::IpAddr>()
+                    .ok()
+            })
+            .is_some_and(|address| address.is_loopback());
+        if !loopback
+            || !matches!(url.scheme(), "http" | "https")
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(PumasError::Config {
+                message: "Fixture API requires literal loopback HTTP(S) without credentials, query or fragment".into(),
+            });
+        }
+        Self::with_config(cache_dir, ttl, api_base)
+    }
+
     fn with_config(cache_dir: PathBuf, ttl: Duration, api_base: String) -> Result<Self> {
         let http = HttpClient::new()?;
         Ok(Self {
@@ -1163,6 +1192,39 @@ mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use tempfile::TempDir;
+
+    #[test]
+    fn fixture_api_seam_accepts_only_literal_loopback_http() {
+        let root = TempDir::new().unwrap();
+        for endpoint in ["http://127.0.0.1:1234/api", "https://[::1]:1234/api"] {
+            assert!(GitHubClient::with_loopback_api(
+                root.path().into(),
+                Duration::from_secs(1),
+                endpoint.into()
+            )
+            .is_ok());
+        }
+        for endpoint in [
+            "http://localhost:1234",
+            "http://192.0.2.1",
+            "https://github.com",
+            "file:///tmp/api",
+            "ftp://127.0.0.1",
+            "http://user@127.0.0.1",
+            "http://127.0.0.1?token=x",
+            "http://127.0.0.1#api",
+        ] {
+            assert!(
+                GitHubClient::with_loopback_api(
+                    root.path().into(),
+                    Duration::from_secs(1),
+                    endpoint.into()
+                )
+                .is_err(),
+                "{endpoint}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn coalesced_callers_share_one_owner_and_rate_limit_details() {

@@ -757,10 +757,23 @@ impl DownloadRecoveryDestination {
         Ok(metadata)
     }
 
+    pub(crate) fn read_model_metadata_value(&self) -> Result<Option<Value>> {
+        let Some(directory) = self.directory_if_present(false)? else {
+            return Ok(None);
+        };
+        let metadata = Self::read_provenance_file(&directory, "metadata.json")?;
+        self.directory(false)?;
+        Ok(metadata)
+    }
+
     pub(crate) fn write_model_metadata(
         &self,
         metadata: &crate::models::ModelMetadata,
     ) -> Result<()> {
+        self.write_model_metadata_value(&serde_json::to_value(metadata)?)
+    }
+
+    pub(crate) fn write_model_metadata_value(&self, metadata: &Value) -> Result<()> {
         let directory = self.directory(false)?;
         let expected = directory_identity(&directory)?;
         let destination = self.clone();

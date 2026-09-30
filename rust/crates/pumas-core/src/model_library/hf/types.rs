@@ -135,7 +135,7 @@ pub(crate) struct DownloadState {
     /// Download speed (bytes/sec)
     pub speed: f64,
     /// Cancellation flag
-    pub cancel_flag: Arc<AtomicBool>,
+    pub cancel_flag: Arc<crate::model_library::mutation_authority::DownloadCancellation>,
     /// Pause flag -- signals graceful stop without deleting .part file
     pub pause_flag: Arc<AtomicBool>,
     /// Error message if failed
@@ -305,7 +305,9 @@ impl DownloadState {
             downloaded_bytes,
             total_bytes: entry.total_bytes,
             speed: 0.0,
-            cancel_flag: Arc::new(AtomicBool::new(false)),
+            cancel_flag: Arc::new(
+                crate::model_library::mutation_authority::DownloadCancellation::new(),
+            ),
             pause_flag: Arc::new(AtomicBool::new(false)),
             error: None,
             retry_attempt: 0,

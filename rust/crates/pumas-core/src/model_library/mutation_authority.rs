@@ -6,12 +6,99 @@ use crate::index::{IntentDeletionClaimResult, ModelIndex};
 use crate::model_library::download_recovery::{
     DownloadDestinationRoot, DownloadRecoveryDestination, RootExecutionGrant,
 };
-use crate::model_library::download_store::DownloadAdmissionDomain;
-use crate::model_library::download_store::{DownloadPersistence, PersistedDestinationIdentity};
+use crate::model_library::download_store::{
+    DownloadAdmissionDomain, DownloadPersistence, HfCompletionReceipt, HfCompletionReceiptRequest,
+    PersistedDestinationIdentity,
+};
 use crate::{PumasError, Result};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use uuid::Uuid;
+
+/// One operation-scoped decision between cancellation and durable completion.
+/// It replaces the download's boolean cancellation flag so the receipt boundary
+/// has a single atomic winner.
+pub(crate) struct DownloadCancellation(AtomicU8);
+
+impl DownloadCancellation {
+    const ACTIVE: u8 = 0;
+    const CANCEL_PREPARING: u8 = 1;
+    const CANCELLED: u8 = 2;
+    const COMPLETING: u8 = 3;
+
+    pub(crate) fn new() -> Self {
+        Self(AtomicU8::new(Self::ACTIVE))
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Acquire) == Self::CANCELLED
+    }
+
+    /// Reserve the cancellation decision before replacing the worker owner.
+    /// The returned boolean says whether this caller must commit or roll back
+    /// the reservation after installing the finalizer.
+    pub(crate) fn prepare_cancel(&self) -> Option<bool> {
+        loop {
+            match self.0.load(Ordering::Acquire) {
+                Self::ACTIVE => {
+                    if self
+                        .0
+                        .compare_exchange(
+                            Self::ACTIVE,
+                            Self::CANCEL_PREPARING,
+                            Ordering::AcqRel,
+                            Ordering::Acquire,
+                        )
+                        .is_ok()
+                    {
+                        return Some(true);
+                    }
+                }
+                Self::CANCELLED => return Some(false),
+                Self::CANCEL_PREPARING | Self::COMPLETING => return None,
+                _ => return None,
+            }
+        }
+    }
+
+    pub(crate) fn finish_cancel(&self, prepared: bool) -> bool {
+        if !prepared {
+            return self.0.load(Ordering::Acquire) == Self::CANCELLED;
+        }
+        self.0
+            .compare_exchange(
+                Self::CANCEL_PREPARING,
+                Self::CANCELLED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    pub(crate) fn abort_cancel(&self, prepared: bool) {
+        if prepared {
+            let _ = self.0.compare_exchange(
+                Self::CANCEL_PREPARING,
+                Self::ACTIVE,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
+        }
+    }
+
+    pub(crate) fn claim_completion(&self) -> bool {
+        match self.0.compare_exchange(
+            Self::ACTIVE,
+            Self::COMPLETING,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) | Err(Self::COMPLETING) => true,
+            Err(_) => false,
+        }
+    }
+}
 
 /// Model policy composes exact neutral proof with the current HF admission
 /// and its already-held native grant. Stage types expose no generic bypass.
@@ -23,6 +110,8 @@ struct ModelImportProof {
     grant: Arc<RootExecutionGrant>,
     download_id: String,
     domain: DownloadAdmissionDomain,
+    downloads: Option<Arc<DownloadPersistence>>,
+    completion_decision: Option<Arc<DownloadCancellation>>,
 }
 
 impl ModelFinalImportCapability {
@@ -31,12 +120,15 @@ impl ModelFinalImportCapability {
         download_id: &str,
         domain: DownloadAdmissionDomain,
         grant: Arc<RootExecutionGrant>,
+        completion_decision: Arc<DownloadCancellation>,
     ) -> Self {
         Self(ModelImportProof {
             acquisition: proof.into_proof(),
             grant,
             download_id: download_id.into(),
             domain,
+            downloads: None,
+            completion_decision: Some(completion_decision),
         })
     }
 
@@ -64,6 +156,8 @@ impl ModelPartialImportCapability {
             grant,
             download_id: download_id.into(),
             domain,
+            downloads: None,
+            completion_decision: None,
         })
     }
 
@@ -224,8 +318,58 @@ impl LibraryMutationAuthority {
         self.tasks.clone()
     }
 
+    pub(crate) fn downloads(&self) -> Arc<DownloadPersistence> {
+        self.downloads.clone()
+    }
+
     pub(crate) fn root(&self) -> &DownloadDestinationRoot {
         &self.root
+    }
+
+    /// Resolve the exact receipt destination under the caller's already-held
+    /// model-root grant. This observes metadata only and performs no repair.
+    pub(crate) fn validate_hf_completion_destination(
+        &self,
+        model_dir: &Path,
+        receipt: &HfCompletionReceipt,
+        grant: &RootExecutionGrant,
+    ) -> Result<DownloadRecoveryDestination> {
+        grant.validate_root(&self.root)?;
+        let destination = self.root.resolve(model_dir)?;
+        let identity = destination.persisted_identity()?;
+        if identity.library_root != receipt.workspace.root_identity
+            || identity.relative_target != receipt.workspace.relative_target
+            || identity != receipt.queue_admission.destination
+        {
+            return Err(import_invalid(
+                "Completion receipt does not identify the held model destination",
+            ));
+        }
+        let metadata = destination
+            .read_model_metadata()?
+            .ok_or_else(|| import_invalid("Completion receipt metadata is missing"))?;
+        if metadata.model_id.as_deref() != Some(receipt.model_id.as_str())
+            || metadata.repo_id.as_deref() != Some(receipt.manifest.source().source_id())
+        {
+            return Err(import_invalid(
+                "Completion receipt provenance does not match current model metadata",
+            ));
+        }
+        if receipt.manifest.source().provider() != "huggingface" {
+            return Err(import_invalid(
+                "Completion receipt source provider is not Hugging Face",
+            ));
+        }
+        if receipt.manifest.source().revision().strength()
+            == crate::acquisition::RevisionStrength::Immutable
+            && metadata.upstream_revision.as_deref()
+                != Some(receipt.manifest.source().revision().value())
+        {
+            return Err(import_invalid(
+                "Completion receipt revision does not match current model metadata",
+            ));
+        }
+        Ok(destination)
     }
 
     /// Import admission is checked under native root exclusion, including
@@ -273,10 +417,11 @@ impl LibraryMutationAuthority {
     fn protect_hf_import(
         &self,
         model_dir: &Path,
-        proof: ModelImportProof,
+        mut proof: ModelImportProof,
         partial: bool,
         context: crate::acquisition::task_custody::TaskContext,
     ) -> Result<Arc<LibraryImportGuard>> {
+        proof.downloads = Some(self.downloads.clone());
         let grant = proof.grant.clone();
         grant.validate_root(&self.root)?;
         let destination = self.root.resolve(model_dir)?;
@@ -446,6 +591,31 @@ enum ImportEffectContext {
 }
 
 impl LibraryImportGuard {
+    pub(crate) fn has_managed_final_import_proof(&self) -> bool {
+        !self.partial && self.proof.is_some()
+    }
+
+    /// Resolve cancellation against managed import before any model publication
+    /// effects begin. Once this succeeds, cancellation cannot report success
+    /// while metadata/index effects are still being drained.
+    pub(crate) fn claim_final_import_completion(&self) -> Result<()> {
+        if self.partial {
+            return Err(import_invalid(
+                "Partial import authority cannot claim final completion",
+            ));
+        }
+        let completion_decision = self
+            .proof
+            .as_ref()
+            .and_then(|proof| proof.completion_decision.as_ref())
+            .ok_or_else(|| import_invalid("Managed HF completion decision is unavailable"))?;
+        if completion_decision.claim_completion() {
+            Ok(())
+        } else {
+            Err(PumasError::DownloadCancelled)
+        }
+    }
+
     pub(crate) async fn run_blocking<T: Send + 'static>(
         self: &Arc<Self>,
         operation: &'static str,
@@ -512,6 +682,81 @@ impl LibraryImportGuard {
     ) -> Result<()> {
         self.validate(path)?;
         self.destination.write_model_metadata(metadata)
+    }
+
+    pub(crate) async fn publish_hf_completion_receipt(
+        self: &Arc<Self>,
+        library: &crate::model_library::ModelLibrary,
+        model_id: &str,
+        require_package_facts: bool,
+    ) -> Result<HfCompletionReceipt> {
+        if self.partial {
+            return Err(import_invalid(
+                "Partial import authority cannot issue a completion receipt",
+            ));
+        }
+        let proof = self
+            .proof
+            .as_ref()
+            .ok_or_else(|| import_invalid("Ordinary import authority cannot issue a receipt"))?;
+        let destination = self.destination.clone();
+        let guard = self.clone();
+        let model_id_owned = model_id.to_string();
+        self.run_blocking("publish durable HF completion metadata", move || {
+            guard.validate(destination.display_path())?;
+            let metadata = destination
+                .read_model_metadata()?
+                .ok_or_else(|| import_invalid("Completed import metadata is missing"))?;
+            if metadata.model_id.as_deref() != Some(model_id_owned.as_str()) {
+                return Err(import_invalid(
+                    "Completed import metadata identifies another model",
+                ));
+            }
+            let metadata_value = destination
+                .read_model_metadata_value()?
+                .ok_or_else(|| import_invalid("Completed import metadata is missing"))?;
+            // Equality may have skipped a write during finalization. Re-publish
+            // the exact observed JSON and require its durable publication outcome.
+            destination.write_model_metadata_value(&metadata_value)
+        })
+        .await??;
+        let outputs = library
+            .hf_completion_output_proof(&self.destination, model_id, require_package_facts)
+            .await?;
+        if outputs.package_facts.is_some() != require_package_facts {
+            return Err(import_invalid(
+                "Completed import package-facts projection is incomplete",
+            ));
+        }
+        let use_lease = match proof.acquisition.record().phase {
+            crate::acquisition::AcquisitionPhase::Using { lease } => lease,
+            _ => return Err(import_invalid("Completed import lease is no longer active")),
+        };
+        let downloads = proof
+            .downloads
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| import_invalid("Managed HF store authority is unavailable"))?;
+        let expected = proof.acquisition.record().clone();
+        let download_id = proof.download_id.clone();
+        let domain = proof.domain;
+        let destination = self.destination.clone();
+        let guard = self.clone();
+        let model_id = model_id.to_string();
+        self.run_blocking("publish managed HF completion receipt", move || {
+            guard.validate(destination.display_path())?;
+            let destination_identity = destination.persisted_identity()?;
+            downloads.publish_hf_completion_receipt(HfCompletionReceiptRequest {
+                expected: &expected,
+                use_lease,
+                download_id: &download_id,
+                domain,
+                destination: &destination_identity,
+                model_id: &model_id,
+                outputs,
+            })
+        })
+        .await?
     }
 }
 

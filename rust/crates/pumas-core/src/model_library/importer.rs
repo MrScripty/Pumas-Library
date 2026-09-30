@@ -676,11 +676,52 @@ impl ModelImporter {
             .map_err(|error| {
                 PumasError::Other(format!("Model import guard observation failed: {error}"))
             })??;
+        guard.claim_final_import_completion()?;
         let importer = Self {
             library: Arc::new(self.library.with_import_guard(guard)),
         };
         importer
             .finalize_downloaded_directory_guarded(info, revision)
+            .await
+    }
+
+    /// Validate a previously issued managed-HF completion receipt without
+    /// importing, repairing metadata, or resolving package facts. This is the
+    /// cold-reopen path after import effects may already have completed.
+    pub(crate) async fn settle_hf_completion_receipt(
+        &self,
+        info: &DownloadCompletionInfo,
+        revision: &DownloadRevision,
+        record: &crate::acquisition::AcquisitionRecord,
+        receipt: &crate::model_library::download_store::HfCompletionReceipt,
+        context: &crate::model_library::hf::DownloadInvocationContext,
+    ) -> Result<bool> {
+        receipt.validate_for_record(record)?;
+
+        let mut selected = record
+            .manifest
+            .files()
+            .iter()
+            .map(|file| file.logical_path().to_string())
+            .collect::<Vec<_>>();
+        let mut requested = info.filenames.clone();
+        selected.sort();
+        requested.sort();
+        if info.download_id != receipt.download_id
+            || selected != requested
+            || record.manifest.source().provider() != "huggingface"
+            || record.manifest.source().source_id() != info.download_request.repo_id
+            || record.manifest.source().revision().value() != revision.as_str()
+        {
+            return Err(PumasError::Validation {
+                field: "downloads.hf_completion_receipts".into(),
+                message: "Completion receipt does not match the selected HF download".into(),
+            });
+        }
+
+        let grant = context.held_root_execution_grant()?;
+        self.library
+            .settle_hf_completion_receipt(&info.dest_dir, record, receipt, grant)
             .await
     }
 
@@ -731,6 +772,9 @@ impl ModelImporter {
             // facts without generating or repairing them during status reads.
             self.library.resolve_model_package_facts(&model_id).await?;
         }
+        self.library
+            .issue_managed_hf_completion_receipt(&model_id, revision.as_persisted().is_some())
+            .await?;
         Ok(result)
     }
 
@@ -2676,6 +2720,10 @@ mod tests {
                             "owner",
                             DownloadAdmissionDomain::Ambient,
                             grant.clone(),
+                            Arc::new(
+                                crate::model_library::mutation_authority::DownloadCancellation::new(
+                                ),
+                            ),
                         );
                         assert!(wrong
                             .validate_provenance("owner", "other/repo", "main", &info.filenames)
@@ -2690,6 +2738,10 @@ mod tests {
                             "owner",
                             DownloadAdmissionDomain::Ambient,
                             grant.clone(),
+                            Arc::new(
+                                crate::model_library::mutation_authority::DownloadCancellation::new(
+                                ),
+                            ),
                         );
                         worker_downloads
                             .acquisition_store()
@@ -2727,6 +2779,10 @@ mod tests {
                             "owner",
                             DownloadAdmissionDomain::Ambient,
                             grant.clone(),
+                            Arc::new(
+                                crate::model_library::mutation_authority::DownloadCancellation::new(
+                                ),
+                            ),
                         );
                         importer
                             .finalize_downloaded_directory_with_capability(
@@ -2755,6 +2811,10 @@ mod tests {
                             "owner",
                             DownloadAdmissionDomain::Ambient,
                             grant.clone(),
+                            Arc::new(
+                                crate::model_library::mutation_authority::DownloadCancellation::new(
+                                ),
+                            ),
                         );
                         let before_hidden = std::fs::read(model.join("metadata.json"))?;
                         assert!(matches!(
@@ -2781,6 +2841,10 @@ mod tests {
                             "owner",
                             DownloadAdmissionDomain::Ambient,
                             grant.clone(),
+                            Arc::new(
+                                crate::model_library::mutation_authority::DownloadCancellation::new(
+                                ),
+                            ),
                         );
                         // Actual durable settlement invalidates an earlier unconsumed proof.
                         worker_acquisition.acknowledge(&context, lease).await?;

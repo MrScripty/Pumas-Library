@@ -26,7 +26,7 @@ pub(crate) trait HttpArtifactSink: Send {
 /// Existing supervised operation supplies cancellation and progress projection
 /// without transferring its lifecycle ownership to the protocol adapter.
 #[async_trait::async_trait]
-pub(crate) trait HttpAttemptHost: Send {
+pub trait HttpAttemptHost: Send {
     async fn pause_requested(&self);
     fn pause_requested_now(&self) -> bool;
     fn cancel_requested(&self) -> bool;

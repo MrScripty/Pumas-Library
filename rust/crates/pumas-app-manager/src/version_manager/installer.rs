@@ -57,6 +57,104 @@ async fn path_exists(path: &Path) -> Result<bool> {
 /// Coordinates Torch cancellation with the irreversible publication boundary.
 pub(crate) struct TorchInstallControl(AtomicU8);
 
+/// Mutable output and input bytes belong to one native attempt. The permanent
+/// lock file coordinates native installers and metadata mutations; it must
+/// never be unlinked.
+struct NativeInstallWorkspace {
+    // Implicit destruction must preserve uncertain work. Reclamation is an
+    // explicit fallible operation after all file/extraction effects settle.
+    directory: PathBuf,
+    _lock: NativeVersionsLock,
+}
+
+#[derive(Clone)]
+pub(crate) struct NativeVersionsLock(Arc<File>);
+
+impl Drop for NativeVersionsLock {
+    fn drop(&mut self) {
+        // Explicit unlock also releases locks inherited by a concurrently
+        // spawning child before that child's close-on-exec takes effect.
+        if Arc::strong_count(&self.0) == 1 {
+            let _ = fs2::FileExt::unlock(&*self.0);
+        }
+    }
+}
+
+impl NativeVersionsLock {
+    pub(crate) fn try_acquire(versions: &Path) -> Result<Self> {
+        std::fs::create_dir_all(versions)
+            .map_err(|error| PumasError::io_with_path(error, versions))?;
+        let lock_path = versions.join(".llama-install.lock");
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .map_err(|error| PumasError::io_with_path(error, &lock_path))?;
+        fs2::FileExt::try_lock_exclusive(&lock)
+            .map_err(|error| PumasError::io_with_path(error, &lock_path))?;
+        Ok(Self(Arc::new(lock)))
+    }
+
+    pub(crate) async fn acquire(versions: PathBuf) -> Result<Self> {
+        tokio::task::spawn_blocking(move || Self::try_acquire(&versions))
+            .await
+            .map_err(|error| {
+                PumasError::Other(format!("Native mutation admission failed: {error}"))
+            })?
+    }
+}
+
+impl NativeInstallWorkspace {
+    fn create(versions: &Path) -> Result<Self> {
+        let lock = NativeVersionsLock::try_acquire(versions)?;
+        let directory = tempfile::Builder::new()
+            .prefix(".llama-install-")
+            .tempdir_in(versions)
+            .map_err(|error| PumasError::io_with_path(error, versions))?
+            .keep();
+        Ok(Self {
+            directory,
+            _lock: lock,
+        })
+    }
+
+    fn path(&self) -> &Path {
+        &self.directory
+    }
+
+    fn cleanup(self) -> Result<()> {
+        std::fs::remove_dir_all(&self.directory).map_err(|error| PumasError::Io {
+            message: format!("Native staging cleanup incomplete; retained workspace requires reconciliation: {error}"),
+            path: Some(self.directory.clone()),
+            source: Some(error),
+        })
+    }
+}
+
+fn settled_result<T>(outcome: Result<T>, settlement: Result<()>) -> Result<T> {
+    match (outcome, settlement) {
+        (result, Ok(())) => result,
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), Err(settlement)) => Err(PumasError::InstallationFailed {
+            message: format!("{error}; settlement incomplete: {settlement}"),
+        }),
+    }
+}
+
+async fn settle_archive_file<T>(mut file: fs::File, path: &Path, outcome: Result<T>) -> Result<T> {
+    let settlement = file.flush().await.map_err(|error| PumasError::Io {
+        message: format!("Failed to flush archive: {error}"),
+        path: Some(path.to_path_buf()),
+        source: Some(error),
+    });
+    // Even an unsuccessful flush must settle queued blocking file work before
+    // the stage owner may reclaim bytes. Dropping Tokio File is insufficient.
+    drop(file.into_std().await);
+    settled_result(outcome, settlement)
+}
+
 type TorchCleanupCompletion = Shared<BoxFuture<'static, std::result::Result<(), Arc<String>>>>;
 type TorchChildReceipt = tokio::sync::watch::Receiver<Option<std::result::Result<(), Arc<String>>>>;
 
@@ -403,6 +501,7 @@ pub struct VersionInstaller {
     progress_tracker: Arc<RwLock<InstallationProgressTracker>>,
     /// Cancellation flag.
     cancel_flag: Arc<AtomicBool>,
+    shutdown_flag: Arc<AtomicBool>,
     torch_control: Arc<TorchInstallControl>,
     torch_cleanup: Arc<TorchCleanupTasks>,
     torch_attempt_lock: Mutex<()>,
@@ -436,6 +535,7 @@ impl VersionInstaller {
             metadata_manager,
             progress_tracker,
             cancel_flag,
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
             torch_control: Arc::new(TorchInstallControl::new()),
             torch_cleanup: Arc::new(TorchCleanupTasks::default()),
             torch_attempt_lock: Mutex::new(()),
@@ -457,6 +557,26 @@ impl VersionInstaller {
         let children = self.torch_cleanup.drain_child_slots().await;
         tasks?;
         children
+    }
+
+    pub(crate) fn with_shutdown_flag(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.shutdown_flag = flag;
+        self
+    }
+
+    async fn send_progress(&self, sender: &mpsc::Sender<ProgressUpdate>, update: ProgressUpdate) {
+        tokio::select! {
+            _ = sender.send(update) => {},
+            _ = super::wait_for_install_cancel(self.shutdown_flag.clone()) => {},
+            _ = super::wait_for_install_cancel(self.cancel_flag.clone()) => {},
+        }
+    }
+
+    async fn wait_for_cancellation(&self) {
+        tokio::select! {
+            _ = super::wait_for_install_cancel(self.shutdown_flag.clone()) => {},
+            _ = super::wait_for_install_cancel(self.cancel_flag.clone()) => {},
+        }
     }
 
     pub(crate) fn with_torch_control(mut self, control: Arc<TorchInstallControl>) -> Self {
@@ -651,6 +771,27 @@ impl VersionInstaller {
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
+        let _attempt =
+            self.torch_attempt_lock
+                .try_lock()
+                .map_err(|_| PumasError::InstallationFailed {
+                    message: "llama.cpp installation already active".into(),
+                })?;
+        self.torch_control.start();
+        let result = self
+            .install_llama_cpp_binary_inner(tag, release, progress_tx)
+            .await;
+        self.torch_control.finish();
+        result
+    }
+
+    async fn install_llama_cpp_binary_inner(
+        &self,
+        tag: &str,
+        release: &GitHubRelease,
+        progress_tx: mpsc::Sender<ProgressUpdate>,
+    ) -> Result<()> {
+        Self::validate_native_tag(tag)?;
         info!("Starting llama.cpp binary installation for {}", tag);
 
         let asset = self.select_llama_cpp_asset(&release.assets)?;
@@ -681,40 +822,46 @@ impl VersionInstaller {
             );
         }
 
-        let cache_downloads = self
-            .launcher_root
-            .join("launcher-data")
-            .join("cache")
-            .join("downloads");
-        fs::create_dir_all(&cache_downloads)
+        // No digest is supplied by GitHubAsset. Filename and size are not
+        // integrity evidence: do not reuse or mutate retained download caches.
+        let versions = self.versions_dir();
+        fs::create_dir_all(&versions)
             .await
-            .map_err(|e| PumasError::Io {
-                message: format!("Failed to create download cache directory: {}", e),
-                path: Some(cache_downloads.clone()),
-                source: Some(e),
-            })?;
-
-        let archive_path = cache_downloads.join(&asset_name);
-        let cache_valid = self
-            .is_cached_download_valid(&archive_path, &asset_name, total_size)
-            .await?;
-
+            .map_err(|e| PumasError::io_with_path(e, &versions))?;
+        let custody = Arc::new(
+            tokio::task::spawn_blocking(move || NativeInstallWorkspace::create(&versions))
+                .await
+                .map_err(|error| {
+                    PumasError::Other(format!("Failed to join native staging: {error}"))
+                })??,
+        );
+        let archive_path = custody.path().join("archive");
         let result = self
             .do_llama_cpp_install(
                 tag,
                 release,
                 download_url,
-                total_size,
                 &asset_name,
                 &archive_path,
-                cache_valid,
+                custody.clone(),
                 &progress_tx,
             )
             .await;
 
-        if result.is_err() {
-            let _ = fs::remove_file(&archive_path).await;
-        }
+        // Stage reclamation can traverse a large archive. The supervised
+        // installation awaits that blocking cleanup before releasing admission.
+        let cleanup = tokio::task::spawn_blocking(move || {
+            Arc::try_unwrap(custody)
+                .map_err(|workspace| PumasError::InstallationFailed {
+                    message: format!("Native workspace remains in use; retained stage requires reconciliation: {}", workspace.path().display()),
+                })?
+                .cleanup()
+        })
+            .await
+            .unwrap_or_else(|error| Err(
+                PumasError::Other(format!("Failed to join native cleanup: {error}"))
+            ));
+        let result = settled_result(result, cleanup);
 
         {
             let mut tracker = self.progress_tracker.write().await;
@@ -754,13 +901,15 @@ impl VersionInstaller {
                     Some("Using cached download"),
                 );
             }
-            let _ = progress_tx
-                .send(ProgressUpdate::Download {
+            self.send_progress(
+                progress_tx,
+                ProgressUpdate::Download {
                     downloaded_bytes: total_size,
                     total_bytes: Some(total_size),
                     speed_bytes_per_sec: None,
-                })
-                .await;
+                },
+            )
+            .await;
         } else {
             self.download_archive(download_url, archive_path, progress_tx)
                 .await?;
@@ -788,12 +937,14 @@ impl VersionInstaller {
                 Some("Extracting binary..."),
             );
         }
-        let _ = progress_tx
-            .send(ProgressUpdate::StageChanged {
+        self.send_progress(
+            progress_tx,
+            ProgressUpdate::StageChanged {
                 stage: InstallationStage::Extract,
                 message: "Extracting binary...".to_string(),
-            })
-            .await;
+            },
+        )
+        .await;
 
         let archive_path = archive_path.to_path_buf();
         let version_dir_for_extract = version_dir.clone();
@@ -826,40 +977,6 @@ impl VersionInstaller {
         Ok(())
     }
 
-    async fn is_cached_download_valid(
-        &self,
-        archive_path: &Path,
-        asset_name: &str,
-        total_size: u64,
-    ) -> Result<bool> {
-        if !path_exists(archive_path).await? {
-            return Ok(false);
-        }
-
-        match fs::metadata(archive_path).await {
-            Ok(meta) if meta.len() == total_size => {
-                info!(
-                    "Using cached download: {} ({} bytes)",
-                    asset_name, total_size
-                );
-                Ok(true)
-            }
-            Ok(meta) => {
-                info!(
-                    "Cached download size mismatch ({} != {}), re-downloading",
-                    meta.len(),
-                    total_size
-                );
-                let _ = fs::remove_file(archive_path).await;
-                Ok(false)
-            }
-            Err(_) => {
-                let _ = fs::remove_file(archive_path).await;
-                Ok(false)
-            }
-        }
-    }
-
     /// Execute llama.cpp installation steps.
     #[allow(clippy::too_many_arguments)]
     async fn do_llama_cpp_install(
@@ -867,55 +984,26 @@ impl VersionInstaller {
         tag: &str,
         release: &GitHubRelease,
         download_url: &str,
-        total_size: u64,
         asset_name: &str,
         archive_path: &Path,
-        cache_valid: bool,
+        custody: Arc<NativeInstallWorkspace>,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
-        self.check_cancelled()?;
-
-        if cache_valid {
-            {
-                let mut tracker = self.progress_tracker.write().await;
-                tracker.update_stage(
-                    InstallationStage::Download,
-                    100.0,
-                    Some("Using cached download"),
-                );
-            }
-            let _ = progress_tx
-                .send(ProgressUpdate::Download {
-                    downloaded_bytes: total_size,
-                    total_bytes: Some(total_size),
-                    speed_bytes_per_sec: None,
-                })
-                .await;
-        } else {
-            self.download_archive(download_url, archive_path, progress_tx)
-                .await?;
-        }
-
-        self.check_cancelled()?;
-
+        Self::validate_native_tag(tag)?;
         let version_dir = self.versions_dir().join(tag);
+        // Replacement requires a durable directory/metadata transaction owned
+        // elsewhere. Never delete or replace retained output here.
         if path_exists(&version_dir).await? {
-            fs::remove_dir_all(&version_dir)
-                .await
-                .map_err(|e| PumasError::Io {
-                    message: format!("Failed to remove existing version directory: {}", e),
-                    path: Some(version_dir.clone()),
-                    source: Some(e),
-                })?;
+            return Err(PumasError::VersionAlreadyInstalled { tag: tag.into() });
         }
-        fs::create_dir_all(&version_dir)
+        self.check_cancelled()?;
+        self.download_archive(download_url, archive_path, progress_tx)
+            .await?;
+        self.check_cancelled()?;
+        let stage = custody.path().join("output");
+        fs::create_dir(&stage)
             .await
-            .map_err(|e| PumasError::Io {
-                message: format!("Failed to create version directory: {}", e),
-                path: Some(version_dir.clone()),
-                source: Some(e),
-            })?;
-
+            .map_err(|e| PumasError::io_with_path(e, &stage))?;
         {
             let mut tracker = self.progress_tracker.write().await;
             tracker.update_stage(
@@ -924,39 +1012,79 @@ impl VersionInstaller {
                 Some("Extracting binary archive..."),
             );
         }
-        let _ = progress_tx
-            .send(ProgressUpdate::StageChanged {
+        self.send_progress(
+            progress_tx,
+            ProgressUpdate::StageChanged {
                 stage: InstallationStage::Extract,
-                message: "Extracting binary archive...".to_string(),
-            })
-            .await;
-
+                message: "Extracting binary archive...".into(),
+            },
+        )
+        .await;
         let archive_path = archive_path.to_path_buf();
-        let version_dir_for_extract = version_dir.clone();
-        let asset_name = asset_name.to_string();
+        let extracted = stage.clone();
+        let asset_name = asset_name.to_owned();
+        // The blocking worker holds custody even if a direct caller drops its
+        // future. The manager never aborts its registered installation task.
+        let held = custody.clone();
         tokio::task::spawn_blocking(move || {
-            Self::extract_llama_cpp_binary(&archive_path, &version_dir_for_extract, &asset_name)
+            let _held = held;
+            Self::extract_llama_cpp_binary(&archive_path, &extracted, &asset_name)
         })
         .await
         .map_err(|e| {
-            PumasError::Other(format!("Failed to join llama.cpp extraction task: {}", e))
+            PumasError::Other(format!("Failed to join llama.cpp extraction task: {e}"))
         })??;
-
-        {
-            let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(
-                InstallationStage::Extract,
-                100.0,
-                Some("Extraction complete"),
-            );
-        }
-
         self.check_cancelled()?;
-
-        self.finalize_llama_cpp_installation(tag, release, &version_dir, progress_tx)
+        self.finalize_llama_cpp_installation(tag, release, &stage, custody, progress_tx)
             .await?;
+        Ok(())
+    }
 
-        info!("llama.cpp installation of {} completed successfully", tag);
+    fn publish_native_stage(
+        stage: &Path,
+        destination: &Path,
+        finalize: impl FnOnce() -> std::result::Result<(), (PumasError, bool)>,
+    ) -> Result<()> {
+        match std::fs::symlink_metadata(destination) {
+            Ok(_) => {
+                return Err(PumasError::InstallationFailed {
+                    message: "Native version destination already exists".into(),
+                })
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(PumasError::io_with_path(error, destination)),
+        }
+        std::fs::rename(stage, destination)
+            .map_err(|e| PumasError::io_with_path(e, destination))?;
+        if let Err((error, can_withdraw)) = finalize() {
+            if !can_withdraw {
+                return Err(error);
+            }
+            // Only this attempt's newly published directory may be withdrawn.
+            std::fs::rename(destination, stage).map_err(|rollback| {
+                PumasError::InstallationFailed {
+                    message: format!(
+                        "Native finalization failed: {error}; stage withdrawal failed: {rollback}"
+                    ),
+                }
+            })?;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn validate_native_tag(tag: &str) -> Result<()> {
+        if tag.is_empty()
+            || !tag.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'+')
+            })
+            || tag == "."
+            || tag == ".."
+        {
+            return Err(PumasError::InstallationFailed {
+                message: "Invalid native version tag".into(),
+            });
+        }
         Ok(())
     }
 
@@ -1168,10 +1296,20 @@ impl VersionInstaller {
             });
         }
 
+        Self::validate_native_output(version_dir)?;
         let server_binary = Self::find_named_binary(version_dir, &["llama-server", "server"])?
             .ok_or_else(|| PumasError::InstallationFailed {
                 message: "Could not find llama-server in extracted archive".to_string(),
             })?;
+        if std::fs::metadata(&server_binary)
+            .map_err(|e| PumasError::io_with_path(e, &server_binary))?
+            .len()
+            == 0
+        {
+            return Err(PumasError::InstallationFailed {
+                message: "Extracted llama.cpp server is empty".into(),
+            });
+        }
         let launch_binary = Self::install_llama_cpp_launch_binary(version_dir, &server_binary)?;
         Self::make_binary_executable(&launch_binary)?;
 
@@ -1179,6 +1317,31 @@ impl VersionInstaller {
             "llama.cpp server binary available at {}",
             launch_binary.display()
         );
+        Ok(())
+    }
+
+    fn validate_native_output(root: &Path) -> Result<()> {
+        let canonical_root = root
+            .canonicalize()
+            .map_err(|e| PumasError::io_with_path(e, root))?;
+        for entry in walkdir::WalkDir::new(root).follow_links(false) {
+            let entry = entry.map_err(|e| PumasError::InstallationFailed {
+                message: format!("Invalid native output: {e}"),
+            })?;
+            if entry.file_type().is_symlink() {
+                let target = entry
+                    .path()
+                    .canonicalize()
+                    .map_err(|e| PumasError::io_with_path(e, entry.path()))?;
+                let link = std::fs::read_link(entry.path())
+                    .map_err(|e| PumasError::io_with_path(e, entry.path()))?;
+                if link.is_absolute() || !target.starts_with(&canonical_root) || !target.is_file() {
+                    return Err(PumasError::InstallationFailed {
+                        message: "Native archive contains an unsafe link".into(),
+                    });
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1220,9 +1383,14 @@ impl VersionInstaller {
                         source.display()
                     ),
                 })?;
+            let relative_dir = binary_dir.strip_prefix(version_dir).map_err(|_| {
+                PumasError::InstallationFailed {
+                    message: "llama.cpp binary is outside staged output".into(),
+                }
+            })?;
             let wrapper = format!(
-                "#!/bin/sh\nBINARY_DIR={}\nexport LD_LIBRARY_PATH=\"$BINARY_DIR${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}\"\nexec \"$BINARY_DIR/{}\" \"$@\"\n",
-                shell_single_quote(&binary_dir.to_string_lossy()),
+                "#!/bin/sh\nROOT=$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd) || exit 1\nBINARY_DIR=\"$ROOT\"/{}\nexport LD_LIBRARY_PATH=\"$BINARY_DIR${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}\"\nexec \"$BINARY_DIR/{}\" \"$@\"\n",
+                shell_single_quote(&relative_dir.to_string_lossy()),
                 binary_file.to_string_lossy().replace('"', "\\\"")
             );
             std::fs::write(&final_path, wrapper).map_err(|e| PumasError::Io {
@@ -1460,12 +1628,14 @@ impl VersionInstaller {
                 Some("Finalizing installation..."),
             );
         }
-        let _ = progress_tx
-            .send(ProgressUpdate::StageChanged {
+        self.send_progress(
+            progress_tx,
+            ProgressUpdate::StageChanged {
                 stage: InstallationStage::Setup,
                 message: "Finalizing installation...".to_string(),
-            })
-            .await;
+            },
+        )
+        .await;
 
         // Find the download URL for metadata
         let download_url = release
@@ -1504,11 +1674,13 @@ impl VersionInstaller {
                 Some("Installation complete"),
             );
         }
-        let _ = progress_tx
-            .send(ProgressUpdate::Setup {
+        self.send_progress(
+            progress_tx,
+            ProgressUpdate::Setup {
                 message: "Installation complete".to_string(),
-            })
-            .await;
+            },
+        )
+        .await;
 
         info!("Ollama installation of {} finalized", tag);
         Ok(())
@@ -1519,7 +1691,8 @@ impl VersionInstaller {
         &self,
         tag: &str,
         release: &GitHubRelease,
-        _version_dir: &Path,
+        stage: &Path,
+        custody: Arc<NativeInstallWorkspace>,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
         info!("Finalizing llama.cpp installation for {}", tag);
@@ -1532,17 +1705,17 @@ impl VersionInstaller {
                 Some("Finalizing installation..."),
             );
         }
-        let _ = progress_tx
-            .send(ProgressUpdate::StageChanged {
+        self.send_progress(
+            progress_tx,
+            ProgressUpdate::StageChanged {
                 stage: InstallationStage::Setup,
                 message: "Finalizing installation...".to_string(),
-            })
-            .await;
+            },
+        )
+        .await;
 
-        let (download_url, size) = self
-            .select_llama_cpp_asset(&release.assets)
-            .map(|asset| (Some(asset.download_url.clone()), Some(asset.size)))
-            .unwrap_or((None, release.archive_size));
+        let selected = self.select_llama_cpp_asset(&release.assets)?;
+        let (download_url, size) = (Some(selected.download_url.clone()), Some(selected.size));
 
         let metadata = InstalledVersionMetadata {
             path: tag.to_string(),
@@ -1558,8 +1731,40 @@ impl VersionInstaller {
             dependencies_installed: Some(true),
         };
 
-        self.metadata_manager
-            .update_installed_version(tag, metadata, Some(self.app_id))?;
+        self.check_cancelled()?;
+        if !self.torch_control.try_begin_publication() {
+            return Err(PumasError::InstallationFailed {
+                message: "Installation cancelled before publication".into(),
+            });
+        }
+        let stage = stage.to_path_buf();
+        let destination = self.versions_dir().join(tag);
+        let manager = self.metadata_manager.clone();
+        let app_id = self.app_id;
+        let tag = tag.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let _custody = custody;
+            if manager.get_installed_version(&tag, Some(app_id))?.is_some() {
+                return Err(PumasError::VersionAlreadyInstalled { tag });
+            }
+            Self::publish_native_stage(&stage, &destination, || {
+                match manager.update_installed_version(&tag, metadata, Some(app_id)) {
+                    Ok(()) => Ok(()),
+                    Err(error) => {
+                        // atomic_write_json may fail after replacement. Withdraw
+                        // output only when the metadata owner proves no entry.
+                        match manager.get_installed_version(&tag, Some(app_id)) {
+                            Ok(None) => Err((error, true)),
+                            _ => Err((PumasError::InstallationFailed {
+                                message: format!("Native metadata publication failed with retained complete output; reconciliation required: {error}"),
+                            }, false)),
+                        }
+                    }
+                }
+            })
+        })
+        .await
+        .map_err(|e| PumasError::Other(format!("Failed to join native publication: {e}")))??;
 
         {
             let mut tracker = self.progress_tracker.write().await;
@@ -1569,13 +1774,15 @@ impl VersionInstaller {
                 Some("Installation complete"),
             );
         }
-        let _ = progress_tx
-            .send(ProgressUpdate::Setup {
+        self.send_progress(
+            progress_tx,
+            ProgressUpdate::Setup {
                 message: "Installation complete".to_string(),
-            })
-            .await;
+            },
+        )
+        .await;
 
-        info!("llama.cpp installation of {} finalized", tag);
+        info!("llama.cpp installation finalized");
         Ok(())
     }
 
@@ -1596,12 +1803,14 @@ impl VersionInstaller {
                 Some("Starting download..."),
             );
         }
-        let _ = progress_tx
-            .send(ProgressUpdate::StageChanged {
+        self.send_progress(
+            progress_tx,
+            ProgressUpdate::StageChanged {
                 stage: InstallationStage::Download,
                 message: "Starting download...".to_string(),
-            })
-            .await;
+            },
+        )
+        .await;
 
         // Create HTTP client with appropriate timeouts for large downloads
         // - connect_timeout: time to establish connection (15s is fine)
@@ -1618,7 +1827,12 @@ impl VersionInstaller {
         // Start download with retry
         let mut response = None;
         for attempt in 1..=InstallationConfig::DOWNLOAD_RETRY_ATTEMPTS {
-            match client.get(url).send().await {
+            self.check_cancelled()?;
+            let request = tokio::select! {
+                result = client.get(url).send() => result,
+                _ = self.wait_for_cancellation() => return Err(Self::cancellation_error()),
+            };
+            match request {
                 Ok(resp) => {
                     if resp.status().is_success() {
                         response = Some(resp);
@@ -1639,7 +1853,10 @@ impl VersionInstaller {
                             cause: Some(e.to_string()),
                         });
                     }
-                    tokio::time::sleep(std::time::Duration::from_secs(2u64.pow(attempt))).await;
+                    tokio::select! {
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(2u64.pow(attempt))) => {},
+                        _ = self.wait_for_cancellation() => return Err(Self::cancellation_error()),
+                    }
                 }
             }
         }
@@ -1660,60 +1877,71 @@ impl VersionInstaller {
                 source: Some(e),
             })?;
 
-        // Download with progress
-        let mut downloaded: u64 = 0;
-        let mut stream = response.bytes_stream();
-        let start_time = std::time::Instant::now();
+        // Cancellation interrupts network waits only. File operations and
+        // their settlement remain awaited before the stage can be reclaimed.
+        let transfer = async {
+            let mut downloaded: u64 = 0;
+            let mut stream = response.bytes_stream();
+            let start_time = std::time::Instant::now();
 
-        use futures::StreamExt;
-        while let Some(chunk) = stream.next().await {
-            // Check cancellation
-            self.check_cancelled()?;
+            use futures::StreamExt;
+            loop {
+                let chunk = tokio::select! {
+                    chunk = stream.next() => chunk,
+                    _ = self.wait_for_cancellation() => {
+                        return Err(Self::cancellation_error());
+                    },
+                };
+                let Some(chunk) = chunk else {
+                    break;
+                };
+                // Check cancellation
+                self.check_cancelled()?;
 
-            let chunk = chunk.map_err(|e| PumasError::Network {
-                message: format!("Error reading download chunk: {}", e),
-                cause: Some(e.to_string()),
-            })?;
+                let chunk = chunk.map_err(|e| PumasError::Network {
+                    message: format!("Error reading download chunk: {}", e),
+                    cause: Some(e.to_string()),
+                })?;
 
-            file.write_all(&chunk).await.map_err(|e| PumasError::Io {
-                message: format!("Failed to write to archive: {}", e),
-                path: Some(archive_path.to_path_buf()),
-                source: Some(e),
-            })?;
+                file.write_all(&chunk).await.map_err(|e| PumasError::Io {
+                    message: format!("Failed to write to archive: {}", e),
+                    path: Some(archive_path.to_path_buf()),
+                    source: Some(e),
+                })?;
 
-            downloaded += chunk.len() as u64;
+                downloaded += chunk.len() as u64;
 
-            // Calculate speed
-            let elapsed = start_time.elapsed().as_secs_f64();
-            let speed = if elapsed > 0.0 {
-                Some(downloaded as f64 / elapsed)
-            } else {
-                None
-            };
+                // Calculate speed
+                let elapsed = start_time.elapsed().as_secs_f64();
+                let speed = if elapsed > 0.0 {
+                    Some(downloaded as f64 / elapsed)
+                } else {
+                    None
+                };
 
-            // Update progress
-            {
-                let mut tracker = self.progress_tracker.write().await;
-                tracker.update_download_progress(downloaded, total_size, speed);
+                // Update progress
+                {
+                    let mut tracker = self.progress_tracker.write().await;
+                    tracker.update_download_progress(downloaded, total_size, speed);
+                }
+
+                self.send_progress(
+                    progress_tx,
+                    ProgressUpdate::Download {
+                        downloaded_bytes: downloaded,
+                        total_bytes: total_size,
+                        speed_bytes_per_sec: speed,
+                    },
+                )
+                .await;
             }
 
-            let _ = progress_tx
-                .send(ProgressUpdate::Download {
-                    downloaded_bytes: downloaded,
-                    total_bytes: total_size,
-                    speed_bytes_per_sec: speed,
-                })
-                .await;
+            self.check_cancelled()?;
+            Ok(downloaded)
         }
+        .await;
 
-        // Tokio can acknowledge the final write while its blocking file work
-        // is still queued. Checksum and extraction readers reopen this path,
-        // so finish all writes before reporting the download complete.
-        file.flush().await.map_err(|e| PumasError::Io {
-            message: format!("Failed to flush archive: {}", e),
-            path: Some(archive_path.to_path_buf()),
-            source: Some(e),
-        })?;
+        let downloaded = settle_archive_file(file, archive_path, transfer).await?;
 
         // Add to completed items
         {
@@ -1831,12 +2059,14 @@ impl VersionInstaller {
                 Some("Finalizing installation..."),
             );
         }
-        let _ = progress_tx
-            .send(ProgressUpdate::StageChanged {
+        self.send_progress(
+            progress_tx,
+            ProgressUpdate::StageChanged {
                 stage: InstallationStage::Setup,
                 message: "Finalizing installation...".to_string(),
-            })
-            .await;
+            },
+        )
+        .await;
 
         // Create metadata entry
         let metadata = InstalledVersionMetadata {
@@ -1900,23 +2130,29 @@ impl VersionInstaller {
                 Some("Installation complete"),
             );
         }
-        let _ = progress_tx
-            .send(ProgressUpdate::Setup {
+        self.send_progress(
+            progress_tx,
+            ProgressUpdate::Setup {
                 message: "Installation complete".to_string(),
-            })
-            .await;
+            },
+        )
+        .await;
 
         info!("Installation of {} finalized", tag);
         Ok(())
     }
 
     fn check_cancelled(&self) -> Result<()> {
-        if self.cancel_flag.load(Ordering::SeqCst) {
-            Err(PumasError::InstallationFailed {
-                message: "Installation cancelled by user".to_string(),
-            })
+        if self.cancel_flag.load(Ordering::SeqCst) || self.shutdown_flag.load(Ordering::SeqCst) {
+            Err(Self::cancellation_error())
         } else {
             Ok(())
+        }
+    }
+
+    fn cancellation_error() -> PumasError {
+        PumasError::InstallationFailed {
+            message: "Installation cancelled".into(),
         }
     }
 
@@ -2066,14 +2302,17 @@ mod tests {
         assert_eq!(launch_binary, version_dir.join("bin/llama-server"));
         let wrapper = std::fs::read_to_string(&launch_binary).unwrap();
         assert!(wrapper.contains("LD_LIBRARY_PATH"));
-        assert!(wrapper.contains(archive_dir.to_string_lossy().as_ref()));
+        assert!(wrapper.contains("llama-b9090"));
+        assert!(!wrapper.contains(version_dir.to_string_lossy().as_ref()));
         let mode = std::fs::metadata(&launch_binary)
             .unwrap()
             .permissions()
             .mode();
         assert_eq!(mode & 0o111, 0o111);
         let unrelated_cwd = tempfile::tempdir().unwrap();
-        let output = std::process::Command::new(&launch_binary)
+        let published = absolute_root.join("published");
+        std::fs::rename(&version_dir, &published).unwrap();
+        let output = std::process::Command::new(published.join("bin/llama-server"))
             .current_dir(unrelated_cwd.path())
             .output()
             .unwrap();
@@ -2083,6 +2322,253 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(output.stdout, b"owned-wrapper-fixture");
+    }
+
+    #[test]
+    fn native_publication_failure_preserves_stage_and_existing_output() {
+        let root = tempfile::tempdir().unwrap();
+        let stage = root.path().join("stage");
+        let destination = root.path().join("version");
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::write(stage.join("complete"), "new").unwrap();
+        let error = VersionInstaller::publish_native_stage(&stage, &destination, || {
+            Err((PumasError::Other("metadata failure".into()), true))
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("metadata failure"));
+        assert!(!destination.exists());
+        assert_eq!(std::fs::read(stage.join("complete")).unwrap(), b"new");
+        std::fs::create_dir(&destination).unwrap();
+        std::fs::write(destination.join("retained"), "old").unwrap();
+        assert!(
+            VersionInstaller::publish_native_stage(&stage, &destination, || panic!(
+                "must not finalize existing output"
+            ))
+            .is_err()
+        );
+        assert_eq!(std::fs::read(destination.join("retained")).unwrap(), b"old");
+    }
+
+    #[test]
+    fn native_uncertain_metadata_publication_retains_complete_output() {
+        let root = tempfile::tempdir().unwrap();
+        let stage = root.path().join("stage");
+        let destination = root.path().join("version");
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::write(stage.join("complete"), "owned").unwrap();
+        assert!(
+            VersionInstaller::publish_native_stage(&stage, &destination, || {
+                Err((PumasError::Other("uncertain publication".into()), false))
+            })
+            .is_err()
+        );
+        assert!(!stage.exists());
+        assert_eq!(
+            std::fs::read(destination.join("complete")).unwrap(),
+            b"owned"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_publication_preserves_a_dangling_destination_link() {
+        let root = tempfile::tempdir().unwrap();
+        let stage = root.path().join("stage");
+        let destination = root.path().join("version");
+        std::fs::create_dir(&stage).unwrap();
+        std::os::unix::fs::symlink("missing", &destination).unwrap();
+        assert!(
+            VersionInstaller::publish_native_stage(&stage, &destination, || {
+                panic!("must not finalize over retained link")
+            })
+            .is_err()
+        );
+        assert_eq!(
+            std::fs::read_link(&destination).unwrap(),
+            Path::new("missing")
+        );
+        assert!(stage.exists());
+    }
+
+    #[tokio::test]
+    async fn native_progress_backpressure_ends_on_cancel_and_shutdown() {
+        let root = tempfile::tempdir().unwrap();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let shutting_down = Arc::new(AtomicBool::new(false));
+        let installer = VersionInstaller::new(
+            root.path().to_path_buf(),
+            AppId::LlamaCpp,
+            Arc::new(MetadataManager::new(root.path())),
+            Arc::new(RwLock::new(InstallationProgressTracker::new(
+                root.path().to_path_buf(),
+            ))),
+            cancelled.clone(),
+        )
+        .with_shutdown_flag(shutting_down.clone());
+        let (sender, _receiver) = mpsc::channel(1);
+        sender
+            .send(ProgressUpdate::Setup {
+                message: "full".into(),
+            })
+            .await
+            .unwrap();
+        for flag in [&cancelled, &shutting_down] {
+            let blocked = installer.send_progress(
+                &sender,
+                ProgressUpdate::Setup {
+                    message: "pending".into(),
+                },
+            );
+            tokio::pin!(blocked);
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(20), &mut blocked)
+                    .await
+                    .is_err()
+            );
+            flag.store(true, Ordering::SeqCst);
+            tokio::time::timeout(std::time::Duration::from_secs(1), blocked)
+                .await
+                .unwrap();
+            flag.store(false, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn native_invalid_archive_cannot_touch_retained_output() {
+        let root = tempfile::tempdir().unwrap();
+        let retained = root.path().join("version");
+        std::fs::create_dir(&retained).unwrap();
+        std::fs::write(retained.join("retained"), "old").unwrap();
+        let stage = tempfile::tempdir_in(root.path()).unwrap();
+        let archive = root.path().join("archive");
+        std::fs::write(&archive, "invalid tar").unwrap();
+        assert!(VersionInstaller::extract_llama_cpp_binary(
+            &archive,
+            stage.path(),
+            "native.tar.gz"
+        )
+        .is_err());
+        assert_eq!(std::fs::read(retained.join("retained")).unwrap(), b"old");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_output_rejects_external_and_directory_links() {
+        let root = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        std::fs::write(external.path().join("server"), "retained").unwrap();
+        std::os::unix::fs::symlink(
+            external.path().join("server"),
+            root.path().join("llama-server"),
+        )
+        .unwrap();
+        assert!(VersionInstaller::validate_native_output(root.path()).is_err());
+        std::fs::remove_file(root.path().join("llama-server")).unwrap();
+        std::os::unix::fs::symlink(".", root.path().join("loop")).unwrap();
+        assert!(VersionInstaller::validate_native_output(root.path()).is_err());
+    }
+
+    #[tokio::test]
+    async fn native_worker_retains_custody_after_waiter_is_cancelled() {
+        let root = tempfile::tempdir().unwrap();
+        let custody = Arc::new(NativeInstallWorkspace::create(root.path()).unwrap());
+        let path = custody.path().to_path_buf();
+        std::fs::write(path.join("archive"), "owned").unwrap();
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker_custody = custody.clone();
+        let worker = tokio::task::spawn_blocking(move || {
+            let _held = worker_custody;
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            assert_eq!(
+                std::fs::read(_held.path().join("archive")).unwrap(),
+                b"owned"
+            );
+        });
+        entered_rx.await.unwrap();
+        drop(custody);
+        worker.abort(); // spawn_blocking is already running and cannot be aborted.
+        assert!(path.exists());
+        assert!(NativeInstallWorkspace::create(root.path()).is_err());
+        release_tx.send(()).unwrap();
+        worker.await.unwrap();
+        // Cancellation loses the receipt, so implicit destruction preserves
+        // bytes for reconciliation even after the blocking worker has settled.
+        assert!(path.exists());
+        let next = NativeInstallWorkspace::create(root.path()).unwrap();
+        next.cleanup().unwrap();
+        std::fs::remove_dir_all(path).unwrap();
+    }
+
+    #[test]
+    fn native_cleanup_failure_reports_and_retains_its_path() {
+        let root = tempfile::tempdir().unwrap();
+        let custody = NativeInstallWorkspace::create(root.path()).unwrap();
+        let path = custody.path().to_owned();
+        std::fs::remove_dir(&path).unwrap();
+        std::fs::write(&path, "retained uncertainty").unwrap();
+        let error = custody.cleanup().unwrap_err().to_string();
+        assert!(error.contains("cleanup incomplete"));
+        assert!(error.contains(&path.display().to_string()));
+        assert_eq!(std::fs::read(&path).unwrap(), b"retained uncertainty");
+        NativeInstallWorkspace::create(root.path())
+            .unwrap()
+            .cleanup()
+            .unwrap();
+    }
+
+    #[test]
+    fn native_cancelled_archive_settles_queued_writes_before_reclamation() {
+        let root = tempfile::tempdir().unwrap();
+        let custody = NativeInstallWorkspace::create(root.path()).unwrap();
+        let path = custody.path().join("archive");
+        let file = std::fs::File::create(&path).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let blocker = tokio::task::spawn_blocking(move || {
+                entered_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            });
+            entered_rx.await.unwrap();
+            let mut file = fs::File::from_std(file);
+            // Tokio accepts this buffer while its blocking write is queued
+            // behind the occupied worker. Cancellation is then observed.
+            file.write_all(b"pending native bytes").await.unwrap();
+            let write_path = path.clone();
+            let mut settlement = tokio::spawn(async move {
+                settle_archive_file::<()>(
+                    file,
+                    &write_path,
+                    Err(VersionInstaller::cancellation_error()),
+                )
+                .await
+            });
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(30), &mut settlement)
+                    .await
+                    .is_err()
+            );
+            assert!(path.exists());
+            assert!(NativeVersionsLock::try_acquire(root.path()).is_err());
+            release_tx.send(()).unwrap();
+            blocker.await.unwrap();
+            assert!(settlement
+                .await
+                .unwrap()
+                .unwrap_err()
+                .to_string()
+                .contains("cancelled"));
+            assert_eq!(std::fs::read(&path).unwrap(), b"pending native bytes");
+            custody.cleanup().unwrap();
+            assert!(!path.exists());
+        });
     }
 
     #[test]

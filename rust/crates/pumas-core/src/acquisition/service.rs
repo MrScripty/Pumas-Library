@@ -111,6 +111,7 @@ impl AcquisitionRecord {
 #[derive(Clone)]
 pub(crate) struct AcquisitionOperation {
     record: AcquisitionRecord,
+    context: TaskContext,
 }
 
 impl AcquisitionOperation {
@@ -131,6 +132,64 @@ pub(crate) struct AcquisitionUseLease {
     operation: AcquisitionOperation,
     workspace: AcquisitionWorkspace,
     lease: Uuid,
+    context: TaskContext,
+}
+
+/// Source-neutral, exact runtime proofs. A retained row or workspace locator
+/// cannot construct either proof or reopen unresolved consumer use.
+pub(crate) struct AcquisitionUseProof(AcquisitionProof);
+pub(crate) struct AcquisitionTransferProof(AcquisitionProof);
+
+pub(crate) struct AcquisitionProof {
+    context: TaskContext,
+    store: Arc<AcquisitionStore>,
+    record: AcquisitionRecord,
+    workspace: AcquisitionWorkspace,
+}
+
+impl AcquisitionUseProof {
+    pub(crate) fn into_proof(self) -> AcquisitionProof {
+        self.0
+    }
+}
+impl AcquisitionTransferProof {
+    pub(crate) fn into_proof(self) -> AcquisitionProof {
+        self.0
+    }
+}
+
+impl AcquisitionProof {
+    pub(crate) fn record(&self) -> &AcquisitionRecord {
+        &self.record
+    }
+
+    pub(crate) fn validate_current(
+        &self,
+        store: &Arc<AcquisitionStore>,
+        current: &std::collections::BTreeMap<Uuid, AcquisitionRecord>,
+    ) -> Result<()> {
+        if !self
+            .context
+            .is_current_role(super::task_custody::TaskRole::Worker)
+            || !Arc::ptr_eq(&self.store, store)
+            || current.get(&self.record.id) != Some(&self.record)
+            || self.workspace.identity() != &self.record.workspace
+        {
+            return Err(invalid(
+                "Acquisition effect proof is stale or belongs to another store/workspace",
+            ));
+        }
+        self.validate_binding()
+    }
+
+    pub(crate) fn verify_receipts(&self) -> Result<()> {
+        self.workspace
+            .verify_receipts(&self.record.manifest, &self.record.files)
+    }
+
+    pub(crate) fn validate_binding(&self) -> Result<()> {
+        self.workspace.validate()
+    }
 }
 
 #[derive(Clone)]
@@ -185,6 +244,51 @@ impl AcquisitionService {
         self.supervisor.request_shutdown().wait().await
     }
 
+    pub(crate) fn use_proof(
+        &self,
+        context: &TaskContext,
+        lease: &AcquisitionUseLease,
+    ) -> Result<AcquisitionUseProof> {
+        if !context.shares_scope(&lease.context)
+            || !context.generation().matches(lease.context.generation())
+            || !context.is_current_role(super::task_custody::TaskRole::Worker)
+            || !matches!(lease.operation.record.phase, AcquisitionPhase::Using { lease: token } if token == lease.lease)
+        {
+            return Err(invalid(
+                "Consumer effect requires its current verified use lease",
+            ));
+        }
+        Ok(AcquisitionUseProof(AcquisitionProof {
+            context: context.clone(),
+            store: self.store.clone(),
+            record: lease.operation.record.clone(),
+            workspace: lease.workspace.clone(),
+        }))
+    }
+
+    pub(crate) fn transfer_proof(
+        &self,
+        context: &TaskContext,
+        operation: &AcquisitionOperation,
+        workspace: &AcquisitionWorkspace,
+    ) -> Result<AcquisitionTransferProof> {
+        if !context.shares_scope(&operation.context)
+            || !context.generation().matches(operation.context.generation())
+            || !context.is_current_role(super::task_custody::TaskRole::Worker)
+            || operation.record.phase != AcquisitionPhase::Transferring
+        {
+            return Err(invalid(
+                "Transfer effect requires its current transferring operation",
+            ));
+        }
+        Ok(AcquisitionTransferProof(AcquisitionProof {
+            context: context.clone(),
+            store: self.store.clone(),
+            record: operation.record.clone(),
+            workspace: workspace.clone(),
+        }))
+    }
+
     pub(crate) async fn require_schema(&self, context: &TaskContext) -> Result<()> {
         let store = self.store.clone();
         owned(
@@ -233,6 +337,7 @@ impl AcquisitionService {
         reconciliation: Option<AcquisitionReconciliation>,
     ) -> Result<AcquisitionOperation> {
         let store = self.store.clone();
+        let origin = context.clone();
         owned(context, "admit durable acquisition", move || {
             store.update_acquisitions(|records| {
                 if let Some(existing) = records.values().find(|record| record.demand == demand) {
@@ -248,7 +353,7 @@ impl AcquisitionService {
                     if !matches!(existing.phase, AcquisitionPhase::Transferring | AcquisitionPhase::FilesReady) && !reconciling {
                         return Err(invalid("Acquisition demand has unresolved or terminal consumer custody"));
                     }
-                    return Ok(AcquisitionOperation { record: existing.clone() });
+                    return Ok(AcquisitionOperation { record: existing.clone(), context: origin.clone() });
                 }
                 if records.values().any(|record| record.workspace == workspace && !matches!(record.phase, AcquisitionPhase::Adopted { .. } | AcquisitionPhase::Withdrawn)) {
                     return Err(PumasError::DownloadRootBusy);
@@ -256,7 +361,7 @@ impl AcquisitionService {
                 let record = AcquisitionRecord { id: Uuid::new_v4(), demand, manifest, workspace, phase: AcquisitionPhase::Transferring, files: Vec::new() };
                 record.validate(record.id)?;
                 records.insert(record.id, record.clone());
-                Ok(AcquisitionOperation { record })
+                Ok(AcquisitionOperation { record, context: origin.clone() })
             })
         }).await
     }
@@ -526,6 +631,13 @@ impl AcquisitionService {
         operation: AcquisitionOperation,
         workspace: AcquisitionWorkspace,
     ) -> Result<AcquisitionUseLease> {
+        if !context.shares_scope(&operation.context)
+            || !context.generation().matches(operation.context.generation())
+        {
+            return Err(invalid(
+                "Verified handoff belongs to another operation generation",
+            ));
+        }
         let seal = workspace.clone();
         let manifest = operation.record.manifest.clone();
         let files = owned(context, "seal verified acquisition file set", move || {
@@ -583,10 +695,19 @@ impl AcquisitionService {
             }
             _ => return Err(invalid("Acquisition is not ready for consumer use")),
         };
+        let mut record = operation.record;
+        record.files = files;
+        if !matches!(record.phase, AcquisitionPhase::Adopted { .. }) {
+            record.phase = AcquisitionPhase::Using { lease };
+        }
         Ok(AcquisitionUseLease {
-            operation,
+            operation: AcquisitionOperation {
+                record,
+                context: context.clone(),
+            },
             workspace,
             lease,
+            context: context.clone(),
         })
     }
 

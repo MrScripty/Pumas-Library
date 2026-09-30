@@ -3,6 +3,7 @@
 //! Model custody is an opaque partition decoded by its model-owned facade.
 //! This module never interprets model requests, statuses, or recovery policy.
 use super::service::AcquisitionRecord;
+pub(crate) use super::service::{AcquisitionProof, AcquisitionTransferProof, AcquisitionUseProof};
 use crate::metadata::{
     AtomicJsonTarget, AtomicPublication, AtomicPublishFailure, AtomicPublishFailureKind,
     AtomicPublishResult, AtomicPublishStage, StagingCleanup,
@@ -273,6 +274,29 @@ impl AcquisitionTransaction<'_> {
         let document: AcquisitionDocument = serde_json::from_value(value)?;
         document.validate()?;
         Ok(document)
+    }
+
+    /// Read both custody partitions from one document revision while this
+    /// canonical transaction excludes every cooperative store writer.
+    pub(crate) fn import_custody_partition(
+        &self,
+    ) -> Result<(Option<Value>, BTreeMap<Uuid, AcquisitionRecord>)> {
+        let Some(value) = self.target.read_json::<Value>()? else {
+            return Ok((None, BTreeMap::new()));
+        };
+        if matches!(schema(&value), Some(4 | 5)) && self.legacy_read_only {
+            return Ok((Some(value), BTreeMap::new()));
+        }
+        let document: AcquisitionDocument = serde_json::from_value(value)?;
+        document.validate()?;
+        let partition = if document.legacy.is_empty() {
+            None
+        } else {
+            let mut value: serde_json::Map<String, Value> = document.legacy.into_iter().collect();
+            value.insert("schema_version".into(), 5.into());
+            Some(Value::Object(value))
+        };
+        Ok((partition, document.acquisitions))
     }
 
     pub(crate) fn model_partition(&self) -> Result<Option<Value>> {

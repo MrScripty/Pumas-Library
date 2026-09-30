@@ -123,7 +123,7 @@ impl AcquisitionWorkspace {
         &self.locator
     }
 
-    fn validate(&self) -> Result<()> {
+    pub(crate) fn validate(&self) -> Result<()> {
         (self.held.validate)()?;
         if identity(&self.held.directory.dir_metadata()?)? != self.held.binding {
             return Err(changed());

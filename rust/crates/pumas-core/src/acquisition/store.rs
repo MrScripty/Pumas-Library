@@ -10,7 +10,7 @@ use crate::metadata::{
 use crate::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
@@ -42,8 +42,33 @@ impl AcquisitionDocument {
         if self.schema_version != SCHEMA_VERSION {
             return Err(invalid_schema());
         }
+        let mut demands = BTreeSet::new();
+        let mut active_workspaces = BTreeSet::new();
         for (id, record) in &self.acquisitions {
             record.validate(*id)?;
+            if !demands.insert((
+                record.demand.consumer.clone(),
+                record.demand.operation.clone(),
+            )) {
+                return Err(PumasError::Validation {
+                    field: "acquisition.custody".into(),
+                    message: "Acquisition demand is duplicated in the durable document".into(),
+                });
+            }
+            if matches!(
+                record.phase,
+                super::service::AcquisitionPhase::Transferring
+                    | super::service::AcquisitionPhase::FilesReady
+                    | super::service::AcquisitionPhase::Using { .. }
+            ) && !active_workspaces.insert((
+                record.workspace.root_identity.clone(),
+                record.workspace.relative_target.clone(),
+            )) {
+                return Err(PumasError::Validation {
+                    field: "acquisition.custody".into(),
+                    message: "Multiple active acquisition demands share one workspace".into(),
+                });
+            }
         }
         Ok(())
     }
@@ -322,5 +347,170 @@ fn require_durable(publication: AtomicPublishResult) -> Result<()> {
         }
         .into_error()),
         Err(failure) => Err(failure.into_error()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::acquisition::{
+        AcquisitionDemand, AcquisitionPhase, AcquisitionRecord, ArtifactFile, ArtifactManifest,
+        ArtifactRevisionEvidence, ArtifactSourceIdentity, FileVerificationRequirement,
+        RevisionStrength, VerifiedFile, WorkspaceIdentity,
+    };
+
+    fn record(
+        id: Uuid,
+        operation: &str,
+        workspace: &str,
+        phase: AcquisitionPhase,
+    ) -> AcquisitionRecord {
+        let manifest = ArtifactManifest::new(
+            ArtifactSourceIdentity::new(
+                "fixture",
+                "object",
+                ArtifactRevisionEvidence::new(
+                    "fixture.revision",
+                    "v1",
+                    RevisionStrength::Immutable,
+                )
+                .unwrap(),
+            )
+            .unwrap(),
+            vec![ArtifactFile::new(
+                "payload.bin",
+                "payload",
+                Some(1),
+                None,
+                FileVerificationRequirement::SizeAndImmutableRevision,
+            )
+            .unwrap()],
+        )
+        .unwrap();
+        let files = if matches!(
+            phase,
+            AcquisitionPhase::FilesReady
+                | AcquisitionPhase::Using { .. }
+                | AcquisitionPhase::Adopted { .. }
+        ) {
+            vec![VerifiedFile {
+                path: "payload.bin".into(),
+                bytes: 1,
+                sha256: "0".repeat(64),
+            }]
+        } else {
+            Vec::new()
+        };
+        AcquisitionRecord {
+            id,
+            demand: AcquisitionDemand {
+                consumer: "fixture.consumer".into(),
+                operation: operation.into(),
+            },
+            manifest,
+            workspace: WorkspaceIdentity {
+                root_identity: "fixture.root".into(),
+                relative_target: workspace.into(),
+            },
+            phase,
+            files,
+        }
+    }
+
+    fn document(records: Vec<AcquisitionRecord>) -> AcquisitionDocument {
+        AcquisitionDocument {
+            schema_version: SCHEMA_VERSION,
+            acquisitions: records
+                .into_iter()
+                .map(|record| (record.id, record))
+                .collect(),
+            legacy: BTreeMap::new(),
+        }
+    }
+
+    fn persisted_document_is_refused_without_rewrite(document: AcquisitionDocument) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("downloads.json");
+        let bytes = serde_json::to_vec(&document).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+
+        assert!(matches!(
+            AcquisitionStore::new(temp.path()).require_acquisition_schema(),
+            Err(PumasError::Validation { ref field, .. }) if field == "acquisition.custody"
+        ));
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+
+    #[test]
+    fn schema_six_rejects_duplicate_demand_even_when_one_row_is_using() {
+        let demand = "same-operation";
+        let document = document(vec![
+            record(
+                Uuid::from_u128(1),
+                demand,
+                "model/path",
+                AcquisitionPhase::Transferring,
+            ),
+            record(
+                Uuid::from_u128(2),
+                demand,
+                "model/path",
+                AcquisitionPhase::Using {
+                    lease: Uuid::from_u128(3),
+                },
+            ),
+        ]);
+
+        persisted_document_is_refused_without_rewrite(document);
+    }
+
+    #[test]
+    fn schema_six_rejects_distinct_active_demands_for_one_workspace() {
+        let document = document(vec![
+            record(
+                Uuid::from_u128(1),
+                "first-operation",
+                "model/path",
+                AcquisitionPhase::Transferring,
+            ),
+            record(
+                Uuid::from_u128(2),
+                "second-operation",
+                "model/path",
+                AcquisitionPhase::Using {
+                    lease: Uuid::from_u128(3),
+                },
+            ),
+        ]);
+
+        persisted_document_is_refused_without_rewrite(document);
+    }
+
+    #[test]
+    fn terminal_history_may_share_a_workspace_with_one_active_successor() {
+        let document = document(vec![
+            record(
+                Uuid::from_u128(1),
+                "adopted-operation",
+                "model/path",
+                AcquisitionPhase::Adopted {
+                    lease: Uuid::from_u128(3),
+                },
+            ),
+            record(
+                Uuid::from_u128(2),
+                "withdrawn-operation",
+                "model/path",
+                AcquisitionPhase::Withdrawn,
+            ),
+            record(
+                Uuid::from_u128(4),
+                "successor-operation",
+                "model/path",
+                AcquisitionPhase::Transferring,
+            ),
+        ]);
+
+        document.validate().unwrap();
     }
 }

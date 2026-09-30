@@ -2,7 +2,7 @@
 
 **Plan status:** `Active` — Q1 is admitted on the current accepted `main` base; AQ-HTTP remains not ready.
 **Objective acceptance status:** `pending`.
-**Current phase:** Q1 manifest/HTTP protocol and normal Hugging Face consumer slice implemented and under verification. The shared durable handoff owner, llama.cpp consumer, retained-store evolution, desktop path, and required real-source qualification remain pending.
+**Current phase:** Q1 manifest/HTTP protocol and normal Hugging Face consumer slice implemented and under verification. The existing GitHub client now has an additive exact-tag resolver that maps live publisher asset identity/digest metadata to a verified manifest while leaving the public/cache DTO unchanged. A native custody proposal is under repair on an isolated worker branch after independent review found shutdown, metadata-coordination, pending-file-I/O, and cleanup-error gaps. The resolver is not yet consumed by the native installer, and shared durable handoff ownership, retained-store evolution, desktop path, and required real-source qualification remain pending.
 **Exactly one next slice:** Continue **Q1 — shared HTTP acquisition through the existing Hugging Face and native-runtime consumers.**
 **Canonical plan path:** `docs/plans/artifact-acquisition/plan.md`.
 **Owner:** Pumas acquisition integration. The repository owner assigns the implementation and integration roles when admitting source work.

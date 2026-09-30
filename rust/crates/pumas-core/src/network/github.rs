@@ -7,6 +7,10 @@
 //! - Rate limit handling
 
 use super::web_source::{CacheStrategy, WebSource, WebSourceId};
+use crate::acquisition::{
+    select_github_release_asset, GitHubReleaseAssetMetadata, GitHubReleaseAssetResolutionError,
+    GitHubReleaseAssetSelection,
+};
 use crate::config::{AppId, NetworkConfig};
 use crate::models::{CacheStatus, GitHubReleasesCache};
 use crate::network::client::HttpClient;
@@ -27,6 +31,7 @@ use tokio::fs;
 use tokio::sync::Notify;
 use tokio::sync::{watch, Mutex, RwLock};
 use tracing::{debug, info, warn};
+use url::Url;
 
 // Re-export for convenience
 pub use crate::models::{GitHubAsset, GitHubRelease};
@@ -37,6 +42,93 @@ struct StoredReleasesCache {
     snapshot: GitHubReleasesCache,
     #[serde(default)]
     listing_complete: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct GitHubReleaseAssetResponse {
+    tag_name: String,
+    assets: Vec<GitHubReleaseAssetApiRecord>,
+}
+
+#[derive(serde::Deserialize)]
+struct GitHubReleaseAssetApiRecord {
+    id: Option<u64>,
+    name: String,
+    size: u64,
+    #[serde(rename = "browser_download_url")]
+    download_url: String,
+    digest: Option<String>,
+}
+
+fn build_release_tag_url(
+    api_base: &str,
+    repository: &str,
+    tag: &str,
+) -> std::result::Result<Url, GitHubReleaseAssetResolutionError> {
+    if tag.is_empty() || tag == "." || tag == ".." {
+        return Err(GitHubReleaseAssetResolutionError::EmptyTag);
+    }
+    let repository_parts: Vec<_> = repository.split('/').collect();
+    if repository_parts.len() != 2
+        || repository_parts.iter().any(|part| {
+            part.is_empty()
+                || *part == "."
+                || *part == ".."
+                || !part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+        })
+    {
+        return Err(GitHubReleaseAssetResolutionError::InvalidRepository);
+    }
+
+    let mut url =
+        Url::parse(api_base).map_err(|_| GitHubReleaseAssetResolutionError::InvalidApiBase)?;
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|_| GitHubReleaseAssetResolutionError::InvalidApiBase)?;
+        segments.pop_if_empty();
+        segments
+            .push("repos")
+            .push(repository_parts[0])
+            .push(repository_parts[1])
+            .push("releases")
+            .push("tags")
+            .push(tag);
+    }
+    Ok(url)
+}
+
+fn github_rate_limit_error(response: &reqwest::Response) -> Option<PumasError> {
+    let status = response.status();
+    if !matches!(
+        status,
+        StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS
+    ) {
+        return None;
+    }
+    let retry_after = response
+        .headers()
+        .get("Retry-After")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .or_else(|| {
+            response
+                .headers()
+                .get("X-RateLimit-Reset")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+                .and_then(|reset| {
+                    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+                    Some(reset.saturating_sub(now))
+                })
+        });
+    warn!("GitHub rate limited ({status}), retry after: {retry_after:?} seconds");
+    Some(PumasError::RateLimited {
+        service: "GitHub".to_string(),
+        retry_after_secs: retry_after,
+    })
 }
 
 /// Cache for GitHub releases.
@@ -412,6 +504,7 @@ where
 /// GitHub API client.
 pub struct GitHubClient {
     http: Arc<HttpClient>,
+    api_base: String,
     cache: ReleasesCache,
     /// Whether we're currently fetching releases.
     is_fetching: AtomicBool,
@@ -443,23 +536,23 @@ impl LlamaCppReleaseVariant {
 impl GitHubClient {
     /// Create a new GitHub client.
     pub fn new(cache_dir: PathBuf) -> Result<Self> {
-        let http = HttpClient::new()?;
-        Ok(Self {
-            http: Arc::new(http),
-            cache: ReleasesCache::new(cache_dir, NetworkConfig::GITHUB_RELEASES_TTL),
-            is_fetching: AtomicBool::new(false),
-            fetch_lock: RwLock::new(()),
-            pending_fetches: Mutex::new(HashMap::new()),
-            #[cfg(test)]
-            follower_joined: Notify::new(),
-        })
+        Self::with_config(
+            cache_dir,
+            NetworkConfig::GITHUB_RELEASES_TTL,
+            NetworkConfig::GITHUB_API_BASE.to_string(),
+        )
     }
 
     /// Create a new GitHub client with custom TTL.
     pub fn with_ttl(cache_dir: PathBuf, ttl: Duration) -> Result<Self> {
+        Self::with_config(cache_dir, ttl, NetworkConfig::GITHUB_API_BASE.to_string())
+    }
+
+    fn with_config(cache_dir: PathBuf, ttl: Duration, api_base: String) -> Result<Self> {
         let http = HttpClient::new()?;
         Ok(Self {
             http: Arc::new(http),
+            api_base: api_base.trim_end_matches('/').to_string(),
             cache: ReleasesCache::new(cache_dir, ttl),
             is_fetching: AtomicBool::new(false),
             fetch_lock: RwLock::new(()),
@@ -744,6 +837,101 @@ impl GitHubClient {
         Ok(releases.into_iter().find(|r| r.tag_name == tag))
     }
 
+    /// Resolve one release asset from a fresh GitHub API representation and
+    /// require publisher identity and SHA-256 evidence before acquisition.
+    /// The established release/cache DTO intentionally remains unchanged.
+    pub async fn resolve_release_asset(
+        &self,
+        repo: &str,
+        tag: &str,
+        asset_name: &str,
+    ) -> std::result::Result<GitHubReleaseAssetSelection, GitHubReleaseAssetResolutionError> {
+        let url = build_release_tag_url(&self.api_base, repo, tag)?;
+        let retry_config = RetryConfig::new()
+            .with_max_attempts(3)
+            .with_base_delay(Duration::from_secs(2));
+        let http = self.http.clone();
+        let url_string = url.to_string();
+
+        let (result, stats) = retry_async(
+            &retry_config,
+            || {
+                let http = http.clone();
+                let url = url_string.clone();
+                async move {
+                    let headers = vec![(
+                        "Accept".to_string(),
+                        "application/vnd.github.v3+json".to_string(),
+                    )];
+                    http.get_with_headers(&url, &headers).await
+                }
+            },
+            |error| error.is_retryable(),
+        )
+        .await;
+
+        if stats.attempts > 1 {
+            debug!(
+                "GitHub release asset resolution succeeded after {} attempts",
+                stats.attempts
+            );
+        }
+
+        let response = result?;
+        let status = response.status();
+        if let Some(error) = github_rate_limit_error(&response) {
+            return Err(GitHubReleaseAssetResolutionError::Api(error));
+        }
+        if !status.is_success() {
+            return Err(GitHubReleaseAssetResolutionError::Api(
+                PumasError::GitHubApi {
+                    message: format!("GitHub API returned {status}"),
+                    status_code: Some(status.as_u16()),
+                },
+            ));
+        }
+        let release: GitHubReleaseAssetResponse =
+            response.json().await.map_err(|error| PumasError::Json {
+                message: format!("Failed to parse GitHub release asset metadata: {error}"),
+                source: None,
+            })?;
+        if release.tag_name != tag {
+            return Err(GitHubReleaseAssetResolutionError::TagMismatch {
+                requested: tag.to_string(),
+                returned: release.tag_name,
+            });
+        }
+
+        let mut matching = release
+            .assets
+            .into_iter()
+            .filter(|asset| asset.name == asset_name);
+        let asset =
+            matching
+                .next()
+                .ok_or_else(|| GitHubReleaseAssetResolutionError::AssetNotFound {
+                    tag: tag.to_string(),
+                    asset_name: asset_name.to_string(),
+                })?;
+        if matching.next().is_some() {
+            return Err(GitHubReleaseAssetResolutionError::AmbiguousAsset {
+                tag: tag.to_string(),
+                asset_name: asset_name.to_string(),
+            });
+        }
+
+        Ok(select_github_release_asset(
+            repo,
+            &GitHubReleaseAssetMetadata {
+                id: asset.id,
+                name: asset.name,
+                size: asset.size,
+                download_url: asset.download_url,
+                digest: asset.digest,
+            },
+        )?)
+    }
+
     /// Get cache status for a repository.
     pub async fn get_cache_status(&self, repo: &str) -> CacheStatus {
         self.cache
@@ -857,10 +1045,7 @@ impl GitHubClient {
         let per_page = NetworkConfig::GITHUB_RELEASES_PER_PAGE;
         let url = format!(
             "{}/repos/{}/releases?per_page={}&page={}",
-            NetworkConfig::GITHUB_API_BASE,
-            repo,
-            per_page,
-            page
+            self.api_base, repo, per_page, page
         );
 
         let retry_config = RetryConfig::new()
@@ -896,36 +1081,8 @@ impl GitHubClient {
 
         let response = result?;
         let status = response.status();
-
-        if status == StatusCode::FORBIDDEN || status == StatusCode::TOO_MANY_REQUESTS {
-            // Rate limited - extract retry information from headers
-            let retry_after = response
-                .headers()
-                .get("Retry-After")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse::<u64>().ok())
-                // Also check X-RateLimit-Reset as fallback
-                .or_else(|| {
-                    response
-                        .headers()
-                        .get("X-RateLimit-Reset")
-                        .and_then(|v| v.to_str().ok())
-                        .and_then(|s| s.parse::<u64>().ok())
-                        .and_then(|reset| {
-                            let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
-                            Some(reset.saturating_sub(now))
-                        })
-                });
-
-            warn!(
-                "GitHub rate limited ({}), retry after: {:?} seconds",
-                status, retry_after
-            );
-
-            return Err(PumasError::RateLimited {
-                service: "GitHub".to_string(),
-                retry_after_secs: retry_after,
-            });
+        if let Some(error) = github_rate_limit_error(&response) {
+            return Err(error);
         }
 
         if !status.is_success() {
@@ -1286,6 +1443,87 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let client = GitHubClient::new(temp_dir.path().to_path_buf()).unwrap();
         (client, temp_dir)
+    }
+
+    #[tokio::test]
+    async fn release_asset_resolution_uses_fresh_metadata_and_keeps_ephemeral_url_out_of_manifest()
+    {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let root = TempDir::new().unwrap();
+        let client = GitHubClient::with_config(
+            root.path().to_path_buf(),
+            Duration::from_secs(60),
+            format!("http://{address}/api"),
+        )
+        .unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            loop {
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                request.extend_from_slice(&chunk[..read]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+
+            let body = format!(
+                r#"{{"tag_name":"v1.2","assets":[{{"id":42,"name":"server.tar.gz","size":17,"browser_download_url":"https://github.com/org/repo/releases/download/v1.2/server.tar.gz?sig=ephemeral","digest":"sha256:{}"}}]}}"#,
+                "a".repeat(64)
+            );
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            String::from_utf8(request).unwrap()
+        });
+
+        let selection = client
+            .resolve_release_asset("org/repo", "v1.2", "server.tar.gz")
+            .await
+            .unwrap();
+        let request = server.await.unwrap();
+
+        assert!(request.starts_with("GET /api/repos/org/repo/releases/tags/v1.2 HTTP/1.1"));
+        assert_eq!(selection.manifest().source().source_id(), "org/repo");
+        assert_eq!(selection.manifest().files()[0].source_key(), "42");
+        assert_eq!(selection.manifest().files()[0].expected_size(), Some(17));
+        assert!(selection.download_url().contains("sig=ephemeral"));
+        assert!(!serde_json::to_string(selection.manifest())
+            .unwrap()
+            .contains("ephemeral"));
+    }
+
+    #[test]
+    fn release_asset_resolution_encodes_tag_as_one_path_segment() {
+        let url = build_release_tag_url(
+            "https://api.github.com",
+            "ggml-org/llama.cpp",
+            "release/candidate",
+        )
+        .unwrap();
+        assert!(url
+            .as_str()
+            .ends_with("/repos/ggml-org/llama.cpp/releases/tags/release%2Fcandidate"));
+        assert!(matches!(
+            build_release_tag_url("https://api.github.com", "owner/repo/extra", "v1"),
+            Err(GitHubReleaseAssetResolutionError::InvalidRepository)
+        ));
     }
 
     #[test]

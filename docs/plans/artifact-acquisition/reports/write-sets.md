@@ -4,17 +4,18 @@ These are the admitted exact paths/closed path families. The actual source files
 
 ## Q1: one HTTP acquisition owner with real consumers
 
-**Canonical module paths:** `rust/crates/pumas-core/src/acquisition/{mod.rs,manifest.rs,http.rs}` currently hold validated source-neutral selections and the HTTP representation/body-streaming protocol. The remaining Q1 design still needs one durable transfer owner and capability workspace; place those with the canonical module rather than creating another downloader. Source-reader adaptation may remain in that module or a focused `acquisition/sources/` child if the actual design supports it.
+**Canonical module paths:** `rust/crates/pumas-core/src/acquisition/{mod.rs,manifest.rs,http.rs}` currently hold validated source-neutral selections and the HTTP representation/body-streaming protocol. The GitHub release adapter is `acquisition/github_release.rs`, with its fresh asset-metadata resolver in the existing `network/github.rs` owner; the public/cache release DTO remains unchanged. The adapter maps publisher asset identity/digest evidence into a verified manifest while keeping the retrieval URL ephemeral. The remaining Q1 design still needs one durable transfer owner and capability workspace; place those with the canonical module rather than creating another downloader. Source-reader adaptation may remain in that module or a focused `acquisition/sources/` child if the actual design supports it.
 
 **Existing owners allowed to change:**
-- `rust/crates/pumas-core/src/lib.rs`, `network/{mod.rs,download.rs}`, `model_library/hf/{mod.rs,download.rs,lifecycle.rs,types.rs,metadata.rs}`;
+- `rust/crates/pumas-core/src/lib.rs`, `network/{mod.rs,download.rs,github.rs}`, `models/github.rs`, `model_library/hf/{mod.rs,download.rs,lifecycle.rs,types.rs,metadata.rs}`;
+- `rust/crates/pumas-core/src/acquisition/{mod.rs,manifest.rs,http.rs}` and focused source adapters under that module when the selected source evidence requires them;
 - `rust/crates/pumas-core/src/model_library/{download_store.rs,download_recovery.rs}` only for the extracted authority and explicit supported migration;
 - `rust/crates/pumas-core/src/tests.rs` when a builder/reopen fixture depends on the selected completion-evidence invariant;
 - directly affected core `api/hf.rs`, `api/state.rs` and current model-importer/intent completion call sites, selected from the actual producer/consumer trace before editing;
-- `rust/crates/pumas-app-manager/src/version_manager/{installer.rs,ollama.rs,progress.rs}` for the acquisition bridge and transfer progress, not installed-unit identity migration;
+- `rust/crates/pumas-app-manager/src/version_manager/{installer.rs,ollama.rs,progress.rs,state.rs}` for the acquisition bridge and transfer progress, not installed-unit identity migration;
 - current core atomic JSON/capability-filesystem modules only where the same selected invariant requires a targeted change, never as an unrelated filesystem rewrite.
 
-**Tests:** proposed `rust/crates/pumas-core/tests/artifact_acquisition.rs`, `rust/crates/pumas-app-manager/tests/artifact_acquisition_install.rs`, plus existing co-located HF lifecycle/recovery/installer regression tests. Fixtures must reach the owner under test with independent expected byte/effect outcomes.
+**Tests:** proposed `rust/crates/pumas-core/tests/artifact_acquisition.rs`, `rust/crates/pumas-app-manager/tests/artifact_acquisition_install.rs`, plus existing co-located GitHub metadata, HF lifecycle/recovery, and installer regression tests. Fixtures must reach the owner under test with independent expected byte/effect outcomes.
 
 **Serial adjacent writes:** `rust/crates/pumas-rpc/src/contract.rs`, `contract/export.rs`, affected HF/version/status handlers, `electron/src/{preload.ts,rpc-method-registry.ts,ipc-validation.ts}`, actual corresponding frontend download/install/source views and generated DTOs. Enumerate outputs from the actual exporter rather than guess or edit generated files manually. Reuse the existing model/native UI; this is not a dashboard redesign.
 

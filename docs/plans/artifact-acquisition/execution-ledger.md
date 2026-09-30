@@ -94,6 +94,14 @@ Created this acquisition plan, a proposed shared contract, gate record, source a
 - A read-only architecture investigation of `c3052583` confirmed the supervisor extraction remains necessary preparation and does not create a shared durable owner. Its source trace identified the v4 migration-on-load, hidden custody and deletion-authority coupling, GitHub exact-tag/asset bridge, separate HF/native shutdown composition, and public constructors that need explicit lifecycle dispositions. The full write-set recommendation is retained in its handoff and will be narrowed to the exact production changes and tests before the next edits.
 - User-owned untracked `docs/breif/future.md` remains untouched. No live retained store, installed environment, model, or release was opened or changed.
 
+### Exact next worker admission — HF consumer of the durable owner
+
+- Parent milestone: `work/acquisition-q1-http` / draft PR #7, targeting `main`; exact worker base: `efc4d20bde6ae426c96f6a5fcb55ce0022788d09`.
+- Worker role: one GPT-6.1 Sol High implementation writer for the canonical acquisition lifecycle/store/workspace and the existing HF consumer cutover. It is a Q1 sub-slice; it does not open AQ-HTTP.
+- Exact primary paths, test requirements and exclusions are recorded in [the Q1 write-set admission](reports/write-sets.md#exact-next-worker-admission--durable-acquisition-owner-and-hugging-face-cutover). The shared semantic contract and gate/plan records remain integrator-owned; no other writer may change the selected persistence schema or migration while this proposal is active.
+- Required proof is the actual normal HF workflow through the acquisition owner, versioned store migration/reopen against disposable supported fixtures, all hidden custody/Pending refusal, lease retention through importer cleanup, concurrent writer isolation, cancellation/restart and shutdown evidence. A helper-only service, mock consumer, or passing unit test is not sufficient for this handoff.
+- After this handoff is reviewed and integrated, the next Q1 sub-slice is the existing exact-tag llama.cpp installer using that same service and verified-input lease, with shared RPC composition and consumer-before-owner shutdown. AQ-HTTP remains blocked until both consumers and the plan acceptance matrix are satisfied.
+
 ### Coding-Standards route for the next shared-custody slice
 
 - Fresh route snapshot `snapshot:v1:2ea2f5e4-70d3-4a32-97c6-13a93989fb3f` selected 34 standards with zero unresolved fact categories after explicitly marking the unrelated framework fact known-absent. The first route omitted that fact and returned one required unresolved category; correcting the route preserved the same change scope.

@@ -23,6 +23,22 @@ The isolated native-custody worker proposal is complete and integrated from `wor
 
 **Serial adjacent writes:** `rust/crates/pumas-rpc/src/contract.rs`, `contract/export.rs`, affected HF/version/status handlers, `electron/src/{preload.ts,rpc-method-registry.ts,ipc-validation.ts}`, actual corresponding frontend download/install/source views and generated DTOs. Enumerate outputs from the actual exporter rather than guess or edit generated files manually. Reuse the existing model/native UI; this is not a dashboard redesign.
 
+### Exact next worker admission — durable acquisition owner and Hugging Face cutover
+
+Parent milestone: `work/acquisition-q1-http`, draft PR #7, target `main`. The worker starts from the exact primary documentation head `efc4d20bde6ae426c96f6a5fcb55ce0022788d09`, in a task-owned branch/worktree. The primary integrator owns PR history, the shared semantic contract, gate state, later native composition, review and final candidate evidence.
+
+Primary worker write set:
+
+- `rust/crates/pumas-core/src/acquisition/{mod.rs,http.rs,task_custody.rs,service.rs,store.rs,workspace.rs}`; the last three are new canonical acquisition modules.
+- `rust/crates/pumas-core/src/model_library/{download_store.rs,download_recovery.rs,mutation_authority.rs,library.rs,mod.rs}`.
+- `rust/crates/pumas-core/src/model_library/hf/{mod.rs,download.rs,lifecycle.rs,acquisition_source.rs,types.rs}`.
+- `rust/crates/pumas-core/src/{lib.rs,api/builder.rs,api/state.rs,api/hf.rs}`.
+- Co-located regressions in those files and new `rust/crates/pumas-core/tests/artifact_acquisition.rs` when a public composition/reopen path is required.
+
+The worker implements one durable neutral acquisition owner/store and makes the ordinary HF path consume its verified-file handoff through awaited import/finalization. It moves the v4/v5 compatibility boundary under that same writer and preserves all current model snapshots, hidden admission attempts, revocations, queues, release proofs and quarantines. The model mutation authority must read the canonical store's custody view. One store file/transaction authority remains; no second transfer writer, model marker initializer in neutral workspace code, inferred v4/v5 compatibility, cross-store exactly-once claim, or new public wire representation is allowed. The worker does not modify `docs/contracts/artifact-acquisition.md`, plan/gate/ledger files, RPC/generated/frontend outputs, `pumas-app-manager`, Cargo manifests/lockfiles, or package/S3/runtime/adapter state. Report any discovered contract or scope change before editing outside this set.
+
+Required handoff evidence: exact branch/base/head and path list; schema 4/5 representative fixture inventory and migration/reopen proof without live roots; single-writer and concurrent-instance tests; preservation/refusal of every hidden custody and Pending-cleanup state; controlled HTTP acquisition through the actual HF workflow; cancellation, dropped observer, shutdown and lease-through-import cleanup; consumer commit/reopen settlement behavior; focused store/recovery/HF/acquisition tests; `pumas-library` Clippy, no-default-features and formatting; and limitations separate from mocks/local fixtures. This HF-only vertical cutover is not AQ-HTTP acceptance; native llama.cpp must later consume the same service on the same PR before that gate can be considered.
+
 **Docs:** the canonical shared contract, acquisition plan records, bounded handoffs in the existing HF/Rust remediation and upstream-runtime plans, and current architecture/development documentation where behavior has landed. Preserve the `docs/breif` path spelling; do not rename unrelated source-intent files.
 
 **Forbidden:** runtime installation-ID/profile migration, new model-adapter registry, package dependency reinterpretation, arbitrary source/plugin execution, consumer data deletion, claims of completed Pending replay, and concurrent second writers to the same transfer state.

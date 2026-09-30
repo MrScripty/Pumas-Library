@@ -306,11 +306,15 @@ impl HuggingFaceClient {
             client,
             download_client,
             cache_dir,
-            downloads,
+            downloads: downloads.clone(),
             download_revision,
             download_updates,
-            download_publications,
-            download_tasks: Arc::new(DownloadTaskOwner::new()),
+            download_publications: download_publications.clone(),
+            download_tasks: Arc::new(DownloadTaskOwner::new_with_finalizer({
+                let downloads = downloads.clone();
+                let publications = download_publications.clone();
+                move || download::project_download_shutdown(downloads, publications)
+            })),
             owns_lifecycle: true,
             destination_executions: Arc::new(DestinationExecutionOwner::new()),
             dest_locks: Arc::new(RwLock::new(HashMap::new())),
@@ -493,11 +497,7 @@ impl HuggingFaceClient {
 impl Drop for HuggingFaceClient {
     fn drop(&mut self) {
         if self.owns_lifecycle {
-            let downloads = self.downloads.clone();
-            let publications = self.download_publications.clone();
-            self.download_tasks.request_shutdown(move || {
-                download::project_download_shutdown(downloads, publications)
-            });
+            self.download_tasks.request_shutdown();
         }
     }
 }

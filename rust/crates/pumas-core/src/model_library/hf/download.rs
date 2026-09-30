@@ -2362,11 +2362,7 @@ impl HuggingFaceClient {
     /// Permanently close download admission and observe owned work to completion.
     /// Cancelling one waiter does not cancel the shared drain or its result.
     pub async fn shutdown_downloads(&self) -> Result<()> {
-        let downloads = self.downloads.clone();
-        let publications = self.download_publications.clone();
-        self.download_tasks
-            .shutdown(move || project_download_shutdown(downloads, publications))
-            .await
+        self.download_tasks.shutdown().await
     }
 
     async fn reconcile_download_reads(&self) {
@@ -3422,12 +3418,11 @@ impl HuggingFaceClient {
         let (admission_completed, admission_completion) = tokio::sync::watch::channel(false);
         let admission_identity = super::lifecycle::PendingAdmissionIdentity {
             destination: destination.identity(),
-            repo_id: request.repo_id.clone(),
-            revision: revision.clone(),
-            files: files
-                .iter()
-                .map(|file| (file.filename.clone(), file.size, file.sha256.clone()))
-                .collect(),
+            selection: super::acquisition_source::manifest_for_download(
+                &request.repo_id,
+                &revision,
+                &files,
+            )?,
         };
         let installed = {
             let downloads = self.downloads.write().await;
@@ -5624,12 +5619,11 @@ impl HuggingFaceClient {
         if let RecoveryLaunchPlan::Existing { download_id } = &launch_plan {
             let admission_identity = super::lifecycle::PendingAdmissionIdentity {
                 destination: verified.destination.identity(),
-                repo_id: verified.repo_id.clone(),
-                revision: DownloadRevision::legacy_main(),
-                files: files
-                    .iter()
-                    .map(|file| (file.filename.clone(), file.size, file.sha256.clone()))
-                    .collect(),
+                selection: super::acquisition_source::manifest_for_download(
+                    &verified.repo_id,
+                    &DownloadRevision::legacy_main(),
+                    &files,
+                )?,
             };
             let (admission_completed, admission_completion) = tokio::sync::watch::channel(false);
             let transition_download_id = download_id.clone();
@@ -15076,7 +15070,8 @@ mod tests {
                 .unwrap()
                 .unwrap();
             let weak_client = Arc::downgrade(&client);
-            let weak_owner = Arc::downgrade(&client.download_tasks);
+            // The HF facade owns model policy; its scope owns the actual drain.
+            let weak_owner = Arc::downgrade(&**client.download_tasks);
             if explicit_shutdown {
                 let shutdown_client = client.clone();
                 let shutdown =

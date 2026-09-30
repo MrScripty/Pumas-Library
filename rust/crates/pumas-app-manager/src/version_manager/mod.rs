@@ -91,6 +91,35 @@ async fn path_exists(path: &Path) -> Result<bool> {
         .map_err(|err| PumasError::io_with_path(err, path))
 }
 
+type InstallationTask = tokio::task::JoinHandle<std::result::Result<(), String>>;
+type InstallationShutdown = futures::future::Shared<
+    futures::future::BoxFuture<'static, std::result::Result<(), Arc<String>>>,
+>;
+
+#[derive(Default)]
+struct InstallationTasks {
+    tasks: Vec<InstallationTask>,
+    failures: Vec<String>,
+}
+
+impl InstallationTasks {
+    fn harvest_finished(&mut self) {
+        use futures::FutureExt;
+        for mut task in std::mem::take(&mut self.tasks) {
+            if task.is_finished() {
+                match (&mut task).now_or_never() {
+                    Some(Ok(Ok(()))) => {}
+                    Some(Ok(Err(error))) => self.failures.push(error),
+                    Some(Err(error)) => self.failures.push(error.to_string()),
+                    None => self.tasks.push(task),
+                }
+            } else {
+                self.tasks.push(task);
+            }
+        }
+    }
+}
+
 async fn wait_for_install_cancel(cancel_flag: Arc<AtomicBool>) {
     loop {
         if cancel_flag.load(Ordering::SeqCst) {
@@ -162,6 +191,8 @@ pub struct VersionManager {
     torch_control: Arc<installer::TorchInstallControl>,
     torch_cleanup: Arc<installer::TorchCleanupTasks>,
     torch_shutting_down: Arc<AtomicBool>,
+    installation_tasks: Arc<std::sync::Mutex<InstallationTasks>>,
+    installation_shutdown: Arc<Mutex<Option<InstallationShutdown>>>,
     #[cfg(test)]
     torch_admission_pause: Option<Arc<TorchAdmissionPause>>,
     torch_previews: torch_preview::TorchPreviews,
@@ -301,6 +332,8 @@ impl VersionManager {
             torch_control: Arc::new(installer::TorchInstallControl::new()),
             torch_cleanup: Arc::new(installer::TorchCleanupTasks::default()),
             torch_shutting_down: Arc::new(AtomicBool::new(false)),
+            installation_tasks: Arc::new(std::sync::Mutex::new(InstallationTasks::default())),
+            installation_shutdown: Arc::new(Mutex::new(None)),
             #[cfg(test)]
             torch_admission_pause: None,
             torch_previews: Arc::new(Mutex::new(Default::default())),
@@ -699,7 +732,9 @@ impl VersionManager {
             return Ok(false);
         }
 
-        if self.app_id == AppId::Torch && !self.torch_control.request_cancel() {
+        if matches!(self.app_id, AppId::Torch | AppId::LlamaCpp)
+            && !self.torch_control.request_cancel()
+        {
             return Ok(false);
         }
 
@@ -717,28 +752,94 @@ impl VersionManager {
         Ok(true)
     }
 
-    /// Stop admitting Torch cleanup work and wait for the current attempt and
-    /// every cleanup task owned by this manager before server shutdown ends.
+    /// Close admission and drain every supported installation. A retained
+    /// receipt survives cancelled shutdown waiters and preserves terminal failures.
+    ///
+    /// Installation failures, task panics and cleanup errors are returned after
+    /// draining and remain observable on repeated calls. Publication that already
+    /// won the cancellation race is allowed to finish. Owners must await this
+    /// before shutting down the Tokio runtime.
+    pub async fn shutdown_installations(&self) -> Result<()> {
+        use futures::FutureExt;
+        let completion = {
+            let mut shutdown = self.installation_shutdown.lock().await;
+            if let Some(completion) = &*shutdown {
+                completion.clone()
+            } else {
+                {
+                    let _installing = self.installing_tag.lock().await;
+                    self.torch_shutting_down.store(true, Ordering::SeqCst);
+                }
+                let manager = self.clone();
+                let worker =
+                    tokio::spawn(async move {
+                        // Cancellation itself may wait for progress state. Keep
+                        // it inside the retained worker, so dropping a waiter
+                        // cannot stop an already-started shutdown.
+                        let mut errors = Vec::new();
+                        if let Err(error) = manager.cancel_installation().await {
+                            errors.push(error.to_string());
+                        }
+                        let _install_guard = manager.install_lock.lock().await;
+                        let registered =
+                            std::mem::take(&mut *manager.installation_tasks.lock().map_err(
+                                |_| Arc::new("Installation task registry poisoned".into()),
+                            )?);
+                        errors.extend(registered.failures);
+                        for task in registered.tasks {
+                            match task.await {
+                                Ok(Ok(())) => {}
+                                Ok(Err(error)) => errors.push(error),
+                                Err(error) => errors.push(error.to_string()),
+                            }
+                        }
+                        let _lifecycle_guard = manager.lifecycle_lock.lock().await;
+                        if let Err(error) = manager.state.write().await.shutdown_mutations().await {
+                            errors.push(error.to_string());
+                        }
+                        if manager.app_id == AppId::Torch {
+                            manager.torch_cleanup.close();
+                            if let Err(error) = manager.torch_cleanup.drain().await {
+                                errors.push(error.to_string());
+                            }
+                            if let Err(error) = manager.torch_cleanup.drain_child_slots().await {
+                                errors.push(error.to_string());
+                            }
+                        }
+                        if errors.is_empty() {
+                            Ok(())
+                        } else {
+                            Err(Arc::new(errors.join("; ")))
+                        }
+                    });
+                let completion = async move {
+                    worker
+                        .await
+                        .unwrap_or_else(|error| Err(Arc::new(error.to_string())))
+                }
+                .boxed()
+                .shared();
+                *shutdown = Some(completion.clone());
+                completion
+            }
+        };
+        completion
+            .await
+            .map_err(|error| PumasError::InstallationFailed {
+                message: (*error).clone(),
+            })
+    }
+
+    /// Compatibility entry point; drains every supported runtime.
     pub async fn shutdown_torch_cleanup(&self) -> Result<()> {
-        if self.app_id != AppId::Torch {
-            return Ok(());
-        }
-        {
-            let _installing = self.installing_tag.lock().await;
-            self.torch_shutting_down.store(true, Ordering::SeqCst);
-        }
-        let _ = self.cancel_installation().await?;
-        let _install_guard = self.install_lock.lock().await;
-        self.torch_cleanup.close();
-        let tasks = self.torch_cleanup.drain().await;
-        let children = self.torch_cleanup.drain_child_slots().await;
-        tasks?;
-        children
+        self.shutdown_installations().await
     }
 
     /// Install a version with progress channel.
     ///
     /// Returns a channel receiver for progress updates.
+    /// Dropping the receiver does not cancel admitted work; use cancellation or
+    /// `shutdown_installations` to settle the manager's owned installation.
     pub async fn install_version(&self, tag: &str) -> Result<mpsc::Receiver<ProgressUpdate>> {
         self.install_version_with_preview(tag, None).await
     }
@@ -766,9 +867,9 @@ impl VersionManager {
 
         // Acquire install lock
         let install_guard = self.install_lock.clone().lock_owned().await;
-        if self.app_id == AppId::Torch && self.torch_shutting_down.load(Ordering::SeqCst) {
+        if self.torch_shutting_down.load(Ordering::SeqCst) {
             return Err(PumasError::InstallationFailed {
-                message: "Torch version manager is shutting down".into(),
+                message: "Version manager is shutting down".into(),
             });
         }
         // Release lookup and package resolution are part of installation work for
@@ -784,9 +885,9 @@ impl VersionManager {
             pause.reached.notify_one();
             pause.resume.acquire().await.unwrap().forget();
         }
-        if self.app_id == AppId::Torch && self.torch_shutting_down.load(Ordering::SeqCst) {
+        if self.torch_shutting_down.load(Ordering::SeqCst) {
             return Err(PumasError::InstallationFailed {
-                message: "Torch version manager is shutting down".into(),
+                message: "Version manager is shutting down".into(),
             });
         }
         let torch_selection = if self.app_id == AppId::Torch {
@@ -831,15 +932,24 @@ impl VersionManager {
 
         // Commit admission under the same lock used by cancellation. Shutdown
         // may begin during release resolution, before an installing tag exists.
+        let mut installing = self.installing_tag.lock().await;
+        // Registration is part of admission. A poisoned registry cannot leave
+        // a task running without its completion capability.
+        let mut registered =
+            self.installation_tasks
+                .lock()
+                .map_err(|_| PumasError::InstallationFailed {
+                    message: "Installation task registry poisoned".into(),
+                })?;
+        registered.harvest_finished();
         {
-            let mut installing = self.installing_tag.lock().await;
-            if self.app_id == AppId::Torch && self.torch_shutting_down.load(Ordering::SeqCst) {
+            if self.torch_shutting_down.load(Ordering::SeqCst) {
                 return Err(PumasError::InstallationFailed {
-                    message: "Torch version manager is shutting down".into(),
+                    message: "Version manager is shutting down".into(),
                 });
             }
             self.cancel_flag.store(false, Ordering::SeqCst);
-            if self.app_id == AppId::Torch {
+            if matches!(self.app_id, AppId::Torch | AppId::LlamaCpp) {
                 self.torch_control.start();
             }
             *installing = Some(tag.to_string());
@@ -857,7 +967,8 @@ impl VersionManager {
             self.cancel_flag.clone(),
         )
         .with_torch_control(self.torch_control.clone())
-        .with_torch_cleanup(self.torch_cleanup.clone());
+        .with_torch_cleanup(self.torch_cleanup.clone())
+        .with_shutdown_flag(self.torch_shutting_down.clone());
         #[cfg(test)]
         let installer = if let Some(pause) = &self.torch_publication_pause {
             installer.with_torch_publication_pause(pause.clone())
@@ -879,8 +990,9 @@ impl VersionManager {
         let torch_control = self.torch_control.clone();
         let app_id = self.app_id;
         let manager = self.clone();
+        let task_registry = self.installation_tasks.clone();
 
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let _install_guard = install_guard;
             if app_id == AppId::Torch {
                 let mut tracker = progress_tracker.write().await;
@@ -928,7 +1040,7 @@ impl VersionManager {
             }
             .await;
 
-            if app_id == AppId::Torch {
+            if matches!(app_id, AppId::Torch | AppId::LlamaCpp) {
                 torch_control.finish();
             }
 
@@ -952,22 +1064,34 @@ impl VersionManager {
                 tracker.set_error(&error.to_string());
                 tracker.complete_installation(false);
             }
-            let _ = tx
-                .send(match result {
+            let terminal = result.as_ref().map(|_| ()).map_err(ToString::to_string);
+            tokio::select! {
+                _ = tx.send(match result {
                     Ok(_) => ProgressUpdate::Completed { success: true },
-                    Err(e) => ProgressUpdate::Error {
-                        message: e.to_string(),
+                    Err(e) => ProgressUpdate::Error { message: e.to_string() },
+                }) => {},
+                _ = wait_for_install_cancel(manager.torch_shutting_down.clone()) => {},
+            }
+            // Keep existing delayed progress cleanup, with observed lifecycle.
+            let mut registered = task_registry
+                .lock()
+                .map_err(|_| "Installation task registry poisoned".to_owned())?;
+            registered.harvest_finished();
+            let cleanup = tokio::spawn(async move {
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                        progress_tracker.write().await.clear_completed_state_async().await;
                     },
-                })
-                .await;
-
-            // Schedule progress state cleanup after frontend has time to poll final status
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                let mut tracker = progress_tracker.write().await;
-                tracker.clear_completed_state_async().await;
+                    _ = wait_for_install_cancel(manager.torch_shutting_down.clone()) => {},
+                }
+                Ok(())
             });
+            registered.tasks.push(cleanup);
+            terminal
         });
+        registered.tasks.push(task);
+        drop(registered);
+        drop(installing);
 
         Ok(rx)
     }
@@ -1083,10 +1207,21 @@ impl VersionManager {
     pub async fn remove_version(&self, tag: &str) -> Result<bool> {
         let _install_guard = self.install_lock.lock().await;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        let native_versions_lock = if self.app_id == AppId::LlamaCpp {
+            Some(installer::NativeVersionsLock::acquire(self.versions_dir()).await?)
+        } else {
+            None
+        };
         let torch_versions_lock = self.acquire_torch_versions_lock_for_mutation().await?;
         // Another backend may have changed metadata while this manager was open.
         if let Some(lock) = &torch_versions_lock {
             self.state.write().await.refresh_with_lock(lock).await?;
+        } else if let Some(lock) = &native_versions_lock {
+            self.state
+                .write()
+                .await
+                .refresh_with_native_lock(lock)
+                .await?;
         }
         self.ensure_torch_stopped(tag).await?;
         // Check if installed
@@ -1116,43 +1251,28 @@ impl VersionManager {
         }
 
         // Keep directory removal and metadata deletion in one leased worker, so
-        // cancelling this waiter cannot publish a half-removed Torch version.
+        // cancelling this waiter cannot release mutation admission while the
+        // filesystem and metadata effects are still running.
         let version_path = self.version_path(tag);
-        if let Some(lock) = &torch_versions_lock {
-            let lease = lock.clone();
-            let metadata = self.metadata_manager.clone();
-            let removed_tag = tag.to_owned();
-            tokio::task::spawn_blocking(move || {
-                let _lease = lease;
-                info!("Removing version directory: {}", version_path.display());
-                match std::fs::remove_dir_all(&version_path) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => {
-                        return Err(PumasError::Io {
-                            message: format!("Failed to remove version directory: {}", error),
-                            path: Some(version_path),
-                            source: Some(error),
-                        });
-                    }
-                }
-                metadata.remove_installed_version(&removed_tag, Some(AppId::Torch))
-            })
-            .await
-            .map_err(|error| PumasError::Other(format!("Torch removal task failed: {error}")))??;
-        } else {
-            if path_exists(&version_path).await? {
-                info!("Removing version directory: {}", version_path.display());
-                fs::remove_dir_all(&version_path)
-                    .await
-                    .map_err(|error| PumasError::Io {
-                        message: format!("Failed to remove version directory: {}", error),
-                        path: Some(version_path),
-                        source: Some(error),
-                    })?;
+        let mutations = self.state.read().await.mutation_tasks();
+        let metadata = self.metadata_manager.clone();
+        let removed_tag = tag.to_owned();
+        let app_id = self.app_id;
+        let remove = move || {
+            info!("Removing version directory: {}", version_path.display());
+            match std::fs::remove_dir_all(&version_path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(PumasError::io_with_path(error, &version_path)),
             }
-            self.metadata_manager
-                .remove_installed_version(tag, Some(self.app_id))?;
+            metadata.remove_installed_version(&removed_tag, Some(app_id))
+        };
+        if let Some(lock) = &torch_versions_lock {
+            mutations.leased_transaction(lock, remove).await?;
+        } else if let Some(lock) = &native_versions_lock {
+            mutations.leased_transaction(lock, remove).await?;
+        } else {
+            mutations.leased_transaction(&(), remove).await?;
         }
 
         #[cfg(test)]
@@ -1166,6 +1286,8 @@ impl VersionManager {
             let mut state = self.state.write().await;
             if let Some(lock) = &torch_versions_lock {
                 state.refresh_with_lock(lock).await?;
+            } else if let Some(lock) = &native_versions_lock {
+                state.refresh_with_native_lock(lock).await?;
             } else {
                 state.refresh().await?;
             }
@@ -1293,6 +1415,539 @@ mod tests {
             .await
             .unwrap();
         (manager, temp_dir)
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    async fn native_archive_fixture(
+        root: &Path,
+    ) -> (
+        tokio::task::JoinHandle<()>,
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<bool>,
+    ) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let payload = b"#!/bin/sh\nprintf 'native-fixture'\n";
+        let compressed = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut archive = tar::Builder::new(compressed);
+        let mut header = tar::Header::new_gnu();
+        header.set_size(payload.len() as u64);
+        header.set_mode(0o755);
+        header.set_cksum();
+        archive
+            .append_data(&mut header, "distribution/llama-server", &payload[..])
+            .unwrap();
+        let bytes = archive.into_inner().unwrap().finish().unwrap();
+        let size = bytes.len() as u64;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/archive", listener.local_addr().unwrap());
+        let releases = pumas_library::network::ReleasesCache::new(
+            root.join("launcher-data/cache"),
+            Duration::from_secs(3600),
+        );
+        releases
+            .set_disk(
+                AppId::LlamaCpp.github_repo(),
+                &[pumas_library::network::GitHubRelease {
+                    tag_name: "b1234".into(),
+                    name: "Native fixture".into(),
+                    published_at: "2026-09-29T00:00:00Z".into(),
+                    body: None,
+                    tarball_url: None,
+                    zipball_url: None,
+                    prerelease: false,
+                    assets: vec![pumas_library::network::GitHubAsset {
+                        name: "llama-b1234-bin-ubuntu-x64.tar.gz".into(),
+                        size,
+                        download_url: url,
+                        content_type: Some("application/gzip".into()),
+                    }],
+                    html_url: "https://github.com/ggml-org/llama.cpp/releases/tag/b1234".into(),
+                    total_size: Some(size),
+                    archive_size: Some(size),
+                    dependencies_size: None,
+                }],
+            )
+            .unwrap();
+        let (entered, observed) = tokio::sync::oneshot::channel();
+        let (release, wait) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            assert!(stream.read(&mut request).await.unwrap() > 0);
+            entered.send(()).unwrap();
+            if wait.await.unwrap() {
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            bytes.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+                stream.write_all(&bytes).await.unwrap();
+            }
+        });
+        (server, observed, release)
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn ollama_shutdown_cancels_stalled_headers_and_body() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for send_headers in [false, true] {
+            let root = TempDir::new().unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/archive", listener.local_addr().unwrap());
+            let releases = pumas_library::network::ReleasesCache::new(
+                root.path().join("launcher-data/cache"),
+                Duration::from_secs(3600),
+            );
+            releases
+                .set_disk(
+                    AppId::Ollama.github_repo(),
+                    &[pumas_library::network::GitHubRelease {
+                        tag_name: "v0.1.2".into(),
+                        name: "Ollama fixture".into(),
+                        published_at: "2026-09-29T00:00:00Z".into(),
+                        body: None,
+                        tarball_url: None,
+                        zipball_url: None,
+                        prerelease: false,
+                        assets: vec![pumas_library::network::GitHubAsset {
+                            name: "ollama-linux-amd64.tgz".into(),
+                            size: 100,
+                            download_url: url,
+                            content_type: Some("application/gzip".into()),
+                        }],
+                        html_url: "https://github.com/ollama/ollama/releases/tag/v0.1.2".into(),
+                        total_size: Some(100),
+                        archive_size: Some(100),
+                        dependencies_size: None,
+                    }],
+                )
+                .unwrap();
+            let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+            let server = tokio::spawn(async move {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = [0; 4096];
+                assert!(stream.read(&mut request).await.unwrap() > 0);
+                if send_headers {
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nx",
+                        )
+                        .await
+                        .unwrap();
+                }
+                entered_tx.send(()).unwrap();
+                release_rx.await.unwrap();
+            });
+            let manager = VersionManager::new(root.path(), AppId::Ollama)
+                .await
+                .unwrap();
+            let mut updates = manager.install_version("v0.1.2").await.unwrap();
+            tokio::time::timeout(Duration::from_secs(2), entered_rx)
+                .await
+                .unwrap()
+                .unwrap();
+            if send_headers {
+                // Prove that body handling has started, rather than merely
+                // testing the header cancellation branch twice.
+                tokio::time::timeout(Duration::from_secs(2), async {
+                    while let Some(update) = updates.recv().await {
+                        if matches!(update, ProgressUpdate::Download { downloaded_bytes, .. } if downloaded_bytes > 0) {
+                            return;
+                        }
+                    }
+                    panic!("Ollama transfer ended without receiving its body");
+                })
+                .await
+                .unwrap();
+            }
+            let error =
+                tokio::time::timeout(Duration::from_secs(2), manager.shutdown_installations())
+                    .await
+                    .unwrap()
+                    .unwrap_err()
+                    .to_string();
+            assert!(error.contains("cancelled"), "{error}");
+            assert_eq!(
+                manager
+                    .shutdown_installations()
+                    .await
+                    .unwrap_err()
+                    .to_string(),
+                error
+            );
+            assert!(!manager.version_path("v0.1.2").exists());
+            assert!(manager
+                .metadata_manager
+                .get_installed_version("v0.1.2", Some(AppId::Ollama))
+                .unwrap()
+                .is_none());
+            release_tx.send(()).unwrap();
+            server.await.unwrap();
+        }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_manager_removal_shares_installation_admission() {
+        let root = TempDir::new().unwrap();
+        let manager = VersionManager::new(root.path(), AppId::LlamaCpp)
+            .await
+            .unwrap();
+        for tag in ["b1234+cpu", "b1235+cpu"] {
+            std::fs::create_dir(manager.version_path(tag)).unwrap();
+            std::fs::write(manager.version_path(tag).join("llama-server"), "complete").unwrap();
+            manager
+                .state
+                .write()
+                .await
+                .add_installed_version(
+                    tag,
+                    pumas_library::metadata::InstalledVersionMetadata {
+                        path: tag.into(),
+                        release_tag: tag.into(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        }
+        manager.set_active_version("b1235+cpu").await.unwrap();
+        let lease = installer::NativeVersionsLock::try_acquire(&manager.versions_dir()).unwrap();
+        assert!(manager.remove_version("b1234+cpu").await.is_err());
+        assert!(manager.version_path("b1234+cpu/llama-server").exists());
+        assert!(manager
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_some());
+        drop(lease);
+        assert!(manager.remove_version("b1234+cpu").await.unwrap());
+        assert!(!manager.version_path("b1234+cpu").exists());
+        assert!(manager
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_none());
+        assert!(manager
+            .metadata_manager
+            .get_installed_version("b1235+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_some());
+        manager.shutdown_installations().await.unwrap();
+    }
+
+    #[test]
+    fn native_removal_shutdown_observes_cancelled_waiter_completion_and_failure() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            for fail_removal in [false, true] {
+                let root = TempDir::new().unwrap();
+                let mut manager = VersionManager::new(root.path(), AppId::LlamaCpp)
+                    .await
+                    .unwrap();
+                for tag in ["b1234+cpu", "b1235+cpu"] {
+                    std::fs::create_dir(manager.version_path(tag)).unwrap();
+                    std::fs::write(manager.version_path(tag).join("llama-server"), "complete")
+                        .unwrap();
+                    manager
+                        .state
+                        .write()
+                        .await
+                        .add_installed_version(
+                            tag,
+                            pumas_library::metadata::InstalledVersionMetadata {
+                                path: tag.into(),
+                                release_tag: tag.into(),
+                                ..Default::default()
+                            },
+                        )
+                        .unwrap();
+                }
+                manager.set_active_version("b1235+cpu").await.unwrap();
+                let pause = Arc::new(RemovalPause {
+                    entered: tokio::sync::Notify::new(),
+                    proceed: tokio::sync::Notify::new(),
+                });
+                manager.removal_pause = Some(pause.clone());
+                let owner = manager.state.read().await.mutation_tasks();
+                let removing = manager.clone();
+                let waiter =
+                    tokio::spawn(async move { removing.remove_version("b1234+cpu").await });
+                pause.entered.notified().await;
+                if fail_removal {
+                    std::fs::remove_dir_all(manager.version_path("b1234+cpu")).unwrap();
+                    std::fs::write(manager.version_path("b1234+cpu"), "retained").unwrap();
+                }
+                let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+                let (release_tx, release_rx) = std::sync::mpsc::channel();
+                let blocker = tokio::task::spawn_blocking(move || {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                });
+                entered_rx.await.unwrap();
+                pause.proceed.notify_one();
+                tokio::time::timeout(Duration::from_secs(2), async {
+                    while !owner.has_active_tasks() {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                waiter.abort();
+                assert!(waiter.await.unwrap_err().is_cancelled());
+                let shutting = manager.clone();
+                let mut shutdown =
+                    tokio::spawn(async move { shutting.shutdown_installations().await });
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(30), &mut shutdown)
+                        .await
+                        .is_err()
+                );
+                assert!(manager.version_path("b1234+cpu").exists());
+                assert!(
+                    installer::NativeVersionsLock::try_acquire(&manager.versions_dir()).is_err()
+                );
+                // Cancel the first shutdown waiter as well. Its retained drain
+                // still owns the queued removal and observes its terminal result.
+                shutdown.abort();
+                assert!(shutdown.await.unwrap_err().is_cancelled());
+                release_tx.send(()).unwrap();
+                blocker.await.unwrap();
+                let outcome = manager
+                    .shutdown_installations()
+                    .await
+                    .map_err(|error| error.to_string());
+                if fail_removal {
+                    assert!(outcome.as_ref().unwrap_err().contains("b1234+cpu"));
+                    assert_eq!(
+                        std::fs::read(manager.version_path("b1234+cpu")).unwrap(),
+                        b"retained"
+                    );
+                } else {
+                    assert!(outcome.is_ok());
+                    assert!(!manager.version_path("b1234+cpu").exists());
+                }
+                assert_eq!(
+                    manager
+                        .metadata_manager
+                        .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+                        .unwrap()
+                        .is_some(),
+                    fail_removal
+                );
+                assert_eq!(
+                    manager
+                        .shutdown_installations()
+                        .await
+                        .map_err(|error| error.to_string()),
+                    outcome
+                );
+                assert!(manager.set_default_version(None).await.is_err());
+            }
+        });
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_archive_publishes_complete_output_and_reopens_metadata() {
+        let root = TempDir::new().unwrap();
+        let (server, observed, release) = native_archive_fixture(root.path()).await;
+        let manager = VersionManager::new(root.path(), AppId::LlamaCpp)
+            .await
+            .unwrap();
+        let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!manager.version_path("b1234+cpu").exists());
+        assert!(manager
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_none());
+        release.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match updates.recv().await.unwrap() {
+                    ProgressUpdate::Completed { success: true } => break,
+                    ProgressUpdate::Error { message } => {
+                        panic!("Native installation failed: {message}")
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        server.await.unwrap();
+        manager.shutdown_installations().await.unwrap();
+        let output =
+            std::process::Command::new(manager.version_path("b1234+cpu").join("bin/llama-server"))
+                .current_dir(root.path())
+                .output()
+                .unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"native-fixture");
+        let reopened = VersionManager::new(root.path(), AppId::LlamaCpp)
+            .await
+            .unwrap();
+        assert_eq!(
+            reopened.get_installed_versions().await.unwrap(),
+            vec!["b1234+cpu"]
+        );
+        assert!(std::fs::read_dir(manager.versions_dir())
+            .unwrap()
+            .all(|entry| {
+                !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".llama-install-")
+            }));
+        reopened.shutdown_installations().await.unwrap();
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_shutdown_cancels_stalled_transfer_and_retains_failed_outcome() {
+        let root = TempDir::new().unwrap();
+        let (server, observed, release) = native_archive_fixture(root.path()).await;
+        let manager = VersionManager::new(root.path(), AppId::LlamaCpp)
+            .await
+            .unwrap();
+        let _updates = manager.install_version("b1234+cpu").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(2), manager.shutdown_installations())
+            .await
+            .unwrap()
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("cancelled"));
+        assert_eq!(
+            manager
+                .shutdown_installations()
+                .await
+                .unwrap_err()
+                .to_string(),
+            error
+        );
+        release.send(false).unwrap();
+        server.await.unwrap();
+        assert!(!manager.version_path("b1234+cpu").exists());
+        assert!(manager
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_none());
+        assert!(std::fs::read_dir(manager.versions_dir())
+            .unwrap()
+            .all(|entry| {
+                !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".llama-install-")
+            }));
+        assert!(!manager.is_installing().await);
+        assert!(manager.get_installation_progress().await.unwrap().success == Some(false));
+    }
+
+    #[tokio::test]
+    async fn native_shutdown_drains_registered_tasks_and_retains_failure() {
+        let (manager, _root) = create_test_manager().await;
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            entered_tx.send(()).unwrap();
+            release_rx.await.unwrap();
+            Err("native terminal failure".into())
+        });
+        manager.installation_tasks.lock().unwrap().tasks.push(task);
+        entered_rx.await.unwrap();
+        let shutting = manager.clone();
+        let waiter = tokio::spawn(async move { shutting.shutdown_installations().await });
+        while !manager.torch_shutting_down.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        let repeated = manager.shutdown_installations();
+        tokio::pin!(repeated);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut repeated)
+                .await
+                .is_err()
+        );
+        release_tx.send(()).unwrap();
+        let error = repeated.await.unwrap_err().to_string();
+        assert!(error.contains("native terminal failure"));
+        assert_eq!(
+            manager
+                .shutdown_installations()
+                .await
+                .unwrap_err()
+                .to_string(),
+            error
+        );
+        assert!(manager.install_version("v-new").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn native_cancelled_shutdown_waiter_does_not_interrupt_cancellation() {
+        let (manager, _root) = create_test_manager().await;
+        *manager.installing_tag.lock().await = Some("owned-attempt".into());
+        let tracker = manager.progress_tracker.write().await;
+        let (completed, observed) = tokio::sync::oneshot::channel();
+        let flag = manager.cancel_flag.clone();
+        manager
+            .installation_tasks
+            .lock()
+            .unwrap()
+            .tasks
+            .push(tokio::spawn(async move {
+                wait_for_install_cancel(flag).await;
+                completed.send(()).unwrap();
+                Ok(())
+            }));
+        let owner = manager.clone();
+        let waiter = tokio::spawn(async move { owner.shutdown_installations().await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !manager.cancel_flag.load(Ordering::SeqCst) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        drop(tracker);
+        tokio::time::timeout(Duration::from_secs(2), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        // The retained worker drains without requiring another shutdown caller.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !manager.installation_tasks.lock().unwrap().tasks.is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        manager.shutdown_installations().await.unwrap();
     }
 
     async fn create_torch_test_manager() -> (VersionManager, TempDir) {

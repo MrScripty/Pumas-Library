@@ -342,13 +342,19 @@ pub async fn start_server(
             result = serving => result.map_err(anyhow::Error::from),
             _ = shutdown.changed() => Ok(()),
         };
-        let torch_cleanup = async {
+        let installation_cleanup = async {
             #[cfg(feature = "inference-plugins")]
             {
                 let managers = state.version_managers.read().await;
                 let mut errors = Vec::new();
-                for manager in managers.values() {
-                    if let Err(error) = manager.shutdown_torch_cleanup().await {
+                let outcomes = futures::future::join_all(
+                    managers
+                        .values()
+                        .map(VersionManager::shutdown_installations),
+                )
+                .await;
+                for outcome in outcomes {
+                    if let Err(error) = outcome {
                         errors.push(error.to_string());
                     }
                 }
@@ -358,7 +364,7 @@ pub async fn start_server(
             }
             Ok::<(), anyhow::Error>(())
         };
-        let (owners, runtimes, torch_cleanup) = tokio::join!(
+        let (owners, runtimes, installation_cleanup) = tokio::join!(
             drain_server_owners(
                 server_result,
                 async {
@@ -377,7 +383,7 @@ pub async fn start_server(
                 state.api.shutdown_conversions(),
             ),
             state.api.stop_all_managed_runtime_profiles(),
-            torch_cleanup,
+            installation_cleanup,
         );
         let runtimes = runtimes.map_err(anyhow::Error::from).and_then(|summary| {
             if summary.errors.is_empty() {
@@ -386,11 +392,13 @@ pub async fn start_server(
                 Err(anyhow::anyhow!(summary.errors.join("; ")))
             }
         });
-        let owners = match (owners, torch_cleanup) {
+        let owners = match (owners, installation_cleanup) {
             (Ok(()), Ok(())) => Ok(()),
             (Err(error), Ok(())) => Err(error),
-            (Ok(()), Err(error)) => Err(anyhow::anyhow!("Torch cleanup: {error}")),
-            (Err(owners), Err(error)) => Err(anyhow::anyhow!("{owners}; Torch cleanup: {error}")),
+            (Ok(()), Err(error)) => Err(anyhow::anyhow!("Installation cleanup: {error}")),
+            (Err(owners), Err(error)) => {
+                Err(anyhow::anyhow!("{owners}; Installation cleanup: {error}"))
+            }
         };
         match (owners, runtimes) {
             (Ok(()), Ok(())) => Ok(()),
@@ -871,6 +879,44 @@ mod tests {
                 assert_eq!(server.shutdown().await.unwrap_err().to_string(), message);
             }
         }
+    }
+
+    #[cfg(feature = "inference-plugins")]
+    #[tokio::test]
+    async fn real_server_shutdown_closes_native_installation_admission() {
+        let root = TempDir::new().unwrap();
+        let api = crate::handlers::test_support::build_test_api_with_hf(root.path()).await;
+        let manager = VersionManager::new(root.path(), AppId::LlamaCpp)
+            .await
+            .unwrap();
+        let managers = HashMap::from([("llama-cpp".into(), manager.clone())]);
+        let sizes = SizeCalculator::new_with_cache(root.path().join("launcher-data/cache")).await;
+        let plugins = PluginLoader::new_async(root.path().join("launcher-data/plugins"))
+            .await
+            .unwrap();
+        let server = match start_server(
+            api,
+            managers,
+            sizes,
+            plugins,
+            LoopbackHost::parse("127.0.0.1").unwrap(),
+            0,
+        )
+        .await
+        {
+            Ok(server) => server,
+            Err(error) if is_socket_bind_permission_error(&error) => {
+                eprintln!(
+                    "Native shutdown integration unavailable: socket bind not permitted ({error})"
+                );
+                return;
+            }
+            Err(error) => panic!("Native shutdown server failed: {error:#}"),
+        };
+        server.shutdown().await.unwrap();
+        server.shutdown().await.unwrap();
+        let error = manager.install_version("b1234").await.unwrap_err();
+        assert!(error.to_string().contains("shutting down"));
     }
 
     #[tokio::test]

@@ -245,6 +245,10 @@ pub(crate) struct DestinationIdentity {
     relative: String,
 }
 
+/// Equality key for one configured physical root; it grants no filesystem access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct DestinationRootIdentity(FilesystemIdentity);
+
 /// One configured root opened by the composition owner after directory setup.
 #[derive(Clone)]
 pub(crate) struct DownloadDestinationRoot(Arc<RecoveryRoot>);
@@ -287,6 +291,13 @@ impl RootExecutionGrant {
 }
 
 impl DownloadDestinationRoot {
+    /// Equality identity for the configured physical root. This is only a key
+    /// for shared in-process grant bookkeeping; the held capability remains
+    /// the authority for every filesystem effect.
+    pub(crate) fn grant_identity(&self) -> DestinationRootIdentity {
+        DestinationRootIdentity(self.0.root_identity)
+    }
+
     pub(crate) fn same_physical_root(&self, other: &Self) -> bool {
         self.0.root_identity == other.0.root_identity
     }

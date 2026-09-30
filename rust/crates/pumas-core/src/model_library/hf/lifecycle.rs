@@ -19,7 +19,7 @@ use tokio::sync::{oneshot, Notify};
 use tokio::task::JoinHandle;
 
 use crate::model_library::download_recovery::{
-    DestinationIdentity, DownloadDestinationRoot, RootExecutionGrant,
+    DestinationIdentity, DestinationRootIdentity, DownloadDestinationRoot, RootExecutionGrant,
 };
 
 type FallibleBlockingReceiver<T, E> =
@@ -763,14 +763,19 @@ struct OwnerState {
     // Admission, ownership transfers, and shutdown capture share this mutex.
     // Entries leave these populations only for another registered observer.
     closed: bool,
-    root_grant: Weak<RootExecutionGrant>,
-    root_grant_acquiring: bool,
+    root_grants: HashMap<DestinationRootIdentity, RootGrantSlot>,
     tasks: HashMap<String, TaskEntry>,
     prepared: HashMap<usize, PreparedEntry>,
     retired: Vec<RetiredTask>,
     retired_failures: usize,
     shutdown: Option<ShutdownReceipt>,
     shutdown_driver: Option<JoinHandle<()>>,
+}
+
+#[derive(Default)]
+struct RootGrantSlot {
+    grant: Weak<RootExecutionGrant>,
+    acquiring: bool,
 }
 
 struct InvocationWaiter {
@@ -995,6 +1000,7 @@ impl DownloadTaskOwner {
         context: &TaskContext,
         root: DownloadDestinationRoot,
     ) -> crate::Result<Arc<RootExecutionGrant>> {
+        let identity = root.grant_identity();
         loop {
             let changed = self.root_grant_changed.notified();
             tokio::pin!(changed);
@@ -1004,12 +1010,13 @@ impl DownloadTaskOwner {
                 if state.closed {
                     return Err(crate::PumasError::DownloadLifecycleClosed);
                 }
-                if let Some(grant) = state.root_grant.upgrade() {
+                let slot = state.root_grants.entry(identity).or_default();
+                if let Some(grant) = slot.grant.upgrade() {
                     GrantAcquisition::Reuse(grant)
-                } else if state.root_grant_acquiring {
+                } else if slot.acquiring {
                     GrantAcquisition::Wait
                 } else {
-                    state.root_grant_acquiring = true;
+                    slot.acquiring = true;
                     GrantAcquisition::Open
                 }
             };
@@ -1045,10 +1052,11 @@ impl DownloadTaskOwner {
                         .and_then(|result| result);
                     {
                         let mut state = self.state.lock().expect("HF task owner lock poisoned");
+                        let slot = state.root_grants.entry(identity).or_default();
                         if let Ok(grant) = &result {
-                            state.root_grant = Arc::downgrade(grant);
+                            slot.grant = Arc::downgrade(grant);
                         }
-                        state.root_grant_acquiring = false;
+                        slot.acquiring = false;
                     }
                     self.root_grant_changed.notify_waiters();
                     return result;
@@ -3104,6 +3112,53 @@ mod tests {
                 // This invocation is still registered and running: only its mutation
                 // scope, not its registry membership, determines native custody.
                 root.try_acquire_execution_grant()?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        owner.shutdown(|| async { Ok(()) }).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn one_owner_acquires_distinct_physical_root_grants_concurrently() {
+        let model_root_dir = tempfile::TempDir::new().unwrap();
+        let runtime_root_dir = tempfile::TempDir::new().unwrap();
+        let model_root = DownloadDestinationRoot::open(model_root_dir.path()).unwrap();
+        let reopened_model_root = DownloadDestinationRoot::open(model_root_dir.path()).unwrap();
+        let runtime_root = DownloadDestinationRoot::open(runtime_root_dir.path()).unwrap();
+        let owner = Arc::new(DownloadTaskOwner::new());
+        owner
+            .run_invocation(move |context| async move {
+                let (model, reopened_model, runtime) = tokio::join!(
+                    context.with_root_grant(model_root.clone()),
+                    context.with_root_grant(reopened_model_root.clone()),
+                    context.with_root_grant(runtime_root.clone()),
+                );
+                let model = model?;
+                let reopened_model = reopened_model?;
+                let runtime = runtime?;
+                assert!(Arc::ptr_eq(
+                    model.root_grant.as_ref().unwrap(),
+                    reopened_model.root_grant.as_ref().unwrap()
+                ));
+                assert!(!Arc::ptr_eq(
+                    model.root_grant.as_ref().unwrap(),
+                    runtime.root_grant.as_ref().unwrap()
+                ));
+                assert!(matches!(
+                    model_root.try_acquire_execution_grant(),
+                    Err(crate::PumasError::DownloadRootBusy)
+                ));
+                assert!(matches!(
+                    runtime_root.try_acquire_execution_grant(),
+                    Err(crate::PumasError::DownloadRootBusy)
+                ));
+                drop(model);
+                drop(reopened_model);
+                drop(runtime);
+                context.drain_blocking().await.unwrap();
+                model_root.try_acquire_execution_grant()?;
+                runtime_root.try_acquire_execution_grant()?;
                 Ok(())
             })
             .await

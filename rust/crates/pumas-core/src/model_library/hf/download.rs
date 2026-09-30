@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Mutex as TokioMutex, OwnedMutexGuard, RwLock};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 /// Regular (non-LFS) filenames that should be automatically fetched alongside
 /// weight files.  These are config/tokenizer files needed by inference engines.
@@ -65,6 +65,7 @@ struct PendingDownloadPublication {
     completed: tokio::sync::oneshot::Sender<()>,
 }
 
+#[cfg(test)]
 fn existing_artifact_requires_source_comparison(
     file: &crate::acquisition::ArtifactFile,
     observed_size: u64,
@@ -326,10 +327,8 @@ fn resolve_exact_recovery_files(
         .collect()
 }
 
-enum DownloadFile {
-    Ambient(Arc<std::sync::Mutex<std::fs::File>>),
-    Recovery(Arc<std::sync::Mutex<std::fs::File>>),
-}
+#[cfg(test)]
+struct DownloadFile(Option<std::fs::File>);
 
 struct DownloadStartSetup {
     marker_contents: String,
@@ -566,6 +565,7 @@ struct PreparedDownloadTask {
     #[cfg(test)]
     download_base_url: Option<String>,
     client: reqwest::Client,
+    acquisition: Arc<crate::acquisition::AcquisitionService>,
     metadata_client: HuggingFaceClient,
     downloads: Arc<RwLock<HashMap<String, DownloadState>>>,
     download_publications: Arc<DownloadPublicationOwner>,
@@ -852,7 +852,11 @@ impl PreparedDownloadTask {
         Ok(())
     }
 
-    async fn finalize_pinned_restored_files(&self, context: &TaskContext) -> Result<bool> {
+    async fn finalize_pinned_restored_files(
+        &self,
+        context: &TaskContext,
+        workspace: &crate::acquisition::AcquisitionWorkspace,
+    ) -> Result<bool> {
         // A restored file with no admitted whole-file digest cannot be tied to
         // the selected source from its pathname, size, or immutable revision
         // alone. Leave it under its existing recovery custody for an ordinary
@@ -891,15 +895,37 @@ impl PreparedDownloadTask {
                 return Ok(false);
             }
             self.destination.verify_file(context, file, true).await?;
-            self.destination
-                .rename_part_to_file(context, &file.filename)
-                .await?;
+            let manifest = super::acquisition_source::manifest_for_download(
+                &self.repo_id,
+                &self.revision,
+                &self.files,
+            )?;
+            let selected = manifest
+                .files()
+                .iter()
+                .find(|selected| selected.logical_path() == file.filename)
+                .ok_or_else(|| PumasError::Other("Restored selected file is unavailable".into()))?
+                .clone();
+            let grant = workspace.clone();
+            context
+                .run_fallible_blocking_named(
+                    "publish verified retained acquisition file",
+                    move || grant.publish_part(&selected, false),
+                )
+                .await
+                .map_err(|error| {
+                    PumasError::Other(format!("Restore publication observation failed: {error}"))
+                })??;
         }
         self.verify_pinned_final_files(context).await?;
         Ok(true)
     }
 
-    async fn finalize_digest_verified_restored_files(&self, context: &TaskContext) -> Result<bool> {
+    async fn finalize_digest_verified_restored_files(
+        &self,
+        context: &TaskContext,
+        workspace: &crate::acquisition::AcquisitionWorkspace,
+    ) -> Result<bool> {
         for file in &self.files {
             // Legacy snapshots can lack enough identity to prove a completed
             // file. Keep them resumable/reconcilable instead of promoting or
@@ -942,9 +968,27 @@ impl PreparedDownloadTask {
                 }
                 return Err(error);
             }
-            self.destination
-                .rename_part_to_file(context, &file.filename)
-                .await?;
+            let manifest = super::acquisition_source::manifest_for_download(
+                &self.repo_id,
+                &self.revision,
+                &self.files,
+            )?;
+            let selected = manifest
+                .files()
+                .iter()
+                .find(|selected| selected.logical_path() == file.filename)
+                .ok_or_else(|| PumasError::Other("Restored selected file is unavailable".into()))?
+                .clone();
+            let grant = workspace.clone();
+            context
+                .run_fallible_blocking_named(
+                    "publish verified retained acquisition file",
+                    move || grant.publish_part(&selected, false),
+                )
+                .await
+                .map_err(|error| {
+                    PumasError::Other(format!("Restore publication observation failed: {error}"))
+                })??;
         }
         Ok(true)
     }
@@ -992,10 +1036,46 @@ impl PreparedDownloadTask {
                     "Download provenance observation failed: {error}"
                 )))
             })??;
+        self.acquisition.require_schema(context).await?;
+        let destination = self.destination.capability().clone();
+        let execution_lease = context.held_execution_lease()?;
+        let workspace = context
+            .run_fallible_blocking_named("capture restored acquisition workspace", move || {
+                destination.acquisition_workspace(execution_lease)
+            })
+            .await
+            .map_err(|error| {
+                PumasError::Other(format!("Restored workspace observation failed: {error}"))
+            })??;
+        let demand = crate::acquisition::AcquisitionDemand {
+            consumer: "hf.model".into(),
+            operation: attempt.clone(),
+        };
+        let reconciliation = self
+            .acquisition
+            .reconciliation_lease(context, &demand)
+            .await?;
+        let manifest = super::acquisition_source::manifest_for_download(
+            &self.repo_id,
+            &self.revision,
+            &self.files,
+        )?;
+        let operation = self
+            .acquisition
+            .begin(
+                context,
+                demand,
+                manifest,
+                workspace.identity().clone(),
+                reconciliation,
+            )
+            .await?;
+        let already_adopted = operation.is_adopted();
         let complete = if self.revision.as_persisted().is_some() {
-            self.finalize_pinned_restored_files(context).await?
+            self.finalize_pinned_restored_files(context, &workspace)
+                .await?
         } else {
-            self.finalize_digest_verified_restored_files(context)
+            self.finalize_digest_verified_restored_files(context, &workspace)
                 .await?
         };
         if !matches!(context.drain_blocking().await, Ok(0)) {
@@ -1021,6 +1101,10 @@ impl PreparedDownloadTask {
             state.files_completed = state.files.len();
         }
         self.verify_pinned_final_files(context).await?;
+        let lease = self
+            .acquisition
+            .files_ready(context, operation, workspace)
+            .await?;
         self.destination.remove_marker(context).await?;
         let info = self
             .downloads
@@ -1029,14 +1113,16 @@ impl PreparedDownloadTask {
             .get(&self.download_id)
             .and_then(download_completion_info);
         drop(destination_guard.take());
-        import_completed_download(
-            &self.download_importer,
-            context,
-            info,
-            self.revision.clone(),
-        )
-        .await
-        .map_err(RestoredFinalizationError::Import)?;
+        if !already_adopted {
+            import_completed_download(
+                &self.download_importer,
+                context,
+                info,
+                self.revision.clone(),
+            )
+            .await
+            .map_err(RestoredFinalizationError::Import)?;
+        }
         destination_guard = Some(self.destination_lock.clone().lock_owned().await);
         {
             let mut states = self.downloads.write().await;
@@ -1047,6 +1133,10 @@ impl PreparedDownloadTask {
                 &[DownloadStatus::Downloading],
             )?;
         }
+        if !matches!(context.drain_blocking().await, Ok(0)) {
+            return Err(PumasError::Other("Restored consumer effects did not drain".into()).into());
+        }
+        self.acquisition.acknowledge(context, lease).await?;
         let persistence = self.persistence.clone().ok_or_else(|| PumasError::Config {
             message: "Restore finalization persistence is unavailable".into(),
         })?;
@@ -1212,6 +1302,7 @@ impl PreparedDownloadTask {
         } else if acquired == Some(true) {
             AssertUnwindSafe(HuggingFaceClient::run_download(
                 self.client,
+                self.acquisition.clone(),
                 self.downloads.clone(),
                 self.download_publications.clone(),
                 &self.download_id,
@@ -1341,6 +1432,47 @@ impl PreparedDownloadTask {
             true
         };
         let nested_failures = task_context.drain_blocking().await.unwrap_or(1);
+        let has_admission = self
+            .downloads
+            .read()
+            .await
+            .get(&self.download_id)
+            .is_some_and(|state| state.admission.is_some());
+        if nested_failures == 0
+            && !has_admission
+            && result.as_ref().is_err_and(|error| {
+                !matches!(
+                    error,
+                    PumasError::DownloadPaused | PumasError::DownloadCancelled
+                )
+            })
+        {
+            let mut cleanup_ok = true;
+            for file in &self.files {
+                cleanup_ok &= self
+                    .destination
+                    .remove_part(&task_context, &file.filename)
+                    .await
+                    .is_ok();
+            }
+            cleanup_ok &= self.destination.remove_marker(&task_context).await.is_ok();
+            if cleanup_ok && matches!(task_context.drain_blocking().await, Ok(0)) {
+                let identity = self.destination.persisted_identity()?;
+                self.acquisition
+                    .withdraw(
+                        &task_context,
+                        crate::acquisition::AcquisitionDemand {
+                            consumer: "hf.model".into(),
+                            operation: self.download_id.clone(),
+                        },
+                        crate::acquisition::WorkspaceIdentity {
+                            root_identity: identity.library_root,
+                            relative_target: identity.relative_target,
+                        },
+                    )
+                    .await?;
+            }
+        }
 
         let mut error_projected = false;
         if let Err(error) = &result {
@@ -1472,6 +1604,7 @@ impl DownloadDestination {
         }
     }
 
+    #[cfg(test)]
     async fn prepare_file(&self, task_context: &TaskContext, filename: &str) -> Result<()> {
         match self {
             Self::Recovery(destination) | Self::Managed(destination) => {
@@ -1544,25 +1677,6 @@ impl DownloadDestination {
         }
     }
 
-    async fn part_matches_final(&self, task_context: &TaskContext, filename: &str) -> Result<bool> {
-        match self {
-            Self::Recovery(destination) | Self::Managed(destination) => {
-                let destination = destination.clone();
-                let filename = filename.to_string();
-                task_context
-                    .run_blocking_named("compare staged and existing artifact files", move || {
-                        destination.download_part_matches_final(&filename)
-                    })
-                    .await
-                    .map_err(|error| {
-                        PumasError::Other(format!(
-                            "download source comparison task failed: {error}"
-                        ))
-                    })?
-            }
-        }
-    }
-
     async fn remove_part(&self, task_context: &TaskContext, filename: &str) -> Result<()> {
         let operation = if self.is_recovery() {
             "remove partial download file"
@@ -1589,35 +1703,7 @@ impl DownloadDestination {
         }
     }
 
-    async fn finalize_complete_part_file(
-        &self,
-        task_context: &TaskContext,
-        file: &FileToDownload,
-        verify_integrity: bool,
-    ) -> Result<bool> {
-        let filename = &file.filename;
-        let expected_size = file.size;
-        let Some(expected_size) = expected_size else {
-            return Ok(false);
-        };
-        let observed_size = self.part_len(task_context, filename).await?;
-        if observed_size != Some(expected_size) {
-            if verify_integrity && observed_size.is_some_and(|observed| observed > expected_size) {
-                self.verify_file(task_context, file, true).await?;
-            }
-            return Ok(false);
-        }
-        if verify_integrity {
-            self.verify_file(task_context, file, true).await?;
-        }
-        self.rename_part_to_file(task_context, filename).await?;
-        info!(
-            "Finalized fully downloaded partial file {} ({} bytes)",
-            filename, expected_size
-        );
-        Ok(true)
-    }
-
+    #[cfg(test)]
     async fn rename_part_to_file(&self, task_context: &TaskContext, filename: &str) -> Result<()> {
         match self {
             Self::Recovery(destination) | Self::Managed(destination) => {
@@ -1633,6 +1719,7 @@ impl DownloadDestination {
         }
     }
 
+    #[cfg(test)]
     async fn open_part(
         &self,
         task_context: &TaskContext,
@@ -1649,12 +1736,7 @@ impl DownloadDestination {
                     move || destination.open_part(&filename, append),
                 )
                 .await?;
-                let file = Arc::new(std::sync::Mutex::new(file));
-                Ok(if self.is_recovery() {
-                    DownloadFile::Recovery(file)
-                } else {
-                    DownloadFile::Ambient(file)
-                })
+                Ok(DownloadFile(Some(file)))
             }
         }
     }
@@ -1713,89 +1795,38 @@ impl DownloadDestination {
     }
 }
 
+#[cfg(test)]
 impl DownloadFile {
-    async fn write_all(&mut self, task_context: &TaskContext, bytes: &[u8]) -> Result<()> {
-        match self {
-            Self::Ambient(file) => {
-                let file = file.clone();
-                let bytes = bytes.to_vec();
-                recovery_filesystem_operation(
-                    task_context,
-                    "write ambient partial download file",
-                    move || {
-                        let mut file = file
-                            .lock()
-                            .map_err(|_| std::io::Error::other("ambient file lock was poisoned"))?;
-                        std::io::Write::write_all(&mut *file, &bytes)
-                    },
-                )
+    async fn write_all(&mut self, context: &TaskContext, bytes: &[u8]) -> Result<()> {
+        let mut file = self.0.take().expect("one owned fixture file effect");
+        let bytes = bytes.to_vec();
+        self.0 = Some(
+            context
+                .run_fallible_blocking_named("write partial download file", move || {
+                    std::io::Write::write_all(&mut file, &bytes)?;
+                    Ok::<_, std::io::Error>(file)
+                })
                 .await
-            }
-            Self::Recovery(file) => {
-                let file = file.clone();
-                let bytes = bytes.to_vec();
-                recovery_filesystem_operation(
-                    task_context,
-                    "write partial download file",
-                    move || {
-                        let mut file = file.lock().map_err(|_| {
-                            std::io::Error::other("recovery file lock was poisoned")
-                        })?;
-                        std::io::Write::write_all(&mut *file, &bytes)
-                    },
-                )
-                .await
-            }
-        }
+                .map_err(|error| {
+                    PumasError::Other(format!("Fixture write observation failed: {error}"))
+                })??,
+        );
+        Ok(())
     }
-
-    async fn flush(&mut self, task_context: &TaskContext) -> Result<()> {
-        match self {
-            Self::Ambient(file) => {
-                let file = file.clone();
-                recovery_filesystem_operation(
-                    task_context,
-                    "flush ambient partial download file",
-                    move || {
-                        let mut file = file
-                            .lock()
-                            .map_err(|_| std::io::Error::other("ambient file lock was poisoned"))?;
-                        std::io::Write::flush(&mut *file)
-                    },
-                )
+    async fn flush(&mut self, context: &TaskContext) -> Result<()> {
+        let file = self.0.take().expect("one owned fixture file effect");
+        self.0 = Some(
+            context
+                .run_fallible_blocking_named("flush partial download file", move || {
+                    file.sync_all()?;
+                    Ok::<_, std::io::Error>(file)
+                })
                 .await
-            }
-            Self::Recovery(file) => {
-                let file = file.clone();
-                recovery_filesystem_operation(
-                    task_context,
-                    "flush partial download file",
-                    move || {
-                        let mut file = file.lock().map_err(|_| {
-                            std::io::Error::other("recovery file lock was poisoned")
-                        })?;
-                        std::io::Write::flush(&mut *file)
-                    },
-                )
-                .await
-            }
-        }
-    }
-}
-
-struct HuggingFaceHttpSink<'a> {
-    file: DownloadFile,
-    task_context: &'a TaskContext,
-}
-
-#[async_trait::async_trait]
-impl crate::acquisition::HttpArtifactSink for HuggingFaceHttpSink<'_> {
-    async fn write_all(&mut self, bytes: &[u8]) -> Result<()> {
-        self.file.write_all(self.task_context, bytes).await
-    }
-
-    async fn flush(&mut self) -> Result<()> {
-        self.file.flush(self.task_context).await
+                .map_err(|error| {
+                    PumasError::Other(format!("Fixture sync observation failed: {error}"))
+                })??,
+        );
+        Ok(())
     }
 }
 
@@ -1812,6 +1843,7 @@ struct HuggingFaceHttpAttemptHost<'a> {
     bytes_offset: u64,
     started_at: Instant,
     last_publish: Instant,
+    retry_limit: Option<u32>,
 }
 
 #[async_trait::async_trait]
@@ -1868,6 +1900,59 @@ impl crate::acquisition::HttpAttemptHost for HuggingFaceHttpAttemptHost<'_> {
             self.last_publish = Instant::now();
         }
         Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::acquisition::AcquisitionHost for HuggingFaceHttpAttemptHost<'_> {
+    async fn retry(
+        &mut self,
+        attempt: u32,
+        delay: Option<Duration>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        if delay.is_none() && attempt > 1 {
+            project_worker_retry_reset(
+                self.downloads,
+                self.download_id,
+                self.task_context,
+                attempt,
+                self.retry_limit,
+            )
+            .await?;
+        }
+        {
+            let mut downloads = self.downloads.write().await;
+            let state = current_worker_state(
+                &mut downloads,
+                self.download_id,
+                self.task_context,
+                &[DownloadStatus::Downloading],
+            )?;
+            state.retry_attempt = attempt;
+            state.retry_limit = self.retry_limit;
+            state.retrying = delay.is_some();
+            state.next_retry_delay_seconds = delay.map(|delay| delay.as_secs_f64());
+            state.error = delay.zip(error).map(|(delay, error)| {
+                format!(
+                    "Transient network error, retrying attempt {} in {:.1}s: {}",
+                    attempt + 1,
+                    delay.as_secs_f64(),
+                    error
+                )
+            });
+        }
+        publish_worker_snapshot_and_revalidate(
+            self.publications,
+            self.downloads,
+            self.download_id,
+            self.task_context,
+            self.destination,
+            self.destination_lock,
+            self.destination_guard,
+            &[DownloadStatus::Downloading],
+        )
+        .await
     }
 }
 
@@ -2075,13 +2160,7 @@ fn retry_limit(max_attempts: u32) -> Option<u32> {
     }
 }
 
-fn retry_limit_display(limit: Option<u32>) -> String {
-    match limit {
-        Some(limit) => limit.to_string(),
-        None => "unlimited".to_string(),
-    }
-}
-
+#[cfg(test)]
 fn retry_exhausted(
     attempt: u32,
     limit: Option<u32>,
@@ -2091,24 +2170,6 @@ fn retry_exhausted(
     let attempts_exhausted = limit.is_some_and(|max_attempts| attempt >= max_attempts);
     let elapsed_exhausted = max_elapsed > Duration::ZERO && elapsed >= max_elapsed;
     attempts_exhausted || elapsed_exhausted
-}
-
-fn retry_exhausted_message(
-    attempt: u32,
-    limit: Option<u32>,
-    elapsed: Duration,
-    last_error: &str,
-) -> String {
-    let limit_text = limit
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "unlimited".to_string());
-    format!(
-        "Retry budget exhausted after {} attempt(s) (limit {}, elapsed {:.1}s). Last error: {}",
-        attempt,
-        limit_text,
-        elapsed.as_secs_f64(),
-        last_error
-    )
 }
 
 fn selected_artifact_id_for_state(state: &DownloadState) -> Option<String> {
@@ -3563,6 +3624,7 @@ impl HuggingFaceClient {
                 #[cfg(test)]
                 download_base_url: self.download_base_url.clone(),
                 client: self.download_client.clone(),
+                acquisition: self.acquisition.clone(),
                 metadata_client: self.clone_for_invocation(),
                 downloads: self.downloads.clone(),
                 download_publications: self.download_publications.clone(),
@@ -3817,6 +3879,7 @@ impl HuggingFaceClient {
             #[cfg(test)]
             download_base_url: self.download_base_url.clone(),
             client: self.download_client.clone(),
+            acquisition: self.acquisition.clone(),
             metadata_client: self.clone_for_invocation(),
             downloads: self.downloads.clone(),
             download_publications: self.download_publications.clone(),
@@ -4038,6 +4101,7 @@ impl HuggingFaceClient {
     #[allow(clippy::too_many_arguments)]
     async fn run_download(
         client: reqwest::Client,
+        acquisition: Arc<crate::acquisition::AcquisitionService>,
         downloads: Arc<RwLock<HashMap<String, DownloadState>>>,
         download_publications: Arc<DownloadPublicationOwner>,
         download_id: &str,
@@ -4061,6 +4125,7 @@ impl HuggingFaceClient {
         use crate::config::NetworkConfig;
         use crate::network::RetryConfig;
 
+        acquisition.require_schema(&task_context).await?;
         let artifact_manifest =
             super::acquisition_source::manifest_for_download(repo_id, revision, files)?;
 
@@ -4131,6 +4196,43 @@ impl HuggingFaceClient {
         .await?;
 
         destination.prepare(&task_context).await?;
+        let granted = destination.capability().clone();
+        let execution_lease = task_context.held_execution_lease()?;
+        let workspace = task_context
+            .run_fallible_blocking_named("capture acquisition workspace", move || {
+                granted.acquisition_workspace(execution_lease)
+            })
+            .await
+            .map_err(|error| {
+                PumasError::Other(format!("Workspace observation failed: {error}"))
+            })??;
+        let operation_receipt = downloads
+            .read()
+            .await
+            .get(download_id)
+            .and_then(|state| {
+                state
+                    .admission
+                    .as_ref()
+                    .map(|admission| admission.attempt_id.clone())
+            })
+            .unwrap_or_else(|| download_id.to_string());
+        let demand = crate::acquisition::AcquisitionDemand {
+            consumer: "hf.model".into(),
+            operation: operation_receipt,
+        };
+        let reconcile_lease = acquisition
+            .reconciliation_lease(&task_context, &demand)
+            .await?;
+        let operation = acquisition
+            .begin(
+                &task_context,
+                demand,
+                artifact_manifest.clone(),
+                workspace.identity().clone(),
+                reconcile_lease,
+            )
+            .await?;
 
         if let Some(start_setup) = start_setup {
             destination
@@ -4247,9 +4349,13 @@ impl HuggingFaceClient {
         let max_attempts = NetworkConfig::hf_download_max_retries();
         let retry_limit = retry_limit(max_attempts);
         let max_retry_elapsed = NetworkConfig::hf_download_max_retry_elapsed();
-        let retry_config = RetryConfig::new()
-            .with_max_attempts(max_attempts.max(1))
-            .with_base_delay(NetworkConfig::HF_DOWNLOAD_RETRY_BASE_DELAY);
+        let retry_policy = crate::acquisition::AcquisitionRetryPolicy {
+            attempts: retry_limit,
+            elapsed: max_retry_elapsed,
+            backoff: RetryConfig::new()
+                .with_max_attempts(max_attempts.max(1))
+                .with_base_delay(NetworkConfig::HF_DOWNLOAD_RETRY_BASE_DELAY),
+        };
 
         // Download each file sequentially
         let mut bytes_offset: u64 = 0;
@@ -4265,78 +4371,40 @@ impl HuggingFaceClient {
                         message: "Resolved Hugging Face artifact manifest lost a selected file"
                             .into(),
                     })?;
-            let verify_selected_file = artifact_manifest.requires_file_verification(file_idx);
-            // Ensure parent directory exists (needed for subdirectory files
-            // like transformer/model.safetensors in diffusion repos)
-            destination.prepare_file(&task_context, filename).await?;
-
-            let mut compare_existing_source = false;
-            // Digest-backed local files can be verified directly. Without a
-            // digest, only an immutable source can prove an existing file by
-            // fetching the selected bytes and comparing them under custody.
-            if let Some(existing_size) = destination.file_len(&task_context, filename).await? {
-                compare_existing_source = existing_artifact_requires_source_comparison(
-                    artifact_file,
-                    existing_size,
-                    artifact_manifest.source().revision().strength()
-                        == crate::acquisition::RevisionStrength::Immutable,
-                )?;
-                if !compare_existing_source {
-                    destination
-                        .verify_file(&task_context, file_info, false)
-                        .await?;
-                    if destination
-                        .part_len(&task_context, filename)
-                        .await?
-                        .is_some()
-                    {
-                        if let Err(error) = destination.remove_part(&task_context, filename).await {
-                            warn!(
-                                "Failed to remove stale partial file for {}/{}: {}",
-                                repo_id, filename, error
-                            );
-                        }
-                    }
-                    bytes_offset += existing_size;
-                    info!(
-                        "Skipping already-downloaded file {}/{} ({} bytes)",
-                        repo_id, filename, existing_size
-                    );
-
-                    // Update state
-                    #[cfg(test)]
-                    task_context.observe_worker_projection("before-existing-file-projection");
-                    {
-                        let mut downloads = downloads.write().await;
-                        let state = current_worker_state(
-                            &mut downloads,
-                            download_id,
-                            &task_context,
-                            &[DownloadStatus::Downloading],
-                        )?;
-                        state.files_completed = file_idx + 1;
-                        state.downloaded_bytes = bytes_offset;
-                        if let Some(total) = state.total_bytes {
-                            state.progress = bytes_offset as f32 / total as f32;
-                        }
-                    }
-                    #[cfg(test)]
-                    if file_idx + 1 == files.len() {
-                        task_context.observe_worker_projection("terminal-cleanup-committed");
-                    }
-                    publish_worker_snapshot_and_revalidate(
-                        &download_publications,
-                        &downloads,
+            if let Some(size) = acquisition
+                .verified_existing_file(&task_context, &operation, &workspace, file_idx)
+                .await?
+            {
+                #[cfg(test)]
+                task_context.observe_worker_projection("before-existing-file-projection");
+                bytes_offset += size;
+                {
+                    let mut states = downloads.write().await;
+                    let state = current_worker_state(
+                        &mut states,
                         download_id,
                         &task_context,
-                        destination,
-                        &destination_lock,
-                        &mut destination_guard,
                         &[DownloadStatus::Downloading],
-                    )
-                    .await?;
-                    continue;
+                    )?;
+                    state.files_completed = file_idx + 1;
+                    state.downloaded_bytes = bytes_offset;
                 }
+                #[cfg(test)]
+                if file_idx + 1 == files.len() {
+                    task_context.observe_worker_projection("terminal-cleanup-committed");
+                }
+                publish_worker_snapshot_and_revalidate(
+                    &download_publications,
+                    &downloads,
+                    download_id,
+                    &task_context,
+                    destination,
+                    &destination_lock,
+                    &mut destination_guard,
+                    &[DownloadStatus::Downloading],
+                )
+                .await?;
+                continue;
             }
 
             // Fire aux-complete callback at the boundary between auxiliary and weight files.
@@ -4475,43 +4543,39 @@ impl HuggingFaceClient {
             )?
             .to_string();
 
-            let mut last_error: Option<PumasError> = None;
-
-            let mut file_completed = false;
-            let mut attempt: u32 = 0;
-            let retry_started = Instant::now();
-            loop {
-                attempt += 1;
-                {
-                    let mut downloads = downloads.write().await;
-                    let state = current_worker_state(
-                        &mut downloads,
-                        download_id,
+            let acquired_size = {
+                let mut host = HuggingFaceHttpAttemptHost {
+                    downloads: &downloads,
+                    publications: &download_publications,
+                    destination_lock: &destination_lock,
+                    destination_guard: &mut destination_guard,
+                    download_id,
+                    destination,
+                    cancel_flag: &cancel_flag,
+                    pause_flag: &pause_flag,
+                    task_context: &task_context,
+                    bytes_offset,
+                    started_at: Instant::now(),
+                    last_publish: Instant::now(),
+                    retry_limit,
+                };
+                acquisition
+                    .acquire_file(
                         &task_context,
-                        &[DownloadStatus::Downloading],
-                    )?;
-                    state.retry_attempt = attempt;
-                    state.retry_limit = retry_limit;
-                    state.retrying = false;
-                    state.next_retry_delay_seconds = None;
-                }
-
-                // Check cancellation before each attempt
-                #[cfg(test)]
-                task_context.observe_cancellation_check();
-                if cancel_flag.load(Ordering::Relaxed) {
-                    let _ = destination.remove_part(&task_context, filename).await;
-                    // `cancel_download` has already generation-replaced this
-                    // worker. Its caller-independent finalizer exclusively
-                    // owns terminal state, persistence cleanup, and recovery
-                    // capability release after observing this worker.
-                    return Err(PumasError::DownloadCancelled);
-                }
-
-                // Check pause before each attempt
-                if pause_flag.load(Ordering::Relaxed) {
-                    #[cfg(test)]
-                    task_context.observe_worker_projection("pause-before-attempt");
+                        &operation,
+                        &workspace,
+                        file_idx,
+                        &client,
+                        &url,
+                        auth_header.as_deref(),
+                        &retry_policy,
+                        &mut host,
+                    )
+                    .await
+            };
+            let actual_size = match acquired_size {
+                Ok(size) => size,
+                Err(PumasError::DownloadPaused) => {
                     return Self::settle_worker_pause(
                         &downloads,
                         &download_publications,
@@ -4522,240 +4586,10 @@ impl HuggingFaceClient {
                     )
                     .await;
                 }
-
-                // Determine resume offset from existing .part file
-                let mut resume_from_byte = destination
-                    .part_len(&task_context, filename)
-                    .await?
-                    .unwrap_or(0);
-
-                if compare_existing_source && attempt == 1 && resume_from_byte > 0 {
-                    // A retained partial has no durable evidence tying its
-                    // prefix to this source. Start this comparison from a
-                    // fresh complete representation; retries in this same
-                    // supervised worker may resume bytes it just received.
-                    destination.remove_part(&task_context, filename).await?;
-                    resume_from_byte = 0;
-                }
-
-                if resume_from_byte > 0 && !artifact_manifest.permits_resume(file_idx) {
-                    info!(
-                        "Discarding partial file {}/{} because its selected source has no resume identity",
-                        repo_id, filename
-                    );
-                    destination.remove_part(&task_context, filename).await?;
-                    resume_from_byte = 0;
-                }
-
-                if !compare_existing_source
-                    && destination
-                        .finalize_complete_part_file(&task_context, file_info, verify_selected_file)
-                        .await?
-                {
-                    file_completed = true;
-                    break;
-                }
-
-                if attempt > 1 {
-                    warn!(
-                        "Retry {}/{} for {}/{} (resuming from byte {})",
-                        attempt,
-                        retry_limit_display(retry_limit),
-                        repo_id,
-                        filename,
-                        resume_from_byte
-                    );
-
-                    // Reset status to Downloading for the retry
-                    project_worker_retry_reset(
-                        &downloads,
-                        download_id,
-                        &task_context,
-                        attempt,
-                        retry_limit,
-                    )
-                    .await?;
-                    publish_worker_snapshot_and_revalidate(
-                        &download_publications,
-                        &downloads,
-                        download_id,
-                        &task_context,
-                        destination,
-                        &destination_lock,
-                        &mut destination_guard,
-                        &[DownloadStatus::Downloading],
-                    )
-                    .await?;
-                }
-
-                match Self::download_attempt(
-                    &client,
-                    &downloads,
-                    &download_publications,
-                    &destination_lock,
-                    &mut destination_guard,
-                    download_id,
-                    &url,
-                    destination,
-                    filename,
-                    &artifact_manifest,
-                    file_idx,
-                    resume_from_byte,
-                    bytes_offset,
-                    &cancel_flag,
-                    &pause_flag,
-                    persistence.as_ref(),
-                    auth_header.as_deref(),
-                    &task_context,
-                )
-                .await
-                {
-                    Ok(_) => {
-                        #[cfg(test)]
-                        task_context.observe_worker_projection("before-rename-pause-check");
-                        if pause_flag.load(Ordering::Relaxed) {
-                            #[cfg(test)]
-                            task_context.observe_worker_projection("pause-before-rename");
-                            return Self::settle_worker_pause(
-                                &downloads,
-                                &download_publications,
-                                download_id,
-                                &task_context,
-                                persistence.as_ref(),
-                                &mut destination_guard,
-                            )
-                            .await;
-                        }
-                        if verify_selected_file {
-                            destination
-                                .verify_file(&task_context, file_info, true)
-                                .await?;
-                        }
-                        if compare_existing_source {
-                            if !destination
-                                .part_matches_final(&task_context, filename)
-                                .await?
-                            {
-                                return Err(PumasError::Validation {
-                                    field: "download.integrity".into(),
-                                    message: format!(
-                                        "Existing selected file {filename} differs from the immutable source artifact; preserving both files for reconciliation"
-                                    ),
-                                });
-                            }
-                            destination.remove_part(&task_context, filename).await?;
-                        } else {
-                            // Rename .part to final path atomically.
-                            destination
-                                .rename_part_to_file(&task_context, filename)
-                                .await
-                                .map_err(|e| PumasError::DownloadFailed {
-                                    url: "Hugging Face artifact".into(),
-                                    message: format!("Failed to rename temp file: {}", e),
-                                })?;
-                        }
-
-                        file_completed = true;
-                        break;
-                    }
-                    Err(e) => {
-                        // Paused -- .part preserved, not a real error
-                        if matches!(e, PumasError::DownloadPaused) {
-                            return Err(e);
-                        }
-
-                        if !e.is_retryable() || cancel_flag.load(Ordering::Relaxed) {
-                            if cancel_flag.load(Ordering::Relaxed) {
-                                let _ = destination.remove_part(&task_context, filename).await;
-                            }
-                            return Err(e);
-                        }
-
-                        warn!(
-                            "Download attempt {}/{} failed for {}/{}: {}",
-                            attempt,
-                            retry_limit_display(retry_limit),
-                            repo_id,
-                            filename,
-                            e
-                        );
-                        let error_text = e.to_string();
-                        last_error = Some(e);
-
-                        let elapsed = retry_started.elapsed();
-                        if retry_exhausted(attempt, retry_limit, elapsed, max_retry_elapsed) {
-                            break;
-                        }
-
-                        let delay = retry_config.calculate_delay(attempt.saturating_sub(1));
-                        let limit_text = retry_limit_display(retry_limit);
-                        let next_attempt = attempt + 1;
-                        {
-                            let mut downloads = downloads.write().await;
-                            let state = current_worker_state(
-                                &mut downloads,
-                                download_id,
-                                &task_context,
-                                &[DownloadStatus::Downloading],
-                            )?;
-                            state.retry_attempt = attempt;
-                            state.retry_limit = retry_limit;
-                            state.retrying = true;
-                            state.next_retry_delay_seconds = Some(delay.as_secs_f64());
-                            state.error = Some(format!(
-                                "Transient network error, retrying attempt {}/{} in {:.1}s: {}",
-                                next_attempt,
-                                limit_text,
-                                delay.as_secs_f64(),
-                                error_text
-                            ));
-                        }
-                        publish_worker_snapshot_and_revalidate(
-                            &download_publications,
-                            &downloads,
-                            download_id,
-                            &task_context,
-                            destination,
-                            &destination_lock,
-                            &mut destination_guard,
-                            &[DownloadStatus::Downloading],
-                        )
-                        .await?;
-                        debug!("Waiting {:?} before retry", delay);
-                        tokio::select! {
-                            biased;
-                            _ = task_context.pause_requested(&pause_flag) => return Err(PumasError::DownloadPaused),
-                            _ = tokio::time::sleep(delay) => {}
-                        }
-                    }
-                }
-            }
-
-            if !file_completed {
-                let elapsed = retry_started.elapsed();
-                if let Some(last_error) = last_error {
-                    let detail = retry_exhausted_message(
-                        attempt,
-                        retry_limit,
-                        elapsed,
-                        &last_error.to_string(),
-                    );
-                    return Err(PumasError::DownloadFailed {
-                        url,
-                        message: detail,
-                    });
-                }
-                return Err(PumasError::DownloadFailed {
-                    url,
-                    message: "Download stopped before completion".to_string(),
-                });
-            }
+                Err(error) => return Err(error),
+            };
 
             // File completed -- use actual file size for accurate offset
-            let actual_size = destination
-                .file_len(&task_context, filename)
-                .await?
-                .unwrap_or(file_info.size.unwrap_or(0));
             bytes_offset += actual_size;
             {
                 let mut downloads = downloads.write().await;
@@ -4797,11 +4631,10 @@ impl HuggingFaceClient {
             );
         }
 
-        for (file_idx, file) in files.iter().enumerate() {
-            if artifact_manifest.requires_file_verification(file_idx) {
-                destination.verify_file(&task_context, file, false).await?;
-            }
-        }
+        let already_adopted = operation.is_adopted();
+        let use_lease = acquisition
+            .files_ready(&task_context, operation, workspace)
+            .await?;
 
         // Remove the marker through the same destination authority before
         // releasing a recovery capability from state. If this fails, the
@@ -4814,13 +4647,15 @@ impl HuggingFaceClient {
             .get(download_id)
             .and_then(download_completion_info);
         drop(destination_guard.take());
-        import_completed_download(
-            &download_importer,
-            &task_context,
-            completion_info,
-            revision.clone(),
-        )
-        .await?;
+        if !already_adopted {
+            import_completed_download(
+                &download_importer,
+                &task_context,
+                completion_info,
+                revision.clone(),
+            )
+            .await?;
+        }
         destination_guard = Some(destination_lock.clone().lock_owned().await);
         {
             let mut states = downloads.write().await;
@@ -4846,6 +4681,13 @@ impl HuggingFaceClient {
                     "Download effect drain failed before settlement: {error}"
                 )))
             }
+        }
+
+        acquisition.acknowledge(&task_context, use_lease).await?;
+        if !matches!(task_context.drain_blocking().await, Ok(0)) {
+            return Err(PumasError::Other(
+                "Acquisition adoption effects did not drain".into(),
+            ));
         }
 
         // Persistence cleanup is part of successful completion. It is
@@ -4923,110 +4765,6 @@ impl HuggingFaceClient {
         publish_download_snapshot_from_parts(&download_publications).await;
 
         Ok(())
-    }
-
-    /// Execute a single download attempt, optionally resuming from a byte offset.
-    ///
-    /// `artifact_manifest` is the validated source-neutral selection for this
-    /// download, and `file_index` identifies the selected file for resume policy.
-    /// `bytes_offset` is bytes already downloaded from previous files in a multi-file download.
-    /// Overall progress is calculated as `(bytes_offset + file_downloaded) / overall_total`.
-    #[allow(clippy::too_many_arguments)]
-    async fn download_attempt(
-        client: &reqwest::Client,
-        downloads: &Arc<RwLock<HashMap<String, DownloadState>>>,
-        download_publications: &Arc<DownloadPublicationOwner>,
-        destination_lock: &Arc<TokioMutex<()>>,
-        destination_guard: &mut Option<OwnedMutexGuard<()>>,
-        download_id: &str,
-        url: &str,
-        destination: &DownloadDestination,
-        filename: &str,
-        artifact_manifest: &crate::acquisition::ArtifactManifest,
-        file_index: usize,
-        resume_from_byte: u64,
-        bytes_offset: u64,
-        cancel_flag: &Arc<AtomicBool>,
-        pause_flag: &Arc<AtomicBool>,
-        persistence: Option<&Arc<DownloadPersistence>>,
-        auth_header: Option<&str>,
-        task_context: &TaskContext,
-    ) -> Result<()> {
-        if resume_from_byte > 0 {
-            info!("Resuming download from byte {}", resume_from_byte);
-        }
-
-        let response = tokio::select! {
-            biased;
-            _ = task_context.pause_requested(pause_flag) => return Err(PumasError::DownloadPaused),
-            response = crate::acquisition::open_http_artifact(
-                client,
-                url,
-                artifact_manifest,
-                file_index,
-                resume_from_byte,
-                auth_header,
-            ) => response,
-        }?;
-
-        let is_resuming = response.resumed;
-        if resume_from_byte > 0 && !is_resuming {
-            warn!("Server ignored Range; replacing the partial file from byte zero");
-        }
-
-        // Open file: append for resume, create for fresh start
-        let file = destination
-            .open_part(task_context, filename, is_resuming)
-            .await?;
-        let (sink, outcome) = {
-            let mut sink = HuggingFaceHttpSink { file, task_context };
-            let mut host = HuggingFaceHttpAttemptHost {
-                downloads,
-                publications: download_publications,
-                destination_lock,
-                destination_guard,
-                download_id,
-                destination,
-                cancel_flag,
-                pause_flag,
-                task_context,
-                bytes_offset,
-                started_at: Instant::now(),
-                last_publish: Instant::now(),
-            };
-            let outcome = crate::acquisition::stream_http_artifact(
-                response,
-                resume_from_byte,
-                &mut sink,
-                &mut host,
-            )
-            .await?;
-            (sink, outcome)
-        };
-
-        drop(sink);
-        match outcome {
-            crate::acquisition::HttpBodyOutcome::Complete { downloaded: _ } => Ok(()),
-            crate::acquisition::HttpBodyOutcome::Paused => {
-                #[cfg(test)]
-                task_context.observe_worker_projection("pause-during-stream");
-                Self::settle_worker_pause(
-                    downloads,
-                    download_publications,
-                    download_id,
-                    task_context,
-                    persistence,
-                    destination_guard,
-                )
-                .await
-            }
-            crate::acquisition::HttpBodyOutcome::Cancelled => {
-                let _ = destination.remove_part(task_context, filename).await;
-                // Terminal cancellation belongs to the generation-replacing
-                // finalizer, which observes this worker and its nested work.
-                Err(PumasError::DownloadCancelled)
-            }
-        }
     }
 
     async fn persist_status_update_owned(
@@ -5148,6 +4886,7 @@ impl HuggingFaceClient {
             let destination_executions = self.destination_executions.clone();
             let persistence = self.persistence.clone();
             let finalizer_id = download_id.to_string();
+            let acquisition = self.acquisition.clone();
             let cancellation_persistence = persistence.map(|store| CancellationPersistence {
                 store,
                 download_id: finalizer_id.clone(),
@@ -5282,6 +5021,18 @@ impl HuggingFaceClient {
                                 let persistence = persistence.clone();
                                 let _ = task_context.run_fallible_blocking_named("mark cancelled download cleanup failure", move || persistence.mark_failed()).await;
                             }
+                        }
+                        if !quarantine_failed && !filesystem_cleanup_failed && !effect_drain_failed && !persistence_cleanup_failed {
+                            let capability = cleanup_destination.capability().clone();
+                            let identity = task_context.run_fallible_blocking_named("observe cancelled acquisition workspace", move || capability.persisted_identity()).await;
+                            if let Ok(Ok(identity)) = identity {
+                                let receipt = cancellation_persistence.as_ref().and_then(|persistence| persistence.admission_attempt.clone()).unwrap_or_else(|| finalizer_id.clone());
+                                if acquisition.withdraw(&task_context,
+                                    crate::acquisition::AcquisitionDemand { consumer: "hf.model".into(), operation: receipt },
+                                    crate::acquisition::WorkspaceIdentity { root_identity: identity.library_root, relative_target: identity.relative_target }).await.is_err() {
+                                    filesystem_cleanup_failed = true;
+                                }
+                            } else { filesystem_cleanup_failed = true; }
                         }
                         // Join registered finalizer blocking work before exposing
                         // Cancelled or releasing the recovery capability.
@@ -10879,7 +10630,12 @@ mod tests {
         assert!(!completion_called.load(Ordering::SeqCst));
         assert!(!aux_called.load(Ordering::SeqCst));
         assert!(persistence.load_all().is_empty());
-        assert!(!temp.path().join("downloads.json").exists());
+        let records = persistence.acquisition_store().acquisitions().unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(matches!(
+            records.values().next().unwrap().phase,
+            crate::acquisition::AcquisitionPhase::Adopted { .. }
+        ));
         assert_eq!(
             std::fs::read(verified.destination.display_path().join("weights.gguf")).unwrap(),
             b"done"
@@ -13731,7 +13487,7 @@ mod tests {
             let started_sender = started_sender.clone();
             let release = release.clone();
             move |operation| {
-                if operation == "write ambient partial download file" {
+                if operation == "write partial download file" {
                     if let Some(sender) = started_sender.lock().unwrap().take() {
                         let _ = sender.send(());
                         let _ = release.lock().unwrap().recv();
@@ -15604,7 +15360,7 @@ mod tests {
                 let result_sender = result_sender.clone();
                 let release = release.clone();
                 move |operation| {
-                    if operation == "create file parent" {
+                    if operation == "inspect reusable acquisition file" {
                         if let Some(sender) = result_sender.lock().unwrap().take() {
                             let _ = sender.send(());
                             let _ = release.lock().unwrap().recv();
@@ -19166,6 +18922,18 @@ mod tests {
             .unwrap()
             .is_some());
         assert!(reopened_persistence.load_all().is_empty());
+        let neutral = reopened.acquisition.store().acquisitions().unwrap();
+        let adopted = neutral
+            .values()
+            .find(|record| record.demand.consumer == "hf.model")
+            .unwrap();
+        assert!(matches!(
+            adopted.phase,
+            crate::acquisition::AcquisitionPhase::Adopted { .. }
+        ));
+        assert_eq!(adopted.manifest.source().revision().value(), COMMIT);
+        assert_eq!(adopted.files.len(), 2);
+        assert_eq!(adopted.files[1].bytes, PAYLOAD.len() as u64);
     }
 
     async fn await_pinned_integrity_error(client: &HuggingFaceClient, download_id: &str) -> String {

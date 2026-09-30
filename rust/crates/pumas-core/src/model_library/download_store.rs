@@ -5,10 +5,11 @@
 //! Strict inventory hides unresolved ownership transitions;
 //! durable terminal proofs may outlive the resumable snapshot they protect.
 
+use crate::acquisition::store::{AcquisitionStore, AcquisitionTransaction};
 use crate::error::Result;
 use crate::metadata::{
-    AtomicJsonTarget, AtomicPublication, AtomicPublishFailure, AtomicPublishFailureKind,
-    AtomicPublishResult, AtomicPublishStage, StagingCleanup,
+    AtomicPublication, AtomicPublishFailure, AtomicPublishFailureKind, AtomicPublishResult,
+    AtomicPublishStage, StagingCleanup,
 };
 use crate::model_library::artifact_identity::DownloadRevision;
 use crate::model_library::types::DownloadRequest;
@@ -16,15 +17,13 @@ use crate::models::DownloadStatus;
 use crate::models::HuggingFaceEvidence;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
 const DOWNLOAD_STORE_SCHEMA_VERSION: u32 = 5;
 const LEGACY_DOWNLOAD_STORE_SCHEMA_VERSION: u32 = 4;
-const DOWNLOAD_STORE_LOCK_FILE: &str = ".downloads.lock";
 
 /// A single persisted download entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -342,7 +341,7 @@ enum PersistedRevocationDisposition {
 #[derive(Clone)]
 pub struct DownloadPersistence {
     path: PathBuf,
-    mutation: Arc<Mutex<()>>,
+    store: Arc<AcquisitionStore>,
     confirmed_admissions: Arc<Mutex<HashSet<String>>>,
     confirmed_cleanups: Arc<Mutex<HashSet<String>>>,
     publisher: Arc<dyn DownloadStorePublisher>,
@@ -359,14 +358,22 @@ enum StoreOperation {
 }
 
 trait DownloadStorePublisher: Send + Sync {
-    fn publish(&self, target: &AtomicJsonTarget, data: &DownloadStoreData) -> AtomicPublishResult;
+    fn publish(
+        &self,
+        target: &AcquisitionTransaction<'_>,
+        data: &DownloadStoreData,
+    ) -> AtomicPublishResult;
 }
 
 struct AtomicDownloadStorePublisher;
 
 impl DownloadStorePublisher for AtomicDownloadStorePublisher {
-    fn publish(&self, target: &AtomicJsonTarget, data: &DownloadStoreData) -> AtomicPublishResult {
-        target.publish_json(data)
+    fn publish(
+        &self,
+        target: &AcquisitionTransaction<'_>,
+        data: &DownloadStoreData,
+    ) -> AtomicPublishResult {
+        target.publish_model_partition(data)
     }
 }
 
@@ -381,9 +388,7 @@ struct NoopStoreTransactionObserver;
 impl StoreTransactionObserver for NoopStoreTransactionObserver {}
 
 struct StoreTransaction<'a> {
-    _instance_guard: MutexGuard<'a, ()>,
-    target: AtomicJsonTarget,
-    _os_lock: File,
+    target: AcquisitionTransaction<'a>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -476,7 +481,7 @@ impl DownloadPersistence {
     pub fn new(data_dir: &Path) -> Self {
         Self {
             path: data_dir.join("downloads.json"),
-            mutation: Arc::new(Mutex::new(())),
+            store: Arc::new(AcquisitionStore::new(data_dir)),
             confirmed_admissions: Arc::new(Mutex::new(HashSet::new())),
             confirmed_cleanups: Arc::new(Mutex::new(HashSet::new())),
             publisher: Arc::new(AtomicDownloadStorePublisher),
@@ -663,7 +668,7 @@ impl DownloadPersistence {
         download_id: &str,
         attempt_id: &str,
     ) -> Result<bool> {
-        let transaction = self.transaction(StoreOperation::Remove)?;
+        let mut transaction = self.transaction(StoreOperation::Remove)?;
         let mut data = self.load_data_strict(&transaction)?;
         let Some(admission) = data
             .queue_admissions
@@ -696,6 +701,9 @@ impl DownloadPersistence {
             data.lifecycle_quarantines
                 .retain(|id, quarantine| id != download_id || quarantine.sticky_failure);
         }
+        transaction
+            .target
+            .stage_consumer_settlement("hf.model", attempt_id);
         self.write_data(&transaction, &mut data)?;
         Ok(true)
     }
@@ -1482,50 +1490,36 @@ impl DownloadPersistence {
         Ok(true)
     }
 
-    fn transaction(&self, operation: StoreOperation) -> Result<StoreTransaction<'_>> {
-        let instance_guard = self.mutation.lock().map_err(|_| {
-            crate::PumasError::Other("Download persistence lock is poisoned".to_string())
-        })?;
-        let target = AtomicJsonTarget::open(&self.path)?;
-        let os_lock = target.open_lock_file(DOWNLOAD_STORE_LOCK_FILE)?;
-        self.observer.attempting(operation);
-        os_lock.lock().map_err(|source| crate::PumasError::Io {
-            message: format!("Failed to lock download store {}", self.path.display()),
-            path: Some(self.path.clone()),
-            source: Some(source),
-        })?;
-        self.observer.acquired(operation);
-        Ok(StoreTransaction {
-            _instance_guard: instance_guard,
-            target,
-            _os_lock: os_lock,
+    /// Explicit one-shot offline migration of the complete supported v4/v5
+    /// model custody representation into schema 6. The caller must stop all
+    /// old readers and writers first; the advisory lock cannot prove that.
+    /// Normal construction/open never invokes this operation.
+    pub fn migrate_legacy_offline(data_dir: impl AsRef<Path>) -> Result<()> {
+        let store = Self::new(data_dir.as_ref());
+        store.store.migrate_legacy_offline(|value| {
+            let data = normalize_legacy_store(value, &store.path)?;
+            serde_json::to_value(data).map_err(Into::into)
         })
     }
 
+    pub(crate) fn acquisition_store(&self) -> Arc<AcquisitionStore> {
+        self.store.clone()
+    }
+
+    fn transaction(&self, operation: StoreOperation) -> Result<StoreTransaction<'_>> {
+        let target = self.store.transaction_observed(
+            operation == StoreOperation::Load,
+            || self.observer.attempting(operation),
+            || self.observer.acquired(operation),
+        )?;
+        Ok(StoreTransaction { target })
+    }
+
     fn load_data_strict(&self, transaction: &StoreTransaction<'_>) -> Result<DownloadStoreData> {
-        let Some(value) = transaction.target.read_json::<serde_json::Value>()? else {
+        let Some(value) = transaction.target.model_partition()? else {
             return Ok(DownloadStoreData::empty());
         };
-        let schema_version = value
-            .get("schema_version")
-            .and_then(serde_json::Value::as_u64);
-        let value = match schema_version {
-            Some(version) if version == u64::from(DOWNLOAD_STORE_SCHEMA_VERSION) => value,
-            Some(version) if version == u64::from(LEGACY_DOWNLOAD_STORE_SCHEMA_VERSION) => {
-                let mut data = migrate_v4_to_v5(value, &self.path)?;
-                self.write_data(transaction, &mut data)?;
-                return Ok(data);
-            }
-            _ => {
-                return Err(crate::PumasError::Validation {
-                    field: "downloads.schema_version".into(),
-                    message: format!(
-                        "Download store requires schema version {DOWNLOAD_STORE_SCHEMA_VERSION}; only schema version {LEGACY_DOWNLOAD_STORE_SCHEMA_VERSION} can be upgraded automatically"
-                    ),
-                });
-            }
-        };
-        parse_current_store(value, &self.path)
+        normalize_legacy_store(value, &self.path)
     }
 
     /// Replace the complete versioned store document and require `Durable`.
@@ -1571,11 +1565,22 @@ fn parse_current_store(value: serde_json::Value, path: &Path) -> Result<Download
     Ok(data)
 }
 
-fn migrate_v4_to_v5(mut value: serde_json::Value, path: &Path) -> Result<DownloadStoreData> {
+fn normalize_legacy_store(mut value: serde_json::Value, path: &Path) -> Result<DownloadStoreData> {
     let root = value
         .as_object_mut()
         .ok_or_else(|| invalid_store_migration("Download store document must be an object"))?;
 
+    let version = root
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64);
+    if version == Some(5) {
+        return parse_current_store(value, path);
+    }
+    if version != Some(4) {
+        return Err(invalid_store_migration(
+            "Only complete supported v4/v5 model custody is accepted",
+        ));
+    }
     add_legacy_revision_to_snapshot_array(root.get_mut("downloads"), "downloads")?;
     add_legacy_revision_to_nested_snapshots(
         root.get_mut("lifecycle_quarantines"),
@@ -2650,7 +2655,7 @@ mod tests {
     impl DownloadStorePublisher for ScriptedPublisher {
         fn publish(
             &self,
-            target: &AtomicJsonTarget,
+            target: &AcquisitionTransaction<'_>,
             data: &DownloadStoreData,
         ) -> AtomicPublishResult {
             self.calls.fetch_add(1, Ordering::SeqCst);
@@ -2661,7 +2666,7 @@ mod tests {
                 .pop_front()
                 .unwrap_or(ScriptedPublication::Durable)
             {
-                ScriptedPublication::Durable => target.publish_json(data),
+                ScriptedPublication::Durable => target.publish_model_partition(data),
                 ScriptedPublication::NotPublished => Err(Box::new(AtomicPublishFailure {
                     stage: AtomicPublishStage::Staging,
                     kind: AtomicPublishFailureKind::Filesystem,
@@ -2670,7 +2675,7 @@ mod tests {
                 })),
                 ScriptedPublication::PublishedDurabilityUnknown => {
                     assert!(matches!(
-                        target.publish_json(data).unwrap(),
+                        target.publish_model_partition(data).unwrap(),
                         AtomicPublication::Durable
                     ));
                     Ok(AtomicPublication::PublishedDurabilityUnknown {
@@ -2689,7 +2694,7 @@ mod tests {
                 }
                 ScriptedPublication::VisibilityUnknownAfterEffect => {
                     assert!(matches!(
-                        target.publish_json(data).unwrap(),
+                        target.publish_model_partition(data).unwrap(),
                         AtomicPublication::Durable
                     ));
                     Ok(AtomicPublication::VisibilityUnknown {
@@ -3182,10 +3187,10 @@ mod tests {
     impl DownloadStorePublisher for ExitAfterPublisher {
         fn publish(
             &self,
-            target: &AtomicJsonTarget,
+            target: &AcquisitionTransaction<'_>,
             data: &DownloadStoreData,
         ) -> AtomicPublishResult {
-            let outcome = target.publish_json(data);
+            let outcome = target.publish_model_partition(data);
             let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
             if call == self.exit_after {
                 std::process::exit(80 + i32::try_from(call).expect("test call count fits i32"));
@@ -3337,7 +3342,7 @@ mod tests {
         assert_eq!(reopened.downloads[0].revision.as_deref(), Some(commit));
         let document = std::fs::read_to_string(&store.path).unwrap();
         assert!(document.contains(&format!("\"revision\": \"{commit}\"")));
-        assert!(document.contains("\"schema_version\": 5"));
+        assert!(document.contains("\"schema_version\": 6"));
     }
 
     #[test]
@@ -3359,6 +3364,114 @@ mod tests {
     }
 
     #[test]
+    fn offline_v4_v5_migration_preserves_all_custody_partitions_without_authorizing_pending() {
+        for version in [4, 5] {
+            let tmp = TempDir::new().unwrap();
+            let store = DownloadPersistence::new(tmp.path());
+            let mut active = admission_request("active");
+            active.destination.relative_target = "active".into();
+            store
+                .admit_download(&Uuid::new_v4().to_string(), &active)
+                .unwrap()
+                .into_result()
+                .unwrap();
+            let mut pending = admission_request("pending");
+            pending.destination.relative_target = "pending".into();
+            let pending_attempt = Uuid::new_v4().to_string();
+            store
+                .admit_download(&pending_attempt, &pending)
+                .unwrap()
+                .into_result()
+                .unwrap();
+            store
+                .begin_lifecycle_quarantine(
+                    &pending.snapshot,
+                    LifecycleQuarantineDomain::Ambient,
+                    true,
+                    Some(&pending_attempt),
+                )
+                .unwrap();
+            let mut released = admission_request("released");
+            released.destination.relative_target = "released".into();
+            let released_attempt = Uuid::new_v4().to_string();
+            store
+                .admit_download(&released_attempt, &released)
+                .unwrap()
+                .into_result()
+                .unwrap();
+            store
+                .settle_queue_admission("released", &released_attempt)
+                .unwrap();
+            let mut recovery = admission_request("recovery");
+            recovery.destination.relative_target = "recovery".into();
+            let recovery_attempt = Uuid::new_v4().to_string();
+            store
+                .admit_download(&recovery_attempt, &recovery)
+                .unwrap()
+                .into_result()
+                .unwrap();
+            store
+                .revoke_admitted_for_recovery("recovery", &recovery_attempt, &recovery.snapshot)
+                .unwrap();
+            let mut hidden = admission_request("hidden");
+            hidden.destination.relative_target = "hidden".into();
+            let hidden_store = store
+                .clone()
+                .with_test_publisher(Arc::new(ScriptedPublisher::new([
+                    ScriptedPublication::Durable,
+                    ScriptedPublication::NotPublished,
+                ])));
+            assert!(matches!(
+                hidden_store
+                    .admit_download(&Uuid::new_v4().to_string(), &hidden)
+                    .unwrap(),
+                DownloadAdmissionTransition::NotPublished { .. }
+            ));
+            let mut expected: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
+            let mut legacy = expected.clone();
+            legacy.as_object_mut().unwrap().remove("acquisitions");
+            legacy["schema_version"] = 5.into();
+            std::fs::write(&store.path, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
+            if version == 4 {
+                rewrite_current_store_as_v4(&store);
+            }
+            let original = std::fs::read(&store.path).unwrap();
+            let fresh = DownloadPersistence::new(tmp.path());
+            let inventory = fresh.load_lifecycle_inventory_strict().unwrap();
+            assert!(inventory.hidden_admissions.contains_key("hidden"));
+            assert_eq!(
+                inventory.quarantines["pending"].disposition,
+                LifecycleCleanupDisposition::Pending
+            );
+            assert!(fresh.reconcile_lifecycle_inventory_strict().is_err());
+            assert_eq!(std::fs::read(&store.path).unwrap(), original);
+            DownloadPersistence::migrate_legacy_offline(tmp.path()).unwrap();
+            expected["schema_version"] = 6.into();
+            let migrated_bytes = std::fs::read(&store.path).unwrap();
+            let actual: serde_json::Value = serde_json::from_slice(&migrated_bytes).unwrap();
+            assert_eq!(
+                actual, expected,
+                "only the envelope may change during v{version} migration"
+            );
+            // An old strict decoder rejects the new envelope, never downgrades it.
+            assert!(serde_json::from_value::<DownloadStoreData>(actual.clone()).is_err());
+            let reopened = DownloadPersistence::new(tmp.path());
+            let inventory = reopened.load_lifecycle_inventory_strict().unwrap();
+            assert_eq!(
+                inventory.quarantines["pending"].disposition,
+                LifecycleCleanupDisposition::Pending
+            );
+            assert!(inventory.hidden_admissions.contains_key("hidden"));
+            assert!(reopened
+                .settle_queue_admission("pending", &pending_attempt)
+                .is_err());
+            assert_eq!(std::fs::read(&store.path).unwrap(), migrated_bytes);
+            assert!(DownloadPersistence::migrate_legacy_offline(tmp.path()).is_err());
+        }
+    }
+
+    #[test]
     fn schema_v4_upgrade_persists_legacy_main_revision() {
         let tmp = TempDir::new().unwrap();
         let store = DownloadPersistence::new(tmp.path());
@@ -3369,22 +3482,26 @@ mod tests {
             .map(|contents| serde_json::from_str::<serde_json::Value>(&contents).unwrap())
             .unwrap();
         legacy["schema_version"] = serde_json::Value::from(4);
+        legacy.as_object_mut().unwrap().remove("acquisitions");
         legacy["downloads"][0]
             .as_object_mut()
             .unwrap()
             .remove("revision");
         std::fs::write(&store.path, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
 
+        let original = std::fs::read(&store.path).unwrap();
         let reopened = DownloadPersistence::new(tmp.path());
         let transaction = reopened.transaction(StoreOperation::Load).unwrap();
         let upgraded = reopened.load_data_strict(&transaction).unwrap();
         assert_eq!(upgraded.schema_version, 5);
         assert_eq!(upgraded.downloads[0].revision, None);
         drop(transaction);
+        assert_eq!(std::fs::read(&store.path).unwrap(), original);
+        DownloadPersistence::migrate_legacy_offline(tmp.path()).unwrap();
 
         let durable: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&reopened.path).unwrap()).unwrap();
-        assert_eq!(durable["schema_version"], 5);
+        assert_eq!(durable["schema_version"], 6);
         assert!(durable["downloads"][0]["revision"].is_null());
     }
 
@@ -3495,6 +3612,7 @@ mod tests {
         let mut document: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
         document["schema_version"] = serde_json::Value::from(4);
+        document.as_object_mut().unwrap().remove("acquisitions");
         for snapshot in document["downloads"].as_array_mut().unwrap() {
             snapshot.as_object_mut().unwrap().remove("revision");
         }
@@ -3556,6 +3674,7 @@ mod tests {
         let mut legacy: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
         legacy["schema_version"] = serde_json::Value::from(4);
+        legacy.as_object_mut().unwrap().remove("acquisitions");
         let original = serde_json::to_vec_pretty(&legacy).unwrap();
         std::fs::write(&store.path, &original).unwrap();
 
@@ -3578,6 +3697,7 @@ mod tests {
         let mut legacy: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&store.path).unwrap()).unwrap();
         legacy["schema_version"] = serde_json::Value::from(4);
+        legacy.as_object_mut().unwrap().remove("acquisitions");
         legacy["downloads"][0]
             .as_object_mut()
             .unwrap()
@@ -3603,39 +3723,32 @@ mod tests {
             ScriptedPublisher::new([ScriptedPublication::NotPublished]),
         ));
 
-        assert!(reopened.load_all_strict().is_err());
+        assert!(reopened.load_all_strict().is_ok());
+        assert!(
+            matches!(reopened.reconcile_lifecycle_inventory_strict(), Err(crate::PumasError::Validation { ref field, .. }) if field == "acquisition.migration_required")
+        );
         assert_eq!(std::fs::read(&reopened.path).unwrap(), original);
     }
 
     #[test]
-    fn schema_v4_upgrade_unknown_durability_returns_error_and_retains_valid_v5_custody() {
+    fn schema_v4_explicit_migration_preserves_reopen_custody() {
         let tmp = TempDir::new().unwrap();
         let store = DownloadPersistence::new(tmp.path());
         store
-            .admit_test_download(&persisted("dl-v4-unknown-durability"))
+            .admit_test_download(&persisted("dl-v4-migration"))
             .unwrap();
-        rewrite_current_store_as_v4(&store);
-        let reopened = DownloadPersistence::new(tmp.path()).with_test_publisher(Arc::new(
-            ScriptedPublisher::new([ScriptedPublication::PublishedDurabilityUnknown]),
-        ));
-
-        assert!(matches!(
-            reopened.load_all_strict(),
-            Err(crate::PumasError::Other(ref message))
-                if message == "injected parent-sync uncertainty"
-        ));
-        let durable: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&reopened.path).unwrap()).unwrap();
-        assert_eq!(durable["schema_version"], 5);
-        assert!(durable["downloads"][0]["revision"].is_null());
-
+        let original = rewrite_current_store_as_v4(&store);
+        let reopened = DownloadPersistence::new(tmp.path());
+        assert!(reopened.load_all_strict().is_ok());
+        assert_eq!(std::fs::read(&store.path).unwrap(), original);
+        DownloadPersistence::migrate_legacy_offline(tmp.path()).unwrap();
         let fresh = DownloadPersistence::new(tmp.path());
-        let transaction = fresh.transaction(StoreOperation::Load).unwrap();
-        let data = fresh.load_data_strict(&transaction).unwrap();
-        assert_eq!(data.downloads[0].download_id, "dl-v4-unknown-durability");
-        assert!(data
-            .queue_admissions
-            .contains_key("dl-v4-unknown-durability"));
+        fresh.reconcile_lifecycle_inventory_strict().unwrap();
+        assert_eq!(
+            fresh.load_all_strict().unwrap()[0].download_id,
+            "dl-v4-migration"
+        );
+        assert!(DownloadPersistence::migrate_legacy_offline(tmp.path()).is_err());
     }
 
     #[test]

@@ -145,6 +145,16 @@ impl PumasApi {
         intent::IntentApi::new(&self.primary().intent_service)
     }
 
+    /// Shared source-neutral artifact acquisition owner used by local consumers.
+    pub fn acquisition(&self) -> &Arc<acquisition::AcquisitionService> {
+        &self.primary().acquisition
+    }
+
+    /// Close the shared acquisition supervisor after consumer-specific shutdown.
+    pub async fn shutdown_acquisition(&self) -> Result<()> {
+        self.primary().acquisition.shutdown().await
+    }
+
     /// Close local intent admission, drain admitted local effects, then drain downloads.
     ///
     /// Dropping this waiter does not cancel admitted work. Repeated calls observe

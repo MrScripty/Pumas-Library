@@ -87,6 +87,7 @@ pub struct HuggingFaceClient {
     pub(super) download_publications: Arc<DownloadPublicationOwner>,
     /// Owner of background download tasks and their blocking filesystem work.
     download_tasks: Arc<DownloadTaskOwner>,
+    pub(crate) acquisition: Arc<crate::acquisition::AcquisitionService>,
     /// Only the public client requests closure on Drop; invocation snapshots
     /// borrow its configuration while their work belongs to `download_tasks`.
     owns_lifecycle: bool,
@@ -196,6 +197,7 @@ impl HuggingFaceClient {
             download_updates: self.download_updates.clone(),
             download_publications: self.download_publications.clone(),
             download_tasks: self.download_tasks.clone(),
+            acquisition: self.acquisition.clone(),
             owns_lifecycle: false,
             destination_executions: self.destination_executions.clone(),
             dest_locks: self.dest_locks.clone(),
@@ -301,6 +303,9 @@ impl HuggingFaceClient {
             download_updates.clone(),
         ));
 
+        let acquisition = Arc::new(crate::acquisition::AcquisitionService::new(Arc::new(
+            crate::acquisition::AcquisitionStore::new(&cache_dir),
+        )));
         Ok(Self {
             destination_root: None,
             client,
@@ -310,11 +315,15 @@ impl HuggingFaceClient {
             download_revision,
             download_updates,
             download_publications: download_publications.clone(),
-            download_tasks: Arc::new(DownloadTaskOwner::new_with_finalizer({
-                let downloads = downloads.clone();
-                let publications = download_publications.clone();
-                move || download::project_download_shutdown(downloads, publications)
-            })),
+            acquisition: acquisition.clone(),
+            download_tasks: Arc::new(DownloadTaskOwner::with_supervisor(
+                acquisition.supervisor(),
+                {
+                    let downloads = downloads.clone();
+                    let publications = download_publications.clone();
+                    move || download::project_download_shutdown(downloads, publications)
+                },
+            )?),
             owns_lifecycle: true,
             destination_executions: Arc::new(DestinationExecutionOwner::new()),
             dest_locks: Arc::new(RwLock::new(HashMap::new())),
@@ -356,7 +365,24 @@ impl HuggingFaceClient {
 
     /// Set the download persistence store.
     pub fn set_persistence(&mut self, persistence: Arc<DownloadPersistence>) {
+        self.acquisition = Arc::new(self.acquisition.with_store(persistence.acquisition_store()));
         self.persistence = Some(persistence);
+    }
+
+    pub(crate) fn set_acquisition_service(
+        &mut self,
+        acquisition: Arc<crate::acquisition::AcquisitionService>,
+    ) -> Result<()> {
+        self.download_tasks = Arc::new(DownloadTaskOwner::with_supervisor(
+            acquisition.supervisor(),
+            {
+                let downloads = self.downloads.clone();
+                let publications = self.download_publications.clone();
+                move || download::project_download_shutdown(downloads, publications)
+            },
+        )?);
+        self.acquisition = acquisition;
+        Ok(())
     }
 
     pub(crate) fn set_download_importer(&mut self, importer: Arc<super::ModelImporter>) {

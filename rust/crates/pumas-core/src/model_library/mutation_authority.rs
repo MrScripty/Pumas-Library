@@ -161,10 +161,21 @@ impl LibraryMutationAuthority {
             .hidden_admissions
             .values()
             .any(|admission| targets.contains(&admission.request.destination));
+        let acquisitions = self.downloads.acquisition_store().acquisitions()?;
+        let acquiring = acquisitions.values().any(|record| {
+            !matches!(
+                record.phase,
+                crate::acquisition::AcquisitionPhase::Adopted { .. }
+                    | crate::acquisition::AcquisitionPhase::Withdrawn
+            ) && targets.iter().any(|target| {
+                target.library_root == record.workspace.root_identity
+                    && target.relative_target == record.workspace.relative_target
+            })
+        });
         // Settled quarantine records do not retain a trustworthy destination
         // identity. Preserve all model bytes until explicit recovery resolves
         // that custody.
-        if queued || hidden || !inventory.quarantines.is_empty() {
+        if queued || hidden || acquiring || !inventory.quarantines.is_empty() {
             return Err(PumasError::DownloadRootBusy);
         }
         Ok(())
@@ -268,5 +279,84 @@ mod tests {
             error,
             PumasError::Validation { ref field, .. } if field == "model_library.mutation"
         ));
+    }
+
+    #[tokio::test]
+    async fn canonical_acquisition_custody_blocks_model_mutation_until_withdrawal() {
+        use crate::acquisition::{
+            AcquisitionDemand, AcquisitionPhase, AcquisitionRecord, ArtifactFile, ArtifactManifest,
+            ArtifactRevisionEvidence, ArtifactSourceIdentity, FileVerificationRequirement,
+            RevisionStrength, WorkspaceIdentity,
+        };
+        let temp = tempfile::TempDir::new().unwrap();
+        let library_root = temp.path().join("library");
+        let model = library_root.join("llm/family/model");
+        std::fs::create_dir_all(&model).unwrap();
+        let downloads = Arc::new(DownloadPersistence::new(temp.path()));
+        let authority = LibraryMutationAuthority::new(
+            &library_root,
+            RuntimeTasks::new(),
+            DownloadDestinationRoot::open(&library_root).unwrap(),
+            downloads.clone(),
+        )
+        .unwrap();
+        let targets = authority
+            .validate_targets(&[("llm/family/model".into(), model)])
+            .unwrap();
+        let operation = Uuid::new_v4();
+        let record = AcquisitionRecord {
+            id: operation,
+            demand: AcquisitionDemand {
+                consumer: "fixture.consumer".into(),
+                operation: "retained-demand".into(),
+            },
+            manifest: ArtifactManifest::new(
+                ArtifactSourceIdentity::new(
+                    "fixture",
+                    "object",
+                    ArtifactRevisionEvidence::new(
+                        "fixture.revision",
+                        "v1",
+                        RevisionStrength::Immutable,
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+                vec![ArtifactFile::new(
+                    "weights.gguf",
+                    "weights",
+                    Some(4),
+                    None,
+                    FileVerificationRequirement::SizeAndImmutableRevision,
+                )
+                .unwrap()],
+            )
+            .unwrap(),
+            workspace: WorkspaceIdentity {
+                root_identity: targets[0].library_root.clone(),
+                relative_target: targets[0].relative_target.clone(),
+            },
+            phase: AcquisitionPhase::Transferring,
+            files: Vec::new(),
+        };
+        downloads
+            .acquisition_store()
+            .update_acquisitions(|records| {
+                records.insert(operation, record);
+                Ok(())
+            })
+            .unwrap();
+        assert!(matches!(
+            authority.require_no_download_custody(&targets),
+            Err(PumasError::DownloadRootBusy)
+        ));
+        downloads
+            .acquisition_store()
+            .update_acquisitions(|records| {
+                records.get_mut(&operation).unwrap().phase = AcquisitionPhase::Withdrawn;
+                Ok(())
+            })
+            .unwrap();
+        authority.require_no_download_custody(&targets).unwrap();
     }
 }

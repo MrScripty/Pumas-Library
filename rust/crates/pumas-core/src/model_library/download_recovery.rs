@@ -652,6 +652,32 @@ impl DownloadRecoveryDestination {
         })
     }
 
+    /// Transfer already-held directory authority into the neutral workspace.
+    /// The model root and destination chain remain revalidated on every effect.
+    pub(crate) fn acquisition_workspace(
+        &self,
+        execution_lease: Arc<dyn Send + Sync>,
+    ) -> Result<crate::acquisition::AcquisitionWorkspace> {
+        let directory = self.directory(false)?;
+        let destination = self.clone();
+        let expected = directory_identity(&directory)?;
+        let locator = self.persisted_identity()?;
+        crate::acquisition::AcquisitionWorkspace::from_capability(
+            directory,
+            crate::acquisition::WorkspaceIdentity {
+                root_identity: locator.library_root,
+                relative_target: locator.relative_target,
+            },
+            execution_lease,
+            move || {
+                if directory_identity(&destination.directory(false)?)? != expected {
+                    return Err(invalid_capability_path().into());
+                }
+                Ok(())
+            },
+        )
+    }
+
     pub(crate) fn identity(&self) -> DestinationIdentity {
         DestinationIdentity {
             root: self.authority.root_identity,
@@ -1060,6 +1086,7 @@ impl DownloadRecoveryDestination {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(crate) fn create_parent(&self, file: &str) -> io::Result<()> {
         self.file_parent(file, true).map(|_| ())
     }
@@ -1151,71 +1178,7 @@ impl DownloadRecoveryDestination {
         Ok(())
     }
 
-    /// Compare an immutable-source response staged in `.part` with an
-    /// existing final file without replacing either file. Identity and
-    /// metadata checks detect replacement and ordinary concurrent changes;
-    /// this is not isolation from an uncooperative writer that can modify a
-    /// file in place while restoring its metadata.
-    pub(crate) fn download_part_matches_final(&self, filename: &str) -> Result<bool> {
-        let (parent, name) = self.file_parent(filename, false)?;
-        let part_name = format!(
-            "{name}{}",
-            crate::config::NetworkConfig::DOWNLOAD_TEMP_SUFFIX
-        );
-        let mut final_options = OpenOptions::new();
-        final_options.read(true);
-        nofollow_options(&mut final_options);
-        let mut part_options = OpenOptions::new();
-        part_options.read(true);
-        nofollow_options(&mut part_options);
-        let mut final_file = parent.open_with(&name, &final_options)?.into_std();
-        let mut part_file = parent.open_with(&part_name, &part_options)?.into_std();
-        let final_before = Metadata::from_file(&final_file)?;
-        let part_before = Metadata::from_file(&part_file)?;
-        if !final_before.is_file() || !part_before.is_file() {
-            return Err(invalid_capability_path().into());
-        }
-        let final_identity = filesystem_identity(&final_before).ok_or_else(|| {
-            invalid_download_integrity("Platform cannot bind the existing file during comparison")
-        })?;
-        let part_identity = filesystem_identity(&part_before).ok_or_else(|| {
-            invalid_download_integrity("Platform cannot bind the staged file during comparison")
-        })?;
-
-        let comparison = if final_before.len() == part_before.len() {
-            compare_file_contents(&mut final_file, &mut part_file, final_before.len())
-        } else {
-            Ok(false)
-        };
-
-        let final_after = Metadata::from_file(&final_file)?;
-        let part_after = Metadata::from_file(&part_file)?;
-        let current_final = parent.symlink_metadata(&name)?;
-        let current_part = parent.symlink_metadata(&part_name)?;
-        let unchanged = current_final.is_file()
-            && current_part.is_file()
-            && filesystem_identity(&final_before) == Some(final_identity)
-            && filesystem_identity(&final_after) == Some(final_identity)
-            && filesystem_identity(&current_final) == Some(final_identity)
-            && filesystem_identity(&part_before) == Some(part_identity)
-            && filesystem_identity(&part_after) == Some(part_identity)
-            && filesystem_identity(&current_part) == Some(part_identity)
-            && final_before.len() == final_after.len()
-            && final_before.len() == current_final.len()
-            && part_before.len() == part_after.len()
-            && part_before.len() == current_part.len()
-            && final_before.modified()? == final_after.modified()?
-            && final_before.modified()? == current_final.modified()?
-            && part_before.modified()? == part_after.modified()?
-            && part_before.modified()? == current_part.modified()?;
-        if !unchanged {
-            return Err(invalid_download_integrity(
-                "Downloaded files changed during source comparison",
-            ));
-        }
-        Ok(comparison?)
-    }
-
+    #[cfg(test)]
     pub(crate) fn open_part(&self, file: &str, append: bool) -> io::Result<std::fs::File> {
         let (parent, name) = self.file_parent(file, true)?;
         let name = format!(
@@ -1252,6 +1215,7 @@ impl DownloadRecoveryDestination {
         self.remove_file_durable(&parent, &name)
     }
 
+    #[cfg(test)]
     pub(crate) fn rename_part_to_file(&self, file: &str) -> io::Result<()> {
         let (parent, name) = self.file_parent(file, false)?;
         let part = format!(
@@ -1331,26 +1295,6 @@ impl DownloadRecoveryDestination {
         relative.push(crate::config::NetworkConfig::DOWNLOAD_TEMP_SUFFIX);
         PathBuf::from(relative)
     }
-}
-
-fn compare_file_contents(
-    left: &mut std::fs::File,
-    right: &mut std::fs::File,
-    length: u64,
-) -> io::Result<bool> {
-    let mut left_buffer = [0_u8; 64 * 1024];
-    let mut right_buffer = [0_u8; 64 * 1024];
-    let mut remaining = length;
-    while remaining > 0 {
-        let chunk_length = remaining.min(left_buffer.len() as u64) as usize;
-        left.read_exact(&mut left_buffer[..chunk_length])?;
-        right.read_exact(&mut right_buffer[..chunk_length])?;
-        if left_buffer[..chunk_length] != right_buffer[..chunk_length] {
-            return Ok(false);
-        }
-        remaining -= chunk_length as u64;
-    }
-    Ok(true)
 }
 
 fn directory_identity(directory: &Dir) -> io::Result<FilesystemIdentity> {

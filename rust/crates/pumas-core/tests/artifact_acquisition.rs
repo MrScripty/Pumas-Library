@@ -191,11 +191,18 @@ async fn public_consumer_acquires_http_and_settles_its_receipt_under_shared_cust
     server.await.unwrap();
 
     let record = store.acquisitions().unwrap().into_values().next().unwrap();
-    assert!(matches!(
-        record.phase,
-        pumas_library::acquisition::AcquisitionPhase::Adopted { .. }
-    ));
     let receipt = service.consumer_receipt(record.id).unwrap().unwrap();
+    assert!(matches!(
+        &record.phase,
+        pumas_library::acquisition::AcquisitionPhase::Adopted { lease }
+            if lease.to_string() == receipt.use_lease
+    ));
+    assert_eq!(receipt.acquisition_id, record.id.to_string());
+    assert_eq!(receipt.owner, record.demand.consumer);
+    assert_eq!(receipt.demand, record.demand);
+    assert_eq!(receipt.manifest, record.manifest);
+    assert_eq!(receipt.workspace, record.workspace);
+    assert_eq!(receipt.verified_files, record.files);
     assert_eq!(receipt.owner, "runtime.llama.cpp");
     assert_eq!(receipt.payload, serde_json::json!({"installed": true}));
     let persisted: serde_json::Value =
@@ -203,5 +210,30 @@ async fn public_consumer_acquires_http_and_settles_its_receipt_under_shared_cust
             .unwrap();
     assert!(persisted.get("downloads").is_none());
     consumer.shutdown().await.unwrap();
-    service.shutdown().await.unwrap();
+    for _ in 0..2 {
+        service.shutdown().await.unwrap();
+        assert_eq!(store.acquisitions().unwrap().get(&record.id), Some(&record));
+        assert_eq!(
+            service.consumer_receipt(record.id).unwrap(),
+            Some(receipt.clone())
+        );
+        assert!(matches!(
+            service.open_consumer("runtime.llama.cpp"),
+            Err(PumasError::DownloadLifecycleClosed)
+        ));
+    }
+    drop(consumer);
+    drop(service);
+    drop(store);
+
+    let reopened_store = Arc::new(AcquisitionStore::new(state.path()));
+    let reopened_service = Arc::new(AcquisitionService::new(reopened_store.clone()));
+    assert_eq!(
+        reopened_store.acquisitions().unwrap().get(&record.id),
+        Some(&record)
+    );
+    assert_eq!(
+        reopened_service.consumer_receipt(record.id).unwrap(),
+        Some(receipt)
+    );
 }

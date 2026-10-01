@@ -319,6 +319,11 @@ All seven primary write sets are disjoint. Do not broaden a stream or change sha
 - After pushing the Q1 candidate, Build #360 (`36834381365`) completed on prior head `0ecccd9c0c223fac32e12ec571126cd7fa39c238`. Its Rust-quality job failed on `clippy::type_complexity` at the unchanged native receipt cold-reopen test helper in `rust/crates/pumas-app-manager/src/version_manager/mod.rs:2042`; the other executed workflow/release, headless, frontend/desktop, and native QA jobs passed, while conditional release/package jobs were skipped.
 - The warning is reproduced by the current strict all-target local Clippy command and is outside the behavioral repair. A test-only named-type refactor is admitted in the same `mod.rs` file so the existing strict CI command can pass without a lint exception. No acceptance or gate state changes.
 
+## 2026-10-01 — Q1 strict all-target lint correction verified
+
+- The test-only alias refactor landed as `b6cf7bf7` in the Q1 branch. `CARGO_BUILD_JOBS=1 cargo clippy --manifest-path rust/Cargo.toml --locked -p pumas-app-manager --all-targets -- -D warnings` now passes without suppressions. `rustfmt --edition 2021 --check rust/crates/pumas-app-manager/src/version_manager/mod.rs` and `git diff --check` pass. The two behavioral repair regressions passed before this no-behavior-change helper refactor, and the all-target Clippy invocation recompiles the test target.
+- Build #360 remains evidence for the prior head only; it failed the same warning before this refactor. Its remaining executed jobs passed; conditional release/package jobs were skipped. The updated PR head needs its own hosted run after push. Acceptance remains unchanged and PR #7 remains draft.
+
 ## 2026-10-01 — Q1 shutdown and custody repair verified
 
 - The repair from the isolated Sol 6.1 Medium worktree was integrated serially on `work/acquisition-q1-http` as `c5deb493172d3fbddab55141d129f2ac7346bb3b`, after admission `e1bb6d26`. The shared progress sender now observes both control flags; registered `AcquiredArtifactUse::run_blocking` work captures the held workspace clone; manager recovery lookup uses the existing consumer's registered blocking boundary. Only the three admitted Rust source/test paths changed.

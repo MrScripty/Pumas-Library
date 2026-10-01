@@ -1,7 +1,7 @@
 # Acquisition prerequisites and runtime handoffs
 
 **Owner:** acquisition integration, with one serial cross-plan integrator. This is the single status record for acquisition-provided gates. The runtime plan references these rows and does not independently declare them ready.
-**All gates:** not ready. AC03 now has real HF and llama.cpp consumer evidence for one Linux x86_64 source-built RPC scope, and AC15 passes on the current code candidate. The other required Q1 claims and broader desktop, deployment, resource, public-client, and platform scopes remain open.
+**All gates:** not ready. AC03 now has real HF and llama.cpp consumer evidence for one Linux x86_64 source-built RPC scope, and AC15 passes on the current code candidate. Build #358 also passed on the documentation-only current PR head, including Windows native QA. The other required Q1 claims and broader desktop, deployment, resource, public-client, and platform scopes remain open.
 
 | Gate | Provider milestone / claims | Required consumer observation | Unblocks | Current status |
 | --- | --- | --- | --- | --- |

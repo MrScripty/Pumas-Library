@@ -141,6 +141,9 @@ impl From<pumas_library::PumasError> for FfiError {
             PumasError::DownloadFailed { url, message } => FfiError::Download {
                 message: format!("{}: {}", url, message),
             },
+            error @ PumasError::AcquisitionCapacityExhausted { .. } => FfiError::Download {
+                message: error.to_string(),
+            },
             PumasError::DownloadCancelled | PumasError::DownloadPaused => FfiError::Cancelled,
             PumasError::HashMismatch { expected, actual } => FfiError::Validation {
                 message: format!("Hash mismatch: expected {}, got {}", expected, actual),
@@ -367,6 +370,23 @@ mod tests {
     use pumas_library::{ModelRecord, PumasError, SearchResult};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn acquisition_capacity_uses_existing_download_error_and_preserves_resource() {
+        for resource in [
+            "workers",
+            "blocking",
+            "rescue_workers",
+            "rescue_blocking",
+            "scopes",
+        ] {
+            let expected = format!("Acquisition {resource} capacity exhausted");
+            assert!(matches!(
+                FfiError::from(PumasError::AcquisitionCapacityExhausted { resource }),
+                FfiError::Download { message } if message == expected
+            ));
+        }
+    }
 
     #[test]
     fn download_root_busy_uses_existing_host_config_error() {

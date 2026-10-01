@@ -134,3 +134,27 @@ This update narrows the earlier feedback: coordination reads now work, but
 contributor discovery still needs to expose which configured profile lookup
 failed or provide a safe status/readiness result, and execution-profile,
 provider, and approval readiness need explicit values before binding a task.
+
+## 2026-09-30 — contributor availability rechecked after user update
+
+After the user reported that Passeur was available and requested Muse Spark 1.3
+Contributor implementation, this session ran `passeur_status`,
+`passeur_prepare`, `passeur_agents({limit:4,offset:0})`,
+`passeur_tasks({schema_version:1,limit:16,offset:0})`, and coordination identity
+and status reads. The installed frontend remains build
+`6a43daa6eec45ddceadea0ba2e2a623d7fc8e81e330237c7762a7f1c63c33f63`; the repo
+service connects with open admission and `passeur_prepare` reports coordination
+ready/held. Identity reads succeed and the task list is empty. However,
+`passeur_agents` still returns `PATH_NOT_FOUND` at `profile.open`, and the
+expected project profile path
+`/home/jeremy/.config/muse-bridge/projects/6aaae9e5ae2b753918ac7478.json` does
+not exist. Separately, `passeur_coordination` status reports `not_enabled`,
+which conflicts with the `passeur_prepare` readiness report. Execution profile,
+provider, and approval remain `not_checked`. No agent ID was returned and no
+task was submitted or started.
+
+The readiness output should distinguish repository-service connection,
+metadata-coordination enablement, project-profile existence, and contributor
+execution/provider readiness. Agent-list failure should identify the missing
+profile resource (or expose a safe status field) instead of returning only
+`profile.open`; the current state is not sufficient to choose an agent safely.

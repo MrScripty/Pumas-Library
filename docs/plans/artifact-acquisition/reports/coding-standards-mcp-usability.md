@@ -370,3 +370,14 @@ This records tool usability only; it does not certify source compliance or AC06 
 - **Recommendations:** Return route counts and unresolved facts separately from policy bodies; cap results by response bytes as well as whole-policy count, and avoid duplicating selected policy text across content and structured output.
 
 This records MCP usability only. Product acceptance and source review remain separate.
+
+## Primary integrator — AC02 validator-bound warm-resume candidate
+
+- **Useful calls:** The pinned final route (`snapshot:v1:faff0add-81ef-42b1-a2d1-043b012c9643`) selected 30 standards with zero unresolved applicability facts. Focused reads covered Core, persistence boundary, Rust API/async/security, concurrency, contracts and contract evolution, architecture, resilience, code design, verification, build, documentation, and commit workflow. The routing result and the direct source/test evidence remained separate.
+- **Confusing or redundant steps:** The route's initial broad policy page was too large to review as one response. Smaller `read_many` batches were usable, but still returned complete policy bodies; the policies' metadata, `next_operations`, and prose were included together.
+- **Missing context:** The MCP did not know the exact candidate tree, the twice-reproduced baseline failure, post-fix Cargo results, the shared target/build serialization, or the loopback llama.cpp integration fixture. Git and the repository test output established those facts.
+- **Where I left MCP:** The 30-standard route resolved applicability only. It did not inspect or approve the code, verify test execution, or accept AC02/AQ-HTTP.
+- **Smallest sufficient workflow:** Reuse the exact snapshot, read only the selected obligations that apply to the final boundary in small batches, and establish candidate identity, review, tests, and acceptance independently from repository evidence.
+- **Recommendations:** Keep route counts and unresolved facts visible without repeating policy-selection rationales; make policy reads section-scoped or byte-budgeted; and make the non-certifying role of a completed route explicit.
+
+This records MCP usability only; it is not evidence of implementation compliance or product acceptance.

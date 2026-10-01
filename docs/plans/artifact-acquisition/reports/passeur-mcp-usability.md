@@ -218,3 +218,21 @@ states separately and return a safe, actionable agent-discovery result that
 identifies the missing profile resource or its readiness state. A caller should
 not have to infer whether the model is unavailable, the profile is missing, or
 the execution provider is not ready from the generic `profile.open` path error.
+
+## 2026-10-01 — bounded recovery-fixture assignment attempt
+
+For the orphan-partial recovery fixture, the current session retried the
+contributor route after the user had authorized Muse Spark 1.3 Contributor for
+implementation. `passeur_tasks({schema_version:1,limit:16})` returned zero
+tasks; agent discovery failed at `profile.open` with `PATH_NOT_FOUND`; and a
+scope-aware coordinated submission for `work/acquisition-q1-http` failed with
+the same profile error. No Passeur task was admitted or started. The bounded
+fixture/documentation change therefore used the authorized GPT-6.1 Sol Medium
+fallback and was independently reviewed by GPT-6.1 Sol High.
+
+This is a separate contributor-profile failure from task-list availability:
+the task list is readable and empty, but execution assignment cannot resolve a
+configured contributor. Keep the model catalog, project profile, coordination
+readiness and execution-provider readiness distinct in diagnostics. A
+successful task-list read must not imply that a requested contributor can be
+selected or that a coordinated task was accepted.

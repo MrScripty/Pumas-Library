@@ -2433,8 +2433,15 @@ pub(super) mod tests {
             }
             let header = String::from_utf8(header).unwrap();
             assert!(header.starts_with("GET /acme/model/resolve/main/weights.gguf HTTP/1.1"));
-            assert!(header.to_ascii_lowercase().contains("range: bytes=7-"));
-            socket.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 7-11/12\r\nConnection: close\r\n\r\n").await.unwrap();
+            // This directly created partial has no live service checkpoint;
+            // ticket admission must restart the transfer at byte zero.
+            let header = header.to_ascii_lowercase();
+            assert!(!header.contains("\r\nrange:"));
+            assert!(!header.contains("\r\nif-match:"));
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
             requested.send(()).unwrap();
             let mut byte = [0_u8; 1];
             assert_eq!(

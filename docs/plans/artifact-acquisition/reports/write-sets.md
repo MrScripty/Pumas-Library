@@ -227,3 +227,13 @@ No persisted format, receipt, schema, HTTP protocol, source adapter, public API,
 ### AC10 checkpoint-retention candidate within the admitted write set
 
 Implementation is confined to the admitted service, workspace, and task-custody paths. The shared supervisor supplies the worker-derived entry limit, the candidate is size-counted before cloning through a bounded serializer, expired workspace owners are pruned without upgrading, and capacity/metadata pressure preserves the existing transfer outcome and durable custody. The focused checkpoint suite passed (21 tests), the complete acquisition unit-test group passed (110 tests), strict all-target `pumas-library` Clippy passed, direct rustfmt and `git diff --check` passed. These local results establish this bounded runtime component only; no representative peak-RAM, disk, stream, or network measurement was made, so AC10 remains pending.
+
+### Q1 orphan-partial recovery fixture correction — admitted 2026-10-01
+
+Parent milestone remains `work/acquisition-q1-http` / draft PR #7. Exact write set:
+
+- `rust/crates/pumas-core/src/api/hf.rs`: change only `api::hf::tests::ticket_recovery_admits_exact_partial_and_public_cancel_preserves_other_artifacts`. The seven-byte `.part` written directly by `indexed_partial_ticket` has no live same-service/workspace checkpoint. Assert that the request has neither `Range` nor `If-Match`, and serve a stalled full `200 OK` response with `Content-Length: 12`. Preserve the assertions that public cancellation closes the response, removes the selected partial/final outputs, and preserves `unrelated.bin`.
+- `docs/plans/artifact-acquisition/reports/write-sets.md` and `docs/plans/artifact-acquisition/execution-ledger.md`: record this exact admission, the prior default/no-default CI failures, the fixture diagnosis, and verification.
+- Serial-integrator status synchronization: update `docs/plans/artifact-acquisition/plan.md`, `docs/plans/artifact-acquisition/reports/acceptance-matrix.md`, and `docs/plans/artifact-acquisition/reports/dependency-gates.md` to distinguish historical AC15 evidence from current-branch pending CI. This changes no acceptance or gate state.
+
+The production checkpoint, prefix-proof, strong-ETag and exact-resource-binding rules remain authoritative. This fixture correction admits no production source change, acceptance or gate transition. The source writer must not run Cargo, rustc, builds or tests, or commit, push or merge; root's serial focused default/no-default results are recorded in the execution ledger. `rustfmt --edition 2021 --check rust/crates/pumas-core/src/api/hf.rs` and `git diff --check` pass. Passeur submission failed with `PATH_NOT_FOUND`, so the authorized Sol Medium fallback owns this bounded edit.

@@ -97,6 +97,15 @@ Exact write set, including co-located regressions:
 
 No new store, supervisor, progress owner, retry policy, dependency, generated contract, live retained-root access, unrelated Torch edit, acceptance-state change, merge, or published-history rewrite is admitted. Use GPT-6.1 Sol Medium for implementation because current Passeur status reports a missing `profile.open` file and agent discovery fails; do not start overlapping Rust builds. Planned evidence is the focused regressions, affected app-manager/core checks, formatting and staged-diff checks, with Cargo commands run one at a time on the shared target.
 
+### Admitted Q1 milestone summary refresh
+
+Base: `work/acquisition-q1-http` at `c5deb493172d3fbddab55141d129f2ac7346bb3b`, after the admitted shutdown/custody implementation. Exact write set:
+
+- `docs/plans/artifact-acquisition/plan.md`: refresh only the current-phase summary to include the three composed-path shutdown/custody fixes and the boundaries of their local evidence. Preserve the Q1 gate, AC matrix, and downstream milestone states.
+- `docs/plans/artifact-acquisition/reports/write-sets.md` and `docs/plans/artifact-acquisition/execution-ledger.md`: this admission and its resulting evidence only.
+
+No source edits, acceptance-state changes, gate reopening, or changes to the Q2/R1 admission order are included. This records the current Q1 milestone before updating its existing draft PR.
+
 ## Q2: exact package-file handoff
 
 Allowed: Q1 acquisition types/service only for demonstrated missing file-set/lease semantics; `torch-server/resolve_runtime.py`, retained preview/lock consumers in `rust/crates/pumas-app-manager/src/version_manager/{torch_preview.rs,installer/torch.rs}`, corresponding existing package/integrity/progress tests, and `artifact_acquisition_install.rs`. Keep package resolution/install semantics with those consumers. The exact managed-Python/provider files are first traced for a migrate-versus-retain traffic disposition; no speculative private integration is authorized.

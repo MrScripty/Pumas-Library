@@ -381,3 +381,14 @@ This records MCP usability only. Product acceptance and source review remain sep
 - **Recommendations:** Keep route counts and unresolved facts visible without repeating policy-selection rationales; make policy reads section-scoped or byte-budgeted; and make the non-certifying role of a completed route explicit.
 
 This records MCP usability only; it is not evidence of implementation compliance or product acceptance.
+
+## Primary integrator — AC01 desktop revision pinning implementation
+
+- **Useful calls:** Refreshed routing facts and routed the completed Rust library/API implementation and verification boundary on snapshot `snapshot:v1:a37ceadd-a5ff-4805-a3b9-b3362c3ea219`. The route selected 25 standards with zero unresolved applicability facts. Focused reads covered Core, the library and Rust API/async/security profiles, persistence, concurrency, contracts/evolution/protocols, architecture/replay, resilience, verification/oracles, planning, documentation, implementation, proportionality, and commit guidance.
+- **Confusing or redundant steps:** A large `read_many` request returned complete policy bodies with metadata and continuation records, beyond the useful output window. Narrowing to nine policies reduced irrelevant material but still produced a large response. The route itself gave a concise selected count and unresolved-fact result.
+- **Missing context:** The MCP did not know the `start_hf_download` call path, exact local-server request sequence, missing-SHA fixture, lifecycle-task accounting behavior, test results, or strict Clippy result. Those facts came from source inspection and serial local verification.
+- **Where I left MCP:** Routing supplied obligations only. The controlled public-entrypoint tests, closed-lifecycle regression, strict Clippy, formatting, and source diff are the separate implementation evidence. None accepts AC01 or AQ-HTTP.
+- **Smallest sufficient workflow:** Refresh facts, route the completed boundary with explicit application, language, topic, workflow, and evidence facts, then read only focused policies in small batches and check the source/test contract independently.
+- **Recommendations:** Keep policy reads byte-bounded as well as item-bounded; avoid repeating whole policy bodies together with metadata and continuation records; show the route's compact count and unresolved facts separately from policy text.
+
+This records tool usability only; it does not certify source compliance or product acceptance.

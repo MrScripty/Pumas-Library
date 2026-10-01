@@ -252,13 +252,19 @@ impl PumasApi {
         client: Arc<model_library::HuggingFaceClient>,
         request: &model_library::DownloadRequest,
     ) -> Result<String> {
-        Self::start_hf_download_owned_at_revision(
-            library,
-            client,
-            request,
-            DownloadRevision::legacy_main(),
-        )
-        .await
+        let resolution_client = client.clone();
+        let repo_id = request.repo_id.clone();
+        let revision_result = client
+            .run_download_invocation(move |_context| async move {
+                Ok::<_, PumasError>(
+                    resolution_client
+                        .resolve_download_revision(&repo_id, None)
+                        .await,
+                )
+            })
+            .await?;
+        let revision = revision_result?;
+        Self::start_hf_download_owned_at_revision(library, client, request, revision).await
     }
 
     pub(crate) async fn prepare_hf_download_owned_at_revision(
@@ -1876,6 +1882,158 @@ pub(super) mod tests {
             .library_root()
             .join("llm")
             .exists());
+        api.shutdown_downloads().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn public_hf_download_pins_default_main_before_metadata_tree_and_payload() {
+        use sha2::Digest;
+        use tokio::sync::oneshot;
+
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        let payload = b"pinned fixture payload";
+        let payload_sha256 = format!("{:x}", sha2::Sha256::digest(payload));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (payload_started, payload_request) = oneshot::channel();
+        let (release_payload, wait_for_release) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let mut request_lines = Vec::new();
+            for (expected, body) in [
+                (
+                    "GET /api/models/acme/model/revision/main HTTP/1.1".to_string(),
+                    format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}"}}"#),
+                ),
+                (
+                    format!("GET /api/models/acme/model/revision/{COMMIT} HTTP/1.1"),
+                    format!(
+                        r#"{{"modelId":"acme/model","sha":"{COMMIT}","pipeline_tag":"text-generation"}}"#
+                    ),
+                ),
+                (
+                    format!("GET /api/models/acme/model/tree/{COMMIT}?recursive=true HTTP/1.1"),
+                    format!(
+                        r#"[{{"path":"weights.gguf","type":"file","lfs":{{"oid":"{payload_sha256}","size":{}}}}}]"#,
+                        payload.len()
+                    ),
+                ),
+            ] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let request = read_intent_test_request(&mut socket).await;
+                assert_eq!(request, expected);
+                request_lines.push(request);
+                write_intent_test_response(&mut socket, "200 OK", &body).await;
+            }
+
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = read_intent_test_request(&mut socket).await;
+            payload_started.send(request.clone()).unwrap();
+            request_lines.push(request);
+            wait_for_release.await.unwrap();
+            request_lines
+        });
+
+        let root = tempfile::TempDir::new().unwrap();
+        let api = recovery_api_fixture(root.path(), Some(format!("http://{address}"))).await;
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/model".into(),
+            family: "acme".into(),
+            official_name: "model".into(),
+            model_type: Some("llm".into()),
+            quant: None,
+            filename: Some("weights.gguf".into()),
+            filenames: None,
+            pipeline_tag: Some("text-generation".into()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+
+        let download_id = api.start_hf_download(&request).await.unwrap();
+        let payload_request =
+            tokio::time::timeout(std::time::Duration::from_secs(5), payload_request)
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            payload_request,
+            format!("GET /acme/model/resolve/{COMMIT}/weights.gguf HTTP/1.1")
+        );
+        assert!(api.cancel_hf_download(&download_id).await.unwrap());
+        release_payload.send(()).unwrap();
+        assert_eq!(
+            server.await.unwrap(),
+            vec![
+                "GET /api/models/acme/model/revision/main HTTP/1.1".to_string(),
+                format!("GET /api/models/acme/model/revision/{COMMIT} HTTP/1.1"),
+                format!("GET /api/models/acme/model/tree/{COMMIT}?recursive=true HTTP/1.1"),
+                format!("GET /acme/model/resolve/{COMMIT}/weights.gguf HTTP/1.1"),
+            ]
+        );
+        assert!(!api
+            .primary()
+            .model_library
+            .library_root()
+            .join("llm/acme/model/weights.gguf")
+            .exists());
+        api.shutdown_downloads().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn public_hf_download_requires_commit_evidence_before_mutation() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = read_intent_test_request(&mut socket).await;
+            write_intent_test_response(&mut socket, "200 OK", r#"{"modelId":"acme/model"}"#).await;
+            request
+        });
+        let root = tempfile::TempDir::new().unwrap();
+        let api = recovery_api_fixture(root.path(), Some(format!("http://{address}"))).await;
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/model".into(),
+            family: "acme".into(),
+            official_name: "model".into(),
+            model_type: Some("llm".into()),
+            quant: None,
+            filename: Some("weights.gguf".into()),
+            filenames: None,
+            pipeline_tag: Some("text-generation".into()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+
+        let result = api.start_hf_download(&request).await;
+        assert!(matches!(
+            result,
+            Err(PumasError::Validation { ref field, .. }) if field == "revision"
+        ));
+        assert_eq!(
+            server.await.unwrap(),
+            "GET /api/models/acme/model/revision/main HTTP/1.1"
+        );
+        assert!(!api
+            .primary()
+            .model_library
+            .library_root()
+            .join("llm")
+            .exists());
+        assert!(api
+            .primary()
+            .hf_client
+            .as_ref()
+            .unwrap()
+            .list_downloads()
+            .await
+            .is_empty());
         api.shutdown_downloads().await.unwrap();
     }
 

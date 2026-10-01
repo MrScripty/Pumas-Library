@@ -778,9 +778,7 @@ async fn import_completed_download(
                 .map(|_| ())
         })
         .await
-        .map_err(|error| {
-            PumasError::Other(format!("Download import observation failed: {error}"))
-        })?
+        .map_err(|error| error.into_pumas_error("Download import observation failed"))?
 }
 
 impl PreparedDownloadTask {
@@ -812,11 +810,7 @@ impl PreparedDownloadTask {
                 },
             )
             .await
-            .map_err(|error| {
-                PumasError::Other(format!(
-                    "Pinned download evidence observation failed: {error}"
-                ))
-            })?
+            .map_err(|error| error.into_pumas_error("Pinned download evidence observation failed"))?
             .unwrap_or_else(|never| match never {})
     }
 
@@ -927,7 +921,7 @@ impl PreparedDownloadTask {
                 )
                 .await
                 .map_err(|error| {
-                    PumasError::Other(format!("Restore publication observation failed: {error}"))
+                    error.into_pumas_error("Restore publication observation failed")
                 })??;
         }
         self.verify_pinned_final_files(context).await?;
@@ -1000,7 +994,7 @@ impl PreparedDownloadTask {
                 )
                 .await
                 .map_err(|error| {
-                    PumasError::Other(format!("Restore publication observation failed: {error}"))
+                    error.into_pumas_error("Restore publication observation failed")
                 })??;
         }
         Ok(true)
@@ -1045,9 +1039,9 @@ impl PreparedDownloadTask {
             )
             .await
             .map_err(|error| {
-                RestoredFinalizationError::Operation(PumasError::Other(format!(
-                    "Download provenance observation failed: {error}"
-                )))
+                RestoredFinalizationError::Operation(
+                    error.into_pumas_error("Download provenance observation failed"),
+                )
             })??;
         self.acquisition.require_schema(context).await?;
         let destination = self.destination.capability().clone();
@@ -1057,9 +1051,7 @@ impl PreparedDownloadTask {
                 destination.acquisition_workspace(execution_lease)
             })
             .await
-            .map_err(|error| {
-                PumasError::Other(format!("Restored workspace observation failed: {error}"))
-            })??;
+            .map_err(|error| error.into_pumas_error("Restored workspace observation failed"))??;
         let demand = crate::acquisition::AcquisitionDemand {
             consumer: "hf.model".into(),
             operation: attempt.clone(),
@@ -1088,9 +1080,7 @@ impl PreparedDownloadTask {
                     persistence.read_hf_completion_receipt(acquisition_id)
                 })
                 .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Restored receipt observation failed: {error}"))
-                })??
+                .map_err(|error| error.into_pumas_error("Restored receipt observation failed"))??
                 .ok_or_else(|| PumasError::Validation {
                     field: "downloads.hf_completion_receipts".into(),
                     message:
@@ -1146,9 +1136,7 @@ impl PreparedDownloadTask {
                     },
                 )
                 .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Restored receipt settlement failed: {error}"))
-                })??;
+                .map_err(|error| error.into_pumas_error("Restored receipt settlement failed"))??;
             if !matches!(context.drain_blocking().await, Ok(0)) {
                 return Err(PumasError::Other(
                     "Restored receipt validation effects did not drain".into(),
@@ -1297,9 +1285,7 @@ impl PreparedDownloadTask {
                     persistence.read_hf_completion_receipt(acquisition_id)
                 })
                 .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Restored receipt observation failed: {error}"))
-                })??
+                .map_err(|error| error.into_pumas_error("Restored receipt observation failed"))??
                 .ok_or_else(|| PumasError::Validation {
                     field: "downloads.hf_completion_receipts".into(),
                     message: "Restored managed HF import completed without a durable receipt"
@@ -1344,9 +1330,7 @@ impl PreparedDownloadTask {
                     },
                 )
                 .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Restore receipt settlement failed: {error}"))
-                })??
+                .map_err(|error| error.into_pumas_error("Restore receipt settlement failed"))??
         } else {
             self.acquisition.acknowledge(context, lease).await?;
             let persistence = self.persistence.clone().ok_or_else(|| PumasError::Config {
@@ -1358,9 +1342,7 @@ impl PreparedDownloadTask {
                     persistence.settle_queue_admission(&id, &attempt)
                 })
                 .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Restore settlement owner failed: {error}"))
-                })??
+                .map_err(|error| error.into_pumas_error("Restore settlement owner failed"))??
         };
         if !settled || !matches!(context.drain_blocking().await, Ok(0)) {
             return Err(PumasError::Other(
@@ -1788,9 +1770,7 @@ impl PreparedDownloadTask {
             })
             .await
             .map_err(|error| {
-                PumasError::Other(format!(
-                    "Download execution validation observation failed: {error}"
-                ))
+                error.into_pumas_error("Download execution validation observation failed")
             })?
     }
 }
@@ -1882,9 +1862,7 @@ impl DownloadDestination {
                     })
                     .await
                     .map_err(|error| {
-                        PumasError::Other(format!(
-                            "download integrity verification task failed: {error}"
-                        ))
+                        error.into_pumas_error("download integrity verification task failed")
                     })?
             }
         }
@@ -1996,9 +1974,7 @@ impl DownloadDestination {
                         error, ..
                     })) => Err(error),
                     Ok(Err(failure)) => Err(failure.into_error()),
-                    Err(error) => Err(PumasError::Other(format!(
-                        "Download marker owner failed: {error}"
-                    ))),
+                    Err(error) => Err(error.into_pumas_error("Download marker owner failed")),
                 }
             }
             Self::Recovery(_) => Err(PumasError::Other(
@@ -2020,9 +1996,7 @@ impl DownloadFile {
                     Ok::<_, std::io::Error>(file)
                 })
                 .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Fixture write observation failed: {error}"))
-                })??,
+                .map_err(|error| error.into_pumas_error("Fixture write observation failed"))??,
         );
         Ok(())
     }
@@ -2035,9 +2009,7 @@ impl DownloadFile {
                     Ok::<_, std::io::Error>(file)
                 })
                 .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Fixture sync observation failed: {error}"))
-                })??,
+                .map_err(|error| error.into_pumas_error("Fixture sync observation failed"))??,
         );
         Ok(())
     }
@@ -2182,8 +2154,8 @@ where
         .run_fallible_blocking_named(operation, function)
         .await
         .map_err(|error| {
-            PumasError::Other(format!(
-                "download recovery filesystem capability task failed during {operation}: {error}"
+            error.into_pumas_error(format!(
+                "download recovery filesystem capability task failed during {operation}"
             ))
         })?
         .map_err(|error| {
@@ -2205,11 +2177,7 @@ async fn assert_no_intent_deletion_claim(
             Ok::<_, std::convert::Infallible>(destination.assert_no_intent_deletion_claim())
         })
         .await
-        .map_err(|error| {
-            PumasError::Other(format!(
-                "Intent deletion custody observation failed: {error}"
-            ))
-        })?
+        .map_err(|error| error.into_pumas_error("Intent deletion custody observation failed"))?
         .expect("infallible custody observation envelope")
 }
 
@@ -2672,9 +2640,7 @@ impl HuggingFaceClient {
                     crate::model_library::canonical_managed_model_dir(&library_root, &record)
                 })
                 .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Recovery inspection owner failed: {error}"))
-                })?
+                .map_err(|error| error.into_pumas_error("Recovery inspection owner failed"))?
         })
         .await
     }
@@ -2695,9 +2661,7 @@ impl HuggingFaceClient {
                     )
                 })
                 .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Recovery verification owner failed: {error}"))
-                })?
+                .map_err(|error| error.into_pumas_error("Recovery verification owner failed"))?
         })
         .await
     }
@@ -3151,7 +3115,7 @@ impl HuggingFaceClient {
                     })
                     .await
                     .map_err(|error| {
-                        PumasError::Other(format!("Download restore owner failed: {error}"))
+                        error.into_pumas_error("Download restore owner failed")
                     })?
             })
             .await?;
@@ -3202,7 +3166,7 @@ impl HuggingFaceClient {
                 })
                 .await
                 .map_err(|error| {
-                    PumasError::Other(format!("Download restore authority owner failed: {error}"))
+                    error.into_pumas_error("Download restore authority owner failed")
                 })??;
             {
                 if admission.domain != DownloadAdmissionDomain::Ambient {
@@ -3244,9 +3208,7 @@ impl HuggingFaceClient {
                     )
                     .await
                     .map_err(|error| {
-                        PumasError::Other(format!(
-                            "Download restore authority owner failed: {error}"
-                        ))
+                        error.into_pumas_error("Download restore authority owner failed")
                     })??;
                 restored_entries.push((
                     entry,
@@ -3389,9 +3351,7 @@ impl HuggingFaceClient {
             )
             .await
             .map_err(|error| {
-                PumasError::Other(format!(
-                    "Receiptless recovery custody observation failed: {error}"
-                ))
+                error.into_pumas_error("Receiptless recovery custody observation failed")
             })?
     }
 
@@ -3615,9 +3575,7 @@ impl HuggingFaceClient {
                 root.resolve(&requested_destination)
             })
             .await
-            .map_err(|error| {
-                PumasError::Other(format!("Download authority resolution failed: {error}"))
-            })??;
+            .map_err(|error| error.into_pumas_error("Download authority resolution failed"))??;
         let dest_dir = destination.display_path();
         assert_no_intent_deletion_claim(context, &destination).await?;
         let provenance_destination = destination.clone();
@@ -3627,9 +3585,7 @@ impl HuggingFaceClient {
                 validate_download_provenance_revision(&provenance_destination, &provenance_revision)
             })
             .await
-            .map_err(|error| {
-                PumasError::Other(format!("Download provenance observation failed: {error}"))
-            })??;
+            .map_err(|error| error.into_pumas_error("Download provenance observation failed"))??;
         self.observe_finished_download_tasks().await;
 
         let download_id = uuid::Uuid::new_v4().to_string();
@@ -3646,9 +3602,7 @@ impl HuggingFaceClient {
                     .await
             })
             .await
-            .map_err(|error| {
-                PumasError::Other(format!("Download metadata observation failed: {error}"))
-            })??;
+            .map_err(|error| error.into_pumas_error("Download metadata observation failed"))??;
 
         // Resolve weight files to download.
         // Priority: filenames (explicit list) > filename (single) > quant (substring) > all.
@@ -4025,9 +3979,7 @@ impl HuggingFaceClient {
                     let confirmed = match outcome {
                         Ok(Ok((transition, inventory, identity))) => transition.into_result().map(|_| (inventory, identity)),
                         Ok(Err(error)) => Err(error),
-                        Err(error) => Err(PumasError::Other(format!(
-                            "Download admission owner failed: {error}"
-                        ))),
+                        Err(error) => Err(error.into_pumas_error("Download admission owner failed")),
                     };
                     let (inventory, identity) = match confirmed {
                         Ok(confirmed) => confirmed,
@@ -4472,9 +4424,7 @@ impl HuggingFaceClient {
                 validate_download_provenance_revision(&provenance_destination, &provenance_revision)
             })
             .await
-            .map_err(|error| {
-                PumasError::Other(format!("Download provenance observation failed: {error}"))
-            })??;
+            .map_err(|error| error.into_pumas_error("Download provenance observation failed"))??;
         publish_worker_snapshot_and_revalidate(
             &download_publications,
             &downloads,
@@ -4495,9 +4445,7 @@ impl HuggingFaceClient {
                 granted.acquisition_workspace(execution_lease)
             })
             .await
-            .map_err(|error| {
-                PumasError::Other(format!("Workspace observation failed: {error}"))
-            })??;
+            .map_err(|error| error.into_pumas_error("Workspace observation failed"))??;
         let operation_receipt = downloads
             .read()
             .await
@@ -4585,7 +4533,7 @@ impl HuggingFaceClient {
                     })
                     .await
                     .map_err(|error| {
-                        PumasError::Other(format!("Download resume marker owner failed: {error}"))
+                        error.into_pumas_error("Download resume marker owner failed")
                     })??;
                 destination.write_marker(&task_context, marker).await?;
             }
@@ -4613,9 +4561,9 @@ impl HuggingFaceClient {
                 }
                 Ok(Err(error)) => return Err(error),
                 Err(error) => {
-                    return Err(PumasError::Other(format!(
-                        "failed to observe admitted download resume persistence: {error}"
-                    )));
+                    return Err(error.into_pumas_error(
+                        "failed to observe admitted download resume persistence",
+                    ));
                 }
             }
         }
@@ -4756,9 +4704,7 @@ impl HuggingFaceClient {
                                 )
                                 .await
                                 .map_err(|error| {
-                                    PumasError::Other(format!(
-                                        "Auxiliary metadata observation failed: {error}"
-                                    ))
+                                    error.into_pumas_error("Auxiliary metadata observation failed")
                                 })??;
                         }
                         let callback_outcome = if let Some(callback) = aux_complete_callback.clone()
@@ -4805,9 +4751,9 @@ impl HuggingFaceClient {
                                 )));
                             }
                             Err(error) => {
-                                return Err(PumasError::Other(format!(
-                                    "failed to observe auxiliary-files-complete callback: {error}"
-                                )));
+                                return Err(error.into_pumas_error(
+                                    "failed to observe auxiliary-files-complete callback",
+                                ));
                             }
                         }
                     }
@@ -4995,9 +4941,7 @@ impl HuggingFaceClient {
                     persistence.read_hf_completion_receipt(acquisition_id)
                 })
                 .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Completion receipt observation failed: {error}"))
-                })??
+                .map_err(|error| error.into_pumas_error("Completion receipt observation failed"))??
                 .ok_or_else(|| PumasError::Validation {
                     field: "downloads.hf_completion_receipts".into(),
                     message: "Managed HF import completed without a durable receipt".into(),
@@ -5071,9 +5015,7 @@ impl HuggingFaceClient {
                     },
                 )
                 .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Managed HF settlement owner failed: {error}"))
-                })??;
+                .map_err(|error| error.into_pumas_error("Managed HF settlement owner failed"))??;
             if !settled {
                 return Err(PumasError::Other(
                     "Managed HF completion settlement was not confirmed".into(),
@@ -5120,18 +5062,18 @@ impl HuggingFaceClient {
                     Ok(Ok(_)) => {}
                     Ok(Err(error)) => return Err(error),
                     Err(error) => {
-                        return Err(PumasError::Other(format!(
-                            "failed to observe completed-download persistence cleanup: {error}"
-                        )));
+                        return Err(error.into_pumas_error(
+                            "failed to observe completed-download persistence cleanup",
+                        ));
                     }
                 }
             }
         }
 
         let nested_failures = task_context.drain_blocking().await.map_err(|error| {
-            PumasError::Other(format!(
-                "failed to drain recovery filesystem operations before completion: {error}"
-            ))
+            error.into_pumas_error(
+                "failed to drain recovery filesystem operations before completion",
+            )
         })?;
         if nested_failures > 0 {
             return Err(PumasError::Other(format!(
@@ -5181,9 +5123,9 @@ impl HuggingFaceClient {
             .await
         {
             Ok(result) => result,
-            Err(error) => Err(PumasError::Other(format!(
-                "failed to observe persisted download status: {error}"
-            ))),
+            Err(error) => {
+                Err(error.into_pumas_error("failed to observe persisted download status"))
+            }
         }
     }
 
@@ -5198,9 +5140,7 @@ impl HuggingFaceClient {
             })
             .await
             .map_err(|error| {
-                PumasError::Other(format!(
-                    "Failed to join persisted recovery authority check: {error}"
-                ))
+                error.into_pumas_error("Failed to join persisted recovery authority check")
             })?
     }
 
@@ -5367,7 +5307,7 @@ impl HuggingFaceClient {
                         let quarantine = if let Some(persistence) = cancellation_persistence.as_ref() {
                             let persistence = persistence.clone();
                             task_context.run_fallible_blocking_named("quarantine download before cancellation", move || persistence.begin(unverified_lifecycle_failure || predecessor_failed)).await
-                                .map_err(|error| PumasError::Other(format!("Cancellation quarantine owner failed: {error}"))).and_then(|result| result)
+                                .map_err(|error| error.into_pumas_error("Cancellation quarantine owner failed")).and_then(|result| result)
                         } else { Ok(None) };
                         let quarantine_failed = quarantine.is_err();
                         let quarantine = quarantine.ok().flatten();
@@ -5614,9 +5554,7 @@ impl HuggingFaceClient {
                     root.resolve(&path)
                 })
                 .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Download lookup owner failed: {error}"))
-                })??;
+                .map_err(|error| error.into_pumas_error("Download lookup owner failed"))??;
             let downloads = client.downloads.read().await;
             Ok(downloads
                 .values()
@@ -5691,9 +5629,7 @@ impl HuggingFaceClient {
                 metadata_client.get_repo_files(&repo_id).await
             })
             .await
-            .map_err(|error| {
-                PumasError::Other(format!("Recovery metadata observation failed: {error}"))
-            })??;
+            .map_err(|error| error.into_pumas_error("Recovery metadata observation failed"))??;
         let Some(files) = resolve_exact_recovery_files(&tree, &verified.files) else {
             return Ok(RecoveryDownloadAdmission::BoundFilesUnavailable);
         };
@@ -5838,9 +5774,7 @@ impl HuggingFaceClient {
                                 )
                                 .await
                                 .map_err(|error| {
-                                    PumasError::Other(format!(
-                                        "download recovery persistence task failed: {error}"
-                                    ))
+                                    error.into_pumas_error("download recovery persistence task failed")
                                 })??;
                             let (snapshot, admission_attempt) = {
                                 let mut states = downloads.write().await;
@@ -5875,9 +5809,7 @@ impl HuggingFaceClient {
                                 )
                                 .await
                                 .map_err(|error| {
-                                    PumasError::Other(format!(
-                                        "download recovery persistence task failed: {error}"
-                                    ))
+                                    error.into_pumas_error("download recovery persistence task failed")
                                 })??;
                         }
 
@@ -6258,9 +6190,7 @@ impl HuggingFaceClient {
                     },
                 )
                 .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Explicit pause observation failed: {error}"))
-                })??;
+                .map_err(|error| error.into_pumas_error("Explicit pause observation failed"))??;
             if changed {
                 self.publish_download_snapshot().await;
             }
@@ -6377,9 +6307,7 @@ impl HuggingFaceClient {
             })
             .await
             .map_err(|error| {
-                PumasError::Other(format!(
-                    "Interrupted download authority observation failed: {error}"
-                ))
+                error.into_pumas_error("Interrupted download authority observation failed")
             })?
             .expect("infallible interrupted authority envelope")
     }
@@ -11886,9 +11814,7 @@ mod tests {
                     )
                     .await
                     .map_err(|error| {
-                        PumasError::Other(format!(
-                            "FilesReady destination observation failed: {error}"
-                        ))
+                        error.into_pumas_error("FilesReady destination observation failed")
                     })??;
                 let managed = DownloadDestination::Managed(destination);
                 managed.prepare(&context).await?;
@@ -11901,9 +11827,7 @@ mod tests {
                     )
                     .await
                     .map_err(|error| {
-                        PumasError::Other(format!(
-                            "FilesReady workspace observation failed: {error}"
-                        ))
+                        error.into_pumas_error("FilesReady workspace observation failed")
                     })??;
                 let manifest = crate::model_library::hf::acquisition_source::manifest_for_download(
                     "acme/model",
@@ -11961,7 +11885,7 @@ mod tests {
                     })
                     .await
                     .map_err(|error| {
-                        PumasError::Other(format!("FilesReady fixture publication failed: {error}"))
+                        error.into_pumas_error("FilesReady fixture publication failed")
                     })??;
                 Ok(())
             })

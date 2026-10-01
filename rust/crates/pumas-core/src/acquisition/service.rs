@@ -411,6 +411,19 @@ impl AcquisitionService {
         }
     }
 
+    /// Construct the shared owner with explicit finite admission limits.
+    /// Every consumer and HF scope shares these budgets. Saturation fails
+    /// synchronously; terminal control work has separate blocking capacity.
+    pub fn with_capacity(
+        store: Arc<AcquisitionStore>,
+        capacity: super::AcquisitionCapacity,
+    ) -> Result<Self> {
+        Ok(Self {
+            store,
+            supervisor: Arc::new(TaskCustodyOwner::with_capacity(capacity)?),
+        })
+    }
+
     pub(crate) fn with_store(&self, store: Arc<AcquisitionStore>) -> Self {
         Self {
             store,
@@ -1117,6 +1130,19 @@ impl AcquisitionConsumer {
         self.scope.shutdown().await
     }
 
+    /// Run consumer recovery or cleanup through this shared scope's bounded
+    /// task/effect custody. Dropping the result waiter cancels the outer task;
+    /// shutdown still joins a registered blocking closure until it truly ends.
+    pub async fn run_blocking<T: Send + 'static>(
+        &self,
+        name: &'static str,
+        work: impl FnOnce() -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        self.scope
+            .run_worker_invocation(move |context| async move { owned(&context, name, work).await })
+            .await
+    }
+
     /// Revalidate a retained consumer receipt under the supplied held
     /// workspace and exact source selection. The callback owns interpretation
     /// of its payload and must verify its durable output before returning.
@@ -1377,8 +1403,11 @@ async fn owned<T: Send + 'static>(
             Ok(value) => Ok(Ok(value)),
         })
         .await
-        .map_err(|error| {
-            PumasError::Other(format!("Acquisition effect observation failed: {error}"))
+        .map_err(|error| match error {
+            super::task_custody::BlockingTaskError::CapacityExhausted { resource } => {
+                PumasError::AcquisitionCapacityExhausted { resource }
+            }
+            error => PumasError::Other(format!("Acquisition effect observation failed: {error}")),
         })?
         .and_then(|result| result)
 }

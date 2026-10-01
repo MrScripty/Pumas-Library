@@ -315,3 +315,14 @@ This is final-route usability evidence, not a Coding-Standards compliance or pro
 - **Recommendations:** Provide a safe snapshot-refresh path after session loss and retain the clear distinction between standards obligations and independent source/test evidence.
 
 This entry records the resumed candidate route only; implementation review and acceptance evidence remain separate.
+
+## Primary integrator — finite acquisition admission and direct-installer candidate
+
+- **Useful calls:** A fresh snapshot `snapshot:v1:28c08446-d4d8-4bab-bf4c-5122700bbd60` routed the library/launcher Rust implementation, concurrency, persistence, IPC error, compatibility, verification, documentation, and commit scope to 25 standards with zero unresolved fact categories. The 24 normative policy targets were read in one `read_many` call; the remaining route entry was the Router navigation index. Core and Rust profile obligations were available for the implementation review.
+- **Confusing or redundant steps:** The first fact set over-reported cross-language binding, platform-target, and release detail; narrowing it to actual IPC/persistence, Rust API/async and resource-lifecycle concerns reduced the route from 35 to 25 while retaining zero unresolved facts. Adding `include_routing: true` to a policy `read_many` rejected the whole batch with `NAVIGATION.ROUTING_TARGET_INVALID` (“Routing definitions are available when reading Router”). Omitting that option allowed policy reads. Expanding all 24 full compact policy bodies still exceeded the visible output window even though the request stayed within the 2 MiB service limit; count limits alone do not bound what the caller can review.
+- **Missing context:** The standards service did not know the current source diff, final Sol High review findings, Passeur agent lookup failure, or local command results; those came from source inspection and separate tools.
+- **Where I left MCP:** The route supplies obligations, not code compliance or acceptance. A final source repair and review pass remain in progress; Q1 gates stay pending.
+- **Smallest sufficient workflow:** Refresh routing facts, route the exact changed boundary, preserve the snapshot handle, read canonical policy bodies without `include_routing`, and focus output on the obligations relevant to the change.
+- **Recommendations:** Separate Router navigation reads from canonical policy reads in the input contract; make `include_routing` invalidity specific to the affected target instead of rejecting a multi-policy batch; and add section-scoped or byte-budgeted reads so full route coverage can be reviewed without flooding the response.
+
+This is tool-usability evidence only and does not certify implementation or product acceptance.

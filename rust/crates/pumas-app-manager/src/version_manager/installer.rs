@@ -569,39 +569,35 @@ impl pumas_library::acquisition::AcquisitionHost for LlamaCppHttpAttemptHost {
     }
 }
 
-async fn open_native_acquisition_workspace(
+fn prepare_native_acquisition_workspace(
     versions: PathBuf,
     tag: String,
     expected: Option<String>,
 ) -> Result<(Arc<NativeInstallWorkspace>, AcquisitionWorkspace)> {
-    tokio::task::spawn_blocking(move || {
-        let custody = Arc::new(NativeInstallWorkspace::create_for_attempt(
-            &versions,
-            &tag,
-            expected.as_deref(),
-        )?);
-        let relative = custody
-            .path()
-            .strip_prefix(&versions)
-            .map_err(|_| PumasError::InstallationFailed {
-                message: "Native acquisition stage escaped the versions root".into(),
-            })?
-            .to_path_buf();
-        let execution_lease: Arc<dyn Send + Sync> = Arc::new(custody._lock.clone());
-        let validator_lease = execution_lease.clone();
-        let workspace = AcquisitionWorkspace::from_reserved_directory(
-            &versions,
-            &relative,
-            execution_lease,
-            move || {
-                let _held = &validator_lease;
-                Ok(())
-            },
-        )?;
-        Ok((custody, workspace))
-    })
-    .await
-    .map_err(|error| PumasError::Other(format!("Failed to join native staging: {error}")))?
+    let custody = Arc::new(NativeInstallWorkspace::create_for_attempt(
+        &versions,
+        &tag,
+        expected.as_deref(),
+    )?);
+    let relative = custody
+        .path()
+        .strip_prefix(&versions)
+        .map_err(|_| PumasError::InstallationFailed {
+            message: "Native acquisition stage escaped the versions root".into(),
+        })?
+        .to_path_buf();
+    let execution_lease: Arc<dyn Send + Sync> = Arc::new(custody._lock.clone());
+    let validator_lease = execution_lease.clone();
+    let workspace = AcquisitionWorkspace::from_reserved_directory(
+        &versions,
+        &relative,
+        execution_lease,
+        move || {
+            let _held = &validator_lease;
+            Ok(())
+        },
+    )?;
+    Ok((custody, workspace))
 }
 
 fn settled_result<T>(outcome: Result<T>, settlement: Result<()>) -> Result<T> {
@@ -981,6 +977,8 @@ pub struct VersionInstaller {
     #[cfg(test)]
     native_receipt_pause: Option<Arc<TorchPublicationPause>>,
     #[cfg(test)]
+    native_recovery_pause: Option<Arc<NativeRecoveryPause>>,
+    #[cfg(test)]
     torch_stage_override: Option<TorchStageOverride>,
     #[cfg(test)]
     torch_publication_pause: Option<Arc<torch::TorchPublicationPause>>,
@@ -988,8 +986,36 @@ pub struct VersionInstaller {
     torch_stage_pause: Option<Arc<torch::TorchPublicationPause>>,
 }
 
+#[cfg(test)]
+pub(crate) struct NativeRecoveryPause {
+    pub(crate) reached: tokio::sync::Notify,
+    resume: StdMutex<std::sync::mpsc::Receiver<()>>,
+}
+
+#[cfg(test)]
+impl NativeRecoveryPause {
+    pub(crate) fn new() -> (Self, std::sync::mpsc::Sender<()>) {
+        let (resume, receiver) = std::sync::mpsc::channel();
+        (
+            Self {
+                reached: tokio::sync::Notify::new(),
+                resume: StdMutex::new(receiver),
+            },
+            resume,
+        )
+    }
+
+    fn block(&self) {
+        self.reached.notify_one();
+        let _ = self.resume.lock().unwrap().recv();
+    }
+}
+
 impl VersionInstaller {
     /// Create a new version installer.
+    ///
+    /// For llama.cpp, configure the returned installer with
+    /// [`Self::with_acquisition`] before calling [`Self::install_version`].
     ///
     /// The supplied cancellation flag is a cooperative request observed at
     /// installer checkpoints; setting it directly does not report whether the
@@ -1019,12 +1045,66 @@ impl VersionInstaller {
             #[cfg(test)]
             native_receipt_pause: None,
             #[cfg(test)]
+            native_recovery_pause: None,
+            #[cfg(test)]
             torch_stage_override: None,
             #[cfg(test)]
             torch_publication_pause: None,
             #[cfg(test)]
             torch_stage_pause: None,
         }
+    }
+
+    /// Configure direct llama.cpp installation with the existing shared
+    /// acquisition capability. Initializes the GitHub metadata client from this
+    /// installer's cache; creates no acquisition store, service, or downloader.
+    /// Reads retained records from that same store and reconciles native uses
+    /// before returning an installer that can admit new work. Recovery failure
+    /// drains this consumer scope before returning the error; the caller retains
+    /// the shared service's shutdown responsibility.
+    /// External customer compatibility acceptance remains pending.
+    pub async fn with_acquisition(
+        mut self,
+        acquisition: Arc<pumas_library::acquisition::AcquisitionService>,
+    ) -> Result<Self> {
+        if self.app_id != AppId::LlamaCpp {
+            return Err(PumasError::Config {
+                message: "Shared artifact acquisition is currently supported for llama.cpp".into(),
+            });
+        }
+        let cache = self
+            .launcher_root
+            .join("launcher-data")
+            .join(PathsConfig::CACHE_DIR_NAME);
+        let store = acquisition.store().clone();
+        let consumer = Arc::new(acquisition.open_consumer("runtime.llama.cpp")?);
+        self.acquisition_consumer = Some(consumer.clone());
+        let configured = async {
+            let (client, records) = consumer
+                .run_blocking("initialize native installer recovery", move || {
+                    Ok((GitHubClient::new(cache)?, store.acquisitions()?))
+                })
+                .await?;
+            self.github_client = Some(Arc::new(client));
+            self.reconcile_retained_llama_cpp(records.into_values().collect())
+                .await
+        }
+        .await;
+        if let Err(error) = configured {
+            return Err(match consumer.shutdown().await {
+                Ok(()) => error,
+                Err(settlement) => PumasError::InstallationFailed {
+                    message: format!("{error}; native recovery shutdown: {settlement}"),
+                },
+            });
+        }
+        Ok(self)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_native_recovery_pause(mut self, pause: Arc<NativeRecoveryPause>) -> Self {
+        self.native_recovery_pause = Some(pause);
+        self
     }
 
     #[cfg(test)]
@@ -1093,8 +1173,14 @@ impl VersionInstaller {
             }
             let tag = tag.to_owned();
             let versions = self.versions_dir();
-            let current =
-                read_native_attempt(&versions, &tag)?.ok_or_else(|| PumasError::Validation {
+            let lookup_versions = versions.clone();
+            let lookup_tag = tag.clone();
+            let current = consumer
+                .run_blocking("read retained native attempt", move || {
+                    read_native_attempt(&lookup_versions, &lookup_tag)
+                })
+                .await?
+                .ok_or_else(|| PumasError::Validation {
                     field: "acquisition.consumer_recovery_required".into(),
                     message: "Retained native acquisition has no attempt identity".into(),
                 })?;
@@ -1107,19 +1193,18 @@ impl VersionInstaller {
                 &record.phase,
                 pumas_library::acquisition::AcquisitionPhase::Adopted { .. }
             ) {
-                let consumer = consumer.clone();
+                let receipt_consumer = consumer.clone();
                 let retained = record.clone();
-                let receipt =
-                    tokio::task::spawn_blocking(move || consumer.completion_receipt(&retained))
-                        .await
-                        .map_err(|error| {
-                            PumasError::Other(format!("Native receipt lookup failed: {error}"))
-                        })??
-                        .ok_or_else(|| PumasError::Validation {
-                            field: "acquisition.consumer_recovery_required".into(),
-                            message: "Adopted native installation has no exact completion receipt"
-                                .into(),
-                        })?;
+                let receipt = consumer
+                    .run_blocking("read retained native completion receipt", move || {
+                        receipt_consumer.completion_receipt(&retained)
+                    })
+                    .await?
+                    .ok_or_else(|| PumasError::Validation {
+                        field: "acquisition.consumer_recovery_required".into(),
+                        message: "Adopted native installation has no exact completion receipt"
+                            .into(),
+                    })?;
                 let proof: LlamaCppInstallReceiptV1 = serde_json::from_value(receipt.payload)
                     .map_err(|error| PumasError::Validation {
                         field: "acquisition.consumer_recovery_required".into(),
@@ -1131,9 +1216,12 @@ impl VersionInstaller {
                 let expected_workspace = record.workspace.clone();
                 let manager = self.metadata_manager.clone();
                 let app_id = self.app_id;
-                let lock = NativeVersionsLock::acquire(versions.clone()).await?;
-                tokio::task::spawn_blocking(move || {
-                    let _lock = lock;
+                #[cfg(test)]
+                let recovery_pause = self.native_recovery_pause.clone();
+                consumer.run_blocking("verify adopted native output and clean workspace", move || {
+                    #[cfg(test)]
+                    if let Some(pause) = recovery_pause { pause.block(); }
+                    let _lock = NativeVersionsLock::try_acquire(&versions_for_cleanup)?;
                     let current = read_native_attempt(&versions_for_cleanup, &tag_for_cleanup)?;
                     let Some(current) = current else {
                         return Err(PumasError::Validation {
@@ -1187,18 +1275,21 @@ impl VersionInstaller {
                     }
                     cleanup_native_workspace_if_present(&workspace, &versions_for_cleanup)
                 })
-                .await
-                .map_err(|error| {
-                    PumasError::Other(format!("Native adopted cleanup task failed: {error}"))
-                })??;
+                .await?;
                 continue;
             }
-            let (custody, workspace) = open_native_acquisition_workspace(
-                versions.clone(),
-                tag.clone(),
-                Some(attempt.to_owned()),
-            )
-            .await?;
+            let recovery_versions = versions.clone();
+            let recovery_tag = tag.clone();
+            let recovery_attempt = attempt.to_owned();
+            let (custody, workspace) = consumer
+                .run_blocking("open retained native workspace", move || {
+                    prepare_native_acquisition_workspace(
+                        recovery_versions,
+                        recovery_tag,
+                        Some(recovery_attempt),
+                    )
+                })
+                .await?;
             let custody_for_reconcile = custody.clone();
             let manager = self.metadata_manager.clone();
             let app_id = self.app_id;
@@ -1236,20 +1327,24 @@ impl VersionInstaller {
                     field: "acquisition.consumer_recovery_required".into(),
                     message: "Retained native use disappeared before reconciliation".into(),
                 })?;
-            tokio::task::spawn_blocking(move || {
-                Arc::try_unwrap(custody)
-                    .map_err(|workspace| PumasError::InstallationFailed {
-                        message: format!(
-                            "Reconciled native workspace remains in use: {}",
-                            workspace.path().display()
-                        ),
-                    })?
-                    .cleanup()
-            })
-            .await
-            .map_err(|error| {
-                PumasError::Other(format!("Native recovery cleanup task failed: {error}"))
-            })??;
+            #[cfg(test)]
+            let recovery_pause = self.native_recovery_pause.clone();
+            consumer
+                .run_blocking("clean reconciled native workspace", move || {
+                    #[cfg(test)]
+                    if let Some(pause) = recovery_pause {
+                        pause.block();
+                    }
+                    Arc::try_unwrap(custody)
+                        .map_err(|workspace| PumasError::InstallationFailed {
+                            message: format!(
+                                "Reconciled native workspace remains in use: {}",
+                                workspace.path().display()
+                            ),
+                        })?
+                        .cleanup()
+                })
+                .await?;
         }
         Ok(())
     }
@@ -1497,6 +1592,12 @@ impl VersionInstaller {
         release: &GitHubRelease,
         progress_tx: mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
+        let consumer = self
+            .acquisition_consumer
+            .clone()
+            .ok_or_else(|| PumasError::Config {
+                message: "llama.cpp requires shared acquisition; configure with VersionInstaller::with_acquisition".into(),
+            })?;
         Self::validate_native_tag(tag)?;
         info!("Starting llama.cpp binary installation for {}", tag);
 
@@ -1538,12 +1639,23 @@ impl VersionInstaller {
         );
 
         let log_dir = self.logs_dir();
-        fs::create_dir_all(&log_dir).await.ok();
         let log_path = log_dir.join(format!(
             "install-llama-cpp-{}-{}.log",
             self.slugify_tag(tag),
             Utc::now().format("%Y%m%d-%H%M%S")
         ));
+
+        let versions = self.versions_dir();
+        let workspace_versions = versions.clone();
+        let workspace_tag = tag.to_owned();
+        let (custody, workspace) = consumer
+            .run_blocking("prepare native installation workspace", move || {
+                std::fs::create_dir_all(&log_dir).ok();
+                std::fs::create_dir_all(&workspace_versions)
+                    .map_err(|error| PumasError::io_with_path(error, &workspace_versions))?;
+                prepare_native_acquisition_workspace(workspace_versions, workspace_tag, None)
+            })
+            .await?;
 
         {
             let mut tracker = self.progress_tracker.write().await;
@@ -1555,18 +1667,6 @@ impl VersionInstaller {
             );
         }
 
-        let versions = self.versions_dir();
-        fs::create_dir_all(&versions)
-            .await
-            .map_err(|e| PumasError::io_with_path(e, &versions))?;
-        let (custody, workspace) =
-            open_native_acquisition_workspace(versions.clone(), tag.to_owned(), None).await?;
-        let consumer = self
-            .acquisition_consumer
-            .clone()
-            .ok_or_else(|| PumasError::Config {
-                message: "llama.cpp requires the shared artifact acquisition consumer".into(),
-            })?;
         let demand = AcquisitionDemand {
             consumer: consumer.owner().to_owned(),
             operation: format!(
@@ -1820,18 +1920,18 @@ impl VersionInstaller {
         };
 
         let result = if result.is_ok() {
-            let cleanup = tokio::task::spawn_blocking(move || {
-                Arc::try_unwrap(custody)
-                    .map_err(|workspace| PumasError::InstallationFailed {
-                        message: format!(
-                            "Native workspace remains in use: {}",
-                            workspace.path().display()
-                        ),
-                    })?
-                    .cleanup()
-            })
-            .await
-            .map_err(|error| PumasError::Other(format!("Native cleanup join failed: {error}")))?;
+            let cleanup = consumer
+                .run_blocking("clean published native workspace", move || {
+                    Arc::try_unwrap(custody)
+                        .map_err(|workspace| PumasError::InstallationFailed {
+                            message: format!(
+                                "Native workspace remains in use: {}",
+                                workspace.path().display()
+                            ),
+                        })?
+                        .cleanup()
+                })
+                .await;
             settled_result(result, cleanup)
         } else {
             result
@@ -3174,6 +3274,91 @@ fn shell_single_quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn unconfigured_direct_llama_cpp_installer_rejects_before_native_mutation() {
+        let root = tempfile::tempdir().unwrap();
+        let installer = crate::version_manager::VersionInstaller::new(
+            root.path().to_path_buf(),
+            AppId::LlamaCpp,
+            Arc::new(MetadataManager::new(root.path())),
+            Arc::new(RwLock::new(InstallationProgressTracker::new(
+                root.path().to_path_buf(),
+            ))),
+            Arc::new(AtomicBool::new(false)),
+        );
+        // Refusal must precede even release validation/resolution, so no remote
+        // fixture or assets are needed to establish the construction contract.
+        let release = GitHubRelease {
+            tag_name: "b1234+cpu".into(),
+            name: "legacy direct fixture".into(),
+            published_at: "2026-09-30T00:00:00Z".into(),
+            body: None,
+            tarball_url: None,
+            zipball_url: None,
+            prerelease: false,
+            assets: Vec::new(),
+            html_url: "https://github.com/ggml-org/llama.cpp/releases/tag/b1234".into(),
+            total_size: None,
+            archive_size: None,
+            dependencies_size: None,
+        };
+        let (progress, _updates) = mpsc::channel(1);
+        let error = installer
+            .install_version("b1234+cpu", &release, progress)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, PumasError::Config { message } if message.contains("with_acquisition"))
+        );
+        assert!(!installer.versions_dir().exists());
+        assert!(!installer.logs_dir().exists());
+        assert!(std::fs::read_dir(root.path()).unwrap().next().is_none());
+    }
+
+    #[tokio::test]
+    async fn public_direct_installer_configures_shared_llama_cpp_acquisition() {
+        use pumas_library::acquisition::{
+            AcquisitionCapacity, AcquisitionService, AcquisitionStore,
+        };
+        let root = tempfile::tempdir().unwrap();
+        let store = Arc::new(AcquisitionStore::new(root.path()));
+        let acquisition = Arc::new(
+            AcquisitionService::with_capacity(
+                store.clone(),
+                AcquisitionCapacity {
+                    scopes: 1,
+                    ..AcquisitionCapacity::default()
+                },
+            )
+            .unwrap(),
+        );
+        let installer = crate::version_manager::VersionInstaller::new(
+            root.path().to_path_buf(),
+            AppId::LlamaCpp,
+            Arc::new(MetadataManager::new(root.path())),
+            Arc::new(RwLock::new(
+                crate::version_manager::InstallationProgressTracker::new(root.path().to_path_buf()),
+            )),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .with_acquisition(acquisition.clone())
+        .await
+        .unwrap();
+        assert!(installer.github_client.is_some());
+        assert_eq!(
+            installer.acquisition_consumer.as_ref().unwrap().owner(),
+            "runtime.llama.cpp"
+        );
+        assert!(Arc::ptr_eq(acquisition.store(), &store));
+        // The direct installer consumes this owner's only scope reservation.
+        assert!(matches!(
+            acquisition.open_consumer("second"),
+            Err(PumasError::AcquisitionCapacityExhausted { resource: "scopes" })
+        ));
+        drop(installer);
+        acquisition.shutdown().await.unwrap();
+    }
 
     #[test]
     fn native_attempt_reopen_preserves_identity_and_remove_reinstall_renews_it() {

@@ -296,9 +296,7 @@ impl PumasApi {
                         })
                         .await
                         .map_err(|error| {
-                            PumasError::Other(format!(
-                                "Download metadata observation failed: {error}"
-                            ))
+                            error.into_pumas_error("Download metadata observation failed")
                         })??;
                     let mut huggingface_evidence = match snapshot {
                         Ok((model, evidence)) => {
@@ -344,9 +342,7 @@ impl PumasApi {
                             )
                             .await
                             .map_err(|error| {
-                                PumasError::Other(format!(
-                                    "Download model type observation failed: {error}"
-                                ))
+                                error.into_pumas_error("Download model type observation failed")
                             })??;
                         (resolved.model_type != model_library::ModelType::Unknown)
                             .then(|| resolved.model_type.as_str().to_string())
@@ -370,9 +366,9 @@ impl PumasApi {
                                     )
                                     .await
                                     .map_err(|error| {
-                                        PumasError::Other(format!(
-                                            "Download repository observation failed: {error}"
-                                        ))
+                                        error.into_pumas_error(
+                                            "Download repository observation failed",
+                                        )
                                     })??,
                             );
                         }
@@ -399,9 +395,7 @@ impl PumasApi {
                                 )
                                 .await
                                 .map_err(|error| {
-                                    PumasError::Other(format!(
-                                        "Download model type observation failed: {error}"
-                                    ))
+                                    error.into_pumas_error("Download model type observation failed")
                                 })??;
                         }
                     }
@@ -435,9 +429,7 @@ impl PumasApi {
                             )
                             .await
                             .map_err(|error| {
-                                PumasError::Other(format!(
-                                    "Download classification observation failed: {error}"
-                                ))
+                                error.into_pumas_error("Download classification observation failed")
                             })??;
                         match classification {
                             Ok(Some(bundle)) => {
@@ -566,9 +558,7 @@ impl PumasApi {
                     })
                     .await
                     .map_err(|error| {
-                        PumasError::Other(format!(
-                            "Download destination preparation observation failed: {error}"
-                        ))
+                        error.into_pumas_error("Download destination preparation observation failed")
                     })??;
                 if prepared.model_type == "unknown" {
                     warn!(
@@ -728,9 +718,7 @@ impl PumasApi {
                 validate_existing_local_directory_lookup_path(&dest_dir, "dest_dir").await
             })
             .await
-            .map_err(|error| {
-                PumasError::Other(format!("Recovery directory observation failed: {error}"))
-            })??;
+            .map_err(|error| error.into_pumas_error("Recovery directory observation failed"))??;
 
         // Determine model_type from directory path relative to library root
         let library_root = library.library_root();
@@ -747,9 +735,7 @@ impl PumasApi {
                 Ok::<_, PumasError>(library.load_metadata(&metadata_dest)?.unwrap_or_default())
             })
             .await
-            .map_err(|error| {
-                PumasError::Other(format!("Recovery metadata observation failed: {error}"))
-            })??;
+            .map_err(|error| error.into_pumas_error("Recovery metadata observation failed"))??;
         let recovery_filenames = metadata
             .selected_artifact_files
             .clone()
@@ -814,9 +800,8 @@ impl PumasApi {
                         library.get_model(&record_id).await
                     })
                     .await
-                    .map_err(|error| {
-                        PumasError::Other(format!("Recovery model observation failed: {error}"))
-                    })? {
+                    .map_err(|error| error.into_pumas_error("Recovery model observation failed"))?
+                {
                     Ok(Some(record)) => record,
                     Ok(None) => return Ok(partial_download_unavailable("model_not_found")),
                     Err(error) => return Ok(partial_download_error(&error)),
@@ -842,9 +827,7 @@ impl PumasApi {
                         library.index_model_dir(&model_dir).await
                     })
                     .await
-                    .map_err(|error| {
-                        PumasError::Other(format!("Recovery index observation failed: {error}"))
-                    })?
+                    .map_err(|error| error.into_pumas_error("Recovery index observation failed"))?
                 {
                     return Ok(partial_download_error(&error));
                 }
@@ -855,9 +838,8 @@ impl PumasApi {
                         library.get_model(&record_id).await
                     })
                     .await
-                    .map_err(|error| {
-                        PumasError::Other(format!("Recovery model observation failed: {error}"))
-                    })? {
+                    .map_err(|error| error.into_pumas_error("Recovery model observation failed"))?
+                {
                     Ok(Some(record)) => record,
                     Ok(None) => return Ok(partial_download_unavailable("model_not_found")),
                     Err(error) => return Ok(partial_download_error(&error)),
@@ -999,7 +981,7 @@ impl PumasApi {
                     )
                     .await
                     .map_err(|error| {
-                        PumasError::Other(format!("Partial directory observation failed: {error}"))
+                        error.into_pumas_error("Partial directory observation failed")
                     })? {
                     Ok(dest) => dest,
                     Err(PumasError::InvalidParams { .. } | PumasError::NotFound { .. }) => {
@@ -1799,6 +1781,7 @@ pub(crate) fn partial_download_reason_code(err: &PumasError) -> &'static str {
         PumasError::ModelNotFound { .. } => "repo_not_found",
         PumasError::RateLimited { .. } => "rate_limited",
         PumasError::DownloadRootBusy => "download_root_busy",
+        PumasError::AcquisitionCapacityExhausted { .. } => "acquisition_capacity_exhausted",
         PumasError::PermissionDenied(_) => "permission_denied",
         PumasError::Network { message, .. } if message.contains("404 Not Found") => {
             "repo_not_found"
@@ -2345,6 +2328,16 @@ pub(super) mod tests {
     }
     use crate::models::HuggingFaceModel;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_partial_download_reason_code_preserves_acquisition_capacity() {
+        assert_eq!(
+            partial_download_reason_code(&PumasError::AcquisitionCapacityExhausted {
+                resource: "workers",
+            }),
+            "acquisition_capacity_exhausted"
+        );
+    }
 
     #[test]
     fn test_partial_download_reason_code_preserves_root_contention() {

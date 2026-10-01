@@ -255,6 +255,9 @@ impl VersionManager {
 
     /// Create a new version manager.
     ///
+    /// llama.cpp installation requires [`Self::new_with_acquisition`] with the
+    /// application's existing shared acquisition owner.
+    ///
     /// # Arguments
     ///
     /// * `launcher_root` - Path to the launcher root directory
@@ -2030,6 +2033,105 @@ mod tests {
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[tokio::test]
+    async fn native_direct_recovery_cancellation_retains_effect_until_shared_shutdown() {
+        let root = TempDir::new().unwrap();
+        let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
+        let api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let mut manager = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        manager.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                manager.cache_dir(),
+                Duration::from_secs(3600),
+                base_url,
+            )
+            .unwrap(),
+        );
+        let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+        observed.await.unwrap();
+        release.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match updates.recv().await.unwrap() {
+                    ProgressUpdate::Completed { success: true } => break,
+                    ProgressUpdate::Error { message } => panic!("native fixture failed: {message}"),
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        server.await.unwrap();
+        manager.shutdown_installations().await.unwrap();
+        let record = api
+            .acquisition()
+            .store()
+            .acquisitions()
+            .unwrap()
+            .into_values()
+            .next()
+            .unwrap();
+        let attempt = record.demand.operation.rsplit_once(':').unwrap().1;
+        use sha2::Digest;
+        let digest = format!("{:x}", sha2::Sha256::digest(b"b1234+cpu"));
+        let stale_workspace = manager
+            .versions_dir()
+            .join(format!(".llama-install-{}-{attempt}", &digest[..24]));
+        std::fs::create_dir(&stale_workspace).unwrap();
+        std::fs::write(
+            stale_workspace.join("stale"),
+            b"registered recovery cleanup",
+        )
+        .unwrap();
+        let (pause, resume) = installer::NativeRecoveryPause::new();
+        let pause = Arc::new(pause);
+        let direct = VersionInstaller::new(
+            root.path().to_path_buf(),
+            AppId::LlamaCpp,
+            manager.metadata_manager.clone(),
+            manager.progress_tracker.clone(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .with_native_recovery_pause(pause.clone());
+        let acquisition = api.acquisition().clone();
+        let constructor = tokio::spawn(async move { direct.with_acquisition(acquisition).await });
+        tokio::time::timeout(Duration::from_secs(5), pause.reached.notified())
+            .await
+            .unwrap();
+        constructor.abort();
+        assert!(matches!(constructor.await, Err(error) if error.is_cancelled()));
+        let acquisition = api.acquisition().clone();
+        let mut shutdown = tokio::spawn(async move { acquisition.shutdown().await });
+        let early = tokio::time::timeout(Duration::from_millis(50), &mut shutdown).await;
+        let still_present = stale_workspace.exists();
+        // Always release the real closure before checking outcomes so failures
+        // cannot strand a blocking thread during test-runtime shutdown.
+        resume.send(()).unwrap();
+        assert!(
+            early.is_err(),
+            "shared shutdown must wait for the registered recovery effect"
+        );
+        assert!(still_present);
+        tokio::time::timeout(Duration::from_secs(5), shutdown)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(!stale_workspace.exists());
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
     async fn native_archive_publishes_complete_output_and_reopens_metadata() {
         let root = TempDir::new().unwrap();
         let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
@@ -2112,6 +2214,20 @@ mod tests {
             b"retry cleanup after adoption",
         )
         .unwrap();
+        // Direct public construction must finish the same retained adopted-use
+        // recovery before it returns an installer that can admit new work.
+        let direct = VersionInstaller::new(
+            root.path().to_path_buf(),
+            AppId::LlamaCpp,
+            manager.metadata_manager.clone(),
+            manager.progress_tracker.clone(),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .with_acquisition(api.acquisition().clone())
+        .await
+        .unwrap();
+        assert!(!stale_workspace.exists());
+        drop(direct);
         let reopened = VersionManager::new_with_acquisition(
             root.path(),
             AppId::LlamaCpp,

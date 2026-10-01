@@ -398,9 +398,7 @@ impl TaskContext {
                 Ok::<_, std::convert::Infallible>(owner.acquire_root_grant(&context, root).await)
             })
             .await
-            .map_err(|error| {
-                crate::PumasError::Other(format!("Download root grant observation failed: {error}"))
-            })?
+            .map_err(|error| error.into_pumas_error("Download root grant observation failed"))?
             .expect("infallible acquisition envelope")?;
         let mut scoped = self.clone();
         scoped.inner = scoped.inner.with_effect_lease(Some(grant.clone()));
@@ -660,9 +658,7 @@ impl DownloadTaskOwner {
                         })
                         .await
                         .map_err(|error| {
-                            crate::PumasError::Other(format!(
-                                "Download root validation observation failed: {error}"
-                            ))
+                            error.into_pumas_error("Download root validation observation failed")
                         })?;
                 }
                 GrantAcquisition::Open => {
@@ -675,9 +671,7 @@ impl DownloadTaskOwner {
                         })
                         .await
                         .map_err(|error| {
-                            crate::PumasError::Other(format!(
-                                "Download root acquisition observation failed: {error}"
-                            ))
+                            error.into_pumas_error("Download root acquisition observation failed")
                         })
                         .and_then(|result| result);
                     {
@@ -707,6 +701,66 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
     use tokio::sync::oneshot;
+    #[tokio::test]
+    async fn ordinary_hf_root_grant_preserves_shared_blocking_saturation() {
+        let supervisor = Arc::new(
+            TaskCustodyOwner::with_capacity(crate::acquisition::AcquisitionCapacity {
+                workers: 2,
+                blocking: 1,
+                ..crate::acquisition::AcquisitionCapacity::default()
+            })
+            .unwrap(),
+        );
+        let hf = Arc::new(
+            DownloadTaskOwner::with_supervisor(supervisor.clone(), || async { Ok(()) }).unwrap(),
+        );
+        let other = supervisor.open_scope(|| async { Ok(()) }).unwrap();
+        let (entered_tx, entered) = oneshot::channel();
+        let (release_tx, release) = std::sync::mpsc::channel();
+        let held = tokio::spawn(async move {
+            other
+                .run_worker_invocation(move |context| async move {
+                    context
+                        .run_blocking(move || {
+                            entered_tx.send(()).unwrap();
+                            let _ = release.recv();
+                        })
+                        .await
+                        .unwrap();
+                    Ok(())
+                })
+                .await
+        });
+        entered.await.unwrap();
+        let root_dir = tempfile::TempDir::new().unwrap();
+        let root = DownloadDestinationRoot::open(root_dir.path()).unwrap();
+        let requested_root = root.clone();
+        let refused = hf
+            .run_invocation(move |context| async move {
+                context.with_root_grant(requested_root).await.map(|_| ())
+            })
+            .await;
+        release_tx.send(()).unwrap();
+        held.await.unwrap().unwrap();
+        assert!(matches!(
+            refused,
+            Err(crate::PumasError::AcquisitionCapacityExhausted {
+                resource: "blocking"
+            })
+        ));
+        // Refusal must clear the acquisition slot so a subsequent grant can proceed.
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            hf.run_invocation(move |context| async move {
+                context.with_root_grant(root).await.map(|_| ())
+            }),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        supervisor.request_shutdown().wait().await.unwrap();
+    }
+
     #[tokio::test]
     async fn admission_matching_uses_ordered_validated_selection_and_weak_legacy_revision() {
         use crate::model_library::artifact_identity::DownloadRevision;

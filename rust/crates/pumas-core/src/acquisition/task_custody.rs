@@ -17,11 +17,63 @@ use std::sync::MutexGuard;
 use std::sync::{Arc, Mutex, Weak};
 
 use futures::FutureExt;
-use tokio::sync::{oneshot, Notify};
+use tokio::sync::{oneshot, Notify, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 
 type FallibleBlockingReceiver<T, E> =
     oneshot::Receiver<std::result::Result<std::result::Result<T, E>, String>>;
+
+/// Finite budgets shared by every scope of an acquisition service.
+///
+/// Defaults are admission limits, not measured memory, thread, or throughput
+/// guarantees. AC10 resource qualification remains pending. Scopes retain their
+/// identities and shutdown receipts until the last scope handle is dropped and
+/// its finalizer/effects drain. `scopes` bounds live and draining scopes.
+#[derive(Clone, Copy, Debug)]
+pub struct AcquisitionCapacity {
+    /// Ordinary prepared, installed, and draining tasks; default 32.
+    pub workers: usize,
+    /// Ordinary blocking jobs and their observers; default 16.
+    pub blocking: usize,
+    /// Cancellation and terminal tasks, independent of ordinary work; default 32.
+    pub rescue_workers: usize,
+    /// Blocking cleanup jobs and their observers; default 4.
+    pub rescue_blocking: usize,
+    /// Live scopes plus scopes draining after their last handle drops; default 256.
+    pub scopes: usize,
+}
+
+impl Default for AcquisitionCapacity {
+    fn default() -> Self {
+        Self {
+            workers: 32,
+            blocking: 16,
+            rescue_workers: 32,
+            rescue_blocking: 4,
+            scopes: 256,
+        }
+    }
+}
+
+impl AcquisitionCapacity {
+    fn validate(self) -> crate::Result<Self> {
+        if [
+            self.workers,
+            self.blocking,
+            self.rescue_workers,
+            self.rescue_blocking,
+            self.scopes,
+        ]
+        .iter()
+        .any(|&limit| limit == 0 || limit > Semaphore::MAX_PERMITS)
+        {
+            return Err(crate::PumasError::Config {
+                message: "Acquisition capacities must be positive finite semaphore limits".into(),
+            });
+        }
+        Ok(self)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TaskRole {
@@ -310,14 +362,30 @@ impl ProjectionCell {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum BlockingTaskError {
     StaleGeneration,
+    CapacityExhausted { resource: &'static str },
     Join(String),
     ResultChannelClosed,
+}
+
+impl BlockingTaskError {
+    /// Preserve shared admission refusal when an adapter adds observation context.
+    pub(crate) fn into_pumas_error(self, context: impl fmt::Display) -> crate::PumasError {
+        match self {
+            Self::CapacityExhausted { resource } => {
+                crate::PumasError::AcquisitionCapacityExhausted { resource }
+            }
+            error => crate::PumasError::Other(format!("{context}: {error}")),
+        }
+    }
 }
 
 impl fmt::Display for BlockingTaskError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::StaleGeneration => formatter.write_str("task generation is no longer current"),
+            Self::CapacityExhausted { resource } => {
+                write!(formatter, "acquisition {resource} capacity exhausted")
+            }
             Self::Join(detail) => write!(formatter, "blocking task failed: {detail}"),
             Self::ResultChannelClosed => formatter.write_str("blocking result channel closed"),
         }
@@ -367,6 +435,7 @@ impl StartGate {
 }
 
 struct TaskEntry {
+    capacity: Option<Arc<OwnedSemaphorePermit>>,
     admission: Option<(
         Arc<dyn Any + Send + Sync>,
         tokio::sync::watch::Receiver<bool>,
@@ -385,6 +454,7 @@ struct TaskEntry {
 }
 
 struct PreparedEntry {
+    capacity: Option<Arc<OwnedSemaphorePermit>>,
     download_id: String,
     generation: TaskGeneration,
     role: TaskRole,
@@ -460,9 +530,21 @@ type ProjectionObserver = Arc<dyn Fn(&'static str) + Send + Sync>;
 
 /// One owner for all consumer-scoped task and effect custody. A scope is an
 /// access handle, never a separately populated supervisor or task registry.
-#[derive(Default)]
 pub(crate) struct TaskCustodyOwner {
     state: Mutex<SupervisorState>,
+    capacity: AcquisitionCapacity,
+    workers: Arc<Semaphore>,
+    blocking: Arc<Semaphore>,
+    rescue_workers: Arc<Semaphore>,
+    rescue_blocking: Arc<Semaphore>,
+    #[cfg(test)]
+    shutdown_keepalive_observer: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+}
+
+impl Default for TaskCustodyOwner {
+    fn default() -> Self {
+        Self::with_capacity(AcquisitionCapacity::default()).expect("valid default capacity")
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -475,6 +557,7 @@ type ScopeFinalizer =
 struct SupervisorState {
     closed: bool,
     next_scope: u64,
+    closed_scope_failures: usize,
     scopes: HashMap<ScopeId, ScopeState>,
     shutdown: Option<ShutdownReceipt>,
     shutdown_driver: Option<JoinHandle<()>>,
@@ -516,6 +599,33 @@ impl TaskCustodyOwner {
         Self::default()
     }
 
+    pub(crate) fn with_capacity(capacity: AcquisitionCapacity) -> crate::Result<Self> {
+        let capacity = capacity.validate()?;
+        Ok(Self {
+            state: Mutex::default(),
+            capacity,
+            workers: Arc::new(Semaphore::new(capacity.workers)),
+            blocking: Arc::new(Semaphore::new(capacity.blocking)),
+            rescue_workers: Arc::new(Semaphore::new(capacity.rescue_workers)),
+            rescue_blocking: Arc::new(Semaphore::new(capacity.rescue_blocking)),
+            #[cfg(test)]
+            shutdown_keepalive_observer: Mutex::default(),
+        })
+    }
+
+    fn acquire_worker(&self, rescue: bool) -> crate::Result<Arc<OwnedSemaphorePermit>> {
+        let (budget, resource) = if rescue {
+            (&self.rescue_workers, "rescue_workers")
+        } else {
+            (&self.workers, "workers")
+        };
+        budget
+            .clone()
+            .try_acquire_owned()
+            .map(Arc::new)
+            .map_err(|_| crate::PumasError::AcquisitionCapacityExhausted { resource })
+    }
+
     /// Mint a scope and register its terminal projection before admitting work.
     /// Scope identities are never removed or reused during this owner's life.
     pub(crate) fn open_scope<F, Fut>(
@@ -532,6 +642,9 @@ impl TaskCustodyOwner {
             .expect("acquisition task custody lock poisoned");
         if state.closed {
             return Err(crate::PumasError::DownloadLifecycleClosed);
+        }
+        if state.scopes.len() >= self.capacity.scopes {
+            return Err(crate::PumasError::AcquisitionCapacityExhausted { resource: "scopes" });
         }
         let identity = ScopeId(state.next_scope);
         state.next_scope = state.next_scope.checked_add(1).ok_or_else(|| {
@@ -591,25 +704,36 @@ impl TaskCustodyOwner {
         state.shutdown = Some(receipt.clone());
         let mut receipts = Vec::with_capacity(state.scopes.len());
         let mut starts = Vec::with_capacity(state.scopes.len());
+        // Even the existing-receipt path can drop its supplied keepalive.
+        // Keep every upgraded scope alive until the custody lock is released.
+        let mut keepalives = Vec::with_capacity(state.scopes.len());
         for scope in state.scopes.values_mut() {
             let keepalive: Arc<dyn Send + Sync> = scope
                 .handle
                 .upgrade()
-                .map(|handle| handle as Arc<dyn Send + Sync>)
+                .map(|handle| {
+                    keepalives.push(handle.clone());
+                    handle as Arc<dyn Send + Sync>
+                })
                 .unwrap_or_else(|| self.clone());
+            #[cfg(test)]
+            if let Some(observer) = self.shutdown_keepalive_observer.lock().unwrap().as_ref() {
+                observer();
+            }
             let (receipt, start) = begin_scope_shutdown(scope, keepalive);
             receipts.push(receipt);
             if let Some(start) = start {
                 starts.push(start);
             }
         }
+        let closed_scope_failures = state.closed_scope_failures;
         match tokio::runtime::Handle::try_current() {
             Ok(runtime) => {
                 let owner = self.clone();
                 let (start, started) = oneshot::channel();
                 state.shutdown_driver = Some(runtime.spawn(async move {
                     let _ = started.await;
-                    let mut failures = 0;
+                    let mut failures = closed_scope_failures;
                     for receipt in receipts {
                         failures += receipt.failures().await;
                     }
@@ -623,6 +747,7 @@ impl TaskCustodyOwner {
             }
         }
         drop(state);
+        drop(keepalives);
         for start in starts {
             let _ = start.send(());
         }
@@ -666,6 +791,7 @@ fn begin_scope_shutdown(
     state.shutdown_driver = Some(runtime.spawn(async move {
         let _ = started.await;
         for (_, entry) in prepared {
+            let _capacity = entry.capacity;
             drop(entry.start);
             if entry.outer.await.is_err_and(|error| error.is_panic()) {
                 failures += 1;
@@ -746,8 +872,46 @@ struct ScopeState {
     retired_failures: usize,
     shutdown: Option<ShutdownReceipt>,
     shutdown_driver: Option<JoinHandle<()>>,
+    cleanup_driver: Option<JoinHandle<()>>,
     finalizer: Option<ScopeFinalizer>,
     handle: Weak<TaskScope>,
+}
+
+// Last-handle drop is a lifecycle boundary: preserve all effects and the
+// registered finalizer, then remove the metadata only after their receipt.
+impl Drop for TaskScope {
+    fn drop(&mut self) {
+        let mut state = self
+            .owner
+            .state
+            .lock()
+            .expect("acquisition task custody lock poisoned");
+        let Some(scope) = state.scopes.get_mut(&self.identity) else {
+            return;
+        };
+        let (receipt, start) = begin_scope_shutdown(scope, self.owner.clone());
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let owner = self.owner.clone();
+            let identity = self.identity;
+            scope.cleanup_driver = Some(runtime.spawn(async move {
+                let failures = receipt.failures().await;
+                let removed = {
+                    let mut state = owner
+                        .state
+                        .lock()
+                        .expect("acquisition task custody lock poisoned");
+                    // Preserve failed cleanup evidence for owner-wide shutdown.
+                    state.closed_scope_failures += failures;
+                    state.scopes.remove(&identity)
+                };
+                drop(removed);
+            }));
+        }
+        drop(state);
+        if let Some(start) = start {
+            let _ = start.send(());
+        }
+    }
 }
 
 struct InvocationWaiter {
@@ -1077,12 +1241,21 @@ impl TaskScope {
     }
 
     fn lock_state(&self) -> ScopeGuard<'_> {
+        let mut supervisor = self
+            .owner
+            .state
+            .lock()
+            .expect("acquisition task custody lock poisoned");
+        // Completion evidence remains retained independently of admission.
+        for scope in supervisor.scopes.values_mut() {
+            for entry in scope.tasks.values_mut() {
+                if entry.finished() {
+                    entry.capacity.take();
+                }
+            }
+        }
         ScopeGuard {
-            supervisor: self
-                .owner
-                .state
-                .lock()
-                .expect("acquisition task custody lock poisoned"),
+            supervisor,
             identity: self.identity,
         }
     }
@@ -1122,6 +1295,10 @@ impl TaskScope {
         if state.closed {
             return Err(crate::PumasError::DownloadLifecycleClosed);
         }
+        let capacity = Some(self.owner.acquire_worker(matches!(
+            role,
+            TaskRole::CancelFinalizer | TaskRole::TerminalProjection
+        ))?);
         let generation = TaskGeneration::new();
         let context = TaskContext {
             owner: Arc::downgrade(self),
@@ -1131,7 +1308,9 @@ impl TaskScope {
             effect_lease: None,
         };
         let (start, started) = oneshot::channel();
+        let outer_capacity = capacity.clone();
         let outer = tokio::spawn(async move {
+            let _capacity = outer_capacity;
             if started.await.is_ok() {
                 work(context).await;
             }
@@ -1140,6 +1319,7 @@ impl TaskScope {
         state.prepared.insert(
             generation.key(),
             PreparedEntry {
+                capacity,
                 download_id: download_id.clone(),
                 generation: generation.clone(),
                 role,
@@ -1246,6 +1426,7 @@ impl TaskScope {
         tasks.insert(
             download_id.clone(),
             TaskEntry {
+                capacity: entry.capacity,
                 admission: None,
                 generation: generation.clone(),
                 role: entry.role,
@@ -1510,6 +1691,7 @@ impl TaskScope {
                 );
             }
         }
+        let capacity = Some(self.owner.acquire_worker(true)?);
         let mut current = tasks.remove(download_id);
         let outer_finished_before_replacement = current
             .as_ref()
@@ -1549,15 +1731,23 @@ impl TaskScope {
             failed: AtomicBool::new(false),
             notify: Notify::new(),
         });
-        let predecessor_observer = tokio::spawn(observe_cancellation_predecessor(
-            current,
-            outer_finished_before_replacement,
-            predecessor_started,
-            predecessor_completion.clone(),
-            predecessor_sender,
-        ));
+        let observer_capacity = capacity.clone();
+        let observer_completion = predecessor_completion.clone();
+        let predecessor_observer = tokio::spawn(async move {
+            let _capacity = observer_capacity;
+            observe_cancellation_predecessor(
+                current,
+                outer_finished_before_replacement,
+                predecessor_started,
+                observer_completion,
+                predecessor_sender,
+            )
+            .await;
+        });
         let start_state = Arc::new(AtomicU8::new(TaskStartState::Gated as u8));
+        let outer_capacity = capacity.clone();
         let outer = tokio::spawn(async move {
+            let _capacity = outer_capacity;
             if started.await.is_err() {
                 return;
             }
@@ -1571,6 +1761,7 @@ impl TaskScope {
         tasks.insert(
             download_id.to_string(),
             TaskEntry {
+                capacity,
                 admission: None,
                 generation: generation.clone(),
                 role: TaskRole::CancelFinalizer,
@@ -1699,6 +1890,7 @@ impl TaskScope {
             return Ok(ProjectionTransition::NotReady);
         }
 
+        let capacity = Some(self.owner.acquire_worker(true)?);
         let predecessor = tasks
             .remove(download_id)
             .expect("finished predecessor remained present");
@@ -1732,7 +1924,9 @@ impl TaskScope {
         });
         let predecessor_completion_task = predecessor_completion.clone();
         let (predecessor_start, predecessor_started) = oneshot::channel();
+        let observer_capacity = capacity.clone();
         let predecessor_observer = tokio::spawn(async move {
+            let _capacity = observer_capacity;
             if predecessor_started.await.is_err() {
                 return;
             }
@@ -1751,7 +1945,9 @@ impl TaskScope {
 
         let project_cell = cell.clone();
         let (project_start, project_started) = oneshot::channel();
+        let outer_capacity = capacity.clone();
         let outer = tokio::spawn(async move {
+            let _capacity = outer_capacity;
             if project_started.await.is_err() {
                 return;
             }
@@ -1792,6 +1988,7 @@ impl TaskScope {
         tasks.insert(
             download_id.to_string(),
             TaskEntry {
+                capacity,
                 admission: None,
                 generation: generation.clone(),
                 role: TaskRole::TerminalProjection,
@@ -1950,6 +2147,7 @@ impl TaskScope {
                 entry.outer.abort();
                 let (start, started) = oneshot::channel();
                 let observer = tokio::spawn(async move {
+                    let _capacity = entry.capacity;
                     let _ = started.await;
                     drop(entry.start);
                     let failures =
@@ -2093,10 +2291,29 @@ impl TaskScope {
         let Some(entry) = tasks.get_mut(download_id) else {
             return Err(BlockingTaskError::StaleGeneration);
         };
-        if !entry.generation.matches(generation) {
+        if !entry.generation.matches(generation) || entry.capacity.is_none() {
             return Err(BlockingTaskError::StaleGeneration);
         }
         entry.reap_completed_nested();
+        let rescue = matches!(
+            entry.role,
+            TaskRole::CancelFinalizer | TaskRole::TerminalProjection
+        );
+        let (budget, resource) = if rescue {
+            (&self.owner.rescue_blocking, "rescue_blocking")
+        } else {
+            (&self.owner.blocking, "blocking")
+        };
+        // Reserve before either observer or blocking job is spawned. No waiter
+        // futures are allocated on saturation. The closure itself retains both
+        // permits if its result waiter or observer disappears.
+        let blocking_capacity = Arc::new(
+            budget
+                .clone()
+                .try_acquire_owned()
+                .map_err(|_| BlockingTaskError::CapacityExhausted { resource })?,
+        );
+        let worker_capacity = entry.capacity.clone();
 
         #[cfg(test)]
         let blocking_observer = self
@@ -2120,9 +2337,13 @@ impl TaskScope {
             .clone();
         let observer = tokio::spawn(async move {
             let closure_grant = effect_lease.clone();
+            let closure_capacity = blocking_capacity.clone();
+            let _observer_capacity = blocking_capacity;
             let result = if start_receiver.await.is_ok() {
                 tokio::task::spawn_blocking(move || {
                     let _grant = closure_grant;
+                    let _blocking_capacity = closure_capacity;
+                    let _worker_capacity = worker_capacity;
                     #[cfg(test)]
                     if let Some(observer) = blocking_observer {
                         observer(operation);
@@ -2374,7 +2595,9 @@ impl TaskContext {
             let entry = state
                 .tasks
                 .get_mut(&self.download_id)
-                .filter(|entry| entry.generation.matches(&self.generation))
+                .filter(|entry| {
+                    entry.generation.matches(&self.generation) && entry.capacity.is_some()
+                })
                 .ok_or(BlockingTaskError::StaleGeneration)?;
             entry.reap_completed_nested();
             let (start, started) = oneshot::channel();
@@ -2386,7 +2609,9 @@ impl TaskContext {
             });
             let observed = completion.clone();
             let effect_lease = self.effect_lease.clone();
+            let worker_capacity = entry.capacity.clone();
             let handle = tokio::spawn(async move {
+                let _worker_capacity = worker_capacity;
                 let _ = started.await;
                 let result = AssertUnwindSafe(async move { function().await })
                     .catch_unwind()
@@ -2788,6 +3013,336 @@ async fn wait_for_nested(completions: &[Arc<NestedCompletion>]) -> usize {
 
 #[cfg(test)]
 mod tests {
+    fn bounded_owner(workers: usize, blocking: usize, scopes: usize) -> Arc<TaskCustodyOwner> {
+        Arc::new(
+            TaskCustodyOwner::with_capacity(AcquisitionCapacity {
+                workers,
+                blocking,
+                rescue_blocking: 1,
+                rescue_workers: 2,
+                scopes,
+            })
+            .unwrap(),
+        )
+    }
+
+    fn assert_worker_full(scope: &Arc<TaskScope>) {
+        assert!(matches!(
+            scope.prepare("rejected".into(), TaskRole::Worker, |_| async {}),
+            Err(crate::PumasError::AcquisitionCapacityExhausted {
+                resource: "workers"
+            })
+        ));
+    }
+
+    async fn wait_worker_slot(owner: &TaskCustodyOwner) {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while owner.workers.available_permits() == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("drained worker must release admission");
+    }
+
+    #[tokio::test]
+    async fn global_shutdown_keeps_prior_closed_scope_alive_until_unlock() {
+        let owner = bounded_owner(1, 1, 1);
+        let scope = owner.open_scope(|| async { Ok(()) }).unwrap();
+        scope.shutdown().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while Arc::strong_count(&scope) != 1 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let (upgraded_tx, upgraded) = oneshot::channel();
+        let upgraded_tx = Mutex::new(Some(upgraded_tx));
+        let (resume_tx, resume) = std::sync::mpsc::channel();
+        let resume = Mutex::new(resume);
+        *owner.shutdown_keepalive_observer.lock().unwrap() = Some(Arc::new(move || {
+            upgraded_tx
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap()
+                .send(())
+                .unwrap();
+            resume.lock().unwrap().recv().unwrap();
+        }));
+        let shutdown_owner = owner.clone();
+        let runtime = tokio::runtime::Handle::current();
+        let (receipt_tx, receipt) = oneshot::channel();
+        // An independent thread makes a failed lock-order assertion time out
+        // without blocking the runtime responsible for the receipt.
+        let thread = std::thread::spawn(move || {
+            let _runtime = runtime.enter();
+            assert!(receipt_tx.send(shutdown_owner.request_shutdown()).is_ok());
+        });
+        upgraded.await.unwrap();
+        drop(scope);
+        resume_tx.send(()).unwrap();
+        let receipt = tokio::time::timeout(Duration::from_secs(1), receipt)
+            .await
+            .expect("shutdown must release its lock before dropping the last scope handle")
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(1), receipt.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        thread.join().unwrap();
+        owner.request_shutdown().wait().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn capacity_is_shared_and_rejected_prepared_work_drains_before_reuse() {
+        let owner = bounded_owner(1, 1, 2);
+        let first = owner.open_scope(|| async { Ok(()) }).unwrap();
+        let second = owner.open_scope(|| async { Ok(()) }).unwrap();
+        let prepared = first
+            .prepare("held".into(), TaskRole::Worker, |_| async {})
+            .unwrap();
+        assert_worker_full(&second);
+        assert_eq!(second.prepared_count_for_test(), 0);
+        let rejected = second.install_gated(prepared).unwrap_err();
+        drop(rejected);
+        assert_worker_full(&second);
+        first.rescue_abandoned();
+        wait_worker_slot(&owner).await;
+        let prepared = second
+            .prepare("accepted".into(), TaskRole::Worker, |_| async {})
+            .unwrap();
+        second.install_gated(prepared).unwrap().start();
+        while !second.snapshot("accepted").is_some_and(|s| s.finished) {
+            tokio::task::yield_now().await;
+        }
+        // Completed, unobserved entries preserve evidence without monopolizing capacity.
+        let prepared = first
+            .prepare("reused".into(), TaskRole::Worker, |_| async {})
+            .unwrap();
+        drop(prepared);
+        first.rescue_abandoned();
+        owner.request_shutdown().wait().await.unwrap();
+        assert_eq!(owner.workers.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn capacity_survives_cancel_replacement_and_dropped_blocking_waiter() {
+        let owner = bounded_owner(1, 1, 2);
+        let first = owner.open_scope(|| async { Ok(()) }).unwrap();
+        let second = owner.open_scope(|| async { Ok(()) }).unwrap();
+        let prepared = first
+            .prepare("held".into(), TaskRole::Worker, |_| async {
+                std::future::pending::<()>().await;
+            })
+            .unwrap();
+        let installed = first.install_gated(prepared).unwrap();
+        let generation = installed.generation().clone();
+        installed.start();
+        let (entered_tx, entered) = oneshot::channel();
+        let (release_tx, release) = std::sync::mpsc::channel();
+        let waiter = first
+            .register_blocking("held", &generation, "held effect", move || {
+                entered_tx.send(()).unwrap();
+                release.recv().unwrap();
+            })
+            .unwrap();
+        drop(waiter);
+        entered.await.unwrap();
+        assert!(matches!(
+            first.register_blocking("held", &generation, "excess", || {}),
+            Err(BlockingTaskError::CapacityExhausted {
+                resource: "blocking"
+            })
+        ));
+        assert_eq!(first.nested_count_for_test("held"), Some(1));
+        let (cleanup_tx, cleanup) = oneshot::channel();
+        let CancelTransition::Started(cancel) = first
+            .begin_cancel("held", move |context, _| async move {
+                context.run_blocking(|| {}).await.unwrap();
+                cleanup_tx.send(()).unwrap();
+            })
+            .unwrap()
+        else {
+            panic!("worker requires cancellation");
+        };
+        cancel.start();
+        assert_worker_full(&second);
+        assert_eq!(owner.blocking.available_permits(), 0);
+        release_tx.send(()).unwrap();
+        cleanup.await.unwrap();
+        wait_worker_slot(&owner).await;
+        assert_eq!(owner.blocking.available_permits(), 1);
+        owner.request_shutdown().wait().await.unwrap();
+        assert_eq!(owner.rescue_blocking.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn blocking_capacity_is_shared_and_rescue_work_remains_available() {
+        let owner = bounded_owner(2, 1, 2);
+        let first = owner.open_scope(|| async { Ok(()) }).unwrap();
+        let second = owner.open_scope(|| async { Ok(()) }).unwrap();
+        let mut generations = Vec::new();
+        for scope in [&first, &second] {
+            let prepared = scope
+                .prepare("held".into(), TaskRole::Worker, |_| async {
+                    std::future::pending::<()>().await;
+                })
+                .unwrap();
+            let installed = scope.install_gated(prepared).unwrap();
+            generations.push(installed.generation().clone());
+            installed.start();
+        }
+        let (entered_tx, entered) = oneshot::channel();
+        let (release_tx, release) = std::sync::mpsc::channel();
+        let waiter = first
+            .register_blocking("held", &generations[0], "shared effect", move || {
+                entered_tx.send(()).unwrap();
+                release.recv().unwrap();
+            })
+            .unwrap();
+        entered.await.unwrap();
+        assert!(matches!(
+            second.register_blocking("held", &generations[1], "excess", || {}),
+            Err(BlockingTaskError::CapacityExhausted {
+                resource: "blocking"
+            })
+        ));
+        let (rescued_tx, rescued) = oneshot::channel();
+        let CancelTransition::Started(cancel) = second
+            .begin_cancel("held", move |context, _| async move {
+                context.run_blocking(|| {}).await.unwrap();
+                rescued_tx.send(()).unwrap();
+            })
+            .unwrap()
+        else {
+            panic!("worker requires cancellation");
+        };
+        cancel.start();
+        tokio::time::timeout(Duration::from_secs(1), rescued)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(owner.blocking.available_permits(), 0);
+        let shutdown = owner.request_shutdown();
+        assert_eq!(owner.workers.available_permits(), 1);
+        assert_eq!(owner.blocking.available_permits(), 0);
+        release_tx.send(()).unwrap();
+        waiter.await.unwrap().unwrap();
+        shutdown.wait().await.unwrap();
+        assert_eq!(owner.workers.available_permits(), 2);
+        assert_eq!(owner.blocking.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn worker_result_waiter_drop_retains_capacity_until_real_effect_finishes() {
+        let owner = bounded_owner(1, 1, 2);
+        let first = owner.open_scope(|| async { Ok(()) }).unwrap();
+        let second = owner.open_scope(|| async { Ok(()) }).unwrap();
+        let (entered_tx, entered) = oneshot::channel();
+        let (release_tx, release) = std::sync::mpsc::channel();
+        let invocation_scope = first.clone();
+        let waiter = tokio::spawn(async move {
+            invocation_scope
+                .run_worker_invocation(move |context| async move {
+                    context
+                        .run_blocking(move || {
+                            entered_tx.send(()).unwrap();
+                            release.recv().unwrap();
+                        })
+                        .await
+                        .unwrap();
+                    Ok(())
+                })
+                .await
+        });
+        entered.await.unwrap();
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        assert_worker_full(&second);
+        assert_eq!(owner.blocking.available_permits(), 0);
+        release_tx.send(()).unwrap();
+        wait_worker_slot(&owner).await;
+        owner.request_shutdown().wait().await.unwrap();
+        assert_eq!(owner.blocking.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn rescue_worker_capacity_is_finite_and_independent_of_work_saturation() {
+        let owner = bounded_owner(1, 1, 1);
+        let scope = owner.open_scope(|| async { Ok(()) }).unwrap();
+        let work = scope
+            .prepare("work".into(), TaskRole::Worker, |_| async {})
+            .unwrap();
+        assert_worker_full(&scope);
+        let control = scope
+            .prepare("control".into(), TaskRole::TerminalProjection, |_| async {})
+            .unwrap();
+        let CancelTransition::Started(cancel) = scope
+            .begin_cancel("absent", |_, _| async {
+                std::future::pending::<()>().await;
+            })
+            .unwrap()
+        else {
+            panic!("state-only cancellation starts");
+        };
+        assert!(matches!(
+            scope.begin_cancel("another", |_, _| async {}),
+            Err(crate::PumasError::AcquisitionCapacityExhausted {
+                resource: "rescue_workers"
+            })
+        ));
+        assert!(!scope.contains("another"));
+        drop(control);
+        drop(work);
+        drop(cancel);
+        scope.rescue_abandoned();
+        owner.request_shutdown().wait().await.unwrap();
+        assert_eq!(owner.rescue_workers.available_permits(), 2);
+        assert_eq!(owner.workers.available_permits(), 1);
+    }
+
+    #[tokio::test]
+    async fn scope_capacity_releases_only_after_last_handle_and_finalizer_drain() {
+        let owner = bounded_owner(1, 1, 1);
+        let (entered_tx, entered) = oneshot::channel();
+        let (release_tx, release) = oneshot::channel();
+        let scope = owner
+            .open_scope(move || async move {
+                entered_tx.send(()).unwrap();
+                let _ = release.await;
+                Ok(())
+            })
+            .unwrap();
+        drop(scope);
+        entered.await.unwrap();
+        assert!(matches!(
+            owner.open_scope(|| async { Ok(()) }),
+            Err(crate::PumasError::AcquisitionCapacityExhausted { resource: "scopes" })
+        ));
+        release_tx.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while !owner.state.lock().unwrap().scopes.is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        for _ in 0..4 {
+            let scope = owner.open_scope(|| async { Ok(()) }).unwrap();
+            drop(scope);
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while !owner.state.lock().unwrap().scopes.is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+        owner.request_shutdown().wait().await.unwrap();
+    }
+
     #[tokio::test]
     async fn shutdown_rejects_work_whose_start_gate_was_already_extracted() {
         let owner = TaskScope::new_test();

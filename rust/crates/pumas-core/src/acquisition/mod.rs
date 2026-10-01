@@ -14,6 +14,7 @@ pub(crate) mod task_custody;
 mod workspace;
 
 pub use http::HttpAttemptHost;
+pub use task_custody::AcquisitionCapacity;
 
 pub(crate) use github_release::{select_github_release_asset, GitHubReleaseAssetMetadata};
 pub use github_release::{

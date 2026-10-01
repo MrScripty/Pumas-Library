@@ -95,3 +95,42 @@ approval as `not_checked`. No agent ID for the requested Muse Spark contributor
 could be verified, so no implementation task was submitted or started. The
 service can coordinate/read metadata, but this session still cannot safely
 select the requested execution profile.
+
+## 2026-09-30 — resumed check after the Passeur update
+
+The current installed build connected through `passeur_prepare({})` with open
+admission and ready coordination authority. `passeur_status({})` reports the
+execution profile, provider, and approval as `not_checked`; a valid
+`passeur_tasks({ schema_version: 1, limit: 16, offset: 0 })` returned zero
+tasks. `passeur_agents({ limit: 4, offset: 0 })` still fails with
+`PATH_NOT_FOUND` at `profile.open`, without a contributor identity. No task
+was submitted. Implementation therefore continues using the user's GPT-6.1
+Sol fallback until contributor discovery works.
+
+This confirms that metadata coordination is ready while execution-profile
+discovery is not. The smallest useful recovery signal would identify the
+unavailable profile lookup (or expose a safe configured-agent status) so a
+caller can distinguish a missing profile from a service-wide failure without
+guessing an agent ID.
+
+## 2026-09-30 — updated frontend with contributor lookup still unavailable
+
+The installed frontend changed build identity to
+`6a43daa6eec45ddceadea0ba2e2a623d7fc8e81e330237c7762a7f1c63c33f63` and
+attached to repository service generation `269decac-59b5-4028-9bac-8d09ee9a35c2`.
+`passeur_prepare({})` reports open admission and ready coordination authority;
+task listing succeeds with zero tasks. `passeur_status({})` still reports the
+execution profile, provider, and approval as `not_checked`.
+
+A valid `passeur_agents({ limit: 4, offset: 0 })` request again fails at
+`profile.open` with `PATH_NOT_FOUND`, without returning a configured agent ID.
+No assignment was submitted. The requested contributor cannot be selected
+reliably from metadata readiness alone. The already-authorized GPT-6.1 Sol
+fallback completed the bounded implementation slice; final review then found
+three source defects that are being corrected before verification. Passeur has
+not yet contributed source work in this session.
+
+This update narrows the earlier feedback: coordination reads now work, but
+contributor discovery still needs to expose which configured profile lookup
+failed or provide a safe status/readiness result, and execution-profile,
+provider, and approval readiness need explicit values before binding a task.

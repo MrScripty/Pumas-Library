@@ -84,6 +84,19 @@ Exact current source paths are `rust/crates/pumas-core/src/acquisition/{http.rs,
 
 The app-manager manifest is a hashed input to release attribution. The test-support dev-dependency required for the fresh-owner cancellation regression therefore also refreshes only `docs/release-attribution/0.7.0/inventory.json`; `THIRD-PARTY-NOTICES.txt` remains byte-for-byte unchanged because the dependency is the existing internal library and adds no third-party package.
 
+### Admitted Q1 repair — llama.cpp progress and effect custody
+
+Base: current `work/acquisition-q1-http` head `0ecccd9c0c223fac32e12ec571126cd7fa39c238`; parent PR #7 remains draft. A read-only GPT-6.1 Sol High composed-design review found three lifecycle gaps: a full progress channel can block cancellation/shutdown in the shared llama.cpp HTTP host and after publication; registered `AcquiredArtifactUse::run_blocking` work does not retain the held workspace execution lease if its waiter is cancelled; and `VersionManager::new_with_acquisition` reads retained acquisition records through a raw `spawn_blocking` outside consumer custody.
+
+Exact write set, including co-located regressions:
+
+- `rust/crates/pumas-app-manager/src/version_manager/installer.rs`: make the shared llama.cpp HTTP progress wait observe cancellation and shutdown, apply the same bounded behavior to post-publication setup progress, and add a regression that fills the live progress channel and proves both control signals release the composed operation.
+- `rust/crates/pumas-core/src/acquisition/service.rs`: retain a clone of the held `AcquisitionWorkspace` through every registered `AcquiredArtifactUse::run_blocking` closure; add a cancellation regression proving the workspace execution lease remains held until the registered effect actually completes.
+- `rust/crates/pumas-app-manager/src/version_manager/mod.rs`: perform retained-acquisition lookup through the existing consumer's registered `run_blocking` boundary; add focused coverage if a deterministic existing seam can observe the constructor lookup's cancellation/drain behavior without adding production-only state.
+- `docs/plans/artifact-acquisition/reports/write-sets.md` and `docs/plans/artifact-acquisition/execution-ledger.md`: admission and resulting evidence only.
+
+No new store, supervisor, progress owner, retry policy, dependency, generated contract, live retained-root access, unrelated Torch edit, acceptance-state change, merge, or published-history rewrite is admitted. Use GPT-6.1 Sol Medium for implementation because current Passeur status reports a missing `profile.open` file and agent discovery fails; do not start overlapping Rust builds. Planned evidence is the focused regressions, affected app-manager/core checks, formatting and staged-diff checks, with Cargo commands run one at a time on the shared target.
+
 ## Q2: exact package-file handoff
 
 Allowed: Q1 acquisition types/service only for demonstrated missing file-set/lease semantics; `torch-server/resolve_runtime.py`, retained preview/lock consumers in `rust/crates/pumas-app-manager/src/version_manager/{torch_preview.rs,installer/torch.rs}`, corresponding existing package/integrity/progress tests, and `artifact_acquisition_install.rs`. Keep package resolution/install semantics with those consumers. The exact managed-Python/provider files are first traced for a migrate-versus-retain traffic disposition; no speculative private integration is authorized.

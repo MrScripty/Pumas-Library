@@ -33,6 +33,31 @@ The actual native install selected release `b11312+vulkan` from the official lla
 
 One `get_model_download_status` poll near HF settlement returned JSON-RPC `-32603` (internal error). A subsequent `list_model_downloads` returned the same download as `completed`, and the model projection and durable receipt were successful. Preserve this as an AC08 progress/error-contract issue to investigate; it does not invalidate the separately observed importer settlement in AC03. The HF manifest used weak revision `main`; this run does not qualify commit-pinned revision selection or every file at a repository commit. Desktop controls, cancellation, pause/resume, packaged backend, other OS, deployed-state migration, and cross-platform durability remain outside this evidence.
 
+### AC05 partial consumer-recovery evidence — 2026-10-01
+
+`receiptless_using_cold_reopen_retains_custody_without_network_or_reimport`
+reopens a schema-7 HF `Using` acquisition with no completion receipt and a
+retained queue admission. The local HTTP listener receives no request, restore
+remains in Error with the explicit receiptless-custody diagnosis, no model
+metadata writes occur, and the same acquisition/queue state, verified model
+bytes, download marker, and authored README remain unchanged. No consumer
+receipt is fabricated.
+
+`native_receipt_publication_conflict_cold_reopen_reconciles_without_reacquiring`
+creates an output conflict after extraction and durable receipt issuance. The
+first install refuses publication while retaining its receipt-bearing `Using`
+record. Cold reopen refuses the conflicting output without changing the
+receipt, acquisition, staged workspace, destination, or installed metadata.
+After the test-owned conflict is removed, a fresh manager adopts the exact
+staged output, reconstructs the installation metadata once, preserves the
+receipt, and settles the existing acquisition.
+
+Both focused tests passed on disposable local roots (one HF, one native), and
+formatting passed; see commit `5a036cd6` in the execution ledger. This is local
+fixture evidence, not process-loss or power-loss proof. AC05 remains pending
+for the other FilesReady/domain-commit/settlement windows, importer and
+extraction failures, real-source behavior, and required platform evidence.
+
 ### AC06 partial service evidence — 2026-10-01
 
 The `pumas-library` acquisition service tests now drive the public

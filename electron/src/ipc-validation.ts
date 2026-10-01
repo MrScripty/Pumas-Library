@@ -1,5 +1,6 @@
 import type { OpenDialogOptions } from 'electron';
 import {
+  decodeDownloadIdParams,
   decodeGetBackendSetupParams,
   decodeCheckVersionDependenciesParams,
   decodeGetReleaseDependenciesParams,
@@ -52,6 +53,18 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
   }
 
   const method = rawMethod as RpcMethodName;
+  if (
+    method === 'get_model_download_status'
+    || method === 'pause_model_download'
+    || method === 'resume_model_download'
+    || method === 'cancel_model_download'
+  ) {
+    const decoded = decodeDownloadIdParams(rawParams);
+    if (decoded.status !== 'valid' || decoded.value.download_id.trim().length === 0) {
+      throw new Error(`Invalid API params for method: ${method}`);
+    }
+    return { method, params: decoded.value };
+  }
   // These requests share Rust's complete generated contract.
   // Return its copied proof-bearing value, never the original renderer object.
   if (

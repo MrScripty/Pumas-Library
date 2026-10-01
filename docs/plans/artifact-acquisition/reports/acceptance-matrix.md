@@ -42,11 +42,20 @@ acquisition record is unchanged. The fixture does not establish successful
 delivery of the gated remainder or crash durability. Commands and results are
 recorded in the execution ledger.
 
+A further public-consumer fixture pauses after the first four bytes, then calls
+`acquire_http` again with the same demand, manifest and workspace. It verifies
+that the second request sends `Range: bytes=4-`, accepts a valid `206` for bytes
+4–7, and produces exactly `DATATAIL`. The original acquisition ID is retained,
+the record settles as Adopted, and the returned receipt matches the persisted
+receipt. This proves same-owner resume over the local HTTP fixture; it does not
+prove cold reopen, power-loss durability, malformed-range handling or real
+consumer publication.
+
 This is partial service-level evidence. AC06 remains pending
-for queued/verifying cancellation, resume-after-pause, stale-generation
-rejection at the acquisition boundary, idempotent release, and preservation of
-all live/durable demands. These local HTTP/workspace fixtures are not real
-HF/native source or supported-platform acceptance.
+for queued/verifying cancellation, stale-generation rejection at the
+acquisition boundary, idempotent release, and preservation of all live/durable
+demands. These local HTTP/workspace fixtures are not real HF/native source or
+supported-platform acceptance.
 
 
 ## Real procedures and proof boundaries

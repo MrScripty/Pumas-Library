@@ -337,3 +337,14 @@ This is tool-usability evidence only and does not certify implementation or prod
 - **Recommendations:** Offer section-scoped reads or a byte-budgeted result option so a bounded policy count also stays within a reviewable response; keep completed routing clearly separate from implementation and acceptance.
 
 This records MCP usability only; it does not certify implementation compliance or AC06 acceptance.
+
+## Primary integrator — AC06 resume-after-pause route
+
+- **Useful calls:** Snapshot `snapshot:v1:dbfe3a19-c99a-4a48-b98c-1647722d3219` routed the Rust service-test change to 29 standards with zero unresolved facts. Focused reads of concurrency, Rust async, verification oracles, architecture replay, and commit workflow supplied the applicable obligations.
+- **Confusing or redundant steps:** One combined `read_many` response repeated results in structured and textual forms and exceeded the useful output window. A `workflow.commit` read returned a transient auto-review timeout message; the tool allowed one retry, and the exact retry succeeded. No approval was rejected.
+- **Missing context:** The MCP did not know the current service fixture, test result, candidate diff, independent reviewer findings, or Passeur profile/coordination errors. These were checked with repository and service tools.
+- **Where I left MCP:** Routing and policy reads supplied obligations only. Source inspection, `cargo test`, Clippy, formatting, diff checks and independent review provide the separate implementation evidence. None of these close AC06 or AQ-HTTP.
+- **Smallest sufficient workflow:** Preserve the full snapshot handle, route the changed implementation/verification boundary, and read only the focused obligations in small batches. Inspect the candidate and run its evidence checks separately.
+- **Recommendations:** Avoid repeating full policy results in both structured and text output; keep read results within a caller-reviewable byte budget; make transient auto-review timeout/retry status explicit without obscuring a successful retry.
+
+This records tool usability only; it does not certify source compliance or product acceptance.

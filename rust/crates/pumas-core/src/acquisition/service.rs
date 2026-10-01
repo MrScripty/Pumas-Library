@@ -2270,6 +2270,211 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn paused_http_acquisition_resumes_same_demand_with_range() {
+        use futures::FutureExt;
+
+        let timeout = Duration::from_secs(5);
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store.clone()));
+        let consumer = Arc::new(service.open_consumer("fixture").unwrap());
+        let demand = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: "pause-then-resume".into(),
+        };
+        let manifest = manifest_with_size("payload.bin", 8);
+        let workspace = workspace(&stage);
+        let (url, first_server, first_sent, continue_sender) =
+            serve_after_gate(b"DATA", b"TAIL").await;
+        let mut first_server = Some(first_server);
+        let mut continue_sender = Some(continue_sender);
+        let mut second_server = None;
+        let (progress_sender, mut progress) = tokio::sync::watch::channel(0_u64);
+        let host = ControlledHost {
+            paused: Arc::new(AtomicBool::new(false)),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            pause_wake: Arc::new(tokio::sync::Notify::new()),
+            cancel_wake: Arc::new(tokio::sync::Notify::new()),
+            progress: progress_sender,
+        };
+        let controls = host.clone();
+        let first_consumer = consumer.clone();
+        let first_request = AcquisitionHttpRequest {
+            demand: demand.clone(),
+            manifest: manifest.clone(),
+            workspace: workspace.clone(),
+            sources: vec![AcquisitionHttpSource {
+                url,
+                authorization: None,
+            }],
+            retry: retry(),
+        };
+        let first_transfer = tokio::spawn(async move {
+            first_consumer
+                .acquire_http(
+                    first_request,
+                    reqwest::Client::new(),
+                    Box::new(host),
+                    |_| async { Ok::<((), Value), PumasError>(((), Value::Null)) },
+                    |(), _receipt| async { Ok::<(), PumasError>(()) },
+                )
+                .await
+        });
+        let mut first_transfer = Some(first_transfer);
+        // Keep all gates and task handles outside the assertion block so even
+        // a panic or timeout must pass through explicit joins and custody drain.
+        let outcome = std::panic::AssertUnwindSafe(async {
+
+        tokio::time::timeout(timeout, async {
+            first_sent.await.unwrap();
+            while *progress.borrow_and_update() < 4 {
+                progress.changed().await.unwrap();
+            }
+        })
+        .await
+        .expect("first transfer must write DATA before pause");
+        let before_pause = store.acquisitions().unwrap();
+        assert_eq!(before_pause.len(), 1);
+        let original = before_pause.values().next().unwrap().clone();
+        assert_eq!(original.demand, demand);
+        assert_eq!(original.manifest, manifest);
+        assert_eq!(original.workspace, *workspace.identity());
+        assert!(matches!(original.phase, AcquisitionPhase::Transferring));
+        assert!(original.files.is_empty());
+
+        controls.pause();
+        let paused = tokio::time::timeout(timeout, first_transfer.as_mut().unwrap())
+            .await
+            .expect("pause must stop the stalled transfer");
+        first_transfer.take();
+        let paused = paused.unwrap();
+        // Release the source only after the public pause has completed.
+        continue_sender.take().unwrap().send(()).unwrap();
+        let first_join = tokio::time::timeout(timeout, first_server.as_mut().unwrap())
+            .await
+            .expect("first HTTP fixture must finish");
+        first_server.take();
+        first_join.unwrap();
+        assert!(matches!(paused, Err(PumasError::DownloadPaused)));
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin.part")).unwrap(),
+            b"DATA"
+        );
+        assert!(!stage.join("payload.bin").exists());
+        assert_eq!(store.acquisitions().unwrap(), before_pause);
+        assert!(service.consumer_receipt(original.id).unwrap().is_none());
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/fixture", listener.local_addr().unwrap());
+        second_server = Some(tokio::spawn(async move {
+            tokio::time::timeout(timeout, async {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    assert!(request.len() < 8192, "fixture request headers too large");
+                    let byte = socket.read_u8().await.unwrap();
+                    request.push(byte);
+                }
+                let request = String::from_utf8(request).unwrap();
+                assert!(request.lines().any(|line| {
+                    line.split_once(':').is_some_and(|(name, value)| {
+                        name.eq_ignore_ascii_case("range") && value.trim() == "bytes=4-"
+                    })
+                }), "resumed request must contain Range: bytes=4-: {request}");
+                socket
+                    .write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 4\r\nContent-Range: bytes 4-7/8\r\nConnection: close\r\n\r\nTAIL")
+                    .await
+                    .unwrap();
+            })
+            .await
+            .expect("resumed HTTP fixture must finish");
+        }));
+        let published_receipt = tokio::time::timeout(
+            timeout,
+            consumer.acquire_http(
+                AcquisitionHttpRequest {
+                    demand: demand.clone(),
+                    manifest: manifest.clone(),
+                    workspace: workspace.clone(),
+                    sources: vec![AcquisitionHttpSource {
+                        url,
+                        authorization: None,
+                    }],
+                    retry: retry(),
+                },
+                reqwest::Client::new(),
+                Box::new(Host),
+                |_| async { Ok::<((), Value), PumasError>(((), Value::Null)) },
+                |(), receipt| async { Ok::<_, PumasError>(receipt) },
+            ),
+        )
+        .await
+        .expect("resume must finish")
+        .unwrap();
+        let second_join = tokio::time::timeout(timeout, second_server.as_mut().unwrap())
+            .await
+            .expect("resumed HTTP fixture must join");
+        second_server.take();
+        second_join.unwrap();
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin")).unwrap(),
+            b"DATATAIL"
+        );
+        assert!(!stage.join("payload.bin.part").exists());
+        let records = store.acquisitions().unwrap();
+        assert_eq!(
+            records.len(),
+            1,
+            "resume must reuse the original acquisition"
+        );
+        let resumed = records.get(&original.id).unwrap();
+        assert_eq!(resumed.demand, original.demand);
+        assert_eq!(resumed.manifest, original.manifest);
+        assert_eq!(resumed.workspace, original.workspace);
+        assert!(matches!(resumed.phase, AcquisitionPhase::Adopted { .. }));
+        assert_eq!(published_receipt.acquisition_id, original.id.to_string());
+        assert_eq!(published_receipt.demand, original.demand);
+        assert_eq!(
+            service.consumer_receipt(original.id).unwrap(),
+            Some(published_receipt)
+        );
+
+        })
+        .catch_unwind()
+        .await;
+
+        // A failed setup/pause/resume must release the stalled source and join
+        // every task. Dropping a timed-out acquire_http future cancels its
+        // invocation; shutdown then awaits the retained worker/blocking effects.
+        controls.cancel();
+        if let Some(sender) = continue_sender.take() {
+            let _ = sender.send(());
+        }
+        if let Some(transfer) = first_transfer.take() {
+            transfer.abort();
+            let _ = transfer.await;
+        }
+        for server in [first_server.take(), second_server.take()]
+            .into_iter()
+            .flatten()
+        {
+            server.abort();
+            let _ = server.await;
+        }
+        let consumer_drain = tokio::time::timeout(timeout, consumer.shutdown()).await;
+        let service_drain = tokio::time::timeout(timeout, service.shutdown()).await;
+        consumer_drain
+            .expect("consumer cleanup must drain")
+            .unwrap();
+        service_drain.expect("service cleanup must drain").unwrap();
+        if let Err(panic) = outcome {
+            std::panic::resume_unwind(panic);
+        }
+    }
+
+    #[tokio::test]
     async fn active_cancel_stops_partial_writes_and_preserves_transfer_demand() {
         controlled_partial_transfer_stops_writing(false).await;
     }

@@ -348,3 +348,18 @@ No production implementation, API, schema, migration, dependency, lockfile, gene
 Implemented in code commit `4309ae9853e34264fbd76ec064af914693dbd145`. The child-only test seam writes a complete marker after the destination rename and both parent syncs, before metadata publication; the parent test observes the marker, confirms the child is still alive under a deadline, issues SIGKILL, and requires signal termination. The parent checks receipt-bound durable state and output hashes, then reconstructs fresh owners and observes no follow-up request to the controlled loopback source through recovery and a bounded drain. No non-test behavior changed.
 
 The focused Linux x86_64 test passed 1/1 with 268 filtered tests using the serialized offline Cargo admission wrapper. Scoped rustfmt and `git diff --check` passed. Independent GPT-6.1 Sol High source review found no substantiated issue in the full code diff and confirmed the process-boundary and controlled-listener claims. The result covers one test-controlled process-loss point on disposable local storage only; it does not qualify power-loss durability, real-source semantics, other AC05 windows, deployment/migration, shutdown/resource bounds or other platforms. AC05 and AQ-HTTP remain pending. PR #7 remains an open draft; its head and description are to be refreshed after the evidence documentation is committed and pushed.
+
+### Q1 exact-head app-manager AC15 supporting verification — admitted 2026-10-01
+
+Base: current `work/acquisition-q1-http` at `b0fef68bb4fdc5b5adc5f1e1a1bdeb4aea467dde`, plan base `e37bbf4b964a0e2aadf25f80ab71edd8fa6b3eb3`.
+
+**Exact write set:**
+
+- `docs/plans/artifact-acquisition/reports/acceptance-matrix.md`: add a bounded local verification subsection for default/no-default app-manager tests, clippy and formatting at the current handoff head; leave AC15's current-branch status pending.
+- `docs/plans/artifact-acquisition/reports/dependency-gates.md`: summarize the same app-manager evidence and state why it does not complete AC15 or AQ-HTTP.
+- `docs/plans/artifact-acquisition/plan.md`: add a concise current-Q1 verification note that preserves AC15/AQ-HTTP pending status.
+- `docs/plans/artifact-acquisition/execution-ledger.md`: record exact commands, results, target/head, serialized Cargo admission and limits.
+- This report: bind the evidence documentation write set and preserve all acceptance/gate status.
+- Existing draft PR #7 description: after pushing this documentation update, refresh its exact head and mention the additional local app-manager verification without marking the PR ready or merging it.
+
+No source, test, public API, contract, schema, migration, lockfile, generated output, prototype ref/worktree, live root or unrelated user file is admitted. This closes local app-manager verification only; it does not complete branch-wide AC15, establish hosted workflows, or change pending status. The current remote PR query reports CodeRabbit success only and no workflow runs. Keep `docs/breif/future.md` untouched.

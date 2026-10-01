@@ -205,6 +205,8 @@ pub struct VersionManager {
     #[cfg(test)]
     native_receipt_pause: Option<Arc<installer::TorchPublicationPause>>,
     #[cfg(test)]
+    interrupt_after_native_rename: Option<Arc<AtomicBool>>,
+    #[cfg(test)]
     torch_stage_override: Option<installer::TorchStageOverride>,
     #[cfg(test)]
     removal_pause: Option<Arc<RemovalPause>>,
@@ -351,6 +353,8 @@ impl VersionManager {
             torch_publication_pause: None,
             #[cfg(test)]
             native_receipt_pause: None,
+            #[cfg(test)]
+            interrupt_after_native_rename: None,
             #[cfg(test)]
             torch_stage_override: None,
             #[cfg(test)]
@@ -1041,6 +1045,12 @@ impl VersionManager {
         #[cfg(test)]
         let installer = if let Some(pause) = &self.native_receipt_pause {
             installer.with_native_receipt_pause(pause.clone())
+        } else {
+            installer
+        };
+        #[cfg(test)]
+        let installer = if let Some(once) = &self.interrupt_after_native_rename {
+            installer.with_native_rename_interruption(once.clone())
         } else {
             installer
         };
@@ -2029,6 +2039,731 @@ mod tests {
             1
         );
         reopened_api.shutdown_acquisition().await.unwrap();
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_receiptless_using_cold_reopen_preserves_custody_without_replay() {
+        use sha2::Digest;
+        use std::os::unix::fs::MetadataExt;
+
+        // Include identity and write/change times: replacing or rewriting an
+        // identical extracted file must still fail this zero-effect oracle.
+        #[derive(Debug, PartialEq, Eq)]
+        struct FileSnapshot {
+            path: PathBuf,
+            identity: (u64, u64, u32),
+            times: (i64, i64, i64, i64),
+            bytes: Vec<u8>,
+        }
+        fn snapshot(root: &Path) -> Vec<FileSnapshot> {
+            walkdir::WalkDir::new(root)
+                .sort_by_file_name()
+                .into_iter()
+                .map(|entry| {
+                    let entry = entry.unwrap();
+                    let metadata = std::fs::symlink_metadata(entry.path()).unwrap();
+                    assert!(!metadata.file_type().is_symlink());
+                    assert!(metadata.is_file() || metadata.is_dir());
+                    FileSnapshot {
+                        path: entry.path().strip_prefix(root).unwrap().to_path_buf(),
+                        identity: (metadata.dev(), metadata.ino(), metadata.mode()),
+                        times: (
+                            metadata.mtime(),
+                            metadata.mtime_nsec(),
+                            metadata.ctime(),
+                            metadata.ctime_nsec(),
+                        ),
+                        bytes: if metadata.is_file() {
+                            std::fs::read(entry.path()).unwrap()
+                        } else {
+                            Vec::new()
+                        },
+                    }
+                })
+                .collect()
+        }
+
+        let root = TempDir::new().unwrap();
+        let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
+        let api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let mut manager = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        manager.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                manager.cache_dir(),
+                Duration::from_secs(3600),
+                base_url.clone(),
+            )
+            .unwrap(),
+        );
+        let pause = Arc::new(installer::TorchPublicationPause::new());
+        manager.native_receipt_pause = Some(pause.clone());
+        let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        release.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), pause.reached.notified())
+            .await
+            .expect("extraction must finish before the completion receipt is issued");
+        let store_path = root.path().join("launcher-data/downloads.json");
+        let before_failure: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store_path).unwrap()).unwrap();
+        assert!(before_failure["consumer_receipts"]
+            .as_object()
+            .unwrap()
+            .is_empty());
+        let record = before_failure["acquisitions"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap();
+        assert_eq!(record["phase"]["state"], "using");
+        assert_eq!(record["demand"]["consumer"], "runtime.llama.cpp");
+
+        // Fail the preparation callback before it can issue a receipt or enter
+        // cancellation withdrawal. This is a disposable retained-store replica
+        // of the pre-receipt restart boundary, not a hard-process-crash claim.
+        pause.resume.close();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match updates.recv().await.expect("preparation must settle") {
+                    ProgressUpdate::Error { message } => {
+                        assert!(
+                            message.contains("Native receipt test pause closed"),
+                            "{message}"
+                        );
+                        break;
+                    }
+                    ProgressUpdate::Completed { success } => {
+                        panic!("receipt-free preparation completed: {success}")
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        server.await.unwrap();
+        assert!(manager.shutdown_installations().await.is_err());
+        api.shutdown_acquisition().await.unwrap();
+        let retained_bytes = std::fs::read(&store_path).unwrap();
+        let retained: serde_json::Value = serde_json::from_slice(&retained_bytes).unwrap();
+        assert_eq!(retained, before_failure);
+        assert_eq!(retained["acquisitions"].as_object().unwrap().len(), 1);
+        let workspace = manager
+            .versions_dir()
+            .join(record["workspace"]["relative_target"].as_str().unwrap());
+        let archive = workspace.join(record["files"][0]["path"].as_str().unwrap());
+        assert_eq!(
+            record["files"][0]["sha256"],
+            format!(
+                "{:x}",
+                sha2::Sha256::digest(std::fs::read(&archive).unwrap())
+            )
+        );
+        // The installer wraps the extracted binary in a launcher. The exact
+        // archive payload is checked above; later snapshots preserve the full
+        // staged output without assuming its generated launcher bytes.
+        assert!(!manager.version_path("b1234+cpu").exists());
+        assert!(manager
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_none());
+        let versions = manager.versions_dir();
+        // Seed plausible orphan publication only after both owners have drained.
+        // Matching executable bytes and installed metadata cannot authorize this
+        // exact retained use without its consumer completion receipt.
+        let destination = manager.version_path("b1234+cpu");
+        let orphan_metadata = pumas_library::metadata::InstalledVersionMetadata {
+            path: "b1234+cpu".into(),
+            installed_date: "2026-09-29T00:00:00Z".into(),
+            release_tag: "b1234+cpu".into(),
+            release_date: Some("2026-09-29T00:00:00Z".into()),
+            size: Some(record["files"][0]["bytes"].as_u64().unwrap()),
+            dependencies_installed: Some(true),
+            ..Default::default()
+        };
+        {
+            let _lock = installer::NativeVersionsLock::try_acquire(&versions).unwrap();
+            std::fs::create_dir_all(destination.join("bin")).unwrap();
+            std::fs::copy(
+                workspace.join("output/bin/llama-server"),
+                destination.join("bin/llama-server"),
+            )
+            .unwrap();
+            manager
+                .metadata_manager
+                .update_installed_version(
+                    "b1234+cpu",
+                    orphan_metadata.clone(),
+                    Some(AppId::LlamaCpp),
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            std::fs::read(destination.join("bin/llama-server")).unwrap(),
+            std::fs::read(workspace.join("output/bin/llama-server")).unwrap()
+        );
+        let retained_destination = snapshot(&destination);
+        let retained_workspace = snapshot(&workspace);
+        std::fs::write(
+            versions.join("authored-sentinel"),
+            b"preserve authored state",
+        )
+        .unwrap();
+        let retained_versions = snapshot(&versions);
+        let metadata = root.path().join("launcher-data/metadata");
+        let metadata_path = metadata.join(format!(
+            "versions-{}.json",
+            AppId::LlamaCpp.to_string().to_lowercase()
+        ));
+        let retained_metadata_bytes = std::fs::read(&metadata_path).unwrap();
+        let retained_metadata = snapshot(&metadata);
+        drop(updates);
+        drop(pause);
+        drop(manager);
+        drop(api);
+
+        // The direct worker retains the injected client, so the loopback
+        // listener can observe that recovery path. Public with_acquisition and
+        // manager construction create their own clients; those paths are checked
+        // for refusal below, but this listener does not observe their traffic.
+        let source = tokio::net::TcpListener::bind(base_url.strip_prefix("http://").unwrap())
+            .await
+            .unwrap();
+        let reopened_api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let new_direct = || {
+            VersionInstaller::new(
+                root.path().to_path_buf(),
+                AppId::LlamaCpp,
+                Arc::new(MetadataManager::new(root.path())),
+                Arc::new(RwLock::new(InstallationProgressTracker::new(
+                    root.path().join("launcher-data/cache"),
+                ))),
+                Arc::new(AtomicBool::new(false)),
+            )
+        };
+        let consumer = Arc::new(
+            reopened_api
+                .acquisition()
+                .open_consumer("runtime.llama.cpp")
+                .unwrap(),
+        );
+        let store = reopened_api.acquisition().store().clone();
+        let records = consumer
+            .run_blocking("read receipt-free native fixture records", move || {
+                store.acquisitions()
+            })
+            .await
+            .unwrap();
+        let direct = new_direct()
+            .with_github_client(Arc::new(
+                GitHubClient::with_loopback_api(
+                    root.path().join("launcher-data/cache"),
+                    Duration::from_secs(3600),
+                    base_url.clone(),
+                )
+                .unwrap(),
+            ))
+            .with_acquisition_consumer(Some(consumer.clone()));
+        let error = tokio::time::timeout(
+            Duration::from_secs(5),
+            direct.reconcile_retained_llama_cpp(records.into_values().collect()),
+        )
+        .await
+        .expect("injected recovery worker must refuse without waiting for a source")
+        .unwrap_err();
+        assert!(
+            matches!(
+                &error,
+                PumasError::Validation { field, message }
+                    if field == "acquisition.consumer_recovery_required"
+                        && message == "Retained consumer use has no authoritative completion receipt"
+            ),
+            "{error}"
+        );
+        // Drain the registered worker before inspecting the listener backlog.
+        // Receipt-free durable custody can truthfully make shutdown fail.
+        let _drain = tokio::time::timeout(Duration::from_secs(5), consumer.shutdown())
+            .await
+            .expect("injected recovery scope must drain");
+        drop(direct);
+        drop(consumer);
+        let error = match tokio::time::timeout(
+            Duration::from_secs(5),
+            new_direct().with_acquisition(reopened_api.acquisition().clone()),
+        )
+        .await
+        .expect("direct public cold recovery must refuse promptly")
+        {
+            Ok(_) => panic!("direct public constructor accepted receipt-free Using"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("Retained consumer use has no authoritative completion receipt"),
+            "{error}"
+        );
+        let error = match tokio::time::timeout(
+            Duration::from_secs(5),
+            VersionManager::new_with_acquisition(
+                root.path(),
+                AppId::LlamaCpp,
+                reopened_api.acquisition().clone(),
+            ),
+        )
+        .await
+        .expect("receipt-free recovery must refuse without waiting for a source")
+        {
+            Ok(_) => panic!("receipt-free Using must refuse cold recovery"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("Retained consumer use has no authoritative completion receipt"),
+            "{error}"
+        );
+        // Full document equality also observes queue/admission/release state,
+        // demand, manifest, verified files, lease generation and workspace ID.
+        assert_eq!(std::fs::read(&store_path).unwrap(), retained_bytes);
+        assert_eq!(snapshot(&versions), retained_versions);
+        assert_eq!(snapshot(&workspace), retained_workspace);
+        assert_eq!(snapshot(&destination), retained_destination);
+        assert_eq!(
+            std::fs::read(&metadata_path).unwrap(),
+            retained_metadata_bytes
+        );
+        assert_eq!(snapshot(&metadata), retained_metadata);
+        assert_eq!(
+            serde_json::to_value(
+                MetadataManager::new(root.path())
+                    .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+                    .unwrap()
+                    .unwrap()
+            )
+            .unwrap(),
+            serde_json::to_value(orphan_metadata).unwrap()
+        );
+
+        // Missing custody is a separate refusal boundary. The native opener
+        // may reserve an empty directory at the exact attempt path, but input
+        // receipts are checked before any consumer callback; the orphan output
+        // and metadata remain untouched.
+        std::fs::remove_dir_all(&workspace).unwrap();
+        assert!(!workspace.exists());
+        let missing_custody_consumer = Arc::new(
+            reopened_api
+                .acquisition()
+                .open_consumer("runtime.llama.cpp")
+                .unwrap(),
+        );
+        let store = reopened_api.acquisition().store().clone();
+        let records = missing_custody_consumer
+            .run_blocking("read missing-custody native fixture records", move || {
+                store.acquisitions()
+            })
+            .await
+            .unwrap();
+        let missing_custody_installer = new_direct()
+            .with_github_client(Arc::new(
+                GitHubClient::with_loopback_api(
+                    root.path().join("launcher-data/cache"),
+                    Duration::from_secs(3600),
+                    base_url,
+                )
+                .unwrap(),
+            ))
+            .with_acquisition_consumer(Some(missing_custody_consumer.clone()));
+        let missing_custody = tokio::time::timeout(
+            Duration::from_secs(5),
+            missing_custody_installer.reconcile_retained_llama_cpp(records.into_values().collect()),
+        )
+        .await
+        .expect("missing-custody recovery must stop promptly")
+        .unwrap_err();
+        assert!(
+            matches!(
+                &missing_custody,
+                PumasError::Io {
+                    source: Some(source),
+                    ..
+                } if source.kind() == std::io::ErrorKind::NotFound
+            ),
+            "missing custody must fail during input verification: {missing_custody}"
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), missing_custody_consumer.shutdown())
+                .await
+                .expect("missing-custody recovery scope must drain")
+                .is_err()
+        );
+        drop(missing_custody_installer);
+        drop(missing_custody_consumer);
+        match tokio::time::timeout(Duration::from_millis(50), source.accept()).await {
+            Err(_) => {}
+            Ok(Ok(_)) => panic!("receiptless recovery contacted the source"),
+            Ok(Err(error)) => panic!("source observation failed: {error}"),
+        }
+        drop(source);
+        assert_eq!(std::fs::read(&store_path).unwrap(), retained_bytes);
+        assert_eq!(snapshot(&destination), retained_destination);
+        assert_eq!(
+            std::fs::read(&metadata_path).unwrap(),
+            retained_metadata_bytes
+        );
+        assert_eq!(snapshot(&metadata), retained_metadata);
+        assert!(!archive.exists());
+        assert!(!workspace.join("output").exists());
+        assert_eq!(snapshot(&workspace).len(), 1);
+        assert_eq!(
+            std::fs::read(versions.join("authored-sentinel")).unwrap(),
+            b"preserve authored state"
+        );
+        assert!(reopened_api.shutdown_acquisition().await.is_err());
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_receipt_post_rename_interruption_cold_reopen_refuses_changed_output_and_settles(
+    ) {
+        use sha2::Digest;
+        use std::os::unix::fs::MetadataExt;
+
+        type SnapshotEntry = (PathBuf, u64, u64, u32, i64, i64, i64, i64, Vec<u8>);
+        type Snapshot = (Vec<SnapshotEntry>, String);
+        type FileSnapshot = (u64, u64, u32, i64, i64, i64, i64, Vec<u8>);
+
+        fn snapshot(root: &Path) -> Snapshot {
+            let mut tree = Vec::new();
+            let mut digest = sha2::Sha256::new();
+            for entry in walkdir::WalkDir::new(root).sort_by_file_name() {
+                let entry = entry.unwrap();
+                let relative = entry.path().strip_prefix(root).unwrap().to_path_buf();
+                let metadata = std::fs::symlink_metadata(entry.path()).unwrap();
+                assert!(!metadata.file_type().is_symlink());
+                let name = relative.to_str().unwrap();
+                digest.update((name.len() as u64).to_le_bytes());
+                digest.update(name.as_bytes());
+                digest.update(metadata.mode().to_le_bytes());
+                let bytes = if metadata.is_file() {
+                    let bytes = std::fs::read(entry.path()).unwrap();
+                    digest.update(b"file");
+                    digest.update(format!("{:x}", sha2::Sha256::digest(&bytes)).as_bytes());
+                    bytes
+                } else {
+                    assert!(metadata.is_dir());
+                    digest.update(b"directory");
+                    Vec::new()
+                };
+                tree.push((
+                    relative,
+                    metadata.dev(),
+                    metadata.ino(),
+                    metadata.mode(),
+                    metadata.mtime(),
+                    metadata.mtime_nsec(),
+                    metadata.ctime(),
+                    metadata.ctime_nsec(),
+                    bytes,
+                ));
+            }
+            (tree, format!("{:x}", digest.finalize()))
+        }
+
+        fn file_snapshot(path: &Path) -> Option<FileSnapshot> {
+            let metadata = match std::fs::symlink_metadata(path) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+                Err(error) => panic!("metadata lookup failed for {}: {error}", path.display()),
+            };
+            assert!(metadata.is_file() && !metadata.file_type().is_symlink());
+            Some((
+                metadata.dev(),
+                metadata.ino(),
+                metadata.mode(),
+                metadata.mtime(),
+                metadata.mtime_nsec(),
+                metadata.ctime(),
+                metadata.ctime_nsec(),
+                std::fs::read(path).unwrap(),
+            ))
+        }
+
+        let root = TempDir::new().unwrap();
+        let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
+        let api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let mut manager = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        manager.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                manager.cache_dir(),
+                Duration::from_secs(3600),
+                base_url,
+            )
+            .unwrap(),
+        );
+        let once = Arc::new(AtomicBool::new(true));
+        manager.interrupt_after_native_rename = Some(once.clone());
+        let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        release.send(true).unwrap();
+        let message = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match updates.recv().await.expect("installation must settle") {
+                    ProgressUpdate::Error { message } => break message,
+                    ProgressUpdate::Completed { success } => {
+                        panic!("interrupted publication completed: {success}")
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            message.contains("Test interruption after native rename before metadata"),
+            "{message}"
+        );
+        assert!(!once.load(Ordering::SeqCst), "interruption is one-shot");
+        server.await.unwrap();
+        assert!(manager.shutdown_installations().await.is_err());
+        assert!(!manager.is_installing().await);
+        assert!(manager
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_none());
+        // The supervisor drains, then reports the deliberately unresolved
+        // receipt-bearing Using record as shutdown failure.
+        assert!(api.shutdown_acquisition().await.is_err());
+
+        let store_path = root.path().join("launcher-data/downloads.json");
+        let metadata_path = root.path().join("launcher-data/metadata").join(format!(
+            "versions-{}.json",
+            AppId::LlamaCpp.to_string().to_lowercase()
+        ));
+        let read_store_bytes = || std::fs::read(&store_path).unwrap();
+        let read_document =
+            || -> serde_json::Value { serde_json::from_slice(&read_store_bytes()).unwrap() };
+        let retained_store_state = file_snapshot(&store_path).unwrap();
+        let retained_metadata_state = file_snapshot(&metadata_path);
+        let retained = read_document();
+        assert_eq!(retained["acquisitions"].as_object().unwrap().len(), 1);
+        assert_eq!(retained["consumer_receipts"].as_object().unwrap().len(), 1);
+        let (id, record) = retained["acquisitions"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
+        assert_eq!(record["phase"]["state"], "using");
+        let receipt = retained["consumer_receipts"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap();
+        assert_eq!(receipt["owner"], "runtime.llama.cpp");
+        assert_eq!(receipt["acquisition_id"], id.as_str());
+        assert_eq!(receipt["use_lease"], record["phase"]["lease"]);
+        assert_eq!(receipt["demand"], record["demand"]);
+        assert_eq!(receipt["manifest"], record["manifest"]);
+        assert_eq!(receipt["workspace"], record["workspace"]);
+        assert_eq!(receipt["verified_files"], record["files"]);
+
+        let workspace = manager
+            .versions_dir()
+            .join(record["workspace"]["relative_target"].as_str().unwrap());
+        let stage = workspace.join("output");
+        let destination = manager.version_path("b1234+cpu");
+        let launcher = destination.join("bin/llama-server");
+        let expected_launcher = concat!(
+            "#!/bin/sh\n",
+            "ROOT=$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd) || exit 1\n",
+            "BINARY_DIR=\"$ROOT\"/'distribution'\n",
+            "export LD_LIBRARY_PATH=\"$BINARY_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}\"\n",
+            "exec \"$BINARY_DIR/llama-server\" \"$@\"\n",
+        )
+        .as_bytes();
+        assert_eq!(std::fs::read(&launcher).unwrap(), expected_launcher);
+        assert!(!stage.exists());
+        let published = snapshot(&destination);
+        assert_eq!(receipt["payload"]["output_tree_sha256"], published.1);
+        assert_eq!(record["files"].as_array().unwrap().len(), 1);
+        let verified = &record["files"][0];
+        let archive = workspace.join(verified["path"].as_str().unwrap());
+        let archive_bytes = std::fs::read(&archive).unwrap();
+        assert_eq!(verified["bytes"], archive_bytes.len() as u64);
+        assert_eq!(
+            verified["sha256"],
+            format!("{:x}", sha2::Sha256::digest(&archive_bytes))
+        );
+        let retained_workspace = snapshot(&workspace);
+        drop(updates);
+        drop(once);
+        drop(manager);
+        drop(api);
+
+        // Alter only this fixture's receipt-bound launcher, preserving its inode.
+        std::fs::write(&launcher, b"altered receipt-bound launcher").unwrap();
+        let altered = snapshot(&destination);
+        // The fixture source server is already closed. This does not directly
+        // observe whether recovery attempts a request.
+        let blocked_api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let error = match VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            blocked_api.acquisition().clone(),
+        )
+        .await
+        {
+            Ok(manager) => {
+                manager.shutdown_installations().await.unwrap();
+                panic!("conflicting output must refuse cold recovery")
+            }
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains(
+                "Native output differs from its durable llama.cpp receipt; recovery required"
+            ),
+            "{error}"
+        );
+        assert!(blocked_api.shutdown_acquisition().await.is_err());
+        assert_eq!(file_snapshot(&store_path).unwrap(), retained_store_state);
+        assert_eq!(read_document(), retained);
+        assert_eq!(snapshot(&workspace), retained_workspace);
+        assert_eq!(snapshot(&destination), altered);
+        assert_eq!(file_snapshot(&metadata_path), retained_metadata_state);
+        assert!(MetadataManager::new(root.path())
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_none());
+        drop(blocked_api);
+
+        // Restore the exact fixture bytes in place, then baseline timestamps.
+        std::fs::write(&launcher, expected_launcher).unwrap();
+        let restored = snapshot(&destination);
+        assert_eq!(restored.1, published.1);
+        assert_eq!(
+            restored
+                .0
+                .iter()
+                .map(|entry| (&entry.0, entry.1, entry.2, entry.3, &entry.8))
+                .collect::<Vec<_>>(),
+            published
+                .0
+                .iter()
+                .map(|entry| (&entry.0, entry.1, entry.2, entry.3, &entry.8))
+                .collect::<Vec<_>>()
+        );
+        let reopened_api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let reopened = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            reopened_api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            reopened.get_installed_versions().await.unwrap(),
+            vec!["b1234+cpu"]
+        );
+        assert_eq!(snapshot(&destination), restored);
+        let installed = reopened
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(installed).unwrap(),
+            receipt["payload"]["metadata"]
+        );
+        assert!(!stage.exists());
+        assert!(!workspace.exists());
+        reopened.shutdown_installations().await.unwrap();
+        reopened_api.shutdown_acquisition().await.unwrap();
+        let settled = read_document();
+        assert_eq!(settled["consumer_receipts"], retained["consumer_receipts"]);
+        assert_eq!(settled["acquisitions"].as_object().unwrap().len(), 1);
+        let mut expected = record.clone();
+        expected["phase"]["state"] = serde_json::json!("adopted");
+        assert_eq!(settled["acquisitions"][id], expected);
+        let settled_metadata = file_snapshot(&metadata_path);
+        drop(reopened);
+        drop(reopened_api);
+
+        let stable_api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let stable = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            stable_api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            stable.get_installed_versions().await.unwrap(),
+            vec!["b1234+cpu"]
+        );
+        assert_eq!(snapshot(&destination), restored);
+        assert_eq!(read_document()["acquisitions"], settled["acquisitions"]);
+        assert_eq!(
+            read_document()["consumer_receipts"],
+            settled["consumer_receipts"]
+        );
+        assert_eq!(file_snapshot(&metadata_path), settled_metadata);
+        stable.shutdown_installations().await.unwrap();
+        stable_api.shutdown_acquisition().await.unwrap();
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]

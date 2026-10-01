@@ -514,6 +514,8 @@ struct LlamaCppPublication {
     stage: PathBuf,
     destination: PathBuf,
     proof: LlamaCppInstallReceiptV1,
+    #[cfg(test)]
+    interrupt_after_native_rename: Option<Arc<AtomicBool>>,
 }
 
 async fn send_install_progress(
@@ -994,6 +996,8 @@ pub struct VersionInstaller {
     #[cfg(test)]
     native_receipt_pause: Option<Arc<TorchPublicationPause>>,
     #[cfg(test)]
+    interrupt_after_native_rename: Option<Arc<AtomicBool>>,
+    #[cfg(test)]
     native_recovery_pause: Option<Arc<NativeRecoveryPause>>,
     #[cfg(test)]
     torch_stage_override: Option<TorchStageOverride>,
@@ -1062,6 +1066,8 @@ impl VersionInstaller {
             #[cfg(test)]
             native_receipt_pause: None,
             #[cfg(test)]
+            interrupt_after_native_rename: None,
+            #[cfg(test)]
             native_recovery_pause: None,
             #[cfg(test)]
             torch_stage_override: None,
@@ -1127,6 +1133,12 @@ impl VersionInstaller {
     #[cfg(test)]
     pub(crate) fn with_native_receipt_pause(mut self, pause: Arc<TorchPublicationPause>) -> Self {
         self.native_receipt_pause = Some(pause);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_native_rename_interruption(mut self, once: Arc<AtomicBool>) -> Self {
+        self.interrupt_after_native_rename = Some(once);
         self
     }
 
@@ -1793,6 +1805,8 @@ impl VersionInstaller {
                 let shutdown_for_progress = self.shutdown_flag.clone();
                 #[cfg(test)]
                 let native_receipt_pause = self.native_receipt_pause.clone();
+                #[cfg(test)]
+                let interrupt_after_native_rename = self.interrupt_after_native_rename.clone();
                 let cancel_for_prepare = self.cancel_flag.clone();
                 let control_for_prepare = self.torch_control.clone();
                 let custody_for_prepare = custody.clone();
@@ -1912,6 +1926,8 @@ impl VersionInstaller {
                                             stage: prepared.stage,
                                             destination: prepared.destination,
                                             proof,
+                                            #[cfg(test)]
+                                            interrupt_after_native_rename,
                                         },
                                     )
                                 })
@@ -2140,6 +2156,8 @@ impl VersionInstaller {
             stage,
             destination,
             proof,
+            #[cfg(test)]
+            interrupt_after_native_rename,
         } = publication;
         Self::validate_llama_cpp_receipt(&proof.tag, &proof, &stage)?;
         if manager
@@ -2151,6 +2169,20 @@ impl VersionInstaller {
             });
         }
         Self::publish_native_stage(&stage, &destination, || {
+            // This test-only interruption models loss after publication is
+            // durable but before native metadata is committed.
+            #[cfg(test)]
+            if interrupt_after_native_rename
+                .as_ref()
+                .is_some_and(|once| once.swap(false, Ordering::SeqCst))
+            {
+                return Err((
+                    PumasError::InstallationFailed {
+                        message: "Test interruption after native rename before metadata".into(),
+                    },
+                    false,
+                ));
+            }
             match manager.update_installed_version(
                 &proof.tag,
                 proof.metadata.clone(),

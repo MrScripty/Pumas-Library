@@ -287,3 +287,30 @@ Parent milestone: `work/acquisition-q1-http`, carried by draft PR #7 into `work/
 - `docs/contracts/artifact-acquisition.md` §9, `docs/plans/artifact-acquisition/issues.md` (AQ-I20), this report, the acceptance matrix, execution ledger, and Coding-Standards MCP usability report: record the exact semantic boundary and evidence while leaving acceptance/gates unchanged.
 
 No persisted schema, public API, generic JSON policy, migration behavior, or acceptance/gate transition is admitted. The strict read closes one ambiguity before `Value` collapses duplicate members; AC04 and AQ-HTTP remain pending. Root owns serial Rust verification on the shared target. Do not overlap Cargo/rustc builds.
+
+### Q1 native receiptless `Using` cold-owner reconstruction regression — admitted 2026-10-01
+
+Base: `work/acquisition-q1-http` at `6f075e2427cd37e81fc79c1f93e6d1e8f2c9fbcd`. Preserve the existing uncommitted test `native_receiptless_using_cold_reopen_preserves_custody_without_replay`; it was handed off as user work and is the only production-path edit in this slice.
+
+**Exact write set:**
+
+- `rust/crates/pumas-app-manager/src/version_manager/mod.rs`: retain only the named `#[cfg(all(target_os = "linux", target_arch = "x86_64"))]` regression. It exercises receiptless native `Using` after an injected preparation failure, same-process cold owner reconstruction, refusing reconciliation and constructor/public-installer routes, no source replay, and preservation of retained inputs and authored outputs. Do not alter production behavior or other tests in this file.
+- `docs/plans/artifact-acquisition/{plan.md,execution-ledger.md,issues.md,reports/acceptance-matrix.md,reports/dependency-gates.md,reports/write-sets.md}`: record this bounded local evidence, role/prototype inventory and limitations; preserve all AC and gate statuses.
+
+No contract, schema, migration, production implementation, generated output, lockfile, or external state change is admitted. This is Linux x86_64 same-process owner reconstruction evidence, not hard-process/power-loss proof or deployed migration evidence. The generated orphan output is a partial fixture, and listener observation is limited to injected worker traffic. AC05 and AQ-HTTP remain pending. Run the exact focused app-manager test serially with `CARGO_BUILD_JOBS=1` against the shared target after confirming no other Cargo/rustc process is active.
+
+The exact regression passed locally after a single-job rebuild and permission-reviewed loopback execution (1 passed, 0 failed). Scoped rustfmt and `git diff --check` pass. An independent read-only review found no substantiated defect and confirmed the same-process, partial-orphan and injected-worker listener limits. This remains supporting AC05 evidence only; no acceptance or gate state changes.
+
+### Q1 native post-rename receipt recovery regression — admitted 2026-10-01
+
+Base: `work/acquisition-q1-http` at `6f075e2427cd37e81fc79c1f93e6d1e8f2c9fbcd`. Prototype reference snapshot: `prototype/artifact-acquisition-q1@cbbff782f63dea041121022bd43de6bb9ec03a6d`, parented directly to the production base. The prototype's separate dirty diff has since been committed and is clean at that snapshot. Selectively adapt only its test-only interruption seam and receipt-bearing recovery fixture; do not merge the branch or copy its standalone report.
+
+**Exact write set:**
+
+- `rust/crates/pumas-app-manager/src/version_manager/installer.rs`: add only a `cfg(test)` one-shot interruption field, its builder/wiring, and a test-only failure from the native publication finalizer after destination rename and both directory syncs but before metadata publication. The fixture must retain published output (`can_withdraw=false`).
+- `rust/crates/pumas-app-manager/src/version_manager/mod.rs`: wire that seam from the existing test manager and add `native_receipt_post_rename_interruption_cold_reopen_refuses_changed_output_and_settles`. Keep the receiptless and publication-conflict regressions unchanged. The new Linux x86_64 fixture must bind the receipt to the exact acquisition, lease, demand, manifest, workspace and verified file; snapshot output/workspace, store and metadata identity, bytes, mode, mtime and ctime (including nanoseconds); refuse changed receipt-bound output without rewriting store, metadata, workspace or destination; restore the fixture's exact launcher bytes and establish a post-restore timestamp baseline; then recover the same receipt to metadata/`Adopted` and confirm repeated cold reopen is stable.
+- `docs/plans/artifact-acquisition/{plan.md,execution-ledger.md,issues.md,reports/acceptance-matrix.md,reports/dependency-gates.md,reports/write-sets.md}`: record the exact prototype provenance, focused result and bounded claim; leave AC05 and AQ-HTTP pending.
+
+No non-test production behavior, public API, store/schema/migration, contract, generated output or lockfile change is admitted. The stopped fixture source does not directly observe zero request attempts, so do not claim a measured no-replay oracle. This is injected-error and same-process cold-owner evidence on Linux x86_64, not process-kill/power-loss, deployment, cross-platform or full AC05 evidence. Run the exact focused app-manager test serially against the shared target after checking that no other Cargo/rustc process is active.
+
+The exact focused test passed locally: `CARGO_BUILD_JOBS=1 cargo test --offline --manifest-path rust/Cargo.toml --locked -p pumas-app-manager --lib version_manager::tests::native_receipt_post_rename_interruption_cold_reopen_refuses_changed_output_and_settles -- --exact --test-threads=1` — 1 passed, 0 failed, 266 filtered out. Scoped rustfmt and `git diff HEAD --check` pass. Independent GPT-6.1 Sol High review of the exact production diff found no substantiated defect or likely race/cleanup issue and confirmed that the closed-source fixture is not a measured zero-request oracle. AC05 and AQ-HTTP remain pending.

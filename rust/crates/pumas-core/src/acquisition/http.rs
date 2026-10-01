@@ -495,6 +495,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn not_modified_response_is_refused_without_a_body() {
+        let (url, server) = serve_once(response("304 Not Modified", "", "")).await;
+        let error = open_http_artifact(
+            &reqwest::Client::new(),
+            url.as_str(),
+            &manifest(weak_file(6), RevisionStrength::Weak),
+            0,
+            0,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            PumasError::DownloadFailed { url, message }
+                if url == "artifact source" && message == "HTTP 304 Not Modified"
+        ));
+        let _ = server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn range_not_satisfiable_response_is_refused() {
+        let (url, server) = serve_once(response(
+            "416 Range Not Satisfiable",
+            "Content-Range: bytes */6\r\n",
+            "",
+        ))
+        .await;
+        let error = open_http_artifact(
+            &reqwest::Client::new(),
+            url.as_str(),
+            &manifest(selected_file(6), RevisionStrength::Immutable),
+            0,
+            3,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            PumasError::DownloadFailed { url, message }
+                if url == "artifact source" && message == "HTTP 416 Range Not Satisfiable"
+        ));
+        let request = server.await.unwrap().to_ascii_lowercase();
+        assert!(request.lines().any(|line| line == "range: bytes=3-"));
+    }
+
+    #[tokio::test]
+    async fn cross_origin_redirect_does_not_forward_authorization() {
+        let (destination, destination_server) = serve_once(response("200 OK", "", "abcdef")).await;
+        let (origin, origin_server) = serve_once(response(
+            "302 Found",
+            &format!("Location: {destination}\r\n"),
+            "",
+        ))
+        .await;
+        assert_ne!(origin.port(), destination.port());
+        let reply = open_http_artifact(
+            &reqwest::Client::new(),
+            origin.as_str(),
+            &manifest(weak_file(6), RevisionStrength::Weak),
+            0,
+            0,
+            Some("Bearer seeded-test-credential"),
+        )
+        .await
+        .unwrap();
+        assert!(!reply.resumed);
+        assert_eq!(reply.total_size, Some(6));
+        assert_eq!(reply.body.bytes().await.unwrap().as_ref(), b"abcdef");
+
+        let origin_request = origin_server.await.unwrap();
+        assert!(origin_request.lines().any(|line| {
+            line.split_once(':').is_some_and(|(name, value)| {
+                name.eq_ignore_ascii_case("authorization")
+                    && value.trim() == "Bearer seeded-test-credential"
+            })
+        }));
+        let destination_request = destination_server.await.unwrap();
+        assert!(!destination_request.lines().any(|line| {
+            line.split_once(':')
+                .is_some_and(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+        }));
+    }
+
+    #[tokio::test]
     async fn rejects_non_identity_content_encoding() {
         let (url, server) =
             serve_once(response("200 OK", "Content-Encoding: gzip\r\n", "bytes")).await;
@@ -589,6 +675,51 @@ mod tests {
             Err(PumasError::Network { .. })
         ));
         assert_eq!(sink.bytes, b"abc");
+        let _ = server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn chunked_body_exceeding_selected_length_is_refused_before_excess_write() {
+        let (url, server) = serve_once(
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n3\r\ndef\r\n0\r\n\r\n"
+                .into(),
+        )
+        .await;
+        let opened = open_http_artifact(
+            &reqwest::Client::new(),
+            url.as_str(),
+            &manifest(weak_file(3), RevisionStrength::Weak),
+            0,
+            0,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(opened.body.content_length(), None);
+        assert_eq!(opened.total_size, Some(3));
+        let mut sink = TestSink::default();
+        let mut host = TestHost {
+            pause: false,
+            cancel: false,
+            progress: Vec::new(),
+        };
+        let error = stream_http_artifact(opened, 0, &mut sink, &mut host)
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            PumasError::Validation { field, message }
+                if field == "artifact.http.response"
+                    && message == "HTTP artifact body exceeded its selected representation length"
+        ));
+        // Transport buffering may combine chunks, so any accepted prefix is valid.
+        assert!(sink.bytes.len() <= 3);
+        assert!(b"abcdef".starts_with(&sink.bytes));
+        assert!(host.progress.iter().all(|downloaded| *downloaded <= 3));
+        assert_eq!(
+            host.progress.last().copied().unwrap_or_default(),
+            sink.bytes.len() as u64
+        );
         let _ = server.await.unwrap();
     }
 

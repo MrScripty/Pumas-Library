@@ -176,7 +176,8 @@ describe('TorchInstallPreview', () => {
     const onInstall = vi.fn();
     render(<TorchInstallPreview tag="v2.14.0" onBack={vi.fn()} onInstall={onInstall} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Install Torch' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Install Torch' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Install Torch' }));
     expect(screen.getByRole('status')).toHaveTextContent('Starting installation…');
     expect(screen.getByRole('button', { name: 'Starting installation…' })).toBeDisabled();
     expect(onInstall).not.toHaveBeenCalled();

@@ -333,15 +333,20 @@ impl ArtifactManifest {
         }
 
         let mut exact_paths = HashSet::with_capacity(files.len());
-        let mut portable_paths = HashSet::with_capacity(files.len());
+        let mut portable_paths = HashSet::with_capacity(files.len().saturating_mul(2));
         let mut source_evidence = HashMap::with_capacity(files.len());
         let mut total = Some(0_u64);
         for file in &files {
             if !exact_paths.insert(file.logical_path.as_str()) {
                 return Err(ManifestValidationError::DuplicateLogicalPath);
             }
-            if !portable_paths.insert(case_insensitive_path_key(&file.logical_path)) {
-                return Err(ManifestValidationError::CollidingLogicalPath);
+            // Final files and their staging siblings share one filesystem
+            // namespace throughout transfer, cleanup, and publication.
+            let staging = staging_path(&file.logical_path);
+            for path in [file.logical_path.as_str(), staging.as_str()] {
+                if !portable_paths.insert(case_insensitive_path_key(path)) {
+                    return Err(ManifestValidationError::CollidingLogicalPath);
+                }
             }
             let evidence = source_evidence
                 .entry(file.source_key.as_str())
@@ -575,6 +580,12 @@ fn validate_logical_path(value: &str) -> Result<(), ManifestValidationError> {
         }
     }
     Ok(())
+}
+
+/// Shared derivation for manifest admission and every workspace staging access.
+/// Appending to either a logical path or its basename yields the same sibling.
+pub(super) fn staging_path(logical_path: &str) -> String {
+    format!("{logical_path}.part")
 }
 
 fn case_insensitive_path_key(value: &str) -> String {

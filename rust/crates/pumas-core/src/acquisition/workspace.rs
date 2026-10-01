@@ -1,6 +1,7 @@
 //! Held, source-neutral filesystem authority. Persisted identity never opens it.
 #![deny(unsafe_code)]
 
+use super::manifest::staging_path;
 use super::{ArtifactFile, ArtifactManifest};
 use crate::platform::capability_fs::sync_directory;
 use crate::{PumasError, Result};
@@ -283,11 +284,7 @@ impl AcquisitionWorkspace {
 
     pub(crate) fn file_len(&self, path: &str, partial: bool) -> Result<Option<u64>> {
         let (parent, name) = self.parent(path, false)?;
-        let name = if partial {
-            format!("{name}.part")
-        } else {
-            name
-        };
+        let name = if partial { staging_path(&name) } else { name };
         match parent.symlink_metadata(name) {
             Ok(metadata) if metadata.is_file() && !metadata.is_symlink() => {
                 Ok(Some(metadata.len()))
@@ -308,9 +305,7 @@ impl AcquisitionWorkspace {
         } else {
             options.write(true).create(true);
         }
-        let file = parent
-            .open_with(format!("{name}.part"), &options)?
-            .into_std();
+        let file = parent.open_with(staging_path(&name), &options)?.into_std();
         if !file.metadata()?.is_file() {
             return Err(changed());
         }
@@ -377,7 +372,7 @@ impl AcquisitionWorkspace {
         read_options.read(true);
         let current = Metadata::from_file(
             &parent
-                .open_with(format!("{name}.part"), &read_options)?
+                .open_with(staging_path(&name), &read_options)?
                 .into_std(),
         )?;
         if identity(&after)? != binding
@@ -405,7 +400,7 @@ impl AcquisitionWorkspace {
     pub(crate) fn remove_part(&self, path: &str) -> Result<()> {
         self.require_writable()?;
         let (parent, name) = self.parent(path, false)?;
-        match parent.remove_file(format!("{name}.part")) {
+        match parent.remove_file(staging_path(&name)) {
             Ok(()) => sync_directory(&parent)?,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error.into()),
@@ -415,11 +410,7 @@ impl AcquisitionWorkspace {
 
     pub(crate) fn verify_file(&self, file: &ArtifactFile, partial: bool) -> Result<VerifiedFile> {
         let (parent, name) = self.parent(file.logical_path(), false)?;
-        let name = if partial {
-            format!("{name}.part")
-        } else {
-            name
-        };
+        let name = if partial { staging_path(&name) } else { name };
         let mut options = options();
         options.read(true);
         let mut handle = parent.open_with(&name, &options)?.into_std();
@@ -544,7 +535,7 @@ impl AcquisitionWorkspace {
             if self.file_len(file.logical_path(), false)?.is_some() {
                 return Err(changed());
             }
-            parent.rename(format!("{name}.part"), &parent, name)?;
+            parent.rename(staging_path(&name), &parent, name)?;
             sync_directory(&parent)?;
         }
         self.verify_file(file, false)

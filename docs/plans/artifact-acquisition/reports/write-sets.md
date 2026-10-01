@@ -180,6 +180,21 @@ Base: `work/acquisition-q1-http` at `4756a40e`. PR #7 remains draft. Source trac
 
 No `DownloadRequest`/RPC/generated/renderer contract change, arbitrary branch/tag selector, persisted schema, store, or migration is admitted. The existing UI request continues to mean default `main`, but each fresh operation becomes commit-pinned before selection and persists/uses that commit through existing APIs. AC01 and AQ-HTTP remain pending; this entrypoint repair alone does not close AC01's manifest completeness, collision or broader identity claims. Preserve the existing closed-lifecycle behavior and use the shared external Rust target with one Cargo build at a time.
 
+### AC01 composed final/staging namespace collision repair — admitted 2026-10-01
+
+Parent milestone: `work/acquisition-q1-http`, currently tracked by draft PR #7 to `main`. This is a bounded source-integrity correction on that milestone branch; it must not be treated as a separate accepted milestone or as AQ-HTTP completion.
+
+**Exact write set:**
+
+- `rust/crates/pumas-core/src/acquisition/manifest.rs` — validate the selected final paths and the `.part` staging sibling derived for each path as one namespace. Reject exact aliases and file/directory prefix conflicts under the existing portability comparison, for either manifest entry order. Keep the existing error family and preserve opaque source keys.
+- `rust/crates/pumas-core/src/acquisition/workspace.rs` — provide/use one private staging-path mapping consistently for inspection, opening, verification, removal and publication so validation and mutation cannot derive different names.
+- `rust/crates/pumas-core/tests/artifact_acquisition.rs` — public constructor, persisted schema-7 reader and valid-acquisition regressions; add no public API or persisted format.
+- `docs/contracts/artifact-acquisition.md` §3 and `docs/plans/artifact-acquisition/{plan.md,execution-ledger.md,issues.md,reports/write-sets.md,reports/architecture-review.md}` — record the invariant, admission, bounded findings and actual evidence. Keep acceptance/gate state unchanged.
+
+Required regressions: direct `weights`/`weights.part` collision; nested `weights`/`weights.part/config` conflict; case-varied and reverse-order forms; schema-7 persisted input refused through the production reader without rewriting stored bytes; a non-conflicting `.part` filename, opaque source key and ordinary multi-file receipt remain valid. Independent source review must confirm all workspace staging operations use the shared mapping. Existing target-platform normalization and Unicode collision qualification remain open; this slice does not close them.
+
+No schema change, public DTO, new error authority, stage-layout change, unrelated HF progress repair, or acceptance-matrix/gate transition is admitted. Run Rust checks serially with `CARGO_BUILD_JOBS=1` and the shared target. Do not update or advance PR #7 until this slice and its milestone-branch verification are committed and the remaining required Q1 changes are accounted for.
+
 ### AC01 desktop revision candidate within the admitted write set
 
 The existing desktop entrypoint now resolves default `main` to a validated commit before all revision-sensitive selection and passes it through the existing pinned flow. The local-server public-entrypoint tests prove that metadata, tree, and payload use that commit; missing commit evidence returns before download admission or destination mutation. The stalled payload is cancelled and no incomplete file is published. The focused API tests (2), existing closed-lifecycle regression (1), strict all-target pumas-library Clippy, rustfmt, and diff check pass with serialized Cargo and a shared target. This remains a narrow verified implementation candidate: broader AC01 manifest/source identity, incomplete-set, and collision acceptance evidence remains open, and no acceptance or dependency-gate state changes.

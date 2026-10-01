@@ -2039,7 +2039,10 @@ mod tests {
 
         // Record filesystem identity as well as every retained byte and the
         // receipt's tree hash. The fixture contains only regular files/directories.
-        fn snapshot(root: &Path) -> (Vec<(PathBuf, u64, u64, u32, Vec<u8>)>, String) {
+        type SnapshotEntry = (PathBuf, u64, u64, u32, Vec<u8>);
+        type Snapshot = (Vec<SnapshotEntry>, String);
+
+        fn snapshot(root: &Path) -> Snapshot {
             let mut tree = Vec::new();
             let mut digest = sha2::Sha256::new();
             for entry in walkdir::WalkDir::new(root).sort_by_file_name() {

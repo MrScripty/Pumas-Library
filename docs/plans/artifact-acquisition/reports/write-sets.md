@@ -195,6 +195,19 @@ Required regressions: direct `weights`/`weights.part` collision; nested `weights
 
 No schema change, public DTO, new error authority, stage-layout change, unrelated HF progress repair, or acceptance-matrix/gate transition is admitted. Run Rust checks serially with `CARGO_BUILD_JOBS=1` and the shared target. Do not update or advance PR #7 until this slice and its milestone-branch verification are committed and the remaining required Q1 changes are accounted for.
 
+### AC01/AC08 mixed-known-size HF progress denominator repair — admitted 2026-10-01
+
+Parent milestone remains `work/acquisition-q1-http` / draft PR #7 to `main`. This is the next Q1 branch correction after commit `d5a98e8c` closed the output/staging path collision. It does not authorize starting Q2, runtime R1, or another milestone.
+
+**Exact write set:**
+
+- `rust/crates/pumas-core/src/model_library/hf/download.rs` — fresh and retained-recovery admission total calculation plus co-located regressions. Only expose an aggregate total when every selected file has a known size and a checked sum; keep zero total as unknown. Do not change the RPC progress validator or public request/persistence schemas.
+- `docs/contracts/artifact-acquisition.md` §10 and `docs/plans/artifact-acquisition/{plan.md,execution-ledger.md,issues.md,reports/write-sets.md,reports/architecture-review.md}` — clarify the denominator invariant and distinguish the source-derived defect from the unproven incident cause.
+
+Required regression evidence: exercise mixed known/unknown file sizes through fresh and recovery admission; report actual transferred bytes beyond the known-size subtotal; verify producer progress does not exceed the valid range and serializes; preserve all-known, all-zero and checked-overflow behavior. Do not weaken the receiving RPC range validation. A representative delayed public status poll remains external AC08 evidence; a local producer fix cannot prove that the prior `-32603` had this cause.
+
+No RPC handler/validator change, UI change, request/schema change, acceptance-matrix update, or AC01/AC08 acceptance is admitted. Use one Cargo build at a time with `CARGO_BUILD_JOBS=1` and the existing shared target; code/review agents must not run Cargo or rustc.
+
 ### AC01 desktop revision candidate within the admitted write set
 
 The existing desktop entrypoint now resolves default `main` to a validated commit before all revision-sensitive selection and passes it through the existing pinned flow. The local-server public-entrypoint tests prove that metadata, tree, and payload use that commit; missing commit evidence returns before download admission or destination mutation. The stalled payload is cancelled and no incomplete file is published. The focused API tests (2), existing closed-lifecycle regression (1), strict all-target pumas-library Clippy, rustfmt, and diff check pass with serialized Cargo and a shared target. This remains a narrow verified implementation candidate: broader AC01 manifest/source identity, incomplete-set, and collision acceptance evidence remains open, and no acceptance or dependency-gate state changes.

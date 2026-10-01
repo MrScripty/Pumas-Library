@@ -140,7 +140,7 @@ Differentiate malformed request, unsupported source/representation, authorizatio
 
 The source reader reports retryability and required refresh, not a second outer retry loop. Acquisition owns the combined retry budget; respect source Retry-After only within authorized policy. Paused or access-blocked jobs release active transfer capacity while retaining resumable custody. Hashing/writes use governed async/blocking capacity and never hold bookkeeping locks through external code or blocking I/O.
 
-Progress separates logical verified bytes from wire bytes, retries and unknown totals; preserve current UI-visible domain progress. Bounded coalesced notifications have snapshot recovery and a reliable terminal/control path. Download 100% does not mean install complete. End-to-end cancellation follows the initiating domain's explicit action while retaining cleanup owners.
+Progress separates logical verified bytes from wire bytes, retries and unknown totals; preserve current UI-visible domain progress. A multi-file byte denominator is known only when every selected size is known and the checked sum is positive; a known-size subtotal is not the whole transfer. Bounded coalesced notifications have snapshot recovery and a reliable terminal/control path. Download 100% does not mean install complete. End-to-end cancellation follows the initiating domain's explicit action while retaining cleanup owners.
 
 Shutdown closes new admission, signals appropriate work, drains tracked async and blocking effects, publishes the true resumable/terminal disposition, then releases custody. Repeated shutdown shares the owned result. An elapsed deadline can produce incomplete shutdown, not fictional cleanup success.
 

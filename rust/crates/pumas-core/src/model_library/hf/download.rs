@@ -63,6 +63,20 @@ const DOWNLOAD_UPDATE_CURSOR_PREFIX: &str = "download:";
 const DOWNLOAD_PROGRESS_PUBLISH_INTERVAL: Duration = Duration::from_millis(500);
 const DOWNLOAD_SHUTDOWN_INTERRUPTED: &str = "Download interrupted by library shutdown";
 
+/// A selected-set denominator exists only when every file has a known size.
+/// Unknown files must not turn the known subset into the overall transfer total.
+fn selected_download_total_bytes(files: &[FileToDownload]) -> std::result::Result<Option<u64>, ()> {
+    let mut total = 0_u64;
+    let mut has_unknown_size = false;
+    for file in files {
+        match file.size {
+            Some(size) => total = total.checked_add(size).ok_or(())?,
+            None => has_unknown_size = true,
+        }
+    }
+    Ok((!has_unknown_size && total > 0).then_some(total))
+}
+
 struct PendingDownloadPublication {
     notification: crate::models::ModelDownloadUpdateNotification,
     completed: tokio::sync::oneshot::Sender<()>,
@@ -3821,8 +3835,7 @@ impl HuggingFaceClient {
                 return Ok(existing_id);
             }
 
-            let known_sum: u64 = files.iter().filter_map(|file| file.size).sum();
-            let total_bytes = (known_sum > 0).then_some(known_sum);
+            let total_bytes = selected_download_total_bytes(&files).unwrap_or(None);
             let first_filename = files[0].filename.clone();
             let final_filenames = files
                 .iter()
@@ -5657,13 +5670,9 @@ impl HuggingFaceClient {
             .expect("verified recovery file set is nonempty")
             .filename
             .clone();
-        let total_bytes = match files
-            .iter()
-            .filter_map(|file| file.size)
-            .try_fold(0_u64, u64::checked_add)
-        {
-            Some(total) => (total > 0).then_some(total),
-            None => return Ok(RecoveryDownloadAdmission::BoundFilesUnavailable),
+        let total_bytes = match selected_download_total_bytes(&files) {
+            Ok(total) => total,
+            Err(()) => return Ok(RecoveryDownloadAdmission::BoundFilesUnavailable),
         };
         let known_sha256 = files
             .iter()
@@ -8081,6 +8090,279 @@ mod tests {
             serde_json::to_vec(&tree).unwrap(),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn selected_download_total_requires_complete_positive_nonoverflowing_sizes() {
+        let files = |sizes: &[Option<u64>]| {
+            sizes
+                .iter()
+                .enumerate()
+                .map(|(index, size)| FileToDownload {
+                    filename: format!("file-{index}"),
+                    size: *size,
+                    sha256: None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            selected_download_total_bytes(&files(&[Some(4), Some(6)])),
+            Ok(Some(10))
+        );
+        assert_eq!(
+            selected_download_total_bytes(&files(&[Some(0), Some(0)])),
+            Ok(None)
+        );
+        assert_eq!(
+            selected_download_total_bytes(&files(&[Some(4), None])),
+            Ok(None)
+        );
+        assert_eq!(
+            selected_download_total_bytes(&files(&[None, Some(4)])),
+            Ok(None)
+        );
+        assert_eq!(
+            selected_download_total_bytes(&files(&[Some(u64::MAX), Some(1)])),
+            Err(())
+        );
+        assert_eq!(
+            selected_download_total_bytes(&files(&[Some(u64::MAX), Some(1), None])),
+            Err(())
+        );
+    }
+
+    #[tokio::test]
+    async fn fresh_admission_uses_unknown_total_for_unknown_size_auxiliary_files() {
+        for (regular_files, sizes, expected_total) in [
+            (vec!["config.json".to_string()], vec![4], None),
+            (Vec::new(), vec![4, 6], Some(10)),
+            (Vec::new(), vec![0], None),
+        ] {
+            let includes_unknown_auxiliary = !regular_files.is_empty();
+            let temp = TempDir::new().unwrap();
+            let client = configured_download_client(temp.path().join("cache")).unwrap();
+            cache_repo_tree(
+                &client,
+                "acme/model",
+                sizes
+                    .iter()
+                    .enumerate()
+                    .map(|(index, size)| LfsFileInfo {
+                        filename: format!("weights-{index}.gguf"),
+                        size: *size,
+                        sha256: "a".repeat(64),
+                    })
+                    .collect(),
+                regular_files,
+            );
+            let destination = temp.path().join("library/model");
+            let guard = client
+                .destination_lock(&destination_identity(&client, &destination))
+                .await
+                .lock_owned()
+                .await;
+            let id = client
+                .start_download(
+                    &recovery_test_request(
+                        "acme/model",
+                        &sizes
+                            .iter()
+                            .enumerate()
+                            .map(|(index, _)| format!("weights-{index}.gguf"))
+                            .collect::<Vec<_>>(),
+                    ),
+                    &destination,
+                    None,
+                )
+                .await
+                .unwrap();
+            let states = client.downloads.read().await;
+            let state = states.get(&id).unwrap();
+            assert_eq!(state.total_bytes, expected_total);
+            assert_eq!(
+                state
+                    .files
+                    .iter()
+                    .any(|file| file.filename == "config.json" && file.size.is_none()),
+                includes_unknown_auxiliary,
+            );
+            assert_eq!(
+                state.files.len(),
+                sizes.len() + usize::from(includes_unknown_auxiliary)
+            );
+            drop(states);
+            let persisted = client.persistence.as_ref().unwrap().load_all();
+            assert_eq!(persisted[0].total_bytes, expected_total);
+            assert!(client.pause_download(&id).await.unwrap());
+            drop(guard);
+            client.shutdown_downloads().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn retained_recovery_replaces_known_subtotal_with_unknown_total() {
+        let temp = TempDir::new().unwrap();
+        let library_root = temp.path().join("library");
+        let client = recovery_test_client(temp.path().join("cache"), &library_root);
+        let verified = verified_recovery(
+            &library_root,
+            "acme/model",
+            &["config.json", "weights.gguf"],
+        );
+        cache_repo_tree(
+            &client,
+            "acme/model",
+            vec![LfsFileInfo {
+                filename: "weights.gguf".into(),
+                size: 4,
+                sha256: "a".repeat(64),
+            }],
+            vec!["config.json".into()],
+        );
+        let id = "mixed-size-retained";
+        client.downloads.write().await.insert(
+            id.into(),
+            recovery_test_state(&verified, id, DownloadStatus::Paused, false),
+        );
+        let guard = client
+            .destination_lock(&verified.destination.identity())
+            .await
+            .lock_owned()
+            .await;
+        assert!(matches!(
+            client.admit_recovery_download(&verified, Some("llm".into())).await.unwrap(),
+            RecoveryDownloadAdmission::Resumed { download_id } if download_id == id
+        ));
+        let states = client.downloads.read().await;
+        let state = states.get(id).unwrap();
+        assert_eq!(state.total_bytes, None);
+        assert!(state.files.iter().any(|file| file.size.is_none()));
+        drop(states);
+        assert!(client.pause_download(id).await.unwrap());
+        drop(guard);
+        client.shutdown_downloads().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn retained_recovery_refuses_all_known_size_overflow_without_replacing_state() {
+        let temp = TempDir::new().unwrap();
+        let library_root = temp.path().join("library");
+        let client = recovery_test_client(temp.path().join("cache"), &library_root);
+        let verified = verified_recovery(
+            &library_root,
+            "acme/model",
+            &["weights-1.gguf", "weights-2.gguf"],
+        );
+        cache_repo_tree(
+            &client,
+            "acme/model",
+            vec![
+                LfsFileInfo {
+                    filename: "weights-1.gguf".into(),
+                    size: u64::MAX,
+                    sha256: "a".repeat(64),
+                },
+                LfsFileInfo {
+                    filename: "weights-2.gguf".into(),
+                    size: 1,
+                    sha256: "b".repeat(64),
+                },
+            ],
+            Vec::new(),
+        );
+        let id = "retained-size-overflow";
+        client.downloads.write().await.insert(
+            id.into(),
+            recovery_test_state(&verified, id, DownloadStatus::Paused, false),
+        );
+        assert!(matches!(
+            client
+                .admit_recovery_download(&verified, Some("llm".into()))
+                .await
+                .unwrap(),
+            RecoveryDownloadAdmission::BoundFilesUnavailable
+        ));
+        let states = client.downloads.read().await;
+        assert_eq!(states.len(), 1);
+        let state = states.get(id).unwrap();
+        assert_eq!(state.status, DownloadStatus::Paused);
+        assert_eq!(state.total_bytes, Some(4));
+        assert!(!state.task_registered);
+        assert!(client.download_tasks.is_empty());
+        assert!(!verified
+            .destination
+            .display_path()
+            .join(".pumas_download")
+            .exists());
+    }
+
+    #[tokio::test]
+    async fn mixed_size_attempt_progress_stays_serializable_beyond_known_subtotal() {
+        let temp = TempDir::new().unwrap();
+        let client = recovery_test_client(temp.path().join("cache"), temp.path());
+        let verified =
+            verified_recovery(temp.path(), "acme/model", &["config.json", "weights.gguf"]);
+        let id = "mixed-size-progress";
+        let mut state = recovery_test_state(&verified, id, DownloadStatus::Downloading, true);
+        state.files[0].size = None;
+        state.total_bytes = selected_download_total_bytes(&state.files).unwrap();
+        let cancel_flag = state.cancel_flag.clone();
+        let pause_flag = state.pause_flag.clone();
+        client.downloads.write().await.insert(id.into(), state);
+        let destination_lock = client
+            .destination_lock(&verified.destination.identity())
+            .await;
+        let downloads = client.downloads.clone();
+        let publications = client.download_publications.clone();
+        let (sender, received) = tokio::sync::oneshot::channel();
+        let prepared = client
+            .download_tasks
+            .prepare(id.into(), TaskRole::Worker, move |context| async move {
+                let destination = DownloadDestination::Recovery(verified.destination);
+                let mut guard = None;
+                let mut host = HuggingFaceHttpAttemptHost {
+                    downloads: &downloads,
+                    publications: &publications,
+                    destination_lock: &destination_lock,
+                    destination_guard: &mut guard,
+                    download_id: id,
+                    destination: &destination,
+                    cancel_flag: &cancel_flag,
+                    pause_flag: &pause_flag,
+                    task_context: &context,
+                    bytes_offset: 4,
+                    started_at: Instant::now(),
+                    last_publish: Instant::now(),
+                    retry_limit: None,
+                };
+                crate::acquisition::HttpAttemptHost::record_progress(&mut host, 8)
+                    .await
+                    .unwrap();
+                let states = downloads.read().await;
+                sender
+                    .send(progress_from_state(states.get(id).unwrap()))
+                    .unwrap();
+            })
+            .unwrap();
+        client
+            .download_tasks
+            .install_gated(prepared)
+            .unwrap()
+            .start();
+        let progress = tokio::time::timeout(Duration::from_secs(3), received)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(progress.downloaded_bytes, Some(12));
+        assert_eq!(progress.total_bytes, None);
+        assert_eq!(progress.eta_seconds, None);
+        let fraction = progress.progress.unwrap();
+        assert!(fraction.is_finite() && (0.0..=1.0).contains(&fraction));
+        let serialized = serde_json::to_value(&progress).unwrap();
+        assert_eq!(serialized["totalBytes"], serde_json::Value::Null);
+        assert_eq!(serialized["downloadedBytes"], json!(12));
+        assert_eq!(serialized["etaSeconds"], serde_json::Value::Null);
+        assert_eq!(serialized["progress"], json!(fraction));
     }
 
     #[test]

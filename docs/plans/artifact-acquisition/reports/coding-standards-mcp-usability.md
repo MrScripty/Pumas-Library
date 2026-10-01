@@ -348,3 +348,14 @@ This records MCP usability only; it does not certify implementation compliance o
 - **Recommendations:** Avoid repeating full policy results in both structured and text output; keep read results within a caller-reviewable byte budget; make transient auto-review timeout/retry status explicit without obscuring a successful retry.
 
 This records tool usability only; it does not certify source compliance or product acceptance.
+
+## Primary integrator — AC06 stale-generation boundary regression route
+
+- **Useful calls:** The initial route `snapshot:v1:6e207013-b615-4b8e-85ca-4170c3bc1408` and the final source/evidence route `snapshot:v1:a2e24e74-b8f8-40cb-a3b4-762857343697` each selected 17 standards with zero unresolved applicability facts. Ten focused policy reads were repeated against the final snapshot and completed successfully for Rust, async, implementation, verification, oracle, concurrency, replay, contracts, resilience, and persistence guidance.
+- **Confusing or redundant steps:** The first route left framework and concurrent-plan-integration applicability unresolved; explicitly setting both to known-absent produced the complete route. The first expanded route response exceeded the useful output window, so the final read was narrowed to the ten policies relevant to this service-level test.
+- **Missing context:** The MCP did not know the actual two-generation fixture, the exact `files_ready` guard, the 8/8 focused test result, Clippy result, or Sol High review limits; these came from repository inspection and independent tools.
+- **Where I left MCP:** The final route supplied obligations only. The test, focused checks, and review establish a sequential service boundary regression, not full AC06 acceptance.
+- **Smallest sufficient workflow:** State framework and concurrent-integration applicability explicitly, route the exact Rust/persistence boundary, then read only directly applicable canonical policies in a caller-reviewable batch.
+- **Recommendations:** Bound route response output by bytes as well as selected-policy count, and retain a concise selection summary when full policy text would exceed the caller's useful review window.
+
+This records tool usability only; it does not certify source compliance or AC06 acceptance.

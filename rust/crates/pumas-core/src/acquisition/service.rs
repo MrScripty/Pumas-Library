@@ -2265,6 +2265,105 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stale_worker_generation_cannot_seal_or_handoff_acquisition() {
+        use crate::acquisition::task_custody::TaskRole;
+
+        let timeout = Duration::from_secs(5);
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::write(stage.join("payload.bin"), b"DATA").unwrap();
+        std::fs::write(stage.join("payload.bin.part"), b"KEEP").unwrap();
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store.clone()));
+        let consumer = service.open_consumer("fixture").unwrap();
+        let grant = workspace(&stage);
+        let demand = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: "stale-generation-handoff".into(),
+        };
+        let selection = manifest("payload.bin");
+        let first_service = service.clone();
+        let first_demand = demand.clone();
+        let first_selection = selection.clone();
+        let first_workspace = grant.identity().clone();
+        let outcome = tokio::time::timeout(timeout, async {
+            let stale = consumer
+                .scope
+                .run_worker_invocation(move |context| async move {
+                    first_service
+                        .begin(
+                            &context,
+                            first_demand,
+                            first_selection,
+                            first_workspace,
+                            None,
+                        )
+                        .await
+                })
+                .await?;
+            let original = stale.record.clone();
+            let before = store.acquisitions()?;
+            let successor_service = service.clone();
+            let successor_workspace = grant.clone();
+            let observation = consumer
+                .scope
+                .run_worker_invocation(move |context| async move {
+                    let same_scope = context.shares_scope(&stale.context);
+                    let same_generation = context.generation().matches(stale.context.generation());
+                    let successor_current = context.is_current_role(TaskRole::Worker);
+                    let rejection = successor_service
+                        .files_ready(&context, stale, successor_workspace)
+                        .await;
+                    Ok((same_scope, same_generation, successor_current, rejection))
+                })
+                .await?;
+            Ok::<_, PumasError>((original, before, observation))
+        })
+        .await;
+        // Drain even if an invocation failed/timed out before reporting any
+        // assertion, so the workspace and durable snapshot cannot race effects.
+        let consumer_drain = tokio::time::timeout(timeout, consumer.shutdown()).await;
+        let service_drain = tokio::time::timeout(timeout, service.shutdown()).await;
+        consumer_drain.expect("consumer must drain").unwrap();
+        service_drain.expect("service must drain").unwrap();
+        let (original, before, (same_scope, same_generation, successor_current, rejection)) =
+            outcome.expect("worker generations must complete").unwrap();
+        assert!(same_scope, "the successor must use the same consumer scope");
+        assert!(
+            !same_generation,
+            "the successor must use a fresh generation"
+        );
+        assert!(successor_current);
+        assert!(
+            matches!(rejection, Err(PumasError::Validation { field, message })
+            if field == "acquisition.custody"
+                && message == "Verified handoff belongs to another operation generation")
+        );
+        assert_eq!(before.len(), 1);
+        assert_eq!(original.demand, demand);
+        assert_eq!(original.manifest, selection);
+        assert_eq!(original.workspace, *grant.identity());
+        assert!(matches!(original.phase, AcquisitionPhase::Transferring));
+        assert!(original.files.is_empty());
+        assert_eq!(store.acquisitions().unwrap(), before);
+        assert!(service.consumer_receipt(original.id).unwrap().is_none());
+        // Opening an existing partial for append does not alter its bytes and
+        // also proves seal() never made the shared workspace read-only.
+        drop(
+            grant
+                .open_part("payload.bin", true)
+                .expect("workspace must remain unsealed"),
+        );
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin.part")).unwrap(),
+            b"KEEP"
+        );
+        assert_eq!(std::fs::read_dir(&stage).unwrap().count(), 2);
+    }
+
+    #[tokio::test]
     async fn pause_stops_partial_writes_and_preserves_transfer_demand() {
         controlled_partial_transfer_stops_writing(true).await;
     }

@@ -52,10 +52,22 @@ prove cold reopen, power-loss durability, malformed-range handling or real
 consumer publication.
 
 This is partial service-level evidence. AC06 remains pending
-for queued/verifying cancellation, stale-generation rejection at the
-acquisition boundary, idempotent release, and preservation of all live/durable
-demands. These local HTTP/workspace fixtures are not real HF/native source or
-supported-platform acceptance.
+for queued/verifying cancellation, idempotent release, and preservation of all
+live/durable demands. The new stale-generation fixture below proves sequential
+rejection at `files_ready` in one consumer scope; it does not exercise a
+concurrent stale-worker race or same-task-ID replacement. These local
+HTTP/workspace fixtures are not real HF/native source or supported-platform
+acceptance.
+
+The `stale_worker_generation_cannot_seal_or_handoff_acquisition` service test
+starts an operation in one worker generation, then invokes `files_ready` from a
+fresh Worker generation in the same consumer scope. It asserts the exact
+acquisition-custody rejection, unchanged Transferring record with no verified
+files or receipt, unchanged final and partial bytes, and an unsealed workspace
+that remains append-openable. Consumer and service shutdown drain before the
+assertions. This covers the sequential generation mismatch at the acquisition
+boundary; it does not establish concurrent replacement, filesystem metadata
+equality, cold recovery, or crash durability.
 
 
 ## Real procedures and proof boundaries
@@ -72,7 +84,7 @@ supported-platform acceptance.
 
 ## Planned test placement and supporting commands
 
-The core public-consumer integration target `rust/crates/pumas-core/tests/artifact_acquisition.rs` exists and has passed 2/2 on a prior code candidate. The AC06 service regressions are unit tests in `rust/crates/pumas-core/src/acquisition/service.rs`; `cargo test --manifest-path rust/Cargo.toml --locked -p pumas-library --lib acquisition::service::tests:: -- --test-threads=1` passed 7/7 on code commit `43f106c7`. Build #355 passed the exact commit, including affected Rust checks, no-default library/RPC checks, frontend/desktop contracts and native QA on three operating systems. The planned standalone target `rust/crates/pumas-app-manager/tests/artifact_acquisition_install.rs` is not present; native install/recovery cases currently run in app-manager unit/fixture targets. These local and hosted checks do not close the real-source, desktop workflow, or deployment/platform acceptance claims above. Record each new command/result and broaden to affected aggregate checks:
+The core public-consumer integration target `rust/crates/pumas-core/tests/artifact_acquisition.rs` exists and has passed 2/2 on a prior code candidate. The AC06 service regressions are unit tests in `rust/crates/pumas-core/src/acquisition/service.rs`; the focused service command passed 8/8 on the current local candidate, and affected-package Clippy passed with warnings denied. Build #355 passed code commit `43f106c7`; Build #356 passed the documentation-only head `59732c1f`. The new service test does not yet have exact-head hosted CI evidence. The planned standalone target `rust/crates/pumas-app-manager/tests/artifact_acquisition_install.rs` is not present; native install/recovery cases currently run in app-manager unit/fixture targets. These local and hosted checks do not close the real-source, desktop workflow, or deployment/platform acceptance claims above. Record each new command/result and broaden to affected aggregate checks:
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml -p pumas-library --test artifact_acquisition

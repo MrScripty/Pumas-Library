@@ -201,3 +201,20 @@ Keep these readiness states separate in status output and return the missing
 profile resource or a safe configured-agent status instead of a generic path
 failure. No product correctness or acceptance conclusion follows from this
 MCP observation.
+
+## 2026-10-01 — Muse contributor lookup during parallel implementation
+
+Seven GPT-6 Luna XHigh CLI orchestrators checked Passeur while handling
+separate Q1 write sets. A valid `passeur_models` request returned the model
+`muse-spark-1.3-contributor`, but valid `passeur_agents({limit:4,offset:0})`
+requests repeatedly failed with `PATH_NOT_FOUND` at `profile.open`. Coordinated
+submission also reached that profile failure after the caller corrected its
+`target_ref` to a full `refs/heads/...` ref. No Passeur task was admitted or
+started; implementation used the authorized GPT-6.1 Sol Medium fallback.
+
+This confirms that model-catalog visibility is not evidence that a configured
+contributor profile is discoverable or spawnable. Passeur should expose these
+states separately and return a safe, actionable agent-discovery result that
+identifies the missing profile resource or its readiness state. A caller should
+not have to infer whether the model is unavailable, the profile is missing, or
+the execution provider is not ready from the generic `profile.open` path error.

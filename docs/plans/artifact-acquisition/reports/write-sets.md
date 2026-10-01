@@ -143,3 +143,13 @@ Affected installed/public/native consumers, source installation/build packaging 
 | Reviewer | Read-only candidate/context/evidence | Never edits | Architecture, migration, trust and lifecycle findings; narrow repair verification |
 
 Default serial order prevents Q1/Q2 installer changes racing runtime R1/R2. Record disjoint primary/allowed-adjacent sets when delegating. Reuse existing branches/worktree conventions; the presence of two plans alone does not require new worktrees or a custom multiagent coordination framework.
+
+### Admitted Q1 milestone PR-order clarification
+
+Base: `work/acquisition-q1-http` at `2e0bfc5b770a28176edd143697b0ef448db62900`. The user requested that milestone changes and their required plan/evidence corrections be completed on each milestone branch before its PR is advanced, with PR integration following the documented dependency order. Exact write set:
+
+- `docs/plans/artifact-acquisition/reports/write-sets.md`: this admission only.
+- `docs/plans/artifact-acquisition/execution-ledger.md`: record the clarified PR sequence and correct the latest Q1 status summary.
+- Existing PR #7 body: replace the inaccurate linear Q1 → Q2 → Q3 → Q4 description with the order in `reports/dependency-gates.md`, after pushing the branch documentation update.
+
+No source changes, acceptance changes, gate changes, PR merge, or retargeting are admitted.

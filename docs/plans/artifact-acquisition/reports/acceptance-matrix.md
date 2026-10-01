@@ -31,6 +31,10 @@ The Linux x86_64 app-manager regression `native_receiptless_using_cold_reopen_pr
 
 The Linux x86_64 app-manager regression `native_receipt_post_rename_interruption_cold_reopen_refuses_changed_output_and_settles` passes locally (1/1). It injects a test-only failure after the receipt-bound native output is renamed into place and both parent directories are synced, but before native metadata publication. A fresh same-process owner refuses a changed launcher while preserving store, metadata, workspace and destination file state, including identity and nanosecond timestamps. After the fixture restores the exact launcher bytes, another cold owner reconstructs metadata from the existing receipt, settles the same acquisition to `Adopted`, and a repeated reopen remains stable. The source fixture has been closed before recovery, but the test does not directly observe zero request attempts. It is not hard-process/power-loss evidence and does not cover the other AC05 crash windows or deployment/platform qualification. AC05 remains pending; see the [execution ledger](../execution-ledger.md) for command, review and limits.
 
+### AC05 native post-rename SIGKILL recovery fixture — local evidence
+
+The Linux x86_64 app-manager regression `native_receipt_post_rename_sigkill_cold_reopen_recovers_without_source_replay` passes locally (1/1). A child installer reaches a test-only marker after destination rename and both parent-directory syncs, before native metadata publication; the parent observes the marker and terminates the child with SIGKILL. The test confirms signal termination, receipt/acquisition/lease/demand/manifest/workspace/output correspondence, matching tree and launcher hashes, and absent installed metadata at the interruption boundary. A fresh owner recovers the same acquisition to `Adopted`, reconstructs metadata from its receipt, and remains stable on another cold reopen. The parent keeps a controlled loopback listener active and observes no request to that endpoint during either owner's recovery and a bounded drain. This is one hard-process interruption point on a disposable Linux x86_64 root; the test-only marker, fixture endpoint and single crash window do not prove power-loss durability, broader source non-replay, other AC05 windows, deployed migration, shutdown/resource limits, packaged behavior, Windows/macOS, or full AC05. AC05 remains pending; see the [execution ledger](../execution-ledger.md) for the exact command, source review and limits.
+
 ### AC03 real-source consumer evidence — 2026-10-01
 
 The exact code candidate `7963211bc5989f6b08712792bf1542a2314cb7fb` was built as the production `pumas-rpc` binary with `inference-plugins` and run on Linux Mint 22.2 (Ubuntu noble base), x86_64, against a fresh isolated root at `/tmp/pumas-q1-live.jeAfvb`. `XDG_CONFIG_HOME` and the Pumas registry DB were isolated under that root, `HF_TOKEN` was unset, and the user's saved Pumas HF token was not read. The real `search_hf_models` and `start_model_download_from_hf` RPC calls reached Hugging Face; `get_available_versions` and `install_version` resolved and installed an official GitHub release. Health, model-list and version-status calls observed the local consumer state. The direct RPC calls exercised the backend operations used by the current UI. The renderer and packaged backend were outside this run; those remain for AC08 and AC17.
@@ -112,8 +116,9 @@ staged output, reconstructs the installation metadata once, preserves the
 receipt, and settles the existing acquisition.
 
 Both focused tests passed on disposable local roots (one HF, one native), and
-formatting passed; see commit `5a036cd6` in the execution ledger. This is local
-fixture evidence, not process-loss or power-loss proof. AC05 remains pending
+formatting passed; see commit `5a036cd6` in the execution ledger. Those two
+fixtures are same-process evidence; the separate SIGKILL fixture above adds one
+process-loss boundary. None establishes power-loss proof. AC05 remains pending
 for the other FilesReady/domain-commit/settlement windows, importer and
 extraction failures, real-source behavior, and required platform evidence.
 

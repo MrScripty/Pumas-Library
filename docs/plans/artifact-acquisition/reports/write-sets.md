@@ -106,6 +106,15 @@ Base: `work/acquisition-q1-http` at `c5deb493172d3fbddab55141d129f2ac7346bb3b`, 
 
 No source edits, acceptance-state changes, gate reopening, or changes to the Q2/R1 admission order are included. This records the current Q1 milestone before updating its existing draft PR.
 
+### Admitted Q1 app-manager test lint correction
+
+Base: `work/acquisition-q1-http` at `367373e77520dde108bb26b15a6ad1c875e94b5a`. Build #360's Rust-quality job failed on an unchanged `clippy::type_complexity` warning in the native receipt cold-reopen test helper in `version_manager/mod.rs:2042`. Exact write set:
+
+- `rust/crates/pumas-app-manager/src/version_manager/mod.rs`: replace only that helper's nested tuple return type with test-local named aliases or an equivalent named type. Preserve fixture behavior and assertions; make no production behavior change.
+- `docs/plans/artifact-acquisition/reports/write-sets.md` and `docs/plans/artifact-acquisition/execution-ledger.md`: admission and resulting verification evidence only.
+
+The repair is limited to enabling the existing strict all-target Rust-quality command. It does not change product acceptance, the Q1 gate, the milestone order, or the other workstreams.
+
 ## Q2: exact package-file handoff
 
 Allowed: Q1 acquisition types/service only for demonstrated missing file-set/lease semantics; `torch-server/resolve_runtime.py`, retained preview/lock consumers in `rust/crates/pumas-app-manager/src/version_manager/{torch_preview.rs,installer/torch.rs}`, corresponding existing package/integrity/progress tests, and `artifact_acquisition_install.rs`. Keep package resolution/install semantics with those consumers. The exact managed-Python/provider files are first traced for a migrate-versus-retain traffic disposition; no speculative private integration is authorized.

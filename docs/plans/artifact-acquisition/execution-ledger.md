@@ -314,6 +314,11 @@ All seven primary write sets are disjoint. Do not broaden a stream or change sha
 - After the admitted repair landed as `c5deb493172d3fbddab55141d129f2ac7346bb3b`, the Q1 current-phase summary needs a bounded refresh so it reports the additional composed-path shutdown/custody findings and the actual limits of the new local evidence. Exact write set is `docs/plans/artifact-acquisition/plan.md` current-phase summary, plus this ledger and `reports/write-sets.md` for admission/evidence only.
 - The refresh does not change the acceptance matrix or dependency gate. AC03 and AC15 remain the only accepted criteria; AQ-HTTP remains not ready; Q2 and runtime R1 remain gated. The existing Q1 draft PR #7 will be updated only after the milestone branch contains its source, plan, and verification record.
 
+## 2026-10-01 — Q1 app-manager test lint correction admitted
+
+- After pushing the Q1 candidate, Build #360 (`36834381365`) completed on prior head `0ecccd9c0c223fac32e12ec571126cd7fa39c238`. Its Rust-quality job failed on `clippy::type_complexity` at the unchanged native receipt cold-reopen test helper in `rust/crates/pumas-app-manager/src/version_manager/mod.rs:2042`; the other executed workflow/release, headless, frontend/desktop, and native QA jobs passed, while conditional release/package jobs were skipped.
+- The warning is reproduced by the current strict all-target local Clippy command and is outside the behavioral repair. A test-only named-type refactor is admitted in the same `mod.rs` file so the existing strict CI command can pass without a lint exception. No acceptance or gate state changes.
+
 ## 2026-10-01 — Q1 shutdown and custody repair verified
 
 - The repair from the isolated Sol 6.1 Medium worktree was integrated serially on `work/acquisition-q1-http` as `c5deb493172d3fbddab55141d129f2ac7346bb3b`, after admission `e1bb6d26`. The shared progress sender now observes both control flags; registered `AcquiredArtifactUse::run_blocking` work captures the held workspace clone; manager recovery lookup uses the existing consumer's registered blocking boundary. Only the three admitted Rust source/test paths changed.

@@ -806,7 +806,11 @@ impl AcquisitionService {
             }
             let response = tokio::select! {
                 biased;
-                _ = host.pause_requested() => return Err(PumasError::DownloadPaused),
+                _ = host.pause_requested() => return Err(if host.cancel_requested() {
+                    PumasError::DownloadCancelled
+                } else {
+                    PumasError::DownloadPaused
+                }),
                 response = open_http_artifact(client, url, &operation.record.manifest, file_index, resume, authorization) => response,
             };
             let outcome = match response {
@@ -859,7 +863,11 @@ impl AcquisitionService {
                         .await?;
                     tokio::select! {
                         biased;
-                        _ = host.pause_requested() => return Err(PumasError::DownloadPaused),
+                        _ = host.pause_requested() => return Err(if host.cancel_requested() {
+                            PumasError::DownloadCancelled
+                        } else {
+                            PumasError::DownloadPaused
+                        }),
                         _ = tokio::time::sleep(delay) => {},
                     }
                 }
@@ -1503,6 +1511,10 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     fn manifest(path: &str) -> ArtifactManifest {
+        manifest_with_size(path, 4)
+    }
+
+    fn manifest_with_size(path: &str, size: u64) -> ArtifactManifest {
         ArtifactManifest::new(
             ArtifactSourceIdentity::new(
                 "fixture",
@@ -1518,7 +1530,7 @@ mod tests {
             vec![ArtifactFile::new(
                 path,
                 "payload",
-                Some(4),
+                Some(size),
                 None,
                 FileVerificationRequirement::SizeAndImmutableRevision,
             )
@@ -1577,6 +1589,73 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct ControlledHost {
+        paused: Arc<AtomicBool>,
+        cancelled: Arc<AtomicBool>,
+        pause_wake: Arc<tokio::sync::Notify>,
+        cancel_wake: Arc<tokio::sync::Notify>,
+        progress: tokio::sync::watch::Sender<u64>,
+    }
+
+    impl ControlledHost {
+        fn pause(&self) {
+            self.paused.store(true, Ordering::Release);
+            self.pause_wake.notify_waiters();
+        }
+
+        fn cancel(&self) {
+            self.cancelled.store(true, Ordering::Release);
+            self.cancel_wake.notify_waiters();
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl HttpAttemptHost for ControlledHost {
+        async fn pause_requested(&self) {
+            loop {
+                let paused = self.pause_wake.notified();
+                tokio::pin!(paused);
+                paused.as_mut().enable();
+                let cancelled = self.cancel_wake.notified();
+                tokio::pin!(cancelled);
+                cancelled.as_mut().enable();
+                if self.paused.load(Ordering::Acquire) || self.cancelled.load(Ordering::Acquire) {
+                    return;
+                }
+                tokio::select! {
+                    _ = paused => {},
+                    _ = cancelled => {},
+                }
+            }
+        }
+
+        fn pause_requested_now(&self) -> bool {
+            self.paused.load(Ordering::Acquire)
+        }
+
+        fn cancel_requested(&self) -> bool {
+            self.cancelled.load(Ordering::Acquire)
+        }
+
+        async fn record_progress(&mut self, downloaded_for_file: u64) -> Result<()> {
+            self.progress.send_replace(downloaded_for_file);
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl AcquisitionHost for ControlledHost {
+        async fn retry(
+            &mut self,
+            _attempt: u32,
+            _delay: Option<Duration>,
+            _error: Option<&str>,
+        ) -> Result<()> {
+            Ok(())
+        }
+    }
+
     fn retry() -> AcquisitionRetryPolicy {
         AcquisitionRetryPolicy {
             attempts: Some(1),
@@ -1606,6 +1685,192 @@ mod tests {
             socket.write_all(body).await.unwrap();
         });
         (url, server)
+    }
+
+    async fn serve_after_gate(
+        first: &'static [u8],
+        remainder: &'static [u8],
+    ) -> (
+        String,
+        tokio::task::JoinHandle<()>,
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/fixture", listener.local_addr().unwrap());
+        let (first_sent_sender, first_sent_receiver) = tokio::sync::oneshot::channel();
+        let (continue_sender, continue_receiver) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 2048];
+            let received = socket.read(&mut request).await.unwrap();
+            assert!(received > 0);
+            let total = first.len() + remainder.len();
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {total}\r\nConnection: close\r\n\r\n"
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            socket.write_all(first).await.unwrap();
+            let _ = first_sent_sender.send(());
+            if continue_receiver.await.is_ok() {
+                let _ = socket.write_all(remainder).await;
+            }
+        });
+        (url, server, first_sent_receiver, continue_sender)
+    }
+
+    async fn controlled_partial_transfer_stops_writing(paused: bool) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store.clone()));
+        let consumer = Arc::new(service.open_consumer("fixture").unwrap());
+        let demand = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: if paused {
+                "paused-transfer".into()
+            } else {
+                "cancelled-transfer".into()
+            },
+        };
+        let expected_demand = demand.clone();
+        let request_manifest = manifest_with_size("payload.bin", 8);
+        let expected_manifest = request_manifest.clone();
+        let request_workspace = workspace(&stage);
+        let expected_workspace = request_workspace.identity().clone();
+        let (url, server, first_sent, continue_sender) = serve_after_gate(b"DATA", b"TAIL").await;
+        let mut continue_sender = Some(continue_sender);
+        let (progress_sender, mut progress) = tokio::sync::watch::channel(0_u64);
+        let host = ControlledHost {
+            paused: Arc::new(AtomicBool::new(false)),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            pause_wake: Arc::new(tokio::sync::Notify::new()),
+            cancel_wake: Arc::new(tokio::sync::Notify::new()),
+            progress: progress_sender,
+        };
+        let controls = host.clone();
+        let transfer_consumer = consumer.clone();
+        let mut transfer = tokio::spawn(async move {
+            transfer_consumer
+                .acquire_http(
+                    AcquisitionHttpRequest {
+                        demand,
+                        manifest: request_manifest,
+                        workspace: request_workspace,
+                        sources: vec![AcquisitionHttpSource {
+                            url,
+                            authorization: None,
+                        }],
+                        retry: retry(),
+                    },
+                    reqwest::Client::new(),
+                    Box::new(host),
+                    |_| async move { Ok::<((), Value), PumasError>(((), Value::Null)) },
+                    |(), _receipt| async move { Ok::<(), PumasError>(()) },
+                )
+                .await
+        });
+
+        let progress_result = tokio::time::timeout(Duration::from_secs(2), async {
+            first_sent
+                .await
+                .map_err(|_| "HTTP fixture stopped before sending the first chunk")?;
+            while *progress.borrow_and_update() < 4 {
+                progress
+                    .changed()
+                    .await
+                    .map_err(|_| "transfer ended before reporting the first chunk")?;
+            }
+            Ok::<(), &'static str>(())
+        })
+        .await;
+        let progress_failure = match progress_result {
+            Ok(Ok(())) => None,
+            Ok(Err(message)) => Some(message),
+            Err(_) => Some("timed out waiting for the first chunk"),
+        };
+        if let Some(message) = progress_failure {
+            controls.cancel();
+            if let Some(sender) = continue_sender.take() {
+                let _ = sender.send(());
+            }
+            if tokio::time::timeout(Duration::from_secs(2), &mut transfer)
+                .await
+                .is_err()
+            {
+                transfer.abort();
+                let _ = transfer.await;
+            }
+            server.abort();
+            let _ = server.await;
+            panic!("controlled transfer setup failed: {message}");
+        }
+        let before_control = store.acquisitions().unwrap();
+        assert_eq!(before_control.len(), 1);
+        let exact_record = before_control.values().next().unwrap().clone();
+        assert_eq!(exact_record.demand, expected_demand);
+        assert_eq!(exact_record.manifest, expected_manifest);
+        assert_eq!(exact_record.workspace, expected_workspace);
+        assert!(matches!(exact_record.phase, AcquisitionPhase::Transferring));
+        assert!(exact_record.files.is_empty());
+
+        if paused {
+            controls.pause();
+        } else {
+            controls.cancel();
+        }
+        let result = match tokio::time::timeout(Duration::from_secs(2), &mut transfer).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(error)) => {
+                if let Some(sender) = continue_sender.take() {
+                    let _ = sender.send(());
+                }
+                server.abort();
+                let _ = server.await;
+                panic!("controlled transfer task failed: {error}");
+            }
+            Err(_) => {
+                controls.cancel();
+                if let Some(sender) = continue_sender.take() {
+                    let _ = sender.send(());
+                }
+                transfer.abort();
+                let _ = transfer.await;
+                server.abort();
+                let _ = server.await;
+                panic!("controlled transfer did not observe pause/cancellation");
+            }
+        };
+        if paused {
+            assert!(matches!(result, Err(PumasError::DownloadPaused)));
+        } else {
+            assert!(matches!(result, Err(PumasError::DownloadCancelled)));
+        }
+        // Only release the final source bytes after the public operation has
+        // returned from either control action; they must not extend its partial.
+        continue_sender.take().unwrap().send(()).unwrap();
+        server.await.unwrap();
+
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin.part")).unwrap(),
+            b"DATA"
+        );
+        assert!(!stage.join("payload.bin").exists());
+        let records = store.acquisitions().unwrap();
+        assert_eq!(records, before_control);
+        assert!(store.consumer_receipt(exact_record.id).unwrap().is_none());
+        let record = records.get(&exact_record.id).unwrap();
+        assert!(matches!(record.phase, AcquisitionPhase::Transferring));
+        assert!(record.files.is_empty());
+
+        consumer.shutdown().await.unwrap();
+        service.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1997,5 +2262,15 @@ mod tests {
     #[tokio::test]
     async fn cleanup_failure_retains_using_record_and_verified_file() {
         withdrawal_waits_for_consumer_effect(true).await;
+    }
+
+    #[tokio::test]
+    async fn pause_stops_partial_writes_and_preserves_transfer_demand() {
+        controlled_partial_transfer_stops_writing(true).await;
+    }
+
+    #[tokio::test]
+    async fn active_cancel_stops_partial_writes_and_preserves_transfer_demand() {
+        controlled_partial_transfer_stops_writing(false).await;
     }
 }

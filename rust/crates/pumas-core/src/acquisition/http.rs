@@ -27,6 +27,9 @@ pub(crate) trait HttpArtifactSink: Send {
 /// without transferring its lifecycle ownership to the protocol adapter.
 #[async_trait::async_trait]
 pub trait HttpAttemptHost: Send {
+    /// Wait for a control signal that interrupts the current HTTP request/body
+    /// wait. After wake, callers inspect `cancel_requested`; otherwise the
+    /// interruption is a pause.
     async fn pause_requested(&self);
     fn pause_requested_now(&self) -> bool;
     fn cancel_requested(&self) -> bool;
@@ -165,6 +168,9 @@ pub(crate) async fn stream_http_artifact(
         let next = tokio::select! {
             biased;
             _ = host.pause_requested() => {
+                if host.cancel_requested() {
+                    return Ok(HttpBodyOutcome::Cancelled);
+                }
                 sink.flush().await?;
                 return Ok(HttpBodyOutcome::Paused);
             }
@@ -173,12 +179,12 @@ pub(crate) async fn stream_http_artifact(
         let Some(chunk) = next else {
             break;
         };
+        if host.cancel_requested() {
+            return Ok(HttpBodyOutcome::Cancelled);
+        }
         if host.pause_requested_now() {
             sink.flush().await?;
             return Ok(HttpBodyOutcome::Paused);
-        }
-        if host.cancel_requested() {
-            return Ok(HttpBodyOutcome::Cancelled);
         }
         let chunk = chunk.map_err(|error| PumasError::Network {
             message: "HTTP artifact stream failed".into(),

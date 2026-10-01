@@ -32,13 +32,21 @@ local HTTP source, hold a blocking effect in that worker generation, and call
 exact `Using` record remain while the effect is held, successful cleanup then
 withdraws the record and clears its verified-file set, and cleanup failure
 retains both the `Using` record and file while scope/global shutdown report the
-failed effect. The command and result are recorded in the execution ledger.
+failed effect. Two more public-consumer tests gate a local HTTP body after its
+first four bytes, then pause or cancel the active transfer before releasing the
+remaining source bytes. Cancellation wakes a stalled HTTP body and is reported
+as cancellation, not pause. Once the operation returns, the fixture opens the
+server gate to attempt the remaining bytes; the exact partial file still
+contains only the first four bytes, no final file exists, and the entire
+acquisition record is unchanged. The fixture does not establish successful
+delivery of the gated remainder or crash durability. Commands and results are
+recorded in the execution ledger.
 
-This closes only that service-level cleanup-custody slice. AC06 remains pending
-for queued/active/verifying cancellation, pause/resume no-write behavior,
-stale-generation rejection at the acquisition boundary, idempotent release,
-and live/durable-demand preservation. The local HTTP/workspace fixture is not
-real HF/native source or supported-platform acceptance.
+This is partial service-level evidence. AC06 remains pending
+for queued/verifying cancellation, resume-after-pause, stale-generation
+rejection at the acquisition boundary, idempotent release, and preservation of
+all live/durable demands. These local HTTP/workspace fixtures are not real
+HF/native source or supported-platform acceptance.
 
 
 ## Real procedures and proof boundaries
@@ -55,7 +63,7 @@ real HF/native source or supported-platform acceptance.
 
 ## Planned test placement and supporting commands
 
-The core public-consumer integration target `rust/crates/pumas-core/tests/artifact_acquisition.rs` exists and has passed 2/2 on the prior code candidate. The AC06 service regressions are unit tests in `rust/crates/pumas-core/src/acquisition/service.rs`; `cargo test --manifest-path rust/Cargo.toml --locked -p pumas-library --lib acquisition::service::tests:: -- --test-threads=1` passed 4/4 on the current local source diff. The planned standalone target `rust/crates/pumas-app-manager/tests/artifact_acquisition_install.rs` is not present; native install/recovery cases currently run in app-manager unit/fixture targets. These local checks do not close the real-source, desktop, or platform claims above. Record each new command/result and broaden to affected aggregate checks:
+The core public-consumer integration target `rust/crates/pumas-core/tests/artifact_acquisition.rs` exists and has passed 2/2 on the prior code candidate. The AC06 service regressions are unit tests in `rust/crates/pumas-core/src/acquisition/service.rs`; `cargo test --manifest-path rust/Cargo.toml --locked -p pumas-library --lib acquisition::service::tests:: -- --test-threads=1` passed 6/6 on the current local source diff. The planned standalone target `rust/crates/pumas-app-manager/tests/artifact_acquisition_install.rs` is not present; native install/recovery cases currently run in app-manager unit/fixture targets. These local checks do not close the real-source, desktop, or platform claims above. Record each new command/result and broaden to affected aggregate checks:
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml -p pumas-library --test artifact_acquisition

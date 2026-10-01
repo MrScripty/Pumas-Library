@@ -285,7 +285,14 @@ fn strong_etag(response: &Response) -> Option<String> {
 }
 
 fn validate_identity_encoding(response: &Response) -> Result<()> {
-    if let Some(value) = response.headers().get(CONTENT_ENCODING) {
+    let all = response.headers().get_all(CONTENT_ENCODING);
+    let mut values = all.iter();
+    if let Some(value) = values.next() {
+        if values.next().is_some() {
+            return Err(invalid_response(
+                "HTTP artifact response requires at most one Content-Encoding field",
+            ));
+        }
         let value = value.to_str().map_err(|_| {
             invalid_response("HTTP artifact response used an unreadable content encoding")
         })?;
@@ -713,6 +720,55 @@ mod tests {
             line.split_once(':')
                 .is_some_and(|(name, _)| name.eq_ignore_ascii_case("authorization"))
         }));
+    }
+
+    #[tokio::test]
+    async fn absent_or_single_identity_content_encoding_admits_the_body() {
+        for headers in ["", "Content-Encoding: identity\r\n"] {
+            let (url, server) = serve_once(response("200 OK", headers, "bytes")).await;
+            let reply = open_http_artifact(
+                &reqwest::Client::new(),
+                url.as_str(),
+                &manifest(weak_file(5), RevisionStrength::Weak),
+                0,
+                0,
+                None,
+            )
+            .await
+            .unwrap();
+            assert!(!reply.resumed);
+            assert_eq!(reply.total_size, Some(5));
+            assert_eq!(reply.body.bytes().await.unwrap().as_ref(), b"bytes");
+            let _ = server.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn duplicate_content_encoding_fields_are_rejected_in_both_orders() {
+        for headers in [
+            "Content-Encoding: identity\r\nContent-Encoding: gzip\r\n",
+            "Content-Encoding: gzip\r\nContent-Encoding: identity\r\n",
+            "Content-Encoding: identity\r\nContent-Encoding: identity\r\n",
+        ] {
+            let (url, server) = serve_once(response("200 OK", headers, "bytes")).await;
+            let error = open_http_artifact(
+                &reqwest::Client::new(),
+                url.as_str(),
+                &manifest(weak_file(5), RevisionStrength::Weak),
+                0,
+                0,
+                None,
+            )
+            .await
+            .unwrap_err();
+            assert!(matches!(
+                error,
+                PumasError::Validation { field, message }
+                    if field == "artifact.http.response"
+                        && message == "HTTP artifact response requires at most one Content-Encoding field"
+            ));
+            let _ = server.await.unwrap();
+        }
     }
 
     #[tokio::test]

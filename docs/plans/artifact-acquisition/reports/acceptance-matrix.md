@@ -23,6 +23,23 @@
 | AC17 | **Installed/native/deployment qualification.** Outside checkout, use actual packaged backend/UI to acquire model/native and S3 inputs; execute affected filesystem/cancellation/reopen mechanisms on each declared supported OS. Close independent client and old-writer dispositions; retain per-target proof and known exclusions. | release-artifact + system + user-workflow | required-real packaged/native targets and deployment facts | either | Q4 / Distribution/integrator | pending |
 | AC18 | **Composed simplicity and single ownership.** Trace new source, native build, adapter artifact and recovery repair against locality matrix. Verify one authoritative transfer writer per migrated attempt, distinct consumer commits, deletion of selected duplicate byte loops and no downstream-to-acquisition dependency. | architecture review (separate from test success) | not-applicable | manual | Q1/each material composition / Independent reviewer | pending |
 
+### AC06 partial service evidence — 2026-10-01
+
+The `pumas-library` acquisition service tests now drive the public
+`AcquisitionConsumer::acquire_http` path with a real temporary workspace and a
+local HTTP source, hold a blocking effect in that worker generation, and call
+`AcquiredArtifactUse::withdraw_after_cleanup`. They prove that the file and
+exact `Using` record remain while the effect is held, successful cleanup then
+withdraws the record and clears its verified-file set, and cleanup failure
+retains both the `Using` record and file while scope/global shutdown report the
+failed effect. The command and result are recorded in the execution ledger.
+
+This closes only that service-level cleanup-custody slice. AC06 remains pending
+for queued/active/verifying cancellation, pause/resume no-write behavior,
+stale-generation rejection at the acquisition boundary, idempotent release,
+and live/durable-demand preservation. The local HTTP/workspace fixture is not
+real HF/native source or supported-platform acceptance.
+
 
 ## Real procedures and proof boundaries
 
@@ -38,11 +55,11 @@
 
 ## Planned test placement and supporting commands
 
-The write-set report assigns the new integration targets `rust/crates/pumas-core/tests/artifact_acquisition.rs` and `rust/crates/pumas-app-manager/tests/artifact_acquisition_install.rs`. They do not exist as executed tests in this package. Once implemented, the owner runs their actual named cases, records commands/results and broadens to affected aggregate checks:
+The core public-consumer integration target `rust/crates/pumas-core/tests/artifact_acquisition.rs` exists and has passed 2/2 on the prior code candidate. The AC06 service regressions are unit tests in `rust/crates/pumas-core/src/acquisition/service.rs`; `cargo test --manifest-path rust/Cargo.toml --locked -p pumas-library --lib acquisition::service::tests:: -- --test-threads=1` passed 4/4 on the current local source diff. The planned standalone target `rust/crates/pumas-app-manager/tests/artifact_acquisition_install.rs` is not present; native install/recovery cases currently run in app-manager unit/fixture targets. These local checks do not close the real-source, desktop, or platform claims above. Record each new command/result and broaden to affected aggregate checks:
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml -p pumas-library --test artifact_acquisition
-cargo test --manifest-path rust/Cargo.toml -p pumas-app-manager --test artifact_acquisition_install
+cargo test --manifest-path rust/Cargo.toml -p pumas-library --lib acquisition::service::tests:: -- --test-threads=1
 ./scripts/rust/check.sh
 npm run -w frontend lint
 npm run -w frontend check:types

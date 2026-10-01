@@ -158,3 +158,24 @@ metadata-coordination enablement, project-profile existence, and contributor
 execution/provider readiness. Agent-list failure should identify the missing
 profile resource (or expose a safe status field) instead of returning only
 `profile.open`; the current state is not sufficient to choose an agent safely.
+
+## 2026-10-01 — coordinated contributor preflight
+
+The service status still reports connected/open admission and ready/held
+metadata coordination. A valid agent-list request
+`passeur_agents({limit:4,offset:0})` again returned `PATH_NOT_FOUND` at
+`profile.open`; the task list returned zero tasks. `passeur_prepare({})`
+completed, but did not enable coordination for execution: after correcting a
+caller-side `target_ref` validation error (the request must use a
+`refs/heads/...` ref), `passeur_preflight` returned
+`COORDINATION_NOT_ENABLED` with “Coordination has not been explicitly
+initialized.” No assignment was submitted. The tool guidance reserves
+initialization for the operator CLI, so the caller cannot safely recover this
+state by guessing an agent ID or writing profile/coordination data.
+
+The current errors expose two distinct setup problems: configured contributor
+discovery cannot open the project profile, and coordinated admission says the
+coordination metadata is uninitialized despite status/prepare reporting it
+ready. Readiness should make these states consistent, and preflight should
+identify the supported operator recovery path without implying that successful
+prepare enabled execution.

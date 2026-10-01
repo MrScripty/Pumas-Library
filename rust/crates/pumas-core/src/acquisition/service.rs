@@ -1499,6 +1499,7 @@ mod tests {
         ArtifactFile, ArtifactRevisionEvidence, ArtifactSourceIdentity,
         FileVerificationRequirement, RevisionStrength,
     };
+    use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     fn manifest(path: &str) -> ArtifactManifest {
@@ -1840,5 +1841,161 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    async fn withdrawal_waits_for_consumer_effect(cleanup_fails: bool) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store.clone()));
+        let consumer = Arc::new(service.open_consumer("fixture").unwrap());
+        let demand = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: "held-consumer-effect".into(),
+        };
+        let (url, server) = serve(b"DATA").await;
+
+        let (use_sender, use_receiver) = tokio::sync::oneshot::channel();
+        let (continue_sender, continue_receiver) = tokio::sync::oneshot::channel();
+        let (effect_started_sender, effect_started_receiver) = tokio::sync::oneshot::channel();
+        let (release_effect_sender, release_effect_receiver) = std::sync::mpsc::channel();
+        let consumer_task = consumer.clone();
+        let acquisition_stage = stage.clone();
+        let acquisition = tokio::spawn(async move {
+            consumer_task
+                .acquire_http(
+                    AcquisitionHttpRequest {
+                        demand,
+                        manifest: manifest("payload.bin"),
+                        workspace: workspace(&acquisition_stage),
+                        sources: vec![AcquisitionHttpSource {
+                            url,
+                            authorization: None,
+                        }],
+                        retry: retry(),
+                    },
+                    reqwest::Client::new(),
+                    Box::new(Host),
+                    move |use_handle| async move {
+                        // Register an effect under this exact worker generation, then
+                        // hand the use lease to the cancellation cleanup under test.
+                        let effect_context = use_handle.context.clone();
+                        let effect = tokio::spawn(async move {
+                            owned(&effect_context, "held consumer effect", move || {
+                                let _ = effect_started_sender.send(());
+                                release_effect_receiver.recv().map_err(|error| {
+                                    PumasError::Other(format!(
+                                        "Consumer effect gate closed: {error}"
+                                    ))
+                                })?;
+                                Ok(())
+                            })
+                            .await
+                        });
+                        effect_started_receiver.await.map_err(|_| {
+                            PumasError::Other("Consumer effect did not start".into())
+                        })?;
+                        use_sender.send(use_handle).map_err(|_| {
+                            PumasError::Other("Cancellation observer disappeared".into())
+                        })?;
+                        continue_receiver.await.map_err(|_| {
+                            PumasError::Other(
+                                "Cancellation observer did not resume consumer".into(),
+                            )
+                        })?;
+                        effect
+                            .await
+                            .map_err(|error| PumasError::Other(error.to_string()))??;
+                        Err::<((), Value), PumasError>(PumasError::Other(
+                            "Fixture consumer cancelled after cleanup".into(),
+                        ))
+                    },
+                    |(), _receipt| async move { Ok::<(), PumasError>(()) },
+                )
+                .await
+        });
+
+        let use_handle = use_receiver.await.unwrap();
+        let retained = use_handle.record().clone();
+        assert!(matches!(retained.phase, AcquisitionPhase::Using { .. }));
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+
+        let cleanup_started = Arc::new(AtomicBool::new(false));
+        let cleanup_started_in_callback = cleanup_started.clone();
+        let cleanup_path = stage.join("payload.bin");
+        let withdrawal = use_handle.withdraw_after_cleanup(move || {
+            cleanup_started_in_callback.store(true, Ordering::Release);
+            if cleanup_fails {
+                return Err(PumasError::Other("Fixture cleanup failed".into()));
+            }
+            std::fs::remove_file(cleanup_path)
+                .map_err(|error| PumasError::Other(error.to_string()))?;
+            Ok(())
+        });
+        tokio::pin!(withdrawal);
+
+        // Poll the real withdrawal path while the registered blocking effect is
+        // gated. The future stays alive after the timeout so it can finish later.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut withdrawal)
+                .await
+                .is_err(),
+            "withdrawal completed while a registered consumer effect was blocked"
+        );
+        assert!(!cleanup_started.load(Ordering::Acquire));
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        let during_cleanup = store.acquisitions().unwrap();
+        assert_eq!(during_cleanup.get(&retained.id), Some(&retained));
+
+        release_effect_sender.send(()).unwrap();
+        let withdrawal_result = withdrawal.await;
+        assert!(cleanup_started.load(Ordering::Acquire));
+
+        let after_cleanup = store.acquisitions().unwrap();
+        let after_record = after_cleanup.get(&retained.id).unwrap();
+        if cleanup_fails {
+            assert!(withdrawal_result.is_err());
+            assert_eq!(after_record, &retained);
+            assert!(matches!(after_record.phase, AcquisitionPhase::Using { .. }));
+            assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        } else {
+            withdrawal_result.unwrap();
+            assert!(matches!(after_record.phase, AcquisitionPhase::Withdrawn));
+            assert!(after_record.files.is_empty());
+            assert!(!stage.join("payload.bin").exists());
+        }
+
+        continue_sender.send(()).unwrap();
+        assert!(acquisition.await.unwrap().is_err());
+        server.await.unwrap();
+        let shutdown = consumer.shutdown().await;
+        if cleanup_fails {
+            assert!(matches!(
+                shutdown,
+                Err(PumasError::DownloadShutdownFailed { failures: 1 })
+            ));
+        } else {
+            shutdown.unwrap();
+        }
+        let shutdown = service.shutdown().await;
+        if cleanup_fails {
+            assert!(matches!(
+                shutdown,
+                Err(PumasError::DownloadShutdownFailed { failures: 1 })
+            ));
+        } else {
+            shutdown.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn withdrawal_waits_for_consumer_effect_before_reclaiming_files() {
+        withdrawal_waits_for_consumer_effect(false).await;
+    }
+
+    #[tokio::test]
+    async fn cleanup_failure_retains_using_record_and_verified_file() {
+        withdrawal_waits_for_consumer_effect(true).await;
     }
 }

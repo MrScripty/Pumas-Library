@@ -326,3 +326,14 @@ This entry records the resumed candidate route only; implementation review and a
 - **Recommendations:** Separate Router navigation reads from canonical policy reads in the input contract; make `include_routing` invalidity specific to the affected target instead of rejecting a multi-policy batch; and add section-scoped or byte-budgeted reads so full route coverage can be reviewed without flooding the response.
 
 This is tool-usability evidence only and does not certify implementation or product acceptance.
+
+## Primary integrator — AC06 cleanup-custody regression route
+
+- **Useful calls:** A fresh snapshot `snapshot:v1:e6fcc079-e95a-4f2e-a39e-47a7e667a20f` routed the Rust service test and durable-cleanup change to 20 standards with zero unresolved facts. Explicitly recording no framework and the observed concurrent-plan-integration condition completed the route. The selected guidance identified the library API, persistence, async custody, concurrency, verification-oracle, implementation, documentation and commit obligations.
+- **Confusing or redundant steps:** The initial route returned `needs-facts` for framework applicability and whether outstanding proposals could stale before serial integration. A single `read_many` request for 18 compact policies returned complete policy bodies but exceeded the caller-visible output window and was truncated. Record-count limits do not ensure the bodies can be reviewed together.
+- **Missing context:** The standards service did not describe the test harness's actual shared `TaskContext`, local HTTP endpoint, exact retained acquisition state, Passeur preflight error, or test result; those came from repository inspection and execution.
+- **Where I left MCP:** The route supplies obligations only. Focused service tests, review of the exact code diff, and plan-gate evidence remain separate.
+- **Smallest sufficient workflow:** Route all registered applicability facts explicitly, then read a few canonical policies per call and inspect service source/tests independently.
+- **Recommendations:** Offer section-scoped reads or a byte-budgeted result option so a bounded policy count also stays within a reviewable response; keep completed routing clearly separate from implementation and acceptance.
+
+This records MCP usability only; it does not certify implementation compliance or AC06 acceptance.

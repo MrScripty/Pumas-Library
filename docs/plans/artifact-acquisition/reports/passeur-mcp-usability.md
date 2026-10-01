@@ -267,3 +267,30 @@ call.
 These observations come from one coordinated Muse 1.3 implementation task.
 The worker report is not code verification: it had no checks, the Passeur
 delivery was uncommitted, and acceptance remains the integrator's responsibility.
+
+## 2026-10-01 — contributor recheck with frozen coordination
+
+The current `passeur_status` call reports a connected repository service and a
+valid execution profile. `passeur_agents({limit:4,offset:0})` returns the
+configured `muse` agent, and `passeur_models({limit:2,offset:0})` returns
+`muse-spark-1.3-contributor`. Agent runtime readiness, provider, and approval
+remain `not_checked`. The first catalog request used `limit:16` and was
+rejected because the current schema requires at most 2; retrying with limit 2
+succeeded.
+
+Task listing shows task
+`ad1668f3-6588-4ce6-86a0-33813b7856cf` in `needs_attention`, with native state
+`unknown` and an unconfirmed shutdown/input-delivery disposition. Repository
+coordination is consequently `frozen` and names that task as requiring
+reconciliation. No new assignment was submitted. This is a distinct state
+from contributor discovery: the contributor identity and model catalog are
+available, but the service refuses coordinated new work while the prior
+native session remains unresolved. The current calls establish the returned
+state only; they do not prove that the native session stopped.
+
+The catalog limit should match the declared tool contract, and a connected
+service should expose contributor runtime readiness explicitly. More
+importantly for this session, task recovery needs an operator-visible,
+evidence-based reconciliation path that distinguishes cancellation requested,
+native shutdown confirmed, and input delivery confirmed before unfreezing
+coordination.

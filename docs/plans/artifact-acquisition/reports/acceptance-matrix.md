@@ -33,7 +33,29 @@ The actual native install selected release `b11312+vulkan` from the official lla
 
 One `get_model_download_status` poll near HF settlement returned JSON-RPC `-32603` (internal error). A subsequent `list_model_downloads` returned the same download as `completed`, and the model projection and durable receipt were successful. Preserve this as an AC08 progress/error-contract issue to investigate; it does not invalidate the separately observed importer settlement in AC03. The HF manifest used weak revision `main`; this run does not qualify commit-pinned revision selection or every file at a repository commit. Desktop controls, cancellation, pause/resume, packaged backend, other OS, deployed-state migration, and cross-platform durability remain outside this evidence.
 
-### AC04 partial duplicate-member evidence — 2026-10-01
+### AC01/AC02 source-hardening candidate — 2026-10-01
+
+Commits `83d6adc1` (source candidate `aeb1c304`) and `0f272db1` (source
+candidate `779a91b0`) contain the AC01/AC02 source changes on the current Q1
+branch. AC01 normalizes each logical-path component to NFC before and after the
+existing lowercase comparison. Its manifest regression rejects NFC/NFD aliases
+across final paths, staging siblings and file/directory prefixes while
+preserving distinct Unicode paths. The direct `unicode-normalization`
+dependency is recorded in the package manifest and lockfile. The exact focused
+AC01 test passed 1/1 using offline Cargo with one job; the initial compile took
+4m08s.
+
+AC02 inspects every `Content-Encoding` field and refuses duplicates before
+returning an admitted response body. Its raw controlled-response regression
+covers identity/gzip in both orders and repeated identity; absent and single
+identity acceptance are covered separately. The complete focused manifest
+unit module passed 10/10 and the HTTP unit module passed 20/20 serially using
+offline Cargo with one job. Scoped rustfmt and `git diff --check` pass. AC01
+and AC02 remain pending: Linux fixtures do not
+establish macOS filesystem identity, the broader HTTP matrix remains open, and
+hosted CI has not verified the current head.
+
+### AC04 partial local migration and duplicate-member evidence — 2026-10-01
 
 The canonical `downloads.json` readers now reject duplicate JSON object member
 names before exposing acquisition, model, or consumer-receipt state. The
@@ -46,9 +68,15 @@ without rewriting the source. Malformed JSON remains a JSON syntax error.
 
 The focused local run selected 29 tests by the `duplicate` filter and passed
 all 29; this includes unrelated tests whose names also contain that word. AC04
-remains pending for complete retained-partition schema-6 migration fixtures,
-all other recovery windows, real deployment population, and old-writer
-retirement/isolation evidence.
+also has focused passing disposable migration fixtures on candidate
+`2b71e8745a158dac8c0b21bf9c7ccabd4e943255`: the schema-6 retained-partition
+fixture and the combined schema-4/5 migration fixture each passed. The schema-6
+fixture verifies migration refusal without rewriting source bytes, explicit
+offline migration, cold production-reader reopen, no fabricated consumer
+receipt, and refusal to settle unresolved Pending cleanup without changing the
+migrated store. These fixtures provide local migration evidence only. AC04
+remains pending for other recovery windows, actual deployment population,
+old-writer retirement/isolation, rollback, and retained-root evidence.
 
 ### AC05 partial consumer-recovery evidence — 2026-10-01
 

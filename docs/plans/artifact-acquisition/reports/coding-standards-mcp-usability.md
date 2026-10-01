@@ -371,8 +371,6 @@ This records Coding-Standards MCP usability only; it is not source review or pro
 
 This records MCP usability only; it is not source review or product acceptance.
 
-- **Final route refresh:** After implementation, the route was refreshed on snapshot `snapshot:v1:b187217e-0e3f-4b16-b101-74eca1357d5b`; it selected 22 standards with zero unresolved applicability facts and matched the admitted pre-edit scope. The route remains guidance only. Sol High's independent review and the serial local test/lint evidence are recorded separately in the execution ledger.
-
 ## Primary integrator — AC02 duplicate `Content-Range` refusal
 
 - **Useful calls:** Reused routing-facts snapshot `snapshot:v1:60843683-da0a-4154-a24c-df49bda2a6d2`, routed the exact Rust library protocol-parser/test/docs slice, and received a complete 21-standard selection with zero unresolved questions or policies. A focused `read_many` covered contract invariants, protocol adapters, Rust security and independent test oracles before the implementation write set was admitted.
@@ -437,5 +435,17 @@ This records tool usability only; it does not certify source compliance or produ
 - **Where I left MCP:** The 22-standard route and policy reads are guidance only. Source review identified the defect; focused tests, exact diff review, and final code review will provide implementation evidence. This does not accept AC10 or AQ-HTTP.
 - **Smallest sufficient workflow:** Refresh facts, route the exact slice, read the selected policies in small batches, and record the candidate's real checks independently.
 - **Recommendations:** Keep full policy bodies available, but return only requested sections or enforce a response-byte budget so metadata and continuations do not obscure the normative content.
+- **Final route refresh:** After implementation, the route was refreshed on snapshot `snapshot:v1:b187217e-0e3f-4b16-b101-74eca1357d5b`; it selected 22 standards with zero unresolved applicability facts and matched the admitted pre-edit scope. The route remains guidance only. Sol High's independent review and the serial local test/lint evidence are recorded separately in the execution ledger.
 
 This records tool usability only; it does not certify source compliance or product acceptance.
+
+## Primary integrator — AC01/AC02 Unicode and HTTP header validation
+
+- **Useful calls:** Refreshed routing facts and routed the exact library/Rust, protocol parsing, Unicode dependency, security, test-oracle, target-evidence, documentation, and commit scope on snapshot `snapshot:v1:01845ea1-06ec-420f-b2f5-678de01c3eee`. The route selected 28 standards with zero unresolved applicability questions. The read request covered Rust, protocol adapters, Rust dependencies/security, verification oracles/platforms, commit, and documentation.
+- **Confusing or redundant steps:** One eight-policy `read_many` response exceeded the useful caller output window and was truncated. The route itself remained compact and identified the selected count; smaller policy batches would make the normative text easier to inspect.
+- **Missing context:** Routing did not know the exact NFC/lowercase/NFC comparison, which manifest collision namespaces it covered, the duplicate `Content-Encoding` bypass, the module test results, or the separate macOS/hosted-CI evidence gaps. Repository inspection and serial Cargo output established those facts.
+- **Where I left MCP:** It supplied implementation, dependency, protocol, test-oracle, platform-evidence, documentation, and commit obligations only. The manifest and HTTP unit modules passed 10/10 and 20/20 respectively; these results and source review are independent evidence. The route does not accept either criterion or AQ-HTTP.
+- **Smallest sufficient workflow:** Refresh routing facts after the source boundary changes, provide explicit applicability facts, route once, and read only the policies that govern the changed boundary in small batches. Record the exact candidate and test result separately.
+- **Recommendations:** Bound policy responses by bytes as well as item count, and keep selected-policy summaries separate from full policy bodies and continuation metadata.
+
+This records Coding-Standards MCP usability only; it is not evidence of source compliance or product acceptance.

@@ -238,6 +238,29 @@ Parent milestone remains `work/acquisition-q1-http` / draft PR #7. Exact write s
 
 The production checkpoint, prefix-proof, strong-ETag and exact-resource-binding rules remain authoritative. This fixture correction admits no production source change, acceptance or gate transition. The source writer must not run Cargo, rustc, builds or tests, or commit, push or merge; root's serial focused default/no-default results are recorded in the execution ledger. `rustfmt --edition 2021 --check rust/crates/pumas-core/src/api/hf.rs` and `git diff --check` pass. Passeur submission failed with `PATH_NOT_FOUND`, so the authorized Sol Medium fallback owns this bounded edit.
 
+### AC01 canonical Unicode path-collision repair — admitted 2026-10-01
+
+Base: `work/acquisition-q1-http` at `2b71e8745a158dac8c0b21bf9c7ccabd4e943255`. Parent draft PR #7 remains the Q1 milestone review path. Exact write set:
+
+- `rust/crates/pumas-core/src/acquisition/manifest.rs`: compare each logical-path component after NFC normalization, lowercase mapping, and NFC normalization again. Apply the existing collision check to final paths, `.part` staging siblings and file/directory prefixes. Preserve original path and source-key values; do not reject unrelated non-ASCII paths.
+- `rust/crates/pumas-core/Cargo.toml` and `rust/Cargo.lock`: add direct `unicode-normalization` dependency only for this comparison and record its resolved dependency graph.
+- Co-located manifest regressions: reject NFC/NFD aliases across final, staging and prefix cases; accept distinct Unicode names; assert existing typed `CollidingLogicalPath` refusal.
+- `docs/contracts/artifact-acquisition.md` §4: specify the portable NFC/lowercase/NFC collision key while preserving original names and keeping target-filesystem identity claims separate.
+- `docs/plans/artifact-acquisition/issues.md` (AQ-I21), `plan.md`, `reports/acceptance-matrix.md`, this report, `execution-ledger.md`, and the Coding-Standards MCP usability report: identify the candidate, exact commits and focused result; leave AC01/AQ-HTTP pending.
+
+The manifest module passed 10/10, including the exact NFC/NFD collision test and distinct-name acceptance: `cargo test --offline --jobs 1 --manifest-path rust/Cargo.toml -p pumas-library --lib acquisition::manifest::tests:: -- --test-threads=1`. The new dependency also passed `cargo check --offline --jobs 1 --manifest-path rust/Cargo.toml -p pumas-library --no-default-features`. The initial default-feature compile took 4m08s. The source candidate is `aeb1c304456e9c50d195538d2a45652108600ddb`, integrated as `83d6adc178ead52babfdf3283bf8009e5b2b6c79`. The local NFC/NFD fixture does not establish the mounted filesystem's identity rules on macOS or another normalizing target. AC01 and AQ-HTTP remain pending. Do not run concurrent Cargo/rustc builds or infer hosted CI acceptance.
+
+### AC02 duplicate `Content-Encoding` refusal — admitted 2026-10-01
+
+Base: `work/acquisition-q1-http` at `2b71e8745a158dac8c0b21bf9c7ccabd4e943255`. Parent draft PR #7 remains the Q1 milestone review path. Exact write set:
+
+- `rust/crates/pumas-core/src/acquisition/http.rs`: inspect all `Content-Encoding` values and reject more than one with the existing typed `artifact.http.response` validation before returning an admitted body. Preserve no-header and single-identity acceptance, plus single compressed-encoding refusal.
+- Co-located controlled-response regressions: cover identity/gzip and gzip/identity duplicates, repeated identity, and valid absent/single identity responses with body-byte assertions.
+- `docs/contracts/artifact-acquisition.md` §5: require refusal of duplicate `Content-Encoding` fields before body admission and permit only absent/single `identity` values in this slice.
+- `docs/plans/artifact-acquisition/issues.md` (AQ-I22), `plan.md`, `reports/acceptance-matrix.md`, this report, `execution-ledger.md`, and the Coding-Standards MCP usability report: identify the candidate, exact commits and focused result; leave AC02/AQ-HTTP pending.
+
+The HTTP module passed 20/20, including duplicate-field refusal in both orders, repeated identity, absent/single-identity admission, existing compressed-encoding refusal and the surrounding range/representation tests: `cargo test --offline --jobs 1 --manifest-path rust/Cargo.toml -p pumas-library --lib acquisition::http::tests:: -- --test-threads=1`. The source candidate is `779a91b0a0e062e0bcc09bf764e6f5338ca4c96b`, integrated as `0f272db144914aa5c182a3334d8a7e57ab09c438`. This source fix does not close the full AC02 protocol matrix or exact-head hosted CI. Do not overlap Rust builds.
+
 ### AC02 duplicate `Content-Range` refusal — admitted 2026-10-01
 
 Base: `work/acquisition-q1-http` at `412409866caca4aedfd219addd869b4c12af6fc3`. Parent draft PR #7 remains the Q1 milestone review path. Exact write set:

@@ -1540,24 +1540,29 @@ mod tests {
     }
 
     fn workspace(path: &std::path::Path) -> AcquisitionWorkspace {
-        let root = crate::platform::capability_fs::open_directory(path).unwrap();
-        let check = root.try_clone().unwrap();
-        let expected = std::fs::canonicalize(path).unwrap();
-        let source = path.to_path_buf();
-        AcquisitionWorkspace::from_capability(
-            root,
+        workspace_with_identity(
+            path,
             WorkspaceIdentity {
                 root_identity: "fixture-physical-root".into(),
                 relative_target: "staging".into(),
             },
-            Arc::new(()),
-            move || {
-                if std::fs::canonicalize(&source)? != expected || !check.dir_metadata()?.is_dir() {
-                    return Err(invalid("Fixture grant changed"));
-                }
-                Ok(())
-            },
         )
+    }
+
+    fn workspace_with_identity(
+        path: &std::path::Path,
+        identity: WorkspaceIdentity,
+    ) -> AcquisitionWorkspace {
+        let root = crate::platform::capability_fs::open_directory(path).unwrap();
+        let check = root.try_clone().unwrap();
+        let expected = std::fs::canonicalize(path).unwrap();
+        let source = path.to_path_buf();
+        AcquisitionWorkspace::from_capability(root, identity, Arc::new(()), move || {
+            if std::fs::canonicalize(&source)? != expected || !check.dir_metadata()?.is_dir() {
+                return Err(invalid("Fixture grant changed"));
+            }
+            Ok(())
+        })
         .unwrap()
     }
 
@@ -2106,6 +2111,97 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn repeated_exact_withdrawal_preserves_an_active_demand_in_a_distinct_workspace() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let first_stage = temp.path().join("first-stage");
+        let second_stage = temp.path().join("second-stage");
+        std::fs::create_dir(&first_stage).unwrap();
+        std::fs::create_dir(&second_stage).unwrap();
+        let sentinel = second_stage.join("sentinel.bin");
+        std::fs::write(&sentinel, b"second workspace sentinel").unwrap();
+        let sentinel_before = std::fs::read(&sentinel).unwrap();
+        let owner = Arc::new(AcquisitionService::new(Arc::new(AcquisitionStore::new(
+            temp.path(),
+        ))));
+        let scope = owner.supervisor().open_scope(|| async { Ok(()) }).unwrap();
+        let service = owner.clone();
+        scope
+            .run_invocation(move |context| async move {
+                let first_grant = workspace_with_identity(
+                    &first_stage,
+                    WorkspaceIdentity {
+                        root_identity: "fixture-physical-root".into(),
+                        relative_target: "first-stage".into(),
+                    },
+                );
+                let second_grant = workspace_with_identity(
+                    &second_stage,
+                    WorkspaceIdentity {
+                        root_identity: "fixture-physical-root".into(),
+                        relative_target: "second-stage".into(),
+                    },
+                );
+                assert_ne!(first_grant.identity(), second_grant.identity());
+                let first_demand = AcquisitionDemand {
+                    consumer: "fixture".into(),
+                    operation: "first".into(),
+                };
+                let second_demand = AcquisitionDemand {
+                    consumer: "fixture".into(),
+                    operation: "second".into(),
+                };
+                let first = service
+                    .begin(
+                        &context,
+                        first_demand.clone(),
+                        manifest("payload.bin"),
+                        first_grant.identity().clone(),
+                        None,
+                    )
+                    .await?;
+                let second = service
+                    .begin(
+                        &context,
+                        second_demand,
+                        manifest("payload.bin"),
+                        second_grant.identity().clone(),
+                        None,
+                    )
+                    .await?;
+                let second_before = service.store.acquisitions()?[&second.record.id].clone();
+                assert_eq!(second_before.phase, AcquisitionPhase::Transferring);
+                assert_eq!(&second_before.workspace, second_grant.identity());
+
+                service
+                    .withdraw(
+                        &context,
+                        first_demand.clone(),
+                        first_grant.identity().clone(),
+                    )
+                    .await?;
+                let after_first = service.store.acquisitions()?;
+                let withdrawn = after_first[&first.record.id].clone();
+                assert_eq!(withdrawn.demand, first_demand);
+                assert_eq!(&withdrawn.workspace, first_grant.identity());
+                assert_eq!(withdrawn.phase, AcquisitionPhase::Withdrawn);
+                assert_eq!(after_first[&second.record.id], second_before);
+                assert_eq!(std::fs::read(&sentinel)?, sentinel_before);
+
+                service
+                    .withdraw(&context, first_demand, first_grant.identity().clone())
+                    .await?;
+                let after_repeat = service.store.acquisitions()?;
+                assert_eq!(after_repeat[&first.record.id], withdrawn);
+                assert_eq!(after_repeat[&second.record.id], second_before);
+                assert_eq!(std::fs::read(&sentinel)?, sentinel_before);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        scope.shutdown().await.unwrap();
     }
 
     async fn withdrawal_waits_for_consumer_effect(cleanup_fails: bool) {

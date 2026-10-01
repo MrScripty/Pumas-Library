@@ -349,6 +349,8 @@ This records MCP usability only; it does not certify implementation compliance o
 
 This records tool usability only; it does not certify source compliance or product acceptance.
 
+- **Final route refresh:** After implementation, the route was refreshed on snapshot `snapshot:v1:b187217e-0e3f-4b16-b101-74eca1357d5b`; it selected 22 standards with zero unresolved applicability facts and matched the admitted pre-edit scope. The route remains guidance only. Sol High's independent review and the serial local test/lint evidence are recorded separately in the execution ledger.
+
 ## Primary integrator — AC06 stale-generation boundary regression route
 
 - **Useful calls:** The initial route `snapshot:v1:6e207013-b615-4b8e-85ca-4170c3bc1408` and the final source/evidence route `snapshot:v1:a2e24e74-b8f8-40cb-a3b4-762857343697` each selected 17 standards with zero unresolved applicability facts. Ten focused policy reads were repeated against the final snapshot and completed successfully for Rust, async, implementation, verification, oracle, concurrency, replay, contracts, resilience, and persistence guidance.
@@ -390,5 +392,16 @@ This records MCP usability only; it is not evidence of implementation compliance
 - **Where I left MCP:** Routing supplied obligations only. The controlled public-entrypoint tests, closed-lifecycle regression, strict Clippy, formatting, and source diff are the separate implementation evidence. None accepts AC01 or AQ-HTTP.
 - **Smallest sufficient workflow:** Refresh facts, route the completed boundary with explicit application, language, topic, workflow, and evidence facts, then read only focused policies in small batches and check the source/test contract independently.
 - **Recommendations:** Keep policy reads byte-bounded as well as item-bounded; avoid repeating whole policy bodies together with metadata and continuation records; show the route's compact count and unresolved facts separately from policy text.
+
+This records tool usability only; it does not certify source compliance or product acceptance.
+
+## Primary integrator — AC10 warm-checkpoint retention admission
+
+- **Useful calls:** Refreshed facts and routed the Q1 bounded-retention implementation/evidence scope on snapshot `snapshot:v1:f476feaf-6487-405b-8d2d-7742115e342d`. The route selected 22 standards with zero unresolved fact categories. The selected Rust, lifecycle, contracts, architecture/replay, resilience, performance, code-design, oracle, planning, integration, and commit policies supplied the scope and typed-outcome obligations before source changes.
+- **Confusing or redundant steps:** `read_many` correctly returned complete policy bodies, but even a four-policy batch exceeded the useful response window because body text and metadata were bundled. Smaller two-policy batches were readable; section-scoped or byte-budgeted retrieval would reduce review overhead.
+- **Missing context:** The MCP did not know the current checkpoint map's ownership, cloned-record size, service-view sharing, pause outcome, or existing byte-zero fallback. Repository source and Sol High's read-only architecture audit established those facts.
+- **Where I left MCP:** The 22-standard route and policy reads are guidance only. Source review identified the defect; focused tests, exact diff review, and final code review will provide implementation evidence. This does not accept AC10 or AQ-HTTP.
+- **Smallest sufficient workflow:** Refresh facts, route the exact slice, read the selected policies in small batches, and record the candidate's real checks independently.
+- **Recommendations:** Keep full policy bodies available, but return only requested sections or enforce a response-byte budget so metadata and continuations do not obscure the normative content.
 
 This records tool usability only; it does not certify source compliance or product acceptance.

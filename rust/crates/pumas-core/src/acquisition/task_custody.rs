@@ -613,6 +613,12 @@ impl TaskCustodyOwner {
         })
     }
 
+    /// Optional paused checkpoint slots share the validated ordinary worker
+    /// limit, without holding a worker permit while transfer is paused.
+    pub(crate) fn checkpoint_limit(&self) -> usize {
+        self.capacity.workers
+    }
+
     fn acquire_worker(&self, rescue: bool) -> crate::Result<Arc<OwnedSemaphorePermit>> {
         let (budget, resource) = if rescue {
             (&self.rescue_workers, "rescue_workers")

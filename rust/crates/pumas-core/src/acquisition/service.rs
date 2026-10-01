@@ -429,6 +429,47 @@ struct WarmCheckpoint {
     prefix: PartialPrefix,
 }
 
+const CHECKPOINT_METADATA_LIMIT: usize = 64 * 1024;
+
+/// Measure the complete variable metadata before retaining any owned copies.
+#[derive(Serialize)]
+struct WarmCheckpointMetadata<'a> {
+    record: &'a AcquisitionRecord,
+    request_url: &'a str,
+    resource: &'a str,
+    etag: &'a str,
+    total: Option<u64>,
+    prefix: &'a PartialPrefix,
+}
+
+struct CappedMetadataWriter {
+    remaining: usize,
+}
+
+impl std::io::Write for CappedMetadataWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() > self.remaining {
+            return Err(std::io::Error::other("Checkpoint metadata limit exceeded"));
+        }
+        self.remaining -= bytes.len();
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn checkpoint_metadata_fits(metadata: &impl Serialize) -> bool {
+    serde_json::to_writer(
+        CappedMetadataWriter {
+            remaining: CHECKPOINT_METADATA_LIMIT,
+        },
+        metadata,
+    )
+    .is_ok()
+}
+
 impl AcquisitionService {
     pub fn new(store: Arc<AcquisitionStore>) -> Self {
         Self {
@@ -458,6 +499,47 @@ impl AcquisitionService {
             supervisor: self.supervisor.clone(),
             checkpoints: self.checkpoints.clone(),
         }
+    }
+
+    fn lookup_checkpoint(&self, key: (Uuid, usize)) -> Result<Option<WarmCheckpoint>> {
+        let mut checkpoints = self
+            .checkpoints
+            .lock()
+            .map_err(|_| invalid("Checkpoint owner poisoned"))?;
+        checkpoints.retain(|_, checkpoint| checkpoint.owner.is_live());
+        Ok(checkpoints.get(&key).cloned())
+    }
+
+    fn retain_checkpoint(
+        &self,
+        key: (Uuid, usize),
+        workspace: &AcquisitionWorkspace,
+        metadata: WarmCheckpointMetadata<'_>,
+    ) -> Result<bool> {
+        let mut checkpoints = self
+            .checkpoints
+            .lock()
+            .map_err(|_| invalid("Checkpoint owner poisoned"))?;
+        checkpoints.retain(|_, checkpoint| checkpoint.owner.is_live());
+        if (!checkpoints.contains_key(&key)
+            && checkpoints.len() >= self.supervisor.checkpoint_limit())
+            || !checkpoint_metadata_fits(&metadata)
+        {
+            return Ok(false);
+        }
+        checkpoints.insert(
+            key,
+            WarmCheckpoint {
+                record: metadata.record.clone(),
+                owner: workspace.checkpoint_owner(),
+                request_url: metadata.request_url.to_owned(),
+                resource: metadata.resource.to_owned(),
+                etag: metadata.etag.to_owned(),
+                total: metadata.total,
+                prefix: metadata.prefix.clone(),
+            },
+        );
+        Ok(true)
     }
 
     fn forget_checkpoint(&self, key: (Uuid, usize)) -> Result<()> {
@@ -850,12 +932,7 @@ impl AcquisitionService {
                 )
                 .await;
             }
-            let checkpoint = self
-                .checkpoints
-                .lock()
-                .map_err(|_| invalid("Checkpoint owner poisoned"))?
-                .get(&key)
-                .cloned();
+            let checkpoint = self.lookup_checkpoint(key)?;
             let checkpoint = checkpoint.filter(|checkpoint| {
                 checkpoint.record == operation.record
                     && checkpoint.owner.matches(workspace)
@@ -910,9 +987,9 @@ impl AcquisitionService {
                 response = open_http_artifact(client, url, &operation.record.manifest, file_index, resume, authorization, continuation.as_ref()) => response,
             };
             let outcome = match response {
-                Ok(response) => {
-                    let resource = response.resource.clone();
-                    let etag = response.strong_etag.clone();
+                Ok(mut response) => {
+                    let resource = std::mem::take(&mut response.resource);
+                    let etag = response.strong_etag.take();
                     let total = response.total_size;
                     self.forget_checkpoint(key)?;
                     let open = workspace.clone();
@@ -963,21 +1040,18 @@ impl AcquisitionService {
                             .await?;
                         if let Some(etag) = etag {
                             if prefix.bytes > 0 && total.is_none_or(|total| prefix.bytes < total) {
-                                self.checkpoints
-                                    .lock()
-                                    .map_err(|_| invalid("Checkpoint owner poisoned"))?
-                                    .insert(
-                                        key,
-                                        WarmCheckpoint {
-                                            record: operation.record.clone(),
-                                            owner: workspace.checkpoint_owner(),
-                                            request_url: url.to_owned(),
-                                            resource,
-                                            etag,
-                                            total,
-                                            prefix,
-                                        },
-                                    );
+                                self.retain_checkpoint(
+                                    key,
+                                    workspace,
+                                    WarmCheckpointMetadata {
+                                        record: &operation.record,
+                                        request_url: url,
+                                        resource: &resource,
+                                        etag: &etag,
+                                        total,
+                                        prefix: &prefix,
+                                    },
+                                )?;
                             }
                         }
                     }
@@ -1674,6 +1748,245 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    fn checkpoint_fixture(workspace: &AcquisitionWorkspace) -> (AcquisitionRecord, PartialPrefix) {
+        let mut handle = workspace.open_part("payload.bin", false).unwrap();
+        std::io::Write::write_all(&mut handle, b"DATA").unwrap();
+        let prefix = workspace
+            .observe_part("payload.bin", &mut handle)
+            .unwrap()
+            .0;
+        let record = AcquisitionRecord {
+            id: Uuid::new_v4(),
+            demand: AcquisitionDemand {
+                consumer: "fixture".into(),
+                operation: "paused".into(),
+            },
+            manifest: manifest_with_size("payload.bin", 8),
+            workspace: workspace.identity().clone(),
+            phase: AcquisitionPhase::Transferring,
+            files: Vec::new(),
+        };
+        (record, prefix)
+    }
+
+    fn retain_fixture(
+        service: &AcquisitionService,
+        workspace: &AcquisitionWorkspace,
+        record: &AcquisitionRecord,
+        index: usize,
+        prefix: &PartialPrefix,
+        resource: &str,
+    ) -> bool {
+        service
+            .retain_checkpoint(
+                (record.id, index),
+                workspace,
+                WarmCheckpointMetadata {
+                    record,
+                    request_url: "http://fixture/artifact",
+                    resource,
+                    etag: "\"fixture-v1\"",
+                    total: Some(8),
+                    prefix,
+                },
+            )
+            .unwrap()
+    }
+
+    fn checkpoint_service(temp: &tempfile::TempDir, workers: usize) -> AcquisitionService {
+        AcquisitionService::with_capacity(
+            Arc::new(AcquisitionStore::new(temp.path())),
+            super::super::AcquisitionCapacity {
+                workers,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn checkpoint_cap_counts_file_indices_and_allows_same_key_replacement() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let workspace = workspace(temp.path());
+        let (record, prefix) = checkpoint_fixture(&workspace);
+        let service = checkpoint_service(&temp, 2);
+        assert!(retain_fixture(
+            &service, &workspace, &record, 0, &prefix, "first"
+        ));
+        assert!(retain_fixture(
+            &service, &workspace, &record, 1, &prefix, "second"
+        ));
+        assert!(!retain_fixture(
+            &service, &workspace, &record, 2, &prefix, "third"
+        ));
+        assert!(retain_fixture(
+            &service,
+            &workspace,
+            &record,
+            0,
+            &prefix,
+            "replacement"
+        ));
+        assert_eq!(service.checkpoints.lock().unwrap().len(), 2);
+        assert_eq!(
+            service
+                .lookup_checkpoint((record.id, 0))
+                .unwrap()
+                .unwrap()
+                .resource,
+            "replacement"
+        );
+        assert!(service.lookup_checkpoint((record.id, 1)).unwrap().is_some());
+        assert_eq!(
+            std::fs::read(temp.path().join("payload.bin.part")).unwrap(),
+            b"DATA"
+        );
+        assert!(service.store.acquisitions().unwrap().is_empty());
+    }
+
+    #[test]
+    fn expired_checkpoint_owners_are_reclaimed_on_lookup_and_insertion() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let service = checkpoint_service(&temp, 1);
+        let first = workspace(temp.path());
+        let (record, prefix) = checkpoint_fixture(&first);
+        assert!(retain_fixture(
+            &service, &first, &record, 0, &prefix, "first"
+        ));
+        drop(first);
+        assert!(service.lookup_checkpoint((record.id, 0)).unwrap().is_none());
+        assert_eq!(
+            std::fs::read(temp.path().join("payload.bin.part")).unwrap(),
+            b"DATA"
+        );
+        let second = workspace(temp.path());
+        assert!(retain_fixture(
+            &service, &second, &record, 0, &prefix, "second"
+        ));
+        drop(second);
+        let third = workspace(temp.path());
+        assert!(retain_fixture(
+            &service, &third, &record, 1, &prefix, "third"
+        ));
+        assert!(service.lookup_checkpoint((record.id, 0)).unwrap().is_none());
+        assert_eq!(service.checkpoints.lock().unwrap().len(), 1);
+        assert_eq!(
+            std::fs::read(temp.path().join("payload.bin.part")).unwrap(),
+            b"DATA"
+        );
+    }
+
+    #[test]
+    fn oversized_checkpoint_metadata_refuses_replacement_without_owned_copies() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let workspace = workspace(temp.path());
+        let (mut record, prefix) = checkpoint_fixture(&workspace);
+        let service = checkpoint_service(&temp, 1);
+        assert!(retain_fixture(
+            &service, &workspace, &record, 0, &prefix, "small"
+        ));
+        let large = "\"".repeat(CHECKPOINT_METADATA_LIMIT / 2);
+        assert!(!retain_fixture(
+            &service, &workspace, &record, 0, &prefix, &large
+        ));
+        record.demand.operation = "x".repeat(CHECKPOINT_METADATA_LIMIT);
+        assert!(!retain_fixture(
+            &service, &workspace, &record, 0, &prefix, "small"
+        ));
+        assert_eq!(
+            service
+                .lookup_checkpoint((record.id, 0))
+                .unwrap()
+                .unwrap()
+                .resource,
+            "small"
+        );
+
+        // A borrowed encoder aborts before serializing the tail. The retention
+        // helper only clones after this complete measurement succeeds.
+        struct UnvisitedTail;
+        impl Serialize for UnvisitedTail {
+            fn serialize<S: serde::Serializer>(
+                &self,
+                _: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
+                panic!("encoding must stop at the metadata limit");
+            }
+        }
+        assert!(!checkpoint_metadata_fits(&(&large, UnvisitedTail)));
+        let mut writer = CappedMetadataWriter {
+            remaining: CHECKPOINT_METADATA_LIMIT,
+        };
+        assert!(std::io::Write::write_all(&mut writer, &[0; CHECKPOINT_METADATA_LIMIT]).is_ok());
+        assert!(std::io::Write::write_all(&mut writer, &[0]).is_err());
+    }
+
+    #[tokio::test]
+    async fn checkpoint_limits_are_shared_by_stores_and_consumers() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let workspace = workspace(temp.path());
+        let (record, prefix) = checkpoint_fixture(&workspace);
+        let service = Arc::new(checkpoint_service(&temp, 1));
+        let other_store = tempfile::TempDir::new().unwrap();
+        let rebound =
+            Arc::new(service.with_store(Arc::new(AcquisitionStore::new(other_store.path()))));
+        let first = service.open_consumer("first").unwrap();
+        let second = rebound.open_consumer("second").unwrap();
+        assert!(retain_fixture(
+            &first.service,
+            &workspace,
+            &record,
+            0,
+            &prefix,
+            "first"
+        ));
+        assert!(!retain_fixture(
+            &second.service,
+            &workspace,
+            &record,
+            1,
+            &prefix,
+            "second"
+        ));
+        assert_eq!(rebound.checkpoints.lock().unwrap().len(), 1);
+        first.shutdown().await.unwrap();
+        second.shutdown().await.unwrap();
+        assert_eq!(service.checkpoints.lock().unwrap().len(), 1);
+        service.shutdown().await.unwrap();
+        assert!(rebound.checkpoints.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn concurrent_checkpoint_insertions_stay_within_shared_cap() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let workspace = workspace(temp.path());
+        let (record, prefix) = checkpoint_fixture(&workspace);
+        let service = checkpoint_service(&temp, 3);
+        let gate = std::sync::Barrier::new(16);
+        let admitted = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..16)
+                .map(|index| {
+                    let (service, workspace, record, prefix, gate) =
+                        (&service, &workspace, &record, &prefix, &gate);
+                    scope.spawn(move || {
+                        gate.wait();
+                        let retained =
+                            retain_fixture(service, workspace, record, index, prefix, "resource");
+                        assert!(service.checkpoints.lock().unwrap().len() <= 3);
+                        retained
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .filter(|retained| *retained)
+                .count()
+        });
+        assert_eq!(admitted, 3);
+        assert_eq!(service.checkpoints.lock().unwrap().len(), 3);
+    }
+
     fn manifest(path: &str) -> ArtifactManifest {
         manifest_with_size(path, 4)
     }
@@ -2040,6 +2353,7 @@ mod tests {
 
         consumer.shutdown().await.unwrap();
         service.shutdown().await.unwrap();
+        assert!(service.checkpoints.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -2503,6 +2817,18 @@ mod tests {
         } else {
             shutdown.unwrap();
         }
+        let paused_stage = temp.path().join("unrelated-paused");
+        std::fs::create_dir(&paused_stage).unwrap();
+        let paused_workspace = workspace(&paused_stage);
+        let (paused_record, paused_prefix) = checkpoint_fixture(&paused_workspace);
+        assert!(retain_fixture(
+            &service,
+            &paused_workspace,
+            &paused_record,
+            0,
+            &paused_prefix,
+            "paused"
+        ));
         let shutdown = service.shutdown().await;
         if cleanup_fails {
             assert!(matches!(
@@ -2512,6 +2838,14 @@ mod tests {
         } else {
             shutdown.unwrap();
         }
+        assert_eq!(
+            service.checkpoints.lock().unwrap().len(),
+            usize::from(cleanup_fails)
+        );
+        assert_eq!(
+            std::fs::read(paused_stage.join("payload.bin.part")).unwrap(),
+            b"DATA"
+        );
     }
 
     #[tokio::test]
@@ -3044,6 +3378,9 @@ mod tests {
         WeakValidator,
         DifferentResource,
         MutatedPrefix,
+        CapacityPressure,
+        UnknownPublicationPressure,
+        MetadataPressure,
     }
 
     #[tokio::test]
@@ -3077,6 +3414,21 @@ mod tests {
         assert_warm_continuation(WarmReply::Partial).await;
     }
 
+    #[tokio::test]
+    async fn checkpoint_capacity_pressure_preserves_pause_and_restarts_from_zero() {
+        assert_warm_continuation(WarmReply::CapacityPressure).await;
+    }
+
+    #[tokio::test]
+    async fn checkpoint_metadata_pressure_preserves_pause_and_restarts_from_zero() {
+        assert_warm_continuation(WarmReply::MetadataPressure).await;
+    }
+
+    #[tokio::test]
+    async fn checkpoint_pressure_preserves_unknown_consumer_publication_custody() {
+        assert_warm_continuation(WarmReply::UnknownPublicationPressure).await;
+    }
+
     async fn assert_warm_continuation(reply: WarmReply) {
         use futures::FutureExt;
 
@@ -3089,10 +3441,25 @@ mod tests {
         let consumer = Arc::new(service.open_consumer("fixture").unwrap());
         let demand = AcquisitionDemand {
             consumer: "fixture".into(),
-            operation: "pause-then-resume".into(),
+            operation: if matches!(reply, WarmReply::MetadataPressure) {
+                "x".repeat(CHECKPOINT_METADATA_LIMIT)
+            } else {
+                "pause-then-resume".into()
+            },
         };
         let manifest = manifest_with_size("payload.bin", 8);
         let workspace = workspace(&stage);
+        if matches!(
+            reply,
+            WarmReply::CapacityPressure | WarmReply::UnknownPublicationPressure
+        ) {
+            let (record, prefix) = checkpoint_fixture(&workspace);
+            for index in 0..service.supervisor.checkpoint_limit() {
+                assert!(retain_fixture(
+                    &service, &workspace, &record, index, &prefix, "retained"
+                ));
+            }
+        }
         let (url, first_server, first_sent, continue_sender) =
             serve_after_gate(b"DATA", b"TAIL").await;
         let mut first_server = Some(first_server);
@@ -3151,6 +3518,7 @@ mod tests {
         assert!(matches!(original.phase, AcquisitionPhase::Transferring));
         assert!(original.files.is_empty());
 
+        let checkpoint_count = service.checkpoints.lock().unwrap().len();
         controls.pause();
         let paused = tokio::time::timeout(timeout, first_transfer.as_mut().unwrap())
             .await
@@ -3165,6 +3533,10 @@ mod tests {
         first_server.take();
         first_join.unwrap();
         assert!(matches!(paused, Err(PumasError::DownloadPaused)));
+        if matches!(reply, WarmReply::CapacityPressure | WarmReply::UnknownPublicationPressure | WarmReply::MetadataPressure) {
+            assert_eq!(service.checkpoints.lock().unwrap().len(), checkpoint_count);
+            assert!(service.lookup_checkpoint((original.id, 0)).unwrap().is_none());
+        }
         assert_eq!(
             std::fs::read(stage.join("payload.bin.part")).unwrap(),
             b"DATA"
@@ -3189,12 +3561,25 @@ mod tests {
                 }
                 let request = String::from_utf8(request).unwrap();
                 let request = request.to_ascii_lowercase();
-                if matches!(reply, WarmReply::MutatedPrefix) {
+                if matches!(reply, WarmReply::MutatedPrefix | WarmReply::CapacityPressure | WarmReply::UnknownPublicationPressure | WarmReply::MetadataPressure) {
                     assert!(!request.contains("range:"));
                     assert!(!request.contains("if-match:"));
                 } else {
                     assert!(request.contains("range: bytes=4-"));
                     assert!(request.contains("if-match: \"fixture-v1\""));
+                }
+                if matches!(reply, WarmReply::CapacityPressure) {
+                    socket.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+                    drop(socket);
+                    socket = listener.accept().await.unwrap().0;
+                    let mut retry_request = Vec::new();
+                    while !retry_request.ends_with(b"\r\n\r\n") {
+                        assert!(retry_request.len() < 8192);
+                        retry_request.push(socket.read_u8().await.unwrap());
+                    }
+                    let retry_request = String::from_utf8(retry_request).unwrap().to_ascii_lowercase();
+                    assert!(!retry_request.contains("range:"));
+                    assert!(!retry_request.contains("if-match:"));
                 }
                 if matches!(reply, WarmReply::DifferentResource) {
                     socket.write_all(b"HTTP/1.1 302 Found\r\nLocation: /different-object\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
@@ -3213,7 +3598,7 @@ mod tests {
                     WarmReply::WeakValidator => "ETag: W/\"fixture-v1\"\r\n",
                     _ => "ETag: \"fixture-v1\"\r\n",
                 };
-                let response = if matches!(reply, WarmReply::Full | WarmReply::MutatedPrefix) {
+                let response = if matches!(reply, WarmReply::Full | WarmReply::MutatedPrefix | WarmReply::CapacityPressure | WarmReply::UnknownPublicationPressure | WarmReply::MetadataPressure) {
                     format!("HTTP/1.1 200 OK\r\n{etag}Content-Length: 8\r\nConnection: close\r\n\r\nDATATAIL")
                 } else {
                     format!("HTTP/1.1 206 Partial Content\r\n{etag}Content-Length: 4\r\nContent-Range: bytes 4-7/8\r\nConnection: close\r\n\r\nTAIL")
@@ -3223,6 +3608,11 @@ mod tests {
             .await
             .expect("resumed HTTP fixture must finish");
         }));
+        let mut resumed_retry = retry();
+        if matches!(reply, WarmReply::CapacityPressure) {
+            resumed_retry.attempts = Some(2);
+            resumed_retry.backoff = resumed_retry.backoff.with_base_delay(Duration::from_millis(1));
+        }
         let published_receipt = tokio::time::timeout(
             timeout,
             consumer.acquire_http(
@@ -3234,12 +3624,19 @@ mod tests {
                         url,
                         authorization: None,
                     }],
-                    retry: retry(),
+                    retry: resumed_retry,
                 },
                 reqwest::Client::new(),
                 Box::new(Host),
                 |_| async { Ok::<((), Value), PumasError>(((), Value::Null)) },
-                |(), receipt| async { Ok::<_, PumasError>(receipt) },
+                move |(), receipt| async move {
+                    if matches!(reply, WarmReply::UnknownPublicationPressure) {
+                        // Consumer publication reports uncertainty after receipt
+                        // issuance; optional retention pressure must preserve it.
+                        return Err(PumasError::Other("Fixture publication visibility unknown".into()));
+                    }
+                    Ok::<_, PumasError>(receipt)
+                },
             ),
         )
         .await
@@ -3255,6 +3652,17 @@ mod tests {
             assert!(!stage.join("payload.bin").exists());
             assert_eq!(store.acquisitions().unwrap(), before_pause);
             assert!(service.consumer_receipt(original.id).unwrap().is_none());
+            return;
+        }
+        if matches!(reply, WarmReply::UnknownPublicationPressure) {
+            assert!(matches!(published_receipt, Err(PumasError::Other(ref message)) if message == "Fixture publication visibility unknown"));
+            let records = store.acquisitions().unwrap();
+            let retained = records.get(&original.id).unwrap();
+            assert!(matches!(retained.phase, AcquisitionPhase::Using { .. }));
+            assert_eq!(retained.demand, original.demand);
+            assert!(service.consumer_receipt(original.id).unwrap().is_some());
+            assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATATAIL");
+            assert_eq!(service.checkpoints.lock().unwrap().len(), checkpoint_count);
             return;
         }
         let published_receipt = published_receipt.unwrap();

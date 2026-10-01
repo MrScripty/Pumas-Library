@@ -31,7 +31,7 @@ pub struct VerifiedFile {
     pub sha256: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 struct Identity(u64, u64);
 
 fn identity(metadata: &Metadata) -> Result<Identity> {
@@ -102,12 +102,19 @@ pub struct AcquisitionWorkspace {
 pub(crate) struct WorkspaceCheckpointOwner(Weak<HeldWorkspace>);
 
 impl WorkspaceCheckpointOwner {
+    /// Observe expiry without acquiring a strong reference. Pruning under the
+    /// checkpoint lock must never run the last workspace's destructor.
+    pub(crate) fn is_live(&self) -> bool {
+        self.0.strong_count() != 0
+    }
+
     pub(crate) fn matches(&self, workspace: &AcquisitionWorkspace) -> bool {
-        self.0.ptr_eq(&Arc::downgrade(&workspace.held)) && self.0.upgrade().is_some()
+        // The borrowed workspace already pins this allocation alive.
+        self.0.ptr_eq(&Arc::downgrade(&workspace.held))
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub(crate) struct PartialPrefix {
     binding: Identity,
     pub(crate) bytes: u64,

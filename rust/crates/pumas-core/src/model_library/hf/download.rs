@@ -11731,6 +11731,260 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn receiptless_using_cold_reopen_retains_custody_without_network_or_reimport() {
+        const SHA256: &str = "3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7";
+
+        let temp = TempDir::new().unwrap();
+        let library_root = temp.path().join("library");
+        let library = Arc::new(
+            crate::model_library::ModelLibrary::new(&library_root)
+                .await
+                .unwrap(),
+        );
+        let destination = library.build_model_path("vision", "acme", "model");
+        std::fs::create_dir_all(&destination).unwrap();
+        std::fs::write(destination.join("model.onnx"), b"data").unwrap();
+
+        let persistence = Arc::new(DownloadPersistence::new(temp.path()));
+        let revision = DownloadRevision::legacy_main();
+        let files = vec![FileToDownload {
+            filename: "model.onnx".into(),
+            size: Some(4),
+            sha256: Some(SHA256.into()),
+        }];
+        let mut request = recovery_test_request("acme/model", &["model.onnx".into()]);
+        request.model_type = Some("vision".into());
+        request.pipeline_tag = Some("image-classification".into());
+        let download_id = "receiptless-using-reopen".to_string();
+        let snapshot = PersistedDownload {
+            download_id: download_id.clone(),
+            repo_id: request.repo_id.clone(),
+            filename: "model.onnx".into(),
+            filenames: vec!["model.onnx".into()],
+            dest_dir: destination.clone(),
+            total_bytes: Some(4),
+            status: DownloadStatus::Error,
+            download_request: request.clone(),
+            revision: None,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            known_sha256: Some(SHA256.into()),
+            huggingface_evidence: None,
+        };
+        let attempt = admit_snapshot_at_root(&persistence, &snapshot, &library_root);
+        std::fs::write(
+            destination.join(".pumas_download"),
+            serialize_download_marker(&request, vec!["model.onnx".into()], None, &revision)
+                .unwrap(),
+        )
+        .unwrap();
+
+        let authored = b"authored notes must survive receiptless recovery";
+        std::fs::write(destination.join("README.md"), authored).unwrap();
+        let marker = std::fs::read(destination.join(".pumas_download")).unwrap();
+
+        let mut client = HuggingFaceClient::new(temp.path().join("cache")).unwrap();
+        client
+            .configure_download_destination_root(&library_root)
+            .unwrap();
+        client.set_persistence(persistence.clone());
+        let importer = importer_with_authority_for_test(library.clone(), &client).await;
+        client.set_download_importer(importer);
+
+        let setup_client = client.clone_for_invocation();
+        let setup_destination = destination.clone();
+        let setup_files = files.clone();
+        let setup_attempt = attempt.clone();
+        client
+            .run_download_invocation(move |context| async move {
+                let context = setup_client.protect_download_mutation(&context).await?;
+                let root =
+                    setup_client
+                        .destination_root
+                        .clone()
+                        .ok_or_else(|| PumasError::Config {
+                            message: "receiptless Using fixture requires a configured root".into(),
+                        })?;
+                let path = setup_destination.clone();
+                let destination = context
+                    .run_fallible_blocking_named(
+                        "resolve receiptless Using fixture destination",
+                        move || root.resolve(&path),
+                    )
+                    .await
+                    .map_err(|error| {
+                        error.into_pumas_error("receiptless Using destination observation failed")
+                    })??;
+                let managed = DownloadDestination::Managed(destination);
+                managed.prepare(&context).await?;
+                let capability = managed.capability().clone();
+                let execution_lease = context.held_execution_lease()?;
+                let workspace = context
+                    .run_fallible_blocking_named(
+                        "capture receiptless Using fixture workspace",
+                        move || capability.acquisition_workspace(execution_lease),
+                    )
+                    .await
+                    .map_err(|error| {
+                        error.into_pumas_error("receiptless Using workspace observation failed")
+                    })??;
+                let manifest = crate::model_library::hf::acquisition_source::manifest_for_download(
+                    "acme/model",
+                    &revision,
+                    &setup_files,
+                )?;
+                let demand = crate::acquisition::AcquisitionDemand {
+                    consumer: "hf.model".into(),
+                    operation: setup_attempt,
+                };
+                let operation = setup_client
+                    .acquisition
+                    .begin(
+                        &context,
+                        demand.clone(),
+                        manifest.clone(),
+                        workspace.identity().clone(),
+                        None,
+                    )
+                    .await?;
+                let lease = setup_client
+                    .acquisition
+                    .files_ready(&context, operation, workspace)
+                    .await?;
+                // Simulate the prior owner stopping after verified handoff,
+                // before the consumer publishes any completion receipt.
+                drop(lease);
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        let retained = client.acquisition.store().acquisitions().unwrap();
+        assert_eq!(retained.len(), 1);
+        let using = retained.values().next().unwrap().clone();
+        assert_eq!(using.demand.consumer, "hf.model");
+        assert_eq!(using.demand.operation, attempt);
+        assert!(matches!(
+            using.phase,
+            crate::acquisition::AcquisitionPhase::Using { .. }
+        ));
+        assert_eq!(using.files.len(), 1);
+        assert_eq!(using.files[0].path, "model.onnx");
+        assert_eq!(using.files[0].bytes, 4);
+        assert_eq!(using.files[0].sha256, SHA256);
+        assert!(persistence
+            .read_hf_completion_receipt(using.id)
+            .unwrap()
+            .is_none());
+        let admissions = persistence
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions;
+        assert_eq!(admissions.len(), 1);
+        assert_eq!(admissions[&download_id].attempt_id, attempt);
+        drop(client);
+        drop(persistence);
+        drop(library);
+
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(AtomicU64::new(0));
+        let server_requests = requests.clone();
+        let server = tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                server_requests.fetch_add(1, Ordering::SeqCst);
+                let mut request = [0_u8; 2048];
+                let _ = socket.read(&mut request).await;
+                let _ = socket.write_all(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                ).await;
+            }
+        });
+        let mut reopened = HuggingFaceClient::new(temp.path().join("cache")).unwrap();
+        reopened
+            .configure_download_destination_root(&library_root)
+            .unwrap();
+        let reopened_persistence = Arc::new(DownloadPersistence::new(temp.path()));
+        reopened.set_persistence(reopened_persistence.clone());
+        reopened.set_test_download_base_url(endpoint);
+        *reopened.auth_token.write().await = None;
+        let reopened_library = Arc::new(
+            crate::model_library::ModelLibrary::new(&library_root)
+                .await
+                .unwrap(),
+        );
+        reopened_library
+            .install_mutation_authority(
+                crate::api::RuntimeTasks::new(),
+                crate::model_library::download_recovery::DownloadDestinationRoot::open(
+                    &library_root,
+                )
+                .unwrap(),
+                reopened_persistence.clone(),
+            )
+            .unwrap();
+        let writes = Arc::new(AtomicU64::new(0));
+        let observed_writes = writes.clone();
+        reopened_library.set_metadata_write_notifier(Some(Arc::new(move |_| {
+            observed_writes.fetch_add(1, Ordering::SeqCst);
+        })));
+        reopened.set_download_importer(Arc::new(crate::model_library::ModelImporter::new(
+            reopened_library,
+        )));
+
+        let completed = tokio::time::timeout(
+            Duration::from_secs(3),
+            reopened.restore_persisted_downloads(),
+        )
+        .await
+        .expect("receiptless recovery must finish without replay")
+        .unwrap();
+        assert!(completed.is_empty());
+        assert_eq!(
+            reopened.get_download_status(&download_id).await,
+            Some(DownloadStatus::Error)
+        );
+        assert!(reopened.downloads.read().await[&download_id]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("Retained HF use has no completion receipt"));
+        // Drain the fresh owner's tasks before checking all zero-effect oracles.
+        reopened.shutdown_downloads().await.unwrap();
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+        assert_eq!(writes.load(Ordering::SeqCst), 0);
+        assert_eq!(requests.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            reopened.acquisition.store().acquisitions().unwrap(),
+            retained
+        );
+        assert_eq!(
+            reopened_persistence
+                .load_lifecycle_inventory_strict()
+                .unwrap()
+                .queue_admissions,
+            admissions
+        );
+        assert!(reopened_persistence
+            .read_hf_completion_receipt(using.id)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            std::fs::read(destination.join("model.onnx")).unwrap(),
+            b"data"
+        );
+        assert_eq!(
+            std::fs::read(destination.join(".pumas_download")).unwrap(),
+            marker
+        );
+        assert_eq!(
+            std::fs::read(destination.join("README.md")).unwrap(),
+            authored
+        );
+    }
+
+    #[tokio::test]
     async fn restored_files_ready_settlement_is_atomic_and_receipt_reopen_does_not_reimport() {
         const SHA256: &str = "3a6eb0790f39ac87c94f3856b2dd2c5d110e6811602261a9a923d3bb23adc8b7";
 

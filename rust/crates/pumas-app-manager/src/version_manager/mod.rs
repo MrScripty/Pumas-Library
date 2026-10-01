@@ -2033,6 +2033,248 @@ mod tests {
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[tokio::test]
+    async fn native_receipt_publication_conflict_cold_reopen_reconciles_without_reacquiring() {
+        use sha2::Digest;
+        use std::os::unix::fs::MetadataExt;
+
+        // Record filesystem identity as well as every retained byte and the
+        // receipt's tree hash. The fixture contains only regular files/directories.
+        fn snapshot(root: &Path) -> (Vec<(PathBuf, u64, u64, u32, Vec<u8>)>, String) {
+            let mut tree = Vec::new();
+            let mut digest = sha2::Sha256::new();
+            for entry in walkdir::WalkDir::new(root).sort_by_file_name() {
+                let entry = entry.unwrap();
+                let relative = entry.path().strip_prefix(root).unwrap().to_path_buf();
+                let metadata = std::fs::symlink_metadata(entry.path()).unwrap();
+                assert!(!metadata.file_type().is_symlink());
+                let name = relative.to_str().unwrap();
+                digest.update((name.len() as u64).to_le_bytes());
+                digest.update(name.as_bytes());
+                digest.update(metadata.mode().to_le_bytes());
+                let bytes = if metadata.is_file() {
+                    let bytes = std::fs::read(entry.path()).unwrap();
+                    digest.update(b"file");
+                    digest.update(format!("{:x}", sha2::Sha256::digest(&bytes)).as_bytes());
+                    bytes
+                } else {
+                    assert!(metadata.is_dir());
+                    digest.update(b"directory");
+                    Vec::new()
+                };
+                tree.push((
+                    relative,
+                    metadata.dev(),
+                    metadata.ino(),
+                    metadata.mode(),
+                    bytes,
+                ));
+            }
+            (tree, format!("{:x}", digest.finalize()))
+        }
+
+        let root = TempDir::new().unwrap();
+        let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
+        let api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let mut manager = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        manager.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                manager.cache_dir(),
+                Duration::from_secs(3600),
+                base_url,
+            )
+            .unwrap(),
+        );
+        let pause = Arc::new(installer::TorchPublicationPause::new());
+        manager.native_receipt_pause = Some(pause.clone());
+        let mut updates = manager.install_version("b1234+cpu").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), observed)
+            .await
+            .unwrap()
+            .unwrap();
+        release.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), pause.reached.notified())
+            .await
+            .expect("extraction and proof must reach the receipt boundary");
+        // This destination belongs solely to the test. Create the conflict
+        // after extraction so the real receipt is durable before publication fails.
+        let destination = manager.version_path("b1234+cpu");
+        std::fs::create_dir_all(destination.join("bin")).unwrap();
+        std::fs::write(destination.join("bin/llama-server"), b"test-owned conflict").unwrap();
+        let conflict = snapshot(&destination);
+        pause.resume.add_permits(1);
+        let message = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match updates.recv().await.expect("installation must settle") {
+                    ProgressUpdate::Error { message } => break message,
+                    ProgressUpdate::Completed { success } => {
+                        panic!("conflicting publication completed: {success}")
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            message.contains("Native version destination already exists"),
+            "{message}"
+        );
+        server.await.unwrap();
+        assert!(manager.shutdown_installations().await.is_err());
+        assert!(!manager.is_installing().await);
+        assert!(manager
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_none());
+        // The supervisor drains, then reports the deliberately unresolved
+        // receipt-bearing Using record as shutdown failure.
+        assert!(api.shutdown_acquisition().await.is_err());
+        let store_path = root.path().join("launcher-data/downloads.json");
+        let read_document = || -> serde_json::Value {
+            serde_json::from_slice(&std::fs::read(&store_path).unwrap()).unwrap()
+        };
+        let retained = read_document();
+        assert_eq!(retained["acquisitions"].as_object().unwrap().len(), 1);
+        assert_eq!(retained["consumer_receipts"].as_object().unwrap().len(), 1);
+        let (id, record) = retained["acquisitions"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .next()
+            .unwrap();
+        assert_eq!(record["phase"]["state"], "using");
+        let receipt = retained["consumer_receipts"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap();
+        assert_eq!(receipt["owner"], "runtime.llama.cpp");
+        assert_eq!(receipt["acquisition_id"], id.as_str());
+        assert_eq!(receipt["use_lease"], record["phase"]["lease"]);
+        assert_eq!(receipt["demand"], record["demand"]);
+        assert_eq!(receipt["manifest"], record["manifest"]);
+        assert_eq!(receipt["workspace"], record["workspace"]);
+        assert_eq!(receipt["verified_files"], record["files"]);
+        let workspace = manager
+            .versions_dir()
+            .join(record["workspace"]["relative_target"].as_str().unwrap());
+        let stage = workspace.join("output");
+        let staged = snapshot(&stage);
+        assert_eq!(receipt["payload"]["output_tree_sha256"], staged.1);
+        assert_eq!(record["files"].as_array().unwrap().len(), 1);
+        let verified = &record["files"][0];
+        let archive = workspace.join(verified["path"].as_str().unwrap());
+        let archive_bytes = std::fs::read(&archive).unwrap();
+        assert_eq!(verified["bytes"], archive_bytes.len() as u64);
+        assert_eq!(
+            verified["sha256"],
+            format!("{:x}", sha2::Sha256::digest(&archive_bytes))
+        );
+        let retained_workspace = snapshot(&workspace);
+        drop(updates);
+        drop(pause);
+        drop(manager);
+        drop(api);
+
+        // The source server is joined and closed. Neither reopen is allowed to
+        // replace this acquisition/receipt or mutate retained bytes to make progress.
+        let blocked_api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let error = match VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            blocked_api.acquisition().clone(),
+        )
+        .await
+        {
+            Ok(manager) => {
+                manager.shutdown_installations().await.unwrap();
+                panic!("conflicting output must refuse cold recovery")
+            }
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains(
+                "Native output differs from its durable llama.cpp receipt; recovery required"
+            ),
+            "{error}"
+        );
+        assert!(blocked_api.shutdown_acquisition().await.is_err());
+        assert_eq!(read_document()["acquisitions"], retained["acquisitions"]);
+        assert_eq!(
+            read_document()["consumer_receipts"],
+            retained["consumer_receipts"]
+        );
+        assert_eq!(snapshot(&workspace), retained_workspace);
+        assert_eq!(snapshot(&destination), conflict);
+        assert!(MetadataManager::new(root.path())
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_none());
+        drop(blocked_api);
+
+        // Remove only the test's conflicting directory, then compose fresh owners.
+        std::fs::remove_dir_all(&destination).unwrap();
+        let reopened_api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let reopened = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            reopened_api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            reopened.get_installed_versions().await.unwrap(),
+            vec!["b1234+cpu"]
+        );
+        assert_eq!(snapshot(&destination), staged);
+        let installed = reopened
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(installed).unwrap(),
+            receipt["payload"]["metadata"]
+        );
+        assert!(!stage.exists());
+        assert!(!workspace.exists());
+        reopened.shutdown_installations().await.unwrap();
+        reopened_api.shutdown_acquisition().await.unwrap();
+        let settled = read_document();
+        assert_eq!(settled["consumer_receipts"], retained["consumer_receipts"]);
+        assert_eq!(settled["acquisitions"].as_object().unwrap().len(), 1);
+        let mut expected = record.clone();
+        expected["phase"]["state"] = serde_json::json!("adopted");
+        assert_eq!(settled["acquisitions"][id], expected);
+        drop(reopened);
+        drop(reopened_api);
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
     async fn native_direct_recovery_cancellation_retains_effect_until_shared_shutdown() {
         let root = TempDir::new().unwrap();
         let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;

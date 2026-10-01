@@ -1,6 +1,7 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
+use unicode_normalization::UnicodeNormalization;
 
 /// Current serialized artifact-manifest version.
 pub const CURRENT_MANIFEST_VERSION: u16 = 1;
@@ -344,7 +345,7 @@ impl ArtifactManifest {
             // namespace throughout transfer, cleanup, and publication.
             let staging = staging_path(&file.logical_path);
             for path in [file.logical_path.as_str(), staging.as_str()] {
-                if !portable_paths.insert(case_insensitive_path_key(path)) {
+                if !portable_paths.insert(portable_path_key(path)) {
                     return Err(ManifestValidationError::CollidingLogicalPath);
                 }
             }
@@ -482,7 +483,7 @@ pub enum ManifestValidationError {
     InvalidSha256,
     #[error("artifact manifest contains the same logical path more than once")]
     DuplicateLogicalPath,
-    #[error("artifact manifest contains file/directory paths that collide under case-insensitive comparison")]
+    #[error("artifact manifest contains file/directory paths that collide under case-insensitive Unicode-normalized comparison")]
     CollidingLogicalPath,
     #[error("artifact source object has contradictory size or digest evidence")]
     ConflictingSourceEvidence,
@@ -547,8 +548,8 @@ fn validate_source_key(value: &str) -> Result<(), ManifestValidationError> {
 
 fn validate_logical_path(value: &str) -> Result<(), ManifestValidationError> {
     // This checks source-independent traversal and common portability hazards.
-    // Materialization still checks the actual target filesystem's name and
-    // normalization collisions before creating any destination entry.
+    // Manifest admission checks cross-path case and canonical Unicode aliases;
+    // lexical validation alone does not establish target filesystem identity.
     if value.is_empty()
         || value.len() > 4096
         || value.starts_with('/')
@@ -588,10 +589,19 @@ pub(super) fn staging_path(logical_path: &str) -> String {
     format!("{logical_path}.part")
 }
 
-fn case_insensitive_path_key(value: &str) -> String {
+fn portable_path_key(value: &str) -> String {
     value
         .split('/')
-        .map(|component| component.to_lowercase())
+        .map(|component| {
+            // Normalize before casing so canonical aliases use the same input,
+            // then restore NFC because lowercasing can introduce combining marks.
+            component
+                .nfc()
+                .collect::<String>()
+                .to_lowercase()
+                .nfc()
+                .collect::<String>()
+        })
         .collect::<Vec<_>>()
         .join("/")
 }
@@ -679,6 +689,51 @@ mod tests {
                 ArtifactManifest::new(source(), files).unwrap_err(),
                 ManifestValidationError::CollidingLogicalPath
             );
+        }
+    }
+
+    #[test]
+    fn manifest_rejects_canonical_unicode_path_collisions() {
+        for paths in [
+            ["caf\u{e9}.bin", "cafe\u{301}.bin"],
+            ["CAF\u{c9}.bin", "cafe\u{301}.bin"],
+            ["caf\u{e9}.bin", "cafe\u{301}.bin.part"],
+            ["caf\u{e9}", "cafe\u{301}/weights.bin"],
+            ["cafe\u{301}/weights.bin", "caf\u{e9}"],
+        ] {
+            let files: Vec<_> = paths
+                .into_iter()
+                .map(|path| complete_file(path, path, Some(1)))
+                .collect();
+            // Each entry is valid in isolation; only their shared namespace
+            // violates the manifest's portable collision contract.
+            for file in &files {
+                let manifest = ArtifactManifest::new(source(), vec![file.clone()]).unwrap();
+                assert_eq!(manifest.files()[0].logical_path(), file.logical_path());
+            }
+            assert_eq!(
+                ArtifactManifest::new(source(), files).unwrap_err(),
+                ManifestValidationError::CollidingLogicalPath
+            );
+        }
+    }
+
+    #[test]
+    fn manifest_preserves_distinct_unicode_paths() {
+        let paths = [
+            "caf\u{e9}.bin",
+            "caf\u{e8}.bin",
+            "cafe.bin",
+            "\u{ff43}afe.bin",
+        ];
+        let files = paths
+            .into_iter()
+            .map(|path| complete_file(path, path, Some(1)))
+            .collect();
+        let manifest = ArtifactManifest::new(source(), files).unwrap();
+        for (file, path) in manifest.files().iter().zip(paths) {
+            assert_eq!(file.logical_path(), path);
+            assert_eq!(file.source_key(), path);
         }
     }
 

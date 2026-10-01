@@ -1176,51 +1176,241 @@ mod tests {
 
     #[test]
     fn schema_six_migration_preserves_acquisition_and_model_partition_without_receipts() {
+        use crate::model_library::download_store::{
+            DownloadAdmissionDomain, DownloadAdmissionPosition, DownloadAdmissionRequest,
+            DownloadPersistence, LifecycleCleanupDisposition, LifecycleQuarantineDomain,
+            PersistedDestinationIdentity, PersistedDownload, PersistedQueueAdmission,
+            QueuePredecessor,
+        };
+
         let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("downloads.json");
         let id = Uuid::from_u128(1);
-        let record = record(
-            id,
-            "retained-using-operation",
-            "model/path",
-            AcquisitionPhase::Using {
-                lease: Uuid::from_u128(2),
+        let lease = Uuid::from_u128(2);
+        let released_attempt = Uuid::from_u128(3).to_string();
+        let active_attempt = Uuid::from_u128(4).to_string();
+        let pending_attempt = Uuid::from_u128(5).to_string();
+        let hidden_attempt = Uuid::from_u128(6).to_string();
+        let destination = PersistedDestinationIdentity {
+            library_root: "fixture.root".into(),
+            relative_target: "model/path".into(),
+        };
+        let snapshot = |download_id: &str| -> PersistedDownload {
+            serde_json::from_value(serde_json::json!({
+                "download_id": download_id,
+                "repo_id": "fixture/model",
+                "filename": "payload.bin",
+                "filenames": ["payload.bin"],
+                "dest_dir": temp.path().join("model/path"),
+                "total_bytes": 1,
+                "status": "paused",
+                "download_request": {
+                    "repo_id": "fixture/model",
+                    "family": "fixture",
+                    "official_name": "Fixture",
+                    "filename": "payload.bin"
+                },
+                "revision": "a".repeat(40),
+                "created_at": "2026-01-01T00:00:00Z",
+                "known_sha256": "0".repeat(64),
+                "huggingface_evidence": null
+            }))
+            .unwrap()
+        };
+        let queue = |attempt: &str, domain, ordinal, predecessor| PersistedQueueAdmission {
+            attempt_id: attempt.into(),
+            domain,
+            destination: destination.clone(),
+            requested_payload_files: vec!["payload.bin".into()],
+            execution_files: vec!["payload.bin".into()],
+            position: DownloadAdmissionPosition {
+                ordinal,
+                predecessor,
             },
+        };
+        let predecessor = |download_id: &str, attempt: &str| {
+            Some(QueuePredecessor {
+                download_id: download_id.into(),
+                admission_attempt_id: attempt.into(),
+            })
+        };
+        let released = queue(&released_attempt, DownloadAdmissionDomain::Ambient, 1, None);
+        let active = queue(
+            &active_attempt,
+            DownloadAdmissionDomain::Ambient,
+            2,
+            predecessor("released", &released_attempt),
         );
-        let mut old = document(vec![record.clone()]);
-        old.schema_version = 6;
-        old.legacy.insert(
-            "downloads".into(),
-            serde_json::json!([{"download_id":"retained-model-row"}]),
+        let pending = queue(
+            &pending_attempt,
+            DownloadAdmissionDomain::Recovery,
+            3,
+            predecessor("active", &active_attempt),
         );
-        let mut value = serde_json::to_value(old).unwrap();
+        let hidden_request = DownloadAdmissionRequest {
+            snapshot: snapshot("hidden"),
+            domain: DownloadAdmissionDomain::Ambient,
+            destination: destination.clone(),
+            requested_payload_files: vec!["payload.bin".into()],
+            execution_files: vec!["payload.bin".into()],
+        };
+        let hidden_position = DownloadAdmissionPosition {
+            ordinal: 4,
+            predecessor: predecessor("pending", &pending_attempt),
+        };
+        let recovery_snapshot = snapshot("pending");
+        let mut quarantine_snapshot = recovery_snapshot.clone();
+        quarantine_snapshot.status = crate::models::DownloadStatus::Error;
+        let mut record = record(
+            id,
+            &active_attempt,
+            "model/path",
+            AcquisitionPhase::Using { lease },
+        );
+        record.demand.consumer = "hf.model".into();
+        let mut value = serde_json::to_value(document(vec![record.clone()])).unwrap();
         value.as_object_mut().unwrap().remove("consumer_receipts");
-        std::fs::write(
-            temp.path().join("downloads.json"),
-            serde_json::to_vec(&value).unwrap(),
-        )
-        .unwrap();
+        value["schema_version"] = 6.into();
+        value["downloads"] = serde_json::json!([snapshot("active")]);
+        value["admission_attempts"] = serde_json::json!({
+            hidden_attempt.clone(): {"request": hidden_request, "position": hidden_position}
+        });
+        value["queue_admissions"] = serde_json::json!({
+            "active": active,
+            "pending": pending
+        });
+        value["released_queue_admissions"] = serde_json::json!({"released": released});
+        value["recovery_revocations"] = serde_json::json!({
+            "pending": {
+                "attempt_id": Uuid::from_u128(7).to_string(),
+                "disposition": "durable",
+                "origin": {
+                    "kind": "admitted",
+                    "admission_attempt_id": pending_attempt,
+                    "snapshot": recovery_snapshot
+                }
+            }
+        });
+        value["lifecycle_quarantines"] = serde_json::json!({
+            "pending": {
+                "snapshot": quarantine_snapshot,
+                "domain": "recovery",
+                "disposition": "pending",
+                "sticky_failure": true
+            }
+        });
+        let before = serde_json::to_vec_pretty(&value).unwrap();
+        std::fs::write(&path, &before).unwrap();
 
         let store = AcquisitionStore::new(temp.path());
-        let before = std::fs::read(temp.path().join("downloads.json")).unwrap();
+        let models = DownloadPersistence::new(temp.path());
         assert!(matches!(
             store.require_acquisition_schema(),
             Err(PumasError::Validation { ref field, .. })
                 if field == "acquisition.migration_required"
         ));
-        assert_eq!(
-            std::fs::read(temp.path().join("downloads.json")).unwrap(),
-            before
-        );
+        assert!(matches!(
+            models.load_lifecycle_inventory_strict(),
+            Err(PumasError::Validation { ref field, .. })
+                if field == "acquisition.migration_required"
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        drop(models);
+        drop(store);
 
-        store.migrate_legacy_offline(Ok).unwrap();
-        store.require_acquisition_schema().unwrap();
-        let migrated = store.transaction(true).unwrap().document().unwrap();
-        assert_eq!(migrated.schema_version, 7);
-        assert_eq!(migrated.acquisitions.get(&id), Some(&record));
-        assert!(migrated.consumer_receipts.is_empty());
+        DownloadPersistence::migrate_legacy_offline(temp.path()).unwrap();
+        let mut expected = value;
+        expected["schema_version"] = 7.into();
+        expected["consumer_receipts"] = serde_json::json!({});
+        let migrated: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(migrated, expected);
+
+        // Cold owners have no process-local admission or cleanup confirmations.
+        let reopened = AcquisitionStore::new(temp.path());
+        let models = DownloadPersistence::new(temp.path());
+        reopened.require_acquisition_schema().unwrap();
+        assert_eq!(reopened.acquisitions().unwrap().get(&id), Some(&record));
+        assert_eq!(record.phase, AcquisitionPhase::Using { lease });
+        assert_eq!(record.files.len(), 1);
+        assert!(reopened.consumer_receipt(id).unwrap().is_none());
+        let (acquisitions, receipts) = reopened
+            .transaction(true)
+            .unwrap()
+            .consumer_completion_partition()
+            .unwrap();
+        assert_eq!(acquisitions.get(&id), Some(&record));
+        assert!(receipts.is_empty());
+        assert!(models.read_hf_completion_receipt(id).unwrap().is_none());
+        let inventory = models.load_lifecycle_inventory_strict().unwrap();
+        assert!(inventory.downloads.is_empty());
+        assert!(inventory.queue_admissions.is_empty());
+        assert_eq!(inventory.hidden_admissions.len(), 3);
+        let hidden = &inventory.hidden_admissions["hidden"];
         assert_eq!(
-            migrated.legacy.get("downloads").unwrap()[0]["download_id"],
-            "retained-model-row"
+            serde_json::to_value(&hidden.request).unwrap(),
+            serde_json::to_value(&hidden_request).unwrap()
+        );
+        assert_eq!(hidden.position, hidden_position);
+        for (download_id, admission, snapshot) in [
+            ("active", &active, snapshot("active")),
+            ("pending", &pending, quarantine_snapshot.clone()),
+        ] {
+            let projected = &inventory.hidden_admissions[download_id];
+            assert_eq!(
+                serde_json::to_value(&projected.request.snapshot).unwrap(),
+                serde_json::to_value(snapshot).unwrap()
+            );
+            assert_eq!(projected.request.domain, admission.domain);
+            assert_eq!(projected.request.destination, admission.destination);
+            assert_eq!(
+                projected.request.requested_payload_files,
+                admission.requested_payload_files
+            );
+            assert_eq!(projected.request.execution_files, admission.execution_files);
+            assert_eq!(projected.position, admission.position);
+        }
+        assert!(!inventory.hidden_admissions.contains_key("released"));
+        let quarantine = &inventory.quarantines["pending"];
+        assert_eq!(inventory.quarantines.len(), 1);
+        assert_eq!(quarantine.domain, LifecycleQuarantineDomain::Recovery);
+        assert_eq!(quarantine.disposition, LifecycleCleanupDisposition::Pending);
+        assert!(quarantine.sticky_failure);
+        assert_eq!(
+            serde_json::to_value(&quarantine.snapshot).unwrap(),
+            serde_json::to_value(&quarantine_snapshot).unwrap()
+        );
+        assert!(models
+            .validate_queue_execution(
+                "pending",
+                &pending_attempt,
+                pending.domain,
+                &destination,
+                &pending.execution_files,
+            )
+            .is_err());
+
+        // Only settlement is inside this byte comparison; inventory projection
+        // and any future reconciliation must not obscure a refused write.
+        let before_settlement = std::fs::read(&path).unwrap();
+        assert!(matches!(
+            models.settle_queue_admission("pending", &pending_attempt),
+            Err(PumasError::Validation { field, message })
+                if field == "downloads.lifecycle_quarantines"
+                    && message == "Queue release requires verified failure cleanup"
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), before_settlement);
+        let after: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(after, expected);
+        assert_eq!(reopened.acquisitions().unwrap().get(&id), Some(&record));
+        assert!(reopened.consumer_receipt(id).unwrap().is_none());
+        assert!(models.read_hf_completion_receipt(id).unwrap().is_none());
+        assert_eq!(
+            models
+                .load_lifecycle_inventory_strict()
+                .unwrap()
+                .quarantines["pending"]
+                .disposition,
+            LifecycleCleanupDisposition::Pending
         );
     }
 

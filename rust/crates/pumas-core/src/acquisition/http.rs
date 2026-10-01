@@ -3,7 +3,9 @@
 use super::{ArtifactManifest, ManifestValidationError};
 use crate::error::{PumasError, Result};
 use futures::StreamExt;
-use reqwest::header::{ACCEPT_ENCODING, AUTHORIZATION, CONTENT_ENCODING, CONTENT_RANGE, RANGE};
+use reqwest::header::{
+    ACCEPT_ENCODING, AUTHORIZATION, CONTENT_ENCODING, CONTENT_RANGE, ETAG, IF_MATCH, RANGE,
+};
 use reqwest::{Response, StatusCode};
 
 /// A checked response to one whole-file or suffix-range artifact request.
@@ -13,6 +15,17 @@ pub(crate) struct HttpArtifactResponse {
     pub(crate) body: Response,
     pub(crate) resumed: bool,
     pub(crate) total_size: Option<u64>,
+    pub(crate) resource: String,
+    pub(crate) strong_etag: Option<String>,
+}
+
+/// Opaque validator scoped to the exact effective HTTP resource. Only the
+/// acquisition owner supplies this after checking its live prefix checkpoint.
+#[derive(Clone)]
+pub(crate) struct HttpResumeEvidence {
+    pub(crate) resource: String,
+    pub(crate) etag: String,
+    pub(crate) total: Option<u64>,
 }
 
 /// Consumer-owned file effect used while the source-neutral HTTP component
@@ -53,6 +66,7 @@ pub(crate) async fn open_http_artifact(
     file_index: usize,
     resume_from: u64,
     authorization: Option<&str>,
+    continuation: Option<&HttpResumeEvidence>,
 ) -> Result<HttpArtifactResponse> {
     let file = manifest
         .files()
@@ -66,7 +80,13 @@ pub(crate) async fn open_http_artifact(
         request = request.header(AUTHORIZATION, authorization);
     }
     if resume_from > 0 {
-        request = request.header(RANGE, format!("bytes={resume_from}-"));
+        let evidence = continuation.ok_or_else(resume_identity_required)?;
+        if !is_strong_etag(&evidence.etag) {
+            return Err(resume_identity_required());
+        }
+        request = request
+            .header(RANGE, format!("bytes={resume_from}-"))
+            .header(IF_MATCH, &evidence.etag);
     }
     let response = request.send().await.map_err(|error| PumasError::Network {
         message: "HTTP artifact request failed".into(),
@@ -74,11 +94,24 @@ pub(crate) async fn open_http_artifact(
     })?;
 
     validate_identity_encoding(&response)?;
+    let resource = response.url().as_str().to_owned();
+    let strong_etag = strong_etag(&response);
     let status = response.status();
+    if resume_from > 0 && matches!(status, StatusCode::OK | StatusCode::PARTIAL_CONTENT) {
+        let evidence = continuation.ok_or_else(resume_identity_required)?;
+        if resource != evidence.resource || strong_etag.as_deref() != Some(evidence.etag.as_str()) {
+            return Err(invalid_response(
+                "HTTP continuation representation or resource changed",
+            ));
+        }
+    }
     match (resume_from, status) {
         (offset, StatusCode::PARTIAL_CONTENT) if offset > 0 => {
             let (start, end, total) = parse_content_range(&response)?;
-            if start != offset
+            if continuation
+                .and_then(|evidence| evidence.total)
+                .is_some_and(|expected| expected != total)
+                || start != offset
                 || end < start
                 || end.checked_add(1) != Some(total)
                 || file
@@ -102,12 +135,24 @@ pub(crate) async fn open_http_artifact(
                 body: response,
                 resumed: true,
                 total_size: Some(total),
+                resource,
+                strong_etag,
             })
         }
         (_, StatusCode::OK) => {
             // A full response to Range is safe only when the consumer opens the
             // partial file from zero and replaces its prior contents.
             let content_length = response.content_length();
+            if resume_from > 0
+                && continuation
+                    .and_then(|evidence| evidence.total)
+                    .zip(content_length)
+                    .is_some_and(|(expected, observed)| expected != observed)
+            {
+                return Err(invalid_response(
+                    "HTTP full continuation response changed total length",
+                ));
+            }
             if file
                 .expected_size()
                 .zip(content_length)
@@ -120,7 +165,12 @@ pub(crate) async fn open_http_artifact(
             Ok(HttpArtifactResponse {
                 body: response,
                 resumed: false,
-                total_size: file.expected_size().or(content_length),
+                total_size: file
+                    .expected_size()
+                    .or(content_length)
+                    .or_else(|| continuation.and_then(|evidence| evidence.total)),
+                resource,
+                strong_etag,
             })
         }
         (_, StatusCode::PARTIAL_CONTENT) => Err(invalid_response(
@@ -213,6 +263,25 @@ pub(crate) async fn stream_http_artifact(
         });
     }
     Ok(HttpBodyOutcome::Complete { downloaded })
+}
+
+fn is_strong_etag(value: &str) -> bool {
+    value.len() >= 2
+        && value.starts_with('"')
+        && value.ends_with('"')
+        && value.as_bytes()[1..value.len() - 1]
+            .iter()
+            .all(|byte| *byte == b'!' || (b'#'..=b'~').contains(byte))
+}
+
+fn strong_etag(response: &Response) -> Option<String> {
+    let all = response.headers().get_all(ETAG);
+    let mut values = all.iter();
+    let value = values.next()?.to_str().ok()?;
+    if values.next().is_some() || !is_strong_etag(value) {
+        return None;
+    }
+    Some(value.to_owned())
 }
 
 fn validate_identity_encoding(response: &Response) -> Result<()> {
@@ -346,9 +415,34 @@ mod tests {
         )
     }
 
+    async fn open_http_artifact(
+        client: &reqwest::Client,
+        url: &str,
+        manifest: &ArtifactManifest,
+        file_index: usize,
+        resume_from: u64,
+        authorization: Option<&str>,
+    ) -> Result<HttpArtifactResponse> {
+        let evidence = HttpResumeEvidence {
+            resource: url.to_owned(),
+            etag: "\"fixture-v1\"".into(),
+            total: manifest.files()[file_index].expected_size(),
+        };
+        super::open_http_artifact(
+            client,
+            url,
+            manifest,
+            file_index,
+            resume_from,
+            authorization,
+            (resume_from > 0).then_some(&evidence),
+        )
+        .await
+    }
+
     fn response(status: &str, headers: &str, body: &str) -> String {
         format!(
-            "HTTP/1.1 {status}\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "HTTP/1.1 {status}\r\nETag: \"fixture-v1\"\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         )
     }
@@ -424,6 +518,7 @@ mod tests {
         assert_eq!(reply.body.bytes().await.unwrap().as_ref(), b"def");
         let request = server.await.unwrap().to_ascii_lowercase();
         assert!(request.contains("range: bytes=3-"));
+        assert!(request.contains("if-match: \"fixture-v1\""));
         assert!(request.contains("accept-encoding: identity"));
     }
 
@@ -777,6 +872,112 @@ mod tests {
         );
         assert!(sink.bytes.is_empty());
         let _ = server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn continuation_refuses_changed_missing_or_weak_validator_for_full_and_partial_bodies() {
+        for status in ["200 OK", "206 Partial Content"] {
+            for etag in ["", "ETag: \"changed-v2\"\r\n", "ETag: W/\"fixture-v1\"\r\n"] {
+                let range = if status.starts_with("206") {
+                    "Content-Range: bytes 3-5/6\r\n"
+                } else {
+                    ""
+                };
+                let body = if status.starts_with("206") {
+                    "def"
+                } else {
+                    "abcdef"
+                };
+                let raw = format!("HTTP/1.1 {status}\r\n{etag}{range}Content-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+                let (url, server) = serve_once(raw).await;
+                let error = open_http_artifact(
+                    &reqwest::Client::new(),
+                    url.as_str(),
+                    &manifest(selected_file(6), RevisionStrength::Immutable),
+                    0,
+                    3,
+                    None,
+                )
+                .await
+                .unwrap_err();
+                assert!(matches!(error, PumasError::Validation { .. }));
+                assert!(server
+                    .await
+                    .unwrap()
+                    .to_ascii_lowercase()
+                    .contains("if-match: \"fixture-v1\""));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn continuation_same_etag_on_different_resource_is_refused() {
+        let (url, server) = serve_once(response(
+            "206 Partial Content",
+            "Content-Range: bytes 3-5/6\r\n",
+            "def",
+        ))
+        .await;
+        let evidence = HttpResumeEvidence {
+            resource: url.join("/prior-selected-object").unwrap().to_string(),
+            etag: "\"fixture-v1\"".into(),
+            total: Some(6),
+        };
+        let error = super::open_http_artifact(
+            &reqwest::Client::new(),
+            url.as_str(),
+            &manifest(selected_file(6), RevisionStrength::Immutable),
+            0,
+            3,
+            None,
+            Some(&evidence),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, PumasError::Validation { .. }));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn continuation_precondition_failure_is_refused() {
+        let (url, server) = serve_once(response("412 Precondition Failed", "", "")).await;
+        let error = open_http_artifact(
+            &reqwest::Client::new(),
+            url.as_str(),
+            &manifest(selected_file(6), RevisionStrength::Immutable),
+            0,
+            3,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(error, PumasError::DownloadFailed { message, .. } if message == "HTTP 412 Precondition Failed")
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn range_without_checkpoint_evidence_is_refused_before_request() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/artifact", listener.local_addr().unwrap());
+        let error = super::open_http_artifact(
+            &reqwest::Client::new(),
+            &url,
+            &manifest(selected_file(6), RevisionStrength::Immutable),
+            0,
+            3,
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, PumasError::Validation { .. }));
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), listener.accept())
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

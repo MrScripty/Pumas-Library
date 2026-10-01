@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 /// Equality-only workspace locator. It conveys no filesystem permission.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +97,23 @@ pub struct AcquisitionWorkspace {
     locator: WorkspaceIdentity,
 }
 
+/// A checkpoint must not keep a reservation alive after its owner drops it.
+#[derive(Clone)]
+pub(crate) struct WorkspaceCheckpointOwner(Weak<HeldWorkspace>);
+
+impl WorkspaceCheckpointOwner {
+    pub(crate) fn matches(&self, workspace: &AcquisitionWorkspace) -> bool {
+        self.0.ptr_eq(&Arc::downgrade(&workspace.held)) && self.0.upgrade().is_some()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct PartialPrefix {
+    binding: Identity,
+    pub(crate) bytes: u64,
+    pub(crate) sha256: String,
+}
+
 impl AcquisitionWorkspace {
     /// Reconstruct the equality-only identity for a reserved child without
     /// opening or creating that child. Consumers use this after durable
@@ -165,6 +182,10 @@ impl AcquisitionWorkspace {
             }),
             locator,
         })
+    }
+
+    pub(crate) fn checkpoint_owner(&self) -> WorkspaceCheckpointOwner {
+        WorkspaceCheckpointOwner(Arc::downgrade(&self.held))
     }
 
     pub fn identity(&self) -> &WorkspaceIdentity {
@@ -274,6 +295,7 @@ impl AcquisitionWorkspace {
         self.require_writable()?;
         let (parent, name) = self.parent(path, true)?;
         let mut options = options();
+        options.read(true);
         if append {
             options.append(true);
         } else {
@@ -290,6 +312,87 @@ impl AcquisitionWorkspace {
         }
         self.validate()?;
         Ok(file)
+    }
+
+    /// Check through the held parent and keep this exact descriptor for append.
+    pub(crate) fn open_checkpoint_part(
+        &self,
+        path: &str,
+        expected: &PartialPrefix,
+    ) -> Result<(std::fs::File, Sha256)> {
+        let mut handle = self.open_part(path, true)?;
+        let hash = self.validate_checkpoint_part(path, &mut handle, expected)?;
+        Ok((handle, hash))
+    }
+
+    /// Recheck after the network wait without opening a new write descriptor.
+    pub(crate) fn validate_checkpoint_part(
+        &self,
+        path: &str,
+        handle: &mut std::fs::File,
+        expected: &PartialPrefix,
+    ) -> Result<Sha256> {
+        let (observed, hash) = self.observe_part(path, handle)?;
+        if &observed != expected {
+            return Err(changed());
+        }
+        Ok(hash)
+    }
+
+    /// Observe a flushed prefix. Callers compare its digest to the bytes they
+    /// actually streamed before admitting it as a continuation checkpoint.
+    pub(crate) fn observe_part(
+        &self,
+        path: &str,
+        handle: &mut std::fs::File,
+    ) -> Result<(PartialPrefix, Sha256)> {
+        self.require_writable()?;
+        let (parent, name) = self.parent(path, false)?;
+        let before = Metadata::from_file(handle)?;
+        if !before.is_file() {
+            return Err(changed());
+        }
+        let binding = identity(&before)?;
+        handle.seek(SeekFrom::Start(0))?;
+        let mut hash = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        let mut bytes = 0_u64;
+        loop {
+            let read = handle.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            bytes = bytes.checked_add(read as u64).ok_or_else(changed)?;
+            hash.update(&buffer[..read]);
+        }
+        let after = Metadata::from_file(handle)?;
+        let mut read_options = options();
+        read_options.read(true);
+        let current = Metadata::from_file(
+            &parent
+                .open_with(format!("{name}.part"), &read_options)?
+                .into_std(),
+        )?;
+        if identity(&after)? != binding
+            || identity(&current)? != binding
+            || before.len() != bytes
+            || after.len() != bytes
+            || current.len() != bytes
+            || before.modified()? != after.modified()?
+            || before.modified()? != current.modified()?
+        {
+            return Err(changed());
+        }
+        self.validate()?;
+        handle.seek(SeekFrom::End(0))?;
+        Ok((
+            PartialPrefix {
+                binding,
+                bytes,
+                sha256: hex::encode(hash.clone().finalize()),
+            },
+            hash,
+        ))
     }
 
     pub(crate) fn remove_part(&self, path: &str) -> Result<()> {
@@ -532,6 +635,79 @@ mod tests {
         )
         .unwrap();
         assert_eq!(workspace.identity(), &identity);
+    }
+
+    #[test]
+    fn checkpoint_descriptor_rejects_mutated_and_replaced_prefixes() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let workspace = AcquisitionWorkspace::from_capability(
+            crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
+            WorkspaceIdentity {
+                root_identity: "fixture".into(),
+                relative_target: "stage".into(),
+            },
+            Arc::new(()),
+            || Ok(()),
+        )
+        .unwrap();
+        let mut initial = workspace.open_part("payload.bin", false).unwrap();
+        initial.write_all(b"DATA").unwrap();
+        initial.sync_all().unwrap();
+        let (prefix, _) = workspace.observe_part("payload.bin", &mut initial).unwrap();
+        let (mut checked, _) = workspace
+            .open_checkpoint_part("payload.bin", &prefix)
+            .unwrap();
+        std::fs::write(temp.path().join("payload.bin.part"), b"EVIL").unwrap();
+        assert!(workspace
+            .validate_checkpoint_part("payload.bin", &mut checked, &prefix)
+            .is_err());
+        assert!(workspace
+            .open_checkpoint_part("payload.bin", &prefix)
+            .is_err());
+        std::fs::write(temp.path().join("payload.bin.part"), b"DATA").unwrap();
+        std::fs::rename(
+            temp.path().join("payload.bin.part"),
+            temp.path().join("retired"),
+        )
+        .unwrap();
+        std::fs::write(temp.path().join("payload.bin.part"), b"DATA").unwrap();
+        assert!(workspace
+            .validate_checkpoint_part("payload.bin", &mut checked, &prefix)
+            .is_err());
+        assert!(workspace
+            .open_checkpoint_part("payload.bin", &prefix)
+            .is_err());
+        assert_eq!(
+            std::fs::read(temp.path().join("payload.bin.part")).unwrap(),
+            b"DATA"
+        );
+    }
+
+    #[test]
+    fn checkpoint_owner_does_not_match_reopened_workspace_or_retain_lease() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let lease = Arc::new(());
+        let make = || {
+            AcquisitionWorkspace::from_capability(
+                crate::platform::capability_fs::open_directory(temp.path()).unwrap(),
+                WorkspaceIdentity {
+                    root_identity: "fixture".into(),
+                    relative_target: "stage".into(),
+                },
+                lease.clone(),
+                || Ok(()),
+            )
+            .unwrap()
+        };
+        let first = make();
+        let owner = first.checkpoint_owner();
+        assert!(owner.matches(&first.clone()));
+        let reopened = make();
+        assert_eq!(first.identity(), reopened.identity());
+        assert!(!owner.matches(&reopened));
+        drop(first);
+        assert_eq!(Arc::strong_count(&lease), 2);
+        assert!(!owner.matches(&reopened));
     }
 
     #[test]

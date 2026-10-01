@@ -1,16 +1,22 @@
 //! Durable acquisition custody shared by source adapters and consumers.
 use super::http::{
     open_http_artifact, stream_http_artifact, HttpArtifactSink, HttpAttemptHost, HttpBodyOutcome,
+    HttpResumeEvidence,
 };
 use super::store::AcquisitionStore;
 use super::task_custody::{TaskContext, TaskCustodyOwner};
-use super::workspace::{write_chunk, AcquisitionWorkspace, VerifiedFile, WorkspaceIdentity};
+use super::workspace::{
+    write_chunk, AcquisitionWorkspace, PartialPrefix, VerifiedFile, WorkspaceCheckpointOwner,
+    WorkspaceIdentity,
+};
 use super::ArtifactManifest;
 use crate::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -408,6 +414,19 @@ impl AcquiredArtifactUse {
 pub struct AcquisitionService {
     store: Arc<AcquisitionStore>,
     supervisor: Arc<TaskCustodyOwner>,
+    checkpoints: Arc<Mutex<BTreeMap<(Uuid, usize), WarmCheckpoint>>>,
+}
+
+/// Runtime evidence only: never decoded from persisted progress or filenames.
+#[derive(Clone)]
+struct WarmCheckpoint {
+    record: AcquisitionRecord,
+    owner: WorkspaceCheckpointOwner,
+    request_url: String,
+    resource: String,
+    etag: String,
+    total: Option<u64>,
+    prefix: PartialPrefix,
 }
 
 impl AcquisitionService {
@@ -415,6 +434,7 @@ impl AcquisitionService {
         Self {
             store,
             supervisor: Arc::new(TaskCustodyOwner::new()),
+            checkpoints: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
@@ -428,6 +448,7 @@ impl AcquisitionService {
         Ok(Self {
             store,
             supervisor: Arc::new(TaskCustodyOwner::with_capacity(capacity)?),
+            checkpoints: Arc::new(Mutex::new(BTreeMap::new())),
         })
     }
 
@@ -435,7 +456,16 @@ impl AcquisitionService {
         Self {
             store,
             supervisor: self.supervisor.clone(),
+            checkpoints: self.checkpoints.clone(),
         }
+    }
+
+    fn forget_checkpoint(&self, key: (Uuid, usize)) -> Result<()> {
+        self.checkpoints
+            .lock()
+            .map_err(|_| invalid("Checkpoint owner poisoned"))?
+            .remove(&key);
+        Ok(())
     }
 
     pub fn store(&self) -> &Arc<AcquisitionStore> {
@@ -520,7 +550,12 @@ impl AcquisitionService {
     /// Global closure after every consumer has stopped admitting work. Narrow
     /// consumer shutdown must close that consumer's scope first.
     pub async fn shutdown(self: &Arc<Self>) -> Result<()> {
-        self.supervisor.request_shutdown().wait().await
+        self.supervisor.request_shutdown().wait().await?;
+        self.checkpoints
+            .lock()
+            .map_err(|_| invalid("Checkpoint owner poisoned"))?
+            .clear();
+        Ok(())
     }
 
     pub(crate) fn use_proof(
@@ -586,6 +621,12 @@ impl AcquisitionService {
         demand: AcquisitionDemand,
         workspace: WorkspaceIdentity,
     ) -> Result<()> {
+        self.checkpoints
+            .lock()
+            .map_err(|_| invalid("Checkpoint owner poisoned"))?
+            .retain(|_, checkpoint| {
+                checkpoint.record.demand != demand || checkpoint.record.workspace != workspace
+            });
         let store = self.store.clone();
         owned(context, "withdraw cleaned acquisition demand", move || {
             store.update_acquisitions_if_changed(|records| {
@@ -652,6 +693,7 @@ impl AcquisitionService {
         workspace: &AcquisitionWorkspace,
         file_index: usize,
     ) -> Result<Option<u64>> {
+        self.forget_checkpoint((operation.record.id, file_index))?;
         let selected = operation
             .record
             .manifest
@@ -765,6 +807,7 @@ impl AcquisitionService {
             }
             None => false,
         };
+        let key = (operation.record.id, file_index);
         let started = Instant::now();
         let mut attempt = 0_u32;
         loop {
@@ -773,6 +816,7 @@ impl AcquisitionService {
                 .ok_or_else(|| invalid("Retry counter exhausted"))?;
             host.retry(attempt, None, None).await?;
             if host.cancel_requested() {
+                self.forget_checkpoint(key)?;
                 return Err(PumasError::DownloadCancelled);
             }
             if host.pause_requested_now() {
@@ -780,65 +824,170 @@ impl AcquisitionService {
             }
             let inspect = workspace.clone();
             let path = file.logical_path().to_owned();
-            let mut resume = owned(context, "inspect acquisition partial file", move || {
+            let physical_length = owned(context, "inspect acquisition partial file", move || {
                 inspect.file_len(&path, true)
             })
             .await?
             .unwrap_or(0);
-            if resume > 0
-                && ((!operation.record.manifest.permits_resume(file_index))
-                    || (compare_existing && attempt == 1))
-            {
-                let remove = workspace.clone();
-                let path = file.logical_path().to_owned();
-                owned(context, "discard unbound acquisition partial", move || {
-                    remove.remove_part(&path)
-                })
-                .await?;
-                resume = 0;
-            }
+            // A publisher digest can independently verify a complete partial.
+            // Immutable revision and length alone cannot establish completion.
             if !compare_existing
-                && file.expected_size() == Some(resume)
-                && resume > 0
-                && operation.record.manifest.permits_resume(file_index)
+                && physical_length > 0
+                && file.expected_size() == Some(physical_length)
+                && file.expected_sha256().is_some()
             {
+                self.forget_checkpoint(key)?;
                 let publish = workspace.clone();
                 let selected = file.clone();
-                return owned(context, "publish complete acquisition partial", move || {
-                    publish
-                        .publish_part(&selected, false)
-                        .map(|receipt| receipt.bytes)
-                })
+                return owned(
+                    context,
+                    "publish digest-verified acquisition partial",
+                    move || {
+                        publish
+                            .publish_part(&selected, false)
+                            .map(|receipt| receipt.bytes)
+                    },
+                )
                 .await;
+            }
+            let checkpoint = self
+                .checkpoints
+                .lock()
+                .map_err(|_| invalid("Checkpoint owner poisoned"))?
+                .get(&key)
+                .cloned();
+            let checkpoint = checkpoint.filter(|checkpoint| {
+                checkpoint.record == operation.record
+                    && checkpoint.owner.matches(workspace)
+                    && checkpoint.request_url == url
+                    && operation.record.manifest.permits_resume(file_index)
+                    && !(compare_existing && attempt == 1)
+                    && checkpoint.prefix.bytes > 0
+                    && checkpoint.prefix.bytes == physical_length
+                    && checkpoint
+                        .total
+                        .or(file.expected_size())
+                        .is_none_or(|total| checkpoint.prefix.bytes < total)
+            });
+            let mut checked_part = None;
+            let mut resume = 0;
+            let mut continuation = None;
+            if let Some(checkpoint) = checkpoint {
+                let check = workspace.clone();
+                let path = file.logical_path().to_owned();
+                let prefix = checkpoint.prefix.clone();
+                match owned(context, "verify live acquisition prefix", move || {
+                    check.open_checkpoint_part(&path, &prefix)
+                })
+                .await
+                {
+                    Ok(checked) => {
+                        resume = checkpoint.prefix.bytes;
+                        continuation = Some(HttpResumeEvidence {
+                            resource: checkpoint.resource.clone(),
+                            etag: checkpoint.etag.clone(),
+                            total: checkpoint.total,
+                        });
+                        checked_part = Some((checked, checkpoint.prefix));
+                    }
+                    Err(PumasError::Validation { .. }) => self.forget_checkpoint(key)?,
+                    Err(error) => {
+                        self.forget_checkpoint(key)?;
+                        return Err(error);
+                    }
+                }
+            } else {
+                self.forget_checkpoint(key)?;
             }
             let response = tokio::select! {
                 biased;
                 _ = host.pause_requested() => return Err(if host.cancel_requested() {
+                    self.forget_checkpoint(key)?;
                     PumasError::DownloadCancelled
                 } else {
                     PumasError::DownloadPaused
                 }),
-                response = open_http_artifact(client, url, &operation.record.manifest, file_index, resume, authorization) => response,
+                response = open_http_artifact(client, url, &operation.record.manifest, file_index, resume, authorization, continuation.as_ref()) => response,
             };
             let outcome = match response {
                 Ok(response) => {
+                    let resource = response.resource.clone();
+                    let etag = response.strong_etag.clone();
+                    let total = response.total_size;
+                    self.forget_checkpoint(key)?;
                     let open = workspace.clone();
                     let path = file.logical_path().to_owned();
                     let append = response.resumed;
-                    let file = owned(context, "open acquisition partial file", move || {
-                        open.open_part(&path, append)
-                    })
+                    let (handle, hash) = owned(
+                        context,
+                        "open checked acquisition partial file",
+                        move || {
+                            if append {
+                                let ((mut handle, _), prefix) = checked_part.ok_or_else(|| {
+                                    invalid("Continuation has no checked descriptor")
+                                })?;
+                                let hash =
+                                    open.validate_checkpoint_part(&path, &mut handle, &prefix)?;
+                                Ok((handle, hash))
+                            } else {
+                                Ok((open.open_part(&path, false)?, Sha256::new()))
+                            }
+                        },
+                    )
                     .await?;
                     let mut sink = AcquisitionSink {
-                        file: Some(file),
+                        file: Some(handle),
                         context,
+                        hash,
                     };
-                    stream_http_artifact(response, resume, &mut sink, host).await
+                    let outcome = stream_http_artifact(response, resume, &mut sink, host).await;
+                    if !matches!(outcome, Ok(HttpBodyOutcome::Cancelled)) && sink.file.is_some() {
+                        sink.flush().await?;
+                        let mut handle = sink
+                            .file
+                            .take()
+                            .ok_or_else(|| invalid("Partial file effect is unfinished"))?;
+                        let expected = hex::encode(sink.hash.clone().finalize());
+                        let check = workspace.clone();
+                        let path = file.logical_path().to_owned();
+                        let prefix =
+                            owned(context, "verify streamed acquisition prefix", move || {
+                                let (prefix, _) = check.observe_part(&path, &mut handle)?;
+                                if prefix.sha256 != expected {
+                                    return Err(invalid(
+                                        "Acquisition prefix differs from streamed bytes",
+                                    ));
+                                }
+                                Ok(prefix)
+                            })
+                            .await?;
+                        if let Some(etag) = etag {
+                            if prefix.bytes > 0 && total.is_none_or(|total| prefix.bytes < total) {
+                                self.checkpoints
+                                    .lock()
+                                    .map_err(|_| invalid("Checkpoint owner poisoned"))?
+                                    .insert(
+                                        key,
+                                        WarmCheckpoint {
+                                            record: operation.record.clone(),
+                                            owner: workspace.checkpoint_owner(),
+                                            request_url: url.to_owned(),
+                                            resource,
+                                            etag,
+                                            total,
+                                            prefix,
+                                        },
+                                    );
+                            }
+                        }
+                    }
+                    outcome
                 }
                 Err(error) => Err(error),
             };
             match outcome {
                 Ok(HttpBodyOutcome::Complete { .. }) => {
+                    self.forget_checkpoint(key)?;
                     if host.cancel_requested() {
                         return Err(PumasError::DownloadCancelled);
                     }
@@ -855,9 +1004,13 @@ impl AcquisitionService {
                     .await;
                 }
                 Ok(HttpBodyOutcome::Paused) => return Err(PumasError::DownloadPaused),
-                Ok(HttpBodyOutcome::Cancelled) => return Err(PumasError::DownloadCancelled),
+                Ok(HttpBodyOutcome::Cancelled) => {
+                    self.forget_checkpoint(key)?;
+                    return Err(PumasError::DownloadCancelled);
+                }
                 Err(error) => {
                     if !error.is_retryable() || host.cancel_requested() {
+                        self.forget_checkpoint(key)?;
                         return Err(error);
                     }
                     if retry.attempts.is_some_and(|limit| attempt >= limit)
@@ -871,6 +1024,7 @@ impl AcquisitionService {
                     tokio::select! {
                         biased;
                         _ = host.pause_requested() => return Err(if host.cancel_requested() {
+                            self.forget_checkpoint(key)?;
                             PumasError::DownloadCancelled
                         } else {
                             PumasError::DownloadPaused
@@ -1430,6 +1584,7 @@ async fn owned<T: Send + 'static>(
 struct AcquisitionSink<'a> {
     file: Option<std::fs::File>,
     context: &'a TaskContext,
+    hash: Sha256,
 }
 
 #[async_trait::async_trait]
@@ -1439,7 +1594,8 @@ impl HttpArtifactSink for AcquisitionSink<'_> {
             .file
             .take()
             .ok_or_else(|| invalid("Partial file effect is unfinished"))?;
-        let bytes = bytes.to_owned();
+        let written = bytes.to_owned();
+        let bytes = written.clone();
         self.file = Some(
             owned(self.context, "write acquisition partial file", move || {
                 write_chunk(&mut file, &bytes)?;
@@ -1447,6 +1603,7 @@ impl HttpArtifactSink for AcquisitionSink<'_> {
             })
             .await?,
         );
+        self.hash.update(&written);
         Ok(())
     }
     async fn flush(&mut self) -> Result<()> {
@@ -1721,7 +1878,7 @@ mod tests {
             socket
                 .write_all(
                     format!(
-                        "HTTP/1.1 200 OK\r\nContent-Length: {total}\r\nConnection: close\r\n\r\n"
+                        "HTTP/1.1 200 OK\r\nContent-Length: {total}\r\nETag: \"fixture-v1\"\r\nConnection: close\r\n\r\n"
                     )
                     .as_bytes(),
                 )
@@ -2571,7 +2728,356 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cold_service_reopen_restarts_partial_transfer_from_zero() {
+        let timeout = Duration::from_secs(5);
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let first_service = Arc::new(AcquisitionService::new(store.clone()));
+        let first_consumer = Arc::new(first_service.open_consumer("fixture").unwrap());
+        let demand = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: "cold-owner-reopen".into(),
+        };
+        let manifest = manifest_with_size("payload.bin", 8);
+        let first_demand = demand.clone();
+        let first_manifest = manifest.clone();
+        let first_workspace = workspace(&stage);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/fixture", listener.local_addr().unwrap());
+        let first_url = url.clone();
+        let (first_sent_sender, first_sent) = tokio::sync::oneshot::channel();
+        let (continue_sender, continue_receiver) = tokio::sync::oneshot::channel();
+        let (range_sender, range_receiver) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut initial, _) = listener.accept().await.unwrap();
+            let mut initial_request = [0_u8; 2048];
+            assert!(initial.read(&mut initial_request).await.unwrap() > 0);
+            initial
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nETag: \"stable-v1\"\r\nConnection: close\r\n\r\nDATA",
+                )
+                .await
+                .unwrap();
+            let _ = first_sent_sender.send(());
+            if continue_receiver.await.is_ok() {
+                let _ = initial.write_all(b"TAIL").await;
+            }
+
+            let (mut reopened, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                assert!(request.len() < 8192, "fixture request headers too large");
+                request.push(reopened.read_u8().await.unwrap());
+            }
+            let request = String::from_utf8(request).unwrap();
+            let had_range = request.lines().any(|line| {
+                line.split_once(':')
+                    .is_some_and(|(name, _)| name.eq_ignore_ascii_case("range"))
+            });
+            let _ = range_sender.send(had_range);
+            if had_range {
+                reopened
+                    .write_all(
+                        b"HTTP/1.1 206 Partial Content\r\nContent-Length: 4\r\nContent-Range: bytes 4-7/8\r\nETag: \"changed-v2\"\r\nConnection: close\r\n\r\nEVIL",
+                    )
+                    .await
+                    .unwrap();
+            } else {
+                reopened
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nETag: \"changed-v2\"\r\nConnection: close\r\n\r\nDATATAIL",
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let (progress_sender, mut progress) = tokio::sync::watch::channel(0_u64);
+        let host = ControlledHost {
+            paused: Arc::new(AtomicBool::new(false)),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            pause_wake: Arc::new(tokio::sync::Notify::new()),
+            cancel_wake: Arc::new(tokio::sync::Notify::new()),
+            progress: progress_sender,
+        };
+        let controls = host.clone();
+        let first_transfer_consumer = first_consumer.clone();
+        let mut first_transfer = tokio::spawn(async move {
+            first_transfer_consumer
+                .acquire_http(
+                    AcquisitionHttpRequest {
+                        demand: first_demand,
+                        manifest: first_manifest,
+                        workspace: first_workspace,
+                        sources: vec![AcquisitionHttpSource {
+                            url: first_url,
+                            authorization: None,
+                        }],
+                        retry: retry(),
+                    },
+                    reqwest::Client::new(),
+                    Box::new(host),
+                    |_| async { Ok::<((), Value), PumasError>(((), Value::Null)) },
+                    |(), _receipt| async { Ok::<(), PumasError>(()) },
+                )
+                .await
+        });
+
+        tokio::time::timeout(timeout, async {
+            first_sent.await.unwrap();
+            while *progress.borrow_and_update() < 4 {
+                progress.changed().await.unwrap();
+            }
+        })
+        .await
+        .expect("first transfer must write DATA before pause");
+        controls.pause();
+        let paused = tokio::time::timeout(timeout, &mut first_transfer)
+            .await
+            .expect("pause must stop the first transfer")
+            .unwrap();
+        assert!(matches!(paused, Err(PumasError::DownloadPaused)));
+        continue_sender.send(()).unwrap();
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin.part")).unwrap(),
+            b"DATA"
+        );
+
+        drop(first_transfer);
+        drop(first_consumer);
+        drop(first_service);
+        let reopened_service = Arc::new(AcquisitionService::new(store));
+        let reopened_consumer = reopened_service.open_consumer("fixture").unwrap();
+        let reopened_receipt = tokio::time::timeout(
+            timeout,
+            reopened_consumer.acquire_http(
+                AcquisitionHttpRequest {
+                    demand,
+                    manifest,
+                    workspace: workspace(&stage),
+                    sources: vec![AcquisitionHttpSource {
+                        url,
+                        authorization: None,
+                    }],
+                    retry: retry(),
+                },
+                reqwest::Client::new(),
+                Box::new(Host),
+                |_| async { Ok::<((), Value), PumasError>(((), Value::Null)) },
+                |(), receipt| async { Ok::<_, PumasError>(receipt) },
+            ),
+        )
+        .await
+        .expect("cold recovery must finish a fresh transfer")
+        .unwrap();
+        let had_range = range_receiver.await.unwrap();
+        tokio::time::timeout(timeout, server)
+            .await
+            .expect("HTTP fixture must finish")
+            .unwrap();
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin")).unwrap(),
+            b"DATATAIL"
+        );
+        assert!(!had_range, "cold owner must not send Range");
+        assert!(!stage.join("payload.bin.part").exists());
+        assert_eq!(reopened_receipt.verified_files[0].bytes, 8);
+    }
+
+    #[tokio::test]
+    async fn digestless_full_size_partial_is_replaced_by_fresh_http_body() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::write(stage.join("payload.bin.part"), b"DATAEVIL").unwrap();
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store));
+        let consumer = service.open_consumer("fixture").unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/fixture", listener.local_addr().unwrap());
+        let mut server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.ends_with(b"\r\n\r\n") {
+                assert!(request.len() < 8192);
+                request.push(socket.read_u8().await.unwrap());
+            }
+            let request = String::from_utf8(request).unwrap().to_ascii_lowercase();
+            assert!(!request.contains("range:"));
+            socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nDATATAIL",
+                )
+                .await
+                .unwrap();
+        });
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            consumer.acquire_http(
+                AcquisitionHttpRequest {
+                    demand: AcquisitionDemand {
+                        consumer: "fixture".into(),
+                        operation: "full-size-digestless".into(),
+                    },
+                    manifest: manifest_with_size("payload.bin", 8),
+                    workspace: workspace(&stage),
+                    sources: vec![AcquisitionHttpSource {
+                        url,
+                        authorization: None,
+                    }],
+                    retry: retry(),
+                },
+                reqwest::Client::new(),
+                Box::new(Host),
+                |_| async { Ok::<((), Value), PumasError>(((), Value::Null)) },
+                |(), _receipt| async { Ok::<(), PumasError>(()) },
+            ),
+        )
+        .await;
+        if result.is_err() {
+            server.abort();
+        }
+        let joined = tokio::time::timeout(Duration::from_secs(5), &mut server).await;
+        if joined.is_err() {
+            server.abort();
+            let _ = server.await;
+        }
+        consumer.shutdown().await.unwrap();
+        service.shutdown().await.unwrap();
+        result.expect("fresh full transfer must finish").unwrap();
+        joined.expect("fresh HTTP fixture must join").unwrap();
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin")).unwrap(),
+            b"DATATAIL"
+        );
+        assert!(!stage.join("payload.bin.part").exists());
+    }
+
+    #[tokio::test]
+    async fn digest_backed_full_size_partial_requires_expected_sha256_before_publication() {
+        for bytes in [b"DATATAIL", b"DATAEVIL"] {
+            let temp = tempfile::TempDir::new().unwrap();
+            let stage = temp.path().join("stage");
+            std::fs::create_dir(&stage).unwrap();
+            std::fs::write(stage.join("payload.bin.part"), bytes).unwrap();
+            let store = Arc::new(AcquisitionStore::new(temp.path()));
+            let service = Arc::new(AcquisitionService::new(store.clone()));
+            let consumer = service.open_consumer("fixture").unwrap();
+            let selected = manifest_with_size("payload.bin", 8);
+            let selection = ArtifactManifest::new(
+                selected.source().clone(),
+                vec![ArtifactFile::new(
+                    "payload.bin",
+                    "payload",
+                    Some(8),
+                    Some(
+                        super::super::Sha256Evidence::new(
+                            "publisher.sha256",
+                            hex::encode(Sha256::digest(b"DATATAIL")),
+                        )
+                        .unwrap(),
+                    ),
+                    FileVerificationRequirement::Sha256,
+                )
+                .unwrap()],
+            )
+            .unwrap();
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/fixture", listener.local_addr().unwrap());
+            let result = tokio::time::timeout(
+                Duration::from_secs(5),
+                consumer.acquire_http(
+                    AcquisitionHttpRequest {
+                        demand: AcquisitionDemand {
+                            consumer: "fixture".into(),
+                            operation: "full-size-digest".into(),
+                        },
+                        manifest: selection,
+                        workspace: workspace(&stage),
+                        sources: vec![AcquisitionHttpSource {
+                            url,
+                            authorization: None,
+                        }],
+                        retry: retry(),
+                    },
+                    reqwest::Client::new(),
+                    Box::new(Host),
+                    |_| async { Ok::<((), Value), PumasError>(((), Value::Null)) },
+                    |(), _receipt| async { Ok::<(), PumasError>(()) },
+                ),
+            )
+            .await
+            .expect("digest check must finish without HTTP");
+            consumer.shutdown().await.unwrap();
+            service.shutdown().await.unwrap();
+            assert!(
+                tokio::time::timeout(Duration::from_millis(50), listener.accept())
+                    .await
+                    .is_err()
+            );
+            if bytes == b"DATATAIL" {
+                result.unwrap();
+                assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), bytes);
+            } else {
+                assert!(matches!(result, Err(PumasError::HashMismatch { .. })));
+                assert!(!stage.join("payload.bin").exists());
+                assert_eq!(
+                    std::fs::read(stage.join("payload.bin.part")).unwrap(),
+                    bytes
+                );
+                let records = store.acquisitions().unwrap();
+                let record = records.values().next().unwrap();
+                assert!(matches!(record.phase, AcquisitionPhase::Transferring));
+                assert!(service.consumer_receipt(record.id).unwrap().is_none());
+            }
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum WarmReply {
+        Partial,
+        Full,
+        ChangedValidator,
+        MissingValidator,
+        WeakValidator,
+        DifferentResource,
+        MutatedPrefix,
+    }
+
+    #[tokio::test]
+    async fn warm_same_validator_full_response_replaces_prefix_from_zero() {
+        assert_warm_continuation(WarmReply::Full).await;
+    }
+
+    #[tokio::test]
+    async fn warm_changed_missing_or_weak_validator_refuses_without_append() {
+        for reply in [
+            WarmReply::ChangedValidator,
+            WarmReply::MissingValidator,
+            WarmReply::WeakValidator,
+        ] {
+            assert_warm_continuation(reply).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn warm_same_etag_on_different_effective_resource_refuses_without_append() {
+        assert_warm_continuation(WarmReply::DifferentResource).await;
+    }
+
+    #[tokio::test]
+    async fn warm_mutated_prefix_restarts_without_range() {
+        assert_warm_continuation(WarmReply::MutatedPrefix).await;
+    }
+
+    #[tokio::test]
     async fn paused_http_acquisition_resumes_same_demand_with_range() {
+        assert_warm_continuation(WarmReply::Partial).await;
+    }
+
+    async fn assert_warm_continuation(reply: WarmReply) {
         use futures::FutureExt;
 
         let timeout = Duration::from_secs(5);
@@ -2607,7 +3113,7 @@ mod tests {
             manifest: manifest.clone(),
             workspace: workspace.clone(),
             sources: vec![AcquisitionHttpSource {
-                url,
+                url: url.clone(),
                 authorization: None,
             }],
             retry: retry(),
@@ -2667,8 +3173,11 @@ mod tests {
         assert_eq!(store.acquisitions().unwrap(), before_pause);
         assert!(service.consumer_receipt(original.id).unwrap().is_none());
 
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/fixture", listener.local_addr().unwrap());
+        if matches!(reply, WarmReply::MutatedPrefix) {
+            std::fs::write(stage.join("payload.bin.part"), b"EVIL").unwrap();
+        }
+        let address = reqwest::Url::parse(&url).unwrap().socket_addrs(|| None).unwrap()[0];
+        let listener = tokio::net::TcpListener::bind(address).await.unwrap();
         second_server = Some(tokio::spawn(async move {
             tokio::time::timeout(timeout, async {
                 let (mut socket, _) = listener.accept().await.unwrap();
@@ -2679,15 +3188,37 @@ mod tests {
                     request.push(byte);
                 }
                 let request = String::from_utf8(request).unwrap();
-                assert!(request.lines().any(|line| {
-                    line.split_once(':').is_some_and(|(name, value)| {
-                        name.eq_ignore_ascii_case("range") && value.trim() == "bytes=4-"
-                    })
-                }), "resumed request must contain Range: bytes=4-: {request}");
-                socket
-                    .write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 4\r\nContent-Range: bytes 4-7/8\r\nConnection: close\r\n\r\nTAIL")
-                    .await
-                    .unwrap();
+                let request = request.to_ascii_lowercase();
+                if matches!(reply, WarmReply::MutatedPrefix) {
+                    assert!(!request.contains("range:"));
+                    assert!(!request.contains("if-match:"));
+                } else {
+                    assert!(request.contains("range: bytes=4-"));
+                    assert!(request.contains("if-match: \"fixture-v1\""));
+                }
+                if matches!(reply, WarmReply::DifferentResource) {
+                    socket.write_all(b"HTTP/1.1 302 Found\r\nLocation: /different-object\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+                    drop(socket);
+                    socket = listener.accept().await.unwrap().0;
+                    let mut redirected = Vec::new();
+                    while !redirected.ends_with(b"\r\n\r\n") {
+                        assert!(redirected.len() < 8192);
+                        redirected.push(socket.read_u8().await.unwrap());
+                    }
+                    assert!(String::from_utf8(redirected).unwrap().starts_with("GET /different-object "));
+                }
+                let etag = match reply {
+                    WarmReply::ChangedValidator => "ETag: \"changed-v2\"\r\n",
+                    WarmReply::MissingValidator => "",
+                    WarmReply::WeakValidator => "ETag: W/\"fixture-v1\"\r\n",
+                    _ => "ETag: \"fixture-v1\"\r\n",
+                };
+                let response = if matches!(reply, WarmReply::Full | WarmReply::MutatedPrefix) {
+                    format!("HTTP/1.1 200 OK\r\n{etag}Content-Length: 8\r\nConnection: close\r\n\r\nDATATAIL")
+                } else {
+                    format!("HTTP/1.1 206 Partial Content\r\n{etag}Content-Length: 4\r\nContent-Range: bytes 4-7/8\r\nConnection: close\r\n\r\nTAIL")
+                };
+                socket.write_all(response.as_bytes()).await.unwrap();
             })
             .await
             .expect("resumed HTTP fixture must finish");
@@ -2712,13 +3243,21 @@ mod tests {
             ),
         )
         .await
-        .expect("resume must finish")
-        .unwrap();
+        .expect("resume must finish");
         let second_join = tokio::time::timeout(timeout, second_server.as_mut().unwrap())
             .await
             .expect("resumed HTTP fixture must join");
         second_server.take();
         second_join.unwrap();
+        if matches!(reply, WarmReply::ChangedValidator | WarmReply::MissingValidator | WarmReply::WeakValidator | WarmReply::DifferentResource) {
+            assert!(matches!(published_receipt, Err(PumasError::Validation { .. })));
+            assert_eq!(std::fs::read(stage.join("payload.bin.part")).unwrap(), b"DATA");
+            assert!(!stage.join("payload.bin").exists());
+            assert_eq!(store.acquisitions().unwrap(), before_pause);
+            assert!(service.consumer_receipt(original.id).unwrap().is_none());
+            return;
+        }
+        let published_receipt = published_receipt.unwrap();
         assert_eq!(
             std::fs::read(stage.join("payload.bin")).unwrap(),
             b"DATATAIL"

@@ -7167,7 +7167,7 @@ mod tests {
                 .starts_with("GET /acme/model/resolve/main/weights.gguf HTTP/1.1"));
             socket
                 .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\npartial",
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\nETag: \"fixture-v1\"\r\nConnection: close\r\n\r\npartial",
                 )
                 .await
                 .unwrap();
@@ -7307,7 +7307,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn immediately_resuming_stalled_body_pause_transfers_remaining_range() {
+    async fn immediately_resuming_stalled_body_pause_restarts_with_reconstructed_workspace() {
         assert_pause_settles_during_stalled_response(StalledResponse::ImmediateResume).await;
     }
 
@@ -7336,20 +7336,29 @@ mod tests {
                 assert!(headers.len() < 4096);
                 headers.push(socket.read_u8().await.unwrap());
             }
-            assert!(String::from_utf8(headers)
+            assert!(!String::from_utf8(headers)
                 .unwrap()
                 .to_ascii_lowercase()
-                .contains("range: bytes=3-"));
+                .contains("range:"));
             if stall_body {
-                socket.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 3-7/8\r\nConnection: close\r\n\r\nde").await.unwrap();
+                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nETag: \"fixture-v1\"\r\nConnection: close\r\n\r\nabcde").await.unwrap();
             }
+            let listener = if retry {
+                Some(listener)
+            } else {
+                drop(listener);
+                None
+            };
             requested_sender.send(()).unwrap();
             if retry {
                 drop(socket);
                 release.await.unwrap();
-                return tokio::time::timeout(Duration::from_millis(100), listener.accept())
-                    .await
-                    .is_err();
+                return tokio::time::timeout(
+                    Duration::from_millis(100),
+                    listener.as_ref().unwrap().accept(),
+                )
+                .await
+                .is_err();
             }
             release.await.unwrap();
             if !stall_body {
@@ -7467,7 +7476,7 @@ mod tests {
         if paused.is_ok() && matches!(stall, StalledResponse::ImmediateResume) {
             // Do not drain the paused generation first: public Paused is the
             // promise that callers may immediately request a successor.
-            assert_resumed_partial_completes(&mut client, &id, &destination, true).await;
+            assert_resumed_partial_completes(&mut client, &id, &destination, address).await;
             release_sender.send(()).unwrap();
             assert!(server.await.unwrap());
             return;
@@ -7515,7 +7524,7 @@ mod tests {
             Some(DownloadStatus::Paused)
         );
         if stall_body {
-            assert_resumed_partial_completes(&mut restarted, &id, &destination, true).await;
+            assert_resumed_partial_completes(&mut restarted, &id, &destination, address).await;
         }
     }
 
@@ -7523,10 +7532,10 @@ mod tests {
         client: &mut HuggingFaceClient,
         id: &str,
         destination: &Path,
-        expect_range: bool,
+        address: std::net::SocketAddr,
     ) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener = tokio::net::TcpListener::bind(address).await.unwrap();
         client.set_test_download_base_url(format!("http://{}", listener.local_addr().unwrap()));
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
@@ -7536,13 +7545,11 @@ mod tests {
                 headers.push(socket.read_u8().await.unwrap());
             }
             let headers = String::from_utf8(headers).unwrap().to_ascii_lowercase();
-            if expect_range {
-                assert!(headers.contains("range: bytes=5-"));
-                socket.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 3\r\nContent-Range: bytes 5-7/8\r\nConnection: close\r\n\r\nfgh").await.unwrap();
-            } else {
-                assert!(!headers.contains("range:"));
-                socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nabcdefgh").await.unwrap();
-            }
+            // The HF successor reconstructs its workspace grant. A prior
+            // prefix remains progress only, even on the same HTTP resource.
+            assert!(!headers.contains("range:"));
+            assert!(!headers.contains("if-match:"));
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 8\r\nETag: \"fixture-v1\"\r\nConnection: close\r\n\r\nabcdefgh").await.unwrap();
         });
         assert!(client.resume_download(id).await.unwrap());
         tokio::time::timeout(Duration::from_secs(3), async {
@@ -19809,7 +19816,7 @@ mod tests {
             )));
             initial
                 .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\npartial",
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\nETag: \"fixture-v1\"\r\nConnection: close\r\n\r\npartial",
                 )
                 .await
                 .unwrap();
@@ -19823,6 +19830,9 @@ mod tests {
             assert!(retry_request
                 .to_ascii_lowercase()
                 .contains("range: bytes=7-"));
+            assert!(retry_request
+                .to_ascii_lowercase()
+                .contains("if-match: \"fixture-v1\""));
             retry
                 .write_all(
                     b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
@@ -19845,12 +19855,11 @@ mod tests {
             assert!(resumed_request.starts_with(&format!(
                 "GET /acme/model/resolve/{COMMIT}/model.onnx HTTP/1.1"
             )));
-            assert!(resumed_request
-                .to_ascii_lowercase()
-                .contains("range: bytes=7-"));
+            assert!(!resumed_request.to_ascii_lowercase().contains("range:"));
+            assert!(!resumed_request.to_ascii_lowercase().contains("if-match:"));
             resumed
                 .write_all(
-                    b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 7-11/12\r\nConnection: close\r\n\r\n-done",
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 12\r\nETag: \"fixture-v1\"\r\nConnection: close\r\n\r\npartial-done",
                 )
                 .await
                 .unwrap();

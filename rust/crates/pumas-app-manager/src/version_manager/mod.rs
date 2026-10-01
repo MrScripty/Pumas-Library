@@ -419,14 +419,14 @@ impl VersionManager {
             });
         }
         let mut manager = Self::new(launcher_root, app_id).await?;
-        manager.acquisition_consumer =
-            Some(Arc::new(acquisition.open_consumer("runtime.llama.cpp")?));
+        let consumer = Arc::new(acquisition.open_consumer("runtime.llama.cpp")?);
+        manager.acquisition_consumer = Some(consumer.clone());
         let store = acquisition.store().clone();
-        let records = tokio::task::spawn_blocking(move || store.acquisitions())
-            .await
-            .map_err(|error| {
-                PumasError::Other(format!("Native recovery lookup failed: {error}"))
-            })??;
+        let records = consumer
+            .run_blocking("look up retained native acquisitions", move || {
+                store.acquisitions()
+            })
+            .await?;
         let installer = VersionInstaller::new(
             manager.launcher_root.clone(),
             app_id,
@@ -2581,6 +2581,110 @@ mod tests {
         assert_eq!(document["consumer_receipts"].as_object().unwrap().len(), 2);
         api.shutdown_intent().await.unwrap();
         api.shutdown_acquisition().await.unwrap();
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_full_progress_channel_releases_on_cancel_and_shutdown_signals() {
+        for shutdown_signal in [false, true] {
+            let root = TempDir::new().unwrap();
+            let (server, observed, release, base_url) = native_archive_fixture(root.path()).await;
+            let acquisition = Arc::new(AcquisitionService::new(Arc::new(
+                pumas_library::acquisition::AcquisitionStore::new(root.path()),
+            )));
+            let mut manager = VersionManager::new_with_acquisition(
+                root.path(),
+                AppId::LlamaCpp,
+                acquisition.clone(),
+            )
+            .await
+            .unwrap();
+            manager.github_client = Arc::new(
+                GitHubClient::with_loopback_api(
+                    manager.cache_dir(),
+                    Duration::from_secs(3600),
+                    base_url,
+                )
+                .unwrap(),
+            );
+            let release_asset = manager
+                .resolve_installable_release("b1234+cpu")
+                .await
+                .unwrap();
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let shutting_down = Arc::new(AtomicBool::new(false));
+            let direct = VersionInstaller::new(
+                root.path().to_path_buf(),
+                AppId::LlamaCpp,
+                manager.metadata_manager.clone(),
+                manager.progress_tracker.clone(),
+                cancelled.clone(),
+            )
+            .with_shutdown_flag(shutting_down.clone())
+            .with_acquisition_consumer(manager.acquisition_consumer.clone())
+            .with_github_client(manager.github_client.clone());
+            let (sender, mut receiver) = mpsc::channel(1);
+            sender
+                .send(ProgressUpdate::Setup {
+                    message: "full".into(),
+                })
+                .await
+                .unwrap();
+            let install = tokio::spawn(async move {
+                direct
+                    .install_version("b1234+cpu", &release_asset, sender)
+                    .await
+            });
+            tokio::time::timeout(Duration::from_secs(5), observed)
+                .await
+                .unwrap()
+                .unwrap();
+            release.send(true).unwrap();
+            // The real host updates tracking immediately before its bounded
+            // send. With the receiver untouched and both flags false, any
+            // positive byte observation proves transfer progress is blocked.
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if manager
+                        .get_installation_progress()
+                        .await
+                        .is_some_and(|progress| progress.downloaded_bytes.unwrap_or(0) > 0)
+                    {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("HTTP transfer must reach the full progress channel");
+            assert!(!install.is_finished());
+            if shutdown_signal {
+                shutting_down.store(true, Ordering::SeqCst);
+            } else {
+                cancelled.store(true, Ordering::SeqCst);
+            }
+            let outcome = tokio::time::timeout(Duration::from_secs(5), install)
+                .await
+                .expect("control signal must release progress backpressure")
+                .unwrap();
+            server.await.unwrap();
+            // This shutdown flag only releases observation backpressure. The
+            // direct installation's publication control remains open, proving
+            // the post-publication Setup send also settles while still full.
+            if shutdown_signal {
+                outcome.unwrap();
+                assert!(manager.version_path("b1234+cpu").exists());
+            } else {
+                assert!(matches!(outcome, Err(PumasError::DownloadCancelled)));
+                assert!(!manager.version_path("b1234+cpu").exists());
+            }
+            assert!(
+                matches!(receiver.recv().await, Some(ProgressUpdate::Setup { message }) if message == "full")
+            );
+            assert!(receiver.recv().await.is_none());
+            manager.shutdown_installations().await.unwrap();
+            acquisition.shutdown().await.unwrap();
+        }
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]

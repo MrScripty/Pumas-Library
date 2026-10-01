@@ -516,8 +516,22 @@ struct LlamaCppPublication {
     proof: LlamaCppInstallReceiptV1,
 }
 
+async fn send_install_progress(
+    sender: &mpsc::Sender<ProgressUpdate>,
+    update: ProgressUpdate,
+    cancel_flag: Arc<AtomicBool>,
+    shutdown_flag: Arc<AtomicBool>,
+) {
+    tokio::select! {
+        _ = sender.send(update) => {},
+        _ = super::wait_for_install_cancel(shutdown_flag) => {},
+        _ = super::wait_for_install_cancel(cancel_flag) => {},
+    }
+}
+
 struct LlamaCppHttpAttemptHost {
     cancel_flag: Arc<AtomicBool>,
+    shutdown_flag: Arc<AtomicBool>,
     progress_tracker: Arc<RwLock<InstallationProgressTracker>>,
     progress_tx: mpsc::Sender<ProgressUpdate>,
     total_size: Option<u64>,
@@ -545,14 +559,17 @@ impl pumas_library::acquisition::HttpAttemptHost for LlamaCppHttpAttemptHost {
             .write()
             .await
             .update_download_progress(downloaded_for_file, self.total_size, speed);
-        let _ = self
-            .progress_tx
-            .send(ProgressUpdate::Download {
+        send_install_progress(
+            &self.progress_tx,
+            ProgressUpdate::Download {
                 downloaded_bytes: downloaded_for_file,
                 total_bytes: self.total_size,
                 speed_bytes_per_sec: speed,
-            })
-            .await;
+            },
+            self.cancel_flag.clone(),
+            self.shutdown_flag.clone(),
+        )
+        .await;
         Ok(())
     }
 }
@@ -1366,11 +1383,13 @@ impl VersionInstaller {
     }
 
     async fn send_progress(&self, sender: &mpsc::Sender<ProgressUpdate>, update: ProgressUpdate) {
-        tokio::select! {
-            _ = sender.send(update) => {},
-            _ = super::wait_for_install_cancel(self.shutdown_flag.clone()) => {},
-            _ = super::wait_for_install_cancel(self.cancel_flag.clone()) => {},
-        }
+        send_install_progress(
+            sender,
+            update,
+            self.cancel_flag.clone(),
+            self.shutdown_flag.clone(),
+        )
+        .await;
     }
 
     async fn wait_for_cancellation(&self) {
@@ -1731,6 +1750,7 @@ impl VersionInstaller {
                     })?;
                 let host = LlamaCppHttpAttemptHost {
                     cancel_flag: self.cancel_flag.clone(),
+                    shutdown_flag: self.shutdown_flag.clone(),
                     progress_tracker: self.progress_tracker.clone(),
                     progress_tx: progress_tx.clone(),
                     total_size,
@@ -1769,6 +1789,8 @@ impl VersionInstaller {
                 let manager_for_publish = self.metadata_manager.clone();
                 let progress_for_publish = self.progress_tracker.clone();
                 let progress_tx_for_publish = progress_tx.clone();
+                let cancel_for_progress = self.cancel_flag.clone();
+                let shutdown_for_progress = self.shutdown_flag.clone();
                 #[cfg(test)]
                 let native_receipt_pause = self.native_receipt_pause.clone();
                 let cancel_for_prepare = self.cancel_flag.clone();
@@ -1899,11 +1921,15 @@ impl VersionInstaller {
                                 100.0,
                                 Some("Installation complete"),
                             );
-                            let _ = progress_tx_for_publish
-                                .send(ProgressUpdate::Setup {
+                            send_install_progress(
+                                &progress_tx_for_publish,
+                                ProgressUpdate::Setup {
                                     message: "Installation complete".into(),
-                                })
-                                .await;
+                                },
+                                cancel_for_progress,
+                                shutdown_for_progress,
+                            )
+                            .await;
                             Ok(())
                         },
                     )

@@ -392,7 +392,14 @@ impl AcquiredArtifactUse {
         name: &'static str,
         work: impl FnOnce() -> Result<T> + Send + 'static,
     ) -> Result<T> {
-        owned(&self.context, name, work).await
+        let workspace = self.lease.workspace.clone();
+        owned(&self.context, name, move || {
+            // The effect can outlive its waiter and use handle. Keep the
+            // execution reservation until this registered closure returns.
+            let _held_workspace = workspace;
+            work()
+        })
+        .await
     }
 }
 
@@ -2348,6 +2355,105 @@ mod tests {
         } else {
             shutdown.unwrap();
         }
+    }
+
+    #[tokio::test]
+    async fn cancelled_use_waiter_holds_workspace_lock_until_registered_effect_returns() {
+        let timeout = Duration::from_secs(5);
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let lock_path = temp.path().join("workspace.lock");
+        let held_lock = std::fs::File::create(&lock_path).unwrap();
+        fs2::FileExt::try_lock_exclusive(&held_lock).unwrap();
+        let contender = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        let directory = crate::platform::capability_fs::open_directory(&stage).unwrap();
+        let grant = AcquisitionWorkspace::from_capability(
+            directory,
+            workspace(&stage).identity().clone(),
+            Arc::new(held_lock),
+            || Ok(()),
+        )
+        .unwrap();
+        let service = Arc::new(AcquisitionService::new(Arc::new(AcquisitionStore::new(
+            temp.path(),
+        ))));
+        let consumer = Arc::new(service.open_consumer("fixture").unwrap());
+        let running = consumer.clone();
+        let (url, server) = serve(b"DATA").await;
+        let (started, observed) = tokio::sync::oneshot::channel();
+        let (release, wait) = std::sync::mpsc::channel();
+        let (callback_alive, callback_dropped) = tokio::sync::oneshot::channel::<()>();
+        let waiter = tokio::spawn(async move {
+            running
+                .acquire_http(
+                    AcquisitionHttpRequest {
+                        demand: AcquisitionDemand {
+                            consumer: "fixture".into(),
+                            operation: "cancel-gated-consumer-effect".into(),
+                        },
+                        manifest: manifest("payload.bin"),
+                        workspace: grant,
+                        sources: vec![AcquisitionHttpSource {
+                            url,
+                            authorization: None,
+                        }],
+                        retry: retry(),
+                    },
+                    reqwest::Client::new(),
+                    Box::new(Host),
+                    move |use_handle| async move {
+                        let _callback_alive = callback_alive;
+                        use_handle
+                            .run_blocking("gated workspace effect", move || {
+                                let _ = started.send(());
+                                wait.recv()
+                                    .map_err(|error| PumasError::Other(error.to_string()))?;
+                                Ok(())
+                            })
+                            .await?;
+                        Ok(((), serde_json::json!({ "fixture": "completed" })))
+                    },
+                    |(), _receipt| async { Ok(()) },
+                )
+                .await
+        });
+        tokio::time::timeout(timeout, observed)
+            .await
+            .unwrap()
+            .unwrap();
+        waiter.abort();
+        let cancelled = waiter.await.unwrap_err().is_cancelled();
+        // Closing this sender proves the owned callback was dropped as well as
+        // its public waiter, while the registered effect is still gated.
+        let callback_was_dropped = tokio::time::timeout(timeout, callback_dropped).await;
+        let lock_still_held = fs2::FileExt::try_lock_exclusive(&contender).is_err();
+        let drain = consumer.shutdown();
+        tokio::pin!(drain);
+        let drain_still_pending = futures::poll!(&mut drain).is_pending();
+        // Release before asserting so a regression cannot strand a blocking
+        // thread when the test runtime is torn down.
+        release.send(()).unwrap();
+        tokio::time::timeout(timeout, drain).await.unwrap().unwrap();
+        service.shutdown().await.unwrap();
+        server.await.unwrap();
+        assert!(cancelled);
+        assert!(matches!(callback_was_dropped, Ok(Err(_))));
+        assert!(
+            lock_still_held,
+            "cancelled waiter released the workspace reservation"
+        );
+        assert!(
+            drain_still_pending,
+            "shutdown skipped the registered effect"
+        );
+        fs2::FileExt::try_lock_exclusive(&contender)
+            .expect("completed effect must release the workspace reservation");
+        fs2::FileExt::unlock(&contender).unwrap();
     }
 
     #[tokio::test]

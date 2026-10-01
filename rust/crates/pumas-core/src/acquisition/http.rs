@@ -299,6 +299,11 @@ fn validate_identity_encoding(response: &Response) -> Result<()> {
 }
 
 fn parse_content_range(response: &Response) -> Result<(u64, u64, u64)> {
+    if response.headers().get_all(CONTENT_RANGE).iter().count() != 1 {
+        return Err(invalid_response(
+            "HTTP range response requires exactly one Content-Range field",
+        ));
+    }
     let value = response
         .headers()
         .get(CONTENT_RANGE)
@@ -520,6 +525,41 @@ mod tests {
         assert!(request.contains("range: bytes=3-"));
         assert!(request.contains("if-match: \"fixture-v1\""));
         assert!(request.contains("accept-encoding: identity"));
+    }
+
+    #[tokio::test]
+    async fn conflicting_duplicate_content_range_fields_are_rejected_in_both_orders() {
+        for headers in [
+            "Content-Range: bytes 3-5/6\r\nContent-Range: bytes 0-2/6\r\n",
+            "Content-Range: bytes 0-2/6\r\nContent-Range: bytes 3-5/6\r\n",
+        ] {
+            let (url, server) = serve_once(response("206 Partial Content", headers, "def")).await;
+            let evidence = HttpResumeEvidence {
+                resource: url.to_string(),
+                etag: "\"fixture-v1\"".into(),
+                total: Some(6),
+            };
+            let error = super::open_http_artifact(
+                &reqwest::Client::new(),
+                url.as_str(),
+                &manifest(selected_file(6), RevisionStrength::Immutable),
+                0,
+                3,
+                None,
+                Some(&evidence),
+            )
+            .await
+            .unwrap_err();
+            let request = server.await.unwrap().to_ascii_lowercase();
+            assert!(matches!(
+                error,
+                PumasError::Validation { field, message }
+                    if field == "artifact.http.response"
+                        && message == "HTTP range response requires exactly one Content-Range field"
+            ));
+            assert!(request.contains("range: bytes=3-"));
+            assert!(request.contains("if-match: \"fixture-v1\""));
+        }
     }
 
     #[tokio::test]

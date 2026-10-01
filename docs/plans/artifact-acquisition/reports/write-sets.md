@@ -237,3 +237,16 @@ Parent milestone remains `work/acquisition-q1-http` / draft PR #7. Exact write s
 - Serial-integrator status synchronization: update `docs/plans/artifact-acquisition/plan.md`, `docs/plans/artifact-acquisition/reports/acceptance-matrix.md`, and `docs/plans/artifact-acquisition/reports/dependency-gates.md` to distinguish historical AC15 evidence from current-branch pending CI. This changes no acceptance or gate state.
 
 The production checkpoint, prefix-proof, strong-ETag and exact-resource-binding rules remain authoritative. This fixture correction admits no production source change, acceptance or gate transition. The source writer must not run Cargo, rustc, builds or tests, or commit, push or merge; root's serial focused default/no-default results are recorded in the execution ledger. `rustfmt --edition 2021 --check rust/crates/pumas-core/src/api/hf.rs` and `git diff --check` pass. Passeur submission failed with `PATH_NOT_FOUND`, so the authorized Sol Medium fallback owns this bounded edit.
+
+### AC02 duplicate `Content-Range` refusal — admitted 2026-10-01
+
+Base: `work/acquisition-q1-http` at `412409866caca4aedfd219addd869b4c12af6fc3`. Parent draft PR #7 remains the Q1 milestone review path. Exact write set:
+
+- `rust/crates/pumas-core/src/acquisition/http.rs`: require exactly one `Content-Range` header for a resumed `206` before returning a body-bearing response. Reject duplicate fields with the existing typed HTTP response-validation outcome.
+- Co-located `http.rs` tests: use valid selected-file, strong-ETag, resource and offset evidence; serve conflicting `Content-Range` values in both orders; assert `PumasError::Validation` and await the fixture server. Preserve valid single-header range behavior and other existing refusal cases.
+- `docs/contracts/artifact-acquisition.md` §5: specify one unambiguous `Content-Range` field for a resumed partial response.
+- `docs/plans/artifact-acquisition/issues.md`: track AQ-I19 and its deciding regression.
+- `docs/plans/artifact-acquisition/reports/write-sets.md` and `docs/plans/artifact-acquisition/execution-ledger.md`: record this exact scope, final route/review, and serial verification results.
+- `docs/plans/artifact-acquisition/reports/coding-standards-mcp-usability.md`: record tool usability separately from product evidence.
+
+No schema, manifest, public API, downstream consumer, or acceptance/gate change is admitted. This bounded parser/test does not close the full AC02 matrix or AQ-HTTP. Passeur contributor discovery and coordinated submission most recently failed with `PATH_NOT_FOUND`, so GPT-6.1 Sol Medium is authorized for implementation; the worker must not run Cargo, rustc, tests or builds. Root owns serial verification with `CARGO_BUILD_JOBS=1`; do not start a build until existing local Rust processes have stopped and do not overlap Rust compiles.

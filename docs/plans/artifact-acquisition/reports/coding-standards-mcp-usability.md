@@ -351,6 +351,18 @@ This records tool usability only; it does not certify source compliance or produ
 
 - **Final route refresh:** After implementation, the route was refreshed on snapshot `snapshot:v1:b187217e-0e3f-4b16-b101-74eca1357d5b`; it selected 22 standards with zero unresolved applicability facts and matched the admitted pre-edit scope. The route remains guidance only. Sol High's independent review and the serial local test/lint evidence are recorded separately in the execution ledger.
 
+## Primary integrator — AC02 duplicate `Content-Range` refusal
+
+- **Useful calls:** Reused routing-facts snapshot `snapshot:v1:60843683-da0a-4154-a24c-df49bda2a6d2`, routed the exact Rust library protocol-parser/test/docs slice, and received a complete 21-standard selection with zero unresolved questions or policies. A focused `read_many` covered contract invariants, protocol adapters, Rust security and independent test oracles before the implementation write set was admitted.
+- **Confusing or redundant steps:** `routing_facts` and the compact route exposed usable inputs/results. The route's full result repeated selection reasons across the reading plan; displaying only its status, selected count and unresolved count was easier to inspect. A four-policy read batch returned complete policy bodies with metadata, reinforcing the value of targeted small batches.
+- **Missing context:** The MCP did not know that `parse_content_range` selects one value while a resumed 206 can contain duplicate fields, that this value controls append admission, or that the existing ETag parser already rejects duplicates. Source and test inspection established the defect and its minimal boundary.
+- **Where I left MCP:** Routing and policy reads supplied obligations only. Repository code, raw HTTP fixtures, independent review and serial tests determine whether the fix works; no route result accepts AC02 or AQ-HTTP.
+- **Smallest sufficient workflow:** Reuse the pinned fact snapshot while the slice boundary is unchanged; route the exact protocol/parser/test/docs facts; read the contract, security and oracle policies in a small set; inspect source and tests; then reroute after the final candidate is complete.
+- **Recommendations:** Keep complete route status and unresolved facts compact; expose already selected/read policy IDs; make policy text byte-bounded or section-addressable; and preserve a visible distinction between applicability resolution and source/test compliance.
+- **Final route refresh:** Reused snapshot `snapshot:v1:60843683-da0a-4154-a24c-df49bda2a6d2` after implementation and evidence review. The exact library/Rust/protocol scope selected 21 standards with zero unresolved applicability questions or policies. It supplies obligations only; the code review, focused test and Q1 gate determine product evidence.
+
+This records Coding-Standards MCP usability only. Product acceptance and Passeur availability remain recorded separately.
+
 ## Primary integrator — AC06 stale-generation boundary regression route
 
 - **Useful calls:** The initial route `snapshot:v1:6e207013-b615-4b8e-85ca-4170c3bc1408` and the final source/evidence route `snapshot:v1:a2e24e74-b8f8-40cb-a3b4-762857343697` each selected 17 standards with zero unresolved applicability facts. Ten focused policy reads were repeated against the final snapshot and completed successfully for Rust, async, implementation, verification, oracle, concurrency, replay, contracts, resilience, and persistence guidance.

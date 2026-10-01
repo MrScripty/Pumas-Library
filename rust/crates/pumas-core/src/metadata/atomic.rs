@@ -11,6 +11,7 @@
 use crate::{PumasError, Result};
 use cap_std::fs::{Dir, OpenOptions as CapOpenOptions};
 use serde::{de::DeserializeOwned, Serialize};
+use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
@@ -358,6 +359,27 @@ impl AtomicJsonTarget {
         read_json_file(&mut file, &self.display_path).map(Some)
     }
 
+    /// Bounded strict read for the canonical `downloads.json` document.
+    ///
+    /// `serde_json::Value` collapses repeated object keys before receipt
+    /// validation runs, so this rejects duplicate member names on the exact
+    /// raw bytes before `Value` materialization. Unrelated JSON readers keep
+    /// the permissive [`Self::read_json`] path unchanged.
+    pub(crate) fn read_downloads_json_value(&self) -> Result<Option<serde_json::Value>> {
+        let mut file = match self.parent.open(&self.name) {
+            Ok(file) => file.into_std(),
+            Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(source) => {
+                return Err(PumasError::Io {
+                    message: format!("Failed to open {}", self.display_path.display()),
+                    path: Some(self.display_path.clone()),
+                    source: Some(source),
+                });
+            }
+        };
+        read_downloads_json_file(&mut file, &self.display_path).map(Some)
+    }
+
     pub(crate) fn open_lock_file(&self, name: &str) -> Result<File> {
         let mut options = CapOpenOptions::new();
         options.read(true).write(true).create(true);
@@ -669,6 +691,219 @@ fn read_json_file<T: DeserializeOwned>(file: &mut File, path: &Path) -> Result<T
             path: Some(path.to_path_buf()),
             source: Some(source),
         })?;
+    serde_json::from_str(&contents).map_err(|source| PumasError::Json {
+        message: format!("Failed to parse {}: {source}", path.display()),
+        source: Some(source),
+    })
+}
+
+fn duplicate_member_error(path: &Path, member: &str) -> PumasError {
+    PumasError::Validation {
+        field: "downloads.duplicate_member".into(),
+        message: format!(
+            "Refusing {} with a repeated object member {member:?}; Value deserialization would collapse it before receipt validation",
+            path.display()
+        ),
+    }
+}
+
+/// Fail-closed duplicate-member guard scoped to the canonical `downloads.json`
+/// reader. Scans the exact raw bytes and rejects a repeated member name in
+/// any object (top level, `consumer_receipts`, or nested receipt members)
+/// after JSON string unescaping, before `Value` materialization.
+///
+/// Malformed JSON remains the serde parser's authority: the scanner defers to
+/// `serde_json::from_str` instead of inventing its own syntax errors, and only
+/// a positively identified duplicate fails here.
+pub(crate) fn reject_duplicate_json_object_members(raw: &str, path: &Path) -> Result<()> {
+    struct Scanner<'a> {
+        contents: &'a str,
+        bytes: &'a [u8],
+        pos: usize,
+    }
+
+    impl Scanner<'_> {
+        fn skip_ws(&mut self) {
+            while self.pos < self.bytes.len()
+                && matches!(
+                    self.bytes[self.pos],
+                    b' ' | b'\t' | b'\n' | b'\r'
+                )
+            {
+                self.pos += 1;
+            }
+        }
+
+        fn peek(&self) -> Option<u8> {
+            self.bytes.get(self.pos).copied()
+        }
+
+        fn scan_raw_string(&mut self) -> Option<String> {
+            if self.peek() != Some(b'"') {
+                return None;
+            }
+            let start = self.pos;
+            self.pos += 1;
+            loop {
+                let byte = *self.bytes.get(self.pos)?;
+                if byte == b'"' {
+                    self.pos += 1;
+                    break;
+                }
+                if byte == b'\\' {
+                    self.pos += 1;
+                    match *self.bytes.get(self.pos)? {
+                        b'u' => {
+                            self.pos += 1;
+                            for _ in 0..4 {
+                                if !self.bytes.get(self.pos)?.is_ascii_hexdigit() {
+                                    return None;
+                                }
+                                self.pos += 1;
+                            }
+                        }
+                        _ => {
+                            self.pos += 1;
+                        }
+                    }
+                    continue;
+                }
+                if byte < 0x20 {
+                    return None;
+                }
+                self.pos += 1;
+            }
+            serde_json::from_str::<String>(&self.contents[start..self.pos]).ok()
+        }
+
+        fn skip_literal(&mut self, literal: &str) {
+            if self.bytes[self.pos..].starts_with(literal.as_bytes()) {
+                self.pos += literal.len();
+            } else {
+                self.pos += 1;
+            }
+        }
+
+        fn skip_number(&mut self) {
+            while self.pos < self.bytes.len()
+                && matches!(
+                    self.bytes[self.pos],
+                    b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9'
+                )
+            {
+                self.pos += 1;
+            }
+        }
+
+        fn scan_value(&mut self, path: &Path, depth: usize) -> Result<()> {
+            if depth > 256 {
+                return Ok(());
+            }
+            self.skip_ws();
+            match self.peek() {
+                Some(b'{') => self.scan_object(path, depth),
+                Some(b'[') => self.scan_array(path, depth),
+                Some(b'"') => {
+                    let _ = self.scan_raw_string();
+                    Ok(())
+                }
+                Some(b't') => {
+                    self.skip_literal("true");
+                    Ok(())
+                }
+                Some(b'f') => {
+                    self.skip_literal("false");
+                    Ok(())
+                }
+                Some(b'n') => {
+                    self.skip_literal("null");
+                    Ok(())
+                }
+                Some(b'-' | b'0'..=b'9') => {
+                    self.skip_number();
+                    Ok(())
+                }
+                _ => Ok(()),
+            }
+        }
+
+        fn scan_object(&mut self, path: &Path, depth: usize) -> Result<()> {
+            self.pos += 1;
+            let mut seen = HashSet::new();
+            self.skip_ws();
+            if self.peek() == Some(b'}') {
+                self.pos += 1;
+                return Ok(());
+            }
+            loop {
+                self.skip_ws();
+                let Some(member) = self.scan_raw_string() else {
+                    return Ok(());
+                };
+                if !seen.insert(member.clone()) {
+                    return Err(duplicate_member_error(path, &member));
+                }
+                self.skip_ws();
+                if self.peek() != Some(b':') {
+                    return Ok(());
+                }
+                self.pos += 1;
+                self.scan_value(path, depth + 1)?;
+                self.skip_ws();
+                match self.peek() {
+                    Some(b',') => {
+                        self.pos += 1;
+                    }
+                    Some(b'}') => {
+                        self.pos += 1;
+                        return Ok(());
+                    }
+                    _ => return Ok(()),
+                }
+            }
+        }
+
+        fn scan_array(&mut self, path: &Path, depth: usize) -> Result<()> {
+            self.pos += 1;
+            self.skip_ws();
+            if self.peek() == Some(b']') {
+                self.pos += 1;
+                return Ok(());
+            }
+            loop {
+                self.scan_value(path, depth + 1)?;
+                self.skip_ws();
+                match self.peek() {
+                    Some(b',') => {
+                        self.pos += 1;
+                    }
+                    Some(b']') => {
+                        self.pos += 1;
+                        return Ok(());
+                    }
+                    _ => return Ok(()),
+                }
+            }
+        }
+    }
+
+    let mut scanner = Scanner {
+        contents: raw,
+        bytes: raw.as_bytes(),
+        pos: 0,
+    };
+    scanner.scan_value(path, 0)
+}
+
+fn read_downloads_json_file(file: &mut File, path: &Path) -> Result<serde_json::Value> {
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)
+        .map_err(|source| PumasError::Io {
+            message: format!("Failed to read {}", path.display()),
+            path: Some(path.to_path_buf()),
+            source: Some(source),
+        })?;
+    reject_duplicate_json_object_members(&contents, path)?;
     serde_json::from_str(&contents).map_err(|source| PumasError::Json {
         message: format!("Failed to parse {}: {source}", path.display()),
         source: Some(source),
@@ -987,6 +1222,57 @@ mod tests {
         let error = atomic_read_json::<TestData>(&non_directory.join("test.json")).unwrap_err();
 
         assert!(error.to_string().contains("Failed to open"), "{error}");
+    }
+
+    #[test]
+    fn downloads_guard_rejects_duplicate_members_before_value_materialization() {
+        let path = Path::new("downloads.json");
+        for raw in [
+            r#"{"schema_version":7,"schema_version":7}"#,
+            r#"{"schema_version":7,"consumer_receipts":{"id":{"demand":1,"demand":2}}}"#,
+            r#"{"consumer_receipts":{"a":1,"a":2}}"#,
+        ] {
+            let error = reject_duplicate_json_object_members(raw, path).unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    PumasError::Validation { ref field, .. } if field == "downloads.duplicate_member"
+                ),
+                "{error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn downloads_guard_treats_escaped_member_aliases_as_duplicates() {
+        let error = reject_duplicate_json_object_members(
+            "{\"acquisitions\":{\"\\u0041\":1,\"A\":2}}",
+            Path::new("downloads.json"),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                error,
+                PumasError::Validation { ref field, .. } if field == "downloads.duplicate_member"
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn downloads_guard_accepts_distinct_members_and_repeated_sibling_objects() {
+        let raw = r#"{"schema_version":7,"acquisitions":{},"consumer_receipts":{},"list":[{"id":1},{"id":1}]}"#;
+        reject_duplicate_json_object_members(raw, Path::new("downloads.json")).unwrap();
+    }
+
+    #[test]
+    fn permissive_reader_keeps_collapsing_duplicates_outside_downloads_scope() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("other.json");
+        fs::write(&path, br#"{"value":1,"value":2}"#).unwrap();
+
+        let read: Option<serde_json::Value> = atomic_read_json(&path).unwrap();
+        assert_eq!(read, Some(serde_json::json!({"value": 2})));
     }
 
     #[test]

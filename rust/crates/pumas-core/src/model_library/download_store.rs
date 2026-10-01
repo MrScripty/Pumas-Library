@@ -3134,6 +3134,52 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), corrupt);
     }
 
+    #[test]
+    fn duplicate_members_fail_model_projection_and_receipt_read_without_rewrite() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("downloads.json");
+        let id = Uuid::new_v4();
+        let raw = format!(
+            "{{\"schema_version\":7,\"acquisitions\":{{}},\"consumer_receipts\":{{\"{id}\":{{\"demand\":1,\"demand\":2}}}}}}"
+        );
+        std::fs::write(&path, raw.as_bytes()).unwrap();
+        let before = std::fs::read(&path).unwrap();
+
+        let store = DownloadPersistence::new(tmp.path());
+        assert!(matches!(
+            store.load_lifecycle_inventory_strict(),
+            Err(crate::PumasError::Validation { ref field, .. })
+                if field == "downloads.duplicate_member"
+        ));
+        assert!(matches!(
+            store.load_all_strict(),
+            Err(crate::PumasError::Validation { ref field, .. })
+                if field == "downloads.duplicate_member"
+        ));
+        assert!(matches!(
+            store.read_hf_completion_receipt(id),
+            Err(crate::PumasError::Validation { ref field, .. })
+                if field == "downloads.duplicate_member"
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn duplicate_members_fail_offline_migration_without_rewrite() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("downloads.json");
+        let raw = r#"{"schema_version":5,"schema_version":5,"downloads":[],"recovery_revocations":{},"lifecycle_quarantines":{},"admission_attempts":{},"queue_admissions":{},"released_queue_admissions":{}}"#;
+        std::fs::write(&path, raw.as_bytes()).unwrap();
+        let before = std::fs::read(&path).unwrap();
+
+        assert!(matches!(
+            DownloadPersistence::migrate_legacy_offline(tmp.path()),
+            Err(crate::PumasError::Validation { ref field, .. })
+                if field == "downloads.duplicate_member"
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
     fn using_hf_acquisition(
         store: &DownloadPersistence,
         snapshot: &PersistedDownload,

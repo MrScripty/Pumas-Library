@@ -250,3 +250,17 @@ Base: `work/acquisition-q1-http` at `412409866caca4aedfd219addd869b4c12af6fc3`. 
 - `docs/plans/artifact-acquisition/reports/coding-standards-mcp-usability.md`: record tool usability separately from product evidence.
 
 No schema, manifest, public API, downstream consumer, or acceptance/gate change is admitted. This bounded parser/test does not close the full AC02 matrix or AQ-HTTP. Passeur contributor discovery and coordinated submission most recently failed with `PATH_NOT_FOUND`, so GPT-6.1 Sol Medium is authorized for implementation; the worker must not run Cargo, rustc, tests or builds. Root owns serial verification with `CARGO_BUILD_JOBS=1`; do not start a build until existing local Rust processes have stopped and do not overlap Rust compiles.
+
+### AC04 strict duplicate-member reads for canonical downloads.json — admitted 2026-10-01
+
+Parent milestone: `work/acquisition-q1-http`, carried by draft PR #7 into `work/artifact-acquisition-runtime-plan`. This is a partial AC04 source-integrity correction and does not satisfy retained schema-6 migration, old-writer exclusion, deployment, rollback, or full AC04 evidence.
+
+**Exact write set:**
+
+- `rust/crates/pumas-core/src/metadata/atomic.rs`: add a strict reader scoped to the canonical `downloads.json` target. Deserialize through Serde's JSON parser with a recursive visitor that compares decoded object member names before constructing each `Value`; preserve JSON syntax/trailing-data errors and map only the repeated-member marker to `downloads.duplicate_member`. Keep generic `atomic_read_json` behavior unchanged.
+- `rust/crates/pumas-core/src/acquisition/store.rs`: route schema eligibility, migration, transaction, acquisition, model-partition, custody-partition and receipt reads through the strict canonical reader.
+- `rust/crates/pumas-core/src/model_library/download_store.rs`: route model inventory/projection and HF receipt reads through the strict reader and add no-rewrite refusal coverage.
+- Co-located tests: cover repeated top-level, receipt-key and nested receipt members; decoded escaped-key aliases; unrelated permissive JSON readers; syntax/trailing errors; and production model/receipt reads refusing duplicates without rewriting the stored bytes.
+- `docs/contracts/artifact-acquisition.md` §9, `docs/plans/artifact-acquisition/issues.md` (AQ-I20), this report, the acceptance matrix, execution ledger, and Coding-Standards MCP usability report: record the exact semantic boundary and evidence while leaving acceptance/gates unchanged.
+
+No persisted schema, public API, generic JSON policy, migration behavior, or acceptance/gate transition is admitted. The strict read closes one ambiguity before `Value` collapses duplicate members; AC04 and AQ-HTTP remain pending. Root owns serial Rust verification on the shared target. Do not overlap Cargo/rustc builds.

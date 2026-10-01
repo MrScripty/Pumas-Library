@@ -284,7 +284,7 @@ impl AcquisitionStore {
     /// Eligibility check; does not publish or obtain workspace authority.
     pub fn require_acquisition_schema(&self) -> Result<()> {
         let target = AtomicJsonTarget::open(&self.path)?;
-        if let Some(value) = target.read_json::<Value>()? {
+        if let Some(value) = target.read_downloads_json_value()? {
             if matches!(schema(&value), Some(4..=6)) {
                 return Err(migration_required());
             }
@@ -309,7 +309,7 @@ impl AcquisitionStore {
             .lock()
             .map_err(|_| PumasError::Other("Acquisition store lock is poisoned".into()))?;
         let target = AtomicJsonTarget::open(&self.path)?;
-        let observed = target.read_json::<Value>()?;
+        let observed = target.read_downloads_json_value()?;
         if observed.as_ref().and_then(schema) == Some(6) {
             return Err(migration_required());
         }
@@ -338,7 +338,7 @@ impl AcquisitionStore {
         // Repeat the schema check after taking the shared lock.
         if !read_only
             && target
-                .read_json::<Value>()?
+                .read_downloads_json_value()?
                 .is_some_and(|value| matches!(schema(&value), Some(4..=6)))
         {
             return Err(migration_required());
@@ -379,7 +379,7 @@ impl AcquisitionStore {
         };
         let value = transaction
             .target
-            .read_json::<Value>()?
+            .read_downloads_json_value()?
             .ok_or_else(invalid_schema)?;
         if !matches!(schema(&value), Some(4..=6)) {
             return Err(invalid_schema());
@@ -631,7 +631,7 @@ fn document_with_partition(
 
 impl AcquisitionTransaction<'_> {
     fn document(&self) -> Result<AcquisitionDocument> {
-        let Some(value) = self.target.read_json::<Value>()? else {
+        let Some(value) = self.target.read_downloads_json_value()? else {
             return Ok(AcquisitionDocument::empty());
         };
         if schema(&value) != Some(7) {
@@ -647,7 +647,7 @@ impl AcquisitionTransaction<'_> {
     pub(crate) fn import_custody_partition(
         &self,
     ) -> Result<(Option<Value>, BTreeMap<Uuid, AcquisitionRecord>)> {
-        let Some(value) = self.target.read_json::<Value>()? else {
+        let Some(value) = self.target.read_downloads_json_value()? else {
             return Ok((None, BTreeMap::new()));
         };
         if matches!(schema(&value), Some(4 | 5)) && self.legacy_read_only {
@@ -690,7 +690,7 @@ impl AcquisitionTransaction<'_> {
     }
 
     pub(crate) fn model_partition(&self) -> Result<Option<Value>> {
-        let Some(value) = self.target.read_json::<Value>()? else {
+        let Some(value) = self.target.read_downloads_json_value()? else {
             return Ok(None);
         };
         if matches!(schema(&value), Some(4 | 5)) && self.legacy_read_only {
@@ -1429,5 +1429,78 @@ mod tests {
                 if field == "acquisition.migration_required"
         ));
         assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+
+    fn assert_duplicate_member_refusal(result: Result<()>) {
+        assert!(
+            matches!(
+                result,
+                Err(PumasError::Validation { ref field, .. })
+                    if field == "downloads.duplicate_member"
+            ),
+            "expected a downloads.duplicate_member refusal"
+        );
+    }
+
+    #[test]
+    fn duplicate_top_level_members_fail_closed_without_rewrite() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("downloads.json");
+        let raw =
+            r#"{"schema_version":7,"schema_version":7,"acquisitions":{},"consumer_receipts":{}}"#;
+        std::fs::write(&path, raw.as_bytes()).unwrap();
+        let before = std::fs::read(&path).unwrap();
+
+        let store = AcquisitionStore::new(temp.path());
+        assert_duplicate_member_refusal(store.require_acquisition_schema().map(|_| ()));
+        assert_duplicate_member_refusal(store.acquisitions().map(|_| ()));
+        assert_duplicate_member_refusal(
+            store
+                .transaction(true)
+                .and_then(|transaction| transaction.model_partition())
+                .map(|_| ()),
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn duplicate_consumer_receipt_keys_fail_closed_without_publication() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("downloads.json");
+        let id = Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111);
+        let raw = format!(
+            "{{\"schema_version\":7,\"acquisitions\":{{}},\"consumer_receipts\":{{\"{id}\":{{\"a\":1}},\"{id}\":{{\"a\":1}}}}}}"
+        );
+        std::fs::write(&path, raw.as_bytes()).unwrap();
+        let before = std::fs::read(&path).unwrap();
+
+        let store = AcquisitionStore::new(temp.path());
+        assert_duplicate_member_refusal(store.require_acquisition_schema().map(|_| ()));
+        assert_duplicate_member_refusal(store.consumer_receipt(id).map(|_| ()));
+        assert_duplicate_member_refusal(
+            store
+                .transaction(true)
+                .and_then(|transaction| transaction.consumer_completion_partition())
+                .map(|_| ()),
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn duplicate_nested_receipt_members_fail_closed_without_publication() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let path = temp.path().join("downloads.json");
+        let id = Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222);
+        let raw = format!(
+            "{{\"schema_version\":7,\"acquisitions\":{{}},\"consumer_receipts\":{{\"{id}\":{{\"demand\":1,\"demand\":2}}}}}}"
+        );
+        std::fs::write(&path, raw.as_bytes()).unwrap();
+        let before = std::fs::read(&path).unwrap();
+
+        let store = AcquisitionStore::new(temp.path());
+        assert_duplicate_member_refusal(store.require_acquisition_schema().map(|_| ()));
+        assert_duplicate_member_refusal(store.acquisitions().map(|_| ()));
+        assert_duplicate_member_refusal(store.consumer_receipt(id).map(|_| ()));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
     }
 }

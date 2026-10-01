@@ -33,6 +33,23 @@ The actual native install selected release `b11312+vulkan` from the official lla
 
 One `get_model_download_status` poll near HF settlement returned JSON-RPC `-32603` (internal error). A subsequent `list_model_downloads` returned the same download as `completed`, and the model projection and durable receipt were successful. Preserve this as an AC08 progress/error-contract issue to investigate; it does not invalidate the separately observed importer settlement in AC03. The HF manifest used weak revision `main`; this run does not qualify commit-pinned revision selection or every file at a repository commit. Desktop controls, cancellation, pause/resume, packaged backend, other OS, deployed-state migration, and cross-platform durability remain outside this evidence.
 
+### AC04 partial duplicate-member evidence — 2026-10-01
+
+The canonical `downloads.json` readers now reject duplicate JSON object member
+names before exposing acquisition, model, or consumer-receipt state. The
+duplicate check uses the existing Serde JSON parser, compares decoded names,
+and applies only to this store; unrelated JSON readers keep their existing
+permissive behavior. Focused fixtures cover duplicate top-level schema fields,
+duplicate receipt IDs, duplicate nested receipt fields, escaped-name aliases,
+model projection and receipt reads, and refusal of offline legacy migration
+without rewriting the source. Malformed JSON remains a JSON syntax error.
+
+The focused local run selected 29 tests by the `duplicate` filter and passed
+all 29; this includes unrelated tests whose names also contain that word. AC04
+remains pending for complete retained-partition schema-6 migration fixtures,
+all other recovery windows, real deployment population, and old-writer
+retirement/isolation evidence.
+
 ### AC05 partial consumer-recovery evidence — 2026-10-01
 
 `receiptless_using_cold_reopen_retains_custody_without_network_or_reimport`

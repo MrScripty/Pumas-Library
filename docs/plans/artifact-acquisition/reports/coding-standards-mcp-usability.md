@@ -349,6 +349,17 @@ This records MCP usability only; it does not certify implementation compliance o
 
 This records tool usability only; it does not certify source compliance or product acceptance.
 
+## Primary integrator — AC04 strict downloads.json duplicate-member reader
+
+- **Useful calls:** Routing snapshot `snapshot:v1:59cc5242-a838-4fec-b13d-63e6687dacbd` selected 20 standards with zero unresolved applicability facts for the Rust persistence/schema/security boundary. Focused reads covered Core, Rust language and security, implementation, verification, persistence, schema contracts, resilience, code design, commit, security, documentation, planning, and concurrent plan integration. The guidance favored using Serde's existing parser, applying the stricter policy only at the canonical store boundary, preserving fail-closed durable state, and keeping local tests distinct from migration/deployment acceptance.
+- **Confusing or redundant steps:** The route returned a complete selected-policy list, while the useful work depended on a smaller set of policy bodies. Keeping the count, unresolved status, and focused read list separate made the scope easier to audit.
+- **Missing context:** The MCP did not surface the concrete `serde_json::Value` duplicate-key collapse or enumerate every production downloads.json read path. Source tracing identified both; direct regressions then exercised store eligibility, acquisition/model projections, and consumer receipt paths.
+- **Where I left MCP:** It supplied implementation and evidence obligations only. The custom Serde visitor, source diff, 29-test filtered run, strict Clippy result, formatting checks, and independent review are separate evidence. The route does not accept AC04, prove deployed schema-6 safety, or make AQ-HTTP ready.
+- **Smallest sufficient workflow:** Reuse the pinned scope snapshot while the admitted boundary is unchanged; read focused persistence, schema, parser-security, verification, documentation, and commit policies; trace every reader; then verify and review the exact candidate independently.
+- **Recommendations:** Return policy bodies by section or a response-byte budget, and expose the selected route summary without repeating selection rationale. Keep routing completion clearly separate from code review and acceptance.
+
+This records Coding-Standards MCP usability only; it is not source review or product acceptance.
+
 ## Primary integrator — AC06 concurrent stale-worker handoff regression
 
 - **Useful calls:** The post-restart routing-facts read and exact-scope route used snapshot `snapshot:v1:2eab787a-b1be-424e-8195-405814f86ede`; the route selected 24 standards with zero unresolved applicability questions. A focused `read_many` call read 17 relevant policies covering core, Rust/API/async, persistence, concurrency, contracts, architecture, security, planning, implementation, documentation, verification oracles, and concurrent integration.

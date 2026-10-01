@@ -125,3 +125,23 @@ The admitted repair validates final and derived staging paths as one order-indep
 Read-only source review found fresh HF admission sums only sizes that are present, then publishes that subtotal as the operation's full `total_bytes`; recovery admission repeats the `filter_map` behavior. Progress includes bytes from every selected file. When a selected auxiliary file has unknown size and its bytes exceed the known-size subtotal, the producer can report progress above `1.0`. The RPC status projection rejects that value, and its handler propagates the validation error. This is a source-derived defect. The historical `-32603` response body was not captured, so the connection to that incident is plausible but not established.
 
 The admitted repair changes only HF producer-side denominator calculation and its owning tests. Keep the RPC validator strict, represent incomplete size knowledge as unknown, and independently verify the progress producer's range/serialization. A controlled delayed public status poll and broader desktop evidence remain open AC08 work.
+
+## AC18 Q1 composed-path source review — 2026-10-01
+
+Independent GPT-6.1 Sol High review compared the implemented candidate `c3a550cc160ed759cfbac2c2d3ac0f95e6856fc6` with plan base `e37bbf4b964a0e2aadf25f80ab71edd8fa6b3eb3`. HEAD later advanced to `d85ecc37913dd9d3fbb9ed7cdc5e3848c816d6ce`; that documentation-only commit changes the execution ledger, not the reviewed Rust source. The review used read-only Git/source inspection commands; it ran no builds or tests and made no edits.
+
+### Traced ownership
+
+- `PumasApiBuilder` constructs one `AcquisitionService` from the canonical download store and injects it into HF before restore; the RPC composition passes the same owner to llama.cpp. HF's task owner scopes access to the shared supervisor rather than creating a second transfer owner.
+- HF acquisition calls `AcquisitionService::acquire_file`. The llama.cpp consumer calls `AcquisitionConsumer::acquire_http`, which delegates to the same HTTP file-acquisition path. The base-to-candidate diff removes the migrated HF byte loop and the prior llama.cpp download/install loop.
+- Model persistence transactions delegate to `AcquisitionStore`; model projections retain their domain boundary. HF import/output proof is published by the model owner, while native extraction, installed-output publication and metadata stay in app-manager. Acquisition settles consumer receipts only after registered effects drain.
+- Workspace use remains registered under acquisition custody. RPC shutdown drains consumers before closing the shared supervisor. Acquisition has no import/dependency on app-manager, the model importer or runtime modules; neutral construction does not require model database or model identity.
+
+No substantiated architecture defect was found in these migrated HF and llama.cpp paths. The review supports locality for the current HTTP source, existing native consumer and their recovery repairs: one transfer writer, separate consumer commits, selected duplicate-loop removal and dependency direction all matched the contract.
+
+### Limits
+
+- The Ollama archive loop and generic public `network::DownloadManager` remain outside these selected migrations. The legacy helper has no production caller in this checkout, but external caller disposition was not established.
+- The neutral store retains a bounded HF receipt-envelope compatibility decoder. It checks envelope shape; model-specific queue/output-proof interpretation remains in the model facade.
+- Q2 wheel and Q3 S3 consumers are not implemented in this candidate, so this review does not establish their future locality or shared-lifecycle behavior.
+- This is source-only architecture evidence. It does not replace tests, public-client migration inventory, deployed-store qualification, packaged/platform evidence or the full AC18/AQ-HTTP acceptance decision. AC18 and AQ-HTTP remain pending.

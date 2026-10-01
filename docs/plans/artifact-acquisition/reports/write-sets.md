@@ -314,3 +314,18 @@ Base: `work/acquisition-q1-http` at `6f075e2427cd37e81fc79c1f93e6d1e8f2c9fbcd`. 
 No non-test production behavior, public API, store/schema/migration, contract, generated output or lockfile change is admitted. The stopped fixture source does not directly observe zero request attempts, so do not claim a measured no-replay oracle. This is injected-error and same-process cold-owner evidence on Linux x86_64, not process-kill/power-loss, deployment, cross-platform or full AC05 evidence. Run the exact focused app-manager test serially against the shared target after checking that no other Cargo/rustc process is active.
 
 The exact focused test passed locally: `CARGO_BUILD_JOBS=1 cargo test --offline --manifest-path rust/Cargo.toml --locked -p pumas-app-manager --lib version_manager::tests::native_receipt_post_rename_interruption_cold_reopen_refuses_changed_output_and_settles -- --exact --test-threads=1` — 1 passed, 0 failed, 266 filtered out. Scoped rustfmt and `git diff HEAD --check` pass. Independent GPT-6.1 Sol High review of the exact production diff found no substantiated defect or likely race/cleanup issue and confirmed that the closed-source fixture is not a measured zero-request oracle. AC05 and AQ-HTTP remain pending.
+
+### Q1 AC18 migrated-path locality review and prototype snapshot refresh — admitted 2026-10-01
+
+Candidate: code commit `c3a550cc160ed759cfbac2c2d3ac0f95e6856fc6` against plan base `e37bbf4b964a0e2aadf25f80ab71edd8fa6b3eb3`; current evidence head before this slice is `d85ecc37913dd9d3fbb9ed7cdc5e3848c816d6ce`. Independent GPT-6.1 Sol High review found no substantiated architecture defect in the migrated HF and llama.cpp paths. It is source-only evidence and leaves AC18/AQ-HTTP pending.
+
+**Exact write set:**
+
+- `docs/plans/artifact-acquisition/reports/architecture-review.md`: append the exact candidate/base, traced owners, findings and review limits.
+- `docs/plans/artifact-acquisition/{plan.md,execution-ledger.md,issues.md,reports/acceptance-matrix.md,reports/dependency-gates.md}`: record bounded source-review evidence, current prototype branch snapshots and PR/check state; preserve all acceptance and gate statuses.
+- `docs/plans/artifact-acquisition/reports/write-sets.md`: retain this admission and its exclusions.
+- Existing draft PR #7 description: after publishing the documentation commit, refresh exact head, AC18 review result and current hosted-check observations.
+
+No production source, test, public API, contract, schema, migration, lockfile, generated output, prototype checkout/ref, live store or installed artifact is admitted. Keep unrelated untracked `docs/breif/future.md` untouched. Do not mark AC18/AQ-HTTP ready or merge the milestone PR on this evidence.
+
+Independent GPT-6.1 Sol High review of the exact documentation diff found one P3 activity-description overstatement (the source reviewer used read-only inspection commands); both occurrences were corrected. No other substantiated issue was found, and no acceptance or gate status changed; AC03 and historical AC15 retain their recorded scopes and AQ-HTTP remains not ready.

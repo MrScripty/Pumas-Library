@@ -41,6 +41,12 @@ The actual native install selected release `b11312+vulkan` from the official lla
 
 One `get_model_download_status` poll near HF settlement returned JSON-RPC `-32603` (internal error). A subsequent `list_model_downloads` returned the same download as `completed`, and the model projection and durable receipt were successful. Preserve this as an AC08 progress/error-contract issue to investigate; it does not invalidate the separately observed importer settlement in AC03. The HF manifest used weak revision `main`; this run does not qualify commit-pinned revision selection or every file at a repository commit. Desktop controls, cancellation, pause/resume, packaged backend, other OS, deployed-state migration, and cross-platform durability remain outside this evidence.
 
+### AC18 source-level locality review — 2026-10-01
+
+Independent GPT-6.1 Sol High review compared code candidate `c3a550cc160ed759cfbac2c2d3ac0f95e6856fc6` with plan base `e37bbf4b964a0e2aadf25f80ab71edd8fa6b3eb3`. The current documentation head `d85ecc37913dd9d3fbb9ed7cdc5e3848c816d6ce` changes only the execution ledger. The reviewer traced composition from `PumasApiBuilder` and RPC to the shared `AcquisitionService`/store, the central HTTP acquisition writer, HF import, and native extraction/publication/recovery. It found no substantiated architecture defect in those migrated paths: transfer authority is shared, consumer commits remain distinct, receipt interpretation/publication remains at the owning consumer boundary, and no downstream-to-acquisition dependency was found.
+
+The review did not disposition the unmodified Ollama archive path or unknown external callers of the legacy public `DownloadManager`; the neutral store still has a bounded HF receipt-envelope compatibility decoder; and Q2 wheel/Q3 S3 consumer compositions are future work. It ran no tests or builds and does not certify runtime correctness, migration safety, supported platforms, deployment or external callers. AC18 remains pending for its full acceptance scope, and AQ-HTTP remains not ready.
+
 ### AC01/AC02 source-hardening candidate — 2026-10-01
 
 Commits `83d6adc1` (source candidate `aeb1c304`) and `0f272db1` (source

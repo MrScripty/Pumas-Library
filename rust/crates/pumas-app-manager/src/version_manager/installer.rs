@@ -516,6 +516,8 @@ struct LlamaCppPublication {
     proof: LlamaCppInstallReceiptV1,
     #[cfg(test)]
     interrupt_after_native_rename: Option<Arc<AtomicBool>>,
+    #[cfg(test)]
+    park_after_native_rename_marker: Option<PathBuf>,
 }
 
 async fn send_install_progress(
@@ -998,6 +1000,8 @@ pub struct VersionInstaller {
     #[cfg(test)]
     interrupt_after_native_rename: Option<Arc<AtomicBool>>,
     #[cfg(test)]
+    park_after_native_rename_marker: Option<PathBuf>,
+    #[cfg(test)]
     native_recovery_pause: Option<Arc<NativeRecoveryPause>>,
     #[cfg(test)]
     torch_stage_override: Option<TorchStageOverride>,
@@ -1067,6 +1071,8 @@ impl VersionInstaller {
             native_receipt_pause: None,
             #[cfg(test)]
             interrupt_after_native_rename: None,
+            #[cfg(test)]
+            park_after_native_rename_marker: None,
             #[cfg(test)]
             native_recovery_pause: None,
             #[cfg(test)]
@@ -1139,6 +1145,12 @@ impl VersionInstaller {
     #[cfg(test)]
     pub(crate) fn with_native_rename_interruption(mut self, once: Arc<AtomicBool>) -> Self {
         self.interrupt_after_native_rename = Some(once);
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_native_rename_park_marker(mut self, marker: PathBuf) -> Self {
+        self.park_after_native_rename_marker = Some(marker);
         self
     }
 
@@ -1807,6 +1819,8 @@ impl VersionInstaller {
                 let native_receipt_pause = self.native_receipt_pause.clone();
                 #[cfg(test)]
                 let interrupt_after_native_rename = self.interrupt_after_native_rename.clone();
+                #[cfg(test)]
+                let park_after_native_rename_marker = self.park_after_native_rename_marker.clone();
                 let cancel_for_prepare = self.cancel_flag.clone();
                 let control_for_prepare = self.torch_control.clone();
                 let custody_for_prepare = custody.clone();
@@ -1928,6 +1942,8 @@ impl VersionInstaller {
                                             proof,
                                             #[cfg(test)]
                                             interrupt_after_native_rename,
+                                            #[cfg(test)]
+                                            park_after_native_rename_marker,
                                         },
                                     )
                                 })
@@ -2158,6 +2174,8 @@ impl VersionInstaller {
             proof,
             #[cfg(test)]
             interrupt_after_native_rename,
+            #[cfg(test)]
+            park_after_native_rename_marker,
         } = publication;
         Self::validate_llama_cpp_receipt(&proof.tag, &proof, &stage)?;
         if manager
@@ -2182,6 +2200,20 @@ impl VersionInstaller {
                     },
                     false,
                 ));
+            }
+            #[cfg(test)]
+            if let Some(marker) = park_after_native_rename_marker {
+                let pending_marker = marker.with_extension("pending");
+                std::fs::write(
+                    &pending_marker,
+                    b"native destination durable; metadata not published",
+                )
+                .expect("write native post-rename test boundary marker");
+                std::fs::rename(&pending_marker, &marker)
+                    .expect("publish native post-rename test boundary marker");
+                loop {
+                    std::thread::park();
+                }
             }
             match manager.update_installed_version(
                 &proof.tag,

@@ -329,3 +329,16 @@ Candidate: code commit `c3a550cc160ed759cfbac2c2d3ac0f95e6856fc6` against plan b
 No production source, test, public API, contract, schema, migration, lockfile, generated output, prototype checkout/ref, live store or installed artifact is admitted. Keep unrelated untracked `docs/breif/future.md` untouched. Do not mark AC18/AQ-HTTP ready or merge the milestone PR on this evidence.
 
 Independent GPT-6.1 Sol High review of the exact documentation diff found one P3 activity-description overstatement (the source reviewer used read-only inspection commands); both occurrences were corrected. No other substantiated issue was found, and no acceptance or gate status changed; AC03 and historical AC15 retain their recorded scopes and AQ-HTTP remains not ready.
+
+### Q1 native receipt post-rename hard-process recovery regression — admitted 2026-10-01
+
+Base: `work/acquisition-q1-http` at `2d1b23d1eca14b187fbf3196dec6e5eea37c1d41`; plan base remains `e37bbf4b964a0e2aadf25f80ab71edd8fa6b3eb3`. The separate Sol High design review recommends retaining the current returned-error fixture and adding a Linux x86_64 child-process fixture.
+
+**Exact write set:**
+
+- `rust/crates/pumas-app-manager/src/version_manager/installer.rs`: extend only the test-gated native post-rename hook with a marker-and-park mode after destination rename and both parent-directory syncs, before metadata publication. Preserve the existing one-shot returned-error mode. No non-test behavior changes.
+- `rust/crates/pumas-app-manager/src/version_manager/mod.rs`: add a parent regression and ignored exact-name child helper; keep the parent-owned temporary launcher root, source listener and marker; kill/reap the child and require signal termination; then inspect the exact receipt-bearing `Using` state and recover with fresh owners. Retain a controlled loopback listener through recovery and assert no follow-up request to that endpoint. Ensure every child wait is bounded and a process guard kills/reaps on assertion failure.
+- `docs/plans/artifact-acquisition/{plan.md,execution-ledger.md,issues.md,reports/acceptance-matrix.md,reports/dependency-gates.md,reports/write-sets.md}`: record the exact process-termination evidence and limitations while leaving AC05/AQ-HTTP pending.
+- Existing draft PR #7 description: refresh exact head and describe the bounded SIGKILL evidence after the commit is pushed.
+
+No production implementation, API, schema, migration, dependency, lockfile, generated output, prototype ref/worktree, live root or unrelated user file is admitted. This can establish post-rename/post-sync recovery after parent-issued process termination on Linux x86_64 only. It cannot establish power-loss durability, other crash windows, deployed-root safety, Windows/macOS/packaged behavior, full shutdown/resource bounds or full AC05. Root owns serialized Cargo verification; confirm no active Cargo/rustc process before the focused test and do not overlap the shared target.

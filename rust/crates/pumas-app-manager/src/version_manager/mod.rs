@@ -207,6 +207,8 @@ pub struct VersionManager {
     #[cfg(test)]
     interrupt_after_native_rename: Option<Arc<AtomicBool>>,
     #[cfg(test)]
+    park_after_native_rename_marker: Option<PathBuf>,
+    #[cfg(test)]
     torch_stage_override: Option<installer::TorchStageOverride>,
     #[cfg(test)]
     removal_pause: Option<Arc<RemovalPause>>,
@@ -355,6 +357,8 @@ impl VersionManager {
             native_receipt_pause: None,
             #[cfg(test)]
             interrupt_after_native_rename: None,
+            #[cfg(test)]
+            park_after_native_rename_marker: None,
             #[cfg(test)]
             torch_stage_override: None,
             #[cfg(test)]
@@ -1055,6 +1059,12 @@ impl VersionManager {
             installer
         };
         #[cfg(test)]
+        let installer = if let Some(marker) = &self.park_after_native_rename_marker {
+            installer.with_native_rename_park_marker(marker.clone())
+        } else {
+            installer
+        };
+        #[cfg(test)]
         let installer = if let Some(pause) = &self.torch_publication_pause {
             installer.with_torch_publication_pause(pause.clone())
         } else {
@@ -1515,6 +1525,37 @@ mod tests {
         tokio::sync::oneshot::Sender<bool>,
         String,
     ) {
+        let (server, observed, release, base_url, _requests, _stop_server) =
+            native_archive_fixture_inner(root, false).await;
+        (server, observed, release, base_url)
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    async fn native_archive_fixture_with_request_monitor(
+        root: &Path,
+    ) -> (
+        tokio::task::JoinHandle<()>,
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<bool>,
+        String,
+        tokio::sync::mpsc::UnboundedReceiver<String>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        native_archive_fixture_inner(root, true).await
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    async fn native_archive_fixture_inner(
+        root: &Path,
+        monitor_requests: bool,
+    ) -> (
+        tokio::task::JoinHandle<()>,
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<bool>,
+        String,
+        tokio::sync::mpsc::UnboundedReceiver<String>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
         use sha2::Digest;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let payload = b"#!/bin/sh\nprintf 'native-fixture'\n";
@@ -1563,14 +1604,38 @@ mod tests {
             .unwrap();
         let (entered, observed) = tokio::sync::oneshot::channel();
         let (release, wait) = tokio::sync::oneshot::channel();
+        let (request_tx, request_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (stop_server, stop_server_rx) = tokio::sync::oneshot::channel();
         let server = tokio::spawn(async move {
             // Real HTTP release metadata supplies the exact publisher asset ID
             // and SHA; cached discovery has neither and cannot authorize bytes.
-            let (mut metadata_stream, _) = listener.accept().await.unwrap();
+            let (mut metadata_stream, _) = if monitor_requests {
+                tokio::time::timeout(Duration::from_secs(10), listener.accept())
+                    .await
+                    .expect("metadata request accept timed out")
+                    .unwrap()
+            } else {
+                listener.accept().await.unwrap()
+            };
             let mut request = [0; 4096];
-            let read = metadata_stream.read(&mut request).await.unwrap();
-            assert!(String::from_utf8_lossy(&request[..read])
+            let read = if monitor_requests {
+                tokio::time::timeout(Duration::from_secs(10), metadata_stream.read(&mut request))
+                    .await
+                    .expect("metadata request read timed out")
+                    .unwrap()
+            } else {
+                metadata_stream.read(&mut request).await.unwrap()
+            };
+            let request_line = String::from_utf8_lossy(&request[..read])
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .to_owned();
+            assert!(request_line
                 .starts_with("GET /repos/ggml-org/llama.cpp/releases/tags/b1234 HTTP/1.1"));
+            if monitor_requests {
+                request_tx.send(request_line).unwrap();
+            }
             let body = serde_json::to_vec(&serde_json::json!({
                 "tag_name": "b1234", "assets": [{
                     "id": 1234, "name": "llama-b1234-bin-ubuntu-x64.tar.gz",
@@ -1591,11 +1656,45 @@ mod tests {
                 .unwrap();
             metadata_stream.write_all(&body).await.unwrap();
             drop(metadata_stream);
-            let (mut stream, _) = listener.accept().await.unwrap();
+            let (mut stream, _) = if monitor_requests {
+                tokio::time::timeout(Duration::from_secs(10), listener.accept())
+                    .await
+                    .expect("archive request accept timed out")
+                    .unwrap()
+            } else {
+                listener.accept().await.unwrap()
+            };
             let mut request = [0; 4096];
-            assert!(stream.read(&mut request).await.unwrap() > 0);
+            let read = if monitor_requests {
+                tokio::time::timeout(Duration::from_secs(10), stream.read(&mut request))
+                    .await
+                    .expect("archive request read timed out")
+                    .unwrap()
+            } else {
+                stream.read(&mut request).await.unwrap()
+            };
+            assert!(read > 0);
+            if monitor_requests {
+                request_tx
+                    .send(
+                        String::from_utf8_lossy(&request[..read])
+                            .lines()
+                            .next()
+                            .unwrap_or_default()
+                            .to_owned(),
+                    )
+                    .unwrap();
+            }
             entered.send(()).unwrap();
-            if wait.await.unwrap() {
+            let send_archive = if monitor_requests {
+                tokio::time::timeout(Duration::from_secs(10), wait)
+                    .await
+                    .expect("source fixture release timed out")
+                    .unwrap()
+            } else {
+                wait.await.unwrap()
+            };
+            if send_archive {
                 stream
                     .write_all(
                         format!(
@@ -1608,8 +1707,50 @@ mod tests {
                     .unwrap();
                 stream.write_all(&bytes).await.unwrap();
             }
+            if monitor_requests {
+                let mut stop_server_rx = stop_server_rx;
+                loop {
+                    tokio::select! {
+                        _ = &mut stop_server_rx => {
+                            let drain_deadline = tokio::time::Instant::now()
+                                + Duration::from_secs(1);
+                            loop {
+                                let remaining = drain_deadline
+                                    .saturating_duration_since(tokio::time::Instant::now());
+                                if remaining.is_zero() {
+                                    break;
+                                }
+                                match tokio::time::timeout(remaining, listener.accept()).await {
+                                    Ok(Ok((mut stream, _))) => {
+                                        request_tx
+                                            .send("monitored-source connection accepted".into())
+                                            .unwrap();
+                                        let _ = tokio::time::timeout(
+                                            Duration::from_millis(250),
+                                            stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+                                        ).await;
+                                    }
+                                    Ok(Err(error)) => panic!("source monitor drain failed: {error}"),
+                                    Err(_) => break,
+                                }
+                            }
+                            break;
+                        }
+                        accepted = listener.accept() => {
+                            let (mut stream, _) = accepted.unwrap();
+                            request_tx
+                                .send("monitored-source connection accepted".into())
+                                .unwrap();
+                            let _ = tokio::time::timeout(
+                                Duration::from_millis(250),
+                                stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+                            ).await;
+                        }
+                    }
+                }
+            }
         });
-        (server, observed, release, base_url)
+        (server, observed, release, base_url, request_rx, stop_server)
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
@@ -2764,6 +2905,356 @@ mod tests {
         assert_eq!(file_snapshot(&metadata_path), settled_metadata);
         stable.shutdown_installations().await.unwrap();
         stable_api.shutdown_acquisition().await.unwrap();
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    struct NativeInstallChildGuard(Option<std::process::Child>);
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    impl NativeInstallChildGuard {
+        fn child_mut(&mut self) -> &mut std::process::Child {
+            self.0.as_mut().expect("child guard already disarmed")
+        }
+
+        fn disarm(&mut self) {
+            self.0.take();
+        }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    impl Drop for NativeInstallChildGuard {
+        fn drop(&mut self) {
+            let Some(mut child) = self.0.take() else {
+                return;
+            };
+            let _ = child.kill();
+            // Do not make test unwinding wait indefinitely. The detached
+            // reaper owns the killed child and polls until try_wait observes
+            // its terminal status, which also reaps it.
+            let _ = std::thread::Builder::new()
+                .name("native-install-test-child-reaper".into())
+                .spawn(move || loop {
+                    match child.try_wait() {
+                        Ok(Some(_)) | Err(_) => break,
+                        Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+                    }
+                });
+        }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    #[ignore = "spawned only by the parent SIGKILL recovery regression"]
+    async fn native_receipt_post_rename_sigkill_child() {
+        const ROOT_ENV: &str = "PUMAS_NATIVE_SIGKILL_TEST_ROOT";
+        const BASE_URL_ENV: &str = "PUMAS_NATIVE_SIGKILL_TEST_BASE_URL";
+        const MARKER_ENV: &str = "PUMAS_NATIVE_SIGKILL_TEST_MARKER";
+
+        let root = PathBuf::from(std::env::var_os(ROOT_ENV).expect("child root is required"));
+        let base_url = std::env::var(BASE_URL_ENV).expect("child source URL is required");
+        let marker = PathBuf::from(std::env::var_os(MARKER_ENV).expect("child marker is required"));
+        let api = pumas_library::PumasApi::builder(&root)
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let mut manager =
+            VersionManager::new_with_acquisition(&root, AppId::LlamaCpp, api.acquisition().clone())
+                .await
+                .unwrap();
+        manager.github_client = Arc::new(
+            GitHubClient::with_loopback_api(
+                manager.cache_dir(),
+                Duration::from_secs(3600),
+                base_url,
+            )
+            .unwrap(),
+        );
+        manager.park_after_native_rename_marker = Some(marker);
+        let _updates = manager.install_version("b1234+cpu").await.unwrap();
+
+        // The parent owns the only termination authority for this dedicated
+        // helper and kills it after observing the post-rename marker.
+        std::future::pending::<()>().await;
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn native_receipt_post_rename_sigkill_cold_reopen_recovers_without_source_replay() {
+        use sha2::Digest;
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
+        use std::process::Stdio;
+
+        fn native_tree_sha256(root: &Path) -> String {
+            use sha2::Digest;
+
+            let mut digest = sha2::Sha256::new();
+            for entry in walkdir::WalkDir::new(root)
+                .follow_links(false)
+                .sort_by_file_name()
+            {
+                let entry = entry.unwrap();
+                let relative = entry.path().strip_prefix(root).unwrap();
+                let name = relative.to_str().unwrap().replace('\\', "/");
+                digest.update((name.len() as u64).to_le_bytes());
+                digest.update(name.as_bytes());
+                let metadata = std::fs::symlink_metadata(entry.path()).unwrap();
+                assert!(!metadata.file_type().is_symlink());
+                digest.update(metadata.permissions().mode().to_le_bytes());
+                if metadata.is_file() {
+                    digest.update(b"file");
+                    let bytes = std::fs::read(entry.path()).unwrap();
+                    digest.update(format!("{:x}", sha2::Sha256::digest(&bytes)).as_bytes());
+                } else {
+                    assert!(metadata.is_dir());
+                    digest.update(b"directory");
+                }
+            }
+            format!("{:x}", digest.finalize())
+        }
+
+        const CHILD_TEST: &str = "version_manager::tests::native_receipt_post_rename_sigkill_child";
+        const ROOT_ENV: &str = "PUMAS_NATIVE_SIGKILL_TEST_ROOT";
+        const BASE_URL_ENV: &str = "PUMAS_NATIVE_SIGKILL_TEST_BASE_URL";
+        const MARKER_ENV: &str = "PUMAS_NATIVE_SIGKILL_TEST_MARKER";
+
+        let root = TempDir::new().unwrap();
+        let control = TempDir::new().unwrap();
+        let marker = control.path().join("post-rename-boundary");
+        let (server, observed, release, base_url, mut requests, stop_server) =
+            native_archive_fixture_with_request_monitor(root.path()).await;
+        let executable = std::env::current_exe().unwrap();
+        let child = std::process::Command::new(executable)
+            .arg("--exact")
+            .arg(CHILD_TEST)
+            .arg("--ignored")
+            .arg("--nocapture")
+            .arg("--test-threads=1")
+            .env(ROOT_ENV, root.path())
+            .env(BASE_URL_ENV, &base_url)
+            .env(MARKER_ENV, &marker)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut child = NativeInstallChildGuard(Some(child));
+
+        tokio::time::timeout(Duration::from_secs(5), observed)
+            .await
+            .expect("child did not request the controlled archive")
+            .expect("source observation sender dropped");
+        release.send(true).unwrap();
+        for expected in [
+            "GET /repos/ggml-org/llama.cpp/releases/tags/b1234 HTTP/1.1",
+            "GET /archive HTTP/1.1",
+        ] {
+            let request = tokio::time::timeout(Duration::from_secs(5), requests.recv())
+                .await
+                .expect("initial source request was not observed")
+                .expect("source monitor stopped before the initial requests");
+            assert!(
+                request.starts_with(expected),
+                "unexpected initial request: {request}"
+            );
+        }
+
+        let marker_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            if marker.exists() {
+                break;
+            }
+            if let Some(status) = child.child_mut().try_wait().unwrap() {
+                panic!("child exited before the durable publication boundary: {status}");
+            }
+            assert!(
+                tokio::time::Instant::now() < marker_deadline,
+                "child did not reach the post-rename publication boundary"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(
+            std::fs::read(&marker).unwrap(),
+            b"native destination durable; metadata not published"
+        );
+        assert!(
+            child.child_mut().try_wait().unwrap().is_none(),
+            "child returned after reporting the publication boundary"
+        );
+        child.child_mut().kill().unwrap();
+        let status = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(status) = child.child_mut().try_wait().unwrap() {
+                    break status;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("SIGKILLed installer child was not reaped");
+        assert_eq!(
+            status.signal(),
+            Some(9),
+            "child must end by SIGKILL: {status}"
+        );
+        child.disarm();
+
+        let store_path = root.path().join("launcher-data/downloads.json");
+        let retained: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store_path).unwrap()).unwrap();
+        let acquisitions = retained["acquisitions"].as_object().unwrap();
+        assert_eq!(acquisitions.len(), 1);
+        assert_eq!(retained["consumer_receipts"].as_object().unwrap().len(), 1);
+        let (acquisition_id, record) = acquisitions.iter().next().unwrap();
+        assert_eq!(record["phase"]["state"], "using");
+        let receipt = retained["consumer_receipts"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap();
+        assert_eq!(receipt["owner"], "runtime.llama.cpp");
+        assert_eq!(receipt["acquisition_id"], acquisition_id.as_str());
+        assert_eq!(receipt["use_lease"], record["phase"]["lease"]);
+        assert_eq!(receipt["demand"], record["demand"]);
+        assert_eq!(receipt["manifest"], record["manifest"]);
+        assert_eq!(receipt["workspace"], record["workspace"]);
+        assert_eq!(receipt["verified_files"], record["files"]);
+
+        let versions = root.path().join(AppId::LlamaCpp.versions_dir_name());
+        let workspace = versions.join(record["workspace"]["relative_target"].as_str().unwrap());
+        let stage = workspace.join("output");
+        let destination = versions.join("b1234+cpu");
+        assert!(workspace.is_dir(), "receipt custody workspace must remain");
+        assert!(
+            destination.is_dir(),
+            "renamed native output must be present"
+        );
+        assert!(!stage.exists(), "published output stage must be absent");
+        let files = record["files"].as_array().unwrap();
+        assert_eq!(files.len(), 1);
+        assert!(workspace.join(files[0]["path"].as_str().unwrap()).is_file());
+        assert_eq!(
+            receipt["payload"]["output_tree_sha256"],
+            native_tree_sha256(&destination)
+        );
+        let receipt_launcher = destination.join(
+            receipt["payload"]["launcher_relative_path"]
+                .as_str()
+                .unwrap(),
+        );
+        assert_eq!(
+            receipt["payload"]["launcher_sha256"],
+            format!(
+                "{:x}",
+                sha2::Sha256::digest(std::fs::read(&receipt_launcher).unwrap())
+            )
+        );
+        assert!(MetadataManager::new(root.path())
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .is_none());
+
+        let recovery_api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let recovered = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            recovery_api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            recovered.get_installed_versions().await.unwrap(),
+            vec!["b1234+cpu"]
+        );
+        assert!(destination.join("bin/llama-server").is_file());
+        assert!(!stage.exists());
+        assert!(!workspace.exists());
+        let recovered_metadata = recovered
+            .metadata_manager
+            .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(recovered_metadata).unwrap(),
+            receipt["payload"]["metadata"]
+        );
+        recovered.shutdown_installations().await.unwrap();
+        recovery_api.shutdown_acquisition().await.unwrap();
+
+        let settled: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store_path).unwrap()).unwrap();
+        assert_eq!(settled["consumer_receipts"], retained["consumer_receipts"]);
+        assert_eq!(settled["acquisitions"].as_object().unwrap().len(), 1);
+        let mut expected_record = record.clone();
+        expected_record["phase"]["state"] = serde_json::json!("adopted");
+        assert_eq!(settled["acquisitions"][acquisition_id], expected_record);
+        drop(recovered);
+        drop(recovery_api);
+
+        let stable_api = pumas_library::PumasApi::builder(root.path())
+            .with_hf_client(false)
+            .with_process_manager(false)
+            .build()
+            .await
+            .unwrap();
+        let stable = VersionManager::new_with_acquisition(
+            root.path(),
+            AppId::LlamaCpp,
+            stable_api.acquisition().clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            stable.get_installed_versions().await.unwrap(),
+            vec!["b1234+cpu"]
+        );
+        assert_eq!(
+            native_tree_sha256(&destination),
+            receipt["payload"]["output_tree_sha256"]
+        );
+        assert_eq!(
+            std::fs::read(&receipt_launcher).unwrap(),
+            std::fs::read(destination.join("bin/llama-server")).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(
+                stable
+                    .metadata_manager
+                    .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+                    .unwrap()
+                    .unwrap()
+            )
+            .unwrap(),
+            receipt["payload"]["metadata"]
+        );
+        stable.shutdown_installations().await.unwrap();
+        stable_api.shutdown_acquisition().await.unwrap();
+        let after_stable_reopen: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&store_path).unwrap()).unwrap();
+        assert_eq!(after_stable_reopen["acquisitions"], settled["acquisitions"]);
+
+        match tokio::time::timeout(Duration::from_secs(1), requests.recv()).await {
+            Err(_) => {}
+            Ok(Some(request)) => panic!("recovery replayed a controlled source request: {request}"),
+            Ok(None) => panic!("source monitor closed before the no-replay check"),
+        }
+        drop(stop_server);
+        tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .expect("source monitor did not stop within its deadline")
+            .unwrap();
+        match requests.try_recv() {
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+            | Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {}
+            Ok(request) => panic!("source monitor drain found an unexpected request: {request}"),
+        }
     }
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]

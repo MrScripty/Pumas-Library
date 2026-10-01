@@ -82,3 +82,16 @@ not identify the unavailable profile. An initial request above the documented
 maximum (`limit: 50`) was rejected by validation, confirming the agents bound is
 4. No task was submitted, and implementation remains on the user-authorized
 GPT-6.1 Sol fallback until the repository service becomes available.
+
+## 2026-09-30 — coordinator connected, contributor discovery unresolved
+
+A later status check changed from `unavailable` to `not_checked`.
+`passeur_prepare({})` connected the repository service with open admission and a
+ready coordination authority. Task listing succeeded and returned zero tasks;
+the coordination identity read also succeeded. However,
+`passeur_agents({ limit: 4 })` still failed at `profile.open` with
+`PATH_NOT_FOUND`, and connected status reported execution profile/provider/
+approval as `not_checked`. No agent ID for the requested Muse Spark contributor
+could be verified, so no implementation task was submitted or started. The
+service can coordinate/read metadata, but this session still cannot safely
+select the requested execution profile.

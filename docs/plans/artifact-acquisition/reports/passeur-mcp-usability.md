@@ -179,3 +179,25 @@ coordination metadata is uninitialized despite status/prepare reporting it
 ready. Readiness should make these states consistent, and preflight should
 identify the supported operator recovery path without implying that successful
 prepare enabled execution.
+
+## 2026-10-01 — status ready, but contributor discovery still fails
+
+After the user requested Sol 6.1, I rechecked the installed Passeur frontend
+build `6a43daa6eec45ddceadea0ba2e2a623d7fc8e81e330237c7762a7f1c63c33f63` and
+repository service generation `e1e32585-e963-495d-b46b-05102aff09f1`.
+`passeur_status({})` reports the service connected, repository binding valid,
+and coordination ready/held. The valid task-list request
+`passeur_tasks({schema_version:1,limit:16,offset:0})` succeeds with zero tasks.
+The valid agent-list request `passeur_agents({limit:4,offset:0})` still fails
+with `PATH_NOT_FOUND` at `profile.open`; execution profile/provider/approval
+are not reported ready by this endpoint. There is no returned Muse Spark agent
+identity and no active Passeur task, so no Passeur subagent is working on the
+implementation. No task was submitted. Work continued directly under the
+user's Sol 6.1 instruction.
+
+The failure has narrowed to configured-agent discovery: service connectivity
+and task inspection work, but `profile.open` prevents safe agent selection.
+Keep these readiness states separate in status output and return the missing
+profile resource or a safe configured-agent status instead of a generic path
+failure. No product correctness or acceptance conclusion follows from this
+MCP observation.

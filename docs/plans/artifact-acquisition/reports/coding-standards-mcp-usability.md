@@ -359,3 +359,14 @@ This records tool usability only; it does not certify source compliance or produ
 - **Recommendations:** Bound route response output by bytes as well as selected-policy count, and retain a concise selection summary when full policy text would exceed the caller's useful review window.
 
 This records tool usability only; it does not certify source compliance or AC06 acceptance.
+
+## Primary integrator — live-consumer and acceptance-record update
+
+- **Useful calls:** A fresh route on snapshot `snapshot:v1:ba87accb-a675-4209-8a1a-2163140b4a96` selected 46 standards with zero unresolved applicability facts. The focused reads covered documentation, commit, release, and verification guidance. They reinforced recording real consumer boundaries and evidence scope, staging only the declared documentation slice, and keeping backend system evidence distinct from packaged/UI acceptance.
+- **Confusing or redundant steps:** The first route requested six whole policy reads and returned a response large enough to exceed the useful output window. Repeating the route with one content item preserved the complete route summary and zero-unresolved result; focused reads were then issued separately. Fact refresh and routing worked consistently after the session restart.
+- **Missing context:** The MCP did not know the actual HF LFS digest, llama.cpp asset ID/digest, isolated host/root facts, Build #357 retry result, or the transient RPC status error. Those were established through the product RPC, acquisition receipt, filesystem, and GitHub run tools.
+- **Where I left MCP:** It supplied documentation, commit, release, and verification obligations only. It did not accept AC03/AC15, certify the Rust code, or decide AQ-HTTP readiness; those statuses are grounded in the recorded product and CI observations and remain scoped.
+- **Smallest sufficient workflow:** Refresh routing facts, route the full implementation/evidence scope on a fresh snapshot with a small content page, then read only the policies needed for the final docs/commit/verification boundary.
+- **Recommendations:** Return route counts and unresolved facts separately from policy bodies; cap results by response bytes as well as whole-policy count, and avoid duplicating selected policy text across content and structured output.
+
+This records MCP usability only. Product acceptance and source review remain separate.

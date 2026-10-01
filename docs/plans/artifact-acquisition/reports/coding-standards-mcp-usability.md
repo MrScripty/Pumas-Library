@@ -349,6 +349,17 @@ This records MCP usability only; it does not certify implementation compliance o
 
 This records tool usability only; it does not certify source compliance or product acceptance.
 
+## Primary integrator — AC06 concurrent stale-worker handoff regression
+
+- **Useful calls:** The post-restart routing-facts read and exact-scope route used snapshot `snapshot:v1:2eab787a-b1be-424e-8195-405814f86ede`; the route selected 24 standards with zero unresolved applicability questions. A focused `read_many` call read 17 relevant policies covering core, Rust/API/async, persistence, concurrency, contracts, architecture, security, planning, implementation, documentation, verification oracles, and concurrent integration.
+- **Confusing or redundant steps:** A route request with `detail:"full"` and a 32-policy content page returned a very large response that exceeded the useful output window. Repeating the route compactly and reading the selected policies through a bounded `read_many` response produced a usable result. This repeats the observed need for response byte budgets, not only item-count limits.
+- **Missing context:** The MCP did not know the Passeur task result, the exact service-test diff, the Cargo test outcome, or that no other Rust compile was running. Repository inspection and the serialized test command established those facts.
+- **Where I left MCP:** The route and policy reads supplied obligations only. Manual source review, the focused passing test, formatting, and diff checks are separate implementation evidence. This neither accepts AC06 nor opens AQ-HTTP.
+- **Smallest sufficient workflow:** Refresh registered routing facts, route the exact source and verification boundary, read only applicable policies in compact bounded batches, then record source and test evidence independently.
+- **Recommendations:** Keep results byte-bounded even when a whole-policy count is within the declared maximum. Avoid repeating policy bodies in a full route response when a compact route plus focused reads is sufficient.
+
+This records MCP usability only; it is not source review or product acceptance.
+
 - **Final route refresh:** After implementation, the route was refreshed on snapshot `snapshot:v1:b187217e-0e3f-4b16-b101-74eca1357d5b`; it selected 22 standards with zero unresolved applicability facts and matched the admitted pre-edit scope. The route remains guidance only. Sol High's independent review and the serial local test/lint evidence are recorded separately in the execution ledger.
 
 ## Primary integrator — AC02 duplicate `Content-Range` refusal

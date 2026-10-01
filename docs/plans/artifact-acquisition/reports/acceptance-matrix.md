@@ -61,13 +61,14 @@ receipt. This proves same-owner resume over the local HTTP fixture; it does not
 prove cold reopen, power-loss durability, malformed-range handling or real
 consumer publication.
 
-This is partial service-level evidence. AC06 remains pending
-for queued/verifying cancellation, idempotent release, and preservation of all
-live/durable demands. The new stale-generation fixture below proves sequential
-rejection at `files_ready` in one consumer scope; it does not exercise a
-concurrent stale-worker race or same-task-ID replacement. These local
-HTTP/workspace fixtures are not real HF/native source or supported-platform
-acceptance.
+This is partial service-level evidence. AC06 remains pending for queued and
+verifying cancellation, idempotent release, and preservation of all live and
+durable demands. The sequential stale-generation fixture below proves rejection
+at `files_ready` from a new worker generation in one consumer scope. The
+concurrent fixture following it proves that stale readiness cannot replace a
+successful concurrent handoff; neither fixture exercises same-task-ID
+replacement. These local HTTP/workspace fixtures are not real HF/native source
+or supported-platform acceptance.
 
 The `stale_worker_generation_cannot_seal_or_handoff_acquisition` service test
 starts an operation in one worker generation, then invokes `files_ready` from a
@@ -78,6 +79,19 @@ that remains append-openable. Consumer and service shutdown drain before the
 assertions. This covers the sequential generation mismatch at the acquisition
 boundary; it does not establish concurrent replacement, filesystem metadata
 equality, cold recovery, or crash durability.
+
+The `concurrent_stale_worker_handoff_cannot_mutate_durable_acquisition`
+service test gates two worker invocations in the same consumer scope on the
+same demand and workspace. It lets the successor seal and hand off the durable
+record, snapshots that winning record and staged bytes, then releases the
+earlier worker to attempt `files_ready`. The stale handoff returns the exact
+`Acquisition readiness is stale` validation error; the winner's row remains
+equal, no consumer receipt is issued, and the final file, partial file, and
+workspace entry count remain unchanged. Consumer and service shutdown drain
+before assertions. The focused test passed 1/1 on Linux x86_64. This does not
+establish same-task-ID replacement, crash or power-loss durability, queued or
+verifying cancellation, idempotent release, preservation of all live and
+durable demands, real-source/consumer behavior, or other-platform acceptance.
 
 
 ## Real procedures and proof boundaries

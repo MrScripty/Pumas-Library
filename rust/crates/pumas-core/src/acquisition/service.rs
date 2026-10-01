@@ -3057,6 +3057,183 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn concurrent_stale_worker_handoff_cannot_mutate_durable_acquisition() {
+        use crate::acquisition::task_custody::TaskRole;
+
+        let timeout = Duration::from_secs(5);
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::write(stage.join("payload.bin"), b"DATA").unwrap();
+        std::fs::write(stage.join("payload.bin.part"), b"KEEP").unwrap();
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store.clone()));
+        let consumer = Arc::new(service.open_consumer("fixture").unwrap());
+        let demand = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: "concurrent-stale-handoff".into(),
+        };
+        let selection = manifest("payload.bin");
+        let grant = workspace(&stage);
+
+        // Gate every ordering step: the stale worker parks after admission
+        // while its successor seals and hands off the same demand, then the
+        // stale worker attempts its own handoff with its still-live context.
+        let (stale_begun_sender, stale_begun) = tokio::sync::oneshot::channel::<()>();
+        let (release_sender, release_receiver) = tokio::sync::oneshot::channel::<()>();
+        let stale_consumer = consumer.clone();
+        let stale_service = service.clone();
+        let stale_demand = demand.clone();
+        let stale_selection = selection.clone();
+        let stale_grant = grant.clone();
+        let stale = tokio::spawn(async move {
+            stale_consumer
+                .scope
+                .run_worker_invocation(move |context| async move {
+                    let operation = stale_service
+                        .begin(
+                            &context,
+                            stale_demand,
+                            stale_selection,
+                            stale_grant.identity().clone(),
+                            None,
+                        )
+                        .await?;
+                    let operation_id = operation.record.id;
+                    let _ = stale_begun_sender.send(());
+                    release_receiver.await.map_err(|_| {
+                        PumasError::Other("Successor did not release the stale worker".into())
+                    })?;
+                    // The stale generation is still installed, so its own
+                    // seal/handoff passes custody and must fail only at the
+                    // durable store comparison.
+                    let current = context.is_current_role(TaskRole::Worker);
+                    let workspace = stale_grant.clone();
+                    let rejection = stale_service
+                        .files_ready(&context, operation, workspace)
+                        .await
+                        .err();
+                    Ok::<_, PumasError>((operation_id, current, rejection))
+                })
+                .await
+        });
+        let successor_consumer = consumer.clone();
+        let successor_service = service.clone();
+        let successor_demand = demand.clone();
+        let successor_selection = selection.clone();
+        let successor_grant = grant.clone();
+        let successor = tokio::spawn(async move {
+            successor_consumer
+                .scope
+                .run_worker_invocation(move |context| async move {
+                    stale_begun.await.map_err(|_| {
+                        PumasError::Other("Stale worker never reached admission".into())
+                    })?;
+                    let operation = successor_service
+                        .begin(
+                            &context,
+                            successor_demand,
+                            successor_selection,
+                            successor_grant.identity().clone(),
+                            None,
+                        )
+                        .await?;
+                    let lease = successor_service
+                        .files_ready(&context, operation, successor_grant)
+                        .await?;
+                    Ok::<_, PumasError>(lease.record().clone())
+                })
+                .await
+        });
+
+        let outcome = tokio::time::timeout(timeout, async {
+            let successor_record = successor
+                .await
+                .map_err(|error| PumasError::Other(error.to_string()))??;
+            // Observe the winner's durable state while the stale worker is
+            // still parked; its later attempt must leave all of this unchanged.
+            let winner = store.acquisitions()?;
+            let winner_final = std::fs::read(stage.join("payload.bin"))
+                .map_err(|error| PumasError::Other(error.to_string()))?;
+            let winner_partial = std::fs::read(stage.join("payload.bin.part"))
+                .map_err(|error| PumasError::Other(error.to_string()))?;
+            let winner_entries = std::fs::read_dir(&stage)
+                .map_err(|error| PumasError::Other(error.to_string()))?
+                .count();
+            release_sender.send(()).map_err(|_| {
+                PumasError::Other("Stale worker disappeared before its handoff".into())
+            })?;
+            let (stale_id, stale_current, rejection) = stale
+                .await
+                .map_err(|error| PumasError::Other(error.to_string()))??;
+            Ok::<_, PumasError>((
+                successor_record,
+                winner,
+                winner_final,
+                winner_partial,
+                winner_entries,
+                stale_id,
+                stale_current,
+                rejection,
+            ))
+        })
+        .await;
+        // Drain even if an invocation failed/timed out before reporting any
+        // assertion, so the workspace and durable snapshot cannot race effects.
+        let consumer_drain = tokio::time::timeout(timeout, consumer.shutdown()).await;
+        let service_drain = tokio::time::timeout(timeout, service.shutdown()).await;
+        consumer_drain.expect("consumer must drain").unwrap();
+        service_drain.expect("service must drain").unwrap();
+        let (
+            successor_record,
+            winner,
+            winner_final,
+            winner_partial,
+            winner_entries,
+            stale_id,
+            stale_current,
+            rejection,
+        ) = outcome.expect("worker generations must complete").unwrap();
+
+        assert_eq!(stale_id, successor_record.id);
+        assert_eq!(successor_record.demand, demand);
+        assert_eq!(successor_record.manifest, selection);
+        assert_eq!(successor_record.workspace, *grant.identity());
+        assert!(matches!(
+            successor_record.phase,
+            AcquisitionPhase::Using { .. }
+        ));
+        assert_eq!(successor_record.files.len(), 1);
+        assert!(
+            stale_current,
+            "the stale generation must still be an installed worker at its handoff"
+        );
+        assert!(
+            matches!(rejection, Some(PumasError::Validation { ref field, ref message })
+            if field == "acquisition.custody"
+                && message == "Acquisition readiness is stale")
+        );
+        // The losing seal/handoff mutated no durable row, issued no receipt,
+        // and changed neither the final nor the partial bytes.
+        assert_eq!(store.acquisitions().unwrap(), winner);
+        assert_eq!(winner.len(), 1);
+        assert_eq!(winner.get(&successor_record.id), Some(&successor_record));
+        assert!(service
+            .consumer_receipt(successor_record.id)
+            .unwrap()
+            .is_none());
+        assert_eq!(winner_final, b"DATA");
+        assert_eq!(winner_partial, b"KEEP");
+        assert_eq!(winner_entries, 2);
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin.part")).unwrap(),
+            b"KEEP"
+        );
+        assert_eq!(std::fs::read_dir(&stage).unwrap().count(), 2);
+    }
+
+    #[tokio::test]
     async fn pause_stops_partial_writes_and_preserves_transfer_demand() {
         controlled_partial_transfer_stops_writing(true).await;
     }

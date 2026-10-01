@@ -236,3 +236,34 @@ configured contributor. Keep the model catalog, project profile, coordination
 readiness and execution-provider readiness distinct in diagnostics. A
 successful task-list read must not imply that a requested contributor can be
 selected or that a coordinated task was accepted.
+
+## 2026-10-01 — coordinated Muse task and terminal-disposition recovery
+
+After the user reported Passeur availability, the operator CLI initialized the
+coordination metadata and `passeur_agents` exposed the configured Muse agent.
+The model catalog reported `muse-spark-1.3-contributor`; coordinated preflight
+and submission then admitted the AC06 service-test task
+`b22767c4-48ac-4cc3-99e4-c91d5e5e51b2` against one allowed source file. The
+worker changed only that file and returned a bounded diff artifact, but its
+delivery was incomplete because the worker had not made a commit. It ran no
+checks; the integrator separately applied and tested the change.
+
+The first completed native turn did not include the required terminal
+`PASSEUR_MESSAGE` v2 assignment-disposition envelope. Passeur surfaced the same
+generic clarification (“Supply an explicit continuation instruction, or cancel
+the task”) twice without exposing the parser's missing-marker/schema reason.
+Providing the documented `PASSEUR_MESSAGE` marker and exact final JSON shape in
+the clarification let the native task complete. The adapter should include the
+disposition contract in the initial native instructions and return the concrete
+bounded parse failure (missing marker, invalid JSON, or schema mismatch) in the
+clarification. Repeating a generic continuation prompt made it unclear what
+response would end the task.
+
+The first `muse_result` request used `limit: 12000` and was rejected because the
+runtime maximum is 8192 bytes; retrying at 8192 succeeded. Expose this maximum
+in the tool schema/description so clients can page correctly without a failed
+call.
+
+These observations come from one coordinated Muse 1.3 implementation task.
+The worker report is not code verification: it had no checks, the Passeur
+delivery was uncommitted, and acceptance remains the integrator's responsibility.

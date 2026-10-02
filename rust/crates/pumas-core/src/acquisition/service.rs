@@ -1208,6 +1208,36 @@ impl AcquisitionService {
         operation: AcquisitionOperation,
         workspace: AcquisitionWorkspace,
     ) -> Result<AcquisitionUseLease> {
+        self.files_ready_with_cancellation_check(context, operation, workspace, || false)
+            .await
+    }
+
+    async fn files_ready_with_host<H>(
+        &self,
+        context: &TaskContext,
+        operation: AcquisitionOperation,
+        workspace: AcquisitionWorkspace,
+        host: &mut H,
+    ) -> Result<AcquisitionUseLease>
+    where
+        H: HttpAttemptHost + ?Sized,
+    {
+        self.files_ready_with_cancellation_check(context, operation, workspace, move || {
+            host.cancel_requested()
+        })
+        .await
+    }
+
+    async fn files_ready_with_cancellation_check<F>(
+        &self,
+        context: &TaskContext,
+        operation: AcquisitionOperation,
+        workspace: AcquisitionWorkspace,
+        cancellation_requested: F,
+    ) -> Result<AcquisitionUseLease>
+    where
+        F: Fn() -> bool + Send,
+    {
         if !context.shares_scope(&operation.context)
             || !context.generation().matches(operation.context.generation())
         {
@@ -1215,12 +1245,18 @@ impl AcquisitionService {
                 "Verified handoff belongs to another operation generation",
             ));
         }
+        if cancellation_requested() {
+            return Err(PumasError::DownloadCancelled);
+        }
         let seal = workspace.clone();
         let manifest = operation.record.manifest.clone();
         let files = owned(context, "seal verified acquisition file set", move || {
             seal.seal(&manifest)
         })
         .await?;
+        if cancellation_requested() {
+            return Err(PumasError::DownloadCancelled);
+        }
         let store = self.store.clone();
         let mut expected = operation.record.clone();
         if matches!(expected.phase, AcquisitionPhase::Transferring) {
@@ -1575,7 +1611,7 @@ impl AcquisitionConsumer {
                         .await?;
                 }
                 let lease = service
-                    .files_ready(&context, operation, request.workspace)
+                    .files_ready_with_host(&context, operation, request.workspace, host.as_mut())
                     .await?;
                 let expected = lease.record().clone();
                 let use_lease = match &expected.phase {
@@ -1745,7 +1781,7 @@ mod tests {
         ArtifactFile, ArtifactRevisionEvidence, ArtifactSourceIdentity,
         FileVerificationRequirement, RevisionStrength,
     };
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     fn checkpoint_fixture(workspace: &AcquisitionWorkspace) -> (AcquisitionRecord, PartialPrefix) {
@@ -2080,6 +2116,14 @@ mod tests {
         progress: tokio::sync::watch::Sender<u64>,
     }
 
+    struct ReservationDropProbe(Arc<AtomicBool>);
+
+    impl Drop for ReservationDropProbe {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
     impl ControlledHost {
         fn pause(&self) {
             self.paused.store(true, Ordering::Release);
@@ -2354,6 +2398,165 @@ mod tests {
         consumer.shutdown().await.unwrap();
         service.shutdown().await.unwrap();
         assert!(service.checkpoints.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn host_cancellation_during_file_set_sealing_prevents_consumer_handoff() {
+        let timeout = Duration::from_secs(5);
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store.clone()));
+        let consumer = Arc::new(service.open_consumer("fixture").unwrap());
+        let reservation_released = Arc::new(AtomicBool::new(false));
+        let root = crate::platform::capability_fs::open_directory(&stage).unwrap();
+        let grant = AcquisitionWorkspace::from_capability(
+            root,
+            WorkspaceIdentity {
+                root_identity: "fixture-physical-root".into(),
+                relative_target: "staging".into(),
+            },
+            Arc::new(ReservationDropProbe(reservation_released.clone())),
+            || Ok(()),
+        )
+        .unwrap();
+        let expected_workspace = grant.identity().clone();
+        let demand = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: "cancel-during-file-set-seal".into(),
+        };
+        let expected_demand = demand.clone();
+        let request_manifest = manifest("payload.bin");
+        let expected_manifest = request_manifest.clone();
+        let (url, server) = serve(b"DATA").await;
+        let (progress_sender, _progress) = tokio::sync::watch::channel(0_u64);
+        let host = ControlledHost {
+            paused: Arc::new(AtomicBool::new(false)),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            pause_wake: Arc::new(tokio::sync::Notify::new()),
+            cancel_wake: Arc::new(tokio::sync::Notify::new()),
+            progress: progress_sender,
+        };
+        let controls = host.clone();
+
+        let (seal_started_sender, seal_started) = tokio::sync::oneshot::channel();
+        let seal_started_sender = Mutex::new(Some(seal_started_sender));
+        let (release_seal_sender, release_seal_receiver) = std::sync::mpsc::channel();
+        let release_seal_receiver = Mutex::new(release_seal_receiver);
+        let (seal_released_sender, seal_released) = tokio::sync::oneshot::channel();
+        let seal_released_sender = Mutex::new(Some(seal_released_sender));
+        let ready_mutation_started = Arc::new(AtomicBool::new(false));
+        let ready_mutation_observer = ready_mutation_started.clone();
+        let handoff_mutation_started = Arc::new(AtomicBool::new(false));
+        let handoff_mutation_observer = handoff_mutation_started.clone();
+        consumer
+            .scope
+            .set_blocking_observer(Some(Arc::new(move |label| match label {
+                "seal verified acquisition file set" => {
+                    if let Some(sender) = seal_started_sender.lock().unwrap().take() {
+                        let _ = sender.send(());
+                    }
+                    let _ = release_seal_receiver.lock().unwrap().recv();
+                    if let Some(sender) = seal_released_sender.lock().unwrap().take() {
+                        let _ = sender.send(());
+                    }
+                }
+                "persist acquisition files ready" => {
+                    ready_mutation_observer.store(true, Ordering::SeqCst);
+                }
+                "handoff durable verified acquisition files" => {
+                    handoff_mutation_observer.store(true, Ordering::SeqCst);
+                }
+                _ => {}
+            })));
+
+        let prepare_calls = Arc::new(AtomicUsize::new(0));
+        let prepare_observer = prepare_calls.clone();
+        let publish_calls = Arc::new(AtomicUsize::new(0));
+        let publish_observer = publish_calls.clone();
+        let running_consumer = consumer.clone();
+        let waiter = tokio::spawn(async move {
+            running_consumer
+                .acquire_http(
+                    AcquisitionHttpRequest {
+                        demand,
+                        manifest: request_manifest,
+                        workspace: grant,
+                        sources: vec![AcquisitionHttpSource {
+                            url,
+                            authorization: None,
+                        }],
+                        retry: retry(),
+                    },
+                    reqwest::Client::new(),
+                    Box::new(host),
+                    move |_| async move {
+                        prepare_observer.fetch_add(1, Ordering::SeqCst);
+                        Ok::<((), Value), PumasError>(((), Value::Null))
+                    },
+                    move |(), _receipt| async move {
+                        publish_observer.fetch_add(1, Ordering::SeqCst);
+                        Ok::<(), PumasError>(())
+                    },
+                )
+                .await
+        });
+
+        tokio::time::timeout(timeout, seal_started)
+            .await
+            .expect("public consumer must reach its registered seal effect")
+            .expect("seal observer must remain connected");
+        let before_cancel = store.acquisitions().unwrap();
+        assert_eq!(before_cancel.len(), 1);
+        let record = before_cancel.values().next().unwrap().clone();
+        assert_eq!(record.demand, expected_demand);
+        assert_eq!(record.manifest, expected_manifest);
+        assert_eq!(record.workspace, expected_workspace);
+        assert_eq!(record.phase, AcquisitionPhase::Transferring);
+        assert!(record.files.is_empty());
+        assert!(store.consumer_receipt(record.id).unwrap().is_none());
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        assert!(!stage.join("payload.bin.part").exists());
+        assert!(!reservation_released.load(Ordering::SeqCst));
+        assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(publish_calls.load(Ordering::SeqCst), 0);
+
+        controls.cancel();
+        assert!(!reservation_released.load(Ordering::SeqCst));
+        release_seal_sender.send(()).unwrap();
+        let result = tokio::time::timeout(timeout, waiter)
+            .await
+            .expect("cancelled public consumer must drain its seal effect")
+            .expect("consumer task must not panic");
+        assert!(matches!(result, Err(PumasError::DownloadCancelled)));
+        tokio::time::timeout(timeout, seal_released)
+            .await
+            .expect("seal barrier must be released")
+            .expect("seal release observer must remain connected");
+        tokio::time::timeout(timeout, server)
+            .await
+            .expect("local HTTP source must finish")
+            .expect("local HTTP source must not panic");
+
+        assert_eq!(store.acquisitions().unwrap(), before_cancel);
+        assert!(store.consumer_receipt(record.id).unwrap().is_none());
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        assert!(!ready_mutation_started.load(Ordering::SeqCst));
+        assert!(!handoff_mutation_started.load(Ordering::SeqCst));
+        assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(publish_calls.load(Ordering::SeqCst), 0);
+        assert!(reservation_released.load(Ordering::SeqCst));
+
+        consumer.scope.set_blocking_observer(None);
+        tokio::time::timeout(timeout, consumer.shutdown())
+            .await
+            .expect("consumer shutdown must drain")
+            .unwrap();
+        tokio::time::timeout(timeout, service.shutdown())
+            .await
+            .expect("service shutdown must drain")
+            .unwrap();
     }
 
     #[tokio::test]

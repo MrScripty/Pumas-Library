@@ -167,13 +167,14 @@ prove cold reopen, power-loss durability, malformed-range handling or real
 consumer publication.
 
 This is partial service-level evidence. AC06 remains pending for queued and
-service-level `Verifying` cancellation, idempotent release, preservation of all
-live and durable demands, and same-task-ID replacement. The sequential
+service-level `Verifying` cancellation, idempotent release, and preservation of
+all live and durable demands. The same-task-key Worker→CancelFinalizer readiness
+fixture recorded below does not establish Worker→Worker resume/reuse. The sequential
 stale-generation fixture below proves rejection at `files_ready` from a new
 worker generation in one consumer scope. The concurrent fixture following it
 proves that stale readiness cannot replace a successful concurrent handoff;
-neither fixture exercises same-task-ID replacement. These local
-HTTP/workspace fixtures are not real HF/native source or supported-platform
+those tests use fresh task keys and do not cover the same-key behavior. These
+local HTTP/workspace fixtures are not real HF/native source or supported-platform
 acceptance.
 
 The `stale_worker_generation_cannot_seal_or_handoff_acquisition` service test
@@ -232,9 +233,31 @@ cancellation, or full AC06 acceptance.
 
 **Native and resource evidence.** State selected OS/filesystem, features, artifact size, parallelism and budgets. Tests cover actual mechanisms on Windows/macOS when those promises change. A Linux process or cross-compile cannot close the native execution claim. Runtime gates may open for the qualified target scope, not for every platform. Performance observations establish resource behavior only for that workload; no unsupported throughput improvement is required or asserted.
 
+The `same_task_key_cancel_replacement_rejects_stale_acquisition_readiness`
+service test starts a Worker with a stable literal key, begins an acquisition,
+and holds a registered async predecessor effect. `begin_cancel` replaces that
+same key with a distinct CancelFinalizer generation. With the original matching
+operation/context pair, `files_ready` fails while registering the first owned
+seal effect because the old generation is no longer current. A blocking-effect
+observer records no seal job; the exact Transferring row, no-receipt condition,
+final and partial bytes, entry count and append-openability remain unchanged.
+The finalizer does not enter until the predecessor effect is released, then
+reports current ownership under the replacement generation. The focused test
+passed 1/1 on the local workspace. The ordinary sandbox service-module run
+passed 10 and failed 17 loopback fixtures at `TcpListener::bind` with OS error
+1 (`Operation not permitted`). A rerun with local loopback access passed 27/27.
+Strict all-target `pumas-library` Clippy passed; scoped rustfmt and
+`git diff --check` passed. Independent GPT-6.1 Sol High review found no
+substantiated source issue and accepted the exact test after correction of its
+base-commit citation. This covers only same-key Worker→CancelFinalizer
+readiness refusal and predecessor drainage. It does not prove Worker→Worker
+resume/reuse, queued or service-level `Verifying` cancellation, successful
+concurrent `Using` handoff, real-source/consumer behavior, crash durability,
+other-platform behavior, or full AC06 acceptance.
+
 ## Planned test placement and supporting commands
 
-The core public-consumer integration target `rust/crates/pumas-core/tests/artifact_acquisition.rs` exists and has passed 2/2 on a prior code candidate. The AC06 service regressions are unit tests in `rust/crates/pumas-core/src/acquisition/service.rs`; the focused service command passed 8/8 on the current local candidate, and affected-package Clippy passed with warnings denied. Build #355 passed code commit `43f106c7`; Build #356 passed the documentation-only head `59732c1f`. The new service test does not yet have exact-head hosted CI evidence. The planned standalone target `rust/crates/pumas-app-manager/tests/artifact_acquisition_install.rs` is not present; native install/recovery cases currently run in app-manager unit/fixture targets. These local and hosted checks do not close the real-source, desktop workflow, or deployment/platform acceptance claims above. Record each new command/result and broaden to affected aggregate checks:
+The core public-consumer integration target `rust/crates/pumas-core/tests/artifact_acquisition.rs` exists and passed 2/2 on a prior code candidate. On the current local candidate, all 27 `acquisition::service::tests` passed with local loopback socket access; strict all-target `pumas-library` Clippy passed with warnings denied. The ordinary sandbox module run had 10 passes and 17 loopback-bind `EPERM` failures. Build #355 passed code commit `43f106c7`; Build #356 passed the documentation-only head `59732c1f`. The new service test does not yet have exact-head hosted CI evidence. The planned standalone target `rust/crates/pumas-app-manager/tests/artifact_acquisition_install.rs` is not present; native install/recovery cases currently run in app-manager unit/fixture targets. These local and hosted checks do not close the real-source, desktop workflow, or deployment/platform acceptance claims above. Record each new command/result and broaden to affected aggregate checks:
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml -p pumas-library --test artifact_acquisition

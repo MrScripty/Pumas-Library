@@ -2958,6 +2958,185 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn same_task_key_cancel_replacement_rejects_stale_acquisition_readiness() {
+        use crate::acquisition::task_custody::{CancelTransition, TaskRole};
+
+        let timeout = Duration::from_secs(5);
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::write(stage.join("payload.bin"), b"DATA").unwrap();
+        std::fs::write(stage.join("payload.bin.part"), b"KEEP").unwrap();
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store.clone()));
+        let consumer = service.open_consumer("fixture").unwrap();
+        let task_key = "stable-acquisition-worker-key";
+        let demand = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: "same-task-key-cancel-replacement".into(),
+        };
+        let selection = manifest("payload.bin");
+        let grant = workspace(&stage);
+        let service_for_worker = service.clone();
+        let demand_for_worker = demand.clone();
+        let selection_for_worker = selection.clone();
+        let workspace_for_worker = grant.identity().clone();
+        let (operation_sender, operation_receiver) =
+            tokio::sync::oneshot::channel::<(TaskContext, AcquisitionOperation)>();
+        let (effect_started_sender, effect_started) = tokio::sync::oneshot::channel();
+        let (release_effect_sender, release_effect) = tokio::sync::oneshot::channel();
+        let (effect_finished_sender, effect_finished) = tokio::sync::oneshot::channel();
+        let prepared = consumer
+            .scope
+            .prepare(
+                task_key.into(),
+                TaskRole::Worker,
+                move |context| async move {
+                    let operation = service_for_worker
+                        .begin(
+                            &context,
+                            demand_for_worker,
+                            selection_for_worker,
+                            workspace_for_worker,
+                            None,
+                        )
+                        .await
+                        .unwrap();
+                    let _ = operation_sender.send((context.clone(), operation));
+                    let _ = context
+                        .run_fallible_async_named("held same-key predecessor", move || async move {
+                            let _ = effect_started_sender.send(());
+                            let _ = release_effect.await;
+                            let _ = effect_finished_sender.send(());
+                            Ok::<(), ()>(())
+                        })
+                        .await;
+                },
+            )
+            .unwrap();
+        let worker = consumer.scope.install_gated(prepared).unwrap();
+        let worker_generation = worker.generation().clone();
+        worker.start();
+        let (worker_context, operation) = tokio::time::timeout(timeout, operation_receiver)
+            .await
+            .expect("worker must admit an acquisition")
+            .expect("worker must retain its operation context");
+        tokio::time::timeout(timeout, effect_started)
+            .await
+            .expect("registered predecessor effect must start")
+            .expect("predecessor effect observer must remain connected");
+
+        assert!(worker_context
+            .generation()
+            .matches(operation.context.generation()));
+        assert!(worker_context.is_current_role(TaskRole::Worker));
+        let before = store.acquisitions().unwrap();
+        assert_eq!(before.len(), 1);
+        let (acquisition_id, record) = before.iter().next().unwrap();
+        assert_eq!(record.demand, demand);
+        assert_eq!(record.manifest, selection);
+        assert_eq!(record.workspace, *grant.identity());
+        assert!(matches!(record.phase, AcquisitionPhase::Transferring));
+        assert!(record.files.is_empty());
+
+        let seal_observed = Arc::new(AtomicBool::new(false));
+        let seal_observed_by_hook = seal_observed.clone();
+        consumer
+            .scope
+            .set_blocking_observer(Some(Arc::new(move |label| {
+                if label == "seal verified acquisition file set" {
+                    seal_observed_by_hook.store(true, Ordering::SeqCst);
+                }
+            })));
+        let (finalizer_entered_sender, mut finalizer_entered) = tokio::sync::oneshot::channel::<(
+            bool,
+            crate::acquisition::task_custody::TaskGeneration,
+        )>();
+        let (release_finalizer_sender, release_finalizer) = tokio::sync::oneshot::channel();
+        let transition = consumer
+            .scope
+            .begin_cancel(task_key, move |context, _predecessor| async move {
+                let _ = finalizer_entered_sender.send((
+                    context.is_current_role(TaskRole::CancelFinalizer),
+                    context.generation().clone(),
+                ));
+                let _ = release_finalizer.await;
+            })
+            .unwrap();
+        let CancelTransition::Started(finalizer) = transition else {
+            panic!("the active worker must be replaced by a cancellation finalizer");
+        };
+        let finalizer_generation = finalizer.generation().clone();
+        assert!(!worker_generation.matches(&finalizer_generation));
+        finalizer.start();
+
+        let readiness = service
+            .files_ready(&worker_context, operation, grant.clone())
+            .await;
+        assert!(matches!(
+            readiness,
+            Err(PumasError::Other(message))
+                if message == "Acquisition effect observation failed: task generation is no longer current"
+        ));
+        assert!(!worker_context.is_current_role(TaskRole::Worker));
+        assert!(!seal_observed.load(Ordering::SeqCst));
+        assert_eq!(store.acquisitions().unwrap(), before);
+        assert!(store.consumer_receipt(*acquisition_id).unwrap().is_none());
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin.part")).unwrap(),
+            b"KEEP"
+        );
+        assert_eq!(std::fs::read_dir(&stage).unwrap().count(), 2);
+        drop(grant.open_part("payload.bin", true).unwrap());
+        assert!(matches!(
+            finalizer_entered.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert!(consumer
+            .scope
+            .snapshot(task_key)
+            .is_some_and(|snapshot| snapshot.role == TaskRole::CancelFinalizer));
+
+        release_effect_sender.send(()).unwrap();
+        tokio::time::timeout(timeout, effect_finished)
+            .await
+            .expect("owned predecessor effect must finish after release")
+            .expect("predecessor completion observer must remain connected");
+        let (finalizer_is_current, observed_generation) =
+            tokio::time::timeout(timeout, &mut finalizer_entered)
+                .await
+                .expect("finalizer must enter after predecessor drainage")
+                .expect("finalizer entry observer must remain connected");
+        assert!(finalizer_is_current);
+        assert!(observed_generation.matches(&finalizer_generation));
+        assert!(consumer
+            .scope
+            .snapshot(task_key)
+            .is_some_and(|snapshot| snapshot.role == TaskRole::CancelFinalizer));
+        release_finalizer_sender.send(()).unwrap();
+
+        tokio::time::timeout(timeout, consumer.shutdown())
+            .await
+            .expect("consumer scope must drain")
+            .unwrap();
+        tokio::time::timeout(timeout, service.shutdown())
+            .await
+            .expect("service must drain")
+            .unwrap();
+        consumer.scope.set_blocking_observer(None);
+        assert_eq!(store.acquisitions().unwrap(), before);
+        assert!(store.consumer_receipt(*acquisition_id).unwrap().is_none());
+        assert!(!seal_observed.load(Ordering::SeqCst));
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        assert_eq!(
+            std::fs::read(stage.join("payload.bin.part")).unwrap(),
+            b"KEEP"
+        );
+        assert_eq!(std::fs::read_dir(&stage).unwrap().count(), 2);
+    }
+
+    #[tokio::test]
     async fn stale_worker_generation_cannot_seal_or_handoff_acquisition() {
         use crate::acquisition::task_custody::TaskRole;
 

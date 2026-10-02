@@ -4234,6 +4234,381 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn same_task_key_worker_reuse_rejects_stale_readiness_and_preserves_successor_handoff() {
+        use crate::acquisition::task_custody::{TaskRole, TaskTerminal};
+
+        let timeout = Duration::from_secs(5);
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("stage");
+        std::fs::create_dir(&stage).unwrap();
+        std::fs::write(stage.join("payload.bin"), b"DATA").unwrap();
+        std::fs::write(stage.join("payload.bin.part"), b"KEEP").unwrap();
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store.clone()));
+        let consumer = service.open_consumer("fixture").unwrap();
+        let task_key = "stable-acquisition-worker-key";
+        let demand = AcquisitionDemand {
+            consumer: "fixture".into(),
+            operation: "same-task-key-worker-reuse".into(),
+        };
+        let selection = manifest("payload.bin");
+        let grant = workspace(&stage);
+        let seal_calls = Arc::new(AtomicUsize::new(0));
+        let observed_seal_calls = seal_calls.clone();
+        consumer
+            .scope
+            .set_blocking_observer(Some(Arc::new(move |label| {
+                if label == "seal verified acquisition file set" {
+                    observed_seal_calls.fetch_add(1, Ordering::SeqCst);
+                }
+            })));
+
+        let mut predecessor_generation = None;
+        let mut successor_generation = None;
+        let (release_successor_sender, release_successor_receiver) =
+            tokio::sync::oneshot::channel::<()>();
+        let outcome = async {
+            let service_for_predecessor = service.clone();
+            let demand_for_predecessor = demand.clone();
+            let selection_for_predecessor = selection.clone();
+            let workspace_for_predecessor = grant.identity().clone();
+            let (predecessor_sender, predecessor_receiver) =
+                tokio::sync::oneshot::channel::<Result<(TaskContext, AcquisitionOperation)>>();
+            let prepared = consumer.scope.prepare(
+                task_key.into(),
+                TaskRole::Worker,
+                move |context| async move {
+                    let result = service_for_predecessor
+                        .begin(
+                            &context,
+                            demand_for_predecessor,
+                            selection_for_predecessor,
+                            workspace_for_predecessor,
+                            None,
+                        )
+                        .await
+                        .map(|operation| (context.clone(), operation));
+                    let _ = predecessor_sender.send(result);
+                },
+            )?;
+            let worker_a = consumer.scope.install_gated(prepared).map_err(|_| {
+                PumasError::Other("predecessor Worker must install under the free task key".into())
+            })?;
+            let generation_a = worker_a.generation().clone();
+            predecessor_generation = Some(generation_a.clone());
+            worker_a.start();
+
+            let (predecessor_context, predecessor_operation) =
+                tokio::time::timeout(timeout, predecessor_receiver)
+                    .await
+                    .map_err(|_| {
+                        PumasError::Other("predecessor must admit acquisition in time".into())
+                    })?
+                    .map_err(|_| {
+                        PumasError::Other(
+                            "predecessor admission observer must remain connected".into(),
+                        )
+                    })??;
+            let predecessor_pair_matches = predecessor_context
+                .shares_scope(&predecessor_operation.context)
+                && predecessor_context
+                    .generation()
+                    .matches(predecessor_operation.context.generation());
+            let acquisition_id = predecessor_operation.record.id;
+            let before = store.acquisitions()?;
+            let before_record = before.get(&acquisition_id).cloned().ok_or_else(|| {
+                PumasError::Other("predecessor acquisition row must be retained".into())
+            })?;
+
+            let observation_a = tokio::time::timeout(timeout, async {
+                loop {
+                    if let Some(observation) = consumer
+                        .scope
+                        .observe_finished_generation(task_key, &generation_a)
+                        .await
+                    {
+                        break observation;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .map_err(|_| PumasError::Other("predecessor generation must finish in time".into()))?;
+
+            let service_for_successor = service.clone();
+            let demand_for_successor = demand.clone();
+            let selection_for_successor = selection.clone();
+            let workspace_for_successor = grant.identity().clone();
+            let (successor_sender, successor_receiver) =
+                tokio::sync::oneshot::channel::<Result<(TaskContext, AcquisitionOperation)>>();
+            let prepared = consumer.scope.prepare(
+                task_key.into(),
+                TaskRole::Worker,
+                move |context| async move {
+                    let result = service_for_successor
+                        .begin(
+                            &context,
+                            demand_for_successor,
+                            selection_for_successor,
+                            workspace_for_successor,
+                            None,
+                        )
+                        .await
+                        .map(|operation| (context.clone(), operation));
+                    let _ = successor_sender.send(result);
+                    let _ = release_successor_receiver.await;
+                },
+            )?;
+            let worker_b = consumer.scope.install_gated(prepared).map_err(|_| {
+                PumasError::Other(
+                    "successor Worker must install after predecessor observation".into(),
+                )
+            })?;
+            let generation_b = worker_b.generation().clone();
+            successor_generation = Some(generation_b.clone());
+            worker_b.start();
+
+            let (successor_context, successor_operation) =
+                tokio::time::timeout(timeout, successor_receiver)
+                    .await
+                    .map_err(|_| {
+                        PumasError::Other("successor must admit acquisition in time".into())
+                    })?
+                    .map_err(|_| {
+                        PumasError::Other(
+                            "successor admission observer must remain connected".into(),
+                        )
+                    })??;
+            let successor_pair_matches = successor_context
+                .shares_scope(&successor_operation.context)
+                && successor_context
+                    .generation()
+                    .matches(successor_operation.context.generation());
+            let successor_is_current = successor_context.is_current_role(TaskRole::Worker);
+            let successor_has_fresh_generation = !generation_a.matches(&generation_b);
+
+            let stale_readiness = tokio::time::timeout(
+                timeout,
+                service.files_ready(&predecessor_context, predecessor_operation, grant.clone()),
+            )
+            .await
+            .map_err(|_| PumasError::Other("stale readiness must reject in time".into()))?;
+            let stale_outcome = match stale_readiness {
+                Err(error) => Err(error),
+                Ok(lease) => {
+                    drop(lease);
+                    Ok(())
+                }
+            };
+            let after_stale = store.acquisitions()?;
+            let receipt_after_stale = service.consumer_receipt(acquisition_id)?;
+            let final_after_stale = std::fs::read(stage.join("payload.bin"))
+                .map_err(|error| PumasError::Other(error.to_string()))?;
+            let partial_after_stale = std::fs::read(stage.join("payload.bin.part"))
+                .map_err(|error| PumasError::Other(error.to_string()))?;
+            let entries_after_stale = std::fs::read_dir(&stage)
+                .map_err(|error| PumasError::Other(error.to_string()))?
+                .count();
+            let partial_appendable = match grant.open_part("payload.bin", true) {
+                Ok(partial) => {
+                    drop(partial);
+                    true
+                }
+                Err(_) => false,
+            };
+            let seals_after_stale = seal_calls.load(Ordering::SeqCst);
+
+            let successor_readiness = tokio::time::timeout(
+                timeout,
+                service.files_ready(&successor_context, successor_operation, grant.clone()),
+            )
+            .await
+            .map_err(|_| PumasError::Other("current readiness must finish in time".into()))?;
+            let successor_result = successor_readiness.map(|lease| {
+                let record = lease.record().clone();
+                drop(lease);
+                record
+            });
+            let after_successor = store.acquisitions()?;
+            let receipt_after_successor = service.consumer_receipt(acquisition_id)?;
+            let final_after_successor = std::fs::read(stage.join("payload.bin"))
+                .map_err(|error| PumasError::Other(error.to_string()))?;
+            let partial_after_successor = std::fs::read(stage.join("payload.bin.part"))
+                .map_err(|error| PumasError::Other(error.to_string()))?;
+            let entries_after_successor = std::fs::read_dir(&stage)
+                .map_err(|error| PumasError::Other(error.to_string()))?
+                .count();
+            let seals_after_successor = seal_calls.load(Ordering::SeqCst);
+
+            Ok::<_, PumasError>((
+                observation_a,
+                predecessor_pair_matches,
+                acquisition_id,
+                before,
+                before_record,
+                successor_pair_matches,
+                successor_is_current,
+                successor_has_fresh_generation,
+                stale_outcome,
+                after_stale,
+                receipt_after_stale,
+                final_after_stale,
+                partial_after_stale,
+                entries_after_stale,
+                partial_appendable,
+                seals_after_stale,
+                successor_result,
+                after_successor,
+                receipt_after_successor,
+                final_after_successor,
+                partial_after_successor,
+                entries_after_successor,
+                seals_after_successor,
+            ))
+        }
+        .await;
+
+        // Releasing the held successor is also the unwind path if an earlier
+        // bounded step returned an error.
+        let _ = release_successor_sender.send(());
+        let successor_observations = match (&predecessor_generation, &successor_generation) {
+            (Some(generation_a), Some(generation_b)) => tokio::time::timeout(timeout, async {
+                loop {
+                    if consumer.scope.snapshot(task_key).is_some_and(|snapshot| {
+                        snapshot.role == TaskRole::Worker && snapshot.finished
+                    }) {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+                let old = consumer
+                    .scope
+                    .observe_finished_generation(task_key, generation_a)
+                    .await;
+                let current = consumer
+                    .scope
+                    .observe_finished_generation(task_key, generation_b)
+                    .await;
+                (old, current)
+            })
+            .await
+            .ok(),
+            _ => None,
+        };
+        let consumer_drain = tokio::time::timeout(timeout, consumer.shutdown()).await;
+        let service_drain = tokio::time::timeout(timeout, service.shutdown()).await;
+        consumer.scope.set_blocking_observer(None);
+        consumer_drain.expect("consumer scope must drain").unwrap();
+        service_drain
+            .expect("acquisition service must drain")
+            .unwrap();
+
+        let (
+            observation_a,
+            predecessor_pair_matches,
+            acquisition_id,
+            before,
+            before_record,
+            successor_pair_matches,
+            successor_is_current,
+            successor_has_fresh_generation,
+            stale_outcome,
+            after_stale,
+            receipt_after_stale,
+            final_after_stale,
+            partial_after_stale,
+            entries_after_stale,
+            partial_appendable,
+            seals_after_stale,
+            successor_result,
+            after_successor,
+            receipt_after_successor,
+            final_after_successor,
+            partial_after_successor,
+            entries_after_successor,
+            seals_after_successor,
+        ) = outcome.expect("same-key Worker generations must complete");
+
+        let generation_a = predecessor_generation
+            .as_ref()
+            .expect("predecessor generation must be installed");
+        let generation_b = successor_generation
+            .as_ref()
+            .expect("successor generation must be installed");
+        assert!(predecessor_pair_matches);
+        assert!(observation_a.generation.matches(generation_a));
+        assert_eq!(observation_a.role, TaskRole::Worker);
+        assert_eq!(observation_a.terminal, TaskTerminal::Completed);
+        assert_eq!(observation_a.nested_failures, 0);
+        assert!(successor_has_fresh_generation);
+        assert!(successor_pair_matches);
+        assert!(successor_is_current);
+        assert!(matches!(
+            &before_record.phase,
+            AcquisitionPhase::Transferring
+        ));
+        assert_eq!(before_record.demand, demand);
+        assert_eq!(before_record.manifest, selection);
+        assert_eq!(before_record.workspace, *grant.identity());
+        assert!(before_record.files.is_empty());
+        assert_eq!(before.len(), 1);
+        assert_eq!(after_stale, before);
+        assert!(matches!(
+            stale_outcome,
+            Err(PumasError::Other(message))
+                if message == "Acquisition effect observation failed: task generation is no longer current"
+        ));
+        assert!(receipt_after_stale.is_none());
+        assert_eq!(final_after_stale, b"DATA");
+        assert_eq!(partial_after_stale, b"KEEP");
+        assert_eq!(entries_after_stale, 2);
+        assert!(partial_appendable);
+        assert_eq!(seals_after_stale, 0);
+
+        let successor_record = match successor_result {
+            Ok(record) => record,
+            Err(_) => panic!("current successor readiness must hand off the acquisition"),
+        };
+        assert_eq!(successor_record.id, acquisition_id);
+        assert_eq!(successor_record.demand, demand);
+        assert_eq!(successor_record.manifest, selection);
+        assert_eq!(successor_record.workspace, *grant.identity());
+        assert!(matches!(
+            &successor_record.phase,
+            AcquisitionPhase::Using { .. }
+        ));
+        assert_eq!(successor_record.files.len(), 1);
+        assert_eq!(successor_record.files[0].path, "payload.bin");
+        assert_eq!(successor_record.files[0].bytes, 4);
+        assert_eq!(
+            successor_record.files[0].sha256,
+            hex::encode(Sha256::digest(b"DATA"))
+        );
+        assert_eq!(after_successor.len(), 1);
+        assert_eq!(
+            after_successor.get(&acquisition_id),
+            Some(&successor_record)
+        );
+        assert!(receipt_after_successor.is_none());
+        assert_eq!(final_after_successor, b"DATA");
+        assert_eq!(partial_after_successor, b"KEEP");
+        assert_eq!(entries_after_successor, 2);
+        assert_eq!(seals_after_successor, 1);
+        let (stale_lookup, successor_observation) =
+            successor_observations.expect("successor generation must finish within the bound");
+        assert!(
+            stale_lookup.is_none(),
+            "observing the old generation must not consume its finished successor"
+        );
+        let successor_observation =
+            successor_observation.expect("the exact successor generation must remain observable");
+        assert!(successor_observation.generation.matches(generation_b));
+        assert_eq!(successor_observation.role, TaskRole::Worker);
+        assert_eq!(successor_observation.terminal, TaskTerminal::Completed);
+        assert_eq!(successor_observation.nested_failures, 0);
+    }
+
+    #[tokio::test]
     async fn stale_worker_generation_cannot_seal_or_handoff_acquisition() {
         use crate::acquisition::task_custody::TaskRole;
 

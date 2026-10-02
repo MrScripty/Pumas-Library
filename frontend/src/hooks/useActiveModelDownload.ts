@@ -13,7 +13,7 @@ export interface ActiveModelDownload {
   downloadId: string;
   repoId: string | null;
   status: ActiveDownloadStatus;
-  progress: number;
+  progress: number; // Backend download fraction in [0,1]; zero when unavailable.
   downloadedBytes: number | null;
   totalBytes: number | null;
   speed: number | null;

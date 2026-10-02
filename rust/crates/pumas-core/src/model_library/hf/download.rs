@@ -11864,6 +11864,552 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn shared_worker_saturation_refuses_hf_admission_then_imports_after_drain() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        #[derive(Debug, Clone, Copy)]
+        struct SourceObservation {
+            expected_path: bool,
+            successful_body: bool,
+        }
+
+        #[derive(Debug, PartialEq, Eq)]
+        enum InitialStart {
+            WorkerCapacity,
+            Started,
+            OtherError,
+            TimedOut,
+            NotRun,
+        }
+
+        #[derive(Debug, PartialEq, Eq)]
+        enum RetryStart {
+            Started,
+            OtherError,
+            TimedOut,
+            NotRun,
+        }
+
+        struct ReleaseOnDrop(Option<std::sync::mpsc::Sender<()>>);
+        impl ReleaseOnDrop {
+            fn release(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+        impl Drop for ReleaseOnDrop {
+            fn drop(&mut self) {
+                self.release();
+            }
+        }
+
+        async fn read_source_request(
+            stream: &mut tokio::net::TcpStream,
+        ) -> std::result::Result<String, &'static str> {
+            let request = tokio::time::timeout(Duration::from_secs(2), async {
+                let mut bytes = Vec::new();
+                while !bytes.ends_with(b"\r\n\r\n") {
+                    if bytes.len() >= 4096 {
+                        return Err("source request exceeded the fixture header limit");
+                    }
+                    let mut chunk = [0_u8; 512];
+                    let read = stream
+                        .read(&mut chunk)
+                        .await
+                        .map_err(|_| "source request could not be read")?;
+                    if read == 0 {
+                        return Err("source request ended before its headers");
+                    }
+                    bytes.extend_from_slice(&chunk[..read]);
+                }
+                String::from_utf8(bytes).map_err(|_| "source request headers were not UTF-8")
+            })
+            .await
+            .map_err(|_| "source request headers exceeded their deadline")??;
+            Ok(request)
+        }
+
+        fn read_optional_download_store(
+            root: &Path,
+        ) -> std::result::Result<Option<Vec<u8>>, &'static str> {
+            match std::fs::read(root.join("downloads.json")) {
+                Ok(bytes) => Ok(Some(bytes)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(_) => Err("download store could not be read"),
+            }
+        }
+
+        fn classify_initial_start(result: Result<String>) -> (InitialStart, Option<String>) {
+            match result {
+                Ok(download_id) => (InitialStart::Started, Some(download_id)),
+                Err(PumasError::AcquisitionCapacityExhausted {
+                    resource: "workers",
+                }) => (InitialStart::WorkerCapacity, None),
+                Err(_) => (InitialStart::OtherError, None),
+            }
+        }
+
+        const EXPECTED_SOURCE_LINE: &str = "GET /acme/model/resolve/main/model.onnx HTTP/1.1";
+        const SOURCE_BYTES: &[u8] = b"data";
+
+        let temp = TempDir::new().unwrap();
+        let (library, mut client, destination, request) =
+            imported_download_fixture(temp.path()).await;
+        let persistence = client.persistence.as_ref().unwrap().clone();
+        let acquisition_store = persistence.acquisition_store();
+        let payload_path = destination.join("model.onnx");
+        let partial_path = destination.join("model.onnx.part");
+        let marker_path = destination.join(".pumas_download");
+        std::fs::remove_file(&payload_path).unwrap();
+        let sentinel_path = temp.path().join("unrelated-sentinel.bin");
+        std::fs::write(&sentinel_path, b"keep-this-file").unwrap();
+        *client.auth_token.write().await = None;
+
+        let service = Arc::new(
+            crate::acquisition::AcquisitionService::with_capacity(
+                acquisition_store,
+                crate::acquisition::AcquisitionCapacity {
+                    workers: 2,
+                    ..crate::acquisition::AcquisitionCapacity::default()
+                },
+            )
+            .unwrap(),
+        );
+        client.set_acquisition_service(service.clone()).unwrap();
+        let blocker = Arc::new(service.open_consumer("test.capacity-blocker").unwrap());
+        let library_model_id = library.get_model_id(&destination).unwrap();
+
+        let baseline_inventory = persistence.load_lifecycle_inventory_strict().unwrap();
+        let baseline_store_bytes = read_optional_download_store(temp.path()).unwrap();
+        let baseline_acquisition_state = service
+            .store()
+            .transaction(true)
+            .unwrap()
+            .consumer_completion_partition()
+            .unwrap();
+        let baseline_public_downloads_empty = client.downloads.read().await.is_empty();
+        let baseline_metadata = library.load_metadata(&destination);
+        let baseline_index = library.index().get(&library_model_id);
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        client.set_test_download_base_url(endpoint);
+        let response_success_enabled = Arc::new(AtomicBool::new(false));
+        let server_success_enabled = response_success_enabled.clone();
+        let source_request_count = Arc::new(AtomicUsize::new(0));
+        let server_request_count = source_request_count.clone();
+        let source_success_count = Arc::new(AtomicUsize::new(0));
+        let server_success_count = source_success_count.clone();
+        let (source_observation_tx, mut source_observation_rx) =
+            tokio::sync::mpsc::unbounded_channel::<SourceObservation>();
+        let (stop_source_tx, mut stop_source_rx) = tokio::sync::oneshot::channel::<()>();
+        let mut source_server = tokio::spawn(async move {
+            let mut successful_responses = 0_usize;
+            let mut stopping = false;
+            loop {
+                let accepted = tokio::select! {
+                    biased;
+                    accepted = listener.accept() => Some(accepted),
+                    _ = &mut stop_source_rx, if !stopping => {
+                        stopping = true;
+                        None
+                    },
+                    _ = tokio::time::sleep(Duration::from_millis(25)), if stopping => break,
+                };
+                let Some(accepted) = accepted else {
+                    continue;
+                };
+                let (mut stream, _) = accepted.map_err(|_| "source listener accept failed")?;
+                server_request_count.fetch_add(1, Ordering::SeqCst);
+                let request = read_source_request(&mut stream).await?;
+                let expected_path = request
+                    .lines()
+                    .next()
+                    .is_some_and(|line| line == EXPECTED_SOURCE_LINE);
+                let successful_body = server_success_enabled.load(Ordering::SeqCst);
+                let _ = source_observation_tx.send(SourceObservation {
+                    expected_path,
+                    successful_body,
+                });
+                let response: &[u8] = if successful_body {
+                    successful_responses += 1;
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata"
+                } else {
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                };
+                tokio::time::timeout(Duration::from_secs(2), stream.write_all(response))
+                    .await
+                    .map_err(|_| "source response write exceeded its deadline")?
+                    .map_err(|_| "source response could not be written")?;
+            }
+            server_success_count.store(successful_responses, Ordering::SeqCst);
+            Ok::<(), &'static str>(())
+        });
+
+        let observer_events = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
+        client
+            .download_tasks
+            .set_ambient_admission_observer(Some(Arc::new({
+                let observer_events = observer_events.clone();
+                move |operation, download_id| {
+                    if matches!(
+                        operation,
+                        "prepare-download-task" | "admission-inventory-checked"
+                    ) {
+                        observer_events
+                            .lock()
+                            .unwrap()
+                            .push((operation.to_owned(), download_id.to_owned()));
+                    }
+                }
+            })));
+
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let mut release_guard = ReleaseOnDrop(Some(release_tx));
+        let blocker_for_task = blocker.clone();
+        let mut held_worker = tokio::spawn(async move {
+            blocker_for_task
+                .run_blocking("hold shared worker capacity", move || {
+                    let _ = entered_tx.send(());
+                    release_rx
+                        .recv()
+                        .map_err(|_| PumasError::Other("capacity fixture release closed".into()))
+                })
+                .await
+        });
+        let blocker_entered = matches!(
+            tokio::time::timeout(Duration::from_secs(3), entered_rx).await,
+            Ok(Ok(()))
+        );
+
+        let mut initial_download_id = None;
+        let initial_start = if blocker_entered {
+            match tokio::time::timeout(
+                Duration::from_secs(5),
+                client.start_download(&request, &destination, None),
+            )
+            .await
+            {
+                Ok(result) => {
+                    let (outcome, download_id) = classify_initial_start(result);
+                    initial_download_id = download_id;
+                    outcome
+                }
+                Err(_) => InitialStart::TimedOut,
+            }
+        } else {
+            InitialStart::NotRun
+        };
+
+        let initial_cancel_observed = if let Some(download_id) = initial_download_id.as_deref() {
+            tokio::time::timeout(Duration::from_secs(2), client.cancel_download(download_id))
+                .await
+                .ok()
+                .and_then(std::result::Result::ok)
+        } else {
+            None
+        };
+        let initial_terminal_observed = if let Some(download_id) = initial_download_id.as_deref() {
+            Some(
+                tokio::time::timeout(Duration::from_secs(4), async {
+                    loop {
+                        client.observe_finished_download_tasks().await;
+                        if !client.download_tasks.contains(download_id) {
+                            break true;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .is_ok_and(|finished| finished),
+            )
+        } else {
+            None
+        };
+
+        let inventory_after_refusal = persistence.load_lifecycle_inventory_strict();
+        let store_bytes_after_refusal = read_optional_download_store(temp.path());
+        let acquisition_state_after_refusal = service
+            .store()
+            .transaction(true)
+            .and_then(|transaction| transaction.consumer_completion_partition());
+        let public_downloads_empty_after_refusal = client.downloads.read().await.is_empty();
+        let payload_exists_after_refusal = payload_path.exists();
+        let partial_exists_after_refusal = partial_path.exists();
+        let marker_exists_after_refusal = marker_path.exists();
+        let sentinel_after_refusal = std::fs::read(&sentinel_path);
+        let metadata_after_refusal = library.load_metadata(&destination);
+        let index_after_refusal = library.index().get(&library_model_id);
+        let no_source_request_window =
+            tokio::time::timeout(Duration::from_millis(300), source_observation_rx.recv())
+                .await
+                .is_err();
+
+        response_success_enabled.store(true, Ordering::SeqCst);
+        release_guard.release();
+        let held_worker_drained = tokio::time::timeout(Duration::from_secs(4), &mut held_worker)
+            .await
+            .is_ok_and(|result| result.is_ok_and(|outcome| outcome.is_ok()));
+        let blocker_shutdown =
+            tokio::time::timeout(Duration::from_secs(4), blocker.shutdown()).await;
+
+        let mut successful_download_id = None;
+        let retry_start = if initial_start == InitialStart::WorkerCapacity && blocker_entered {
+            match tokio::time::timeout(Duration::from_secs(8), async {
+                loop {
+                    match client.start_download(&request, &destination, None).await {
+                        Ok(download_id) => break Some(download_id),
+                        Err(PumasError::AcquisitionCapacityExhausted {
+                            resource: "workers",
+                        }) => {
+                            tokio::time::sleep(Duration::from_millis(5)).await;
+                        }
+                        Err(_) => break None,
+                    }
+                }
+            })
+            .await
+            {
+                Ok(Some(download_id)) => {
+                    successful_download_id = Some(download_id);
+                    RetryStart::Started
+                }
+                Ok(None) => RetryStart::OtherError,
+                Err(_) => RetryStart::TimedOut,
+            }
+        } else {
+            RetryStart::NotRun
+        };
+
+        let completion_observed = if let Some(download_id) = successful_download_id.as_deref() {
+            Some(
+                tokio::time::timeout(Duration::from_secs(10), async {
+                    loop {
+                        client.observe_finished_download_tasks().await;
+                        let status = client.get_download_status(download_id).await;
+                        if status == Some(DownloadStatus::Completed)
+                            && !client.download_tasks.contains(download_id)
+                        {
+                            break true;
+                        }
+                        if matches!(
+                            status,
+                            Some(DownloadStatus::Error | DownloadStatus::Cancelled)
+                        ) {
+                            break false;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .is_ok_and(|completed| completed),
+            )
+        } else {
+            None
+        };
+
+        let final_status = if let Some(download_id) = successful_download_id.as_deref() {
+            tokio::time::timeout(
+                Duration::from_secs(2),
+                client.get_download_status(download_id),
+            )
+            .await
+            .ok()
+            .flatten()
+        } else {
+            None
+        };
+        let final_payload = std::fs::read(&payload_path);
+        let final_partial_exists = partial_path.exists();
+        let final_marker_exists = marker_path.exists();
+        let final_sentinel = std::fs::read(&sentinel_path);
+        let final_metadata = library.load_metadata(&destination);
+        let final_index = library.index().get(&library_model_id);
+        client.download_tasks.set_ambient_admission_observer(None);
+        let client_shutdown =
+            tokio::time::timeout(Duration::from_secs(6), client.shutdown_downloads()).await;
+        drop(client);
+        drop(blocker);
+        let service_shutdown =
+            tokio::time::timeout(Duration::from_secs(6), service.shutdown()).await;
+        let _ = stop_source_tx.send(());
+        let source_server_join =
+            tokio::time::timeout(Duration::from_secs(4), &mut source_server).await;
+        if source_server_join.is_err() {
+            source_server.abort();
+            let _ = tokio::time::timeout(Duration::from_secs(1), &mut source_server).await;
+        }
+        let inventory_after_completion = persistence.load_lifecycle_inventory_strict();
+        let acquisition_state_after_completion = service
+            .store()
+            .transaction(true)
+            .and_then(|transaction| transaction.consumer_completion_partition());
+        let final_hf_receipt =
+            acquisition_state_after_completion
+                .as_ref()
+                .ok()
+                .and_then(|(records, _)| {
+                    records
+                        .values()
+                        .find(|record| {
+                            record.demand.consumer == "hf.model"
+                                && record.manifest.source().source_id() == "acme/model"
+                                && matches!(
+                                    &record.phase,
+                                    crate::acquisition::AcquisitionPhase::Adopted { .. }
+                                )
+                        })
+                        .and_then(|record| {
+                            persistence
+                                .read_hf_completion_receipt(record.id)
+                                .ok()
+                                .flatten()
+                        })
+                });
+        let source_observations = {
+            let mut observations = Vec::new();
+            while let Ok(observation) = source_observation_rx.try_recv() {
+                observations.push(observation);
+            }
+            observations
+        };
+        let observer_events = observer_events.lock().unwrap().clone();
+
+        let blocker_shutdown_succeeded = blocker_shutdown.is_ok_and(|result| result.is_ok());
+        let client_shutdown_succeeded = client_shutdown.is_ok_and(|result| result.is_ok());
+        let service_shutdown_succeeded = service_shutdown.is_ok_and(|result| result.is_ok());
+        let source_server_succeeded = matches!(source_server_join, Ok(Ok(Ok(()))));
+
+        assert!(blocker_entered);
+        assert_eq!(initial_start, InitialStart::WorkerCapacity);
+        assert_eq!(initial_cancel_observed, None);
+        assert_eq!(initial_terminal_observed, None);
+        assert!(baseline_public_downloads_empty);
+        assert!(public_downloads_empty_after_refusal);
+        let baseline_inventory_is_empty = baseline_inventory.downloads.is_empty()
+            && baseline_inventory.quarantines.is_empty()
+            && baseline_inventory.hidden_admissions.is_empty()
+            && baseline_inventory.queue_admissions.is_empty();
+        let inventory_after_refusal =
+            inventory_after_refusal.expect("refusal lifecycle inventory must remain readable");
+        let after_refusal_inventory_is_empty = inventory_after_refusal.downloads.is_empty()
+            && inventory_after_refusal.quarantines.is_empty()
+            && inventory_after_refusal.hidden_admissions.is_empty()
+            && inventory_after_refusal.queue_admissions.is_empty();
+        assert!(baseline_inventory_is_empty && after_refusal_inventory_is_empty);
+        assert_eq!(
+            store_bytes_after_refusal.expect("refusal download store must be readable"),
+            baseline_store_bytes
+        );
+        assert_eq!(
+            acquisition_state_after_refusal
+                .expect("refusal acquisition partitions must remain readable"),
+            baseline_acquisition_state
+        );
+        assert!(baseline_acquisition_state.0.is_empty());
+        assert!(baseline_acquisition_state.1.is_empty());
+        assert!(baseline_metadata
+            .expect("initial model metadata lookup must succeed")
+            .is_none());
+        assert!(baseline_index
+            .expect("initial model index lookup must succeed")
+            .is_none());
+        assert!(!payload_exists_after_refusal);
+        assert!(!partial_exists_after_refusal);
+        assert!(!marker_exists_after_refusal);
+        assert_eq!(
+            sentinel_after_refusal.expect("refusal sentinel must remain readable"),
+            b"keep-this-file"
+        );
+        assert!(metadata_after_refusal
+            .expect("refusal model metadata lookup must succeed")
+            .is_none());
+        assert!(index_after_refusal
+            .expect("refusal model index lookup must succeed")
+            .is_none());
+        assert!(no_source_request_window);
+        assert!(held_worker_drained);
+        assert!(blocker_shutdown_succeeded);
+        assert_eq!(retry_start, RetryStart::Started);
+        assert_eq!(completion_observed, Some(true));
+        assert_eq!(final_status, Some(DownloadStatus::Completed));
+        assert_eq!(
+            final_payload.expect("completed model bytes must be readable"),
+            SOURCE_BYTES
+        );
+        assert!(!final_partial_exists);
+        assert!(!final_marker_exists);
+        assert_eq!(
+            final_sentinel.expect("completed sentinel must remain readable"),
+            b"keep-this-file"
+        );
+        let final_metadata = final_metadata
+            .expect("completed model metadata lookup must succeed")
+            .expect("completed download must publish model metadata");
+        assert_eq!(final_metadata.repo_id.as_deref(), Some("acme/model"));
+        assert_eq!(final_metadata.match_source.as_deref(), Some("download"));
+        assert!(final_index
+            .expect("completed model index lookup must succeed")
+            .is_some());
+        let inventory_after_completion =
+            inventory_after_completion.expect("completed lifecycle inventory must remain readable");
+        assert!(successful_download_id.as_ref().is_some_and(|download_id| {
+            !inventory_after_completion
+                .queue_admissions
+                .contains_key(download_id)
+        }));
+        let (records, receipts) = acquisition_state_after_completion
+            .expect("completed acquisition partitions must remain readable");
+        assert_eq!(records.len(), 1);
+        assert_eq!(receipts.len(), 1);
+        let adopted = records
+            .values()
+            .next()
+            .expect("one HF acquisition must be retained");
+        assert_eq!(adopted.demand.consumer, "hf.model");
+        assert_eq!(adopted.manifest.source().source_id(), "acme/model");
+        assert!(matches!(
+            &adopted.phase,
+            crate::acquisition::AcquisitionPhase::Adopted { .. }
+        ));
+        let final_hf_receipt = final_hf_receipt.expect("completed HF receipt must be readable");
+        assert_eq!(
+            final_hf_receipt.download_id,
+            successful_download_id.unwrap()
+        );
+        assert_eq!(final_hf_receipt.acquisition_id, adopted.id.to_string());
+        assert_eq!(final_hf_receipt.model_id, library_model_id);
+        let successful_download_id = final_hf_receipt.download_id.as_str();
+        assert!(client_shutdown_succeeded);
+        assert!(service_shutdown_succeeded);
+        assert!(source_server_succeeded);
+        assert_eq!(source_request_count.load(Ordering::SeqCst), 1);
+        assert_eq!(source_success_count.load(Ordering::SeqCst), 1);
+        assert_eq!(source_observations.len(), 1);
+        assert!(source_observations[0].expected_path);
+        assert!(source_observations[0].successful_body);
+        let first_prepared_id = observer_events
+            .iter()
+            .find(|(operation, _)| operation == "prepare-download-task")
+            .map(|(_, download_id)| download_id);
+        assert!(first_prepared_id.is_some());
+        assert!(!observer_events.iter().any(|(operation, download_id)| {
+            operation == "admission-inventory-checked" && Some(download_id) == first_prepared_id
+        }));
+        assert!(observer_events.iter().any(|(operation, download_id)| {
+            operation == "prepare-download-task" && Some(download_id) == first_prepared_id
+        }));
+        assert!(observer_events.iter().any(|(operation, download_id)| {
+            operation == "prepare-download-task" && download_id == successful_download_id
+        }));
+        assert!(observer_events.iter().any(|(operation, download_id)| {
+            operation == "admission-inventory-checked" && download_id == successful_download_id
+        }));
+    }
+
+    #[tokio::test]
     async fn receipt_reopen_settles_after_publication_failure_without_network_or_reimport() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

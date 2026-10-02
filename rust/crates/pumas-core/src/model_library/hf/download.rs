@@ -351,6 +351,142 @@ struct DownloadStartSetup {
     marker_contents: String,
 }
 
+/// Exact immutable selection resolved from one pinned repository tree before
+/// destination preparation or admission can mutate retained workspace state.
+pub(crate) struct ResolvedDownloadSelection {
+    request: DownloadRequest,
+    revision: DownloadRevision,
+    tree: crate::model_library::RepoFileTree,
+    files: Vec<FileToDownload>,
+    requested_payload_files: Vec<String>,
+    manifest: crate::acquisition::ArtifactManifest,
+}
+
+fn resolve_download_selection(
+    request: &DownloadRequest,
+    revision: DownloadRevision,
+    tree: crate::model_library::RepoFileTree,
+) -> Result<ResolvedDownloadSelection> {
+    if tree.repo_id != request.repo_id {
+        return Err(PumasError::Validation {
+            field: "download.integrity".into(),
+            message: "Pinned repository evidence does not match the requested repository".into(),
+        });
+    }
+
+    // Resolve weight files to download.
+    // Priority: filenames (explicit list) > filename (single) > quant (substring) > all.
+    let payload_files =
+        if request.bundle_format == Some(crate::models::BundleFormat::DiffusersDirectory) {
+            tree.lfs_files
+                .iter()
+                .map(|file| FileToDownload {
+                    filename: file.filename.clone(),
+                    size: Some(file.size),
+                    sha256: Some(file.sha256.clone()),
+                })
+                .collect()
+        } else if let Some(filenames) = &request.filenames {
+            let requested_names: HashSet<&str> = filenames.iter().map(String::as_str).collect();
+            let matching: Vec<FileToDownload> = tree
+                .lfs_files
+                .iter()
+                .filter(|file| requested_names.contains(file.filename.as_str()))
+                .map(|file| FileToDownload {
+                    filename: file.filename.clone(),
+                    size: Some(file.size),
+                    sha256: Some(file.sha256.clone()),
+                })
+                .collect();
+            let matched_names: HashSet<&str> =
+                matching.iter().map(|file| file.filename.as_str()).collect();
+            if requested_names.is_empty() || matched_names.len() != requested_names.len() {
+                return Err(PumasError::ModelNotFound {
+                    model_id: format!("{}:{} files", request.repo_id, filenames.len()),
+                });
+            }
+            matching
+        } else if let Some(filename) = &request.filename {
+            let lfs = tree
+                .lfs_files
+                .iter()
+                .find(|file| file.filename == *filename);
+            vec![FileToDownload {
+                filename: filename.clone(),
+                size: lfs.map(|file| file.size),
+                sha256: lfs.map(|file| file.sha256.clone()),
+            }]
+        } else if let Some(quant) = &request.quant {
+            let matching: Vec<FileToDownload> = tree
+                .lfs_files
+                .iter()
+                .filter(|file| file.filename.contains(quant.as_str()))
+                .map(|file| FileToDownload {
+                    filename: file.filename.clone(),
+                    size: Some(file.size),
+                    sha256: Some(file.sha256.clone()),
+                })
+                .collect();
+            if matching.is_empty() {
+                return Err(PumasError::ModelNotFound {
+                    model_id: format!("{}:{}", request.repo_id, quant),
+                });
+            }
+            matching
+        } else {
+            if tree.lfs_files.is_empty() {
+                return Err(PumasError::ModelNotFound {
+                    model_id: request.repo_id.clone(),
+                });
+            }
+            tree.lfs_files
+                .iter()
+                .map(|file| FileToDownload {
+                    filename: file.filename.clone(),
+                    size: Some(file.size),
+                    sha256: Some(file.sha256.clone()),
+                })
+                .collect()
+        };
+
+    let requested_payload_files = payload_files
+        .iter()
+        .map(|file| file.filename.clone())
+        .collect::<Vec<_>>();
+    let mut auxiliary_files = if request.filenames.is_some() {
+        select_auxiliary_files_for_download(&tree.regular_files, &tree.lfs_files, &payload_files)
+    } else {
+        select_auxiliary_files(&tree.regular_files)
+            .into_iter()
+            .map(|filename| FileToDownload {
+                filename,
+                size: None,
+                sha256: None,
+            })
+            .collect()
+    };
+    if !auxiliary_files.is_empty() {
+        info!(
+            "Including {} auxiliary file(s) for {}",
+            auxiliary_files.len(),
+            request.repo_id
+        );
+    }
+    auxiliary_files.extend(payload_files);
+    let files = validate_pinned_execution_tree(&request.repo_id, &auxiliary_files, &tree)?;
+    let manifest =
+        super::acquisition_source::manifest_for_download(&request.repo_id, &revision, &files)?;
+
+    Ok(ResolvedDownloadSelection {
+        request: request.clone(),
+        revision,
+        tree,
+        files,
+        requested_payload_files,
+        manifest,
+    })
+}
+
 fn serialize_download_marker(
     request: &DownloadRequest,
     selected_filenames: Vec<String>,
@@ -3564,6 +3700,47 @@ impl HuggingFaceClient {
         .await
     }
 
+    pub(crate) async fn resolve_download_selection_in_invocation(
+        &self,
+        context: &TaskContext,
+        request: &DownloadRequest,
+        revision: DownloadRevision,
+    ) -> Result<ResolvedDownloadSelection> {
+        self.resolve_download_selection_in_context(context, request, revision)
+            .await
+    }
+
+    pub(crate) async fn start_download_with_selection_in_invocation(
+        &self,
+        context: &TaskContext,
+        selection: ResolvedDownloadSelection,
+        dest_dir: &Path,
+        remote_evidence: Option<crate::models::HuggingFaceEvidence>,
+    ) -> Result<String> {
+        self.start_download_admitted_with_selection(context, selection, dest_dir, remote_evidence)
+            .await
+    }
+
+    async fn resolve_download_selection_in_context(
+        &self,
+        context: &TaskContext,
+        request: &DownloadRequest,
+        revision: DownloadRevision,
+    ) -> Result<ResolvedDownloadSelection> {
+        let metadata_client = self.clone_for_invocation();
+        let repo_id = request.repo_id.clone();
+        let metadata_revision = revision.clone();
+        let tree = context
+            .run_fallible_async_named("load download repository files", move || async move {
+                metadata_client
+                    .get_repo_files_at_revision(&repo_id, &metadata_revision)
+                    .await
+            })
+            .await
+            .map_err(|error| error.into_pumas_error("Download metadata observation failed"))??;
+        resolve_download_selection(request, revision, tree)
+    }
+
     async fn start_download_admitted(
         &self,
         context: &TaskContext,
@@ -3572,6 +3749,29 @@ impl HuggingFaceClient {
         remote_evidence: Option<crate::models::HuggingFaceEvidence>,
         revision: DownloadRevision,
     ) -> Result<String> {
+        let selection = self
+            .resolve_download_selection_in_context(context, request, revision)
+            .await?;
+        self.start_download_admitted_with_selection(context, selection, dest_dir, remote_evidence)
+            .await
+    }
+
+    async fn start_download_admitted_with_selection(
+        &self,
+        context: &TaskContext,
+        selection: ResolvedDownloadSelection,
+        dest_dir: &Path,
+        remote_evidence: Option<crate::models::HuggingFaceEvidence>,
+    ) -> Result<String> {
+        let ResolvedDownloadSelection {
+            request,
+            revision,
+            tree,
+            files,
+            requested_payload_files,
+            manifest,
+        } = selection;
+        let request = &request;
         let protected_context = self.protect_download_mutation(context).await?;
         let context = &protected_context;
         let root = self
@@ -3604,126 +3804,6 @@ impl HuggingFaceClient {
 
         let download_id = uuid::Uuid::new_v4().to_string();
         let cancel_flag = Arc::new(DownloadCancellation::new());
-
-        // Get file info
-        let metadata_client = self.clone_for_invocation();
-        let repo_id = request.repo_id.clone();
-        let metadata_revision = revision.clone();
-        let tree = context
-            .run_fallible_async_named("load download repository files", move || async move {
-                metadata_client
-                    .get_repo_files_at_revision(&repo_id, &metadata_revision)
-                    .await
-            })
-            .await
-            .map_err(|error| error.into_pumas_error("Download metadata observation failed"))??;
-
-        // Resolve weight files to download.
-        // Priority: filenames (explicit list) > filename (single) > quant (substring) > all.
-        let files: Vec<FileToDownload> =
-            if request.bundle_format == Some(crate::models::BundleFormat::DiffusersDirectory) {
-                tree.lfs_files
-                    .iter()
-                    .map(|f| FileToDownload {
-                        filename: f.filename.clone(),
-                        size: Some(f.size),
-                        sha256: Some(f.sha256.clone()),
-                    })
-                    .collect()
-            } else if let Some(ref fnames) = request.filenames {
-                // Explicit file list from grouped file selection
-                let name_set: HashSet<&str> = fnames.iter().map(|s| s.as_str()).collect();
-                let matching: Vec<FileToDownload> = tree
-                    .lfs_files
-                    .iter()
-                    .filter(|f| name_set.contains(f.filename.as_str()))
-                    .map(|f| FileToDownload {
-                        filename: f.filename.clone(),
-                        size: Some(f.size),
-                        sha256: Some(f.sha256.clone()),
-                    })
-                    .collect();
-                if matching.is_empty() {
-                    return Err(PumasError::ModelNotFound {
-                        model_id: format!("{}:{} files", request.repo_id, fnames.len()),
-                    });
-                }
-                matching
-            } else if let Some(ref f) = request.filename {
-                // Specific file requested
-                let lfs = tree.lfs_files.iter().find(|lf| lf.filename == *f);
-                vec![FileToDownload {
-                    filename: f.clone(),
-                    size: lfs.map(|l| l.size),
-                    sha256: lfs.map(|l| l.sha256.clone()),
-                }]
-            } else if let Some(ref quant) = request.quant {
-                // All files matching this quantization (handles sharded models)
-                let matching: Vec<FileToDownload> = tree
-                    .lfs_files
-                    .iter()
-                    .filter(|f| f.filename.contains(quant.as_str()))
-                    .map(|f| FileToDownload {
-                        filename: f.filename.clone(),
-                        size: Some(f.size),
-                        sha256: Some(f.sha256.clone()),
-                    })
-                    .collect();
-                if matching.is_empty() {
-                    return Err(PumasError::ModelNotFound {
-                        model_id: format!("{}:{}", request.repo_id, quant),
-                    });
-                }
-                matching
-            } else {
-                // All LFS files in the repo
-                if tree.lfs_files.is_empty() {
-                    return Err(PumasError::ModelNotFound {
-                        model_id: request.repo_id.clone(),
-                    });
-                }
-                tree.lfs_files
-                    .iter()
-                    .map(|f| FileToDownload {
-                        filename: f.filename.clone(),
-                        size: Some(f.size),
-                        sha256: Some(f.sha256.clone()),
-                    })
-                    .collect()
-            };
-
-        // Prepend auxiliary files so they download first.
-        // When an explicit file list (filenames) is used, apply scope-aware
-        // auxiliary selection that includes non-weight LFS files and
-        // directory-scoped configs.  Otherwise fall back to the basic
-        // pattern-only selection.
-        let mut aux_files = if request.filenames.is_some() {
-            select_auxiliary_files_for_download(&tree.regular_files, &tree.lfs_files, &files)
-        } else {
-            let auxiliary = select_auxiliary_files(&tree.regular_files);
-            auxiliary
-                .into_iter()
-                .map(|aux_filename| FileToDownload {
-                    filename: aux_filename,
-                    size: None,
-                    sha256: None,
-                })
-                .collect()
-        };
-        if !aux_files.is_empty() {
-            info!(
-                "Including {} auxiliary file(s) for {}",
-                aux_files.len(),
-                request.repo_id
-            );
-        }
-        let requested_payload_files = files
-            .iter()
-            .map(|file| file.filename.clone())
-            .collect::<Vec<_>>();
-        aux_files.extend(files);
-        let files = aux_files;
-
         // Await every fallible/cancellable prerequisite before acquiring the
         // state/task admission critical section. From this point onward task
         // construction is pure until the gated owner and state are committed
@@ -3739,11 +3819,7 @@ impl HuggingFaceClient {
         let (admission_completed, admission_completion) = tokio::sync::watch::channel(false);
         let admission_identity = super::lifecycle::PendingAdmissionIdentity {
             destination: destination.identity(),
-            selection: super::acquisition_source::manifest_for_download(
-                &request.repo_id,
-                &revision,
-                &files,
-            )?,
+            selection: manifest,
         };
         let installed = {
             let downloads = self.downloads.write().await;
@@ -20991,6 +21067,195 @@ mod tests {
             headers.push(socket.read_u8().await.unwrap());
         }
         String::from_utf8(headers).unwrap()
+    }
+
+    #[test]
+    fn explicit_selection_retains_every_distinct_requested_file() {
+        const COMMIT: &str = "4444444444444444444444444444444444444444";
+
+        let request = recovery_test_request(
+            "acme/model",
+            &[
+                "weights-a.gguf".into(),
+                "weights-b.gguf".into(),
+                "weights-a.gguf".into(),
+            ],
+        );
+        let revision = DownloadRevision::from_commit(COMMIT).unwrap();
+        let tree = crate::model_library::RepoFileTree {
+            repo_id: "acme/model".into(),
+            lfs_files: vec![
+                LfsFileInfo {
+                    filename: "weights-a.gguf".into(),
+                    size: 4,
+                    sha256: "a".repeat(64),
+                },
+                LfsFileInfo {
+                    filename: "weights-b.gguf".into(),
+                    size: 5,
+                    sha256: "b".repeat(64),
+                },
+            ],
+            regular_files: Vec::new(),
+            cached_at: "fixture".into(),
+            last_modified: None,
+            cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
+        };
+
+        let selection = resolve_download_selection(&request, revision, tree).unwrap();
+
+        assert_eq!(
+            selection.requested_payload_files,
+            vec!["weights-a.gguf", "weights-b.gguf"]
+        );
+        assert_eq!(
+            selection
+                .files
+                .iter()
+                .map(|file| file.filename.as_str())
+                .collect::<Vec<_>>(),
+            vec!["weights-a.gguf", "weights-b.gguf"]
+        );
+        assert_eq!(selection.manifest.files().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn ordinary_start_refuses_nonempty_explicit_file_subset_before_admission() {
+        use std::time::Duration;
+        use tokio::io::AsyncWriteExt;
+        use tokio::sync::oneshot;
+
+        const COMMIT: &str = "4444444444444444444444444444444444444444";
+
+        fn optional_store_bytes(path: &Path) -> Option<Vec<u8>> {
+            match std::fs::read(path) {
+                Ok(bytes) => Some(bytes),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => panic!("could not read fixture store: {error}"),
+            }
+        }
+
+        let temp = TempDir::new().unwrap();
+        let mut client = configured_download_client(temp.path().join("cache")).unwrap();
+        let revision = DownloadRevision::from_commit(COMMIT).unwrap();
+        cache_pinned_repo_tree(
+            &client,
+            "acme/model",
+            &revision,
+            vec![LfsFileInfo {
+                filename: "weights-a.gguf".into(),
+                size: 4,
+                sha256: "a".repeat(64),
+            }],
+            Vec::new(),
+        );
+        let request = recovery_test_request(
+            "acme/model",
+            &["weights-a.gguf".into(), "weights-b.gguf".into()],
+        );
+        let destination = temp.path().join("library/model");
+        let sentinel = temp.path().join("sentinel.bin");
+        std::fs::write(&sentinel, b"preserve me").unwrap();
+        let persistence = client.persistence.as_ref().unwrap().clone();
+        let store_before = optional_store_bytes(&temp.path().join("downloads.json"));
+        let acquisitions_before = persistence.acquisition_store().acquisitions().unwrap();
+        let task_preparation_count = Arc::new(AtomicUsize::new(0));
+        client
+            .download_tasks
+            .set_ambient_admission_observer(Some(Arc::new({
+                let task_preparation_count = task_preparation_count.clone();
+                move |operation, _| {
+                    if operation == "prepare-download-task" {
+                        task_preparation_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+            })));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        client.set_test_download_base_url(endpoint);
+        let (stop_server, mut stop_server_rx) = oneshot::channel::<()>();
+        let mut source_server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = &mut stop_server_rx => break,
+                    accepted = listener.accept() => {
+                        let (mut stream, _) = accepted.unwrap();
+                        let request = read_pinned_test_request(&mut stream).await;
+                        requests.push(request.lines().next().unwrap().to_owned());
+                        stream
+                            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                            .await
+                            .unwrap();
+                    }
+                }
+            }
+            requests
+        });
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(8),
+            client.start_download_at_revision(&request, &destination, None, revision),
+        )
+        .await;
+        let unexpected_download_id = result
+            .as_ref()
+            .ok()
+            .and_then(|result| result.as_ref().ok())
+            .cloned();
+        if let Some(download_id) = unexpected_download_id.as_deref() {
+            let _ =
+                tokio::time::timeout(Duration::from_secs(3), client.cancel_download(download_id))
+                    .await;
+        }
+        let mut shutdown =
+            tokio::time::timeout(Duration::from_secs(3), client.shutdown_downloads()).await;
+        if !matches!(&shutdown, Ok(Ok(()))) {
+            shutdown =
+                tokio::time::timeout(Duration::from_secs(3), client.shutdown_downloads()).await;
+        }
+        let _ = stop_server.send(());
+        let source_requests =
+            match tokio::time::timeout(Duration::from_secs(3), &mut source_server).await {
+                Ok(Ok(requests)) => requests,
+                outcome => {
+                    source_server.abort();
+                    let _ = source_server.await;
+                    panic!("source monitor did not join after owner shutdown: {outcome:?}");
+                }
+            };
+        client.download_tasks.set_ambient_admission_observer(None);
+
+        assert!(
+            matches!(&result, Ok(Err(crate::PumasError::ModelNotFound { .. }))),
+            "an incomplete explicit list must be refused with ModelNotFound; observed {result:?}"
+        );
+        assert!(
+            matches!(&shutdown, Ok(Ok(()))),
+            "download owner shutdown must complete: {shutdown:?}"
+        );
+        assert!(
+            source_requests.is_empty(),
+            "no payload request is permitted: {source_requests:?}"
+        );
+        assert_eq!(
+            task_preparation_count.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        assert!(client.downloads.read().await.is_empty());
+        assert!(client.persistence.as_ref().unwrap().load_all().is_empty());
+        assert_eq!(
+            persistence.acquisition_store().acquisitions().unwrap(),
+            acquisitions_before
+        );
+        assert_eq!(
+            optional_store_bytes(&temp.path().join("downloads.json")),
+            store_before
+        );
+        assert!(!destination.exists());
+        assert_eq!(std::fs::read(&sentinel).unwrap(), b"preserve me");
     }
 
     #[tokio::test]

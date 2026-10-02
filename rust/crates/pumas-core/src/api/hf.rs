@@ -548,6 +548,13 @@ impl PumasApi {
         client
             .run_download_invocation(move |context| async move {
                 validate_prepared_download(&library, &prepared, expected.as_ref())?;
+                let selection = invocation_client
+                    .resolve_download_selection_in_invocation(
+                        &context,
+                        &prepared.request,
+                        prepared.revision.clone(),
+                    )
+                    .await?;
                 let destination_type = prepared.model_type.clone();
                 let architecture_family = prepared.architecture_family.clone();
                 let artifact_id = prepared.selected_artifact.artifact_id.clone();
@@ -574,11 +581,11 @@ impl PumasApi {
                     );
                 }
                 invocation_client
-                    .start_download_at_revision(
-                        &prepared.request,
+                    .start_download_with_selection_in_invocation(
+                        &context,
+                        selection,
                         &dest_dir,
                         prepared.evidence,
-                        prepared.revision,
                     )
                     .await
             })
@@ -1980,6 +1987,373 @@ pub(super) mod tests {
             .join("llm/acme/model/weights.gguf")
             .exists());
         api.shutdown_downloads().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn public_hf_explicit_file_selection_refuses_missing_member_before_payload_or_admission()
+    {
+        use std::time::Duration;
+        use tokio::sync::oneshot;
+
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        const EXPECTED_CALLS: usize = 4;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop_server, mut stop_server_rx) = oneshot::channel::<()>();
+        let mut server_task = tokio::spawn(async move {
+            let mut observed = Vec::new();
+            for expected in [
+                format!("GET /api/models/acme/model/revision/{COMMIT} HTTP/1.1"),
+                "GET /api/models/acme/model/revision/main HTTP/1.1".to_string(),
+                format!("GET /api/models/acme/model/revision/{COMMIT} HTTP/1.1"),
+                format!("GET /api/models/acme/model/tree/{COMMIT}?recursive=true HTTP/1.1"),
+            ] {
+                let (mut socket, _) =
+                    tokio::time::timeout(Duration::from_secs(4), listener.accept())
+                        .await
+                        .expect("pinned metadata/tree source call must be bounded")
+                        .unwrap();
+                let request = read_intent_test_request(&mut socket).await;
+                assert_eq!(request, expected);
+                observed.push(request.clone());
+                let body = if request.ends_with(
+                    "/tree/0123456789abcdef0123456789abcdef01234567?recursive=true HTTP/1.1",
+                ) {
+                    format!(
+                        r#"[{{"path":"weights-a.gguf","type":"file","lfs":{{"oid":"{}","size":7}}}}]"#,
+                        "a".repeat(64)
+                    )
+                } else if request.ends_with("revision/main HTTP/1.1") {
+                    format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}"}}"#)
+                } else {
+                    format!(
+                        r#"{{"modelId":"acme/model","sha":"{COMMIT}","pipeline_tag":"text-generation","tags":["gguf"]}}"#
+                    )
+                };
+                write_intent_test_response(&mut socket, "200 OK", &body).await;
+            }
+
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = &mut stop_server_rx => break,
+                    accepted = listener.accept() => {
+                        let (mut socket, _) = accepted.unwrap();
+                        let request = read_intent_test_request(&mut socket).await;
+                        observed.push(request);
+                        write_intent_test_response(&mut socket, "404 Not Found", "{}").await;
+                    }
+                }
+            }
+            observed
+        });
+
+        let root = tempfile::TempDir::new().unwrap();
+        let api = recovery_api_fixture(root.path(), Some(format!("http://{address}"))).await;
+        let library = api.primary().model_library.clone();
+        let client = api.primary().hf_client.as_ref().unwrap().clone();
+        let revision = DownloadRevision::from_commit(COMMIT).unwrap();
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/model".into(),
+            family: "acme".into(),
+            official_name: "model".into(),
+            model_type: Some("llm".into()),
+            quant: None,
+            filename: None,
+            filenames: Some(vec!["weights-a.gguf".into(), "weights-b.gguf".into()]),
+            pipeline_tag: Some("text-generation".into()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let prepared = PumasApi::prepare_hf_download_owned_at_revision(
+            library.clone(),
+            client.clone(),
+            &request,
+            revision.clone(),
+        )
+        .await
+        .unwrap();
+        let artifact_id = prepared.selected_artifact.artifact_id.clone();
+        let unknown_model_id = format!("unknown/{}/{artifact_id}", prepared.architecture_family);
+        let unknown_dir = library.build_artifact_model_path(
+            "unknown",
+            &prepared.architecture_family,
+            &artifact_id,
+        );
+        let destination = library.build_artifact_model_path(
+            &prepared.model_type,
+            &prepared.architecture_family,
+            &artifact_id,
+        );
+        std::fs::create_dir_all(&unknown_dir).unwrap();
+        std::fs::write(unknown_dir.join("weights-a.gguf.part"), b"retained partial").unwrap();
+        let partial_metadata = models::ModelMetadata {
+            model_id: Some(unknown_model_id.clone()),
+            family: Some(prepared.architecture_family.clone()),
+            model_type: Some("unknown".into()),
+            cleaned_name: Some(artifact_id.clone()),
+            official_name: Some("model".into()),
+            repo_id: Some("acme/model".into()),
+            match_source: Some("download_partial".into()),
+            selected_artifact_id: Some(artifact_id.clone()),
+            selected_artifact_files: Some(vec!["weights-a.gguf".into(), "weights-b.gguf".into()]),
+            expected_files: Some(vec!["weights-a.gguf".into(), "weights-b.gguf".into()]),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&unknown_dir, &partial_metadata)
+            .await
+            .unwrap();
+        library.index_model_dir(&unknown_dir).await.unwrap();
+
+        let partial_path = unknown_dir.join("weights-a.gguf.part");
+        let metadata_path = unknown_dir.join("metadata.json");
+        let partial_bytes_before = std::fs::read(&partial_path).unwrap();
+        let metadata_bytes_before = std::fs::read(&metadata_path).unwrap();
+        let unknown_index_before =
+            serde_json::to_value(library.index().get(&unknown_model_id).unwrap().unwrap()).unwrap();
+        let destination_model_id = library.build_artifact_model_id(
+            &prepared.model_type,
+            &prepared.architecture_family,
+            &artifact_id,
+        );
+        let destination_index_before =
+            serde_json::to_value(library.index().get(&destination_model_id).unwrap()).unwrap();
+        let persistence = client.persistence().unwrap();
+        let acquisitions_before = persistence.acquisition_store().acquisitions().unwrap();
+        let lifecycle_before = persistence.load_lifecycle_inventory_strict().unwrap();
+        let result =
+            tokio::time::timeout(Duration::from_secs(8), api.start_hf_download(&request)).await;
+        if let Ok(Ok(download_id)) = &result {
+            let _ =
+                tokio::time::timeout(Duration::from_secs(3), api.cancel_hf_download(download_id))
+                    .await;
+        }
+        let mut shutdown =
+            tokio::time::timeout(Duration::from_secs(5), api.shutdown_downloads()).await;
+        if !matches!(&shutdown, Ok(Ok(()))) {
+            shutdown = tokio::time::timeout(Duration::from_secs(5), api.shutdown_downloads()).await;
+        }
+        let _ = stop_server.send(());
+        let observed = match tokio::time::timeout(Duration::from_secs(4), &mut server_task).await {
+            Ok(Ok(observed)) => observed,
+            outcome => {
+                server_task.abort();
+                let _ = server_task.await;
+                panic!("pinned source monitor failed to join after shutdown: {outcome:?}");
+            }
+        };
+
+        assert!(
+            matches!(&result, Ok(Err(PumasError::ModelNotFound { .. }))),
+            "incomplete explicit list must be refused with ModelNotFound: {result:?}"
+        );
+        assert!(
+            matches!(&shutdown, Ok(Ok(()))),
+            "API owner shutdown must complete: {shutdown:?}"
+        );
+        assert!(acquisitions_before.is_empty());
+        assert!(lifecycle_before.downloads.is_empty());
+        assert!(lifecycle_before.quarantines.is_empty());
+        assert!(lifecycle_before.hidden_admissions.is_empty());
+        assert!(lifecycle_before.queue_admissions.is_empty());
+        assert_eq!(
+            observed.len(),
+            EXPECTED_CALLS,
+            "only revision and pinned-tree resolution are allowed: {observed:?}"
+        );
+        assert!(
+            unknown_dir.is_dir(),
+            "retained partial directory must stay in place"
+        );
+        assert!(
+            !destination.exists(),
+            "relocation/destination creation is forbidden"
+        );
+        assert_eq!(std::fs::read(&partial_path).unwrap(), partial_bytes_before);
+        assert_eq!(
+            std::fs::read(&metadata_path).unwrap(),
+            metadata_bytes_before
+        );
+        assert_eq!(
+            serde_json::to_value(library.index().get(&unknown_model_id).unwrap().unwrap()).unwrap(),
+            unknown_index_before
+        );
+        assert_eq!(
+            serde_json::to_value(library.index().get(&destination_model_id).unwrap()).unwrap(),
+            destination_index_before
+        );
+        assert!(client.list_downloads().await.is_empty());
+        assert!(api
+            .get_hf_download_progress("unadmitted")
+            .await
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            persistence.acquisition_store().acquisitions().unwrap(),
+            acquisitions_before
+        );
+        let lifecycle_after = persistence.load_lifecycle_inventory_strict().unwrap();
+        assert!(lifecycle_after.downloads.is_empty());
+        assert!(lifecycle_after.quarantines.is_empty());
+        assert!(lifecycle_after.hidden_admissions.is_empty());
+        assert!(lifecycle_after.queue_admissions.is_empty());
+        assert!(!destination.join(".pumas_download").exists());
+        assert!(!destination.join("weights-a.gguf.part").exists());
+    }
+
+    #[tokio::test]
+    async fn public_hf_explicit_complete_file_selection_is_admitted_intact() {
+        use std::time::Duration;
+        use tokio::sync::oneshot;
+
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (payload_started, payload_request) = oneshot::channel();
+        let (release_payload, wait_for_release) = oneshot::channel();
+        let mut server_task = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for (expected, body) in [
+                (
+                    "GET /api/models/acme/model/revision/main HTTP/1.1".to_string(),
+                    format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}"}}"#),
+                ),
+                (
+                    format!("GET /api/models/acme/model/revision/{COMMIT} HTTP/1.1"),
+                    format!(
+                        r#"{{"modelId":"acme/model","sha":"{COMMIT}","pipeline_tag":"text-generation","tags":["gguf"]}}"#
+                    ),
+                ),
+                (
+                    format!("GET /api/models/acme/model/tree/{COMMIT}?recursive=true HTTP/1.1"),
+                    format!(
+                        r#"[{{"path":"weights-a.gguf","type":"file","lfs":{{"oid":"{}","size":4}}}},{{"path":"weights-b.gguf","type":"file","lfs":{{"oid":"{}","size":5}}}}]"#,
+                        "a".repeat(64),
+                        "b".repeat(64)
+                    ),
+                ),
+            ] {
+                let (mut socket, _) =
+                    tokio::time::timeout(Duration::from_secs(4), listener.accept())
+                        .await
+                        .expect("metadata/tree source call must be bounded")
+                        .unwrap();
+                let request = read_intent_test_request(&mut socket).await;
+                assert_eq!(request, expected);
+                requests.push(request);
+                write_intent_test_response(&mut socket, "200 OK", &body).await;
+            }
+            let (mut socket, _) = tokio::time::timeout(Duration::from_secs(4), listener.accept())
+                .await
+                .expect("accepted complete selection must reach its payload source")
+                .unwrap();
+            let request = read_intent_test_request(&mut socket).await;
+            let _ = payload_started.send(request.clone());
+            requests.push(request);
+            tokio::time::timeout(Duration::from_secs(5), wait_for_release)
+                .await
+                .expect("payload monitor release must be bounded")
+                .expect("test must release the payload monitor");
+            drop(socket);
+            requests
+        });
+
+        let root = tempfile::TempDir::new().unwrap();
+        let api = recovery_api_fixture(root.path(), Some(format!("http://{address}"))).await;
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/model".into(),
+            family: "acme".into(),
+            official_name: "model".into(),
+            model_type: Some("llm".into()),
+            quant: None,
+            filename: None,
+            filenames: Some(vec!["weights-a.gguf".into(), "weights-b.gguf".into()]),
+            pipeline_tag: Some("text-generation".into()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let start =
+            tokio::time::timeout(Duration::from_secs(8), api.start_hf_download(&request)).await;
+        let download_id = start
+            .as_ref()
+            .ok()
+            .and_then(|result| result.as_ref().ok())
+            .cloned();
+        let payload_request = tokio::time::timeout(Duration::from_secs(4), payload_request).await;
+        let cancellation = if let Some(download_id) = download_id.as_deref() {
+            Some(
+                tokio::time::timeout(Duration::from_secs(3), api.cancel_hf_download(download_id))
+                    .await,
+            )
+        } else {
+            None
+        };
+        let mut shutdown =
+            tokio::time::timeout(Duration::from_secs(5), api.shutdown_downloads()).await;
+        if !matches!(&shutdown, Ok(Ok(()))) {
+            shutdown = tokio::time::timeout(Duration::from_secs(5), api.shutdown_downloads()).await;
+        }
+        let _ = release_payload.send(());
+        let observed = match tokio::time::timeout(Duration::from_secs(5), &mut server_task).await {
+            Ok(Ok(observed)) => observed,
+            outcome => {
+                server_task.abort();
+                let _ = server_task.await;
+                panic!("complete-list source monitor did not join: {outcome:?}");
+            }
+        };
+
+        assert!(
+            matches!(&start, Ok(Ok(_))),
+            "public complete-list start must settle successfully: {start:?}"
+        );
+        let download_id = download_id.expect("successful start must return its download id");
+        assert!(
+            matches!(cancellation, Some(Ok(Ok(true)))),
+            "accepted complete-list download must be cancellable: {cancellation:?}"
+        );
+        assert!(
+            matches!(&shutdown, Ok(Ok(()))),
+            "API owner shutdown must complete: {shutdown:?}"
+        );
+        assert!(
+            matches!(&payload_request, Ok(Ok(_))),
+            "accepted complete selection must start a payload request: {payload_request:?}"
+        );
+        let payload_request = payload_request.unwrap().unwrap();
+        assert_eq!(
+            payload_request,
+            format!("GET /acme/model/resolve/{COMMIT}/weights-a.gguf HTTP/1.1")
+        );
+        let client = api.primary().hf_client.as_ref().unwrap();
+        let inventory = client
+            .persistence()
+            .unwrap()
+            .load_lifecycle_inventory_strict()
+            .unwrap();
+        let admission = inventory
+            .queue_admissions
+            .get(&download_id)
+            .expect("durable admission must be visible");
+        assert_eq!(
+            admission.requested_payload_files,
+            vec!["weights-a.gguf", "weights-b.gguf"]
+        );
+        assert_eq!(
+            admission.execution_files,
+            vec!["weights-a.gguf", "weights-b.gguf"]
+        );
+        assert_eq!(observed.len(), 4);
+        assert!(observed[3].contains("/resolve/"));
     }
 
     #[tokio::test]

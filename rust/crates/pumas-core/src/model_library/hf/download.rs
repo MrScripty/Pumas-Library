@@ -12972,6 +12972,221 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancellation_during_acquisition_file_set_sealing_drains_before_handoff() {
+        struct ReleaseOnDrop(Option<std::sync::mpsc::Sender<()>>);
+
+        impl ReleaseOnDrop {
+            fn release(&mut self) {
+                if let Some(sender) = self.0.take() {
+                    let _ = sender.send(());
+                }
+            }
+        }
+
+        impl Drop for ReleaseOnDrop {
+            fn drop(&mut self) {
+                self.release();
+            }
+        }
+
+        let temp = TempDir::new().unwrap();
+        let (library, client, destination, request) = imported_download_fixture(temp.path()).await;
+        let client = Arc::new(client);
+        let persistence = client.persistence.as_ref().unwrap().clone();
+        let artifact = destination.join("model.onnx");
+        let artifact_before = std::fs::read(&artifact).unwrap();
+        let metadata_writes = Arc::new(AtomicU64::new(0));
+        let metadata_writes_observed = metadata_writes.clone();
+        library.set_metadata_write_notifier(Some(Arc::new(move |_| {
+            metadata_writes_observed.fetch_add(1, Ordering::SeqCst);
+        })));
+
+        let (seal_started_sender, seal_started) = tokio::sync::oneshot::channel();
+        let seal_started_sender = Arc::new(std::sync::Mutex::new(Some(seal_started_sender)));
+        let (release_sender, release_receiver) = std::sync::mpsc::channel();
+        let release_receiver = Arc::new(std::sync::Mutex::new(release_receiver));
+        let mut release_guard = ReleaseOnDrop(Some(release_sender));
+        client.download_tasks.set_blocking_observer(Some(Arc::new({
+            let seal_started_sender = seal_started_sender.clone();
+            let release_receiver = release_receiver.clone();
+            move |operation| {
+                if operation == "seal verified acquisition file set" {
+                    if let Some(sender) = seal_started_sender.lock().unwrap().take() {
+                        let _ = sender.send(());
+                    }
+                    let _ = release_receiver.lock().unwrap().recv();
+                }
+            }
+        })));
+
+        let (seal_finished_sender, mut seal_finished) = tokio::sync::oneshot::channel();
+        let seal_finished_sender = Arc::new(std::sync::Mutex::new(Some(seal_finished_sender)));
+        client
+            .download_tasks
+            .set_blocking_result_observer(Some(Arc::new({
+                let seal_finished_sender = seal_finished_sender.clone();
+                move |operation| {
+                    if operation == "seal verified acquisition file set" {
+                        if let Some(sender) = seal_finished_sender.lock().unwrap().take() {
+                            let _ = sender.send(());
+                        }
+                    }
+                }
+            })));
+
+        let download_id = client
+            .start_download(&request, &destination, None)
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(3), seal_started)
+            .await
+            .expect("shared file-set sealing must start")
+            .expect("file-set sealing observer must remain connected");
+
+        let records = client.acquisition.store().acquisitions().unwrap();
+        assert_eq!(records.len(), 1);
+        let (acquisition_id, before_record) = records.iter().next().unwrap();
+        assert_eq!(
+            before_record.phase,
+            crate::acquisition::AcquisitionPhase::Transferring
+        );
+        assert!(before_record.files.is_empty());
+        assert!(client
+            .acquisition
+            .store()
+            .consumer_receipt(*acquisition_id)
+            .unwrap()
+            .is_none());
+        assert!(persistence
+            .read_hf_completion_receipt(*acquisition_id)
+            .unwrap()
+            .is_none());
+
+        let inventory_at_seal = persistence.load_lifecycle_inventory_strict().unwrap();
+        assert!(inventory_at_seal
+            .queue_admissions
+            .contains_key(&download_id));
+        let marker = destination.join(".pumas_download");
+        let marker_at_seal = std::fs::read(&marker).unwrap();
+        let metadata_writes_at_seal = metadata_writes.load(Ordering::SeqCst);
+        assert_eq!(std::fs::read(&artifact).unwrap(), artifact_before);
+        assert_eq!(
+            client.downloads.read().await[&download_id].status,
+            DownloadStatus::Downloading
+        );
+
+        let root = crate::model_library::download_recovery::DownloadDestinationRoot::open(
+            library.library_root(),
+        )
+        .unwrap();
+        assert!(matches!(
+            root.try_acquire_execution_grant(),
+            Err(PumasError::DownloadRootBusy)
+        ));
+
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), client.cancel_download(&download_id))
+                .await
+                .expect("public cancellation must acknowledge while the verifier remains owned")
+                .unwrap()
+        );
+        {
+            let downloads = client.downloads.read().await;
+            let state = downloads.get(&download_id).unwrap();
+            assert_eq!(state.status, DownloadStatus::Cancelling);
+            assert!(state.task_registered);
+        }
+        assert_eq!(
+            client.acquisition.store().acquisitions().unwrap(),
+            records,
+            "cancellation must not publish verified-file handoff before the held effect drains"
+        );
+        assert_eq!(std::fs::read(&marker).unwrap(), marker_at_seal);
+        assert_eq!(std::fs::read(&artifact).unwrap(), artifact_before);
+        assert_eq!(
+            metadata_writes.load(Ordering::SeqCst),
+            metadata_writes_at_seal
+        );
+        assert!(matches!(
+            seal_finished.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ));
+        assert!(persistence
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .contains_key(&download_id));
+        assert!(matches!(
+            root.try_acquire_execution_grant(),
+            Err(PumasError::DownloadRootBusy)
+        ));
+
+        release_guard.release();
+        tokio::time::timeout(Duration::from_secs(3), seal_finished)
+            .await
+            .expect("the registered verifier must drain after release")
+            .expect("the verifier result observer must remain connected");
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                client.observe_finished_download_tasks().await;
+                let terminal = {
+                    let downloads = client.downloads.read().await;
+                    downloads.get(&download_id).is_some_and(|state| {
+                        state.status == DownloadStatus::Cancelled && !state.task_registered
+                    })
+                };
+                if terminal
+                    && client
+                        .download_tasks
+                        .snapshot(&download_id)
+                        .is_none_or(|task| task.finished)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("cancellation cleanup must wait for the verifier and settle");
+
+        let after_records = client.acquisition.store().acquisitions().unwrap();
+        assert_eq!(after_records.len(), 1);
+        let after_record = after_records.get(acquisition_id).unwrap();
+        let mut expected_record = before_record.clone();
+        expected_record.phase = crate::acquisition::AcquisitionPhase::Withdrawn;
+        expected_record.files.clear();
+        assert_eq!(after_record, &expected_record);
+        assert!(client
+            .acquisition
+            .store()
+            .consumer_receipt(*acquisition_id)
+            .unwrap()
+            .is_none());
+        assert!(persistence
+            .read_hf_completion_receipt(*acquisition_id)
+            .unwrap()
+            .is_none());
+        let inventory_after = persistence.load_lifecycle_inventory_strict().unwrap();
+        assert!(!inventory_after.queue_admissions.contains_key(&download_id));
+        assert!(!inventory_after.quarantines.contains_key(&download_id));
+        assert!(!marker.exists());
+        assert_eq!(std::fs::read(&artifact).unwrap(), artifact_before);
+        assert_eq!(
+            metadata_writes.load(Ordering::SeqCst),
+            metadata_writes_at_seal
+        );
+        let root_grant = root
+            .try_acquire_execution_grant()
+            .expect("root exclusion must be released after cleanup settles");
+        drop(root_grant);
+
+        client.download_tasks.set_blocking_observer(None);
+        client.download_tasks.set_blocking_result_observer(None);
+        library.set_metadata_write_notifier(None);
+        client.shutdown_downloads().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn auxiliary_callback_runs_without_destination_lease_and_cancel_stops_continuation() {
         let temp = TempDir::new().unwrap();
         let library_root = temp.path().join("library");

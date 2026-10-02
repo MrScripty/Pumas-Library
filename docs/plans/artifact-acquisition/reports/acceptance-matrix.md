@@ -167,13 +167,14 @@ prove cold reopen, power-loss durability, malformed-range handling or real
 consumer publication.
 
 This is partial service-level evidence. AC06 remains pending for queued and
-verifying cancellation, idempotent release, and preservation of all live and
-durable demands. The sequential stale-generation fixture below proves rejection
-at `files_ready` from a new worker generation in one consumer scope. The
-concurrent fixture following it proves that stale readiness cannot replace a
-successful concurrent handoff; neither fixture exercises same-task-ID
-replacement. These local HTTP/workspace fixtures are not real HF/native source
-or supported-platform acceptance.
+service-level `Verifying` cancellation, idempotent release, preservation of all
+live and durable demands, and same-task-ID replacement. The sequential
+stale-generation fixture below proves rejection at `files_ready` from a new
+worker generation in one consumer scope. The concurrent fixture following it
+proves that stale readiness cannot replace a successful concurrent handoff;
+neither fixture exercises same-task-ID replacement. These local
+HTTP/workspace fixtures are not real HF/native source or supported-platform
+acceptance.
 
 The `stale_worker_generation_cannot_seal_or_handoff_acquisition` service test
 starts an operation in one worker generation, then invokes `files_ready` from a
@@ -197,6 +198,26 @@ before assertions. The focused test passed 1/1 on Linux x86_64. This does not
 establish same-task-ID replacement, crash or power-loss durability, queued or
 verifying cancellation, idempotent release, preservation of all live and
 durable demands, real-source/consumer behavior, or other-platform acceptance.
+
+The HF consumer regression `cancellation_during_acquisition_file_set_sealing_drains_before_handoff`
+holds the registered `seal verified acquisition file set` effect after valid
+artifact bytes exist and before durable `FilesReady` handoff. Public
+`cancel_download` returns while the worker is `Cancelling`, the acquisition is
+still `Transferring`, the marker and artifact bytes are unchanged, durable
+admission remains, no receipt is published, and root exclusion remains held.
+After release, the registered effect drains before cancellation settlement;
+the acquisition is withdrawn, queue admission and marker are removed, no
+completion receipt appears, artifact bytes stay unchanged, and root exclusion
+is released. The focused test passed 1/1. The full HF download module had 164
+passes and 15 failures, each an existing loopback fixture failing at
+`TcpListener::bind` with sandbox `PermissionDenied` / OS error 1; the new test
+also passed in that run. Strict all-target `pumas-library` Clippy passed and
+scoped rustfmt plus `git diff --check` passed. Separate GPT-6.1 Sol High source
+review found no substantiated issue and confirmed the seal observer is before
+the hash closure. This is partial HF consumer evidence for one controlled
+pre-handoff boundary. It does not prove mid-hash cancellation, HTTP
+cancellation/replay, crash durability, service-level queued/`Verifying`
+cancellation, or full AC06 acceptance.
 
 
 ## Real procedures and proof boundaries

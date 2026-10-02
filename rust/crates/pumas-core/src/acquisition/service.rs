@@ -1779,7 +1779,7 @@ mod tests {
     use super::*;
     use crate::acquisition::{
         ArtifactFile, ArtifactRevisionEvidence, ArtifactSourceIdentity,
-        FileVerificationRequirement, RevisionStrength,
+        FileVerificationRequirement, RevisionStrength, Sha256Evidence,
     };
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -2103,6 +2103,80 @@ mod tests {
             _delay: Option<Duration>,
             _error: Option<&str>,
         ) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Default)]
+    struct RecordingHost {
+        retry_notifications: Arc<Mutex<Vec<Option<String>>>>,
+        progress_bytes: Arc<Mutex<Vec<u64>>>,
+    }
+
+    struct AbortOnDrop<T> {
+        handle: Option<tokio::task::JoinHandle<T>>,
+    }
+
+    impl<T> AbortOnDrop<T> {
+        fn new(handle: tokio::task::JoinHandle<T>) -> Self {
+            Self {
+                handle: Some(handle),
+            }
+        }
+
+        async fn join_with_timeout(mut self, timeout: Duration) -> std::result::Result<T, ()> {
+            let handle = self.handle.as_mut().ok_or(())?;
+            let result = match tokio::time::timeout(timeout, &mut *handle).await {
+                Ok(Ok(output)) => Ok(output),
+                Ok(Err(_)) => Err(()),
+                Err(_) => {
+                    handle.abort();
+                    let _ = tokio::time::timeout(timeout, &mut *handle).await;
+                    Err(())
+                }
+            };
+            self.handle.take();
+            result
+        }
+    }
+
+    impl<T> Drop for AbortOnDrop<T> {
+        fn drop(&mut self) {
+            if let Some(handle) = &self.handle {
+                handle.abort();
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl HttpAttemptHost for RecordingHost {
+        async fn pause_requested(&self) {
+            std::future::pending::<()>().await;
+        }
+        fn pause_requested_now(&self) -> bool {
+            false
+        }
+        fn cancel_requested(&self) -> bool {
+            false
+        }
+        async fn record_progress(&mut self, bytes: u64) -> Result<()> {
+            self.progress_bytes.lock().unwrap().push(bytes);
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl AcquisitionHost for RecordingHost {
+        async fn retry(
+            &mut self,
+            _attempt: u32,
+            _delay: Option<Duration>,
+            error: Option<&str>,
+        ) -> Result<()> {
+            self.retry_notifications
+                .lock()
+                .unwrap()
+                .push(error.map(str::to_owned));
             Ok(())
         }
     }
@@ -3539,6 +3613,445 @@ mod tests {
             .await
             .expect("shared acquisition service must drain")
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn explicit_access_refresh_preserves_selected_consumer_identity() {
+        async fn read_headers(socket: &mut tokio::net::TcpStream) -> String {
+            let mut bytes = Vec::new();
+            while !bytes.ends_with(b"\r\n\r\n") {
+                assert!(bytes.len() < 8192, "fixture request headers exceed bound");
+                bytes.push(socket.read_u8().await.unwrap());
+            }
+            String::from_utf8(bytes).unwrap()
+        }
+
+        async fn write_response(
+            socket: &mut tokio::net::TcpStream,
+            status: &'static str,
+            body: &'static [u8],
+        ) {
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+            socket.write_all(body).await.unwrap();
+        }
+
+        let timeout = Duration::from_secs(5);
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage = temp.path().join("workspace");
+        std::fs::create_dir(&stage).unwrap();
+        let sentinel = stage.join("sentinel.bin");
+        std::fs::write(&sentinel, b"preserve me").unwrap();
+        let sentinel_before = std::fs::read(&sentinel).unwrap();
+
+        let manifest_for = |bytes: &[u8]| {
+            ArtifactManifest::new(
+                ArtifactSourceIdentity::new(
+                    "fixture",
+                    "selected-object",
+                    ArtifactRevisionEvidence::new(
+                        "fixture.revision",
+                        "immutable-v1",
+                        RevisionStrength::Immutable,
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+                vec![ArtifactFile::new(
+                    "payload.bin",
+                    "selected-object",
+                    Some(bytes.len() as u64),
+                    Some(
+                        Sha256Evidence::new("publisher.sha256", hex::encode(Sha256::digest(bytes)))
+                            .unwrap(),
+                    ),
+                    FileVerificationRequirement::Sha256,
+                )
+                .unwrap()],
+            )
+            .unwrap()
+        };
+        let original_manifest = manifest_for(b"DATA");
+        let changed_manifest = manifest_for(b"EVIL");
+        let expected_digest = hex::encode(Sha256::digest(b"DATA"));
+        let demand = AcquisitionDemand {
+            consumer: "credential-refresh-fixture".into(),
+            operation: "preserve-selected-object-on-access-refresh".into(),
+        };
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        let service = Arc::new(AcquisitionService::new(store.clone()));
+        let consumer = service.open_consumer("credential-refresh-fixture").unwrap();
+        let host = RecordingHost::default();
+        let prepare_calls = Arc::new(AtomicUsize::new(0));
+        let publish_calls = Arc::new(AtomicUsize::new(0));
+
+        let old_access_token = "q1-old-access-secret";
+        let old_authorization = format!("Bearer {old_access_token}");
+        let old_query = "q1-old-query-secret";
+        let new_access_token = "q1-new-access-secret";
+        let new_authorization = format!("Bearer {new_access_token}");
+        let new_query = "q1-new-query-secret";
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}/fixture", listener.local_addr().unwrap());
+        let old_url = format!("{base_url}?token={old_query}");
+        let refreshed_url = format!("{base_url}?token={new_query}");
+        let request_count = Arc::new(AtomicUsize::new(0));
+        let old_access_seen = Arc::new(AtomicBool::new(false));
+        let refreshed_access_seen = Arc::new(AtomicBool::new(false));
+        let request_count_in_server = request_count.clone();
+        let old_access_seen_in_server = old_access_seen.clone();
+        let refreshed_access_seen_in_server = refreshed_access_seen.clone();
+        let (stop_server_sender, stop_server_receiver) = tokio::sync::oneshot::channel();
+        let server = AbortOnDrop::new(tokio::spawn(async move {
+            let mut stop_server_receiver = stop_server_receiver;
+            let mut drain_deadline: Option<tokio::time::Instant> = None;
+            loop {
+                let accepted = if let Some(deadline) = drain_deadline {
+                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    if remaining.is_zero() {
+                        break;
+                    }
+                    match tokio::time::timeout(
+                        remaining.min(Duration::from_millis(25)),
+                        listener.accept(),
+                    )
+                    .await
+                    {
+                        Ok(Ok(accepted)) => accepted,
+                        Ok(Err(error)) => panic!("fixture listener failed: {error}"),
+                        Err(_) => break,
+                    }
+                } else {
+                    tokio::select! {
+                        biased;
+                        accepted = listener.accept() => accepted.unwrap(),
+                        _ = &mut stop_server_receiver => {
+                            drain_deadline = Some(
+                                tokio::time::Instant::now() + Duration::from_secs(2),
+                            );
+                            continue;
+                        }
+                    }
+                };
+
+                let (mut socket, _) = accepted;
+                let count = request_count_in_server.fetch_add(1, Ordering::SeqCst) + 1;
+                let request_deadline = tokio::time::Instant::now() + timeout;
+                let io_deadline = drain_deadline
+                    .map_or(request_deadline, |deadline| deadline.min(request_deadline));
+                let read_timeout =
+                    io_deadline.saturating_duration_since(tokio::time::Instant::now());
+                if read_timeout.is_zero() {
+                    break;
+                }
+                let request = tokio::time::timeout(read_timeout, read_headers(&mut socket))
+                    .await
+                    .expect("fixture request-header read must be bounded");
+                let request_lower = request.to_ascii_lowercase();
+                let is_old_access = request.contains(&format!("/fixture?token={old_query}"))
+                    && request_lower.contains(&format!("authorization: bearer {old_access_token}"));
+                let is_refreshed_access = request.contains(&format!("/fixture?token={new_query}"))
+                    && request_lower.contains(&format!("authorization: bearer {new_access_token}"));
+
+                let write_timeout =
+                    io_deadline.saturating_duration_since(tokio::time::Instant::now());
+                if write_timeout.is_zero() {
+                    break;
+                }
+
+                if count == 1 {
+                    old_access_seen_in_server.store(is_old_access, Ordering::SeqCst);
+                    tokio::time::timeout(
+                        write_timeout,
+                        write_response(&mut socket, "403 Forbidden", b""),
+                    )
+                    .await
+                    .expect("fixture denial response write must be bounded");
+                } else if is_refreshed_access {
+                    refreshed_access_seen_in_server.store(true, Ordering::SeqCst);
+                    tokio::time::timeout(
+                        write_timeout,
+                        write_response(&mut socket, "200 OK", b"DATA"),
+                    )
+                    .await
+                    .expect("fixture success response write must be bounded");
+                } else {
+                    // An attempted source read for the changed manifest is an
+                    // observed unexpected request and must not be mistaken for
+                    // the subsequent access refresh.
+                    tokio::time::timeout(
+                        write_timeout,
+                        write_response(&mut socket, "403 Forbidden", b""),
+                    )
+                    .await
+                    .expect("fixture refusal response write must be bounded");
+                }
+            }
+        }));
+
+        let make_request =
+            |manifest: ArtifactManifest, url: String, authorization: &str| AcquisitionHttpRequest {
+                demand: demand.clone(),
+                manifest,
+                workspace: workspace(&stage),
+                sources: vec![AcquisitionHttpSource {
+                    url,
+                    authorization: Some(authorization.to_owned()),
+                }],
+                retry: retry(),
+            };
+
+        let prepare_on_denial = prepare_calls.clone();
+        let publish_on_denial = publish_calls.clone();
+        let denied_result = tokio::time::timeout(
+            timeout,
+            consumer.acquire_http(
+                make_request(
+                    original_manifest.clone(),
+                    old_url.clone(),
+                    &old_authorization,
+                ),
+                reqwest::Client::new(),
+                Box::new(host.clone()),
+                move |_use_handle| async move {
+                    prepare_on_denial.fetch_add(1, Ordering::SeqCst);
+                    Err::<((), Value), PumasError>(PumasError::Other(
+                        "denied attempt reached consumer preparation".into(),
+                    ))
+                },
+                move |(), _receipt| async move {
+                    publish_on_denial.fetch_add(1, Ordering::SeqCst);
+                    Ok::<(), PumasError>(())
+                },
+            ),
+        )
+        .await
+        .expect("denied acquisition must finish");
+        let denied_error = denied_result.expect_err("403 must refuse source access");
+        assert!(matches!(
+            &denied_error,
+            PumasError::DownloadFailed { url, message }
+                if url == "artifact source" && message == "HTTP 403 Forbidden"
+        ));
+        let denied_error_text = denied_error.to_string();
+        assert!(!denied_error_text.contains(old_access_token));
+        assert!(!denied_error_text.contains(old_query));
+
+        let denied_records = store.acquisitions().unwrap();
+        assert_eq!(denied_records.len(), 1);
+        let denied_record = denied_records.values().next().unwrap().clone();
+        assert_eq!(denied_record.demand, demand);
+        assert_eq!(denied_record.manifest, original_manifest);
+        assert_eq!(
+            denied_record.workspace,
+            workspace(&stage).identity().clone()
+        );
+        assert!(matches!(
+            &denied_record.phase,
+            AcquisitionPhase::Transferring
+        ));
+        assert!(denied_record.files.is_empty());
+        assert!(store.consumer_receipt(denied_record.id).unwrap().is_none());
+        assert!(!stage.join("payload.bin").exists());
+        assert!(!stage.join("payload.bin.part").exists());
+        assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(publish_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(request_count.load(Ordering::SeqCst), 1);
+        assert!(old_access_seen.load(Ordering::SeqCst));
+        {
+            let notifications = host.retry_notifications.lock().unwrap();
+            assert!(
+                notifications.len() == 1 && notifications[0].is_none(),
+                "403 must not schedule a retry after the initial attempt"
+            );
+        }
+        assert!(host.progress_bytes.lock().unwrap().is_empty());
+        let denied_json = std::fs::read_to_string(temp.path().join("downloads.json")).unwrap();
+        assert!(!denied_json.contains(old_access_token));
+        assert!(!denied_json.contains(old_query));
+
+        let prepare_on_changed = prepare_calls.clone();
+        let publish_on_changed = publish_calls.clone();
+        let changed_result = tokio::time::timeout(
+            timeout,
+            consumer.acquire_http(
+                make_request(changed_manifest, old_url.clone(), &old_authorization),
+                reqwest::Client::new(),
+                Box::new(host.clone()),
+                move |_use_handle| async move {
+                    prepare_on_changed.fetch_add(1, Ordering::SeqCst);
+                    Err::<((), Value), PumasError>(PumasError::Other(
+                        "changed selection reached consumer preparation".into(),
+                    ))
+                },
+                move |(), _receipt| async move {
+                    publish_on_changed.fetch_add(1, Ordering::SeqCst);
+                    Ok::<(), PumasError>(())
+                },
+            ),
+        )
+        .await
+        .expect("changed selection attempt must finish");
+        assert!(matches!(
+            &changed_result,
+            Err(PumasError::Validation { field, message })
+                if field == "acquisition.custody"
+                    && message == "Exact acquisition demand changed selection or workspace"
+        ));
+        assert_eq!(store.acquisitions().unwrap(), denied_records);
+        assert!(
+            std::fs::read_to_string(temp.path().join("downloads.json")).unwrap() == denied_json,
+            "persisted state changed during rejected selection"
+        );
+        assert!(!stage.join("payload.bin").exists());
+        assert!(!stage.join("payload.bin.part").exists());
+        assert_eq!(request_count.load(Ordering::SeqCst), 1);
+        assert_eq!(prepare_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(publish_calls.load(Ordering::SeqCst), 0);
+        {
+            let notifications = host.retry_notifications.lock().unwrap();
+            assert!(
+                notifications.len() == 1 && notifications[0].is_none(),
+                "changed selection must not start another HTTP attempt"
+            );
+        }
+
+        let expected_id = denied_record.id;
+        let expected_manifest = original_manifest.clone();
+        let prepare_on_refresh = prepare_calls.clone();
+        let publish_on_refresh = publish_calls.clone();
+        let receipt_result = tokio::time::timeout(
+            timeout,
+            consumer.acquire_http(
+                make_request(original_manifest.clone(), refreshed_url, &new_authorization),
+                reqwest::Client::new(),
+                Box::new(host.clone()),
+                move |use_handle| async move {
+                    prepare_on_refresh.fetch_add(1, Ordering::SeqCst);
+                    let verified_file = use_handle.open_file(0).await?;
+                    let bytes = use_handle
+                        .run_blocking("read refreshed verified artifact", move || {
+                            let mut verified_file = verified_file;
+                            let mut bytes = Vec::new();
+                            std::io::Read::read_to_end(&mut verified_file, &mut bytes)
+                                .map_err(|error| PumasError::Other(error.to_string()))?;
+                            Ok(bytes)
+                        })
+                        .await?;
+                    Ok::<(Vec<u8>, Value), PumasError>((
+                        bytes,
+                        serde_json::json!({"selected_sha256": expected_digest}),
+                    ))
+                },
+                move |bytes, receipt| async move {
+                    publish_on_refresh.fetch_add(1, Ordering::SeqCst);
+                    assert_eq!(bytes, b"DATA");
+                    assert_eq!(receipt.acquisition_id, expected_id.to_string());
+                    assert_eq!(receipt.manifest, expected_manifest);
+                    Ok::<AcquisitionConsumerReceipt, PumasError>(receipt)
+                },
+            ),
+        )
+        .await
+        .expect("refreshed access attempt must finish");
+        let receipt = match receipt_result {
+            Ok(receipt) => receipt,
+            Err(_) => panic!("refreshed access must acquire the original selected bytes"),
+        };
+
+        assert!(old_access_seen.load(Ordering::SeqCst));
+        assert!(refreshed_access_seen.load(Ordering::SeqCst));
+        assert_eq!(prepare_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(publish_calls.load(Ordering::SeqCst), 1);
+        {
+            let notifications = host.retry_notifications.lock().unwrap();
+            assert!(
+                notifications.len() == 2 && notifications.iter().all(Option::is_none),
+                "only the two explicit acquisition attempt starts are expected"
+            );
+        }
+        assert!(host
+            .progress_bytes
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|bytes| *bytes <= 4));
+
+        let final_records = store.acquisitions().unwrap();
+        assert_eq!(final_records.len(), 1);
+        let final_record = final_records.get(&expected_id).unwrap();
+        assert_eq!(final_record.demand, demand);
+        assert_eq!(final_record.manifest, original_manifest);
+        assert_eq!(final_record.workspace, denied_record.workspace);
+        assert!(matches!(
+            &final_record.phase,
+            AcquisitionPhase::Adopted { .. }
+        ));
+        assert_eq!(final_record.files.len(), 1);
+        assert_eq!(final_record.files[0].path, "payload.bin");
+        assert_eq!(final_record.files[0].bytes, 4);
+        assert_eq!(
+            final_record.files[0].sha256,
+            hex::encode(Sha256::digest(b"DATA"))
+        );
+        assert_eq!(std::fs::read(stage.join("payload.bin")).unwrap(), b"DATA");
+        assert_eq!(std::fs::read(&sentinel).unwrap(), sentinel_before);
+        let stored_receipt = store
+            .consumer_receipt(expected_id)
+            .unwrap()
+            .expect("successful consumer must publish its exact receipt");
+        assert_eq!(stored_receipt, receipt);
+        assert_eq!(stored_receipt.manifest, original_manifest);
+        assert_eq!(stored_receipt.verified_files, final_record.files);
+        assert_eq!(
+            consumer.completion_receipt(final_record).unwrap(),
+            Some(receipt.clone())
+        );
+        let receipt_json = serde_json::to_string(&receipt).unwrap();
+        assert!(!receipt_json.contains(old_access_token));
+        assert!(!receipt_json.contains(old_query));
+        assert!(!receipt_json.contains(new_access_token));
+        assert!(!receipt_json.contains(new_query));
+        let final_json = std::fs::read_to_string(temp.path().join("downloads.json")).unwrap();
+        assert!(!final_json.contains(old_access_token));
+        assert!(!final_json.contains(old_query));
+        assert!(!final_json.contains(new_access_token));
+        assert!(!final_json.contains(new_query));
+        assert!(host
+            .retry_notifications
+            .lock()
+            .unwrap()
+            .iter()
+            .flatten()
+            .all(|error| {
+                !error.contains(old_access_token)
+                    && !error.contains(old_query)
+                    && !error.contains(new_access_token)
+                    && !error.contains(new_query)
+            }));
+
+        tokio::time::timeout(timeout, consumer.shutdown())
+            .await
+            .expect("consumer scope must shut down")
+            .unwrap();
+        tokio::time::timeout(timeout, service.shutdown())
+            .await
+            .expect("acquisition service must shut down")
+            .unwrap();
+        let _ = stop_server_sender.send(());
+        server
+            .join_with_timeout(timeout)
+            .await
+            .expect("source monitor must drain or be aborted within the bound");
+        assert_eq!(request_count.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

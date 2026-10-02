@@ -3161,6 +3161,387 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn public_withdrawal_preserves_live_use_and_cold_retained_demand() {
+        let timeout = Duration::from_secs(5);
+        let temp = tempfile::TempDir::new().unwrap();
+        let stage_a = temp.path().join("stage-a");
+        let stage_b = temp.path().join("stage-b");
+        let stage_c = temp.path().join("stage-c");
+        std::fs::create_dir(&stage_a).unwrap();
+        std::fs::create_dir(&stage_b).unwrap();
+        std::fs::create_dir(&stage_c).unwrap();
+        let sentinel_a = stage_a.join("sentinel.bin");
+        let sentinel_b = stage_b.join("sentinel.bin");
+        let sentinel_c = stage_c.join("sentinel.bin");
+        std::fs::write(&sentinel_a, b"A sentinel").unwrap();
+        std::fs::write(&sentinel_b, b"B sentinel").unwrap();
+        std::fs::write(&sentinel_c, b"C sentinel").unwrap();
+        let sentinel_a_before = std::fs::read(&sentinel_a).unwrap();
+        let sentinel_b_before = std::fs::read(&sentinel_b).unwrap();
+        let sentinel_c_before = std::fs::read(&sentinel_c).unwrap();
+
+        // Leave a real receiptless Using row, then destroy the original owner
+        // and reopen the same persisted store before creating the other demands.
+        let first_store = Arc::new(AcquisitionStore::new(temp.path()));
+        let first_service = Arc::new(AcquisitionService::new(first_store.clone()));
+        let consumer_c = first_service.open_consumer("consumer-c").unwrap();
+        let demand_c = AcquisitionDemand {
+            consumer: "consumer-c".into(),
+            operation: "cold-retained-using-demand".into(),
+        };
+        let workspace_c = workspace_with_identity(
+            &stage_c,
+            WorkspaceIdentity {
+                root_identity: "fixture-physical-root".into(),
+                relative_target: "stage-c".into(),
+            },
+        );
+        let (url_c, server_c) = serve(b"CCCC").await;
+        let result_c = tokio::time::timeout(
+            timeout,
+            consumer_c.acquire_http(
+                AcquisitionHttpRequest {
+                    demand: demand_c.clone(),
+                    manifest: manifest("payload.bin"),
+                    workspace: workspace_c,
+                    sources: vec![AcquisitionHttpSource {
+                        url: url_c,
+                        authorization: None,
+                    }],
+                    retry: retry(),
+                },
+                reqwest::Client::new(),
+                Box::new(Host),
+                |_use_handle| async move {
+                    Err::<((), Value), PumasError>(PumasError::Other(
+                        "injected consumer preparation failure".into(),
+                    ))
+                },
+                |(), _receipt| async move { Ok::<(), PumasError>(()) },
+            ),
+        )
+        .await
+        .expect("cold retained fixture acquisition must finish");
+        assert!(
+            matches!(result_c, Err(PumasError::Other(message)) if message == "injected consumer preparation failure")
+        );
+        tokio::time::timeout(timeout, server_c)
+            .await
+            .expect("cold retained fixture source must finish")
+            .expect("cold retained fixture source must not panic");
+        let records_c = first_store.acquisitions().unwrap();
+        assert_eq!(records_c.len(), 1);
+        let cold_record = records_c
+            .values()
+            .find(|record| record.demand == demand_c)
+            .unwrap()
+            .clone();
+        assert!(matches!(&cold_record.phase, AcquisitionPhase::Using { .. }));
+        assert!(first_store
+            .consumer_receipt(cold_record.id)
+            .unwrap()
+            .is_none());
+        assert_eq!(std::fs::read(stage_c.join("payload.bin")).unwrap(), b"CCCC");
+        tokio::time::timeout(timeout, consumer_c.shutdown())
+            .await
+            .expect("initial cold-fixture consumer must shut down")
+            .unwrap();
+        tokio::time::timeout(timeout, first_service.shutdown())
+            .await
+            .expect("initial cold-fixture service must shut down")
+            .unwrap();
+        drop(consumer_c);
+        drop(first_service);
+        drop(first_store);
+
+        let store = Arc::new(AcquisitionStore::new(temp.path()));
+        assert_eq!(store.acquisitions().unwrap(), records_c);
+        let service = Arc::new(AcquisitionService::new(store.clone()));
+        let consumer_a = Arc::new(service.open_consumer("consumer-a").unwrap());
+        let consumer_b = Arc::new(service.open_consumer("consumer-b").unwrap());
+
+        let demand_b = AcquisitionDemand {
+            consumer: "consumer-b".into(),
+            operation: "live-using-demand".into(),
+        };
+        let b_reservation_dropped = Arc::new(AtomicBool::new(false));
+        let b_root = crate::platform::capability_fs::open_directory(&stage_b).unwrap();
+        let b_check = b_root.try_clone().unwrap();
+        let b_expected_root = std::fs::canonicalize(&stage_b).unwrap();
+        let b_source_root = stage_b.clone();
+        let b_grant = AcquisitionWorkspace::from_capability(
+            b_root,
+            WorkspaceIdentity {
+                root_identity: "fixture-physical-root".into(),
+                relative_target: "stage-b".into(),
+            },
+            Arc::new(ReservationDropProbe(b_reservation_dropped.clone())),
+            move || {
+                if std::fs::canonicalize(&b_source_root)? != b_expected_root
+                    || !b_check.dir_metadata()?.is_dir()
+                {
+                    return Err(invalid("Fixture B grant changed"));
+                }
+                Ok(())
+            },
+        )
+        .unwrap();
+        let (url_b, server_b) = serve(b"BBBB").await;
+        let (b_effect_started_sender, b_effect_started) = tokio::sync::oneshot::channel();
+        let (b_effect_release_sender, b_effect_release_receiver) = std::sync::mpsc::channel();
+        let (b_read_sender, b_read_result) = tokio::sync::oneshot::channel();
+        let (b_callback_continue_sender, b_callback_continue_receiver) =
+            tokio::sync::oneshot::channel();
+        let b_consumer = consumer_b.clone();
+        let b_task = tokio::spawn(async move {
+            b_consumer
+                .acquire_http(
+                    AcquisitionHttpRequest {
+                        demand: demand_b,
+                        manifest: manifest("payload.bin"),
+                        workspace: b_grant,
+                        sources: vec![AcquisitionHttpSource {
+                            url: url_b,
+                            authorization: None,
+                        }],
+                        retry: retry(),
+                    },
+                    reqwest::Client::new(),
+                    Box::new(Host),
+                    move |use_handle| async move {
+                        let expected_id = use_handle.record().id;
+                        let mut verified_file = use_handle.open_file(0).await?;
+                        let read_effect = use_handle.run_blocking(
+                            "held verified read during unrelated withdrawal",
+                            move || {
+                                let _ = b_effect_started_sender.send(());
+                                b_effect_release_receiver.recv().map_err(|error| {
+                                    PumasError::Other(format!("B read gate closed: {error}"))
+                                })?;
+                                let mut bytes = Vec::new();
+                                std::io::Read::read_to_end(&mut verified_file, &mut bytes)
+                                    .map_err(|error| PumasError::Other(error.to_string()))?;
+                                b_read_sender.send(bytes).map_err(|_| {
+                                    PumasError::Other("B read observer disappeared".into())
+                                })?;
+                                Ok(())
+                            },
+                        );
+                        tokio::pin!(read_effect);
+                        let mut callback_continue = b_callback_continue_receiver;
+                        tokio::select! {
+                            result = &mut read_effect => {
+                                result?;
+                                callback_continue.await.map_err(|_| {
+                                    PumasError::Other("B consumer callback was not released".into())
+                                })?;
+                            }
+                            signal = &mut callback_continue => {
+                                signal.map_err(|_| {
+                                    PumasError::Other("B consumer callback was not released".into())
+                                })?;
+                                read_effect.await?;
+                            }
+                        }
+                        assert_eq!(use_handle.record().id, expected_id);
+                        Ok::<((), Value), PumasError>(((), serde_json::json!({"consumer": "B"})))
+                    },
+                    |(), _receipt| async move { Ok::<String, PumasError>("published-B".into()) },
+                )
+                .await
+        });
+
+        tokio::time::timeout(timeout, b_effect_started)
+            .await
+            .expect("B must enter its registered verified read")
+            .expect("B read observer must remain connected");
+        assert!(!b_reservation_dropped.load(Ordering::SeqCst));
+
+        let demand_a = AcquisitionDemand {
+            consumer: "consumer-a".into(),
+            operation: "withdraw-while-other-use-is-live".into(),
+        };
+        let workspace_a = workspace_with_identity(
+            &stage_a,
+            WorkspaceIdentity {
+                root_identity: "fixture-physical-root".into(),
+                relative_target: "stage-a".into(),
+            },
+        );
+        let (url_a, server_a) = serve(b"AAAA").await;
+        let (a_use_sender, a_use_receiver) = tokio::sync::oneshot::channel();
+        let (a_callback_continue_sender, a_callback_continue_receiver) =
+            tokio::sync::oneshot::channel();
+        let a_consumer = consumer_a.clone();
+        let a_task = tokio::spawn(async move {
+            a_consumer
+                .acquire_http(
+                    AcquisitionHttpRequest {
+                        demand: demand_a,
+                        manifest: manifest("payload.bin"),
+                        workspace: workspace_a,
+                        sources: vec![AcquisitionHttpSource {
+                            url: url_a,
+                            authorization: None,
+                        }],
+                        retry: retry(),
+                    },
+                    reqwest::Client::new(),
+                    Box::new(Host),
+                    move |use_handle| async move {
+                        a_use_sender.send(use_handle).map_err(|_| {
+                            PumasError::Other("A withdrawal observer disappeared".into())
+                        })?;
+                        a_callback_continue_receiver
+                            .await
+                            .map_err(|_| PumasError::Other("A callback was not released".into()))?;
+                        Err::<((), Value), PumasError>(PumasError::DownloadCancelled)
+                    },
+                    |(), _receipt| async move { Ok::<(), PumasError>(()) },
+                )
+                .await
+        });
+        let a_use = tokio::time::timeout(timeout, a_use_receiver)
+            .await
+            .expect("A must reach its public Using callback")
+            .expect("A use handle must remain available for withdrawal");
+
+        let before = store.acquisitions().unwrap();
+        assert_eq!(before.len(), 3);
+        let record_a = before
+            .values()
+            .find(|record| {
+                record.demand
+                    == AcquisitionDemand {
+                        consumer: "consumer-a".into(),
+                        operation: "withdraw-while-other-use-is-live".into(),
+                    }
+            })
+            .unwrap()
+            .clone();
+        let record_b = before
+            .values()
+            .find(|record| {
+                record.demand
+                    == AcquisitionDemand {
+                        consumer: "consumer-b".into(),
+                        operation: "live-using-demand".into(),
+                    }
+            })
+            .unwrap()
+            .clone();
+        assert_eq!(before.get(&cold_record.id), Some(&cold_record));
+        assert!(matches!(&record_a.phase, AcquisitionPhase::Using { .. }));
+        assert!(matches!(&record_b.phase, AcquisitionPhase::Using { .. }));
+        assert!(matches!(&cold_record.phase, AcquisitionPhase::Using { .. }));
+        for record in [&record_a, &record_b, &cold_record] {
+            assert!(store.consumer_receipt(record.id).unwrap().is_none());
+        }
+        assert_eq!(std::fs::read(stage_a.join("payload.bin")).unwrap(), b"AAAA");
+        assert_eq!(std::fs::read(stage_b.join("payload.bin")).unwrap(), b"BBBB");
+        assert_eq!(std::fs::read(stage_c.join("payload.bin")).unwrap(), b"CCCC");
+        assert_eq!(std::fs::read(&sentinel_a).unwrap(), sentinel_a_before);
+        assert_eq!(std::fs::read(&sentinel_b).unwrap(), sentinel_b_before);
+        assert_eq!(std::fs::read(&sentinel_c).unwrap(), sentinel_c_before);
+
+        let cleanup_path = stage_a.join("payload.bin");
+        tokio::time::timeout(
+            timeout,
+            a_use.withdraw_after_cleanup(move || {
+                std::fs::remove_file(cleanup_path)
+                    .map_err(|error| PumasError::Other(error.to_string()))?;
+                Ok(())
+            }),
+        )
+        .await
+        .expect("A's withdrawal must finish while B remains blocked")
+        .unwrap();
+
+        let after_a = store.acquisitions().unwrap();
+        let mut expected_a = record_a.clone();
+        expected_a.phase = AcquisitionPhase::Withdrawn;
+        expected_a.files.clear();
+        assert_eq!(after_a.get(&record_a.id), Some(&expected_a));
+        assert_eq!(after_a.get(&record_b.id), Some(&record_b));
+        assert_eq!(after_a.get(&cold_record.id), Some(&cold_record));
+        assert!(store.consumer_receipt(record_a.id).unwrap().is_none());
+        assert!(store.consumer_receipt(record_b.id).unwrap().is_none());
+        assert!(store.consumer_receipt(cold_record.id).unwrap().is_none());
+        assert!(!stage_a.join("payload.bin").exists());
+        assert_eq!(std::fs::read(stage_b.join("payload.bin")).unwrap(), b"BBBB");
+        assert_eq!(std::fs::read(stage_c.join("payload.bin")).unwrap(), b"CCCC");
+        assert_eq!(std::fs::read(&sentinel_a).unwrap(), sentinel_a_before);
+        assert_eq!(std::fs::read(&sentinel_b).unwrap(), sentinel_b_before);
+        assert_eq!(std::fs::read(&sentinel_c).unwrap(), sentinel_c_before);
+        assert!(
+            !b_reservation_dropped.load(Ordering::SeqCst),
+            "withdrawing A must not release B's live workspace reservation"
+        );
+
+        a_callback_continue_sender.send(()).unwrap();
+        let a_result = tokio::time::timeout(timeout, a_task)
+            .await
+            .expect("A acquisition must finish after its callback is released")
+            .expect("A acquisition task must not panic");
+        assert!(matches!(a_result, Err(PumasError::DownloadCancelled)));
+        tokio::time::timeout(timeout, consumer_a.shutdown())
+            .await
+            .expect("A consumer scope must close while B remains held")
+            .unwrap();
+        tokio::time::timeout(timeout, server_a)
+            .await
+            .expect("A local HTTP source must finish")
+            .expect("A local HTTP source must not panic");
+        assert!(!b_reservation_dropped.load(Ordering::SeqCst));
+
+        b_effect_release_sender.send(()).unwrap();
+        let b_read = tokio::time::timeout(timeout, b_read_result)
+            .await
+            .expect("B registered read must finish after release")
+            .expect("B read observer must remain connected");
+        assert_eq!(b_read, b"BBBB");
+        b_callback_continue_sender.send(()).unwrap();
+        let b_result = tokio::time::timeout(timeout, b_task)
+            .await
+            .expect("B consumer must settle normally")
+            .expect("B acquisition task must not panic")
+            .unwrap();
+        assert_eq!(b_result, "published-B");
+        assert!(b_reservation_dropped.load(Ordering::SeqCst));
+        tokio::time::timeout(timeout, consumer_b.shutdown())
+            .await
+            .expect("B consumer scope must close")
+            .unwrap();
+        tokio::time::timeout(timeout, server_b)
+            .await
+            .expect("B local HTTP source must finish")
+            .expect("B local HTTP source must not panic");
+
+        let final_records = store.acquisitions().unwrap();
+        assert_eq!(final_records.get(&record_a.id), Some(&expected_a));
+        let mut expected_b = record_b.clone();
+        if let AcquisitionPhase::Using { lease } = &record_b.phase {
+            expected_b.phase = AcquisitionPhase::Adopted { lease: *lease };
+        } else {
+            unreachable!("B snapshot must be in Using");
+        }
+        assert_eq!(final_records.get(&record_b.id), Some(&expected_b));
+        assert_eq!(final_records.get(&cold_record.id), Some(&cold_record));
+        assert!(store.consumer_receipt(record_a.id).unwrap().is_none());
+        assert!(store.consumer_receipt(record_b.id).unwrap().is_some());
+        assert!(store.consumer_receipt(cold_record.id).unwrap().is_none());
+        assert_eq!(std::fs::read(stage_b.join("payload.bin")).unwrap(), b"BBBB");
+        assert_eq!(std::fs::read(stage_c.join("payload.bin")).unwrap(), b"CCCC");
+        assert_eq!(std::fs::read(&sentinel_a).unwrap(), sentinel_a_before);
+        assert_eq!(std::fs::read(&sentinel_b).unwrap(), sentinel_b_before);
+        assert_eq!(std::fs::read(&sentinel_c).unwrap(), sentinel_c_before);
+        tokio::time::timeout(timeout, service.shutdown())
+            .await
+            .expect("shared acquisition service must drain")
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn same_task_key_cancel_replacement_rejects_stale_acquisition_readiness() {
         use crate::acquisition::task_custody::{CancelTransition, TaskRole};
 

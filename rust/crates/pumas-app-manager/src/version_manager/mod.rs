@@ -4244,6 +4244,341 @@ mod tests {
 
     #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     #[tokio::test]
+    async fn native_independent_acquisition_installs_and_repeated_shutdown_preserves_receipt() {
+        use futures::FutureExt;
+        use sha2::Digest;
+        use std::os::unix::fs::MetadataExt;
+
+        type SnapshotEntry = (PathBuf, u64, u64, u32, i64, i64, i64, i64, Vec<u8>);
+
+        struct AbortSourceOnDrop(tokio::task::JoinHandle<()>);
+
+        impl Drop for AbortSourceOnDrop {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
+
+        fn snapshot_tree(root: &Path) -> Vec<SnapshotEntry> {
+            walkdir::WalkDir::new(root)
+                .sort_by_file_name()
+                .into_iter()
+                .map(|entry| {
+                    let entry = entry.unwrap();
+                    let metadata = std::fs::symlink_metadata(entry.path()).unwrap();
+                    assert!(!metadata.file_type().is_symlink());
+                    assert!(metadata.is_file() || metadata.is_dir());
+                    (
+                        entry.path().strip_prefix(root).unwrap().to_path_buf(),
+                        metadata.dev(),
+                        metadata.ino(),
+                        metadata.mode(),
+                        metadata.mtime(),
+                        metadata.mtime_nsec(),
+                        metadata.ctime(),
+                        metadata.ctime_nsec(),
+                        if metadata.is_file() {
+                            std::fs::read(entry.path()).unwrap()
+                        } else {
+                            Vec::new()
+                        },
+                    )
+                })
+                .collect()
+        }
+
+        let root = TempDir::new().unwrap();
+        std::fs::create_dir_all(root.path().join("launcher-data")).unwrap();
+        let sentinel_path = root.path().join("launcher-data/authored-sentinel");
+        std::fs::write(&sentinel_path, b"keep native authored state").unwrap();
+
+        let acquisition = Arc::new(AcquisitionService::new(Arc::new(
+            pumas_library::acquisition::AcquisitionStore::new(root.path()),
+        )));
+        let store = acquisition.store().clone();
+        let mut manager =
+            VersionManager::new_with_acquisition(root.path(), AppId::LlamaCpp, acquisition.clone())
+                .await
+                .unwrap();
+        let (source, observed, release, base_url, mut requests, stop_source) =
+            native_archive_fixture_with_request_monitor(root.path()).await;
+        let mut source_task = AbortSourceOnDrop(source);
+        let mut release = Some(release);
+        let mut stop_source = Some(stop_source);
+        let exercise = std::panic::AssertUnwindSafe(async {
+            manager.github_client = Arc::new(
+                GitHubClient::with_loopback_api(
+                    manager.cache_dir(),
+                    Duration::from_secs(3600),
+                    base_url,
+                )
+                .unwrap(),
+            );
+
+            let mut updates = tokio::time::timeout(
+                Duration::from_secs(15),
+                manager.install_version("b1234+cpu"),
+            )
+            .await
+            .expect("native installation admission must finish within its deadline")
+            .unwrap();
+            tokio::time::timeout(Duration::from_secs(5), observed)
+                .await
+                .expect("native archive request must reach the controlled fixture")
+                .unwrap();
+            release.take().unwrap().send(true).unwrap();
+            tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    match updates
+                        .recv()
+                        .await
+                        .expect("native installation must settle")
+                    {
+                        ProgressUpdate::Completed { success: true } => break,
+                        ProgressUpdate::Completed { success: false } => {
+                            panic!("native installation reported unsuccessful completion")
+                        }
+                        ProgressUpdate::Error { message } => {
+                            panic!("native installation failed: {message}")
+                        }
+                        _ => {}
+                    }
+                }
+            })
+            .await
+            .expect("native installation must report terminal progress");
+
+            let destination = manager.version_path("b1234+cpu");
+            let launcher = destination.join("bin/llama-server");
+            let output = tokio::time::timeout(
+                Duration::from_secs(5),
+                tokio::process::Command::new(&launcher)
+                    .kill_on_drop(true)
+                    .current_dir(root.path())
+                    .output(),
+            )
+            .await
+            .expect("installed native launcher must finish within its deadline")
+            .unwrap();
+            assert!(output.status.success());
+            assert_eq!(output.stdout, b"native-fixture");
+            let metadata = manager
+                .metadata_manager
+                .get_installed_version("b1234+cpu", Some(AppId::LlamaCpp))
+                .unwrap()
+                .expect("successful native installation must publish metadata");
+            assert_eq!(metadata.path, "b1234+cpu");
+            assert_eq!(metadata.release_tag, "b1234+cpu");
+            let metadata_value = serde_json::to_value(&metadata).unwrap();
+
+            let records = store.acquisitions().unwrap();
+            assert_eq!(records.len(), 1);
+            let (acquisition_id, record) = records.iter().next().unwrap();
+            assert_eq!(record.demand.consumer, "runtime.llama.cpp");
+            assert!(matches!(
+                &record.phase,
+                pumas_library::acquisition::AcquisitionPhase::Adopted { .. }
+            ));
+            let store_path = root.path().join("downloads.json");
+            let store_bytes = std::fs::read(&store_path).unwrap();
+            let document: serde_json::Value = serde_json::from_slice(&store_bytes).unwrap();
+            let receipt: pumas_library::acquisition::AcquisitionConsumerReceipt =
+                serde_json::from_value(
+                    document["consumer_receipts"][acquisition_id.to_string()].clone(),
+                )
+                .expect("successful native publication must retain its completion receipt");
+            assert_eq!(receipt.owner, "runtime.llama.cpp");
+            assert_eq!(receipt.acquisition_id, acquisition_id.to_string());
+            assert_eq!(receipt.demand, record.demand);
+            assert_eq!(receipt.manifest, record.manifest);
+            assert_eq!(receipt.workspace, record.workspace);
+            assert_eq!(receipt.verified_files, record.files);
+            if let pumas_library::acquisition::AcquisitionPhase::Adopted { lease } = &record.phase {
+                assert_eq!(receipt.use_lease, lease.to_string());
+            } else {
+                unreachable!("adoption phase was checked above");
+            }
+            assert_eq!(receipt.payload["metadata"], metadata_value);
+            assert_eq!(
+                receipt.payload["launcher_relative_path"],
+                "bin/llama-server"
+            );
+            assert_eq!(
+                receipt.payload["launcher_sha256"],
+                format!(
+                    "{:x}",
+                    sha2::Sha256::digest(std::fs::read(&launcher).unwrap())
+                )
+            );
+            assert!(!manager.is_installing().await);
+
+            let mut document_keys: Vec<_> = document
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            document_keys.sort_unstable();
+            assert_eq!(
+                document_keys,
+                ["acquisitions", "consumer_receipts", "schema_version"]
+            );
+            assert_eq!(document["acquisitions"].as_object().unwrap().len(), 1);
+            assert_eq!(document["consumer_receipts"].as_object().unwrap().len(), 1);
+            let model_db = root.path().join("shared-resources/models/models.db");
+            for suffix in ["", "-wal", "-shm", "-journal"] {
+                assert!(
+                    !model_db
+                        .with_file_name(format!("models.db{suffix}"))
+                        .exists(),
+                    "independent runtime acquisition created model index artifact {}",
+                    model_db
+                        .with_file_name(format!("models.db{suffix}"))
+                        .display()
+                );
+            }
+            assert!(!root.path().join("launcher-data/downloads.json").exists());
+            assert_eq!(
+                std::fs::read(&sentinel_path).unwrap(),
+                b"keep native authored state"
+            );
+
+            let before_shutdown = snapshot_tree(root.path());
+            Ok::<_, ()>((
+                before_shutdown,
+                store_path,
+                store_bytes,
+                *acquisition_id,
+                receipt,
+            ))
+        })
+        .catch_unwind()
+        .await;
+
+        if let Some(release) = release.take() {
+            let _ = release.send(true);
+        }
+
+        let manager_shutdown_first =
+            tokio::time::timeout(Duration::from_secs(8), manager.shutdown_installations()).await;
+        let manager_shutdown_second =
+            tokio::time::timeout(Duration::from_secs(8), manager.shutdown_installations()).await;
+        let acquisition_shutdown_first =
+            tokio::time::timeout(Duration::from_secs(8), acquisition.shutdown()).await;
+        let acquisition_shutdown_second =
+            tokio::time::timeout(Duration::from_secs(8), acquisition.shutdown()).await;
+
+        let (before_shutdown, exercise_panic) = match exercise {
+            Ok(Ok(outcome)) => (Some(outcome), None),
+            Ok(Err(())) => unreachable!("the exercise closure only returns a success value"),
+            Err(panic) => (None, Some(panic)),
+        };
+
+        let post_shutdown =
+            if let Some((before_shutdown, store_path, store_bytes, acquisition_id, receipt)) =
+                &before_shutdown
+            {
+                Some(
+                    std::panic::AssertUnwindSafe(async {
+                        assert!(!manager.is_installing().await);
+                        assert!(manager.installation_tasks.lock().unwrap().tasks.is_empty());
+
+                        assert!(matches!(
+                            acquisition.open_consumer("post-shutdown-probe"),
+                            Err(PumasError::DownloadLifecycleClosed)
+                        ));
+                        assert!(matches!(
+                            tokio::time::timeout(
+                                Duration::from_secs(3),
+                                manager.install_version("b5678+cpu")
+                            )
+                            .await
+                            .expect("closed installation admission must return promptly"),
+                            Err(PumasError::InstallationFailed { message })
+                                if message == "Version manager is shutting down"
+                        ));
+                        assert_eq!(
+                        snapshot_tree(root.path()),
+                        *before_shutdown,
+                        "repeated shutdown or closed admission changed installed or authored state"
+                    );
+                        assert_eq!(std::fs::read(store_path).unwrap(), *store_bytes);
+                        let after_shutdown: serde_json::Value =
+                            serde_json::from_slice(&std::fs::read(store_path).unwrap()).unwrap();
+                        assert_eq!(
+                            after_shutdown["consumer_receipts"][acquisition_id.to_string()],
+                            serde_json::to_value(receipt).unwrap()
+                        );
+                    })
+                    .catch_unwind()
+                    .await,
+                )
+            } else {
+                None
+            };
+
+        if let Some(stop_source) = stop_source.take() {
+            let _ = stop_source.send(());
+        }
+        let source_result = match tokio::time::timeout(Duration::from_secs(5), &mut source_task.0)
+            .await
+        {
+            Ok(result) => result.map_err(|error| error.to_string()),
+            Err(_) => {
+                source_task.0.abort();
+                match tokio::time::timeout(Duration::from_secs(5), &mut source_task.0).await {
+                    Ok(Ok(())) => {
+                        Err("controlled native source timed out, then stopped after abort".into())
+                    }
+                    Ok(Err(error)) if error.is_cancelled() => Err(
+                        "controlled native source timed out, then was aborted and joined".into(),
+                    ),
+                    Ok(Err(_)) => {
+                        Err("controlled native source timed out, then failed after abort".into())
+                    }
+                    Err(_) => Err("controlled native source abort join also timed out".into()),
+                }
+            }
+        };
+        let observed_requests: Vec<_> = std::iter::from_fn(|| requests.try_recv().ok()).collect();
+
+        let manager_shutdown_outcomes =
+            [manager_shutdown_first, manager_shutdown_second].map(|result| format!("{result:?}"));
+        let acquisition_shutdown_outcomes =
+            [acquisition_shutdown_first, acquisition_shutdown_second]
+                .map(|result| format!("{result:?}"));
+        assert_eq!(
+            manager_shutdown_outcomes,
+            ["Ok(Ok(()))", "Ok(Ok(()))"],
+            "both manager shutdown calls must finish and succeed"
+        );
+        assert_eq!(
+            acquisition_shutdown_outcomes,
+            ["Ok(Ok(()))", "Ok(Ok(()))"],
+            "both acquisition shutdown calls must finish and succeed"
+        );
+        assert!(
+            source_result.is_ok(),
+            "controlled native source must stop: {source_result:?}"
+        );
+        if let Some(panic) = exercise_panic {
+            std::panic::resume_unwind(panic);
+        }
+        if let Some(Err(panic)) = post_shutdown {
+            std::panic::resume_unwind(panic);
+        }
+        assert_eq!(
+            observed_requests,
+            [
+                "GET /repos/ggml-org/llama.cpp/releases/tags/b1234 HTTP/1.1",
+                "GET /archive HTTP/1.1",
+            ],
+            "shutdown or closed admission caused unexpected source traffic"
+        );
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
     async fn native_full_progress_channel_releases_on_cancel_and_shutdown_signals() {
         for shutdown_signal in [false, true] {
             let root = TempDir::new().unwrap();

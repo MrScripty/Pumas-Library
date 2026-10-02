@@ -59,6 +59,7 @@ bytes = { workspace = true }
 nix = { workspace = true }
 
 [dev-dependencies]
+pumas-library = { workspace = true, features = ["test-support"] }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 
 [target.'cfg(windows)'.dev-dependencies]

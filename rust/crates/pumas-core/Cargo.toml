@@ -43,6 +43,9 @@ tempfile = { workspace = true }
 walkdir = { workspace = true }
 fs2 = { workspace = true }
 
+# Portable logical-path collision comparison
+unicode-normalization = "=0.1.25"
+
 # Archive extraction
 flate2 = { workspace = true }
 tar = { workspace = true }

@@ -5,6 +5,7 @@
 
 use crate::version_manager::progress::ProgressUpdate;
 use crate::version_manager::state::VersionState;
+use futures::FutureExt;
 use pumas_library::config::{AppId, InstallationConfig};
 use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
 use pumas_library::models::InstallationStage;
@@ -15,6 +16,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -27,6 +29,11 @@ async fn path_exists(path: &Path) -> Result<bool> {
 }
 
 /// Ollama version manager specialized for binary-only installation.
+///
+/// Await construction and retain an owner until `shutdown` completes before
+/// dropping its storage or stopping the Tokio runtime. Clones share admission
+/// and the shutdown receipt; dropping an operation waiter does not cancel it.
+#[derive(Clone)]
 pub struct OllamaVersionManager {
     /// Root directory for launcher data.
     launcher_root: PathBuf,
@@ -44,6 +51,14 @@ pub struct OllamaVersionManager {
     install_lock: Arc<Mutex<()>>,
     /// Currently installing tag.
     installing_tag: Arc<RwLock<Option<String>>>,
+    shutdown_flag: Arc<AtomicBool>,
+    activities: Arc<StdMutex<OllamaActivities>>,
+}
+
+#[derive(Default)]
+struct OllamaActivities {
+    tasks: super::InstallationTasks,
+    completion: Option<super::InstallationShutdown>,
 }
 
 impl OllamaVersionManager {
@@ -65,7 +80,103 @@ impl OllamaVersionManager {
             cancel_flag: Arc::new(AtomicBool::new(false)),
             install_lock: Arc::new(Mutex::new(())),
             installing_tag: Arc::new(RwLock::new(None)),
+            shutdown_flag: Arc::new(AtomicBool::new(false)),
+            activities: Arc::new(StdMutex::new(OllamaActivities::default())),
         })
+    }
+
+    fn ensure_open(&self) -> Result<()> {
+        if self.shutdown_flag.load(Ordering::SeqCst) {
+            return Err(PumasError::Other(
+                "Ollama version manager is shutting down".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn owned_activity(
+        &self,
+        operation: impl std::future::Future<Output = Result<()>> + Send + 'static,
+    ) -> Result<()> {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        {
+            let mut activities = self
+                .activities
+                .lock()
+                .map_err(|_| PumasError::Other("Ollama activity registry poisoned".into()))?;
+            self.ensure_open()?;
+            activities.tasks.harvest_finished();
+            let task = tokio::spawn(async move {
+                let result = operation.await;
+                let terminal = result.as_ref().map(|_| ()).map_err(ToString::to_string);
+                let _ = sender.send(result);
+                terminal
+            });
+            activities.tasks.tasks.push(task);
+        }
+        receiver.await.map_err(|error| {
+            PumasError::Other(format!("Ollama activity lost its result: {error}"))
+        })?
+    }
+
+    async fn send_progress(&self, sender: &mpsc::Sender<ProgressUpdate>, update: ProgressUpdate) {
+        tokio::select! {
+            _ = sender.send(update) => {},
+            _ = super::wait_for_install_cancel(self.shutdown_flag.clone()) => {},
+        }
+    }
+
+    /// Close mutation admission, request installation cancellation, and drain
+    /// admitted install/removal activities before draining state mutations.
+    /// Started work is joined, including work whose waiter was cancelled.
+    /// Repeated calls retain failures, including task panics. Existing network
+    /// waits and filesystem settlement may delay shutdown; elapsed time never
+    /// substitutes for completion. Cancelled shutdown waiters may safely retry.
+    pub async fn shutdown(&self) -> Result<()> {
+        let completion = {
+            let mut activities = self
+                .activities
+                .lock()
+                .map_err(|_| PumasError::Other("Ollama activity registry poisoned".into()))?;
+            if let Some(completion) = &activities.completion {
+                completion.clone()
+            } else {
+                self.shutdown_flag.store(true, Ordering::SeqCst);
+                self.cancel_flag.store(true, Ordering::SeqCst);
+                let registered = std::mem::take(&mut activities.tasks);
+                let owner = self.clone();
+                let supervisor = tokio::spawn(async move {
+                    let mut failures = registered.failures;
+                    for task in registered.tasks {
+                        match task.await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(error)) => failures.push(error),
+                            Err(error) => failures.push(error.to_string()),
+                        }
+                    }
+                    if let Err(error) = owner.state.write().await.shutdown_mutations().await {
+                        failures.push(error.to_string());
+                    }
+                    if failures.is_empty() {
+                        Ok(())
+                    } else {
+                        Err(Arc::new(failures.join("; ")))
+                    }
+                });
+                let completion = async move {
+                    supervisor
+                        .await
+                        .unwrap_or_else(|error| Err(Arc::new(error.to_string())))
+                }
+                .boxed()
+                .shared();
+                activities.completion = Some(completion.clone());
+                completion
+            }
+        };
+        completion
+            .await
+            .map_err(|error| PumasError::Other(format!("Ollama shutdown failed: {error}")))
     }
 
     /// Get the versions directory.
@@ -178,17 +289,31 @@ impl OllamaVersionManager {
         tag: &str,
         progress_tx: Option<mpsc::Sender<ProgressUpdate>>,
     ) -> Result<()> {
+        let owner = self.clone();
+        let tag = tag.to_owned();
+        self.owned_activity(async move { owner.install_version_owned(&tag, progress_tx).await })
+            .await
+    }
+
+    async fn install_version_owned(
+        &self,
+        tag: &str,
+        progress_tx: Option<mpsc::Sender<ProgressUpdate>>,
+    ) -> Result<()> {
         // Acquire installation lock
         let _lock = self.install_lock.lock().await;
 
         // Set installing tag
         {
             let mut installing = self.installing_tag.write().await;
+            let _admission = self
+                .activities
+                .lock()
+                .map_err(|_| PumasError::Other("Ollama activity registry poisoned".into()))?;
+            self.ensure_open()?;
             *installing = Some(tag.to_string());
+            self.cancel_flag.store(false, Ordering::SeqCst);
         }
-
-        // Reset cancel flag
-        self.cancel_flag.store(false, Ordering::SeqCst);
 
         let result = self
             .install_version_internal(tag, progress_tx.clone())
@@ -202,11 +327,13 @@ impl OllamaVersionManager {
 
         // Send completion status
         if let Some(tx) = progress_tx {
-            let _ = tx
-                .send(ProgressUpdate::Completed {
+            self.send_progress(
+                &tx,
+                ProgressUpdate::Completed {
                     success: result.is_ok(),
-                })
-                .await;
+                },
+            )
+            .await;
         }
 
         result
@@ -231,12 +358,14 @@ impl OllamaVersionManager {
 
         // Send stage update
         if let Some(ref tx) = progress_tx {
-            let _ = tx
-                .send(ProgressUpdate::StageChanged {
+            self.send_progress(
+                tx,
+                ProgressUpdate::StageChanged {
                     stage: InstallationStage::Download,
                     message: format!("Fetching release {}", tag),
-                })
-                .await;
+                },
+            )
+            .await;
         }
 
         // Fetch releases and find the matching one
@@ -264,12 +393,14 @@ impl OllamaVersionManager {
         let archive_path = version_path.join(&asset.name);
 
         if let Some(ref tx) = progress_tx {
-            let _ = tx
-                .send(ProgressUpdate::StageChanged {
+            self.send_progress(
+                tx,
+                ProgressUpdate::StageChanged {
                     stage: InstallationStage::Download,
                     message: format!("Downloading {}", asset.name),
-                })
-                .await;
+                },
+            )
+            .await;
         }
 
         self.download_file(download_url, &archive_path, progress_tx.clone())
@@ -280,12 +411,14 @@ impl OllamaVersionManager {
 
         // Extract and set up
         if let Some(ref tx) = progress_tx {
-            let _ = tx
-                .send(ProgressUpdate::StageChanged {
+            self.send_progress(
+                tx,
+                ProgressUpdate::StageChanged {
                     stage: InstallationStage::Extract,
                     message: "Extracting binary".to_string(),
-                })
-                .await;
+                },
+            )
+            .await;
         }
 
         self.extract_binary(&archive_path, &version_path).await?;
@@ -297,12 +430,14 @@ impl OllamaVersionManager {
 
         // Record in metadata
         if let Some(ref tx) = progress_tx {
-            let _ = tx
-                .send(ProgressUpdate::StageChanged {
+            self.send_progress(
+                tx,
+                ProgressUpdate::StageChanged {
                     stage: InstallationStage::Setup,
                     message: "Recording installation".to_string(),
-                })
-                .await;
+                },
+            )
+            .await;
         }
 
         // Create metadata and update state
@@ -368,33 +503,53 @@ impl OllamaVersionManager {
             .await
             .map_err(|e| PumasError::io_with_path(e, dest))?;
 
-        use futures::StreamExt;
-        while let Some(chunk) = stream.next().await {
-            self.check_cancelled()?;
+        let transfer: Result<()> = async {
+            use futures::StreamExt;
+            while let Some(chunk) = stream.next().await {
+                self.check_cancelled()?;
 
-            let chunk = chunk.map_err(|e| PumasError::Network {
-                message: format!("Error reading download: {}", e),
-                cause: Some(e.to_string()),
-            })?;
+                let chunk = chunk.map_err(|e| PumasError::Network {
+                    message: format!("Error reading download: {}", e),
+                    cause: Some(e.to_string()),
+                })?;
 
-            file.write_all(&chunk)
-                .await
-                .map_err(|e| PumasError::io_with_path(e, dest))?;
+                file.write_all(&chunk)
+                    .await
+                    .map_err(|e| PumasError::io_with_path(e, dest))?;
 
-            downloaded += chunk.len() as u64;
+                downloaded += chunk.len() as u64;
 
-            if let Some(ref tx) = progress_tx {
-                let _ = tx
-                    .send(ProgressUpdate::Download {
-                        downloaded_bytes: downloaded,
-                        total_bytes: total_size,
-                        speed_bytes_per_sec: None,
-                    })
+                if let Some(ref tx) = progress_tx {
+                    self.send_progress(
+                        tx,
+                        ProgressUpdate::Download {
+                            downloaded_bytes: downloaded,
+                            total_bytes: total_size,
+                            speed_bytes_per_sec: None,
+                        },
+                    )
                     .await;
+                }
             }
-        }
 
-        Ok(())
+            Ok(())
+        }
+        .await;
+        // Settle this activity's existing file writes before its terminal
+        // receipt, including cancellation/error exits. Dropping Tokio File
+        // alone can leave blocking writes active after wrapper shutdown.
+        let settlement = file
+            .flush()
+            .await
+            .map_err(|error| PumasError::io_with_path(error, dest));
+        drop(file.into_std().await);
+        match (transfer, settlement) {
+            (result, Ok(())) => result,
+            (Ok(()), Err(error)) => Err(error),
+            (Err(error), Err(settlement)) => Err(PumasError::Other(format!(
+                "{error}; Ollama file settlement failed: {settlement}"
+            ))),
+        }
     }
 
     /// Extract the binary from archive.
@@ -687,6 +842,7 @@ impl OllamaVersionManager {
     /// Set active version.
     pub async fn set_active_version(&self, tag: &str) -> Result<()> {
         let mut state = self.state.write().await;
+        self.ensure_open()?;
         state.set_active_version(tag).await?;
         Ok(())
     }
@@ -700,12 +856,22 @@ impl OllamaVersionManager {
     /// Set default version.
     pub async fn set_default_version(&self, tag: Option<&str>) -> Result<()> {
         let mut state = self.state.write().await;
+        self.ensure_open()?;
         state.set_default_version(tag).await?;
         Ok(())
     }
 
     /// Uninstall a version.
     pub async fn uninstall_version(&self, tag: &str) -> Result<()> {
+        let owner = self.clone();
+        let tag = tag.to_owned();
+        self.owned_activity(async move { owner.uninstall_version_owned(&tag).await })
+            .await
+    }
+
+    async fn uninstall_version_owned(&self, tag: &str) -> Result<()> {
+        let _install = self.install_lock.lock().await;
+        self.ensure_open()?;
         let version_path = self.version_path(tag);
 
         if path_exists(&version_path).await? {
@@ -744,6 +910,201 @@ impl OllamaVersionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn test_manager() -> (OllamaVersionManager, tempfile::TempDir) {
+        let root = tempfile::tempdir().unwrap();
+        let metadata = Arc::new(MetadataManager::new(root.path()));
+        metadata.ensure_directories().unwrap();
+        let github = Arc::new(GitHubClient::new(root.path().join("launcher-data/cache")).unwrap());
+        let manager = OllamaVersionManager::new(root.path().to_owned(), metadata, github)
+            .await
+            .unwrap();
+        std::fs::create_dir_all(manager.version_path("v1")).unwrap();
+        std::fs::write(manager.get_binary_path("v1"), "complete").unwrap();
+        manager
+            .state
+            .write()
+            .await
+            .add_installed_version(
+                "v1",
+                InstalledVersionMetadata {
+                    path: "v1".into(),
+                    release_tag: "v1".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        (manager, root)
+    }
+
+    fn single_blocking_worker_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .max_blocking_threads(1)
+            .build()
+            .unwrap()
+    }
+
+    async fn occupy_blocking_worker() -> (std::sync::mpsc::Sender<()>, tokio::task::JoinHandle<()>)
+    {
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker = tokio::task::spawn_blocking(move || {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        entered_rx.await.unwrap();
+        (release_tx, worker)
+    }
+
+    #[test]
+    fn ollama_wrapper_shutdown_drains_cancelled_state_mutation_and_retains_outcome() {
+        single_blocking_worker_runtime().block_on(async {
+            for fail_mutation in [false, true] {
+                let (manager, root) = test_manager().await;
+                let state_owner = manager.state.read().await.mutation_tasks();
+                let (release, blocker) = occupy_blocking_worker().await;
+                let selecting = manager.clone();
+                let waiter =
+                    tokio::spawn(async move { selecting.set_default_version(Some("v1")).await });
+                tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                    while !state_owner.has_active_tasks() {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                waiter.abort();
+                assert!(waiter.await.unwrap_err().is_cancelled());
+                if fail_mutation {
+                    let path = root
+                        .path()
+                        .join("launcher-data/metadata/versions-ollama.json");
+                    std::fs::remove_file(&path).unwrap();
+                    std::fs::create_dir(&path).unwrap();
+                }
+                let owner = manager.clone();
+                let mut shutdown = tokio::spawn(async move { owner.shutdown().await });
+                assert!(
+                    tokio::time::timeout(std::time::Duration::from_millis(30), &mut shutdown)
+                        .await
+                        .is_err()
+                );
+                shutdown.abort();
+                assert!(shutdown.await.unwrap_err().is_cancelled());
+                release.send(()).unwrap();
+                blocker.await.unwrap();
+                let outcome = manager.shutdown().await.map_err(|error| error.to_string());
+                assert_eq!(outcome.is_err(), fail_mutation);
+                if fail_mutation {
+                    assert!(outcome
+                        .as_ref()
+                        .unwrap_err()
+                        .contains("versions-ollama.json"));
+                } else {
+                    assert_eq!(
+                        MetadataManager::new(root.path())
+                            .load_versions(Some(AppId::Ollama))
+                            .unwrap()
+                            .default_version
+                            .as_deref(),
+                        Some("v1")
+                    );
+                }
+                assert_eq!(
+                    manager.shutdown().await.map_err(|error| error.to_string()),
+                    outcome
+                );
+                assert!(manager.set_active_version("v1").await.is_err());
+                assert!(manager.set_default_version(None).await.is_err());
+                assert!(manager.install_version("late", None).await.is_err());
+                assert!(manager.uninstall_version("v1").await.is_err());
+                assert!(manager.get_binary_path("v1").exists());
+                assert!(!manager.version_path("late").exists());
+            }
+        });
+    }
+
+    #[test]
+    fn ollama_wrapper_shutdown_settles_removal_after_waiter_cancellation() {
+        single_blocking_worker_runtime().block_on(async {
+            for fail_removal in [false, true] {
+                let (manager, root) = test_manager().await;
+                if fail_removal {
+                    std::fs::remove_dir_all(manager.version_path("v1")).unwrap();
+                    std::fs::write(manager.version_path("v1"), "retained").unwrap();
+                }
+                let (release, blocker) = occupy_blocking_worker().await;
+                let removing = manager.clone();
+                let waiter = tokio::spawn(async move { removing.uninstall_version("v1").await });
+                tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                    while manager.install_lock.try_lock().is_ok() {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                waiter.abort();
+                assert!(waiter.await.unwrap_err().is_cancelled());
+                let shutdown = manager.shutdown();
+                tokio::pin!(shutdown);
+                assert!(
+                    tokio::time::timeout(std::time::Duration::from_millis(30), &mut shutdown)
+                        .await
+                        .is_err()
+                );
+                assert!(manager.version_path("v1").exists());
+                release.send(()).unwrap();
+                blocker.await.unwrap();
+                let outcome = shutdown.await.map_err(|error| error.to_string());
+                assert_eq!(outcome.is_err(), fail_removal);
+                assert_eq!(manager.version_path("v1").exists(), fail_removal);
+                assert_eq!(
+                    MetadataManager::new(root.path())
+                        .get_installed_version("v1", Some(AppId::Ollama))
+                        .unwrap()
+                        .is_some(),
+                    fail_removal
+                );
+                assert_eq!(
+                    manager.shutdown().await.map_err(|error| error.to_string()),
+                    outcome
+                );
+                assert!(manager.uninstall_version("v1").await.is_err());
+            }
+        });
+    }
+
+    #[tokio::test]
+    async fn ollama_wrapper_shutdown_rejects_queued_install_before_cancellation_reset() {
+        let (manager, _root) = test_manager().await;
+        let held = manager.install_lock.lock().await;
+        let installing = manager.clone();
+        let waiter = tokio::spawn(async move { installing.install_version("queued", None).await });
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while manager.activities.lock().unwrap().tasks.tasks.is_empty() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        let shutdown = manager.shutdown();
+        tokio::pin!(shutdown);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(30), &mut shutdown)
+                .await
+                .is_err()
+        );
+        drop(held);
+        let error = shutdown.await.unwrap_err().to_string();
+        assert!(error.contains("shutting down"));
+        assert!(manager.cancel_flag.load(Ordering::SeqCst));
+        assert!(!manager.version_path("queued").exists());
+        assert_eq!(manager.shutdown().await.unwrap_err().to_string(), error);
+        assert!(manager.install_version("late", None).await.is_err());
+    }
 
     #[test]
     fn test_binary_name() {

@@ -40,6 +40,30 @@ describe('useDownloadCompletionRefresh', () => {
     expect(onModelsImported).toHaveBeenCalledTimes(1);
   });
 
+  it('waits for backend completion after transfer progress reaches 100 percent', () => {
+    const onModelsImported = vi.fn();
+    const { rerender } = renderHook(
+      ({ statuses }) => useDownloadCompletionRefresh({
+        delayMs: 100,
+        downloadStatusByRepo: statuses,
+        onModelsImported,
+      }),
+      { initialProps: { statuses: { 'org/model': downloadStatus('downloading') } } }
+    );
+
+    const transferFinished: DownloadStatus = {
+      ...downloadStatus('downloading'), progress: 100, downloadedBytes: 10, totalBytes: 10,
+    };
+    rerender({ statuses: { 'org/model': transferFinished } });
+    vi.advanceTimersByTime(1000);
+    expect(onModelsImported).not.toHaveBeenCalled();
+
+    rerender({ statuses: { 'org/model': { ...transferFinished, status: 'completed' } } });
+    expect(onModelsImported).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(100);
+    expect(onModelsImported).toHaveBeenCalledTimes(1);
+  });
+
   it('refreshes models when a queued or downloading entry disappears', () => {
     const onModelsImported = vi.fn();
     const { rerender } = renderHook(

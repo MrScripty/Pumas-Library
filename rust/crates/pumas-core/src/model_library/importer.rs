@@ -15,6 +15,10 @@ use crate::model_library::external_assets::{
 use crate::model_library::hashing::{compute_dual_hash, DualHash};
 use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
 use crate::model_library::library::ModelLibrary;
+use crate::model_library::mutation_authority::owned_mutation_outcome;
+use crate::model_library::mutation_authority::{
+    ModelFinalImportCapability, ModelPartialImportCapability,
+};
 use crate::model_library::naming::{normalize_filename, normalize_name};
 use crate::model_library::sharding;
 use crate::model_library::types::{
@@ -115,35 +119,41 @@ async fn path_is_dir(path: &Path) -> Result<bool> {
 }
 
 async fn resolve_model_type_with_rules_async(
-    index: crate::index::ModelIndex,
+    library: Arc<ModelLibrary>,
     model_dir: PathBuf,
     pipeline_tag: Option<String>,
     model_type_hint: Option<String>,
     huggingface_evidence: Option<HuggingFaceEvidence>,
 ) -> Result<crate::model_library::ModelTypeResolution> {
-    tokio::task::spawn_blocking(move || {
-        resolve_model_type_with_rules(
-            &index,
-            &model_dir,
-            pipeline_tag.as_deref(),
-            model_type_hint.as_deref(),
-            huggingface_evidence.as_ref(),
-        )
-    })
-    .await
-    .map_err(|err| {
-        PumasError::Other(format!(
-            "Failed to join in-place model-type resolution task: {}",
-            err
-        ))
-    })?
+    let index = library.index().clone();
+    library
+        .run_import_blocking("resolve imported model type", move || {
+            resolve_model_type_with_rules(
+                &index,
+                &model_dir,
+                pipeline_tag.as_deref(),
+                model_type_hint.as_deref(),
+                huggingface_evidence.as_ref(),
+            )
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join in-place model-type resolution task: {}",
+                err
+            ))
+        })?
 }
 
 async fn load_model_metadata_or_default(
     library: Arc<ModelLibrary>,
     model_dir: PathBuf,
 ) -> Result<ModelMetadata> {
-    tokio::task::spawn_blocking(move || Ok(library.load_metadata(&model_dir)?.unwrap_or_default()))
+    let execution = library.clone();
+    execution
+        .run_import_blocking("load importer metadata", move || {
+            Ok(library.load_metadata(&model_dir)?.unwrap_or_default())
+        })
         .await
         .map_err(|err| {
             PumasError::Other(format!(
@@ -203,15 +213,18 @@ impl ModelImporter {
         // Detect file type and model info
         let importer = self.clone();
         let source_path_for_detection = source_path.clone();
-        let type_info =
-            tokio::task::spawn_blocking(move || importer.detect_type(&source_path_for_detection))
-                .await
-                .map_err(|err| {
-                    PumasError::Other(format!(
-                        "Failed to join import type detection task: {}",
-                        err
-                    ))
-                })??;
+        let type_info = self
+            .library
+            .run_import_blocking("importer blocking effect", move || {
+                importer.detect_type(&source_path_for_detection)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join import type detection task: {}",
+                    err
+                ))
+            })??;
 
         // Check security tier
         let security_tier = type_info.format.security_tier();
@@ -229,16 +242,17 @@ impl ModelImporter {
         let bundle_validation = if source_metadata.is_dir() {
             let validation_source_path = source_path.clone();
             Some(
-                tokio::task::spawn_blocking(move || {
-                    validate_diffusers_directory_for_import(&validation_source_path)
-                })
-                .await
-                .map_err(|err| {
-                    PumasError::Other(format!(
-                        "Failed to join import diffusers validation task: {}",
-                        err
-                    ))
-                })?,
+                self.library
+                    .run_import_blocking("importer blocking effect", move || {
+                        validate_diffusers_directory_for_import(&validation_source_path)
+                    })
+                    .await
+                    .map_err(|err| {
+                        PumasError::Other(format!(
+                            "Failed to join import diffusers validation task: {}",
+                            err
+                        ))
+                    })?,
             )
         } else {
             None
@@ -372,16 +386,18 @@ impl ModelImporter {
         }
 
         let validation_source_path = source_path.clone();
-        let validation = tokio::task::spawn_blocking(move || {
-            validate_diffusers_directory_for_import(&validation_source_path)
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join external diffusers validation task: {}",
-                err
-            ))
-        })?;
+        let validation = self
+            .library
+            .run_import_blocking("importer blocking effect", move || {
+                validate_diffusers_directory_for_import(&validation_source_path)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join external diffusers validation task: {}",
+                    err
+                ))
+            })?;
         tokio::fs::create_dir_all(&target_dir).await?;
         let model_id = self.library.get_model_id(&target_dir).ok_or_else(|| {
             PumasError::Other(format!(
@@ -421,16 +437,19 @@ impl ModelImporter {
         let temp_dir = self.create_temp_import_dir().await?;
         let source_path_for_copy = source_path.to_path_buf();
         let temp_dir_for_copy = temp_dir.clone();
-        if let Err(err) = tokio::task::spawn_blocking(move || {
-            copy_directory_preserving_layout(&source_path_for_copy, &temp_dir_for_copy)
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join copied diffusers directory copy task: {}",
-                err
-            ))
-        })? {
+        if let Err(err) = self
+            .library
+            .run_import_blocking("importer blocking effect", move || {
+                copy_directory_preserving_layout(&source_path_for_copy, &temp_dir_for_copy)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join copied diffusers directory copy task: {}",
+                    err
+                ))
+            })?
+        {
             let _ = tokio::fs::remove_dir_all(&temp_dir).await;
             return Err(err);
         }
@@ -446,16 +465,18 @@ impl ModelImporter {
         }
 
         let target_dir_for_expected_files = target_dir.to_path_buf();
-        let expected_files = tokio::task::spawn_blocking(move || {
-            collect_relative_file_paths(&target_dir_for_expected_files)
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join copied diffusers expected-files task: {}",
-                err
-            ))
-        })??;
+        let expected_files = self
+            .library
+            .run_import_blocking("importer blocking effect", move || {
+                collect_relative_file_paths(&target_dir_for_expected_files)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join copied diffusers expected-files task: {}",
+                    err
+                ))
+            })??;
 
         let in_place_spec = InPlaceImportSpec {
             model_dir: target_dir.to_path_buf(),
@@ -590,6 +611,125 @@ impl ModelImporter {
         info: &DownloadCompletionInfo,
         revision: &DownloadRevision,
     ) -> Result<ModelImportResult> {
+        let authority = self.library.mutation_authority()?;
+        if self.library.get_model_id(&info.dest_dir).is_none() {
+            return Err(PumasError::Validation {
+                field: "download_finalization".into(),
+                message: "Downloaded directory has no library model identity".into(),
+            });
+        }
+        let tasks = authority.tasks();
+        let importer = self.clone();
+        let info = info.clone();
+        let revision = revision.clone();
+        tasks
+            .run_owned(
+                "finalize in-place model import",
+                move |context| async move {
+                    owned_mutation_outcome(
+                        async move {
+                            let model_dir = info.dest_dir.clone();
+                            let guard_context = context.clone();
+                            let guard = context
+                                .run_blocking("protect model import", move || {
+                                    authority.protect_import(&model_dir, guard_context)
+                                })
+                                .await??;
+                            let importer = Self {
+                                library: Arc::new(importer.library.with_import_guard(guard)),
+                            };
+                            importer
+                                .finalize_downloaded_directory_guarded(&info, &revision)
+                                .await
+                        }
+                        .await,
+                    )
+                },
+            )
+            .await?
+    }
+
+    /// Only the managed HF owner can supply this exact verified-use proof.
+    pub(crate) async fn finalize_downloaded_directory_with_capability(
+        &self,
+        info: &DownloadCompletionInfo,
+        revision: &DownloadRevision,
+        context: &crate::acquisition::task_custody::TaskContext,
+        capability: ModelFinalImportCapability,
+    ) -> Result<ModelImportResult> {
+        capability.validate_provenance(
+            &info.download_id,
+            &info.download_request.repo_id,
+            revision.as_str(),
+            &info.filenames,
+        )?;
+        // Re-wrap without broadening the proof's stage; the guard factory owns
+        // the coherent current-store decision under its existing root grant.
+        let authority = self.library.mutation_authority()?;
+        let destination = info.dest_dir.clone();
+        let guard_context = context.clone();
+        let guard = context
+            .run_fallible_blocking_named("protect verified model import", move || {
+                authority.protect_final_import(&destination, capability, guard_context)
+            })
+            .await
+            .map_err(|error| {
+                PumasError::Other(format!("Model import guard observation failed: {error}"))
+            })??;
+        guard.claim_final_import_completion()?;
+        let importer = Self {
+            library: Arc::new(self.library.with_import_guard(guard)),
+        };
+        importer
+            .finalize_downloaded_directory_guarded(info, revision)
+            .await
+    }
+
+    /// Validate a previously issued managed-HF completion receipt without
+    /// importing, repairing metadata, or resolving package facts. This is the
+    /// cold-reopen path after import effects may already have completed.
+    pub(crate) async fn settle_hf_completion_receipt(
+        &self,
+        info: &DownloadCompletionInfo,
+        revision: &DownloadRevision,
+        record: &crate::acquisition::AcquisitionRecord,
+        receipt: &crate::model_library::download_store::HfCompletionReceipt,
+        context: &crate::model_library::hf::DownloadInvocationContext,
+    ) -> Result<bool> {
+        receipt.validate_for_record(record)?;
+
+        let mut selected = record
+            .manifest
+            .files()
+            .iter()
+            .map(|file| file.logical_path().to_string())
+            .collect::<Vec<_>>();
+        let mut requested = info.filenames.clone();
+        selected.sort();
+        requested.sort();
+        if info.download_id != receipt.download_id
+            || selected != requested
+            || record.manifest.source().provider() != "huggingface"
+            || record.manifest.source().source_id() != info.download_request.repo_id
+            || record.manifest.source().revision().value() != revision.as_str()
+        {
+            return Err(PumasError::Validation {
+                field: "downloads.hf_completion_receipts".into(),
+                message: "Completion receipt does not match the selected HF download".into(),
+            });
+        }
+
+        let grant = context.held_root_execution_grant()?;
+        self.library
+            .settle_hf_completion_receipt(&info.dest_dir, record, receipt, grant)
+            .await
+    }
+
+    async fn finalize_downloaded_directory_guarded(
+        &self,
+        info: &DownloadCompletionInfo,
+        revision: &DownloadRevision,
+    ) -> Result<ModelImportResult> {
         let model_id =
             self.library
                 .get_model_id(&info.dest_dir)
@@ -616,7 +756,7 @@ impl ModelImporter {
             license_status: info.download_request.license_status.clone(),
         };
         let result = self
-            .import_in_place_with_mode(&spec, InPlaceImportMode::FinalizeDownload, revision)
+            .import_in_place_effects(&spec, InPlaceImportMode::FinalizeDownload, revision)
             .await?;
         if !result.success || result.model_id.as_deref() != Some(model_id.as_str()) {
             return Err(PumasError::Validation {
@@ -632,6 +772,9 @@ impl ModelImporter {
             // facts without generating or repairing them during status reads.
             self.library.resolve_model_package_facts(&model_id).await?;
         }
+        self.library
+            .issue_managed_hf_completion_receipt(&model_id, revision.as_persisted().is_some())
+            .await?;
         Ok(result)
     }
 
@@ -643,6 +786,77 @@ impl ModelImporter {
 
     /// Persist partial-download metadata using its execution revision.
     pub(crate) async fn upsert_download_metadata_stub_at_revision(
+        &self,
+        info: &AuxFilesCompleteInfo,
+        revision: &DownloadRevision,
+    ) -> Result<()> {
+        let authority = self.library.mutation_authority()?;
+        let tasks = authority.tasks();
+        let importer = self.clone();
+        let info = info.clone();
+        let revision = revision.clone();
+        tasks
+            .run_owned(
+                "upsert in-place model metadata",
+                move |context| async move {
+                    owned_mutation_outcome(
+                        async move {
+                            let model_dir = info.dest_dir.clone();
+                            let guard_context = context.clone();
+                            let guard = context
+                                .run_blocking("protect partial model metadata", move || {
+                                    authority.protect_import(&model_dir, guard_context)
+                                })
+                                .await??;
+                            let importer = Self {
+                                library: Arc::new(importer.library.with_import_guard(guard)),
+                            };
+                            importer
+                                .upsert_download_metadata_stub_effects(&info, &revision)
+                                .await
+                        }
+                        .await,
+                    )
+                },
+            )
+            .await?
+    }
+
+    pub(crate) async fn upsert_download_metadata_stub_with_capability(
+        &self,
+        info: &AuxFilesCompleteInfo,
+        revision: &DownloadRevision,
+        context: &crate::acquisition::task_custody::TaskContext,
+        capability: ModelPartialImportCapability,
+    ) -> Result<()> {
+        capability.validate_provenance(
+            &info.download_id,
+            &info.download_request.repo_id,
+            revision.as_str(),
+            &info.filenames,
+        )?;
+        let authority = self.library.mutation_authority()?;
+        let destination = info.dest_dir.clone();
+        let guard_context = context.clone();
+        let guard = context
+            .run_fallible_blocking_named("protect transferring model metadata", move || {
+                authority.protect_partial_import(&destination, capability, guard_context)
+            })
+            .await
+            .map_err(|error| {
+                PumasError::Other(format!(
+                    "Partial metadata guard observation failed: {error}"
+                ))
+            })??;
+        let importer = Self {
+            library: Arc::new(self.library.with_import_guard(guard)),
+        };
+        importer
+            .upsert_download_metadata_stub_effects(info, revision)
+            .await
+    }
+
+    async fn upsert_download_metadata_stub_effects(
         &self,
         info: &AuxFilesCompleteInfo,
         revision: &DownloadRevision,
@@ -780,15 +994,18 @@ impl ModelImporter {
 
         let importer = self.clone();
         let source_path_for_detection = source_path.clone();
-        let type_info =
-            tokio::task::spawn_blocking(move || importer.detect_type(&source_path_for_detection))
-                .await
-                .map_err(|err| {
-                    PumasError::Other(format!(
-                        "Failed to join progress import type detection task: {}",
-                        err
-                    ))
-                })??;
+        let type_info = self
+            .library
+            .run_import_blocking("importer blocking effect", move || {
+                importer.detect_type(&source_path_for_detection)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join progress import type detection task: {}",
+                    err
+                ))
+            })??;
         let security_tier = type_info.format.security_tier();
 
         // Security check
@@ -849,16 +1066,18 @@ impl ModelImporter {
         let importer = self.clone();
         let source_path_for_copy = source_path.clone();
         let temp_dir_for_copy = temp_dir.clone();
-        let files = tokio::task::spawn_blocking(move || {
-            importer.copy_files(&source_path_for_copy, &temp_dir_for_copy)
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join progress import file copy task: {}",
-                err
-            ))
-        })??;
+        let files = self
+            .library
+            .run_import_blocking("importer blocking effect", move || {
+                importer.copy_files(&source_path_for_copy, &temp_dir_for_copy)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join progress import file copy task: {}",
+                    err
+                ))
+            })??;
 
         // Compute hashes
         let _ = progress_tx
@@ -871,20 +1090,25 @@ impl ModelImporter {
 
         let importer = self.clone();
         let temp_dir_for_primary = temp_dir.clone();
-        let primary_file = tokio::task::spawn_blocking(move || {
-            importer.choose_primary_file(&temp_dir_for_primary)
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join progress import primary file selection task: {}",
-                err
-            ))
-        })??;
+        let primary_file = self
+            .library
+            .run_import_blocking("importer blocking effect", move || {
+                importer.choose_primary_file(&temp_dir_for_primary)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join progress import primary file selection task: {}",
+                    err
+                ))
+            })??;
         let hashes = if let Some(ref primary) = primary_file {
             let primary_for_hash = primary.clone();
             Some(
-                tokio::task::spawn_blocking(move || compute_dual_hash(&primary_for_hash))
+                self.library
+                    .run_import_blocking("importer blocking effect", move || {
+                        compute_dual_hash(&primary_for_hash)
+                    })
                     .await
                     .map_err(|err| {
                         PumasError::Other(format!(
@@ -1074,34 +1298,41 @@ impl ModelImporter {
         let importer = self.clone();
         let source_for_copy = source.to_path_buf();
         let temp_dir_for_copy = temp_dir.to_path_buf();
-        let files = tokio::task::spawn_blocking(move || {
-            importer.copy_files(&source_for_copy, &temp_dir_for_copy)
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join temp import file copy task: {}",
-                err
-            ))
-        })??;
+        let files = self
+            .library
+            .run_import_blocking("importer blocking effect", move || {
+                importer.copy_files(&source_for_copy, &temp_dir_for_copy)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join temp import file copy task: {}",
+                    err
+                ))
+            })??;
 
         // Compute hashes for primary file
         let importer = self.clone();
         let temp_dir_for_primary = temp_dir.to_path_buf();
-        let primary_file = tokio::task::spawn_blocking(move || {
-            importer.choose_primary_file(&temp_dir_for_primary)
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join temp import primary file selection task: {}",
-                err
-            ))
-        })??;
+        let primary_file = self
+            .library
+            .run_import_blocking("importer blocking effect", move || {
+                importer.choose_primary_file(&temp_dir_for_primary)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join temp import primary file selection task: {}",
+                    err
+                ))
+            })??;
         let hashes = if let Some(ref primary) = primary_file {
             let primary_for_hash = primary.clone();
             Some(
-                tokio::task::spawn_blocking(move || compute_dual_hash(&primary_for_hash))
+                self.library
+                    .run_import_blocking("importer blocking effect", move || {
+                        compute_dual_hash(&primary_for_hash)
+                    })
                     .await
                     .map_err(|err| {
                         PumasError::Other(format!(
@@ -1369,6 +1600,42 @@ impl ModelImporter {
         mode: InPlaceImportMode,
         revision: &DownloadRevision,
     ) -> Result<ModelImportResult> {
+        let authority = self.library.mutation_authority()?;
+        let tasks = authority.tasks();
+        let importer = self.clone();
+        let spec = spec.clone();
+        let revision = revision.clone();
+        tasks
+            .run_owned("import model in place", move |context| async move {
+                owned_mutation_outcome(
+                    async move {
+                        let model_dir = spec.model_dir.clone();
+                        let guard_context = context.clone();
+                        let guard = context
+                            .run_blocking("protect model import", move || {
+                                authority.protect_import(&model_dir, guard_context)
+                            })
+                            .await??;
+                        let importer = Self {
+                            library: Arc::new(importer.library.with_import_guard(guard)),
+                        };
+                        importer
+                            .import_in_place_effects(&spec, mode, &revision)
+                            .await
+                    }
+                    .await,
+                )
+            })
+            .await?
+    }
+
+    /// Runs only on a private library clone carrying the admitted effect lease.
+    async fn import_in_place_effects(
+        &self,
+        spec: &InPlaceImportSpec,
+        mode: InPlaceImportMode,
+        revision: &DownloadRevision,
+    ) -> Result<ModelImportResult> {
         let model_dir = &spec.model_dir;
         let metadata_path = model_dir.join("metadata.json");
 
@@ -1403,16 +1670,18 @@ impl ModelImporter {
         }
 
         let bundle_validation_dir = model_dir.to_path_buf();
-        let bundle_validation = tokio::task::spawn_blocking(move || {
-            validate_diffusers_directory_for_import(&bundle_validation_dir)
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join in-place diffusers validation task: {}",
-                err
-            ))
-        })?;
+        let bundle_validation = self
+            .library
+            .run_import_blocking("importer blocking effect", move || {
+                validate_diffusers_directory_for_import(&bundle_validation_dir)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join in-place diffusers validation task: {}",
+                    err
+                ))
+            })?;
         if bundle_validation.validation_state == crate::models::AssetValidationState::Valid {
             return self
                 .import_library_owned_diffusers_directory(spec, &bundle_validation, mode, revision)
@@ -1422,16 +1691,18 @@ impl ModelImporter {
         // Find primary model file
         let importer = self.clone();
         let model_dir_for_primary = model_dir.to_path_buf();
-        let primary_file = tokio::task::spawn_blocking(move || {
-            importer.choose_primary_file(&model_dir_for_primary)
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join in-place primary file selection task: {}",
-                err
-            ))
-        })??;
+        let primary_file = self
+            .library
+            .run_import_blocking("importer blocking effect", move || {
+                importer.choose_primary_file(&model_dir_for_primary)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join in-place primary file selection task: {}",
+                    err
+                ))
+            })??;
         if primary_file.is_none() {
             return Ok(ModelImportResult {
                 path: model_dir.display().to_string(),
@@ -1446,20 +1717,23 @@ impl ModelImporter {
 
         // Detect file type from primary file.
         let primary_file_for_type = primary_file.clone();
-        let type_info =
-            tokio::task::spawn_blocking(move || identify_model_type(&primary_file_for_type))
-                .await
-                .map_err(|err| {
-                    PumasError::Other(format!(
-                        "Failed to join in-place type detection task: {}",
-                        err
-                    ))
-                })??;
+        let type_info = self
+            .library
+            .run_import_blocking("importer blocking effect", move || {
+                identify_model_type(&primary_file_for_type)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join in-place type detection task: {}",
+                    err
+                ))
+            })??;
 
         // Resolve model type from hard source signals via SQLite rule tables.
         // Medium hints (pipeline_tag/spec.model_type) only adjust confidence.
         let resolved_model_type = resolve_model_type_with_rules_async(
-            self.library.index().clone(),
+            self.library.clone(),
             model_dir.to_path_buf(),
             spec.pipeline_tag.clone(),
             spec.model_type.clone(),
@@ -1470,16 +1744,18 @@ impl ModelImporter {
         // Detect dLLM subtype from config.json
         let resolved_subtype = if resolved_model_type.model_type == ModelType::Llm {
             let model_dir_for_subtype = model_dir.to_path_buf();
-            let is_dllm = tokio::task::spawn_blocking(move || {
-                detect_dllm_from_config_json(&model_dir_for_subtype)
-            })
-            .await
-            .map_err(|err| {
-                PumasError::Other(format!(
-                    "Failed to join in-place dLLM subtype detection task: {}",
-                    err
-                ))
-            })?;
+            let is_dllm = self
+                .library
+                .run_import_blocking("importer blocking effect", move || {
+                    detect_dllm_from_config_json(&model_dir_for_subtype)
+                })
+                .await
+                .map_err(|err| {
+                    PumasError::Other(format!(
+                        "Failed to join in-place dLLM subtype detection task: {}",
+                        err
+                    ))
+                })?;
             if is_dllm {
                 Some("dllm".to_string())
             } else {
@@ -1492,16 +1768,18 @@ impl ModelImporter {
         // Enumerate existing files (no copy needed)
         let importer = self.clone();
         let model_dir_for_enumeration = model_dir.to_path_buf();
-        let files = tokio::task::spawn_blocking(move || {
-            importer.enumerate_model_files(&model_dir_for_enumeration)
-        })
-        .await
-        .map_err(|err| {
-            PumasError::Other(format!(
-                "Failed to join in-place file enumeration task: {}",
-                err
-            ))
-        })??;
+        let files = self
+            .library
+            .run_import_blocking("importer blocking effect", move || {
+                importer.enumerate_model_files(&model_dir_for_enumeration)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join in-place file enumeration task: {}",
+                    err
+                ))
+            })??;
 
         // Validate shard completeness — reject if any file is part of an incomplete set.
         // Uses extract_shard_info per file to catch even single-shard-of-set cases
@@ -1553,7 +1831,10 @@ impl ModelImporter {
         } else if spec.compute_hashes {
             let primary_file_for_hash = primary_file.clone();
             Some(
-                tokio::task::spawn_blocking(move || compute_dual_hash(&primary_file_for_hash))
+                self.library
+                    .run_import_blocking("importer blocking effect", move || {
+                        compute_dual_hash(&primary_file_for_hash)
+                    })
                     .await
                     .map_err(|err| {
                         PumasError::Other(format!(
@@ -1967,10 +2248,729 @@ mod tests {
     async fn setup() -> (TempDir, Arc<ModelLibrary>) {
         let temp_dir = TempDir::new().unwrap();
         let library = Arc::new(ModelLibrary::new(temp_dir.path()).await.unwrap());
+        library
+            .install_mutation_authority(
+                crate::api::RuntimeTasks::new(),
+                crate::model_library::download_recovery::DownloadDestinationRoot::open(
+                    library.library_root(),
+                )
+                .unwrap(),
+                Arc::new(
+                    crate::model_library::download_store::DownloadPersistence::new(temp_dir.path()),
+                ),
+            )
+            .unwrap();
         (temp_dir, library)
     }
 
-    fn completed_download(model_dir: &Path, diffusers: bool) -> DownloadCompletionInfo {
+    pub(super) async fn custody_fixture() -> (
+        TempDir,
+        Arc<ModelLibrary>,
+        Arc<crate::model_library::download_store::DownloadPersistence>,
+        crate::api::RuntimeTasks,
+        crate::model_library::download_recovery::DownloadDestinationRoot,
+    ) {
+        let temp = TempDir::new().unwrap();
+        let library = Arc::new(
+            ModelLibrary::new(temp.path().join("library"))
+                .await
+                .unwrap(),
+        );
+        let downloads =
+            Arc::new(crate::model_library::download_store::DownloadPersistence::new(temp.path()));
+        let tasks = crate::api::RuntimeTasks::new();
+        let root = crate::model_library::download_recovery::DownloadDestinationRoot::open(
+            library.library_root(),
+        )
+        .unwrap();
+        library
+            .install_mutation_authority(tasks.clone(), root.clone(), downloads.clone())
+            .unwrap();
+        (temp, library, downloads, tasks, root)
+    }
+
+    pub(super) fn orphan_spec(path: &Path) -> InPlaceImportSpec {
+        InPlaceImportSpec {
+            model_dir: path.into(),
+            official_name: "model".into(),
+            family: "publisher".into(),
+            model_type: Some("vision".into()),
+            repo_id: None,
+            download_request: None,
+            known_sha256: None,
+            compute_hashes: false,
+            expected_files: None,
+            pipeline_tag: None,
+            huggingface_evidence: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        }
+    }
+
+    pub(super) fn real_admission(
+        downloads: &crate::model_library::download_store::DownloadPersistence,
+        root: &crate::model_library::download_recovery::DownloadDestinationRoot,
+        info: &DownloadCompletionInfo,
+        id: &str,
+    ) -> String {
+        use crate::model_library::download_store::*;
+        let attempt = uuid::Uuid::new_v4().to_string();
+        let request = DownloadAdmissionRequest {
+            snapshot: PersistedDownload {
+                download_id: id.into(),
+                repo_id: info.download_request.repo_id.clone(),
+                filename: info.filename.clone(),
+                filenames: info.filenames.clone(),
+                dest_dir: info.dest_dir.clone(),
+                total_bytes: Some(4),
+                status: crate::models::DownloadStatus::Queued,
+                download_request: info.download_request.clone(),
+                revision: None,
+                created_at: chrono::Utc::now().to_rfc3339(),
+                known_sha256: None,
+                huggingface_evidence: None,
+            },
+            domain: DownloadAdmissionDomain::Ambient,
+            destination: root
+                .resolve(&info.dest_dir)
+                .unwrap()
+                .persisted_identity()
+                .unwrap(),
+            requested_payload_files: info.filenames.clone(),
+            execution_files: info.filenames.clone(),
+        };
+        downloads
+            .admit_download(&attempt, &request)
+            .unwrap()
+            .into_result()
+            .unwrap();
+        attempt
+    }
+
+    #[tokio::test]
+    async fn custody_guard_refuses_unconfigured_direct_import_even_with_metadata() {
+        let temp = TempDir::new().unwrap();
+        let library = Arc::new(ModelLibrary::new(temp.path()).await.unwrap());
+        let model = library.build_model_path("vision", "publisher", "model");
+        std::fs::create_dir_all(&model).unwrap();
+        std::fs::write(model.join("metadata.json"), b"{}").unwrap();
+        let error = ModelImporter::new(library.clone())
+            .import_in_place(&orphan_spec(&model))
+            .await
+            .unwrap_err();
+        assert!(matches!(error, PumasError::Config { .. }));
+        assert!(error.to_string().contains("authority unavailable"));
+        assert_eq!(std::fs::read(model.join("metadata.json")).unwrap(), b"{}");
+        assert!(library
+            .index()
+            .get("vision/publisher/model")
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn custody_guard_precedes_metadata_shortcuts_and_diffusers_for_all_retained_phases() {
+        use crate::acquisition::*;
+        for phase in [
+            AcquisitionPhase::Transferring,
+            AcquisitionPhase::FilesReady,
+            AcquisitionPhase::Using {
+                lease: uuid::Uuid::new_v4(),
+            },
+        ] {
+            for branch in ["plain", "metadata", "diffusers"] {
+                let (_temp, library, downloads, tasks, root) = custody_fixture().await;
+                let model = if branch == "diffusers" {
+                    create_external_diffusers_bundle(
+                        &library.library_root().join("diffusion/publisher"),
+                    )
+                } else {
+                    let model = library.build_model_path("vision", "publisher", "model");
+                    std::fs::create_dir_all(&model).unwrap();
+                    std::fs::write(model.join("detector.onnx"), b"data").unwrap();
+                    model
+                };
+                if branch == "metadata" {
+                    std::fs::write(model.join("metadata.json"), b"{}").unwrap();
+                }
+                let file = if branch == "diffusers" {
+                    "model_index.json"
+                } else {
+                    "detector.onnx"
+                };
+                let manifest = ArtifactManifest::new(
+                    ArtifactSourceIdentity::new(
+                        "fixture",
+                        "object",
+                        ArtifactRevisionEvidence::new(
+                            "fixture.rev",
+                            "v1",
+                            RevisionStrength::Immutable,
+                        )
+                        .unwrap(),
+                    )
+                    .unwrap(),
+                    vec![ArtifactFile::new(
+                        file,
+                        file,
+                        None,
+                        None,
+                        FileVerificationRequirement::CompleteRepresentation,
+                    )
+                    .unwrap()],
+                )
+                .unwrap();
+                let grant = Arc::new(root.try_acquire_execution_grant().unwrap());
+                let workspace = root
+                    .resolve(&model)
+                    .unwrap()
+                    .acquisition_workspace(grant.clone())
+                    .unwrap();
+                let files = if phase == AcquisitionPhase::Transferring {
+                    Vec::new()
+                } else {
+                    workspace.seal(&manifest).unwrap()
+                };
+                let id = uuid::Uuid::new_v4();
+                downloads
+                    .acquisition_store()
+                    .update_acquisitions(|records| {
+                        records.insert(
+                            id,
+                            AcquisitionRecord {
+                                id,
+                                demand: AcquisitionDemand {
+                                    consumer: "fixture.consumer".into(),
+                                    operation: id.to_string(),
+                                },
+                                manifest,
+                                workspace: workspace.identity().clone(),
+                                phase: phase.clone(),
+                                files,
+                            },
+                        );
+                        Ok(())
+                    })
+                    .unwrap();
+                drop(workspace);
+                drop(grant);
+                let before = std::fs::read(model.join("metadata.json")).ok();
+                assert!(
+                    matches!(
+                        ModelImporter::new(library.clone())
+                            .import_in_place(&orphan_spec(&model))
+                            .await,
+                        Err(PumasError::DownloadRootBusy)
+                    ),
+                    "{phase:?}/{branch}"
+                );
+                assert_eq!(std::fs::read(model.join("metadata.json")).ok(), before);
+                assert!(library
+                    .index()
+                    .get(&library.get_model_id(&model).unwrap())
+                    .unwrap()
+                    .is_none());
+                tasks.shutdown_owned().await.unwrap();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn custody_guard_retains_metadata_worker_and_shutdown_receipt_after_caller_drop() {
+        for (panic_worker, index_shortcut) in [(false, false), (true, false), (false, true)] {
+            let (_temp, library, _downloads, tasks, root) = custody_fixture().await;
+            let model = library.build_model_path("vision", "publisher", "model");
+            std::fs::create_dir_all(&model).unwrap();
+            std::fs::write(model.join("detector.onnx"), b"data").unwrap();
+            if index_shortcut {
+                library
+                    .save_metadata(
+                        &model,
+                        &ModelMetadata {
+                            model_id: Some("vision/publisher/model".into()),
+                            model_type: Some("vision".into()),
+                            pipeline_tag: Some("image-classification".into()),
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap();
+            }
+            let (entered_tx, entered) = tokio::sync::oneshot::channel();
+            let entered_tx = std::sync::Mutex::new(Some(entered_tx));
+            let (release_tx, release) = std::sync::mpsc::channel();
+            let release = std::sync::Mutex::new(release);
+            library.set_metadata_write_notifier(Some(Arc::new(move |_| {
+                if let Some(sender) = entered_tx.lock().unwrap().take() {
+                    sender.send(()).unwrap();
+                    release.lock().unwrap().recv().unwrap();
+                    assert!(!panic_worker, "held import metadata sentinel panic");
+                }
+            })));
+            let importer = ModelImporter::new(library.clone());
+            let info = completed_download(&model, false);
+            let caller = tokio::spawn(async move {
+                if index_shortcut {
+                    importer.import_in_place(&orphan_spec(&info.dest_dir)).await
+                } else {
+                    importer.finalize_downloaded_directory(&info).await
+                }
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(5), entered)
+                .await
+                .unwrap()
+                .unwrap();
+            caller.abort();
+            assert!(caller.await.unwrap_err().is_cancelled());
+            let shutdown_tasks = tasks.clone();
+            let shutdown = tokio::spawn(async move { shutdown_tasks.shutdown_owned().await });
+            tokio::task::yield_now().await;
+            assert!(!shutdown.is_finished());
+            assert!(matches!(
+                root.try_acquire_execution_grant(),
+                Err(PumasError::DownloadRootBusy)
+            ));
+            release_tx.send(()).unwrap();
+            let result = tokio::time::timeout(std::time::Duration::from_secs(5), shutdown)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(result.is_err(), panic_worker);
+            assert!(root.try_acquire_execution_grant().is_ok());
+            assert_eq!(
+                library
+                    .index()
+                    .get("vision/publisher/model")
+                    .unwrap()
+                    .is_some(),
+                !panic_worker
+            );
+            assert_eq!(std::fs::read(model.join("detector.onnx")).unwrap(), b"data");
+            library.set_metadata_write_notifier(None);
+        }
+    }
+
+    #[tokio::test]
+    async fn custody_guard_refuses_root_and_destination_replacement_at_real_metadata_effect() {
+        for replace_root in [false, true] {
+            let (temp, library, _downloads, tasks, _root) = custody_fixture().await;
+            let model = library.build_model_path("vision", "publisher", "model");
+            std::fs::create_dir_all(&model).unwrap();
+            std::fs::write(model.join("detector.onnx"), b"data").unwrap();
+            let target = if replace_root {
+                library.library_root().to_path_buf()
+            } else {
+                model.clone()
+            };
+            let displaced = temp.path().join("displaced");
+            let replacement_model = if replace_root {
+                target.join("vision/publisher/model")
+            } else {
+                target.clone()
+            };
+            library.set_metadata_write_notifier(Some(Arc::new(move |_| {
+                std::fs::rename(&target, &displaced).unwrap();
+                std::fs::create_dir_all(&replacement_model).unwrap();
+                std::fs::write(replacement_model.join("sentinel"), b"replacement").unwrap();
+            })));
+            let error = ModelImporter::new(library.clone())
+                .finalize_downloaded_directory(&completed_download(&model, false))
+                .await
+                .unwrap_err();
+            assert!(matches!(error, PumasError::Io { .. }), "{error}");
+            assert!(!model.join("metadata.json").exists());
+            assert_eq!(
+                std::fs::read(model.join("sentinel")).unwrap(),
+                b"replacement"
+            );
+            assert!(tasks.shutdown_owned().await.is_err());
+            library.set_metadata_write_notifier(None);
+        }
+    }
+
+    #[tokio::test]
+    async fn custody_guard_hf_stage_proofs_preserve_followers_and_refuse_stale_use() {
+        use crate::acquisition::task_custody::TaskRole;
+        use crate::acquisition::*;
+        use crate::model_library::download_store::DownloadAdmissionDomain;
+        let (_temp, library, downloads, tasks, root) = custody_fixture().await;
+        let model = library.build_model_path("vision", "publisher", "model");
+        std::fs::create_dir_all(&model).unwrap();
+        std::fs::write(model.join("detector.onnx"), b"data").unwrap();
+        let mut info = completed_download(&model, false);
+        info.download_id = "owner".into();
+        let attempt = real_admission(&downloads, &root, &info, "owner");
+        let follower = real_admission(&downloads, &root, &info, "follower");
+        let acquisition = Arc::new(AcquisitionService::new(downloads.acquisition_store()));
+        let scope = acquisition
+            .supervisor()
+            .open_scope(|| async { Ok(()) })
+            .unwrap();
+        let (result_tx, result) = tokio::sync::oneshot::channel();
+        let worker_acquisition = acquisition.clone();
+        let worker_library = library.clone();
+        let external_store =
+            crate::model_library::download_store::DownloadPersistence::new(_temp.path());
+        let worker_downloads = downloads.clone();
+        let prepared = scope
+            .prepare(
+                "owner".into(),
+                TaskRole::Worker,
+                move |context| async move {
+                    let result = async {
+                        let grant = Arc::new(root.try_acquire_execution_grant()?);
+                        let context = context.with_effect_lease(Some(grant.clone()));
+                        let workspace =
+                            root.resolve(&model)?.acquisition_workspace(grant.clone())?;
+                        let manifest = ArtifactManifest::new(
+                            ArtifactSourceIdentity::new(
+                                "huggingface",
+                                &info.download_request.repo_id,
+                                ArtifactRevisionEvidence::new(
+                                    "huggingface.commit",
+                                    "main",
+                                    RevisionStrength::Weak,
+                                )
+                                .unwrap(),
+                            )
+                            .unwrap(),
+                            vec![ArtifactFile::new(
+                                "detector.onnx",
+                                "detector.onnx",
+                                Some(4),
+                                None,
+                                FileVerificationRequirement::CompleteRepresentation,
+                            )
+                            .unwrap()],
+                        )
+                        .unwrap();
+                        let operation = worker_acquisition
+                            .begin(
+                                &context,
+                                AcquisitionDemand {
+                                    consumer: "hf.model".into(),
+                                    operation: attempt.clone(),
+                                },
+                                manifest,
+                                workspace.identity().clone(),
+                                None,
+                            )
+                            .await?;
+                        let partial = ModelPartialImportCapability::new(
+                            worker_acquisition.transfer_proof(&context, &operation, &workspace)?,
+                            "owner",
+                            DownloadAdmissionDomain::Ambient,
+                            grant.clone(),
+                        );
+                        let importer = ModelImporter::new(worker_library.clone());
+                        let aux = AuxFilesCompleteInfo {
+                            download_id: "owner".into(),
+                            dest_dir: model.clone(),
+                            filenames: info.filenames.clone(),
+                            download_request: info.download_request.clone(),
+                            total_bytes: Some(4),
+                            huggingface_evidence: None,
+                        };
+                        importer
+                            .upsert_download_metadata_stub_with_capability(
+                                &aux,
+                                &DownloadRevision::legacy_main(),
+                                &context,
+                                partial,
+                            )
+                            .await?;
+                        assert_eq!(
+                            worker_library
+                                .load_metadata(&model)?
+                                .unwrap()
+                                .match_source
+                                .as_deref(),
+                            Some("download_partial")
+                        );
+                        assert!(worker_library
+                            .index()
+                            .get("vision/publisher/model")?
+                            .is_some());
+                        // Stage isolation is enforced even on the privately scoped clone.
+                        let partial = ModelPartialImportCapability::new(
+                            worker_acquisition.transfer_proof(&context, &operation, &workspace)?,
+                            "owner",
+                            DownloadAdmissionDomain::Ambient,
+                            grant.clone(),
+                        );
+                        let guard = worker_library
+                            .mutation_authority()?
+                            .protect_partial_import(&model, partial, context.clone())?;
+                        let scoped = worker_library.with_import_guard(guard);
+                        assert!(scoped
+                            .resolve_model_package_facts("vision/publisher/model")
+                            .await
+                            .unwrap_err()
+                            .to_string()
+                            .contains("Partial metadata authority"));
+                        drop(scoped);
+                        let lease = worker_acquisition
+                            .files_ready(&context, operation, workspace)
+                            .await?;
+                        // A proof for the right lease cannot authorize another selection.
+                        let wrong = ModelFinalImportCapability::new(
+                            worker_acquisition.use_proof(&context, &lease)?,
+                            "owner",
+                            DownloadAdmissionDomain::Ambient,
+                            grant.clone(),
+                            Arc::new(
+                                crate::model_library::mutation_authority::DownloadCancellation::new(
+                                ),
+                            ),
+                        );
+                        assert!(wrong
+                            .validate_provenance("owner", "other/repo", "main", &info.filenames)
+                            .is_err());
+                        // Synthetic wrong-token fault on the actual canonical
+                        // store: an authentic runtime lease cannot execute if
+                        // current durable consumer custody names another use.
+                        let proof = worker_acquisition.use_proof(&context, &lease)?;
+                        let expected = proof.into_proof().record().clone();
+                        let mismatched = ModelFinalImportCapability::new(
+                            worker_acquisition.use_proof(&context, &lease)?,
+                            "owner",
+                            DownloadAdmissionDomain::Ambient,
+                            grant.clone(),
+                            Arc::new(
+                                crate::model_library::mutation_authority::DownloadCancellation::new(
+                                ),
+                            ),
+                        );
+                        worker_downloads
+                            .acquisition_store()
+                            .update_acquisitions(|records| {
+                                records.get_mut(&expected.id).unwrap().phase =
+                                    AcquisitionPhase::Using {
+                                        lease: uuid::Uuid::new_v4(),
+                                    };
+                                Ok(())
+                            })?;
+                        let before_wrong_token = std::fs::read(model.join("metadata.json"))?;
+                        assert!(importer
+                            .finalize_downloaded_directory_with_capability(
+                                &info,
+                                &DownloadRevision::legacy_main(),
+                                &context,
+                                mismatched,
+                            )
+                            .await
+                            .unwrap_err()
+                            .to_string()
+                            .contains("stale"));
+                        assert_eq!(
+                            std::fs::read(model.join("metadata.json"))?,
+                            before_wrong_token
+                        );
+                        worker_downloads
+                            .acquisition_store()
+                            .update_acquisitions(|records| {
+                                records.insert(expected.id, expected);
+                                Ok(())
+                            })?;
+                        let capability = ModelFinalImportCapability::new(
+                            worker_acquisition.use_proof(&context, &lease)?,
+                            "owner",
+                            DownloadAdmissionDomain::Ambient,
+                            grant.clone(),
+                            Arc::new(
+                                crate::model_library::mutation_authority::DownloadCancellation::new(
+                                ),
+                            ),
+                        );
+                        importer
+                            .finalize_downloaded_directory_with_capability(
+                                &info,
+                                &DownloadRevision::legacy_main(),
+                                &context,
+                                capability,
+                            )
+                            .await?;
+                        assert_ne!(
+                            worker_library
+                                .load_metadata(&model)?
+                                .unwrap()
+                                .match_source
+                                .as_deref(),
+                            Some("download_partial")
+                        );
+                        let hidden_attempt =
+                            real_admission(&external_store, &root, &info, "hidden-follower");
+                        assert!(worker_downloads
+                            .load_lifecycle_inventory_strict()?
+                            .hidden_admissions
+                            .contains_key("hidden-follower"));
+                        let hidden = ModelFinalImportCapability::new(
+                            worker_acquisition.use_proof(&context, &lease)?,
+                            "owner",
+                            DownloadAdmissionDomain::Ambient,
+                            grant.clone(),
+                            Arc::new(
+                                crate::model_library::mutation_authority::DownloadCancellation::new(
+                                ),
+                            ),
+                        );
+                        let before_hidden = std::fs::read(model.join("metadata.json"))?;
+                        assert!(matches!(
+                            importer
+                                .finalize_downloaded_directory_with_capability(
+                                    &info,
+                                    &DownloadRevision::legacy_main(),
+                                    &context,
+                                    hidden
+                                )
+                                .await,
+                            Err(PumasError::DownloadRootBusy)
+                        ));
+                        assert_eq!(std::fs::read(model.join("metadata.json"))?, before_hidden);
+                        assert_eq!(
+                            external_store
+                                .load_lifecycle_inventory_strict()?
+                                .queue_admissions["hidden-follower"]
+                                .attempt_id,
+                            hidden_attempt
+                        );
+                        let stale = ModelFinalImportCapability::new(
+                            worker_acquisition.use_proof(&context, &lease)?,
+                            "owner",
+                            DownloadAdmissionDomain::Ambient,
+                            grant.clone(),
+                            Arc::new(
+                                crate::model_library::mutation_authority::DownloadCancellation::new(
+                                ),
+                            ),
+                        );
+                        // Actual durable settlement invalidates an earlier unconsumed proof.
+                        worker_acquisition.acknowledge(&context, lease).await?;
+                        let before = std::fs::read(model.join("metadata.json"))?;
+                        let error = importer
+                            .finalize_downloaded_directory_with_capability(
+                                &info,
+                                &DownloadRevision::legacy_main(),
+                                &context,
+                                stale,
+                            )
+                            .await
+                            .unwrap_err();
+                        assert!(error.to_string().contains("stale"), "{error}");
+                        assert_eq!(std::fs::read(model.join("metadata.json"))?, before);
+                        let inventory = worker_downloads.load_lifecycle_inventory_strict()?;
+                        assert_eq!(inventory.queue_admissions["follower"].attempt_id, follower);
+                        assert_eq!(inventory.queue_admissions["owner"].attempt_id, attempt);
+                        Ok::<_, PumasError>(())
+                    }
+                    .await;
+                    result_tx.send(result).unwrap();
+                },
+            )
+            .unwrap();
+        scope.install_gated(prepared).unwrap().start();
+        tokio::time::timeout(std::time::Duration::from_secs(5), result)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        // The negative stale-use probe is a synthetic invocation on real custody;
+        // it is deliberately reported as a failed owned effect by this owner.
+        assert!(acquisition.shutdown().await.is_err());
+        tasks.shutdown_owned().await.unwrap();
+        let records = downloads.acquisition_store().acquisitions().unwrap();
+        assert!(matches!(
+            records.values().next().unwrap().phase,
+            AcquisitionPhase::Adopted { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn custody_guard_refuses_hidden_pending_and_settled_quarantine_without_effects() {
+        use crate::model_library::download_store::*;
+        for state in ["hidden", "pending", "quarantine"] {
+            let temp = TempDir::new().unwrap();
+            let library = Arc::new(
+                ModelLibrary::new(temp.path().join("library"))
+                    .await
+                    .unwrap(),
+            );
+            let root = crate::model_library::download_recovery::DownloadDestinationRoot::open(
+                library.library_root(),
+            )
+            .unwrap();
+            let model = library.build_model_path("vision", "publisher", "model");
+            std::fs::create_dir_all(&model).unwrap();
+            std::fs::write(model.join("detector.onnx"), b"data").unwrap();
+            let original = Arc::new(DownloadPersistence::new(temp.path()));
+            let attempt = real_admission(
+                &original,
+                &root,
+                &completed_download(&model, false),
+                "retained",
+            );
+            if state != "hidden" {
+                let snapshot = original
+                    .load_lifecycle_inventory_strict()
+                    .unwrap()
+                    .downloads[0]
+                    .clone();
+                original
+                    .begin_lifecycle_quarantine(
+                        &snapshot,
+                        LifecycleQuarantineDomain::Ambient,
+                        state == "quarantine",
+                        Some(&attempt),
+                    )
+                    .unwrap();
+                if state == "quarantine" {
+                    assert!(original.verify_lifecycle_quarantine("retained").unwrap());
+                }
+            }
+            let downloads = if state == "hidden" {
+                Arc::new(DownloadPersistence::new(temp.path()))
+            } else {
+                original
+            };
+            let inventory = downloads.load_lifecycle_inventory_strict().unwrap();
+            if state == "hidden" {
+                assert!(inventory.hidden_admissions.contains_key("retained"));
+            } else {
+                assert_eq!(
+                    inventory.quarantines["retained"].disposition,
+                    if state == "pending" {
+                        LifecycleCleanupDisposition::Pending
+                    } else {
+                        LifecycleCleanupDisposition::Verified
+                    }
+                );
+            }
+            let tasks = crate::api::RuntimeTasks::new();
+            library
+                .install_mutation_authority(tasks.clone(), root, downloads)
+                .unwrap();
+            assert!(
+                matches!(
+                    ModelImporter::new(library.clone())
+                        .import_in_place(&orphan_spec(&model))
+                        .await,
+                    Err(PumasError::DownloadRootBusy)
+                ),
+                "{state}"
+            );
+            assert!(!model.join("metadata.json").exists());
+            assert!(library
+                .index()
+                .get("vision/publisher/model")
+                .unwrap()
+                .is_none());
+            tasks.shutdown_owned().await.unwrap();
+        }
+    }
+
+    pub(super) fn completed_download(model_dir: &Path, diffusers: bool) -> DownloadCompletionInfo {
         DownloadCompletionInfo {
             download_id: "truthful-finalization".into(),
             dest_dir: model_dir.to_path_buf(),

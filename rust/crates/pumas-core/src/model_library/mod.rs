@@ -44,7 +44,6 @@ mod model_type_resolver;
 mod mutation_authority;
 mod naming;
 mod package_facts;
-mod partial_download;
 mod read_only;
 pub mod sharding;
 mod task_signature;

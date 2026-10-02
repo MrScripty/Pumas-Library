@@ -138,6 +138,10 @@ pub enum PumasError {
     #[error("Download lifecycle is closed")]
     DownloadLifecycleClosed,
 
+    /// Shared acquisition admission failed without spawning or waiting.
+    #[error("Acquisition {resource} capacity exhausted")]
+    AcquisitionCapacityExhausted { resource: &'static str },
+
     /// Another cooperating download client owns mutation of this library root.
     #[error("Download library root is busy")]
     DownloadRootBusy,
@@ -292,6 +296,7 @@ impl PumasError {
         match self {
             PumasError::Network { .. }
             | PumasError::DownloadLifecycleClosed
+            | PumasError::AcquisitionCapacityExhausted { .. }
             | PumasError::Timeout(_)
             | PumasError::RateLimited { .. }
             | PumasError::CircuitBreakerOpen { .. } => -32000,

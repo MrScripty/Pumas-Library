@@ -12733,6 +12733,313 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancelling_queued_follower_preserves_incumbent_that_completes_normally() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let timeout = Duration::from_secs(5);
+        let temp = TempDir::new().unwrap();
+        let (library, mut client, destination, request) =
+            imported_download_fixture(temp.path()).await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        client.set_test_download_base_url(format!("http://{}", listener.local_addr().unwrap()));
+        let unexpected_source_requests = Arc::new(AtomicUsize::new(0));
+        let source_requests = unexpected_source_requests.clone();
+        let (stop_source_monitor, mut stop_source_monitor_rx) =
+            tokio::sync::oneshot::channel::<()>();
+        let source_monitor = tokio::spawn(async move {
+            let handle_unexpected = |mut stream: tokio::net::TcpStream| {
+                let source_requests = source_requests.clone();
+                async move {
+                    source_requests.fetch_add(1, Ordering::SeqCst);
+                    let _ = tokio::time::timeout(Duration::from_secs(1), async move {
+                        let mut request = [0_u8; 2048];
+                        let _ = stream.read(&mut request).await;
+                        let _ = stream.write_all(
+                            b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        ).await;
+                    }).await;
+                }
+            };
+            loop {
+                tokio::select! {
+                    accepted = listener.accept() => {
+                        let Ok((stream, _)) = accepted else {
+                            break;
+                        };
+                        handle_unexpected(stream).await;
+                    }
+                    _ = &mut stop_source_monitor_rx => {
+                        tokio::time::timeout(Duration::from_secs(2), async {
+                            loop {
+                                tokio::select! {
+                                    biased;
+                                    accepted = listener.accept() => {
+                                        let Ok((stream, _)) = accepted else {
+                                            break;
+                                        };
+                                        handle_unexpected(stream).await;
+                                    }
+                                    _ = tokio::time::sleep(Duration::from_millis(25)) => break,
+                                }
+                            }
+                        })
+                        .await
+                        .expect("source monitor must drain pending accepts within a bound");
+                        break;
+                    }
+                }
+            }
+        });
+
+        let (import_entered_sender, import_entered) = tokio::sync::oneshot::channel();
+        let import_entered_sender = std::sync::Mutex::new(Some(import_entered_sender));
+        let (release_import_sender, release_import_receiver) = std::sync::mpsc::channel();
+        let release_import_receiver = std::sync::Mutex::new(release_import_receiver);
+        let import_destination = destination.clone();
+        library.set_metadata_write_notifier(Some(Arc::new(move |_| {
+            if import_destination.join(".pumas_download").exists() {
+                return;
+            }
+            if let Some(sender) = import_entered_sender.lock().unwrap().take() {
+                let _ = sender.send(());
+                let _ = release_import_receiver.lock().unwrap().recv();
+            }
+        })));
+
+        let incumbent_artifact = destination.join("model.onnx");
+        let incumbent_before = std::fs::read(&incumbent_artifact).unwrap();
+        let unrelated = destination.join("keep-unrelated.bin");
+        std::fs::write(&unrelated, b"unrelated incumbent data").unwrap();
+        let unrelated_before = std::fs::read(&unrelated).unwrap();
+        let incumbent = client
+            .start_download(&request, &destination, None)
+            .await
+            .unwrap();
+        tokio::time::timeout(timeout, import_entered)
+            .await
+            .expect("incumbent must reach its real final-import barrier")
+            .expect("import barrier observer must remain connected");
+        assert_eq!(
+            client.get_download_status(&incumbent).await,
+            Some(DownloadStatus::Downloading)
+        );
+        assert!(library.load_metadata(&destination).unwrap().is_none());
+        assert!(library
+            .index()
+            .get(&library.get_model_id(&destination).unwrap())
+            .unwrap()
+            .is_none());
+
+        let follower_filename = "follower.onnx";
+        let follower_partial = destination.join(format!("{follower_filename}.part"));
+        std::fs::write(&follower_partial, b"queued follower prefix").unwrap();
+        let mut follower_request = request.clone();
+        follower_request.repo_id = "acme/queued-follower".into();
+        follower_request.filename = Some(follower_filename.into());
+        follower_request.filenames = Some(vec![follower_filename.into()]);
+        cache_repo_tree(
+            &client,
+            &follower_request.repo_id,
+            vec![LfsFileInfo {
+                filename: follower_filename.into(),
+                size: 4,
+                sha256: "c".repeat(64),
+            }],
+            Vec::new(),
+        );
+        let follower = client
+            .start_download(&follower_request, &destination, None)
+            .await
+            .unwrap();
+        tokio::time::timeout(timeout, async {
+            loop {
+                let downloads = client.downloads.read().await;
+                if downloads.get(&follower).is_some_and(|state| {
+                    state.status == DownloadStatus::Queued && state.task_registered
+                }) {
+                    break;
+                }
+                drop(downloads);
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("follower must stay queued behind the held incumbent");
+        let follower_attempt = client.downloads.read().await[&follower]
+            .admission
+            .as_ref()
+            .unwrap()
+            .attempt_id
+            .clone();
+        let destination_key = destination_identity(&client, &destination);
+        let queued_inventory = client
+            .persistence
+            .as_ref()
+            .unwrap()
+            .load_lifecycle_inventory_strict()
+            .unwrap();
+        assert!(queued_inventory.queue_admissions.contains_key(&incumbent));
+        assert!(queued_inventory.queue_admissions.contains_key(&follower));
+        assert_eq!(
+            client.destination_executions.claim_count(&destination_key),
+            2
+        );
+        assert_eq!(
+            std::fs::read(&incumbent_artifact).unwrap(),
+            incumbent_before
+        );
+        assert_eq!(std::fs::read(&unrelated).unwrap(), unrelated_before);
+        assert_eq!(
+            std::fs::read(&follower_partial).unwrap(),
+            b"queued follower prefix"
+        );
+        assert_eq!(unexpected_source_requests.load(Ordering::SeqCst), 0);
+
+        assert!(
+            tokio::time::timeout(timeout, client.cancel_download(&follower))
+                .await
+                .expect("queued cancellation must return while the incumbent import is held")
+                .unwrap()
+        );
+        {
+            let downloads = client.downloads.read().await;
+            let state = downloads.get(&follower).unwrap();
+            assert_eq!(state.status, DownloadStatus::Cancelling);
+            assert!(state.task_registered);
+        }
+        let cancelling_inventory = client
+            .persistence
+            .as_ref()
+            .unwrap()
+            .load_lifecycle_inventory_strict()
+            .unwrap();
+        assert!(cancelling_inventory
+            .queue_admissions
+            .contains_key(&incumbent));
+        assert!(cancelling_inventory
+            .queue_admissions
+            .contains_key(&follower));
+        assert_eq!(
+            client.destination_executions.claim_count(&destination_key),
+            2
+        );
+        assert_eq!(
+            std::fs::read(&incumbent_artifact).unwrap(),
+            incumbent_before
+        );
+        assert_eq!(std::fs::read(&unrelated).unwrap(), unrelated_before);
+        assert_eq!(
+            std::fs::read(&follower_partial).unwrap(),
+            b"queued follower prefix"
+        );
+        assert_eq!(unexpected_source_requests.load(Ordering::SeqCst), 0);
+
+        release_import_sender.send(()).unwrap();
+        tokio::time::timeout(timeout, async {
+            loop {
+                client.observe_finished_download_tasks().await;
+                let downloads = client.downloads.read().await;
+                let incumbent_complete = downloads.get(&incumbent).is_some_and(|state| {
+                    state.status == DownloadStatus::Completed && !state.task_registered
+                });
+                let follower_cancelled = downloads.get(&follower).is_some_and(|state| {
+                    state.status == DownloadStatus::Cancelled && !state.task_registered
+                });
+                drop(downloads);
+                if incumbent_complete
+                    && follower_cancelled
+                    && !client.download_tasks.contains(&incumbent)
+                    && !client.download_tasks.contains(&follower)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("incumbent completion must pass before queued follower cleanup settles");
+
+        assert_eq!(
+            client.get_download_status(&incumbent).await,
+            Some(DownloadStatus::Completed)
+        );
+        assert_eq!(
+            client.get_download_status(&follower).await,
+            Some(DownloadStatus::Cancelled)
+        );
+        assert_eq!(
+            client.destination_executions.claim_count(&destination_key),
+            0
+        );
+        let final_inventory = client
+            .persistence
+            .as_ref()
+            .unwrap()
+            .load_lifecycle_inventory_strict()
+            .unwrap();
+        assert!(!final_inventory.queue_admissions.contains_key(&incumbent));
+        assert!(!final_inventory.queue_admissions.contains_key(&follower));
+        assert!(!final_inventory.quarantines.contains_key(&follower));
+        assert!(!follower_partial.exists());
+        assert!(!destination.join(follower_filename).exists());
+        assert!(!destination.join(".pumas_download").exists());
+        assert_eq!(
+            std::fs::read(&incumbent_artifact).unwrap(),
+            incumbent_before
+        );
+        assert_eq!(std::fs::read(&unrelated).unwrap(), unrelated_before);
+        let acquisitions = client.acquisition.store().acquisitions().unwrap();
+        assert!(!acquisitions
+            .values()
+            .any(|record| record.demand.operation == follower_attempt));
+        let incumbent_record = acquisitions
+            .values()
+            .find(|record| record.demand.consumer == "hf.model")
+            .expect("successful incumbent must retain its acquisition record");
+        assert!(matches!(
+            incumbent_record.phase,
+            crate::acquisition::AcquisitionPhase::Adopted { .. }
+        ));
+        assert!(client
+            .persistence
+            .as_ref()
+            .unwrap()
+            .read_hf_completion_receipt(incumbent_record.id)
+            .unwrap()
+            .is_some());
+        let metadata = library.load_metadata(&destination).unwrap().unwrap();
+        assert_eq!(metadata.repo_id.as_deref(), Some("acme/model"));
+        assert_eq!(metadata.match_source.as_deref(), Some("download"));
+        assert!(library
+            .index()
+            .get(&library.get_model_id(&destination).unwrap())
+            .unwrap()
+            .is_some());
+
+        let root = crate::model_library::download_recovery::DownloadDestinationRoot::open(
+            library.library_root(),
+        )
+        .unwrap();
+        let root_grant = root
+            .try_acquire_execution_grant()
+            .expect("destination claims must release root custody after both tasks drain");
+        drop(root_grant);
+
+        library.set_metadata_write_notifier(None);
+        tokio::time::timeout(timeout, client.shutdown_downloads())
+            .await
+            .expect("client shutdown must drain before source monitoring stops")
+            .unwrap();
+        // Drain pending accepts after client shutdown before checking the count.
+        stop_source_monitor.send(()).unwrap();
+        tokio::time::timeout(timeout, source_monitor)
+            .await
+            .expect("source monitor must stop")
+            .expect("source monitor must not panic");
+        assert_eq!(unexpected_source_requests.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
     async fn held_completion_notification_allows_real_destination_successor() {
         let temp = TempDir::new().unwrap();
         let (library, mut client, destination, request) =

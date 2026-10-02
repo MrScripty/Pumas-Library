@@ -1983,6 +1983,412 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
+    async fn public_hf_status_poll_tracks_mixed_size_download_through_receipt_settlement() {
+        use sha2::{Digest, Sha256};
+        use std::time::Duration;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::{TcpListener, TcpStream};
+        use tokio::sync::oneshot;
+
+        const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
+        const PROGRESS_CHUNK: usize = 48;
+        const IO_TIMEOUT: Duration = Duration::from_secs(3);
+        const TEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+        async fn read_request_line(
+            stream: &mut TcpStream,
+        ) -> std::result::Result<String, &'static str> {
+            let header = tokio::time::timeout(IO_TIMEOUT, async {
+                let mut bytes = Vec::new();
+                while !bytes.ends_with(b"\r\n\r\n") {
+                    if bytes.len() >= 8192 {
+                        return Err("local fixture request header exceeded its bound");
+                    }
+                    bytes.push(
+                        stream
+                            .read_u8()
+                            .await
+                            .map_err(|_| "local fixture request read failed")?,
+                    );
+                }
+                Ok::<_, &'static str>(bytes)
+            })
+            .await
+            .map_err(|_| "local fixture request read timed out")??;
+            let header = std::str::from_utf8(&header)
+                .map_err(|_| "local fixture request header was not UTF-8")?;
+            header
+                .lines()
+                .next()
+                .map(str::to_owned)
+                .ok_or("local fixture request line was missing")
+        }
+
+        async fn write_bytes(
+            stream: &mut TcpStream,
+            bytes: &[u8],
+        ) -> std::result::Result<(), &'static str> {
+            tokio::time::timeout(IO_TIMEOUT, stream.write_all(bytes))
+                .await
+                .map_err(|_| "local fixture response write timed out")?
+                .map_err(|_| "local fixture response write failed")
+        }
+
+        async fn accept_request(
+            listener: &TcpListener,
+            expected: &str,
+        ) -> std::result::Result<TcpStream, &'static str> {
+            let (mut stream, _) = tokio::time::timeout(IO_TIMEOUT, listener.accept())
+                .await
+                .map_err(|_| "local fixture accept timed out")?
+                .map_err(|_| "local fixture accept failed")?;
+            let observed = read_request_line(&mut stream).await?;
+            if observed != expected {
+                return Err("local fixture received an unexpected request");
+            }
+            Ok(stream)
+        }
+
+        async fn write_json(
+            stream: &mut TcpStream,
+            body: &str,
+        ) -> std::result::Result<(), &'static str> {
+            let header = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            );
+            write_bytes(stream, header.as_bytes()).await?;
+            write_bytes(stream, body.as_bytes()).await
+        }
+
+        let weight_payload = intent_test_gguf();
+        let auxiliary_payload =
+            br#"{"fixture":"status-poll","padding":"abcdefghijklmnopqrstuvwx"}"#.to_vec();
+        assert!(PROGRESS_CHUNK > weight_payload.len());
+        assert!(PROGRESS_CHUNK < auxiliary_payload.len());
+        let weight_sha256 = hex::encode(Sha256::digest(&weight_payload));
+        let source_weight_payload = weight_payload.clone();
+        let source_auxiliary_payload = auxiliary_payload.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (progress_started_tx, progress_started_rx) = oneshot::channel();
+        let (release_auxiliary_tx, release_auxiliary_rx) = oneshot::channel();
+        let server_task = tokio::spawn(async move {
+            let result = async {
+                let main_route = "GET /api/models/acme/model/revision/main HTTP/1.1";
+                let pinned_route = format!("GET /api/models/acme/model/revision/{COMMIT} HTTP/1.1");
+                let tree_route = format!(
+                    "GET /api/models/acme/model/tree/{COMMIT}?recursive=true HTTP/1.1"
+                );
+                let auxiliary_route = format!(
+                    "GET /acme/model/resolve/{COMMIT}/config.json HTTP/1.1"
+                );
+                let weight_route = format!(
+                    "GET /acme/model/resolve/{COMMIT}/weights.gguf HTTP/1.1"
+                );
+
+                let mut stream = accept_request(&listener, main_route).await?;
+                write_json(
+                    &mut stream,
+                    &format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}","tags":["gguf"]}}"#),
+                )
+                .await?;
+
+                let mut stream = accept_request(&listener, &pinned_route).await?;
+                write_json(
+                    &mut stream,
+                    &format!(r#"{{"modelId":"acme/model","sha":"{COMMIT}","tags":["gguf"]}}"#),
+                )
+                .await?;
+
+                let mut stream = accept_request(&listener, &tree_route).await?;
+                let tree = format!(
+                    r#"[{{"path":"weights.gguf","type":"file","lfs":{{"oid":"{weight_sha256}","size":{}}}}},{{"path":"config.json","type":"file"}}]"#,
+                    source_weight_payload.len()
+                );
+                write_json(&mut stream, &tree).await?;
+
+                let mut stream = accept_request(&listener, &auxiliary_route).await?;
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    source_auxiliary_payload.len()
+                );
+                write_bytes(&mut stream, header.as_bytes()).await?;
+                write_bytes(&mut stream, &source_auxiliary_payload[..PROGRESS_CHUNK]).await?;
+                progress_started_tx
+                    .send(())
+                    .map_err(|_| "status observer left before source delay")?;
+                tokio::time::timeout(TEST_TIMEOUT, release_auxiliary_rx)
+                    .await
+                    .map_err(|_| "source delay release timed out")?
+                    .map_err(|_| "source delay release sender was dropped")?;
+                write_bytes(&mut stream, &source_auxiliary_payload[PROGRESS_CHUNK..]).await?;
+
+                let mut stream = accept_request(&listener, &weight_route).await?;
+                let header = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: application/octet-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    source_weight_payload.len()
+                );
+                write_bytes(&mut stream, header.as_bytes()).await?;
+                write_bytes(&mut stream, &source_weight_payload).await?;
+                Ok::<_, &'static str>(())
+            }
+            .await;
+            result
+        });
+
+        let root = tempfile::TempDir::new().unwrap();
+        let api = recovery_api_fixture(root.path(), Some(format!("http://{address}"))).await;
+        let library = api.primary().model_library.clone();
+
+        let request = model_library::DownloadRequest {
+            repo_id: "acme/model".into(),
+            family: "acme".into(),
+            official_name: "model".into(),
+            model_type: Some("llm".into()),
+            quant: None,
+            filename: Some("weights.gguf".into()),
+            filenames: None,
+            pipeline_tag: Some("text-generation".into()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+        let download_id = tokio::time::timeout(TEST_TIMEOUT, api.start_hf_download(&request))
+            .await
+            .expect("public start must settle within its bound")
+            .unwrap();
+        tokio::time::timeout(TEST_TIMEOUT, progress_started_rx)
+            .await
+            .expect("the auxiliary source must reach its held response")
+            .expect("the local source must retain the progress observer");
+
+        let partial = tokio::time::timeout(TEST_TIMEOUT, async {
+            loop {
+                let Some(progress) = api.get_hf_download_progress(&download_id).await.unwrap()
+                else {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    continue;
+                };
+                if progress.downloaded_bytes == Some(PROGRESS_CHUNK as u64) {
+                    break progress;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("public status must observe the held auxiliary bytes");
+        assert_eq!(
+            partial.download_id, download_id,
+            "status identity must remain stable"
+        );
+        assert_eq!(partial.repo_id.as_deref(), Some("acme/model"));
+        assert!(partial.selected_artifact_id.is_some());
+        let library_model_id = partial
+            .library_model_id
+            .clone()
+            .expect("admitted status must expose its bound library identity");
+        assert_eq!(partial.status, models::DownloadStatus::Downloading);
+        assert_eq!(partial.downloaded_bytes, Some(PROGRESS_CHUNK as u64));
+        assert!(partial.downloaded_bytes.unwrap() > weight_payload.len() as u64);
+        assert_eq!(partial.total_bytes, None);
+        assert_eq!(partial.eta_seconds, None);
+        let partial_fraction = partial
+            .progress
+            .expect("public progress fraction is present");
+        assert!(partial_fraction.is_finite() && (0.0..=1.0).contains(&partial_fraction));
+        let partial_json = serde_json::to_value(&partial).unwrap();
+        assert_eq!(partial_json["downloadId"], download_id);
+        assert_eq!(partial_json["status"], "downloading");
+        assert_eq!(partial_json["downloadedBytes"], PROGRESS_CHUNK as u64);
+        assert_eq!(partial_json["totalBytes"], serde_json::Value::Null);
+        assert_eq!(partial_json["etaSeconds"], serde_json::Value::Null);
+        assert_eq!(
+            partial_json["progress"],
+            serde_json::json!(partial_fraction)
+        );
+
+        let destination = library.library_root().join(&library_model_id);
+        let (import_started_tx, import_started_rx) = oneshot::channel();
+        let import_started_tx = std::sync::Mutex::new(Some(import_started_tx));
+        let (release_import_tx, release_import_rx) = std::sync::mpsc::channel();
+        let release_import_rx = std::sync::Mutex::new(release_import_rx);
+        let import_destination = destination.clone();
+        library.set_metadata_write_notifier(Some(Arc::new(move |_| {
+            if import_destination.join(".pumas_download").exists()
+                || !import_destination.join("weights.gguf").is_file()
+            {
+                return;
+            }
+            if let Some(sender) = import_started_tx.lock().unwrap().take() {
+                let _ = sender.send(());
+                let _ = release_import_rx.lock().unwrap().recv();
+            }
+        })));
+
+        release_auxiliary_tx
+            .send(())
+            .expect("local source should still hold the auxiliary response");
+        tokio::time::timeout(TEST_TIMEOUT, import_started_rx)
+            .await
+            .expect("the real importer must reach its metadata write barrier")
+            .expect("the metadata barrier observer must remain connected");
+
+        let full_bytes = (auxiliary_payload.len() + weight_payload.len()) as u64;
+        let at_import = tokio::time::timeout(TEST_TIMEOUT, async {
+            loop {
+                let progress = api
+                    .get_hf_download_progress(&download_id)
+                    .await
+                    .unwrap()
+                    .expect("the admitted download must remain observable during import");
+                if progress.downloaded_bytes == Some(full_bytes) {
+                    break progress;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("public status must observe complete source bytes at the import barrier");
+        assert_eq!(at_import.status, models::DownloadStatus::Downloading);
+        assert_eq!(at_import.download_id, partial.download_id);
+        assert_eq!(at_import.repo_id, partial.repo_id);
+        assert_eq!(at_import.selected_artifact_id, partial.selected_artifact_id);
+        assert_eq!(at_import.library_model_id, partial.library_model_id);
+        assert_eq!(at_import.downloaded_bytes, Some(full_bytes));
+        assert_eq!(at_import.total_bytes, None);
+        assert_eq!(at_import.eta_seconds, None);
+        let import_fraction = at_import
+            .progress
+            .expect("public progress fraction remains present during import");
+        assert!(import_fraction.is_finite() && (0.0..=1.0).contains(&import_fraction));
+        assert_eq!(
+            std::fs::read(destination.join("config.json")).unwrap(),
+            auxiliary_payload
+        );
+        assert_eq!(
+            std::fs::read(destination.join("weights.gguf")).unwrap(),
+            weight_payload
+        );
+
+        let client = api.primary().hf_client.as_ref().unwrap();
+        let persistence = client.persistence().unwrap();
+        let acquisition_store = persistence.acquisition_store();
+        let matching_acquisitions: Vec<_> = acquisition_store
+            .acquisitions()
+            .unwrap()
+            .into_values()
+            .filter(|record| record.manifest.source().source_id() == "acme/model")
+            .collect();
+        assert_eq!(
+            matching_acquisitions.len(),
+            1,
+            "one exact source acquisition must be retained"
+        );
+        let acquisition = matching_acquisitions.into_iter().next().unwrap();
+        assert!(matches!(
+            acquisition.phase,
+            crate::acquisition::AcquisitionPhase::Using { .. }
+        ));
+        assert_eq!(acquisition.files.len(), 2);
+        assert!(persistence
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .contains_key(&download_id));
+        assert!(persistence
+            .read_hf_completion_receipt(acquisition.id)
+            .unwrap()
+            .is_none());
+
+        release_import_tx
+            .send(())
+            .expect("importer should still be waiting at its metadata barrier");
+        let completed = tokio::time::timeout(TEST_TIMEOUT, async {
+            loop {
+                let progress = api
+                    .get_hf_download_progress(&download_id)
+                    .await
+                    .unwrap()
+                    .expect("settled download status must remain available");
+                if progress.status == models::DownloadStatus::Completed {
+                    break progress;
+                }
+                assert!(!matches!(
+                    progress.status,
+                    models::DownloadStatus::Cancelled | models::DownloadStatus::Error
+                ));
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("receipt-backed import must settle within its bound");
+        assert_eq!(completed.download_id, partial.download_id);
+        assert_eq!(completed.repo_id, partial.repo_id);
+        assert_eq!(completed.selected_artifact_id, partial.selected_artifact_id);
+        assert_eq!(completed.downloaded_bytes, Some(full_bytes));
+        let receipt = persistence
+            .read_hf_completion_receipt(acquisition.id)
+            .unwrap()
+            .expect("completion must have its consumer receipt");
+        assert_eq!(receipt.download_id, download_id);
+        let model_id = receipt.model_id.clone();
+        assert!(completed
+            .library_model_id
+            .as_deref()
+            .is_none_or(|completed_model_id| completed_model_id == model_id.as_str()));
+        assert!(tokio::time::timeout(TEST_TIMEOUT, api.get_model(&model_id))
+            .await
+            .expect("terminal model projection must settle within its bound")
+            .unwrap()
+            .is_some());
+        assert!(library.index().get(&model_id).unwrap().is_some());
+        assert_eq!(receipt.model_id, model_id);
+        assert!(matches!(
+            acquisition_store
+                .acquisitions()
+                .unwrap()
+                .get(&acquisition.id)
+                .map(|record| &record.phase),
+            Some(crate::acquisition::AcquisitionPhase::Adopted { .. })
+        ));
+        assert!(!persistence
+            .load_lifecycle_inventory_strict()
+            .unwrap()
+            .queue_admissions
+            .contains_key(&download_id));
+        let repeated =
+            tokio::time::timeout(TEST_TIMEOUT, api.get_hf_download_progress(&download_id))
+                .await
+                .expect("repeated terminal status must settle within its bound")
+                .unwrap()
+                .expect("terminal status must remain available for repeated polling");
+        assert_eq!(repeated.status, models::DownloadStatus::Completed);
+        assert_eq!(repeated.download_id, completed.download_id);
+        assert_eq!(repeated.library_model_id, completed.library_model_id);
+        assert_eq!(repeated.repo_id, completed.repo_id);
+        assert_eq!(
+            repeated.selected_artifact_id,
+            completed.selected_artifact_id
+        );
+        assert_eq!(repeated.downloaded_bytes, completed.downloaded_bytes);
+
+        library.set_metadata_write_notifier(None);
+        tokio::time::timeout(TEST_TIMEOUT, api.shutdown_downloads())
+            .await
+            .expect("download owners must drain within their bound")
+            .unwrap();
+        tokio::time::timeout(TEST_TIMEOUT, server_task)
+            .await
+            .expect("local source task must drain within its bound")
+            .expect("local source task must not panic")
+            .expect("local source must complete its bounded request sequence");
+    }
+
+    #[tokio::test]
     async fn public_hf_download_requires_commit_evidence_before_mutation() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();

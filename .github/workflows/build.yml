@@ -242,9 +242,9 @@ jobs:
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager locked_stage_stays_owned
       # Exercise the integrated filesystem and registry repairs on each host;
       # compilation of these modules alone is not native behavioral evidence.
-      - name: Diagnose native Windows nested import publication
+      - name: Test native Windows nested import publication
         if: runner.os == 'Windows'
-        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library windows_import_nested_directory_publication_trace -- --nocapture
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library copied_import_nested_native_publication_rebinds_exact_payload -- --nocapture
       - name: Test native GGUF file-type inspection
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library model_library::package_facts::gguf::tests
       - name: Test native GGUF inspector cache invalidation

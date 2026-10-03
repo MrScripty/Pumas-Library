@@ -7,6 +7,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
 /// A registered library entry.
@@ -172,14 +173,47 @@ impl LibraryRegistry {
     }
 
     fn configure_connection(conn: &Connection) -> Result<()> {
-        conn.execute_batch(&format!(
-            "PRAGMA journal_mode=WAL;\n\
-             PRAGMA busy_timeout={};\n\
-             PRAGMA synchronous=NORMAL;\n\
-             PRAGMA temp_store=MEMORY;",
+        Self::configure_wal(
+            conn,
+            Duration::from_millis(u64::from(RegistryConfig::BUSY_TIMEOUT_MS)),
+        )?;
+        conn.busy_timeout(Duration::from_millis(u64::from(
             RegistryConfig::BUSY_TIMEOUT_MS,
-        ))?;
+        )))?;
+        conn.execute_batch("PRAGMA synchronous=NORMAL; PRAGMA temp_store=MEMORY;")?;
         Ok(())
+    }
+
+    /// WAL conversion can return SQLITE_BUSY without invoking SQLite's busy
+    /// handler (lock-upgrade avoidance). Retry that initialization step only,
+    /// within one shared budget; never turn other initialization failures into
+    /// a fallback database or silently continue without the requested mode.
+    fn configure_wal(conn: &Connection, budget: Duration) -> Result<()> {
+        let deadline = Instant::now() + budget;
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            conn.busy_timeout(remaining.min(Duration::from_millis(20)))?;
+            let outcome =
+                conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get::<_, String>(0));
+            match outcome {
+                Ok(mode) if mode.eq_ignore_ascii_case("wal") => return Ok(()),
+                Ok(_) => {
+                    return Err(PumasError::Database {
+                        message: "Registry could not establish WAL journal mode".into(),
+                        source: None,
+                    })
+                }
+                Err(error) => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if error.sqlite_error_code() != Some(rusqlite::ErrorCode::DatabaseBusy)
+                        || remaining.is_zero()
+                    {
+                        return Err(error.into());
+                    }
+                    std::thread::sleep(remaining.min(Duration::from_millis(5)));
+                }
+            }
+        }
     }
 
     fn ensure_schema(conn: &Connection) -> Result<()> {
@@ -767,6 +801,81 @@ mod tests {
         let dir = parent.join(name);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn concurrent_fresh_registry_connections_all_establish_wal() {
+        for _ in 0..8 {
+            let root = TempDir::new().unwrap();
+            let path = root.path().join("concurrent.db");
+            let barrier = Arc::new(std::sync::Barrier::new(16));
+            let workers: Vec<_> = (0..16)
+                .map(|_| {
+                    let path = path.clone();
+                    let barrier = barrier.clone();
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        let registry = LibraryRegistry::open_at(&path).unwrap();
+                        let mode: String = registry
+                            .lock_conn()
+                            .unwrap()
+                            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+                            .unwrap();
+                        assert_eq!(mode, "wal");
+                    })
+                })
+                .collect();
+            for worker in workers {
+                worker.join().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn wal_contention_exhausts_its_budget_without_swallowing_busy() {
+        let root = TempDir::new().unwrap();
+        let path = root.path().join("locked.db");
+        let owner = Connection::open(&path).unwrap();
+        owner.execute_batch("CREATE TABLE sentinel (value TEXT); BEGIN EXCLUSIVE; INSERT INTO sentinel VALUES ('owned');").unwrap();
+        let contender = Connection::open(&path).unwrap();
+        let began = Instant::now();
+        let error =
+            LibraryRegistry::configure_wal(&contender, Duration::from_millis(40)).unwrap_err();
+        assert!(
+            matches!(error, PumasError::Database { source: Some(error), .. }
+            if error.sqlite_error_code() == Some(rusqlite::ErrorCode::DatabaseBusy))
+        );
+        assert!(
+            began.elapsed() >= Duration::from_millis(40),
+            "busy failure must consume its retry budget"
+        );
+        assert!(
+            began.elapsed() < Duration::from_secs(2),
+            "busy retry must remain bounded"
+        );
+        owner.execute_batch("COMMIT").unwrap();
+        LibraryRegistry::configure_wal(&contender, Duration::from_secs(1)).unwrap();
+        let value: String = contender
+            .query_row("SELECT value FROM sentinel", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(value, "owned");
+    }
+
+    #[test]
+    fn wal_initialization_preserves_nonbusy_errors_and_rejects_unsupported_mode() {
+        let root = TempDir::new().unwrap();
+        let path = root.path().join("invalid.db");
+        std::fs::write(&path, b"not a sqlite database").unwrap();
+        let connection = Connection::open(&path).unwrap();
+        let error =
+            LibraryRegistry::configure_wal(&connection, Duration::from_secs(1)).unwrap_err();
+        assert!(
+            matches!(error, PumasError::Database { source: Some(error), .. }
+            if error.sqlite_error_code() == Some(rusqlite::ErrorCode::NotADatabase))
+        );
+        assert_eq!(std::fs::read(path).unwrap(), b"not a sqlite database");
+        let memory = Connection::open_in_memory().unwrap();
+        assert!(LibraryRegistry::configure_wal(&memory, Duration::from_secs(1)).is_err());
     }
 
     #[test]

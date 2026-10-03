@@ -1997,6 +1997,8 @@ pub struct ShardRecoveryDiagnostic {
 pub enum ShardRecoveryDiagnosticKind {
     EnumerationFailed,
     MetadataFailed,
+    /// The held binding no longer matched or could not be re-observed. This is
+    /// not proof that an actor replaced the directory.
     BindingChanged,
     SymlinkRefused,
     NonCanonicalLayout,

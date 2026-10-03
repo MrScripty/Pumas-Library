@@ -1,5 +1,6 @@
 use super::*;
 use crate::model_library::{MissingShardRange, ShardSetDiscoveryStatus as Status};
+use std::collections::BTreeMap;
 use std::fs;
 
 fn write(root: &Path, relative: &str, bytes: &[u8]) {
@@ -322,76 +323,189 @@ fn index_references_remain_relative_to_their_held_directory() {
     assert!(report.model_roots[0].indexes[0].missing_files.is_empty());
 }
 
+fn byte_snapshot(root: &Path) -> BTreeMap<PathBuf, Option<Vec<u8>>> {
+    walkdir::WalkDir::new(root)
+        .into_iter()
+        .map(|entry| {
+            let entry = entry.unwrap();
+            let relative = entry.path().strip_prefix(root).unwrap().to_owned();
+            let contents = entry
+                .file_type()
+                .is_file()
+                .then(|| fs::read(entry.path()).unwrap());
+            (relative, contents)
+        })
+        .collect()
+}
+
+fn rename_control(target: &Path, moved: &Path) {
+    assert!(!moved.exists());
+    fs::rename(target, moved).expect("unbound rename positive control must succeed");
+    assert!(!target.exists());
+    fs::rename(moved, target).expect("unbound rename control must restore the source");
+}
+
+/// False is only a Windows refusal candidate. Each caller must also demonstrate
+/// unchanged bytes/names and a successful same-path rename after handles drop.
+fn attempt_held_rename(target: &Path, moved: &Path) -> bool {
+    match fs::rename(target, moved) {
+        Ok(()) => true,
+        #[cfg(windows)]
+        Err(error) => {
+            use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION};
+            let code = error.raw_os_error();
+            assert!(
+                code == Some(ERROR_ACCESS_DENIED as i32)
+                    || code == Some(ERROR_SHARING_VIOLATION as i32),
+                "unexpected rename error, not evidence of held-directory pinning: {error}"
+            );
+            false
+        }
+        #[cfg(not(windows))]
+        Err(error) => {
+            panic!("held-directory replacement must reach rebinding on this target: {error}")
+        }
+    }
+}
+
 #[test]
-fn root_or_configured_ancestor_replacement_discards_evidence() {
+fn root_or_configured_ancestor_replacement_discards_evidence_or_is_natively_pinned() {
     for replace_ancestor in [false, true] {
         let temp = tempfile::tempdir().unwrap();
         let outer = temp.path().join("outer");
         let root = outer.join("library");
-        write(&root, "llm/family/model/model-1-of-2.gguf", b"original");
+        let original = "llm/family/model/model-1-of-2.gguf";
+        write(&root, original, b"original");
+        write(temp.path(), "outside/sentinel", b"preserve");
         let target = if replace_ancestor {
             outer.clone()
         } else {
             root.clone()
         };
+        let original_below_target = root
+            .join(original)
+            .strip_prefix(&target)
+            .unwrap()
+            .to_owned();
         let moved = temp.path().join("held-original");
-        let mut replaced = false;
+        rename_control(&target, &moved);
+        let before = byte_snapshot(temp.path());
+        let mut outcome = None;
         let mut hook = |_path: &Path, phase| {
-            if phase == Phase::BeforeFinish && !replaced {
-                fs::rename(&target, &moved).unwrap();
-                fs::create_dir_all(&root).unwrap();
-                write(&root, "llm/family/sentinel/model-1-of-1.gguf", b"preserve");
-                replaced = true;
+            if phase == Phase::BeforeFinish && outcome.is_none() {
+                let renamed = attempt_held_rename(&target, &moved);
+                if renamed {
+                    fs::create_dir_all(&root).unwrap();
+                    write(
+                        &root,
+                        "llm/family/sentinel/model-1-of-1.gguf",
+                        b"replacement",
+                    );
+                }
+                outcome = Some(renamed);
             }
             Ok(())
         };
         let report = scan(&root, &mut hook);
-        assert!(!report.enumeration_complete);
-        assert!(has(&report, Kind::BindingChanged));
-        assert!(report.model_roots.is_empty());
         assert_eq!(
-            fs::read(root.join("llm/family/sentinel/model-1-of-1.gguf")).unwrap(),
+            fs::read(temp.path().join("outside/sentinel")).unwrap(),
             b"preserve"
         );
+        if outcome.expect("replacement checkpoint must run") {
+            assert!(!report.enumeration_complete);
+            assert!(has(&report, Kind::BindingChanged));
+            assert!(report.model_roots.is_empty());
+            assert_eq!(
+                fs::read(root.join("llm/family/sentinel/model-1-of-1.gguf")).unwrap(),
+                b"replacement"
+            );
+            assert_eq!(
+                fs::read(moved.join(original_below_target)).unwrap(),
+                b"original"
+            );
+        } else {
+            assert!(cfg!(windows), "only the native Windows refusal is accepted");
+            assert!(report.enumeration_complete, "{:?}", report.diagnostics);
+            assert!(!has(&report, Kind::BindingChanged));
+            assert_eq!(byte_snapshot(temp.path()), before);
+            // Discovery has returned and dropped all held directories. The same
+            // operation must now work, ruling out a persistent permission/path error.
+            rename_control(&target, &moved);
+            assert_eq!(byte_snapshot(temp.path()), before);
+            assert_eq!(
+                report.model_roots[0].shard_sets[0].status,
+                Status::MissingOrdinals
+            );
+        }
     }
 }
 
 #[test]
-fn family_model_and_nested_child_replacement_refuse_stale_observations() {
-    for target in ["llm/family", "llm/family/model", "llm/family/model/nested"] {
+fn family_model_and_nested_child_replacement_is_refused_or_natively_pinned() {
+    for target_relative in ["llm/family", "llm/family/model", "llm/family/model/nested"] {
         for phase in [Phase::DirectoryBound, Phase::BeforeFinish] {
             let temp = tempfile::tempdir().unwrap();
             let root = temp.path().join("library");
-            write(
-                &root,
-                "llm/family/model/nested/model-1-of-2.gguf",
-                b"original",
-            );
-            let mut replaced = false;
+            let original = "llm/family/model/nested/model-1-of-2.gguf";
+            write(&root, original, b"original");
+            write(temp.path(), "outside/sentinel", b"preserve");
+            let target = root.join(target_relative);
+            let original_below_target = root
+                .join(original)
+                .strip_prefix(&target)
+                .unwrap()
+                .to_owned();
+            let moved = temp.path().join("held-original");
+            rename_control(&target, &moved);
+            let before = byte_snapshot(temp.path());
+            let mut outcome = None;
             let mut hook = |path: &Path, current| {
-                if !replaced
+                if outcome.is_none()
                     && current == phase
-                    && (phase == Phase::BeforeFinish || path == Path::new(target))
+                    && (phase == Phase::BeforeFinish || path == Path::new(target_relative))
                 {
-                    fs::rename(root.join(target), temp.path().join("held-original")).unwrap();
-                    fs::create_dir_all(root.join(target)).unwrap();
-                    write(&root.join(target), "sentinel-1-of-1.gguf", b"preserve");
-                    replaced = true;
+                    let renamed = attempt_held_rename(&target, &moved);
+                    if renamed {
+                        fs::create_dir_all(&target).unwrap();
+                        write(&target, "sentinel-1-of-1.gguf", b"replacement");
+                    }
+                    outcome = Some(renamed);
                 }
                 Ok(())
             };
             let report = scan(&root, &mut hook);
-            assert!(!report.enumeration_complete, "{target}");
-            assert!(has(&report, Kind::BindingChanged));
-            assert!(report
-                .model_roots
-                .iter()
-                .all(|model| !model.enumeration_complete || model.shard_sets.is_empty()));
-            assert!(legacy_projection(report).is_empty());
             assert_eq!(
-                fs::read(root.join(target).join("sentinel-1-of-1.gguf")).unwrap(),
+                fs::read(temp.path().join("outside/sentinel")).unwrap(),
                 b"preserve"
             );
+            if outcome.expect("replacement checkpoint must run") {
+                assert!(!report.enumeration_complete, "{target_relative}");
+                assert!(has(&report, Kind::BindingChanged));
+                assert!(report
+                    .model_roots
+                    .iter()
+                    .all(|model| !model.enumeration_complete || model.shard_sets.is_empty()));
+                assert!(legacy_projection(report).is_empty());
+                assert_eq!(
+                    fs::read(target.join("sentinel-1-of-1.gguf")).unwrap(),
+                    b"replacement"
+                );
+                assert_eq!(
+                    fs::read(moved.join(original_below_target)).unwrap(),
+                    b"original"
+                );
+            } else {
+                assert!(cfg!(windows), "only the native Windows refusal is accepted");
+                assert!(report.enumeration_complete, "{:?}", report.diagnostics);
+                assert!(!has(&report, Kind::BindingChanged));
+                assert_eq!(byte_snapshot(temp.path()), before);
+                rename_control(&target, &moved);
+                assert_eq!(byte_snapshot(temp.path()), before);
+                assert_eq!(
+                    report.model_roots[0].shard_sets[0].status,
+                    Status::MissingOrdinals
+                );
+            }
         }
     }
 }

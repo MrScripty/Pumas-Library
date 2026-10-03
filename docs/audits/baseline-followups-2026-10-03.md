@@ -52,8 +52,10 @@ The configured library root may use a canonical platform alias. Discovery binds
 its physical identity, holds the canonical ancestor chain, and reads descendants
 through held no-follow directories. It rechecks observed bindings before/after
 reads and before returning. An observed replacement invalidates the affected
-root's evidence. There is no library-ID initialization, marker, database, cache,
-cleanup, or network write. This is point-in-time evidence, not an immutable
+root's evidence. `BindingChanged` also covers a binding check that could not be
+observed (for example, a missing or inaccessible component); it does not assert
+that an actor replaced a directory. There is no library-ID initialization,
+marker, database, cache, cleanup, or network write. This is point-in-time evidence, not an immutable
 snapshot or a grant for a later filesystem action. Concurrent in-place changes
 can still require a fresh scan and authoritative package validation.
 
@@ -94,3 +96,14 @@ sentinels, malformed ordinals and indexes, missing index evidence, bounded
 missing ranges, read-only observations, and the exact startup shard observer.
 The existing persisted-download recovery tests remain with their unchanged HF
 owner. The incomplete-import validator and B1 copy-staging owner are unchanged.
+
+Native rebinding regressions require the attempted rename to succeed before
+binding. Where held Windows descendant handles reject that same rename, only
+access-denied/sharing-violation errors are considered refusal candidates. The
+test must also prove unchanged source/sentinel names and bytes and a successful
+same-path rename after discovery drops its handles. This establishes native
+pin refusal rather than pretending rebinding occurred. Successful mutations
+still require stale-evidence rejection. The startup observer regression checks
+its actual byte/name effects; zero acquisition authority is established by its
+`ModelImporter`-only input and the reviewed production call boundary, not an
+unconnected test download client.

@@ -633,8 +633,23 @@ mod claim_guard_tests {
 mod shard_startup_tests {
     use super::*;
 
+    fn byte_snapshot(root: &Path) -> std::collections::BTreeMap<PathBuf, Option<Vec<u8>>> {
+        walkdir::WalkDir::new(root)
+            .into_iter()
+            .map(|entry| {
+                let entry = entry.unwrap();
+                let relative = entry.path().strip_prefix(root).unwrap().to_owned();
+                let contents = entry
+                    .file_type()
+                    .is_file()
+                    .then(|| std::fs::read(entry.path()).unwrap());
+                (relative, contents)
+            })
+            .collect()
+    }
+
     #[tokio::test]
-    async fn startup_shard_observer_has_zero_download_admission() {
+    async fn startup_shard_observer_returns_evidence_without_writes() {
         let temp = tempfile::tempdir().unwrap();
         let library = Arc::new(
             model_library::ModelLibrary::new(temp.path().join("models"))
@@ -644,21 +659,18 @@ mod shard_startup_tests {
         let model_dir = library.build_model_path("llm", "guessed-publisher", "guessed-repository");
         std::fs::create_dir_all(model_dir.join("nested")).unwrap();
         std::fs::write(model_dir.join("nested/model-1-of-2.gguf"), b"partial").unwrap();
-        let persistence = Arc::new(model_library::DownloadPersistence::new(
-            &temp.path().join("data"),
-        ));
-        let mut client = model_library::HuggingFaceClient::new(temp.path().join("cache")).unwrap();
-        client.set_persistence(persistence.clone());
-        assert!(client.list_downloads().await.is_empty());
-        let report = inspect_startup_shards(model_library::ModelImporter::new(library)).await;
+        let before = byte_snapshot(temp.path());
+        // Keep the library owner alive so connection shutdown cannot change the
+        // SQLite files included in the snapshot when the observer's clone drops.
+        let report =
+            inspect_startup_shards(model_library::ModelImporter::new(library.clone())).await;
         assert!(report.enumeration_complete);
         assert_eq!(report.model_roots.len(), 1);
         assert_eq!(
             report.model_roots[0].shard_sets[0].status,
             model_library::ShardSetDiscoveryStatus::MissingOrdinals
         );
-        assert!(client.list_downloads().await.is_empty());
-        assert!(persistence.load_all().is_empty());
+        assert_eq!(byte_snapshot(temp.path()), before);
         assert!(!model_dir.join(".pumas_download").exists());
         assert!(!model_dir.join("metadata.json").exists());
     }

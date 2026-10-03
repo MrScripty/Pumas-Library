@@ -57,3 +57,16 @@ test('release builds and frontend artifact upload are guarded inside shared jobs
     new RegExp(`uses: actions/upload-artifact@v7\\.0\\.1\\n        if: ${escapedVersionTagGuard}`),
   );
 });
+
+
+test('native workspace custody and cleanup run on every native QA platform', () => {
+  const native = job('torch-quality');
+  assert.match(native, /os: \[ubuntu-24\.04, windows-2025, macos-15\]/);
+  for (const [name, command] of [
+    ['Test reserved acquisition workspace custody', 'cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library acquisition::workspace::tests'],
+    ['Test native acquisition workspace cleanup', 'cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager native_'],
+  ]) {
+    assert.ok(native.includes(`      - name: ${name}\n        run: ${command}\n`),
+      `${name} must run without a platform-specific skip`);
+  }
+});

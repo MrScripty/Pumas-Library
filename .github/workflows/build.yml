@@ -223,6 +223,10 @@ jobs:
       - name: Test Windows locked-stage cleanup ownership
         if: runner.os == 'Windows'
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager locked_stage_stays_owned
+      - name: Test reserved acquisition workspace custody
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library acquisition::workspace::tests
+      - name: Test native acquisition workspace cleanup
+        run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-app-manager native_
       - name: Test native managed Python paths
         run: cargo test --locked --manifest-path rust/Cargo.toml -p pumas-library test_venv_python_path
       - name: Test Unix managed process-group ownership
